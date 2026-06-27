@@ -103,7 +103,8 @@ other OpenAI-compatible local server (Jan, llama.cpp, GPT4All, and similar) can
 be added the same way, since detection is just a local `/v1/models` style read.
 
 See [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for exactly where each number
-comes from.
+comes from, and [docs/PROVIDER_CLIS.md](docs/PROVIDER_CLIS.md) for each
+provider's own usage command and official docs.
 
 ## Install
 
