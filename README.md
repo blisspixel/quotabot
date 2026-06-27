@@ -3,20 +3,37 @@
 [![CI](https://github.com/blisspixel/quotabot/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/quotabot/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A small desktop widget that shows how much quota you have left across a few AI
-coding subscriptions in one place: Claude (Anthropic), Codex (OpenAI),
-Antigravity / Gemini (Google), and Grok (xAI), plus passive local support for
-Cursor, Windsurf, and Kiro, and local runtimes like Ollama and LM Studio.
+See how much quota you have left across your agentic AI coding subscriptions, in
+one place, and let your tools route work to whichever one still has budget.
 
-Nothing fancy. If you pay for a few of these and keep forgetting which one still
-has headroom, this might save you a little hassle. It reads the usage your tools
-already track locally, so for most providers there is nothing extra to set up
-(Claude and Codex just work; an optional login covers Antigravity and Grok). None
-of the reads are model calls, so checking your quota costs no usage tokens.
+quotabot does two things:
 
-The window is frameless, follows the system light/dark theme, can be pinned
-always on top or shown in the taskbar, and collapses to a tiny status strip when
-you want it out of the way.
+1. **Shows your remaining quota** for the rolling-window subscriptions you pay
+   for: Claude (Pro/Max), Codex (OpenAI), Antigravity / Gemini (Google), and
+   Grok (xAI). It also surfaces what your **local LLM runtimes** (Ollama, LM
+   Studio) have loaded, so a free local model is always in view as a fallback.
+2. **Recommends where to send the next request.** `quotabot suggest` (and the
+   same logic over MCP) ranks your subscriptions by remaining headroom and falls
+   back to a local model when they are low, so AI tools and agents can route
+   across your accounts and spend the budget you are paying for instead of
+   stalling on a spent cap.
+
+It reads the usage your tools already track locally, so most providers need no
+setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).
+
+Highlights:
+
+- **Cross-platform.** One codebase on Windows, macOS, and Linux.
+- **Easy and good-looking.** A small frameless widget that follows the system
+  light/dark theme automatically, pins always-on-top or to the taskbar, and
+  collapses to a tiny status strip.
+- **Useful analytics, no surveillance.** Statistical insight into your own usage
+  patterns (distribution, reliability, trend, best time to run) to get more value
+  from what you pay for. Only quota/usage metadata is ever read, never prompts,
+  code, or other sensitive content.
+- **Zero usage tokens.** Every read is local metadata, never a model call, so
+  checking quota never costs you anything.
+- **Local-first.** Nothing leaves your machine; there is no account or cloud.
 
 New to quotabot? Start with [docs/SETUP.md](docs/SETUP.md), a step-by-step guide
 covering which providers work automatically and which take a one-time login.
