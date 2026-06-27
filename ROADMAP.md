@@ -1,7 +1,30 @@
 # Roadmap
 
-Where the project stands and what is planned next. For the full record of
-shipped changes, see [CHANGELOG.md](CHANGELOG.md).
+What is planned next and what is deliberately out of scope. For the record of
+what has already shipped, see [CHANGELOG.md](CHANGELOG.md).
+
+## Invariants
+
+Non-negotiables. Every change is held to these; a feature that breaks one is the
+wrong feature.
+
+- **Local-first.** Nothing leaves the machine. No account, no cloud, no
+  telemetry.
+- **Zero usage tokens.** Only metadata reads, never a model/inference call.
+- **Metadata only.** Read quota and usage figures, never prompts, code, or any
+  other user content.
+- **Never disturb host credentials.** quotabot's own grants are independent;
+  refreshing or reading must never invalidate a provider CLI's or IDE's login.
+- **Fail soft.** If quotabot is unavailable or its data is stale, callers fall
+  back to what they asked for. Routing is an optimization, never a dependency.
+- **Honest data.** Surface staleness and age; never fabricate a number. A spent
+  longer window overrides a healthy shorter one (the binding-window rule).
+- **Cross-platform parity.** Every feature works on Windows, macOS, and Linux
+  from one codebase.
+- **Pure core, thin adapters.** Logic lives in pure, tested functions; adapters
+  are thin I/O shells. The test-coverage floor is enforced in CI.
+- **No attribution, no emoji, no em-dashes** in the repo, with the single
+  sanctioned exception of the math-derived analytics glyph.
 
 ## Shipped
 
@@ -107,12 +130,8 @@ Worth doing, in order:
 
 Deferred until after a public launch with real users: publishing the collector to
 pub.dev, a mdBook docs site, winget/MSIX/Homebrew/flatpak packaging, sigstore /
-reproducible builds, a Prometheus endpoint, and a token-store audit log.
-
-Declined: rewriting the core in Rust or moving to Tauri (discards a working
-cross-platform Flutter app to chase packaging debt that is real but overstated),
-and runtime plugin discovery from pub.dev (not feasible in an AOT-compiled Flutter
-app; a compile-time registry is the workable form).
+reproducible builds, a Prometheus endpoint, and a token-store audit log. (See
+also "Not doing", below.)
 
 ## Ideas from the field (competitive scan)
 
@@ -133,11 +152,6 @@ High value, on-brand:
   can consume routing data stably.
 - Merged "most-constrained provider" compact mode for the collapsed widget.
 
-GitHub Copilot is intentionally not supported: for individuals it is a monthly
-premium-request allowance with pay-as-you-go overage rather than a rolling-window
-quota, the usage is server-side only, and the token lives in the OS keyring
-rather than a file. Revisit only if GitHub exposes a local premium-request read.
-
 Medium value:
 
 - GitHub-style year contribution calendar and a 30-day stacked-by-provider chart.
@@ -149,14 +163,36 @@ Medium value:
   OTel-file) to expand provider coverage cheaply.
 - Optional cost dimension from local session logs, kept distinct from headroom.
 
-Deliberately skipped: token/dollar cost ledgers as the primary view, git-commit
-productivity correlation, global leaderboards / cloud sync (local-first), browser
-cookie + keychain decryption (platform-specific, privacy-sensitive), and CLI-PTY
-scraping of `/usage` (brittle; prefer the OAuth/file sources quotabot uses).
-
 ## Later
+
+Worth doing eventually, not now:
 
 - Richer MCP and HTTP transports and client examples.
 - Further notification and trend-view polish.
 - macOS and Linux packaging polish (Windows release is verified; macOS/Linux have
   notes, a `.desktop` file, and code paths ready for target builds).
+- Platform-maturity items deferred until after a public launch (pub.dev publish,
+  mdBook site, OS package managers, signing, metrics endpoint, audit log).
+
+## Not doing (and why)
+
+Deliberately out of scope. Listed so the boundary is explicit.
+
+- **A Rust core or a Tauri rewrite.** Discards a working cross-platform Flutter
+  app to chase packaging debt that is real but overstated.
+- **Runtime plugin discovery from pub.dev.** Not feasible in an AOT-compiled
+  Flutter app; a compile-time adapter registry is the workable form.
+- **GitHub Copilot.** For individuals it is a monthly premium-request allowance
+  with pay-as-you-go overage, not a rolling-window quota; usage is server-side
+  only and the token lives in the OS keyring, not a file. Revisit only if GitHub
+  exposes a local premium-request read.
+- **Token/dollar cost ledgers as the primary view.** quotabot tracks rolling
+  windows, not spend accounting; a cost dimension stays optional and secondary.
+- **Pay-as-you-go API vendors** (as quota providers). That is cost, not a
+  rolling-window quota.
+- **Global leaderboards or cloud sync.** Violates local-first.
+- **Browser cookie / OS-keychain decryption.** Platform-specific and
+  privacy-sensitive; quotabot reuses tokens the provider's own tools already
+  wrote, nothing more.
+- **CLI-PTY scraping of `/usage`.** Brittle; prefer the OAuth and file sources.
+- **Git-commit / productivity correlation.** Out of the tool's lane.

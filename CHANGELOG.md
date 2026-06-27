@@ -5,11 +5,25 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
-- Fleet Analytics dashboard: a full-window view over every provider at once,
-  opened from a header button. Includes a radar/constellation of remaining
-  headroom, a tightest-first headroom ranking, a consumption-share donut, a
-  p10/p50/p90 distribution strip, and an aggregated weekday-by-hour
-  best-time-to-run heatmap. Pure render over the existing collector analytics.
+- Quota Analytics: a range-switched view (Now / 7d / 90d) in the same window,
+  opened from the header. Now shows ranked headroom with resets and a
+  consumption-share donut; 7d/90d recompute from history for the free-%
+  distribution, reliability and per-day trend, and a best-time-to-run
+  weekday-by-hour heatmap. Carries one math-derived glyph (the only emoji in the
+  app), chosen by the fleet's own numbers.
+- Antigravity live quota via the Antigravity OAuth client plus the onboarding
+  step, so paid accounts read real model quota instead of 403. `quotabot login
+  antigravity` now works with no Google Cloud setup and pins a chosen account.
+- Full-featured CLI: `status`, `check <provider>`, `json`, `help`, and `version`
+  alongside `suggest`/`stats`/`login`/`logout`, with `--json` on every read
+  command, color that honors NO_COLOR/CLICOLOR/TTY, and a progress spinner.
+- Lemonade Server adapter (OpenAI-compatible local runtime, port 8000, honors
+  `LEMONADE_HOST`).
+- Demo mode (`QUOTABOT_DEMO=1`) that renders synthetic, account-free data for
+  previews and screenshots, plus widget and analytics screenshots in the README.
+- Agent and reference docs: `AGENTS.md` (the routing contract), `docs/USAGE.md`,
+  `docs/BUILDING.md`, and `docs/PROVIDER_CLIS.md` (each provider's own usage
+  command, with a last-updated stamp).
 - CLI release asset packaging helpers: `tools/package-cli.ps1` and
   `tools/package-cli.sh`, each writing the installer asset plus a `.sha256`
   sidecar under `release/`.
@@ -43,7 +57,14 @@ Notable changes to quotabot. Newest first.
 
 ### Changed
 - The desktop binary now uses the public `quotabot` name.
+- Default provider order leads with the most widely used (Claude, then Codex).
+- Header controls reordered to refresh, analytics, collapse, menu, help, close,
+  with a clearer bar-chart analytics icon and tooltips.
+- README tightened from roughly 390 to 150 lines, with the widget walkthrough,
+  analytics, CLI reference, MCP, and build detail moved into linked docs.
 - Cache, history, and analytics writes are atomic (temp file then rename).
+- Dev tooling refreshed: lints 6.x, CI enforces 85 percent line coverage, and
+  `actions/checkout` is on v5.
 
 ### Security
 - Token and cache provider names are constrained or sanitized before they become
@@ -63,6 +84,12 @@ Notable changes to quotabot. Newest first.
   longer drops to "no live data" after about an hour. When the per-model quota
   endpoint returns nothing it now says so honestly instead of mislabeling a paid
   account as free tier.
+- The Antigravity adapter tolerates a network error in the quotabot-grant path
+  (falling back to the CLI/IDE token instead of hard-failing), a non-string tier
+  id during onboarding, and no longer assigns a stringified user object as the
+  account.
+- Google and xAI token responses are decoded inside a guard, so a malformed 200
+  can never surface token bytes in an error string.
 - The LiteLLM router no longer lets a local fallback preempt a metered provider
   that still has budget.
 
