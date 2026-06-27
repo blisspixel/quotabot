@@ -222,7 +222,8 @@ quotabot suggest --json   # same decision as JSON for scripts and agents
 ```
 
 The same recommendation is available over MCP (`suggest_provider`) and HTTP
-(`GET /suggest`). For a turnkey setup that routes a whole fleet of agents across
+(`GET /suggest`). For how an agent or tool should call quotabot and route, see
+[AGENTS.md](AGENTS.md). For a turnkey setup that routes a whole fleet of agents across
 your subscriptions and local models, see the LiteLLM proxy plugin in
 [integrations/litellm/](integrations/litellm/): it reads this recommendation in a
 pre-call hook and rewrites each request to whichever deployment has budget,
