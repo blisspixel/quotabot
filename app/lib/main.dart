@@ -21,10 +21,15 @@ import 'prefs.dart';
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
+/// Global text-scale, applied to every route (strip and analytics) via the
+/// MaterialApp builder. Driven by the TextSize preference.
+final ValueNotifier<double> textScale = ValueNotifier<double>(1.0);
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
   final prefs = Prefs.load();
+  textScale.value = prefs.textSize.scale;
 
   // init notifications (cross platform) - wrapped to prevent crash on Windows if not fully supported
   try {
@@ -90,6 +95,15 @@ class QuotaBotApp extends StatelessWidget {
       themeMode: ThemeMode.system, // follow OS light/dark
       theme: _theme(Brightness.light),
       darkTheme: _theme(Brightness.dark),
+      builder: (context, child) => ValueListenableBuilder<double>(
+        valueListenable: textScale,
+        builder: (context, scale, _) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(scale)),
+          child: child!,
+        ),
+      ),
       home: Dashboard(prefs: prefs),
     );
   }
@@ -122,6 +136,7 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   late bool _showInTaskbar = widget.prefs.showInTaskbar;
   late bool _enableNotifications = widget.prefs.enableNotifications;
   late bool _showAccounts = widget.prefs.showAccounts;
+  late TextSize _textSize = widget.prefs.textSize;
   bool _isRefreshing = false;
   int _failStreak = 0; // consecutive refreshes with no live data at all
   late final Set<String> _hidden = {...widget.prefs.hidden};
@@ -219,6 +234,7 @@ class _DashboardState extends State<Dashboard> with WindowListener {
       showInTaskbar: _showInTaskbar,
       enableNotifications: _enableNotifications,
       sort: _sort,
+      textSize: _textSize,
       showAccounts: _showAccounts,
       setupDone: widget.prefs.setupDone,
       windowX: _windowPos?.dx,
@@ -903,9 +919,28 @@ class _DashboardState extends State<Dashboard> with WindowListener {
             style: const TextStyle(fontSize: 12.5),
           ),
         ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          enabled: false,
+          height: 26,
+          child: Text(
+            'TEXT SIZE',
+            style: TextStyle(fontSize: 10, letterSpacing: 0.6),
+          ),
+        ),
+        _textSizeItem('text:small', TextSize.small, 'Small'),
+        _textSizeItem('text:medium', TextSize.medium, 'Medium'),
+        _textSizeItem('text:large', TextSize.large, 'Large'),
       ],
     );
   }
+
+  PopupMenuItem<String> _textSizeItem(String value, TextSize t, String label) =>
+      CheckedPopupMenuItem(
+        value: value,
+        checked: _textSize == t,
+        child: Text(label, style: const TextStyle(fontSize: 12.5)),
+      );
 
   PopupMenuItem<String> _cadenceItem(String value, Cadence c, String label) =>
       CheckedPopupMenuItem(
@@ -946,12 +981,25 @@ class _DashboardState extends State<Dashboard> with WindowListener {
       _toggleNotifications();
     } else if (value == 'show_accounts') {
       _setShowAccounts(!_showAccounts);
+    } else if (value == 'text:small') {
+      _setTextSize(TextSize.small);
+    } else if (value == 'text:medium') {
+      _setTextSize(TextSize.medium);
+    } else if (value == 'text:large') {
+      _setTextSize(TextSize.large);
     }
   }
 
   void _setShowAccounts(bool value) {
     setState(() => _showAccounts = value);
     _persistPrefs();
+  }
+
+  void _setTextSize(TextSize t) {
+    setState(() => _textSize = t);
+    textScale.value = t.scale; // applied app-wide by the MaterialApp builder
+    _persistPrefs();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
   void _setCadence(Cadence c) {
@@ -1073,27 +1121,13 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   /// vertical scroll, so the window size is left exactly as it is.
   Future<void> _showFleet() async {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // Give analytics a steady, modest portrait window rather than inheriting the
-    // strip's height (which grows with the provider count), then restore the
-    // strip exactly on the way back.
-    final prevSize = await windowManager.getSize();
-    final prevPos = await windowManager.getPosition();
-    final display =
-        WidgetsBinding.instance.platformDispatcher.views.first.display;
-    final availH = display.size.height / display.devicePixelRatio;
-    // Resize in place (anchored at the current top-left); do not recenter, so the
-    // window stays where the user put it.
-    await windowManager.setSize(Size(380, math.min(680, availH - 60)));
-
-    if (!mounted) return;
+    // Open analytics in the existing window: no resize, no move, so nothing
+    // reflows or appears to change scale. The analytics body scrolls to fit.
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => FleetScreen(data: _data, buckets: _buckets, dark: dark),
       ),
     );
-
-    await windowManager.setSize(prevSize);
-    await windowManager.setPosition(prevPos);
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 

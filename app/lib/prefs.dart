@@ -9,6 +9,16 @@ enum Cadence { smart, m15, h1 }
 /// Sort order for displayed providers (affects compact icons order and expanded cards).
 enum ProviderSort { defaultOrder, alphabetical, mostAvailable, mostUsed }
 
+/// Overall text size. Medium is the design default; the others scale all text.
+enum TextSize {
+  small(0.9),
+  medium(1.0),
+  large(1.15);
+
+  const TextSize(this.scale);
+  final double scale;
+}
+
 /// User interface preferences, persisted across restarts under the per-user
 /// config directory.
 class Prefs {
@@ -20,6 +30,7 @@ class Prefs {
   final bool enableNotifications;
   final ProviderSort sort;
   final bool showAccounts;
+  final TextSize textSize;
 
   /// True once the first-run setup walkthrough has been completed or dismissed.
   final bool setupDone;
@@ -35,6 +46,7 @@ class Prefs {
     this.enableNotifications = true,
     this.sort = ProviderSort.defaultOrder,
     this.showAccounts = false,
+    this.textSize = TextSize.medium,
     this.setupDone = false,
     this.windowX,
     this.windowY,
@@ -49,6 +61,7 @@ class Prefs {
     bool? enableNotifications,
     ProviderSort? sort,
     bool? showAccounts,
+    TextSize? textSize,
     bool? setupDone,
     double? windowX,
     double? windowY,
@@ -62,6 +75,7 @@ class Prefs {
     enableNotifications: enableNotifications ?? this.enableNotifications,
     sort: sort ?? this.sort,
     showAccounts: showAccounts ?? this.showAccounts,
+    textSize: textSize ?? this.textSize,
     setupDone: setupDone ?? this.setupDone,
     windowX: clearWindowPosition ? null : windowX ?? this.windowX,
     windowY: clearWindowPosition ? null : windowY ?? this.windowY,
@@ -76,6 +90,7 @@ class Prefs {
     'enable_notifications': enableNotifications,
     'sort': sort.name,
     'show_accounts': showAccounts,
+    'text_size': textSize.name,
     'setup_done': setupDone,
     if (windowX != null) 'window_x': windowX,
     if (windowY != null) 'window_y': windowY,
@@ -96,6 +111,10 @@ class Prefs {
       orElse: () => ProviderSort.defaultOrder,
     ),
     showAccounts: j['show_accounts'] as bool? ?? false,
+    textSize: TextSize.values.firstWhere(
+      (t) => t.name == j['text_size'],
+      orElse: () => TextSize.medium,
+    ),
     setupDone: j['setup_done'] as bool? ?? false,
     windowX: (j['window_x'] as num?)?.toDouble(),
     windowY: (j['window_y'] as num?)?.toDouble(),

@@ -64,7 +64,7 @@ void main() {
     await tester.pump();
 
     // Now view by default.
-    expect(find.text('QUOTA ANALYTICS'), findsOneWidget);
+    expect(find.text('Quota Analytics'), findsOneWidget);
     expect(find.text('HEADROOM'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
@@ -85,7 +85,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('QUOTA ANALYTICS'), findsOneWidget);
+    expect(find.text('Quota Analytics'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('7d'));
     await tester.pump();
