@@ -79,6 +79,41 @@ Make local models first-class for the broke indie:
 - Per-model capability tags (coding, long-context) so a hard refactor is not
   routed to a 7B that flubs it and forces a paid retry.
 
+## Platform maturity (external review)
+
+From an architecture review. Kept the right-sized items, deferred the premature
+platform work, and noted what does not fit the Dart/Flutter reality.
+
+Worth doing, in order:
+
+1. **Adapter interface + fixtures.** A small `Adapter` abstraction (collect,
+   parseFixture, healthCheck, metadata) with a required test fixture per adapter,
+   plus a compile-time registry, so adding Z.ai/Kimi/Amp is a short, well-trodden
+   path instead of copy-paste. A "add a provider in 10 minutes" checklist in
+   CONTRIBUTING.
+2. **`suggest` as the default brain, not a CLI afterthought:** capability flags
+   (`--min-context`, `--require-tools`, `--budget`), an explainable reason
+   ("picked Grok: 91% free, resets soonest"), and a concurrency lease
+   (`reserve`/`release`, file-lock or SQLite-atomic) so parallel agents do not
+   dogpile the same pick.
+3. **Local runtimes as first-class:** VRAM/readiness awareness ("can I run 70B Q4
+   right now?", loaded vs cold, tokens/sec), the strongest differentiator since no
+   rival does it.
+4. **Tray-first desktop UX:** tray icon, configurable global hotkey, native toasts
+   with "Route now / Switch to Ollama" actions; the current frameless widget
+   becomes the expanded view. This is the casual user's "make it disappear".
+5. **Simulation mode:** `--mock-provider claude --state exhausted` for tests,
+   demos, and screenshots (extends the existing demo mode).
+
+Deferred until after a public launch with real users: publishing the collector to
+pub.dev, a mdBook docs site, winget/MSIX/Homebrew/flatpak packaging, sigstore /
+reproducible builds, a Prometheus endpoint, and a token-store audit log.
+
+Declined: rewriting the core in Rust or moving to Tauri (discards a working
+cross-platform Flutter app to chase packaging debt that is real but overstated),
+and runtime plugin discovery from pub.dev (not feasible in an AOT-compiled Flutter
+app; a compile-time registry is the workable form).
+
 ## Ideas from the field (competitive scan)
 
 From a read of similar tools (ccusage, CodexBar, ClaudeBar, TokenTracker,
