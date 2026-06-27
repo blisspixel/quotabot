@@ -501,16 +501,17 @@ class _FleetScreenState extends State<FleetScreen> {
               ),
             ),
             const Spacer(),
+            // One math-derived glyph. No label; the curious can hover.
             Tooltip(
               message: oracle.proof,
-              child: InkResponse(
-                radius: 18,
-                onTap: () => _showOracle(context, oracle, c),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+              waitDuration: const Duration(milliseconds: 400),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Opacity(
+                  opacity: 0.85,
                   child: Text(
                     oracle.glyph,
-                    style: const TextStyle(fontSize: 16),
+                    style: const TextStyle(fontSize: 15),
                   ),
                 ),
               ),
@@ -566,43 +567,6 @@ class _FleetScreenState extends State<FleetScreen> {
               ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showOracle(
-    BuildContext context,
-    ({String glyph, String proof}) oracle,
-    ({Color panel, Color fg, Color muted, Color line}) c,
-  ) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: c.panel,
-        title: Row(
-          children: [
-            Text(oracle.glyph, style: const TextStyle(fontSize: 22)),
-            const SizedBox(width: 10),
-            Text(
-              'Oracle of Pythagoras',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                color: c.fg,
-              ),
-            ),
-          ],
-        ),
-        content: Text(
-          '${oracle.proof}.\n\nOne glyph per fleet, chosen by the numbers, not by you.',
-          style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('So it is'),
-          ),
-        ],
       ),
     );
   }
