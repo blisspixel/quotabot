@@ -4,15 +4,15 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 A small desktop widget that shows how much quota you have left across a few AI
-coding subscriptions in one place: Codex (OpenAI), Claude (Anthropic), Grok
-(xAI), Antigravity (Google), plus passive local support for Kiro, Cursor,
-Windsurf, and local runtimes like Ollama and LM Studio.
+coding subscriptions in one place: Claude (Anthropic), Codex (OpenAI),
+Antigravity / Gemini (Google), and Grok (xAI), plus passive local support for
+Cursor, Windsurf, and Kiro, and local runtimes like Ollama and LM Studio.
 
 Nothing fancy. If you pay for a few of these and keep forgetting which one still
 has headroom, this might save you a little hassle. It reads the usage your tools
-already track locally, so for most providers there is nothing extra to set up (an
-optional one-time login keeps Grok and Antigravity live longer). None of the
-reads are model calls, so checking your quota costs no usage tokens.
+already track locally, so for most providers there is nothing extra to set up
+(Claude and Codex just work; an optional login covers Antigravity and Grok). None
+of the reads are model calls, so checking your quota costs no usage tokens.
 
 The window is frameless, follows the system light/dark theme, can be pinned
 always on top or shown in the taskbar, and collapses to a tiny status strip when
@@ -26,7 +26,7 @@ covering which providers work automatically and which take a one-time login.
 - [What it shows](#what-it-shows)
 - [Provider status](#provider-status)
 - [Install](#install)
-- [Keeping Grok and Antigravity live](#keeping-grok-and-antigravity-live)
+- [Keeping Antigravity and Grok live](#keeping-antigravity-and-grok-live)
 - [Using the widget](#using-the-widget)
 - [History and analytics](#history-and-analytics)
 - [Routing work to the freest provider](#routing-work-to-the-freest-provider)
@@ -58,25 +58,26 @@ weekly cap is spent, the card collapses to a single "weekly spent - resets in
 
 | Provider     | Source                                                   | Live usage      |
 |--------------|----------------------------------------------------------|-----------------|
-| Codex        | `rate_limits` event in the newest session rollout        | Yes             |
 | Claude       | OAuth usage endpoint, token reused from Claude Code       | Yes             |
+| Codex        | `rate_limits` event in the newest session rollout        | Yes             |
+| Antigravity  | Google Cloud Code API (Gemini), token reused and refreshed | Yes, signed-in account |
 | Grok         | gRPC-web billing endpoint, token reused from the CLI     | Yes, when fresh |
-| Antigravity  | Google Cloud Code API, token reused from the IDE          | Yes, when fresh |
-| Kiro         | Local credits/state (CLI+IDE VSCode fork); passive detect | opportunistic   |
 | Cursor       | Local credits/state (IDE); passive detect for free/Pro    | opportunistic   |
 | Windsurf     | Local `cachedPlanInfo` in state.vscdb (daily/weekly/Cascade quota); passive detect | opportunistic   |
+| Kiro         | Local credits/state (CLI+IDE VSCode fork); passive detect | opportunistic   |
 | Ollama       | Local daemon (`/api/tags` + `/api/ps`); installed and loaded models, in-use status | when running |
 | LM Studio    | Local server (`/api/v0/models`, OpenAI `/v1/models` fallback); installed and loaded models | when running |
 
-Codex and Claude are always live. Grok and Antigravity are live while the token
-their app stored is still valid; once it expires the card falls back to the last
-cached value (shown with its age) until you reopen that app or connect quotabot's
-own login (see [Keeping Grok and Antigravity live](#keeping-grok-and-antigravity-live)).
+Claude and Codex are always live with no setup. Antigravity and Grok are live for
+the account their app is signed into; quotabot refreshes that token on its own, so
+a card only falls back to its last cached value (shown with its age) if the app is
+signed out (see [Keeping Antigravity and Grok live](#keeping-antigravity-and-grok-live)).
 
-Kiro (even post-cancel), Cursor (free), and Windsurf (free tier) are detected
-passively for robustness. Gemini CLI (consumer) transitioned to Antigravity
-(~June 2026); Google coverage is via the Antigravity adapter. Aider/Cline and
-similar are model-agnostic and use underlying provider quotas (already tracked).
+Cursor (free/Pro), Windsurf (free tier), and Kiro (even post-cancel) are detected
+passively for robustness. Google's consumer Gemini CLI has been superseded by
+Antigravity (the Gemini-powered IDE and CLI), so Google coverage runs through the
+Antigravity adapter. Aider/Cline and similar are model-agnostic and use the
+underlying provider quotas (already tracked).
 
 Local runtimes (Ollama, LM Studio) have no quota to spend, so they are not shown
 as a usage bar. Instead their card reports what is installed, which model is
@@ -101,21 +102,21 @@ curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh
 irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 ```
 
-After install, restart your terminal and run:
+After install, restart your terminal and check what was detected:
 ```bash
 quotabot doctor
-quotabot login grok
 ```
 
-To install from a fork, set `QUOTABOT_REPO=owner/quotabot` before running the
-installer. Prefer to run from source instead? See
-[Building from source](#building-from-source).
+Claude and Codex should already read live (they need no setup). To install from a
+fork, set `QUOTABOT_REPO=owner/quotabot` before running the installer. Prefer to
+run from source instead? See [Building from source](#building-from-source).
 
-## Keeping Grok and Antigravity live
+## Keeping Antigravity and Grok live
 
-Codex and Claude are always live. Grok and Antigravity are live while the token
-their app holds is fresh. To keep Grok live without reopening the CLI, connect
-quotabot's own login once:
+Claude and Codex are always live with no setup. Antigravity and Grok are live for
+the account their app is signed into, and quotabot refreshes that token on its
+own. If an app is signed out, connect quotabot's own login once so the card stays
+live regardless:
 
 ```bash
 quotabot login grok      # prints a URL and a device code to confirm
@@ -125,14 +126,13 @@ quotabot logout grok     # disconnect any time
 
 quotabot stores its own refresh token under your per-user config directory
 (owner-only on POSIX) and refreshes silently from then on. This grant is
-independent of the Grok CLI, so it never disturbs its credentials.
+independent of the app's own credentials, so it never disturbs them.
 
-Antigravity's passive IDE token read works automatically while the IDE token is
-fresh. Persistent Antigravity login is available only when you provide your own
-Google installed-app OAuth client through `QUOTABOT_GOOGLE_CLIENT_ID` and
-`QUOTABOT_GOOGLE_CLIENT_SECRET`, then run `quotabot login antigravity`. Without
-those variables, Antigravity still works from the IDE's fresh local token and
-falls back to cached values when it expires.
+For Antigravity, quotabot reads and refreshes the token of the account you are
+signed into in the Antigravity IDE or the Gemini CLI. A persistent quotabot-owned
+login is also available by providing your own Google installed-app OAuth client
+through `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`, then
+running `quotabot login antigravity`.
 
 ## Using the widget
 
