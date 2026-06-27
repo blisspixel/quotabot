@@ -5,6 +5,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 
 ## The desktop widget
 
+- **Header buttons** (left to right): refresh now, open Quota Analytics
+  (bar-chart icon), collapse, the providers/settings menu, setup and help, and
+  close. Hover for a tooltip on each.
 - **Move it:** drag the header bar or the cards area (the control buttons on the
   right are excluded). The body scrolls and the window hugs its content.
 - **Collapse:** shrink to a compact strip of provider logos with one status dot
@@ -29,12 +32,18 @@ free), amber (>=25%), orange (>0), or red (spent).
 
 ## Quota Analytics
 
-A full-window view, switchable by time range:
+Open it from the bar-chart button in the header. It takes over the window (a
+Back button returns you to the strip) and scrolls like a phone, switchable by
+time range:
 
-- **Now:** ranked headroom per provider with reset countdowns, and a
-  consumption-share donut.
+- **Now:** pool-free and most-headroom chips, ranked headroom per provider with
+  reset countdowns, and a consumption-share donut. Providers with no live data
+  are listed so they do not silently disappear.
 - **7d / 90d:** the free-% distribution (p10-p90 with a median tick), reliability
   and per-day trend, and a best-time-to-run weekday-by-hour heatmap.
+
+(There is also one small easter egg in the header, derived from the fleet's own
+numbers. Hover it.)
 
 The same numbers are on the command line:
 
@@ -99,3 +108,9 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 
 `GET /` returns the full snapshot as JSON; `GET /suggest` returns the routing
 recommendation. Local only, zero tokens.
+
+## Demo mode
+
+Launch the widget with `QUOTABOT_DEMO=1` to populate it with synthetic,
+account-free data covering every supported service. Nothing real is read and no
+provider is contacted; it is meant for previews and screenshots.

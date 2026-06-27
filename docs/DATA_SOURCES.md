@@ -52,23 +52,26 @@ State lives in the Antigravity globalStorage SQLite database at
 
 - Account and plan: the `antigravityAuthStatus` key holds JSON with the email
   and a base64 `userStatus` protobuf; the adapter decodes the plan tier from it.
-- Auth: quotabot's own grant from `login antigravity` if configured with your
-  own Google OAuth client, otherwise the IDE's current access token, recovered from the
+- Auth, in priority order: quotabot's own grant from `quotabot login antigravity`
+  (preferred); otherwise the token the Gemini/Antigravity CLI stored in
+  `~/.gemini/oauth_creds.json`, refreshed from its refresh token when the saved
+  access token has expired; otherwise the IDE's access token from the
   `antigravityUnifiedStateSync.oauthToken` key (a protobuf wrapping a
   base64-encoded inner protobuf; `findEmbeddedToken` peels the layers).
-- Live usage: with the access token it calls the Google Cloud Code API
-  (`https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` for the
-  project and plan, then `:fetchAvailableModels` for per-model `quotaInfo` with
-  `remainingFraction`, `resetTime`, and `isExhausted`). These are quota metadata
-  calls, not generation, so they cost no tokens. The per-model quotas are
-  bucketed into sprint, daily, and weekly windows.
-- Without a quotabot login the IDE access token is short-lived; once it expires
-  the adapter falls back to account and plan. Profile directories under
-  Antigravity (cross-platform scan for Windows/macOS/Linux Profiles) are
-  discovered; per-account cache files support showing multiple when switching.
-- The adapter constructs the SQLite path cross-platform (Windows APPDATA,
-  macOS Library, Linux XDG) and searches common sqlite libs. Profile scan
-  extended for full multi on-disk support.
+- Live usage: the quota endpoint only accepts tokens minted by Antigravity's own
+  OAuth client and an onboarded project, so `login antigravity` uses that public
+  client and the adapter runs `:onboardUser` (retried) to provision the project,
+  then calls the Cloud Code API
+  (`https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then
+  `:fetchAvailableModels`) for per-model `quotaInfo` with `remainingFraction`,
+  `resetTime`, and `isExhausted`. These are quota metadata calls, not generation,
+  so they cost no tokens. The per-model quotas are bucketed into windows by reset.
+- The Code Assist tier field reports `free-tier` even for paid accounts, so it is
+  not used as a plan signal; when the quota endpoint returns nothing the adapter
+  says so honestly rather than mislabeling the account as free.
+- The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
+  Library, Linux XDG) and scans Antigravity profile directories; per-account
+  cache files support showing multiple accounts when switching.
 
 ## Authentication
 
@@ -77,14 +80,15 @@ stores. Grok and Antigravity can run two ways:
 
 - Opportunistic: reuse the token the CLI or IDE currently holds, read-only. This
   is live only while that app keeps the token fresh.
-- Connected: after `login grok`, quotabot holds its own OAuth grant and
-  refreshes silently. Persistent Antigravity login is available when you provide
-  `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET` for your own
-  Google installed-app OAuth client; it uses a loopback plus PKCE
-  authorization-code flow. These grants are independent of the host apps, so
-  they never invalidate the CLI's or IDE's credentials.
-  quotabot's tokens live under the per-user config directory, owner-only on
-  POSIX, and rotated refresh tokens are persisted on every refresh.
+- Connected: after `login grok` or `login antigravity`, quotabot holds its own
+  OAuth grant and refreshes silently. Both work with no cloud setup. Grok uses
+  the device-code flow; Antigravity uses a loopback plus PKCE authorization-code
+  flow against Antigravity's public client (override with
+  `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET` to use your own).
+  These grants are independent of the host apps, so they never invalidate the
+  CLI's or IDE's credentials. quotabot's tokens live under the per-user config
+  directory, owner-only on POSIX and ACL-restricted on Windows, and rotated
+  refresh tokens are persisted on every refresh.
 
 ## Kiro (agentic CLI + IDE)
 
@@ -130,7 +134,11 @@ actually down).
 - LM Studio: `GET /api/v0/models` (native REST, includes a per-model `state` of
   loaded or not-loaded), falling back to the OpenAI-compatible `GET /v1/models`
   when the native API is unavailable. Honors `LMSTUDIO_HOST`, default
-  `http://127.0.0.1:1234`.
+  `http://127.0.0.1:1234`. The LM Studio local server must be started (Developer
+  tab, or `lms server start`).
+- Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
+  (falling back to `/v1/models`). Honors `LEMONADE_HOST`, default
+  `http://127.0.0.1:8000`.
 - Other runtimes: anything exposing an OpenAI-style `/v1/models` endpoint (Jan,
   llama.cpp / llamafile, GPT4All, text-generation-webui, KoboldCpp) can be added
   with the same shared `localRuntimeQuota` helper; only the discovery URL and

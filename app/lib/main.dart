@@ -1081,8 +1081,9 @@ class _DashboardState extends State<Dashboard> with WindowListener {
     final display =
         WidgetsBinding.instance.platformDispatcher.views.first.display;
     final availH = display.size.height / display.devicePixelRatio;
+    // Resize in place (anchored at the current top-left); do not recenter, so the
+    // window stays where the user put it.
     await windowManager.setSize(Size(380, math.min(680, availH - 60)));
-    await windowManager.center();
 
     if (!mounted) return;
     await Navigator.of(context).push(

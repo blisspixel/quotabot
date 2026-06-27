@@ -11,18 +11,21 @@ collector/ (Dart package)
   parsing.dart       pure response/window parsing (no I/O)
   analysis.dart      pure routing helpers (headroom, availability)
   cache.dart         last-known-good snapshot cache
+  insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap
   collector.dart     collectAll(): run adapters, apply cache
-  adapters/          codex, claude, grok, antigravity, kiro, cursor,
-                     windsurf, ollama, lmstudio (thin I/O shells)
+  adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
+                     ollama, lmstudio, lemonade (thin I/O shells)
   auth/              tokens + store, PKCE/loopback util, xai + google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
-  bin/collect.dart        CLI: JSON, doctor, login, logout
+  bin/collect.dart        CLI: status/doctor, check, suggest, stats, json, login, logout
   bin/mcp_server.dart     MCP server over stdio (tools + quotas://current resource)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing
 
 app/ (Flutter desktop)
   main.dart   imports collectAll(), renders cards, adaptive refresh
+  fleet.dart  the Quota Analytics screen (Now/7d/90d, charts, the oracle glyph)
+  demo.dart   synthetic data for QUOTABOT_DEMO previews/screenshots
   logos.dart  vector provider logos (CustomPainter)
   prefs.dart  persisted UI preferences
 ```
@@ -56,13 +59,15 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
 - Claude, Grok, and Antigravity call live metadata endpoints (no model calls, no
   token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
   prefer quotabot's own OAuth grant (see Authentication) and fall back to the
-  token the host CLI or IDE currently holds.
+  token the host CLI or IDE currently holds. Antigravity additionally refreshes
+  the Gemini CLI token from disk and runs the Cloud Code onboarding step before
+  reading per-model quota.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
-- Ollama and LM Studio are local-runtime adapters: they report installed and
-  loaded models instead of a quota window and act as a routing fallback. Any
-  OpenAI-compatible runtime can be added with the shared `localRuntimeQuota`
-  helper.
+- Ollama, LM Studio, and Lemonade are local-runtime adapters: they report
+  installed and loaded models instead of a quota window and act as a routing
+  fallback. Any OpenAI-compatible runtime can be added with the shared
+  `localRuntimeQuota` helper.
 
 An adapter that cannot produce live windows still returns a `ProviderQuota` with
 account and plan and an explanatory `error` note, rather than throwing. The UI
@@ -123,8 +128,13 @@ simple HTTP alternative.
 - `ProviderTile` computes the binding window (the one with the least headroom).
   If that window is exhausted, the card collapses to a single line; otherwise it
   renders one `WindowBar` per window. Windows with `resetsAt` (e.g. Claude weekly)
-  show countdowns (e.g. "80%  3d12h"). Antigravity shows "free tier" when
-  applicable.
+  show countdowns (e.g. "80%  3d12h").
+- `fleet.dart` is the Quota Analytics screen, opened from the header and pushed as
+  a route over the strip (the window resizes to a steady portrait and restores on
+  Back). It is a range switch (Now / 7d / 90d): the live view ranks headroom and
+  shows a consumption donut; the historical views recompute `Insights` and the
+  heatmap from the raw buckets. It carries the one sanctioned emoji, a glyph
+  derived from the fleet's numbers (`pythagorasOracle`).
 - Provider logos are vector `CustomPainter`s (`logos.dart`) so they stay sharp
   at any size and recolor for light or dark. The in-app header shows a small
   dynamic radial "pool gauge" (`AppGauge` in `logos.dart`) next to the "Quota"
