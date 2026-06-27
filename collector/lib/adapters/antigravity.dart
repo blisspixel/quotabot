@@ -190,7 +190,13 @@ class AntigravityAdapter {
       bool usingQuotabot = false;
       bool usingCli = false;
 
-      access = await GoogleAuth().freshAccessToken();
+      // A network or timeout error here must not hard-fail the adapter: fall
+      // through to the passive CLI/IDE token instead of throwing.
+      try {
+        access = await GoogleAuth().freshAccessToken();
+      } catch (_) {
+        access = null;
+      }
       if (access != null) {
         usingQuotabot = true;
       }
@@ -231,12 +237,12 @@ class AntigravityAdapter {
         } catch (_) {}
       }
 
-      // Also try to extract email from the load response
+      // Also try to extract email from the load response. Only accept a
+      // string-valued key: `user` is often an object, and stringifying it would
+      // assign a "{email: ...}" blob as the account.
       if (account == 'default' || account == (email ?? 'default')) {
-        final loadEmail = findKey(load, 'email')?.toString() ??
-            findKey(load, 'userEmail')?.toString() ??
-            findKey(load, 'user')?.toString();
-        if (loadEmail != null && loadEmail.isNotEmpty) {
+        final loadEmail = findKey(load, 'email') ?? findKey(load, 'userEmail');
+        if (loadEmail is String && loadEmail.isNotEmpty) {
           account = loadEmail;
         }
       }
@@ -328,17 +334,13 @@ class AntigravityAdapter {
   /// id, else LEGACY, else whatever the load response reported.
   static String? _pickOnboardTier(dynamic allowedTiers, String? fromLoad) {
     if (allowedTiers is! List || allowedTiers.isEmpty) return fromLoad;
+    bool hasId(dynamic t) =>
+        t is Map && t['id'] is String && (t['id'] as String).isNotEmpty;
     for (final t in allowedTiers) {
-      if (t is Map &&
-          t['isDefault'] == true &&
-          (t['id'] as String?)?.isNotEmpty == true) {
-        return t['id'] as String;
-      }
+      if (hasId(t) && (t as Map)['isDefault'] == true) return t['id'] as String;
     }
     for (final t in allowedTiers) {
-      if (t is Map && (t['id'] as String?)?.isNotEmpty == true) {
-        return t['id'] as String;
-      }
+      if (hasId(t)) return (t as Map)['id'] as String;
     }
     return 'LEGACY';
   }

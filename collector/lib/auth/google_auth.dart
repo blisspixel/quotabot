@@ -133,6 +133,12 @@ class GoogleAuth {
         )
         .timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) return null;
-    return jsonDecode(resp.body) as Map<String, dynamic>;
+    // Parse inside a guard: a malformed 200 body is token material, and a raw
+    // FormatException would put a slice of it into an error string.
+    try {
+      return jsonDecode(resp.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
   }
 }

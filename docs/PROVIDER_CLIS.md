@@ -61,6 +61,8 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
 - **Cursor, Windsurf, Kiro:** detected from their local state files; no usage
   command needed. quotabot reports what it can read opportunistically.
-- **Ollama, LM Studio (and other OpenAI-compatible runtimes):** quotabot lists
-  installed and loaded models from the local API. There is no quota to spend, so
-  they act as an always-available routing fallback.
+- **Ollama, LM Studio, Lemonade (and other OpenAI-compatible runtimes):**
+  quotabot lists installed and loaded models from the local API. There is no
+  quota to spend, so they act as an always-available routing fallback. LM Studio
+  must have its local server started (Developer tab, or `lms server start`);
+  Lemonade defaults to port 8000 and honors `LEMONADE_HOST`.

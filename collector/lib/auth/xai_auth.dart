@@ -45,7 +45,14 @@ class XaiAuth {
         'device_code': deviceCode,
         'client_id': clientId,
       });
-      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      // Guard the decode: a malformed body is token material, and a raw
+      // FormatException would carry a slice of it. Keep polling on bad JSON.
+      Map<String, dynamic> body;
+      try {
+        body = jsonDecode(resp.body) as Map<String, dynamic>;
+      } catch (_) {
+        continue;
+      }
       if (resp.statusCode == 200) {
         final tokens = Tokens.fromOAuth(body);
         TokenStore.save(provider, tokens);
@@ -95,7 +102,11 @@ class XaiAuth {
   ) async {
     final resp = await _postRaw(url, form);
     if (resp.statusCode != 200) return null;
-    return jsonDecode(resp.body) as Map<String, dynamic>;
+    try {
+      return jsonDecode(resp.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<http.Response> _postRaw(String url, Map<String, String> form) {

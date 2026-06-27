@@ -99,7 +99,7 @@ underlying provider quotas (already tracked).
 Local runtimes (Ollama, LM Studio) have no quota to spend, so they are not shown
 as a usage bar. Instead their card reports what is installed, which model is
 loaded, and whether one is in use, and it sorts below the cloud services. Any
-other OpenAI-compatible local server (Jan, llama.cpp, GPT4All, and similar) can
+other OpenAI-compatible local server (Lemonade, Jan, llama.cpp, GPT4All, similar) can
 be added the same way, since detection is just a local `/v1/models` style read.
 
 See [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) for exactly where each number

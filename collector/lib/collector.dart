@@ -4,6 +4,7 @@ import 'adapters/codex.dart';
 import 'adapters/cursor.dart';
 import 'adapters/grok.dart';
 import 'adapters/kiro.dart';
+import 'adapters/lemonade.dart';
 import 'adapters/lmstudio.dart';
 import 'adapters/ollama.dart';
 import 'adapters/windsurf.dart';
@@ -39,6 +40,7 @@ Future<List<ProviderQuota>> collectAll() async {
     // daemon is actually off, so they are collected without the cache fallback.
     OllamaAdapter().collect(),
     LmStudioAdapter().collect(),
+    LemonadeAdapter().collect(),
   ]);
   final antis = await _collectAntigravityMulti();
   // A local runtime that is not running is not ok; drop it so users who do not
