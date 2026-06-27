@@ -247,39 +247,24 @@ class AntigravityAdapter {
       });
       final windows = antigravityWindows(models, asOf);
 
-      // Resolve the tier. The load response carries it as a nested object
-      // (currentTier.{id,name}); free tier exposes no per-model quota, so the
-      // models call returns 403 and there are no windows to show.
+      // Tier name from the load response (do not surface the raw `free-tier`
+      // id as a plan: the Code Assist tier field does not reflect the user's
+      // actual Antigravity entitlement, so it would mislabel paid accounts).
       final tierObj = findKey(load, 'currentTier');
-      String? tierId, tierName;
-      if (tierObj is Map) {
-        tierId = tierObj['id']?.toString();
-        tierName = tierObj['name']?.toString();
-      }
-      final isFree = (tierId ?? plan ?? '').toLowerCase().contains('free');
-      final tier = isFree ? 'Free' : (plan ?? tierName ?? tierId);
+      final tierName = tierObj is Map ? tierObj['name']?.toString() : null;
 
       if (windows.isEmpty) {
-        // A reachable free-tier account is a known state, not missing data.
-        if (isFree) {
-          return ProviderQuota(
-            provider: id,
-            displayName: name,
-            account: account,
-            plan: 'Free',
-            asOf: asOf,
-            ok: true,
-            windows: const [],
-          );
-        }
-        return offline('no live quota - account/plan only');
+        // The token authenticated (account resolved) but the per-model quota
+        // endpoint returned nothing. Be honest rather than calling it "free".
+        return offline(
+            'connected; Antigravity is not returning live quota here yet');
       }
 
       return ProviderQuota(
         provider: id,
         displayName: name,
         account: account,
-        plan: tier,
+        plan: plan ?? tierName,
         asOf: asOf,
         windows: windows,
       );
