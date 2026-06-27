@@ -4,7 +4,11 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 See how much quota you have left across your agentic AI coding subscriptions, in
-one place, and let your tools route work to whichever one still has budget.
+one place, and route the next request to whichever one has budget, so you never
+stall mid-flow on a spent cap or leave paid quota sitting unspent.
+
+> Early and under active development (0.x). The core works and is in daily use;
+> expect changes on the road to 1.0. See [ROADMAP.md](ROADMAP.md).
 
 quotabot does two things:
 

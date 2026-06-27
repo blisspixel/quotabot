@@ -1,7 +1,31 @@
 # Roadmap
 
-What is planned next and what is deliberately out of scope. For the record of
+Where quotabot is headed and what is deliberately out of scope. For the record of
 what has already shipped, see [CHANGELOG.md](CHANGELOG.md).
+
+## What quotabot is (and is not)
+
+quotabot does two jobs: **see** how much quota you have left across the AI coding
+subscriptions you pay for and your local models, and **route** the next request to
+whichever one has budget. The point is simple: never stall mid-flow on a spent
+cap, and never leave paid quota sitting unspent.
+
+It **is**:
+
+- a live rolling-window quota monitor (5h / weekly / monthly windows, real resets);
+- a routing advisor, available as a CLI, an MCP server, and a LiteLLM plugin;
+- local-first and cross-platform (Windows, macOS, Linux), desktop widget plus CLI;
+- aware of local runtimes (Ollama, LM Studio, Lemonade) as first-class fallbacks.
+
+It is **not**:
+
+- a cost or dollar-spend ledger (a different, already-crowded category);
+- a proxy that sits in your request path (it advises; LiteLLM is an optional add-on);
+- telemetry, a cloud service, or an account;
+- a model quality or benchmark tool.
+
+That second list matters as much as the roadmap: it is what keeps quotabot from
+sprawling into the pile of interchangeable usage dashboards.
 
 ## Invariants
 
@@ -32,153 +56,78 @@ wrong feature.
 - **No attribution, no emoji, no em-dashes** in the repo, with the single
   sanctioned exception of the math-derived analytics glyph.
 
-## Shipped
+## Road to 1.0
 
-The core is complete and in daily use:
+1.0 is a promise that the **core works exceptionally** and the public surface is
+**stable**, not a feature count. Everything here is depth on what already exists:
+the SEE and ROUTE jobs done flawlessly on every platform, for the providers
+quotabot already claims. Adding a new provider does not get us to 1.0; Antigravity
+never lying about quota on any OS does.
 
-- Normalized, provider-agnostic quota model shared by the collector and the app.
-- Live adapters for Codex, Claude, Grok, and Antigravity (metadata reads, zero
-  usage tokens), plus passive detection for Kiro, Cursor, and Windsurf and
-  local-runtime reporting for Ollama and LM Studio.
-- Persistent OAuth login for Grok (device flow) and Antigravity (loopback +
-  PKCE), each an independent grant that never disturbs the host app credentials.
-- Cross-platform desktop widget: frameless, system light/dark, vector logos,
-  availability bars with reset countdowns, binding-constraint collapse, compact
-  and expanded views, per-provider hide/show, adaptive refresh, and last-known
-  -good caching with a stale indicator.
-- History and analytics: 90-day hourly buckets feeding distribution, reliability,
-  trend, and by-hour profiles, surfaced as `quotabot stats` and an in-app panel.
-- Routing as a primitive: a shared recommendation engine exposed as `quotabot
-  suggest`, the MCP server (`list_quotas`, `provider_with_most_headroom`,
-  `suggest_provider`, `check_provider_availability`, plus a `quotas://current`
-  resource), a local HTTP server, and a LiteLLM proxy plugin.
-- Test suite over the parsing, model, cache, analysis, and auth logic, with CI on
-  Linux running format, analyze, and tests for both Dart packages and the router.
+**Reliability (SEE is flawless)**
 
-## Next
+- Every claimed provider reads correctly on Windows, macOS, and Linux, verified
+  on real machines, not just "code paths ready".
+- No silent failures: a provider that cannot read says why, plainly.
+- Token-refresh and onboarding edge cases are handled and tested (Antigravity,
+  Grok), including expiry, multi-account, and signed-out states.
 
-- **Surface routed-request metrics in the widget.** The LiteLLM plugin already
-  logs per-request usage; show those counts next to subscription headroom so
-  routing outcomes sit beside the budget that drove them.
-- **Streamable HTTP transport for MCP**, in addition to stdio.
-- **Routing-aware alerts.** When a provider goes low, name where to route next
-  (ties the notification to the suggest engine), with tiered 70%/90% thresholds
-  and an urgency rank so the most urgent risk surfaces first.
-- **Actionable warnings with a one-line remedy** ("route to X", "switch to Ollama
-  for this task", "downgrade Opus to Sonnet").
+**Routing you can trust (ROUTE earns trust)**
 
-## From the user panel
+- `suggest` explains itself ("picked X: 91% free, resets soonest").
+- Provenance on every payload (`as_of`, staleness/confidence) so a stale route is
+  never trusted blindly.
+- Fail-soft verified end to end; callers always have a safe default.
 
-Themes from four user archetypes (power user, casual, optimizer, broke indie),
-ordered by how many of them asked for it.
+**A widget that disappears when you want it to**
 
-Make `suggest` the centerpiece (everyone but the casual user):
+- Tray-first quiet mode: tray icon, optional global hotkey, native low-quota
+  toasts, with the current frameless card as the expanded view.
+- Plain-language low warnings ("about an hour of usage left") alongside the bars.
+- No layout jank; fast refresh. (Light/dark and text size are already in.)
 
-- **Blunt one-line verdict** with the reset baked in: "Use local (Ollama llama3);
-  Pro resets in 38m, ~6 requests left."
-- **Capability-aware routing.** Respect task needs, not just raw headroom:
-  `suggest --min-context`, `--require-tools`, `--budget`, `--exclude`. Cheapest
-  -with-room is wrong when the task needs 200k context.
-- **Aggressive local-first mode** for tight budgets: prefer local, escalate to
-  paid only when the task needs it or a window is about to reset.
-- **Concurrency leases** so parallel agents do not dogpile the same pick:
-  `quotabot reserve <provider> --ttl 5m` / `release`, atomic and local.
-- **Provenance on every payload:** `as_of`, `source` (measured vs estimated), and
-  a confidence/staleness signal, so a stale route is not trusted blindly.
+**A stable contract**
 
-Serve the casual user by hiding depth (they ignore analytics/CLI/MCP entirely):
+- Freeze the `quotabot.v1` JSON schema, the surface agents depend on.
+- A small adapter interface plus a required fixture per adapter (a compile-time
+  registry), so the provider set stays correct and is easy to keep correct, with
+  an "add a provider in 10 minutes" checklist in CONTRIBUTING.
+- A simulation mode (`--mock-provider claude --state exhausted`) for deterministic
+  testing of the core.
 
-- Default to the compact status strip, not the full grid.
-- Plain-language low warning ("about 1 hour of usage left") over a bare percent.
-- Put Analytics/CLI/MCP behind an "Advanced" affordance.
+**Shipping**
 
-Dollarize value for the optimizer:
+- A working release and install pipeline (the one-line install actually installs)
+  and verified macOS and Linux packaging.
 
-- **Use-it-or-lose-it alert:** fire when projected waste at reset crosses a
-  threshold, with a one-click "what can I run now" number.
-- **Downgrade/upgrade ROI:** rolling 90d p90 vs each tier's cap, with $/mo saved
-  and breach probability ("under Tier 2's ceiling 11 of 13 weeks").
-- **Reset-anchored scheduling:** `suggest --after-reset` prints the next refresh
-  timestamp per provider so batch work queues the moment a window flips.
+## After 1.0
 
-Make local models first-class for the broke indie:
+Breadth and depth, once the core is trusted:
 
-- Show real readiness: loaded-in-VRAM vs cold, est. tokens/sec, and "fits your
-  GPU?", so "free" does not secretly mean two-minute waits.
-- Per-model capability tags (coding, long-context) so a hard refactor is not
-  routed to a 7B that flubs it and forces a paid retry.
+- **More quota-window providers:** Z.ai (GLM), Kimi, Amp, OpenCode.
+- **Capability-aware routing:** `suggest --min-context`, `--require-tools`,
+  `--budget`, `--exclude`, and an aggressive local-first mode that escalates to a
+  paid plan only when the task needs it or a window is about to reset.
+- **Concurrency leases** (`reserve` / `release`) so parallel agents do not dogpile
+  the same pick.
+- **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
+  crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
+  $/mo saved and breach probability); reset-anchored scheduling.
+- **First-class local models (the moat):** VRAM/readiness awareness ("can I run
+  70B Q4 right now?", loaded vs cold, tokens/sec) and per-model capability tags,
+  so "free" never secretly means a two-minute wait or a flubbed refactor.
+- **Richer analytics:** hour-by-weekday heatmap polish, a contribution calendar,
+  streaks and summary stats, plan-tier modeling, and provider status polling.
+- **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
+- **MCP streamable HTTP transport** and client snippets.
+- **Ecosystem and packaging:** a plugin model, OS package managers (winget/MSIX,
+  Homebrew, AppImage/flatpak), a docs site, and a reusable passive-reader adapter
+  taxonomy to widen coverage cheaply.
 
-## Platform maturity (external review)
-
-From an architecture review. Kept the right-sized items, deferred the premature
-platform work, and noted what does not fit the Dart/Flutter reality.
-
-Worth doing, in order:
-
-1. **Adapter interface + fixtures.** A small `Adapter` abstraction (collect,
-   parseFixture, healthCheck, metadata) with a required test fixture per adapter,
-   plus a compile-time registry, so adding Z.ai/Kimi/Amp is a short, well-trodden
-   path instead of copy-paste. A "add a provider in 10 minutes" checklist in
-   CONTRIBUTING.
-2. **`suggest` as the default brain, not a CLI afterthought:** capability flags
-   (`--min-context`, `--require-tools`, `--budget`), an explainable reason
-   ("picked Grok: 91% free, resets soonest"), and a concurrency lease
-   (`reserve`/`release`, file-lock or SQLite-atomic) so parallel agents do not
-   dogpile the same pick.
-3. **Local runtimes as first-class:** VRAM/readiness awareness ("can I run 70B Q4
-   right now?", loaded vs cold, tokens/sec), the strongest differentiator since no
-   rival does it.
-4. **Tray-first desktop UX:** tray icon, configurable global hotkey, native toasts
-   with "Route now / Switch to Ollama" actions; the current frameless widget
-   becomes the expanded view. This is the casual user's "make it disappear".
-5. **Simulation mode:** `--mock-provider claude --state exhausted` for tests,
-   demos, and screenshots (extends the existing demo mode).
-
-Deferred until after a public launch with real users: publishing the collector to
-pub.dev, a mdBook docs site, winget/MSIX/Homebrew/flatpak packaging, sigstore /
-reproducible builds, a Prometheus endpoint, and a token-store audit log. (See
-also "Not doing", below.)
-
-## Ideas from the field (competitive scan)
-
-From a read of similar tools (ccusage, CodexBar, ClaudeBar, TokenTracker,
-codeburn, tokscale, Claude-Code-Usage-Monitor, and others). quotabot's
-differentiators to keep leaning on: a cross-platform desktop widget (most rivals
-are macOS menu-bar only), reading real rate-limit windows (vs token or dollar
-accounting), routing as a primitive (suggest/MCP/LiteLLM), local-runtime
-monitoring, and value analytics.
-
-High value, on-brand:
-
-- Hour x day-of-week headroom heatmap ("best time to run"). quotabot already
-  computes both profiles; no rival shows both dimensions at once.
-- More quota-window providers in the same lane: Z.ai (GLM), Kimi, Amp, OpenCode.
-  (Skip pay-as-you-go API vendors - that is cost, not a rolling-window quota.)
-- Versioned machine-readable schema on all outputs (e.g. `quotabot.v1`) so agents
-  can consume routing data stably.
-- Merged "most-constrained provider" compact mode for the collapsed widget.
-
-Medium value:
-
-- GitHub-style year contribution calendar and a 30-day stacked-by-provider chart.
-- Plan-tier modeling (Pro/Max 5x/20x) so headroom and runway map to the real
-  allowance; surface projected overage.
-- Provider status/incident polling ("is the provider even up right now").
-- Streaks and summary stats (longest/current streak, best day, daily average).
-- Reusable passive-reader adapter taxonomy (JSONL-transcript, SQLite-session,
-  OTel-file) to expand provider coverage cheaply.
-- Optional cost dimension from local session logs, kept distinct from headroom.
-
-## Later
-
-Worth doing eventually, not now:
-
-- Richer MCP and HTTP transports and client examples.
-- Further notification and trend-view polish.
-- macOS and Linux packaging polish (Windows release is verified; macOS/Linux have
-  notes, a `.desktop` file, and code paths ready for target builds).
-- Platform-maturity items deferred until after a public launch (pub.dev publish,
-  mdBook site, OS package managers, signing, metrics endpoint, audit log).
+Differentiators (from a scan of ccusage, CodexBar, ClaudeBar, TokenTracker, and
+others) to keep leaning on: a cross-platform widget (most rivals are macOS
+menu-bar only), real rate-limit windows (not token or dollar accounting), routing
+as a primitive, and first-class local runtimes.
 
 ## Not doing (and why)
 
