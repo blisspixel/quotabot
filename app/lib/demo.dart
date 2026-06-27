@@ -10,14 +10,38 @@ ProviderQuota _p(
   String id,
   String name,
   String plan,
-  List<QuotaWindow> windows,
-) => ProviderQuota(
+  String account,
+  List<QuotaWindow> windows, {
+  bool stale = false,
+  String? note,
+}) => ProviderQuota(
   provider: id,
   displayName: name,
-  account: 'demo',
+  account: account,
   plan: plan,
   asOf: _now(),
+  stale: stale,
+  error: note,
   windows: windows,
+);
+
+ProviderQuota _local(
+  String id,
+  String name,
+  String account,
+  String status,
+  List<String> details, {
+  bool active = false,
+}) => ProviderQuota(
+  provider: id,
+  displayName: name,
+  account: account,
+  plan: 'local',
+  kind: 'local',
+  asOf: _now(),
+  status: status,
+  active: active,
+  details: details,
 );
 
 int _now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -28,25 +52,49 @@ QuotaWindow _w(String label, double used, int resetInSecs) => QuotaWindow(
   resetsAt: _now() + resetInSecs,
 );
 
-/// A believable fleet: each provider at a different point in its cycle.
+/// Every supported service at a made-up point in its cycle, including two
+/// Antigravity accounts to show multi-account display. All numbers and the
+/// account names are invented for the demo and do not mirror any real account
+/// or machine.
 List<ProviderQuota> demoData() => [
-  _p('claude', 'Claude', 'max', [_w('5h', 26, 5226), _w('weekly', 16, 540000)]),
-  _p('codex', 'Codex', 'pro', [_w('5h', 2, 10920), _w('weekly', 47, 416700)]),
-  _p('antigravity', 'Antigravity', 'AI Pro', [
-    _w('5h', 0, 16800),
-    _w('weekly', 0, 118260),
+  // A power user leaning hard on Claude (5h nearly tapped), with Kiro getting
+  // low and Antigravity flush, so routing has an obvious place to send work.
+  _p('claude', 'Claude', 'Max', 'you@example.com', [
+    _w('5h', 81, 4500),
+    _w('weekly', 52, 388800),
   ]),
-  _p('grok', 'Grok', 'SuperGrok', [_w('monthly', 59, 338700)]),
-  ProviderQuota(
-    provider: 'ollama',
-    displayName: 'Ollama',
-    account: '12 models',
-    plan: 'local',
-    kind: 'local',
-    asOf: _now(),
-    status: '12 installed, idle',
-    details: const ['12 installed . 191.0 GB on disk'],
-  ),
+  _p('codex', 'Codex', 'Pro', 'you@example.com', [
+    _w('5h', 44, 11400),
+    _w('weekly', 68, 297000),
+  ]),
+  _p('antigravity', 'Antigravity', 'AI Pro', 'you@example.com', [
+    _w('5h', 9, 9600),
+    _w('weekly', 21, 469800),
+  ]),
+  _p('antigravity', 'Antigravity', 'AI Pro', 'work@example.com', [
+    _w('5h', 47, 6300),
+    _w('weekly', 55, 201600),
+  ], stale: true),
+  _p('grok', 'Grok', 'SuperGrok', 'you@example.com', [
+    _w('monthly', 57, 712800),
+  ]),
+  _p('cursor', 'Cursor', 'Pro', 'you@example.com', [_w('monthly', 38, 745200)]),
+  _p('windsurf', 'Windsurf', 'Pro', 'you@example.com', [
+    _w('daily', 66, 48600),
+    _w('weekly', 55, 360000),
+  ]),
+  _p('kiro', 'Kiro', 'Pro', 'you@example.com', [_w('credit', 78, 280800)]),
+  _local('ollama', 'Ollama', '3 models', 'qwen2.5-coder 7B Q4 loaded', const [
+    '4.4 GB VRAM . 32K ctx',
+    '3 installed . 18.6 GB on disk',
+  ], active: true),
+  _local('lmstudio', 'LM Studio', '2 models', 'llama-3.1-8B loaded', const [
+    '5.1 GB VRAM . 16K ctx',
+    '2 installed . 12.0 GB on disk',
+  ], active: true),
+  _local('lemonade', 'Lemonade', '1 model', '1 installed, idle', const [
+    '1 installed . 4.7 GB on disk',
+  ]),
 ];
 
 /// About 40 days of hourly buckets per metered provider so the analytics views
@@ -57,10 +105,13 @@ Map<String, List<HeadroomBucket>> demoBuckets() {
   final rng = math.Random(7); // fixed seed: stable screenshots
   final out = <String, List<HeadroomBucket>>{};
   final bases = {
-    'claude': 62.0,
-    'codex': 48.0,
-    'antigravity': 88.0,
-    'grok': 40.0,
+    'claude': 34.0,
+    'codex': 46.0,
+    'antigravity': 84.0,
+    'grok': 47.0,
+    'cursor': 60.0,
+    'windsurf': 41.0,
+    'kiro': 28.0,
   };
   bases.forEach((id, base) {
     final buckets = <HeadroomBucket>[];

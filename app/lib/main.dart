@@ -297,6 +297,7 @@ class _DashboardState extends State<Dashboard> with WindowListener {
     final tz = DateTime.now().timeZoneOffset;
     final buckets = demoBuckets();
     setState(() {
+      _showAccounts = true; // show the (fake) account names in the demo
       _data = demoData();
       _loading = false;
       _updated = DateTime.now();
