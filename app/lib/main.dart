@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:window_manager/window_manager.dart';
 
+import 'demo.dart';
 import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
@@ -226,6 +228,10 @@ class _DashboardState extends State<Dashboard> with WindowListener {
 
   Future<void> _refresh() async {
     if (_isRefreshing) return;
+    if (Platform.environment['QUOTABOT_DEMO'] == '1') {
+      _loadDemo();
+      return;
+    }
     setState(() => _isRefreshing = true);
     try {
       final results = await collectAll();
@@ -281,6 +287,34 @@ class _DashboardState extends State<Dashboard> with WindowListener {
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
+    }
+  }
+
+  /// Populates the dashboard with synthetic demo data (QUOTABOT_DEMO=1) so the
+  /// app can be previewed or screenshotted without touching real accounts.
+  void _loadDemo() {
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final tz = DateTime.now().timeZoneOffset;
+    final buckets = demoBuckets();
+    setState(() {
+      _data = demoData();
+      _loading = false;
+      _updated = DateTime.now();
+      _history = {};
+      _insights = {};
+      _heatmaps = {};
+      _buckets = buckets;
+      buckets.forEach((id, b) {
+        _insights[id] = Insights.from(b, nowSec, tzOffset: tz);
+        _heatmaps[id] = weekHourHeatmap(b, tzOffset: tz);
+      });
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _scheduleNext(); // keep the "as of" label current even in demo mode
+    if (Platform.environment['QUOTABOT_SHOT'] == '1') {
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) _showFleet();
+      });
     }
   }
 
@@ -742,16 +776,39 @@ class _DashboardState extends State<Dashboard> with WindowListener {
                 ],
               ),
             ),
-            _iconButton(Icons.hub_rounded, muted, _showFleet),
-            _iconButton(Icons.help_outline_rounded, muted, _showHelp),
-            _menuButton(muted),
-            _iconButton(Icons.close_fullscreen_rounded, muted, _toggleCompact),
+            // Order: the two things you actively do (refresh, open analytics),
+            // then the view toggle, then settings and help, then close last.
             _iconButton(
               _isRefreshing ? Icons.sync : Icons.refresh_rounded,
               muted,
               _refresh,
+              tooltip: 'Refresh now',
             ),
-            _iconButton(Icons.close_rounded, muted, windowManager.close),
+            _iconButton(
+              Icons.bar_chart_rounded,
+              muted,
+              _showFleet,
+              tooltip: 'Quota analytics',
+            ),
+            _iconButton(
+              Icons.close_fullscreen_rounded,
+              muted,
+              _toggleCompact,
+              tooltip: 'Collapse',
+            ),
+            _menuButton(muted),
+            _iconButton(
+              Icons.help_outline_rounded,
+              muted,
+              _showHelp,
+              tooltip: 'Setup and help',
+            ),
+            _iconButton(
+              Icons.close_rounded,
+              muted,
+              windowManager.close,
+              tooltip: 'Close',
+            ),
           ],
         ),
       ),
@@ -1263,14 +1320,25 @@ class _DashboardState extends State<Dashboard> with WindowListener {
     return ('live', green);
   }
 
-  Widget _iconButton(IconData icon, Color color, VoidCallback? onTap) {
-    return InkWell(
+  Widget _iconButton(
+    IconData icon,
+    Color color,
+    VoidCallback? onTap, {
+    String? tooltip,
+  }) {
+    final button = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.all(4),
         child: Icon(icon, size: 15, color: color),
       ),
+    );
+    if (tooltip == null) return button;
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 500),
+      child: button,
     );
   }
 }

@@ -20,6 +20,14 @@ quotabot does two things:
 It reads the usage your tools already track locally, so most providers need no
 setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).
 
+<p align="center">
+  <img src="docs/screenshot-widget.png" alt="quotabot widget showing per-provider quota" width="300">
+  &nbsp;&nbsp;
+  <img src="docs/screenshot-analytics.png" alt="quotabot quota analytics over 90 days" width="300">
+</p>
+
+<p align="center"><sub>The widget, and the 90-day analytics view (demo data).</sub></p>
+
 Highlights:
 
 - **Cross-platform.** One codebase on Windows, macOS, and Linux.
