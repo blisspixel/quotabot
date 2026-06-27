@@ -88,7 +88,12 @@ Future<void> main() async {
     callback: (args, extra) async {
       final now = nowEpoch();
       final results = await snapshot();
-      return _json(suggestRoute(results, now).toJson());
+      return _json(suggestRoute(
+        results,
+        now,
+        burnByProvider:
+            recentBurnByProvider(results.map((q) => q.provider), now),
+      ).toJson());
     },
   );
 

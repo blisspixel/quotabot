@@ -15,7 +15,7 @@ import 'util.dart';
 
 export 'models.dart';
 export 'insights.dart';
-export 'cache.dart' show loadHistory, loadBuckets;
+export 'cache.dart' show loadHistory, loadBuckets, recentBurnByProvider;
 
 /// Whether the one-time temp-file sweep has run this process.
 bool _sweptTemp = false;

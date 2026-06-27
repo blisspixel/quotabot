@@ -2,6 +2,19 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Changed
+- Routing (`quotabot suggest`, the MCP `suggest_provider` tool, and the local
+  `/suggest` endpoint) now ranks on burn-aware effective headroom: each
+  provider's remaining quota is discounted by its recent burn rate over a
+  one-hour planning horizon, so a cap being drawn down fast is preferred less
+  than its instantaneous headroom suggests, and a raw-comfortable provider can
+  correctly fall back to a local runtime once burn is accounted for.
+  Availability still reflects present headroom. The suggestion JSON gains
+  `effective_headroom_percent` per candidate, plus `burn_percent_per_hour` when
+  local history is available.
+
 ## 0.2.0 - 2026-06-27
 
 ### Added

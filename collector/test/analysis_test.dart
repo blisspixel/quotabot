@@ -224,4 +224,99 @@ void main() {
       },
     );
   });
+
+  group('suggestRoute burn-aware effective headroom', () {
+    test('discounts headroom by burn x lead and exposes it', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 20)]), // 80% free
+        ],
+        _now,
+        burnByProvider: {'codex': 30},
+        leadHours: 1.0,
+      );
+      final c = s.recommended!;
+      expect(c.headroom, closeTo(80, 1e-9));
+      expect(c.effectiveHeadroom, closeTo(50, 1e-9));
+      expect(c.toJson()['effective_headroom_percent'], closeTo(50, 1e-9));
+      expect(c.toJson()['burn_percent_per_hour'], 30);
+    });
+
+    test('ranks a hard-burned provider below a steadier one', () {
+      // codex 70% free burning 40/h -> eff 30; claude 50% free at 2/h -> eff 48.
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 30)]),
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 50)]),
+        ],
+        _now,
+        burnByProvider: {'codex': 40, 'claude': 2},
+      );
+      expect(s.recommended?.provider, 'claude');
+      expect(s.ranked.first.provider, 'claude');
+    });
+
+    test('a raw-comfortable provider falls back to local once burn applies', () {
+      // codex 25% free is comfy raw, but burning 20/h over 1h -> eff 5 (< 15).
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 75)]),
+          _local('ollama'),
+        ],
+        _now,
+        burnByProvider: {'codex': 20},
+      );
+      expect(s.recommended?.provider, 'ollama');
+      expect(s.usingLocalFallback, isTrue);
+    });
+
+    test('effective headroom never goes negative', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 90)]), // 10% free
+          _local('ollama'),
+        ],
+        _now,
+        burnByProvider: {'codex': 50}, // 10 - 50 -> clamped to 0
+      );
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(codex.effectiveHeadroom, 0);
+    });
+
+    test('a recovering (negative) burn does not change headroom', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 40)]), // 60% free
+        ],
+        _now,
+        burnByProvider: {'codex': -5},
+      );
+      expect(s.recommended!.effectiveHeadroom, closeTo(60, 1e-9));
+    });
+
+    test('local runtimes are never discounted', () {
+      final s = suggestRoute(
+        [_local('ollama')],
+        _now,
+        burnByProvider: {'ollama': 99},
+      );
+      expect(s.recommended!.effectiveHeadroom, 100);
+      expect(
+        s.recommended!.toJson().containsKey('burn_percent_per_hour'),
+        isFalse,
+      );
+    });
+
+    test('without burn data, effective headroom equals raw headroom', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 35)]), // 65% free
+        ],
+        _now,
+      );
+      final c = s.recommended!;
+      expect(c.effectiveHeadroom, c.headroom);
+      expect(c.toJson().containsKey('burn_percent_per_hour'), isFalse);
+    });
+  });
 }

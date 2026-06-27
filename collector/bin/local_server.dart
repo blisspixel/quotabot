@@ -66,7 +66,16 @@ Future<void> main(List<String> args) async {
           'providers': results.map((r) => r.toJson()).toList(),
         });
       } else if (path == '/suggest') {
-        writeJson(request, suggestRoute(await snapshot(), nowEpoch()).toJson());
+        final snap = await snapshot();
+        final now = nowEpoch();
+        writeJson(
+          request,
+          suggestRoute(
+            snap,
+            now,
+            burnByProvider: recentBurnByProvider(snap.map((q) => q.provider), now),
+          ).toJson(),
+        );
       } else if (path == '/health') {
         writeJson(request, {'ok': true, 'generated_at': nowEpoch()});
       } else if (path.startsWith('/providers/')) {

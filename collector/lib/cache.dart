@@ -189,6 +189,18 @@ void recordHeadroomSample(String provider, double headroom, int now) {
   }
 }
 
+/// Recent burn per provider (percent of quota per hour) read from local history,
+/// for burn-aware routing. Null for a provider without enough history. A thin
+/// I/O shell over [loadBuckets] and [burnRatePerHour] so [suggestRoute] stays a
+/// pure function: the burn map is built here at the I/O boundary and passed in.
+Map<String, double?> recentBurnByProvider(Iterable<String> providers, int now) {
+  final out = <String, double?>{};
+  for (final provider in providers) {
+    out[provider] = burnRatePerHour(loadBuckets(provider), now);
+  }
+  return out;
+}
+
 /// Loads a provider's hourly bucket series, oldest first. Empty when absent.
 List<HeadroomBucket> loadBuckets(String provider) {
   try {

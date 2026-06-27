@@ -43,6 +43,10 @@ QUALITY-RUBRIC.md
 # Maintainer-only docs (kept locally, not part of the public repo)
 docs/dev/
 
+# Agent loop-engineering workspace and runtime logs (local only)
+docs/.agent/
+logs/
+
 # Local env, credential, and database files
 .env
 .env.*

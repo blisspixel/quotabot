@@ -110,7 +110,13 @@ Future<void> main(List<String> args) async {
       return;
     case 'suggest':
       final results = await _read();
-      final s = suggestRoute(results, nowEpoch());
+      final now = nowEpoch();
+      final s = suggestRoute(
+        results,
+        now,
+        burnByProvider:
+            recentBurnByProvider(results.map((q) => q.provider), now),
+      );
       wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       return;
     case 'stats':
@@ -384,7 +390,11 @@ void _printDoctor(List<ProviderQuota> results) {
   }
 
   // Close the loop: tell the user where to route work next.
-  final suggestion = suggestRoute(results, now);
+  final suggestion = suggestRoute(
+    results,
+    now,
+    burnByProvider: recentBurnByProvider(results.map((q) => q.provider), now),
+  );
   print('\nSuggested: ${suggestion.reason}');
   print('  (run "quotabot suggest" for the full ranked list)');
 

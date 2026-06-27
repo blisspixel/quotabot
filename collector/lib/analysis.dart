@@ -89,6 +89,16 @@ class RouteCandidate {
   /// Remaining headroom percent (0..100). Local runtimes report 100.
   final double? headroom;
 
+  /// Forward-looking headroom after discounting recent burn over the routing
+  /// lead time: `clamp(headroom - max(0, burnPerHour) * leadHours, 0, 100)`.
+  /// Equals [headroom] when no burn signal is available. Ranking and the comfort
+  /// gate use this; [available] still reflects present [headroom].
+  final double? effectiveHeadroom;
+
+  /// Recent burn in percent of quota per hour used to discount [headroom], when
+  /// history was available. Null when unknown; never set for local runtimes.
+  final double? burnPerHour;
+
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
@@ -103,9 +113,11 @@ class RouteCandidate {
     required this.plan,
     required this.isLocal,
     required this.headroom,
+    required this.effectiveHeadroom,
     required this.resetsAt,
     required this.stale,
     required this.available,
+    this.burnPerHour,
   });
 
   Map<String, dynamic> toJson() => {
@@ -114,6 +126,8 @@ class RouteCandidate {
         if (plan != null) 'plan': plan,
         'local': isLocal,
         'headroom_percent': headroom,
+        'effective_headroom_percent': effectiveHeadroom,
+        if (burnPerHour != null) 'burn_percent_per_hour': burnPerHour,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -151,6 +165,16 @@ class RouteSuggestion {
       };
 }
 
+/// A short ", ~N% after burn" note when recent burn materially discounts a
+/// candidate's headroom (by at least one point), else an empty string.
+String _burnNote(RouteCandidate c) {
+  final h = c.headroom, e = c.effectiveHeadroom;
+  if (h == null || e == null) return '';
+  if (c.burnPerHour == null || c.burnPerHour! <= 0) return '';
+  if (h - e < 1) return '';
+  return ', ~${e.round()}% after burn';
+}
+
 /// Recommends where to route the next request.
 ///
 /// Policy: prefer the metered subscription with the most remaining headroom,
@@ -160,21 +184,38 @@ class RouteSuggestion {
 /// If there is no local fallback either, recommend the least-bad subscription
 /// that still has *some* headroom; otherwise the one that resets soonest.
 ///
+/// Ranking and the comfort gate use *effective* headroom: present headroom
+/// discounted by each provider's recent burn over the [leadHours] planning
+/// horizon ([burnByProvider], percent of quota per hour). A provider being drawn
+/// down fast is therefore a less safe pick than its instantaneous headroom
+/// suggests. Availability still reflects present headroom (a provider with quota
+/// now is usable now, just ranked lower). With no burn data the behavior is
+/// identical to ranking on raw headroom.
+///
 /// Local runtimes never "win" on headroom (they would always read 100%); they
 /// are only chosen when the paid budget is too tight to be comfortable.
 RouteSuggestion suggestRoute(
   List<ProviderQuota> quotas,
   int now, {
   double comfortThreshold = 15,
+  Map<String, double?> burnByProvider = const {},
+  double leadHours = 1.0,
 }) {
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
+    final headroom = q.isLocal ? 100.0 : a.headroom;
+    final burn = q.isLocal ? null : burnByProvider[q.provider];
+    final discount = (burn != null && burn > 0) ? burn * leadHours : 0.0;
+    final effective =
+        headroom == null ? null : (headroom - discount).clamp(0.0, 100.0);
     return RouteCandidate(
       provider: q.provider,
       account: q.account,
       plan: q.plan,
       isLocal: q.isLocal,
-      headroom: q.isLocal ? 100.0 : a.headroom,
+      headroom: headroom,
+      effectiveHeadroom: effective,
+      burnPerHour: burn,
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,
@@ -192,7 +233,7 @@ RouteSuggestion suggestRoute(
   final subs = usable.where((c) => !c.isLocal).toList()
     ..sort((a, b) {
       if (a.stale != b.stale) return a.stale ? 1 : -1;
-      return (b.headroom ?? -1).compareTo(a.headroom ?? -1);
+      return (b.effectiveHeadroom ?? -1).compareTo(a.effectiveHeadroom ?? -1);
     });
   final locals = usable.where((c) => c.isLocal).toList();
 
@@ -210,16 +251,18 @@ RouteSuggestion suggestRoute(
   }
 
   final liveSubs = subs.where((c) => !c.stale).toList();
-  final comfy =
-      liveSubs.where((c) => (c.headroom ?? 0) >= comfortThreshold).toList();
+  final comfy = liveSubs
+      .where((c) => (c.effectiveHeadroom ?? 0) >= comfortThreshold)
+      .toList();
   if (comfy.isNotEmpty) {
     final best = comfy.first;
     final note = best.stale ? ' (cached)' : '';
+    final burnNote = _burnNote(best);
     return RouteSuggestion(
       recommended: best,
       ranked: ranked,
       reason:
-          'Use ${best.provider}$note - most headroom (${best.headroom!.round()}% free).',
+          'Use ${best.provider}$note - most headroom (${best.headroom!.round()}% free$burnNote).',
       usingLocalFallback: false,
     );
   }
