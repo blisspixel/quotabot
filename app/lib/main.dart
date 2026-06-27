@@ -1073,11 +1073,27 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   /// vertical scroll, so the window size is left exactly as it is.
   Future<void> _showFleet() async {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    // Give analytics a steady, modest portrait window rather than inheriting the
+    // strip's height (which grows with the provider count), then restore the
+    // strip exactly on the way back.
+    final prevSize = await windowManager.getSize();
+    final prevPos = await windowManager.getPosition();
+    final display =
+        WidgetsBinding.instance.platformDispatcher.views.first.display;
+    final availH = display.size.height / display.devicePixelRatio;
+    await windowManager.setSize(Size(380, math.min(680, availH - 60)));
+    await windowManager.center();
+
+    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => FleetScreen(data: _data, buckets: _buckets, dark: dark),
       ),
     );
+
+    await windowManager.setSize(prevSize);
+    await windowManager.setPosition(prevPos);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
   /// Compact setup/help panel: a short intro, then every detected provider with

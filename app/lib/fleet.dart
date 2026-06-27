@@ -500,62 +500,68 @@ class _FleetScreenState extends State<FleetScreen> {
     ({Color panel, Color fg, Color muted, Color line}) c,
     ({String glyph, String proof}) oracle,
   ) {
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onPanStart: (_) => windowManager.startDragging(),
-      child: Container(
-        decoration: BoxDecoration(
-          color: c.panel,
-          border: Border(bottom: BorderSide(color: c.line)),
-        ),
-        padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
-        child: Row(
-          children: [
-            TextButton.icon(
-              onPressed: () => Navigator.of(context).maybePop(),
-              icon: Icon(Icons.arrow_back_rounded, size: 18, color: c.fg),
-              label: Text(
-                'Back',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: c.fg,
-                ),
-              ),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: const Size(0, 36),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 2),
-            Text(
-              'QUOTA ANALYTICS',
+    return Container(
+      decoration: BoxDecoration(
+        color: c.panel,
+        border: Border(bottom: BorderSide(color: c.line)),
+      ),
+      padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
+      child: Row(
+        children: [
+          // Back is a normal tap target (not inside the window-drag area, which
+          // would otherwise swallow the click as a drag).
+          TextButton.icon(
+            onPressed: () => Navigator.of(context).maybePop(),
+            icon: Icon(Icons.arrow_back_rounded, size: 18, color: c.fg),
+            label: Text(
+              'Back',
               style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
                 color: c.fg,
               ),
             ),
-            const Spacer(),
-            // One math-derived glyph. No label; the curious can hover.
-            Tooltip(
-              message: oracle.proof,
-              waitDuration: const Duration(milliseconds: 400),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Opacity(
-                  opacity: 0.85,
-                  child: Text(
-                    oracle.glyph,
-                    style: const TextStyle(fontSize: 15),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 36),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 2),
+          // Only the title area drags the window.
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart: (_) => windowManager.startDragging(),
+              child: Row(
+                children: [
+                  Text(
+                    'Quota Analytics',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                      color: c.fg,
+                    ),
                   ),
-                ),
+                  const Spacer(),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+          // One math-derived glyph. No label; the curious can hover.
+          Tooltip(
+            message: oracle.proof,
+            waitDuration: const Duration(milliseconds: 400),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Opacity(
+                opacity: 0.85,
+                child: Text(oracle.glyph, style: const TextStyle(fontSize: 15)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
