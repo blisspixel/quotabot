@@ -8,11 +8,17 @@ what has already shipped, see [CHANGELOG.md](CHANGELOG.md).
 Non-negotiables. Every change is held to these; a feature that breaks one is the
 wrong feature.
 
-- **Local-first.** Nothing leaves the machine. No account, no cloud, no
-  telemetry.
+- **Your data is yours, and it stays local.** Your tokens, usage history, cache,
+  and preferences live only on your machine. quotabot has no account, no cloud,
+  and no telemetry, and never uploads or shares any of it. (This is about your
+  data, not about whether quotabot talks to a provider: a request to a provider,
+  such as confirming a service is reachable, moves none of your data anywhere and
+  is fine.)
 - **Never touches user content.** quotabot handles quota and usage figures only.
   It never reads or transmits your prompts, code, or other content; if a feature
   ever talks to a model, it sends only quotabot's own synthetic probe.
+- **Credential-careful.** Tokens are stored locked-down (owner-only on POSIX,
+  ACL-restricted on Windows), never logged, and never written to JSON output.
 - **Never disturb host credentials.** quotabot's own grants are independent;
   refreshing or reading must never invalidate a provider CLI's or IDE's login.
 - **Fail soft.** If quotabot is unavailable or its data is stale, callers fall
