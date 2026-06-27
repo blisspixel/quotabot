@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -280,21 +279,10 @@ class _DashboardState extends State<Dashboard> with WindowListener {
       _scheduleNext();
       _checkAndNotify();
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
-      // Debug aid: auto-open the fleet view once so it can be screenshotted.
-      // Delayed so the strip's content-fit resize settles before the fleet view
-      // enlarges the window.
-      if (!_fleetAutoOpened && Platform.environment['QUOTABOT_FLEET'] == '1') {
-        _fleetAutoOpened = true;
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          if (mounted) _showFleet();
-        });
-      }
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
   }
-
-  bool _fleetAutoOpened = false;
 
   /// Adaptive polling: fast only when a reset is imminent or a cap is nearly
   /// hit; slow when everything is healthy and resets are far away.
