@@ -10,9 +10,14 @@ wrong feature.
 
 - **Local-first.** Nothing leaves the machine. No account, no cloud, no
   telemetry.
-- **Zero usage tokens.** Only metadata reads, never a model/inference call.
-- **Metadata only.** Read quota and usage figures, never prompts, code, or any
-  other user content.
+- **Free to check, minimal by exception.** Reading quota and recommending a route
+  cost zero usage tokens (metadata only). Any feature that would spend tokens
+  (for example a tiny capability probe to validate a local model) must be
+  opt-in, as small as possible, and clearly disclosed, never silent or on by
+  default.
+- **Never reads user content.** quotabot reads quota and usage figures and, when
+  it must talk to a model at all, only ever sends its own synthetic probe, never
+  your prompts, code, or other content.
 - **Never disturb host credentials.** quotabot's own grants are independent;
   refreshing or reading must never invalidate a provider CLI's or IDE's login.
 - **Fail soft.** If quotabot is unavailable or its data is stale, callers fall
