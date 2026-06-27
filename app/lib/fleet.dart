@@ -277,7 +277,29 @@ class _FleetScreenState extends State<FleetScreen> {
                   ),
           ),
         ),
+        _missingNote(now, c),
       ],
+    );
+  }
+
+  /// Providers that exist but have no live quota right now (e.g. an expired
+  /// token), so they are absent from the charts above. Naming them avoids the
+  /// "where did X go?" confusion.
+  Widget _missingNote(
+    int now,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    final missing = [
+      for (final q in widget.data)
+        if (!q.isLocal && providerHeadroom(q, now) == null) q.displayName,
+    ];
+    if (missing.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10, left: 2, right: 2),
+      child: Text(
+        'no live data: ${missing.join(', ')} (reopen the app or reconnect)',
+        style: TextStyle(fontSize: 10.5, color: c.muted, height: 1.3),
+      ),
     );
   }
 
@@ -486,17 +508,33 @@ class _FleetScreenState extends State<FleetScreen> {
           color: c.panel,
           border: Border(bottom: BorderSide(color: c.line)),
         ),
-        padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+        padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
         child: Row(
           children: [
-            Icon(Icons.hub_rounded, size: 16, color: fleetColor(60)),
-            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).maybePop(),
+              icon: Icon(Icons.arrow_back_rounded, size: 18, color: c.fg),
+              label: Text(
+                'Back',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: c.fg,
+                ),
+              ),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 36),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 2),
             Text(
               'QUOTA ANALYTICS',
               style: TextStyle(
-                fontSize: 13,
+                fontSize: 12.5,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.4,
+                letterSpacing: 1.2,
                 color: c.fg,
               ),
             ),
@@ -506,7 +544,7 @@ class _FleetScreenState extends State<FleetScreen> {
               message: oracle.proof,
               waitDuration: const Duration(milliseconds: 400),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Opacity(
                   opacity: 0.85,
                   child: Text(
@@ -515,11 +553,6 @@ class _FleetScreenState extends State<FleetScreen> {
                   ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Close',
-              icon: Icon(Icons.close_rounded, size: 18, color: c.muted),
-              onPressed: () => Navigator.of(context).maybePop(),
             ),
           ],
         ),
