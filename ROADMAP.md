@@ -99,6 +99,38 @@ Getting to "exceptional" is a cadence, repeated until it stops finding anything:
   shared by the CLI, MCP, and the LiteLLM plugin, with the plugin covered by
   real-proxy integration tests.
 
+**A model registry (what can I run, right now?)**
+
+The flagship that turns quotabot from a quota monitor into a routing primitive any
+agentic app can build on. Today it reports quota per provider; the next layer is a
+normalized list of the **models** available to you right now, across every
+provider and local runtime, each tagged with:
+
+- its provider and account, and the quota window that gates it;
+- current headroom and reset (so an agent sees budget per model, not per provider);
+- capability hints where known: context length, tool use, vision, reasoning tier.
+
+Sourced from each provider's own model list (Antigravity `fetchAvailableModels`,
+Ollama `/api/tags`, LM Studio / Lemonade `/v1/models`, and the lists the CLIs
+expose), surfaced as `quotabot models` (CLI), a `list_models` MCP tool, and a
+field in the `quotabot.v1` snapshot. With it, `suggest` recommends a concrete
+*model*, not just a provider, and any app can use quotabot as its auto-router:
+"give me a long-context coding model that still has budget; fall back to local."
+This is the CLI/MCP primitive the whole project is in service of, and it must be
+rock-solid: stable schema, fail-soft, fast, zero-token.
+
+**An exceptional CLI (the htop view)**
+
+The CLI is the primitive everything else builds on, and it should feel like htop
+for your quota plans: open it and the whole fleet is just there, live.
+
+- A `quotabot top` (watch) mode: a refreshing terminal dashboard of every
+  provider's windows and your local runtimes, redrawing in place, honoring
+  NO_COLOR and degrading to plain text when piped or dumb-terminal.
+- Every command fast, scriptable, and `--json`-complete, with documented, stable
+  exit codes so a shell or agent can branch on them.
+- Identical behavior across Windows, macOS, and Linux terminals.
+
 **Local runtimes, first-class**
 
 - Deeper Ollama / LM Studio / Lemonade reads: load-state, VRAM, context length,

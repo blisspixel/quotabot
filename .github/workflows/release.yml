@@ -1,0 +1,58 @@
+name: Release
+
+# Cuts a GitHub release when a v* tag is pushed, building the CLI asset that the
+# one-line installers download (quotabot-<os>-<arch>[.exe] plus a .sha256 sidecar)
+# natively on each platform so every OS gets a real, checksummed binary.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create the release if it does not exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists."
+            exit 0
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --prerelease \
+            --generate-notes
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    script: bash tools/package-cli.sh }
+          - { os: ubuntu-24.04-arm, script: bash tools/package-cli.sh }
+          - { os: macos-13,         script: bash tools/package-cli.sh }
+          - { os: macos-latest,     script: bash tools/package-cli.sh }
+          - { os: windows-latest,   script: pwsh tools/package-cli.ps1 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dart-lang/setup-dart@v1
+      - name: Resolve collector dependencies
+        working-directory: collector
+        run: dart pub get
+      - name: Build and package the CLI asset
+        run: ${{ matrix.script }}
+      - name: Upload the asset to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" release/quotabot-* --repo "$GITHUB_REPOSITORY" --clobber

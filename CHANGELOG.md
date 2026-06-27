@@ -2,9 +2,13 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.2.0 - 2026-06-27
 
 ### Added
+- Cross-platform release pipeline: pushing a `v*` tag builds the CLI asset
+  natively on Linux (x64/arm64), macOS (x64/arm64), and Windows, each with a
+  `.sha256` sidecar, so the one-line installers pull a real checksummed binary on
+  every OS.
 - Quota Analytics: a range-switched view (Now / 7d / 90d) in the same window,
   opened from the header. Now shows ranked headroom with resets and a
   consumption-share donut; 7d/90d recompute from history for the free-%

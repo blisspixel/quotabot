@@ -3,6 +3,8 @@
 [![CI](https://github.com/blisspixel/quotabot/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/quotabot/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
+**htop for your agentic-AI quota plans.**
+
 See how much quota you have left across your agentic AI coding subscriptions, in
 one place, and route the next request to whichever one has budget, so you never
 stall mid-flow on a spent cap or leave paid quota sitting unspent.
