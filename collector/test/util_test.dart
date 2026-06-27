@@ -52,5 +52,17 @@ void main() {
       expect(asciiString([0x00, 0x01, 0x02, 0x03]), isNull);
       expect(asciiString(utf8.encode('ok')), 'ok');
     });
+
+    test('skips non-string wire types and recurses into nested messages', () {
+      final bytes = [
+        0x0a, 5, ...utf8.encode('hello'), // field 1, wire 2, string
+        0x10, 0x05, // field 2, wire 0 (varint), skipped
+        0x1d, 1, 2, 3, 4, // field 3, wire 5 (fixed32), skipped
+        0x21, 1, 2, 3, 4, 5, 6, 7, 8, // field 4, wire 1 (fixed64), skipped
+        0x2a, 5, 0x0a, 3, ...utf8.encode('abc'), // field 5, nested message
+      ];
+      final out = protoStrings(bytes).toList();
+      expect(out, containsAll(['hello', 'abc']));
+    });
   });
 }

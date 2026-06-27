@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -49,6 +50,28 @@ bool _useColor(Set<String> flags) {
 
 String _jsonPretty(Object? o) => const JsonEncoder.withIndent('  ').convert(o);
 
+/// Runs [task] while showing a spinner on stderr, but only when stderr is a
+/// terminal, so piped or scripted output stays clean. The spinner line is
+/// erased before the result is printed.
+Future<T> _withSpinner<T>(String label, Future<T> Function() task) async {
+  if (!stderr.hasTerminal) return task();
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  var i = 0;
+  final timer = Timer.periodic(const Duration(milliseconds: 80), (_) {
+    stderr.write('\r${style.cyan(frames[i++ % frames.length])} $label ');
+  });
+  try {
+    return await task();
+  } finally {
+    timer.cancel();
+    stderr.write('\r\x1B[K'); // carriage return + clear to end of line
+  }
+}
+
+/// Collects every provider's quota behind the spinner.
+Future<List<ProviderQuota>> _read() =>
+    _withSpinner('reading quota', collectAll);
+
 Map<String, dynamic> _snapshot(List<ProviderQuota> results) => {
       'schema': 'quotabot.v1',
       'generated_at': nowEpoch(),
@@ -86,7 +109,7 @@ Future<void> main(List<String> args) async {
       await _check(pos[1], wantsJson);
       return;
     case 'suggest':
-      final results = await collectAll();
+      final results = await _read();
       final s = suggestRoute(results, nowEpoch());
       wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       return;
@@ -96,7 +119,7 @@ Future<void> main(List<String> args) async {
   }
 
   // Snapshot and the default status table share one collect.
-  final results = await collectAll();
+  final results = await _read();
   if (cmd == 'json' || (cmd.isEmpty && wantsJson)) {
     print(_jsonPretty(_snapshot(results)));
     return;
@@ -166,7 +189,7 @@ void _printHelp() {
 Future<void> _runStats(List<String> rest, bool wantsJson) async {
   final only = rest.isEmpty ? null : rest.first.toLowerCase();
   final now = nowEpoch();
-  final results = await collectAll();
+  final results = await _read();
   final providers = {
     ...results.where((q) => !q.isLocal).map((q) => q.provider),
   }.where((p) => only == null || p == only).toList()
@@ -188,7 +211,7 @@ Future<void> _runStats(List<String> rest, bool wantsJson) async {
 
 /// `check <provider>`: is this one usable right now, and when does it reset.
 Future<void> _check(String name, bool wantsJson) async {
-  final results = await collectAll();
+  final results = await _read();
   final now = nowEpoch();
   final key = name.toLowerCase();
   ProviderQuota? q;

@@ -128,5 +128,67 @@ void main() {
       expect(t!.accessToken, 'GA');
       expect(t.refreshToken, 'R1');
     });
+
+    test('XaiAuth.refresh returns null on a non-200', () async {
+      final mock = MockClient((req) async => http.Response('no', 400));
+      expect(await XaiAuth(client: mock).refresh('R'), isNull);
+    });
+  });
+
+  group('GoogleAuth client', () {
+    test('defaults to the bundled public client when nothing is set', () {
+      final g = GoogleAuth();
+      expect(g.clientId, isNotEmpty);
+      expect(g.clientSecret, isNotEmpty);
+    });
+
+    test('honors an explicitly provided client', () {
+      final g = GoogleAuth(clientId: 'X', clientSecret: 'Y');
+      expect(g.clientId, 'X');
+      expect(g.clientSecret, 'Y');
+    });
+  });
+
+  group('XaiAuth.deviceLogin', () {
+    test('prompts, polls past pending, and reports a terminal error', () async {
+      var tokenCalls = 0;
+      final mock = MockClient((req) async {
+        if (req.url.toString().contains('device/code')) {
+          return http.Response(
+            jsonEncode({
+              'device_code': 'DC',
+              'interval': 0,
+              'verification_uri_complete': 'https://x.ai/activate',
+              'user_code': 'ABCD',
+            }),
+            200,
+          );
+        }
+        tokenCalls++;
+        final err = tokenCalls == 1 ? 'authorization_pending' : 'access_denied';
+        return http.Response(jsonEncode({'error': err}), 400);
+      });
+      String? shownUrl, shownCode;
+      await expectLater(
+        XaiAuth(client: mock).deviceLogin(
+          prompt: (url, code) {
+            shownUrl = url;
+            shownCode = code;
+          },
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(shownUrl, 'https://x.ai/activate');
+      expect(shownCode, 'ABCD');
+      expect(tokenCalls, greaterThanOrEqualTo(2));
+    });
+
+    test('throws when device authorization fails to start', () async {
+      final mock = MockClient((req) async => http.Response('no', 400));
+      await expectLater(
+        XaiAuth(client: mock).deviceLogin(prompt: (_, __) {}),
+        throwsA(isA<StateError>()),
+      );
+    });
   });
 }
