@@ -38,6 +38,47 @@ The core is complete and in daily use:
 - **Actionable warnings with a one-line remedy** ("route to X", "switch to Ollama
   for this task", "downgrade Opus to Sonnet").
 
+## From the user panel
+
+Themes from four user archetypes (power user, casual, optimizer, broke indie),
+ordered by how many of them asked for it.
+
+Make `suggest` the centerpiece (everyone but the casual user):
+
+- **Blunt one-line verdict** with the reset baked in: "Use local (Ollama llama3);
+  Pro resets in 38m, ~6 requests left."
+- **Capability-aware routing.** Respect task needs, not just raw headroom:
+  `suggest --min-context`, `--require-tools`, `--budget`, `--exclude`. Cheapest
+  -with-room is wrong when the task needs 200k context.
+- **Aggressive local-first mode** for tight budgets: prefer local, escalate to
+  paid only when the task needs it or a window is about to reset.
+- **Concurrency leases** so parallel agents do not dogpile the same pick:
+  `quotabot reserve <provider> --ttl 5m` / `release`, atomic and local.
+- **Provenance on every payload:** `as_of`, `source` (measured vs estimated), and
+  a confidence/staleness signal, so a stale route is not trusted blindly.
+
+Serve the casual user by hiding depth (they ignore analytics/CLI/MCP entirely):
+
+- Default to the compact status strip, not the full grid.
+- Plain-language low warning ("about 1 hour of usage left") over a bare percent.
+- Put Analytics/CLI/MCP behind an "Advanced" affordance.
+
+Dollarize value for the optimizer:
+
+- **Use-it-or-lose-it alert:** fire when projected waste at reset crosses a
+  threshold, with a one-click "what can I run now" number.
+- **Downgrade/upgrade ROI:** rolling 90d p90 vs each tier's cap, with $/mo saved
+  and breach probability ("under Tier 2's ceiling 11 of 13 weeks").
+- **Reset-anchored scheduling:** `suggest --after-reset` prints the next refresh
+  timestamp per provider so batch work queues the moment a window flips.
+
+Make local models first-class for the broke indie:
+
+- Show real readiness: loaded-in-VRAM vs cold, est. tokens/sec, and "fits your
+  GPU?", so "free" does not secretly mean two-minute waits.
+- Per-model capability tags (coding, long-context) so a hard refactor is not
+  routed to a 7B that flubs it and forces a paid retry.
+
 ## Ideas from the field (competitive scan)
 
 From a read of similar tools (ccusage, CodexBar, ClaudeBar, TokenTracker,
