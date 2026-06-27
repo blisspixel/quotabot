@@ -64,6 +64,21 @@ the SEE and ROUTE jobs done flawlessly on every platform, for the providers
 quotabot already claims. Adding a new provider does not get us to 1.0; Antigravity
 never lying about quota on any OS does.
 
+**Quality and hardening (continuous, not a phase)**
+
+Getting to "exceptional" is a cadence, repeated until it stops finding anything:
+
+- **Repeated adversarial bug-hunt rounds.** Multi-agent sweeps over the whole
+  codebase, each finding fixed and pinned with a regression test, run again until
+  a round comes back empty.
+- **Recurring security reviews**, not a one-time pass: token handling, host/SSRF
+  validation for local runtimes, injection via provider data, and the install
+  supply chain. Each pass fixes what it finds.
+- **Validation beyond unit tests:** integration tests against recorded provider
+  fixtures, a per-provider `doctor` smoke check, property/fuzz tests on the
+  parsers (they ingest untrusted external JSON and protobuf), and real
+  cross-platform CI (macOS and Linux runners, not just Linux).
+
 **Reliability (SEE is flawless)**
 
 - Every claimed provider reads correctly on Windows, macOS, and Linux, verified
@@ -72,12 +87,25 @@ never lying about quota on any OS does.
 - Token-refresh and onboarding edge cases are handled and tested (Antigravity,
   Grok), including expiry, multi-account, and signed-out states.
 
-**Routing you can trust (ROUTE earns trust)**
+**Routing and MCP you can trust (ROUTE earns trust)**
 
 - `suggest` explains itself ("picked X: 91% free, resets soonest").
 - Provenance on every payload (`as_of`, staleness/confidence) so a stale route is
   never trusted blindly.
 - Fail-soft verified end to end; callers always have a safe default.
+- **MCP depth:** complete tool-discovery metadata, capability scoping, a tested
+  Streamable HTTP transport alongside stdio, and client snippets (Python/TS), so
+  quotabot is the de-facto quota/routing MCP reference. One routing contract,
+  shared by the CLI, MCP, and the LiteLLM plugin, with the plugin covered by
+  real-proxy integration tests.
+
+**Local runtimes, first-class**
+
+- Deeper Ollama / LM Studio / Lemonade reads: load-state, VRAM, context length,
+  and tokens/sec where the API exposes them, with graceful degradation when it
+  does not.
+- A clean onboarding path for any OpenAI-compatible server, so a new local runtime
+  is a few lines, not a fork.
 
 **A widget that disappears when you want it to**
 
