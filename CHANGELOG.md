@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Fleet Analytics dashboard: a full-window view over every provider at once,
+  opened from a header button. Includes a radar/constellation of remaining
+  headroom, a tightest-first headroom ranking, a consumption-share donut, a
+  p10/p50/p90 distribution strip, and an aggregated weekday-by-hour
+  best-time-to-run heatmap. Pure render over the existing collector analytics.
 - CLI release asset packaging helpers: `tools/package-cli.ps1` and
   `tools/package-cli.sh`, each writing the installer asset plus a `.sha256`
   sidecar under `release/`.
