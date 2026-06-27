@@ -12,6 +12,7 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:window_manager/window_manager.dart';
 
+import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
 
@@ -738,6 +739,7 @@ class _DashboardState extends State<Dashboard> with WindowListener {
                 ],
               ),
             ),
+            _iconButton(Icons.hub_rounded, muted, _showFleet),
             _iconButton(Icons.help_outline_rounded, muted, _showHelp),
             _menuButton(muted),
             _iconButton(Icons.close_fullscreen_rounded, muted, _toggleCompact),
@@ -1005,6 +1007,37 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   }
 
   void _showHelp() => _showSetup();
+
+  /// Opens the full-window Fleet Analytics dashboard. The widget normally lives
+  /// in a narrow strip, so the window is enlarged while the dashboard is open
+  /// and restored to its prior size and position on close.
+  Future<void> _showFleet() async {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final prevSize = await windowManager.getSize();
+    final prevPos = await windowManager.getPosition();
+    final wasOnTop = await windowManager.isAlwaysOnTop();
+
+    if (wasOnTop) await windowManager.setAlwaysOnTop(false);
+    await windowManager.setSize(const Size(820, 900));
+    await windowManager.center();
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => FleetScreen(
+          data: _data,
+          insights: _insights,
+          heatmaps: _heatmaps,
+          dark: dark,
+        ),
+      ),
+    );
+
+    // Restore the strip exactly as it was.
+    await windowManager.setSize(prevSize);
+    await windowManager.setPosition(prevPos);
+    if (wasOnTop) await windowManager.setAlwaysOnTop(true);
+  }
 
   /// Compact setup/help panel: a short intro, then every detected provider with
   /// its live status and an inline Connect for Grok/Antigravity (login then
