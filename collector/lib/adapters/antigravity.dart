@@ -241,7 +241,28 @@ class AntigravityAdapter {
         }
       }
 
-      final project = findKey(load, 'cloudaicompanionProject')?.toString();
+      // Resolve a Cloud Code project that can read model quota. The project
+      // from loadCodeAssist is not enough on its own; the account must be
+      // onboarded for the tier first (the IDE/CLI does this). Onboarding is
+      // cached per account so it only runs when needed.
+      var project = _extractProjectId(findKey(load, 'cloudaicompanionProject'));
+      final onboarded = _projectCache[account];
+      if (onboarded != null) {
+        project = onboarded;
+      } else {
+        final tier = _pickOnboardTier(
+          load['allowedTiers'],
+          (load['currentTier'] is Map)
+              ? (load['currentTier'] as Map)['id']?.toString()
+              : null,
+        );
+        final p = await _onboardUser(access, tier);
+        if (p != null) {
+          project = p;
+          _projectCache[account] = p;
+        }
+      }
+
       final models = await _post(access, 'fetchAvailableModels', {
         if (project != null) 'project': project,
       });
@@ -280,14 +301,68 @@ class AntigravityAdapter {
 
   // --- Cloud Code API ---------------------------------------------------------
 
+  // Cached onboarded project id per account, so onboarding runs at most once
+  // per process instead of on every refresh.
+  static final Map<String, String> _projectCache = {};
+
+  static const _metadata = {
+    'ideType': 'ANTIGRAVITY',
+    'platform': 'PLATFORM_UNSPECIFIED',
+    'pluginType': 'GEMINI',
+  };
+
   static Future<Map<String, dynamic>?> _loadCodeAssist(String access) =>
-      _post(access, 'loadCodeAssist', {
-        'metadata': {
-          'ideType': 'ANTIGRAVITY',
-          'platform': 'PLATFORM_UNSPECIFIED',
-          'pluginType': 'GEMINI',
-        },
-      });
+      _post(access, 'loadCodeAssist', {'metadata': _metadata});
+
+  /// Reads a Cloud Code project id from a `cloudaicompanionProject` value that
+  /// may be a bare string or a `{id: ...}` object.
+  static String? _extractProjectId(dynamic v) {
+    if (v is String && v.isNotEmpty) return v;
+    if (v is Map && v['id'] is String && (v['id'] as String).isNotEmpty) {
+      return v['id'] as String;
+    }
+    return null;
+  }
+
+  /// Chooses the tier to onboard with: the default tier, else the first with an
+  /// id, else LEGACY, else whatever the load response reported.
+  static String? _pickOnboardTier(dynamic allowedTiers, String? fromLoad) {
+    if (allowedTiers is! List || allowedTiers.isEmpty) return fromLoad;
+    for (final t in allowedTiers) {
+      if (t is Map &&
+          t['isDefault'] == true &&
+          (t['id'] as String?)?.isNotEmpty == true) {
+        return t['id'] as String;
+      }
+    }
+    for (final t in allowedTiers) {
+      if (t is Map && (t['id'] as String?)?.isNotEmpty == true) {
+        return t['id'] as String;
+      }
+    }
+    return 'LEGACY';
+  }
+
+  /// Onboards the account for [tier] so the model-quota endpoint is permitted,
+  /// returning the provisioned project id. Retries while provisioning settles.
+  static Future<String?> _onboardUser(String access, String? tier) async {
+    final payload = {if (tier != null) 'tierId': tier, 'metadata': _metadata};
+    for (var attempt = 0; attempt < 5; attempt++) {
+      final resp = await _post(access, 'onboardUser', payload);
+      if (resp == null) return null; // 401/403 or error: do not spin
+      if (resp['done'] == true) {
+        final proj = _extractProjectId(
+          (resp['response'] is Map)
+              ? (resp['response'] as Map)['cloudaicompanionProject']
+              : null,
+        );
+        if (proj != null) return proj;
+        return null;
+      }
+      await Future.delayed(const Duration(seconds: 2));
+    }
+    return null;
+  }
 
   static Future<Map<String, dynamic>?> _getUserInfo(String access) async {
     final resp = await http.get(

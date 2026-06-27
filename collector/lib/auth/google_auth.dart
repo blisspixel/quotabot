@@ -17,14 +17,16 @@ class GoogleAuth {
   static const _scope =
       'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email';
 
-  // The Gemini CLI's public installed-app OAuth client (shipped in the
-  // open-source google-gemini/gemini-cli). Used by default so `login
-  // antigravity` works for anyone with no Google Cloud project to set up; the
-  // user still signs in with their own Google account in the browser. Override
-  // with QUOTABOT_GOOGLE_CLIENT_ID/SECRET to use your own client instead.
+  // Antigravity's own public installed-app OAuth client (the one the Antigravity
+  // CLI/IDE ship). Used by default so `login antigravity` works for anyone with
+  // no Google Cloud project to set up; the user still signs in with their own
+  // Google account in the browser. This client (not the gemini-cli one) is what
+  // the Cloud Code model-quota endpoint accepts. Installed-app client secrets
+  // are non-confidential by design; override with QUOTABOT_GOOGLE_CLIENT_ID and
+  // QUOTABOT_GOOGLE_CLIENT_SECRET to use your own client instead.
   static const _publicClientId =
-      '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
-  static const _publicClientSecret = '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';
+      '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+  static const _publicClientSecret = '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';
 
   final String clientId;
   final String clientSecret;
