@@ -26,13 +26,15 @@ Future<List<ProviderQuota>> collectAll() async {
     _sweptTemp = true;
     sweepStaleTempFiles(); // once per process, clear any crash leftovers
   }
+  // Default order roughly follows how widely each is used, most popular first.
+  // Antigravity is appended after this list (it has multi-account handling).
   final others = await Future.wait<ProviderQuota>([
-    _withCache(CodexAdapter.id, () => CodexAdapter().collect()),
     _withCache(ClaudeAdapter.id, () => ClaudeAdapter().collect()),
+    _withCache(CodexAdapter.id, () => CodexAdapter().collect()),
     _withCache(GrokAdapter.id, () => GrokAdapter().collect()),
-    _withCache(KiroAdapter.id, () => KiroAdapter().collect()),
     _withCache(CursorAdapter.id, () => CursorAdapter().collect()),
     _withCache(WindsurfAdapter.id, () => WindsurfAdapter().collect()),
+    _withCache(KiroAdapter.id, () => KiroAdapter().collect()),
     // Local runtimes are live probes: never serve a cached "available" when the
     // daemon is actually off, so they are collected without the cache fallback.
     OllamaAdapter().collect(),

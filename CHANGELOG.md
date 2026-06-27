@@ -58,6 +58,10 @@ Notable changes to quotabot. Newest first.
   provider calls behind a short cache.
 
 ### Fixed
+- Antigravity now refreshes the Gemini/Antigravity access token from the stored
+  refresh token instead of reusing the expired one, so the signed-in account
+  reads live instead of falling back to "no live data" after about an hour. A
+  reachable free-tier account is reported as free tier rather than missing data.
 - The LiteLLM router no longer lets a local fallback preempt a metered provider
   that still has budget.
 

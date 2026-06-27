@@ -77,6 +77,18 @@ class AntigravityAdapter {
 
   static const _api = 'https://cloudcode-pa.googleapis.com/v1internal';
 
+  // The Gemini CLI's public installed-app OAuth client (shipped in the
+  // open-source google-gemini/gemini-cli). quotabot uses it only to refresh the
+  // user's own Gemini/Antigravity token from the refresh token the CLI already
+  // stored, exactly as the CLI itself does. No new grant is created.
+  static const _geminiClientId =
+      '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
+  static const _geminiClientSecret = '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';
+
+  // In-process cache of a freshly refreshed CLI access token.
+  static String? _cliTokenCache;
+  static int _cliTokenExpMs = 0;
+
   /// Platform-aware path to the Antigravity globalStorage SQLite. Falls back
   /// gracefully if the file is absent (no install or different platform layout).
   static String _antigravityDbPath() {
@@ -189,7 +201,7 @@ class AntigravityAdapter {
         final cliMtime = _getDevinCredMtime();
         if (cliMtime != null &&
             (antigravityMtime == null || cliMtime.isAfter(antigravityMtime))) {
-          access = _getCliAccess();
+          access = await _getCliAccess();
           usingCli = access != null;
         }
         if (access == null) {
@@ -235,13 +247,33 @@ class AntigravityAdapter {
       });
       final windows = antigravityWindows(models, asOf);
 
-      // Try to surface tier/individual quota info if present in the load response
-      String? tier = plan ?? findKey(load, 'currentTier')?.toString();
-      final quotaInfo = findKey(load, 'quotaInfo');
-      if (quotaInfo is Map && tier == null) {
-        tier = quotaInfo['tier']?.toString() ?? quotaInfo['plan']?.toString();
+      // Resolve the tier. The load response carries it as a nested object
+      // (currentTier.{id,name}); free tier exposes no per-model quota, so the
+      // models call returns 403 and there are no windows to show.
+      final tierObj = findKey(load, 'currentTier');
+      String? tierId, tierName;
+      if (tierObj is Map) {
+        tierId = tierObj['id']?.toString();
+        tierName = tierObj['name']?.toString();
       }
-      if (windows.isEmpty) return offline('no live quota - account/plan only');
+      final isFree = (tierId ?? plan ?? '').toLowerCase().contains('free');
+      final tier = isFree ? 'Free' : (plan ?? tierName ?? tierId);
+
+      if (windows.isEmpty) {
+        // A reachable free-tier account is a known state, not missing data.
+        if (isFree) {
+          return ProviderQuota(
+            provider: id,
+            displayName: name,
+            account: account,
+            plan: 'Free',
+            asOf: asOf,
+            ok: true,
+            windows: const [],
+          );
+        }
+        return offline('no live quota - account/plan only');
+      }
 
       return ProviderQuota(
         provider: id,
@@ -365,7 +397,7 @@ class AntigravityAdapter {
 
   static DateTime? _getDevinCredMtime() => _getGeminiCredMtime();
 
-  static String? _getCliAccess() => _getGeminiAccess();
+  static Future<String?> _getCliAccess() => _getGeminiAccessFresh();
 
   static Future<String?> _getCliEmail(String access) => _getGeminiEmail(access);
 
@@ -385,15 +417,54 @@ class AntigravityAdapter {
     }
   }
 
-  static String? _getGeminiAccess() {
+  /// Returns a usable Gemini/Antigravity access token, refreshing it when the
+  /// one the CLI stored has expired. Access tokens live ~1 hour, so reading the
+  /// file verbatim returns a dead token most of the time; we mint a fresh one
+  /// from the stored refresh token (the CLI's own flow) when needed.
+  static Future<String?> _getGeminiAccessFresh() async {
     try {
       final f = File(_geminiOauthPath());
       if (!f.existsSync()) return null;
       final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-      final tok = j['access_token']?.toString();
-      if (tok != null && tok.isNotEmpty) return tok;
-    } catch (_) {}
-    return null;
+      final stored = j['access_token']?.toString();
+      final exp = j['expiry_date'];
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+      // Stored token still valid (60s safety margin).
+      if (stored != null &&
+          stored.isNotEmpty &&
+          exp is int &&
+          nowMs < exp - 60000) {
+        return stored;
+      }
+      // A token we refreshed earlier this session is still good.
+      if (_cliTokenCache != null && nowMs < _cliTokenExpMs - 60000) {
+        return _cliTokenCache;
+      }
+      final refresh = j['refresh_token']?.toString();
+      if (refresh == null || refresh.isEmpty) return stored;
+
+      final resp = await http.post(
+        Uri.parse('https://oauth2.googleapis.com/token'),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': refresh,
+          'client_id': _geminiClientId,
+          'client_secret': _geminiClientSecret,
+        },
+      ).timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) return stored; // best effort
+      final fresh = jsonDecode(resp.body) as Map<String, dynamic>;
+      final tok = fresh['access_token']?.toString();
+      if (tok == null || tok.isEmpty) return stored;
+      final expiresIn = (fresh['expires_in'] as num?)?.toInt() ?? 3600;
+      _cliTokenCache = tok;
+      _cliTokenExpMs = nowMs + expiresIn * 1000;
+      return tok;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<String?> _getGeminiEmail(String access) async {
