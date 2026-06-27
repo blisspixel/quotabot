@@ -1,0 +1,17 @@
+# Normalize line endings. Text files are LF in the repo; Git converts to the
+# platform default on checkout where appropriate.
+* text=auto
+
+# Files that must stay LF regardless of platform (they run on Linux/macOS).
+*.sh text eol=lf
+*.desktop text eol=lf
+
+# Files that are CRLF on Windows.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets: never normalize.
+*.png binary
+*.ico binary
+*.icns binary

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Collector dependencies
+        working-directory: collector
+        run: dart pub get
+
+      - name: Collector format
+        working-directory: collector
+        run: dart format --set-exit-if-changed .
+
+      - name: Collector analyze
+        working-directory: collector
+        run: dart analyze
+
+      - name: Collector tests with coverage
+        working-directory: collector
+        run: |
+          dart test --coverage=coverage
+          dart pub global activate coverage
+          dart pub global run coverage:format_coverage \
+            --lcov \
+            --in=coverage \
+            --out=coverage/lcov.info \
+            --packages=.dart_tool/package_config.json \
+            --report-on=lib
+          python ../tools/check_lcov.py coverage/lcov.info 80
+
+      - name: Flutter dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Flutter format
+        working-directory: app
+        run: dart format --set-exit-if-changed lib test
+
+      - name: Flutter analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: Flutter tests
+        working-directory: app
+        run: flutter test
+
+      - name: LiteLLM router tests
+        working-directory: integrations/litellm
+        run: python -m unittest test_quotabot_router.py

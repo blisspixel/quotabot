@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=quotabot
+Comment=Glanceable AI quota tracker
+Exec=quotabot
+Icon=quotabot
+Terminal=false
+Type=Application
+Categories=Utility;Development;
+StartupWMClass=io.quotabot.app
+Keywords=quota;ai;llm;tracker;

@@ -1,0 +1,125 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:quotabot_collector/util.dart';
+
+/// Refresh cadence: smart (adaptive) or a fixed interval.
+enum Cadence { smart, m15, h1 }
+
+/// Sort order for displayed providers (affects compact icons order and expanded cards).
+enum ProviderSort { defaultOrder, alphabetical, mostAvailable, mostUsed }
+
+/// User interface preferences, persisted across restarts under the per-user
+/// config directory.
+class Prefs {
+  final Set<String> hidden;
+  final bool compact;
+  final Cadence cadence;
+  final bool alwaysOnTop;
+  final bool showInTaskbar;
+  final bool enableNotifications;
+  final ProviderSort sort;
+  final bool showAccounts;
+
+  /// True once the first-run setup walkthrough has been completed or dismissed.
+  final bool setupDone;
+  final double? windowX;
+  final double? windowY;
+
+  const Prefs({
+    this.hidden = const {},
+    this.compact = false,
+    this.cadence = Cadence.smart,
+    this.alwaysOnTop = false,
+    this.showInTaskbar = true,
+    this.enableNotifications = true,
+    this.sort = ProviderSort.defaultOrder,
+    this.showAccounts = false,
+    this.setupDone = false,
+    this.windowX,
+    this.windowY,
+  });
+
+  Prefs copyWith({
+    Set<String>? hidden,
+    bool? compact,
+    Cadence? cadence,
+    bool? alwaysOnTop,
+    bool? showInTaskbar,
+    bool? enableNotifications,
+    ProviderSort? sort,
+    bool? showAccounts,
+    bool? setupDone,
+    double? windowX,
+    double? windowY,
+    bool clearWindowPosition = false,
+  }) => Prefs(
+    hidden: hidden ?? this.hidden,
+    compact: compact ?? this.compact,
+    cadence: cadence ?? this.cadence,
+    alwaysOnTop: alwaysOnTop ?? this.alwaysOnTop,
+    showInTaskbar: showInTaskbar ?? this.showInTaskbar,
+    enableNotifications: enableNotifications ?? this.enableNotifications,
+    sort: sort ?? this.sort,
+    showAccounts: showAccounts ?? this.showAccounts,
+    setupDone: setupDone ?? this.setupDone,
+    windowX: clearWindowPosition ? null : windowX ?? this.windowX,
+    windowY: clearWindowPosition ? null : windowY ?? this.windowY,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'hidden': hidden.toList(),
+    'compact': compact,
+    'cadence': cadence.name,
+    'always_on_top': alwaysOnTop,
+    'show_in_taskbar': showInTaskbar,
+    'enable_notifications': enableNotifications,
+    'sort': sort.name,
+    'show_accounts': showAccounts,
+    'setup_done': setupDone,
+    if (windowX != null) 'window_x': windowX,
+    if (windowY != null) 'window_y': windowY,
+  };
+
+  factory Prefs.fromJson(Map<String, dynamic> j) => Prefs(
+    hidden: ((j['hidden'] as List?) ?? const []).map((e) => '$e').toSet(),
+    compact: j['compact'] as bool? ?? false,
+    cadence: Cadence.values.firstWhere(
+      (c) => c.name == j['cadence'],
+      orElse: () => Cadence.smart,
+    ),
+    alwaysOnTop: j['always_on_top'] as bool? ?? false,
+    showInTaskbar: j['show_in_taskbar'] as bool? ?? true,
+    enableNotifications: j['enable_notifications'] as bool? ?? true,
+    sort: ProviderSort.values.firstWhere(
+      (s) => s.name == j['sort'],
+      orElse: () => ProviderSort.defaultOrder,
+    ),
+    showAccounts: j['show_accounts'] as bool? ?? false,
+    setupDone: j['setup_done'] as bool? ?? false,
+    windowX: (j['window_x'] as num?)?.toDouble(),
+    windowY: (j['window_y'] as num?)?.toDouble(),
+  );
+
+  static File _file() => File('${quotabotDir('app').path}/prefs.json');
+
+  static Prefs load() {
+    try {
+      final f = _file();
+      if (!f.existsSync()) return const Prefs();
+      return Prefs.fromJson(
+        jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
+      );
+    } catch (_) {
+      return const Prefs();
+    }
+  }
+
+  void save() {
+    try {
+      _file().writeAsStringSync(jsonEncode(toJson()));
+    } catch (_) {
+      // Preferences are best-effort; ignore write failures.
+    }
+  }
+}

@@ -1,0 +1,66 @@
+# Dart / Flutter generated tooling and build output.
+# These can embed absolute pub-cache paths and must never be published.
+**/.dart_tool/
+**/build/
+**/.packages
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/flutter/ephemeral/
+**/Flutter/ephemeral/
+
+# Test coverage (regenerated locally; embeds absolute paths)
+coverage/
+**/coverage/
+
+# Dev artifacts, logs, atomic-write temp files
+tools/shot*.png
+tools/icon_preview.png
+*.log
+*.err
+*.tmp
+build-log.txt
+dist/
+release/
+
+# IDE and local editor state
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Agent working journals (kept locally, not part of the public repo)
+PROGRESS-LOG.md
+CURRENT-STATE-ANALYSIS.md
+QUALITY-RUBRIC.md
+.claude/
+.codex/
+
+# Maintainer-only docs (kept locally, not part of the public repo)
+docs/dev/
+
+# Local env, credential, and database files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.vscdb
+
+# LiteLLM integration: user copies the examples to these working names
+integrations/litellm/config.yaml
+integrations/litellm/quotabot-routing.yaml
+integrations/litellm/__pycache__/
+
+# OS
+Thumbs.db
+.DS_Store

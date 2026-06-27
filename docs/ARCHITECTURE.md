@@ -1,0 +1,163 @@
+# Architecture
+
+quotabot has two parts, both written in Dart: a collector package and a Flutter
+desktop app. The app depends on the collector by path and calls it directly, so
+there is a single code path and no subprocess or IPC. The collector also ships
+two binaries: a CLI and an MCP server.
+
+```
+collector/ (Dart package)
+  models.dart        normalized ProviderQuota / QuotaWindow
+  parsing.dart       pure response/window parsing (no I/O)
+  analysis.dart      pure routing helpers (headroom, availability)
+  cache.dart         last-known-good snapshot cache
+  collector.dart     collectAll(): run adapters, apply cache
+  adapters/          codex, claude, grok, antigravity, kiro, cursor,
+                     windsurf, ollama, lmstudio (thin I/O shells)
+  auth/              tokens + store, PKCE/loopback util, xai + google OAuth
+  util.dart          home/config dirs, varint + protobuf helpers
+  bin/collect.dart        CLI: JSON, doctor, login, logout
+  bin/mcp_server.dart     MCP server over stdio (tools + quotas://current resource)
+  bin/local_server.dart   Optional plain HTTP JSON snapshot server
+  bin/example_routing_agent.dart  Worked example using collect + analysis for routing
+
+app/ (Flutter desktop)
+  main.dart   imports collectAll(), renders cards, adaptive refresh
+  logos.dart  vector provider logos (CustomPainter)
+  prefs.dart  persisted UI preferences
+```
+
+## The normalized model
+
+Everything funnels into one shape (`models.dart`):
+
+- `ProviderQuota`: provider id, display name, account, plan, ok flag, optional
+  error note, capture time (`asOf`), a `stale` flag, and a list of windows.
+- `QuotaWindow`: a label (such as `5h` or `weekly`), percent used, optional raw
+  used and limit counts, and a reset time as a Unix timestamp.
+
+Adapters never talk to the UI. They return `ProviderQuota`, and the UI derives
+everything it shows from that, including colors and the binding-constraint
+collapse.
+
+## Separation of pure logic from I/O
+
+The bulk of the logic lives in `parsing.dart` and `analysis.dart` with no
+network or disk access, so it is unit tested directly against fixtures. Adapters
+are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate parsing.
+This is why the core has high test coverage even though the adapters do I/O.
+
+## Adapters
+
+Each adapter has a single `collect()` method returning a `ProviderQuota`:
+
+- Codex reads a local file (the newest session rollout) and parses the
+  `rate_limits` snapshot. No network or auth.
+- Claude, Grok, and Antigravity call live metadata endpoints (no model calls, no
+  token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
+  prefer quotabot's own OAuth grant (see Authentication) and fall back to the
+  token the host CLI or IDE currently holds.
+- Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
+  they are detected (and report installed/free tiers) even with no live API.
+- Ollama and LM Studio are local-runtime adapters: they report installed and
+  loaded models instead of a quota window and act as a routing fallback. Any
+  OpenAI-compatible runtime can be added with the shared `localRuntimeQuota`
+  helper.
+
+An adapter that cannot produce live windows still returns a `ProviderQuota` with
+account and plan and an explanatory `error` note, rather than throwing. The UI
+shows that as "no live data" instead of a gap.
+
+## Authentication
+
+`auth/` holds quotabot's own OAuth, kept separate from the host apps' tokens:
+
+- `tokens.dart`: the `Tokens` model and `TokenStore`, which persists tokens per
+  provider under the config directory, owner-only on POSIX. Rotated refresh
+  tokens are saved on every refresh or the next refresh would fail.
+- `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
+  to capture the redirect, and a system-browser launcher.
+- `xai_auth.dart`: the Grok device-code login and refresh.
+- `google_auth.dart`: the Antigravity loopback plus PKCE authorization-code
+  login and refresh.
+
+Each login mints an independent grant, so refreshing never invalidates the host
+CLI's or IDE's credentials. `login`/`logout` are CLI subcommands.
+
+## Collection and caching
+
+`collectAll()` runs every adapter concurrently (Antigravity via multi-account
+profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`):
+
+1. Run the adapter.
+2. If it succeeded and has windows, write the snapshot to the local cache and
+   return it.
+3. Otherwise, load the last-known snapshot, mark it stale, and return that.
+
+The cache lives under the platform application-data directory
+(`%LOCALAPPDATA%/quotabot/cache` on Windows). This is what keeps a transient
+rate limit or an expired token from blanking a provider.
+
+## Routing helpers and the MCP server
+
+`analysis.dart` exposes `providerHeadroom`, `providerWithMostHeadroom`,
+`providerAvailability`, `bindingWindow`, and `averageRecentHeadroom`.
+`bin/mcp_server.dart` wraps `collectAll()` plus helpers as MCP tools and a
+`quotas://current` resource over stdio. `bin/example_routing_agent.dart` shows
+the same logic used for routing decisions. `bin/local_server.dart` provides a
+simple HTTP alternative.
+
+## The UI
+
+- The window is frameless via `window_manager`, with a transparent background
+  so the rounded card can hug its content and any surplus window height is
+  invisible. Always on top and taskbar entry are optional and controlled by
+  prefs. The body is scrollable and the window height comes from a deterministic
+  content-size estimate (provider and window counts) capped at the screen
+  height; live render-measurement proved unreliable because window_manager's
+  pixel units don't match Flutter's logical pixels under display scaling. This
+  fixes the "BOTTOM OVERFLOWED" banner that appeared with many providers, so all
+  providers display without an overflow. Small minimum size supports compact
+  mode. Dragging works on the full header bar and content/cards area (buttons
+  excluded).
+- `ProviderTile` computes the binding window (the one with the least headroom).
+  If that window is exhausted, the card collapses to a single line; otherwise it
+  renders one `WindowBar` per window. Windows with `resetsAt` (e.g. Claude weekly)
+  show countdowns (e.g. "80%  3d12h"). Antigravity shows "free tier" when
+  applicable.
+- Provider logos are vector `CustomPainter`s (`logos.dart`) so they stay sharp
+  at any size and recolor for light or dark. The in-app header shows a small
+  dynamic radial "pool gauge" (`AppGauge` in `logos.dart`) next to the "Quota"
+  wordmark; it fills clockwise to the average remaining headroom across visible
+  providers (`_poolHeadroom` in `main.dart`) and is colored with the same
+  `_availColor` scale as the cards (green at >=50% free, amber >=25%, orange >0,
+  red when spent; neutral grey when no data). The OS application icon
+  (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style
+  mark (light/dark friendly) for the desktop icon.
+- Compact and expanded views, plus hide/show per provider. "Show account names"
+  toggle (global, in menu) controls display of usernames (Grok uses email as
+  account; others often default/hidden); on top of the toggle, a username is
+  only shown when the provider has more than one account on screen, so
+  single-account providers auto-hide it. `prefs.dart` persists hidden providers,
+  compact state, cadence, always on top, taskbar visibility, enable notifications,
+  showAccounts, and window position across restarts.
+- A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
+  countdowns stay current; actual data refresh is on a separate adaptive timer.
+- History snapshots (last few per provider) load from jsonl and show a
+  "usually ~X% free (last N)" line in expanded tiles when an average is present
+  ("N recent checks" otherwise).
+- Notifications toggle drives guarded immediate low-headroom alerts and
+  scheduled reset notifications via flutter_local_notifications.
+
+## Adaptive refresh
+
+`_nextInterval()` picks the next refresh delay from the current data: about
+thirty seconds when a reset is imminent, five minutes near a cap, fifteen
+minutes when partially used, and one hour to twelve hours when everything is
+healthy and resets are far off. A cycle that returns nothing live backs off to
+one hour, then six. A fixed cadence (15 minutes or 1 hour) can be chosen from
+the menu instead of the smart schedule.
+
+## Packaging
+
+Code is cross platform (platform-aware paths and sqlite in collector; Flutter desktop + window_manager in app). Windows release build verified (build/windows/x64/runner/Release). See README + tools/package-*.ps1/sh + .desktop for build and packaging. macOS: codesign + notarize; Linux: AppImage + .desktop. Build on target OS.

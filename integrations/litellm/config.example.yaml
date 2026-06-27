@@ -1,0 +1,35 @@
+# Example LiteLLM proxy config wired to the quotabot router.
+#
+# Run with:  litellm --config config.yaml
+#
+# `model_list` declares the concrete deployments. The `model_name` values here
+# are what quotabot-routing.yaml refers to as `deployment`. Clients call the
+# logical names (e.g. "frontier-coder"); the quotabot hook rewrites the request
+# to whichever concrete deployment currently has budget.
+
+model_list:
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: codex-gpt
+    litellm_params:
+      model: openai/gpt-5.3-codex
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: grok-code
+    litellm_params:
+      model: xai/grok-code
+      api_key: os.environ/XAI_API_KEY
+
+  # Local fallback via Ollama. No key, no cost, always available.
+  - model_name: ollama-qwen
+    litellm_params:
+      model: ollama/qwen3-coder
+      api_base: http://127.0.0.1:11434
+
+# Register the quotabot routing hook. The module must be importable, so launch
+# the proxy from this folder (or add it to PYTHONPATH).
+litellm_settings:
+  callbacks: quotabot_router.proxy_handler_instance
