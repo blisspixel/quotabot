@@ -25,10 +25,26 @@ least once on this machine:
 - **Live while their app is fresh:** Grok CLI, Antigravity IDE (step 4 keeps
   these live longer).
 - **Detected automatically, no setup:** Kiro, Cursor, Windsurf, and a local
-  runtime (Ollama or LM Studio) while it is running.
+  runtime (Ollama, LM Studio, or Lemonade) while its server is running.
 
 If a tool has never run here, that provider simply shows "no live data" until you
 use it once.
+
+### Local models (Ollama, LM Studio, Lemonade)
+
+A local runtime only appears in quotabot while its **local server** is running,
+because quotabot reads its models over a local HTTP API. If you have one
+installed but do not see it, start its server:
+
+- **Ollama:** runs as a background service once installed (port 11434). Honors
+  `OLLAMA_HOST`.
+- **LM Studio:** loading a model in the chat window is not enough; you must start
+  the **local server** (the Developer tab, toggle "Start Server", or run
+  `lms server start`). It listens on port 1234.
+- **Lemonade:** start the server (`lemonade-server serve`); it listens on port
+  8000. Honors `LEMONADE_HOST`.
+
+Any other OpenAI-compatible server works the same way once it is serving.
 
 ## 2. Install the quotabot CLI
 

@@ -1078,7 +1078,9 @@ class _DashboardState extends State<Dashboard> with WindowListener {
                     ),
                     Text(
                       'Detected automatically. Grok and Antigravity can be '
-                      'connected once to stay live.',
+                      'connected once to stay live. Local models (Ollama, LM '
+                      'Studio, Lemonade) appear only while their server is '
+                      'running; in LM Studio, start the local server.',
                       style: TextStyle(fontSize: 11, height: 1.3, color: muted),
                     ),
                     const SizedBox(height: 8),

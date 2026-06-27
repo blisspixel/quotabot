@@ -182,6 +182,14 @@ void _printHelp() {
   );
   stdout.writeln(
     style.dim(
+        '  Local models (Ollama/LM Studio/Lemonade) appear once their server is'),
+  );
+  stdout.writeln(
+    style.dim(
+        '  running; LM Studio needs its local server started (lms server start).'),
+  );
+  stdout.writeln(
+    style.dim(
         '  Agents: see AGENTS.md. MCP server: dart run bin/mcp_server.dart.'),
   );
 }
