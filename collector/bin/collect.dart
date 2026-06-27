@@ -8,89 +8,232 @@ import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/util.dart';
 
-/// Usage:
-///   quotabot                 Print a readable status table (default)
-///   quotabot doctor          Same as above
-///   quotabot suggest         Recommend which provider to route work to next
-///   quotabot suggest --json  Routing recommendation as JSON (for scripts/agents)
-///   quotabot stats [name]    Historical analytics from local 90-day buckets
-///   quotabot stats --json    Analytics as JSON
-///   quotabot login <name>    Connect grok or antigravity
-///   quotabot logout <name>   Disconnect a provider
-///   quotabot --json          Print raw JSON (for scripts)
-///
-/// The reads are metadata lookups, not model calls, so they cost no usage
-/// tokens. login/logout manage quotabot's own OAuth grant so a provider stays
-/// live without reopening its app.
+/// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
+/// local metadata lookup, not a model call, so it costs no usage tokens.
+
+const _version = '0.2.0';
+
+/// Minimal ANSI styling, gated on whether the output wants color.
+class _Style {
+  final bool on;
+  const _Style(this.on);
+  String _w(String code, String s) => on ? '\x1B[${code}m$s\x1B[0m' : s;
+  String bold(String s) => _w('1', s);
+  String dim(String s) => _w('2', s);
+  String green(String s) => _w('32', s);
+  String yellow(String s) => _w('33', s);
+  String orange(String s) => _w('38;5;208', s);
+  String red(String s) => _w('31', s);
+  String cyan(String s) => _w('36', s);
+
+  /// Colors text on the shared headroom scale (input is remaining percent).
+  String health(num remaining, String s) {
+    if (remaining >= 50) return green(s);
+    if (remaining >= 25) return yellow(s);
+    if (remaining > 0) return orange(s);
+    return red(s);
+  }
+}
+
+late _Style style;
+
+/// Honors NO_COLOR and CLICOLOR=0, an explicit --color/--no-color, then falls
+/// back to whether stdout is an interactive terminal.
+bool _useColor(Set<String> flags) {
+  if (flags.contains('--no-color')) return false;
+  if (flags.contains('--color')) return true;
+  if (Platform.environment.containsKey('NO_COLOR')) return false;
+  if (Platform.environment['CLICOLOR'] == '0') return false;
+  return stdout.hasTerminal;
+}
+
+String _jsonPretty(Object? o) => const JsonEncoder.withIndent('  ').convert(o);
+
+Map<String, dynamic> _snapshot(List<ProviderQuota> results) => {
+      'schema': 'quotabot.v1',
+      'generated_at': nowEpoch(),
+      'providers': results.map((r) => r.toJson()).toList(),
+    };
 Future<void> main(List<String> args) async {
-  if (args.isNotEmpty && args.first == 'login') {
-    await _login(args.length > 1 ? args[1] : '');
+  final flags = args.where((a) => a.startsWith('-')).toSet();
+  final pos = args.where((a) => !a.startsWith('-')).toList();
+  final cmd = pos.isEmpty ? '' : pos.first;
+  final wantsJson = flags.contains('--json');
+  style = _Style(_useColor(flags));
+
+  if (cmd == 'help' || flags.contains('--help') || flags.contains('-h')) {
+    _printHelp();
     return;
   }
-  if (args.isNotEmpty && args.first == 'logout') {
-    _logout(args.length > 1 ? args[1] : '');
+  if (cmd == 'version' || flags.contains('--version') || flags.contains('-v')) {
+    stdout.writeln('quotabot $_version');
     return;
   }
 
-  // Historical analytics from the long-term buckets.
-  if (args.isNotEmpty && args.first == 'stats') {
-    final positional = args.skip(1).where((a) => !a.startsWith('-')).toList();
-    final only = positional.isEmpty ? null : positional.first.toLowerCase();
-    final now = nowEpoch();
-    // Discover which providers have history, optionally filtered to one.
-    final results = await collectAll();
-    final providers = {
-      ...results.where((q) => !q.isLocal).map((q) => q.provider),
-    }.where((p) => only == null || p == only).toList()
-      ..sort();
-    final tz = DateTime.now().timeZoneOffset;
-    final byProvider = {for (final q in results) q.provider: q};
+  switch (cmd) {
+    case 'login':
+      await _login(pos.length > 1 ? pos[1] : '');
+      return;
+    case 'logout':
+      _logout(pos.length > 1 ? pos[1] : '');
+      return;
+    case 'check':
+      if (pos.length < 2) {
+        stderr.writeln('usage: quotabot check <provider>');
+        exitCode = 64;
+        return;
+      }
+      await _check(pos[1], wantsJson);
+      return;
+    case 'suggest':
+      final results = await collectAll();
+      final s = suggestRoute(results, nowEpoch());
+      wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
+      return;
+    case 'stats':
+      await _runStats(pos.skip(1).toList(), wantsJson);
+      return;
+  }
+
+  // Snapshot and the default status table share one collect.
+  final results = await collectAll();
+  if (cmd == 'json' || (cmd.isEmpty && wantsJson)) {
+    print(_jsonPretty(_snapshot(results)));
+    return;
+  }
+  if (cmd.isEmpty || cmd == 'status' || cmd == 'doctor') {
+    wantsJson ? print(_jsonPretty(_snapshot(results))) : _printDoctor(results);
+    return;
+  }
+
+  stderr.writeln('${style.red('unknown command')}: $cmd');
+  stderr.writeln('run "quotabot help" for the command list');
+  exitCode = 64;
+}
+
+void _printHelp() {
+  String head(String s) => style.bold(s);
+  stdout.writeln(
+    '${style.bold('quotabot')} $_version  -  your AI subscription quota, in one place',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('USAGE'));
+  stdout.writeln('  quotabot <command> [options]');
+  stdout.writeln('');
+  stdout.writeln(head('SEE QUOTA'));
+  stdout.writeln(
+    '  status, doctor      every provider, its windows and resets (default)',
+  );
+  stdout.writeln(
+    '  check <provider>    whether one provider is usable now, and its reset',
+  );
+  stdout.writeln(
+    '  stats [provider]    90-day analytics: distribution, reliability, pace',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('ROUTE'));
+  stdout
+      .writeln('  suggest             which subscription to use next (ranked)');
+  stdout.writeln('');
+  stdout.writeln(head('CONNECT'));
+  stdout.writeln(
+    '  login <provider>    connect grok or antigravity (keeps it live)',
+  );
+  stdout.writeln('  logout <provider>   disconnect a provider');
+  stdout.writeln('');
+  stdout.writeln(head('OTHER'));
+  stdout.writeln('  json                full snapshot as quotabot.v1 JSON');
+  stdout.writeln('  help, version');
+  stdout.writeln('');
+  stdout.writeln(head('OPTIONS'));
+  stdout.writeln(
+    '  --json              machine-readable output (status/check/suggest/stats/json)',
+  );
+  stdout.writeln(
+    '  --color, --no-color force or disable color (also honors NO_COLOR)',
+  );
+  stdout.writeln('');
+  stdout.writeln(
+    style.dim(
+        '  Every command is a local metadata read and costs no usage tokens.'),
+  );
+  stdout.writeln(
+    style.dim(
+        '  Agents: see AGENTS.md. MCP server: dart run bin/mcp_server.dart.'),
+  );
+}
+
+Future<void> _runStats(List<String> rest, bool wantsJson) async {
+  final only = rest.isEmpty ? null : rest.first.toLowerCase();
+  final now = nowEpoch();
+  final results = await collectAll();
+  final providers = {
+    ...results.where((q) => !q.isLocal).map((q) => q.provider),
+  }.where((p) => only == null || p == only).toList()
+    ..sort();
+  final tz = DateTime.now().timeZoneOffset;
+  final byProvider = {for (final q in results) q.provider: q};
+  if (wantsJson) {
     final report = <String, dynamic>{};
     for (final p in providers) {
       final ins = Insights.from(loadBuckets(p), now, tzOffset: tz);
       final pace = _paceFor(byProvider[p], ins, now);
       report[p] = {...ins.toJson(), if (pace != null) 'pace': pace.toJson()};
     }
-    if (args.contains('--json')) {
-      print(const JsonEncoder.withIndent('  ').convert(report));
-    } else {
-      _printStats(providers, byProvider, now, tz);
-    }
-    return;
+    print(_jsonPretty(report));
+  } else {
+    _printStats(providers, byProvider, now, tz);
   }
+}
 
-  // Routing recommendation: which provider to use next.
-  if (args.isNotEmpty && args.first == 'suggest') {
-    final results = await collectAll();
-    final suggestion = suggestRoute(results, nowEpoch());
-    if (args.contains('--json')) {
-      print(const JsonEncoder.withIndent('  ').convert(suggestion.toJson()));
-    } else {
-      _printSuggest(suggestion);
-    }
-    return;
-  }
-
-  // Bare invocation or explicit doctor -> human friendly table
-  if (args.isEmpty || args.contains('doctor')) {
-    final results = await collectAll();
-    _printDoctor(results);
-    return;
-  }
-
-  // --json or anything else -> raw JSON for scripting / power users
+/// `check <provider>`: is this one usable right now, and when does it reset.
+Future<void> _check(String name, bool wantsJson) async {
   final results = await collectAll();
-  if (args.contains('doctor')) {
-    _printDoctor(results);
+  final now = nowEpoch();
+  final key = name.toLowerCase();
+  ProviderQuota? q;
+  for (final r in results) {
+    if (r.provider == key || r.displayName.toLowerCase() == key) {
+      q = r;
+      break;
+    }
+  }
+  if (q == null) {
+    if (wantsJson) {
+      print(_jsonPretty({
+        'schema': 'quotabot.v1',
+        'provider': key,
+        'found': false,
+      }));
+    } else {
+      stderr.writeln('no provider named "$name"');
+      stderr.writeln('known: ${results.map((r) => r.provider).join(', ')}');
+    }
+    exitCode = 1;
     return;
   }
-  print(
-    const JsonEncoder.withIndent('  ').convert({
+  final head = providerHeadroom(q, now);
+  final binding = bindingWindow(q, now);
+  final available = q.isLocal ? q.ok : (head != null && head > 0.5);
+  final reset = binding?.resetsAt;
+  if (wantsJson) {
+    print(_jsonPretty({
       'schema': 'quotabot.v1',
-      'generated_at': nowEpoch(),
-      'providers': results.map((r) => r.toJson()).toList(),
-    }),
-  );
+      'provider': q.provider,
+      'account': q.account,
+      'available': available,
+      'headroom_percent': head,
+      'resets_at': reset,
+      'stale': q.stale,
+    }));
+    return;
+  }
+  final label = available ? style.green('available') : style.red('unavailable');
+  final pct =
+      head == null ? '' : '  ${style.health(head, '${head.round()}% free')}';
+  final rs = reset == null ? '' : style.dim('  resets ${_in(reset, now)}');
+  final staleTag = q.stale ? style.dim(' (cached)') : '';
+  stdout.writeln('${style.bold(q.displayName)}: $label$pct$rs$staleTag');
 }
 
 Future<void> _login(String provider) async {
@@ -140,9 +283,31 @@ void _logout(String provider) {
   stderr.writeln('$provider disconnected.');
 }
 
+/// Pads a state to the column width, then colors it (so the padding stays
+/// outside the ANSI codes and alignment is preserved).
+String _stateStyled(String state) {
+  final padded = state.padRight(12);
+  switch (state) {
+    case 'live':
+      return style.green(padded);
+    case 'in use':
+    case 'local':
+      return style.cyan(padded);
+    case 'cached':
+      return style.yellow(padded);
+    case 'OUT OF QUOTA':
+    case 'ERROR':
+      return style.red(padded);
+    default: // no live data
+      return style.dim(padded);
+  }
+}
+
 void _printDoctor(List<ProviderQuota> results) {
   final now = nowEpoch();
-  print('quotabot doctor  (all checks are metadata reads, 0 usage tokens)\n');
+  print(
+    '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
+  );
   for (final q in results) {
     bool exhausted = false;
     if (q.windows.isNotEmpty) {
@@ -178,7 +343,7 @@ void _printDoctor(List<ProviderQuota> results) {
         ? ' (${q.account})'
         : '';
     final namePart = '${q.displayName}$acct';
-    print('  ${namePart.padRight(28)} ${state.padRight(12)} $detail');
+    print('  ${namePart.padRight(28)} ${_stateStyled(state)} $detail');
     for (final d in q.details) {
       print('  ${' '.padRight(28)} ${' '.padRight(12)} $d');
     }
@@ -216,8 +381,8 @@ void _printSuggest(RouteSuggestion s) {
   if (r == null) {
     print('  no provider to route to right now');
   } else {
-    final tag = r.isLocal ? ' (local fallback)' : '';
-    print('  -> ${r.provider}$tag');
+    final tag = r.isLocal ? style.dim(' (local fallback)') : '';
+    print('  ${style.green('->')} ${style.bold(r.provider)}$tag');
   }
   print('  ${s.reason}\n');
 
@@ -226,15 +391,18 @@ void _printSuggest(RouteSuggestion s) {
   for (final c in s.ranked) {
     if (c.isLocal) {
       // Local runtimes have no quota; show them as the always-on fallback.
-      print('    ${c.provider.padRight(12)} local fallback  [always on]');
+      print(
+        '    ${c.provider.padRight(12)} ${style.cyan('local fallback')}  ${style.dim('[always on]')}',
+      );
       continue;
     }
-    final head = c.headroom == null
+    final pct = c.headroom == null
         ? '   ? '
         : '${c.headroom!.round().toString().padLeft(3)}%';
-    final kind = c.stale ? 'cached' : 'live';
-    final state = c.available ? '' : '  spent';
-    print('    ${c.provider.padRight(12)} $head free  [$kind]$state');
+    final head = c.headroom == null ? pct : style.health(c.headroom!, pct);
+    final kind = style.dim('[${c.stale ? 'cached' : 'live'}]');
+    final state = c.available ? '' : style.red('  spent');
+    print('    ${c.provider.padRight(12)} $head free  $kind$state');
   }
 }
 
