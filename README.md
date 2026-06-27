@@ -129,10 +129,16 @@ quotabot stores its own refresh token under your per-user config directory
 independent of the app's own credentials, so it never disturbs them.
 
 For Antigravity, quotabot reads and refreshes the token of the account you are
-signed into in the Antigravity IDE or the Gemini CLI. A persistent quotabot-owned
-login is also available by providing your own Google installed-app OAuth client
-through `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`, then
-running `quotabot login antigravity`.
+signed into in the Antigravity IDE or the Gemini CLI. If that is not the account
+you want shown (for example you use several Google accounts), pin a specific one:
+
+```bash
+quotabot login antigravity   # opens a browser; sign in with the account you want
+```
+
+This needs no Google Cloud setup. quotabot then holds its own refreshing grant
+for that account, independent of the IDE. Advanced users can override the OAuth
+client with `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`.
 
 ## Using the widget
 

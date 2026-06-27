@@ -122,7 +122,7 @@ Future<void> _login(String provider) async {
           'Antigravity connected. You can now run "quotabot doctor" to verify live data.',
         );
       } catch (e) {
-        stderr.writeln('Antigravity login is not configured: $e');
+        stderr.writeln('Antigravity login failed: $e');
         exitCode = 64;
       }
       break;

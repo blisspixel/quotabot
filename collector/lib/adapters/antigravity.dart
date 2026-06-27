@@ -211,7 +211,7 @@ class AntigravityAdapter {
       final load = access == null ? null : await _loadCodeAssist(access);
       if (access == null || load == null) {
         return offline(
-          'no live quota - reopen Antigravity, or configure QUOTABOT_GOOGLE_CLIENT_ID/SECRET and run: quotabot login antigravity',
+          'no live quota - run: quotabot login antigravity (then sign in with this account)',
         );
       }
 

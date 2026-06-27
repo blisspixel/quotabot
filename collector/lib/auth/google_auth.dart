@@ -17,17 +17,37 @@ class GoogleAuth {
   static const _scope =
       'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email';
 
+  // The Gemini CLI's public installed-app OAuth client (shipped in the
+  // open-source google-gemini/gemini-cli). Used by default so `login
+  // antigravity` works for anyone with no Google Cloud project to set up; the
+  // user still signs in with their own Google account in the browser. Override
+  // with QUOTABOT_GOOGLE_CLIENT_ID/SECRET to use your own client instead.
+  static const _publicClientId =
+      '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
+  static const _publicClientSecret = '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';
+
   final String clientId;
   final String clientSecret;
   final http.Client _http;
   GoogleAuth({String? clientId, String? clientSecret, http.Client? client})
-      : clientId = clientId ??
-            Platform.environment['QUOTABOT_GOOGLE_CLIENT_ID'] ??
+      : clientId = _firstNonEmpty(
+            clientId,
+            Platform.environment['QUOTABOT_GOOGLE_CLIENT_ID'],
             const String.fromEnvironment('QUOTABOT_GOOGLE_CLIENT_ID'),
-        clientSecret = clientSecret ??
-            Platform.environment['QUOTABOT_GOOGLE_CLIENT_SECRET'] ??
+            _publicClientId),
+        clientSecret = _firstNonEmpty(
+            clientSecret,
+            Platform.environment['QUOTABOT_GOOGLE_CLIENT_SECRET'],
             const String.fromEnvironment('QUOTABOT_GOOGLE_CLIENT_SECRET'),
+            _publicClientSecret),
         _http = client ?? http.Client();
+
+  static String _firstNonEmpty(String? a, String? b, String c, String d) {
+    if (a != null && a.isNotEmpty) return a;
+    if (b != null && b.isNotEmpty) return b;
+    if (c.isNotEmpty) return c;
+    return d;
+  }
 
   /// Opens the system browser, captures the redirect on a loopback port, and
   /// exchanges the code for tokens. Saves and returns them.

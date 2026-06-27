@@ -77,36 +77,22 @@ quotabot suggest          # where to send the next request (step 6)
 
 ## 4. Keep Grok and Antigravity live (optional)
 
-Codex and Claude are always live. Grok and Antigravity are live only while their
-own app's token is fresh; after that quotabot shows the last cached value with its
-age. A one-time `login` lets quotabot refresh on its own.
-
-**Grok** (works on all platforms):
-```bash
-quotabot login grok       # prints a URL and a device code to confirm
-quotabot doctor           # confirm it now reads "live", not "cached"
-quotabot logout grok      # disconnect any time
-```
-
-**Antigravity** needs your own Google OAuth client (an installed-app client with
-the Cloud Code scopes). Set two environment variables, then log in:
+Claude and Codex are always live. Antigravity and Grok are live for the account
+their app is signed into, and quotabot refreshes that token on its own. Two cases
+call for a one-time `login`: the app is signed out, or you use several accounts
+and want a specific one shown.
 
 ```bash
-# macOS / Linux
-export QUOTABOT_GOOGLE_CLIENT_ID=...
-export QUOTABOT_GOOGLE_CLIENT_SECRET=...
-quotabot login antigravity
-```
-```powershell
-# Windows (PowerShell)
-$env:QUOTABOT_GOOGLE_CLIENT_ID = "..."
-$env:QUOTABOT_GOOGLE_CLIENT_SECRET = "..."
-quotabot login antigravity
+quotabot login grok          # device-code flow; confirm in the browser
+quotabot login antigravity   # opens a browser; sign in with the account you want
+quotabot doctor              # confirm they now read "live"
+quotabot logout grok         # or: quotabot logout antigravity
 ```
 
-Without those variables, Antigravity still works from the IDE's fresh token and
-falls back to cached values when it expires. quotabot stores its own tokens
-separately from the host apps, so this never disturbs their credentials.
+Neither needs any cloud setup. quotabot stores its own refreshing grant for the
+account you pick, separate from the host apps, so it never disturbs their
+credentials. (Advanced: override the Antigravity OAuth client with
+`QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`.)
 
 ## 5. Run the desktop widget (optional)
 
