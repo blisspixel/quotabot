@@ -14,31 +14,164 @@ Color fleetColor(num freePct) {
   return const Color(0xFFF85149);
 }
 
-/// One provider reduced to the few numbers the fleet charts need.
+/// The Oracle of Pythagoras.
+///
+/// The cult permits exactly one emoji in this entire program, and refuses to let
+/// a mere human choose it. The glyph is derived, from the fleet's own numbers,
+/// through a deliberately overwrought chain of number theory. That ceremony is
+/// the joke. [free] and [used] are parallel per-provider percent lists.
+///
+/// Returns the single sanctioned glyph and a terse, smug proof of why.
+({String glyph, String proof}) pythagorasOracle(
+  List<double> free,
+  List<double> used,
+) {
+  if (free.isEmpty) {
+    return (
+      glyph: '\u{1F311}',
+      proof: 'the void before counting (no live providers)',
+    );
+  }
+  final n = free.length;
+  final pool = free.reduce((a, b) => a + b) / n;
+
+  if (pool <= 0.5) {
+    return (
+      glyph: '\u{1FAA6}',
+      proof: 'Sigma(free) -> 0; the quota gods are sated',
+    );
+  }
+
+  const phi = 1.6180339887498949;
+  if ((pool - 100 * (phi - 1)).abs() <= 1.5) {
+    return (
+      glyph: '\u{1F41A}',
+      proof: 'pool ~= 100(phi-1) = 61.8%; the logarithmic spiral approves',
+    );
+  }
+
+  final r = free.map((f) => f.round()).where((v) => v > 0).toSet().toList()
+    ..sort();
+  for (var i = 0; i < r.length; i++) {
+    for (var j = i + 1; j < r.length; j++) {
+      for (var k = j + 1; k < r.length; k++) {
+        if (r[i] * r[i] + r[j] * r[j] == r[k] * r[k]) {
+          return (
+            glyph: '\u{1F4D0}',
+            proof:
+                'a^2+b^2=c^2 walks among your quotas (${r[i]},${r[j]},${r[k]})',
+          );
+        }
+      }
+    }
+  }
+
+  final spenders = used.where((u) => u > 0.5).toList();
+  if (spenders.isEmpty) {
+    return (
+      glyph: '\u{1F315}',
+      proof: 'every window full; the monad is undisturbed',
+    );
+  }
+
+  final tot = spenders.reduce((a, b) => a + b);
+  var h = 0.0;
+  for (final u in spenders) {
+    final p = u / tot;
+    h -= p * math.log(p);
+  }
+  final evenness = spenders.length < 2 ? 0.0 : h / math.log(spenders.length);
+
+  if (_isPrime(n) && evenness >= 0.9) {
+    return (
+      glyph: '\u{1F3BC}',
+      proof:
+          'prime fleet ($n) in near-uniform burn (H=${evenness.toStringAsFixed(2)}): musica universalis',
+    );
+  }
+
+  if (evenness <= 0.34) {
+    return (
+      glyph: '\u{1F5FF}',
+      proof:
+          'consumption entropy collapses (H=${evenness.toStringAsFixed(2)}); one node bears the load',
+    );
+  }
+
+  final dr = _digitalRoot(pool.round());
+  const wheel = [
+    '\u{1F312}',
+    '\u{1F313}',
+    '\u{1F314}',
+    '\u{1F316}',
+    '\u{1F317}',
+    '\u{1F318}',
+    '\u{1F31B}',
+    '\u{1F31D}',
+    '\u{1F9EE}', // the abacus: 9, the indestructible digital root
+  ];
+  return (
+    glyph: wheel[dr - 1],
+    proof:
+        'digital root of ${pool.round()}% is $dr; the abacus turns the wheel',
+  );
+}
+
+bool _isPrime(int n) {
+  if (n < 2) return false;
+  for (var i = 2; i * i <= n; i++) {
+    if (n % i == 0) return false;
+  }
+  return true;
+}
+
+/// Repeated digit sum, 1..9 (the indestructible residue mod 9).
+int _digitalRoot(int n) => n <= 0 ? 9 : 1 + (n - 1) % 9;
+
+/// The time window the dashboard is showing.
+enum FleetRange {
+  now('Now', null),
+  week('7d', 7),
+  quarter('90d', 90);
+
+  const FleetRange(this.label, this.days);
+  final String label;
+  final int? days; // null = live snapshot
+}
+
+/// One provider reduced to the numbers a chart needs.
 class _Node {
   final String label;
   final double free; // remaining headroom percent, 0..100
   final int? resetsAt;
-  final Insights? insights;
-  _Node(this.label, this.free, this.resetsAt, this.insights);
+  Insights? insights; // filled per range for historical views
+  _Node(this.label, this.free, this.resetsAt);
   double get used => (100 - free).clamp(0, 100);
 }
 
-/// Full-window "mission control" view over the whole fleet at once. Pure render
-/// of the snapshot the dashboard already loaded; it computes no I/O.
-class FleetScreen extends StatelessWidget {
+/// Analytics over the whole fleet, switchable by time range. Lives in the same
+/// window as the strip and scrolls like a phone. The Now view is a live read;
+/// the 7d/90d views recompute from the raw history buckets.
+class FleetScreen extends StatefulWidget {
   final List<ProviderQuota> data;
-  final Map<String, Insights> insights;
-  final Map<String, List<List<double?>>> heatmaps;
+  final Map<String, List<HeadroomBucket>> buckets;
   final bool dark;
 
   const FleetScreen({
     super.key,
     required this.data,
-    required this.insights,
-    required this.heatmaps,
+    required this.buckets,
     required this.dark,
   });
+
+  @override
+  State<FleetScreen> createState() => _FleetScreenState();
+}
+
+class _FleetScreenState extends State<FleetScreen> {
+  FleetRange _range = FleetRange.now;
+
+  bool get dark => widget.dark;
 
   @override
   Widget build(BuildContext context) {
@@ -47,165 +180,35 @@ class FleetScreen extends StatelessWidget {
     final fg = dark ? Colors.white : const Color(0xFF111317);
     final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
     final line = dark ? const Color(0xFF262B33) : const Color(0xFFE3E5EA);
+    final c = (panel: panel, fg: fg, muted: muted, line: line);
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final nodes = <_Node>[];
-    for (final q in data) {
+    for (final q in widget.data) {
       if (q.isLocal) continue;
       final h = providerHeadroom(q, now);
       if (h == null) continue;
-      final b = bindingWindow(q, now);
-      nodes.add(_Node(q.displayName, h, b?.resetsAt, insights[q.provider]));
+      nodes.add(_Node(q.displayName, h, bindingWindow(q, now)?.resetsAt));
     }
     nodes.sort((a, b) => a.free.compareTo(b.free)); // tightest first
 
-    final avgFree = nodes.isEmpty
-        ? null
-        : nodes.map((n) => n.free).reduce((a, b) => a + b) / nodes.length;
-    final fleetGrid = _aggregateHeatmap();
-    final portfolio = portfolioInsight(insights);
+    final oracle = pythagorasOracle(
+      [for (final n in nodes) n.free],
+      [for (final n in nodes) n.used],
+    );
 
     return Scaffold(
       backgroundColor: bg,
       body: Column(
         children: [
-          _bar(context, fg, muted, line, panel),
+          _bar(context, c, oracle),
+          _tabs(c),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _summary(nodes, avgFree, portfolio, fg, muted, panel, line),
-                  const SizedBox(height: 14),
-                  _card(
-                    panel,
-                    line,
-                    'CONSTELLATION',
-                    'remaining headroom across the fleet',
-                    muted,
-                    fg,
-                    SizedBox(
-                      height: 300,
-                      child: nodes.length < 3
-                          ? _empty('needs 3+ live providers', muted)
-                          : CustomPaint(
-                              painter: _RadarPainter(nodes, avgFree ?? 0, dark),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  LayoutBuilder(
-                    builder: (_, c) {
-                      final wide = c.maxWidth > 560;
-                      final ranking = _card(
-                        panel,
-                        line,
-                        'HEADROOM',
-                        'free now, tightest first',
-                        muted,
-                        fg,
-                        SizedBox(
-                          height: math.max(120, nodes.length * 30.0),
-                          child: nodes.isEmpty
-                              ? _empty('no live data', muted)
-                              : CustomPaint(
-                                  painter: _RankPainter(nodes, dark, fg, muted),
-                                ),
-                        ),
-                      );
-                      final donut = _card(
-                        panel,
-                        line,
-                        'CONSUMPTION',
-                        'share of quota spent',
-                        muted,
-                        fg,
-                        SizedBox(
-                          height: 220,
-                          child: nodes.every((n) => n.used <= 0.5)
-                              ? _empty('nothing spent yet', muted)
-                              : CustomPaint(
-                                  painter: _DonutPainter(
-                                    nodes,
-                                    dark,
-                                    fg,
-                                    muted,
-                                  ),
-                                ),
-                        ),
-                      );
-                      if (!wide) {
-                        return Column(
-                          children: [
-                            ranking,
-                            const SizedBox(height: 14),
-                            donut,
-                          ],
-                        );
-                      }
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(flex: 3, child: ranking),
-                          const SizedBox(width: 14),
-                          Expanded(flex: 2, child: donut),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  _card(
-                    panel,
-                    line,
-                    'DISTRIBUTION',
-                    'typical free range (p10 / p50 / p90) from history',
-                    muted,
-                    fg,
-                    SizedBox(
-                      height: math.max(110, _withStats(nodes).length * 30.0),
-                      child: _withStats(nodes).isEmpty
-                          ? _empty('history is still warming up', muted)
-                          : CustomPaint(
-                              painter: _DistPainter(
-                                _withStats(nodes),
-                                dark,
-                                fg,
-                                muted,
-                              ),
-                            ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  _card(
-                    panel,
-                    line,
-                    'BEST TIME TO RUN',
-                    'fleet headroom by weekday x hour (local)',
-                    muted,
-                    fg,
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        SizedBox(
-                          height: 150,
-                          child: fleetGrid == null
-                              ? _empty('history is still warming up', muted)
-                              : CustomPaint(
-                                  painter: _FleetHeatmapPainter(
-                                    fleetGrid,
-                                    dark,
-                                    muted,
-                                  ),
-                                ),
-                        ),
-                        const SizedBox(height: 6),
-                        _legend(muted),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+              child: _range == FleetRange.now
+                  ? _liveView(nodes, now, c)
+                  : _historyView(now, c),
             ),
           ),
         ],
@@ -213,21 +216,243 @@ class FleetScreen extends StatelessWidget {
     );
   }
 
-  List<_Node> _withStats(List<_Node> nodes) => [
-    for (final n in nodes)
-      if ((n.insights?.samples ?? 0) > 0) n,
-  ];
+  // ---- live (Now) ------------------------------------------------------
 
-  /// Cell-wise average of every provider's 7x24 heatmap, null where no data.
-  List<List<double?>>? _aggregateHeatmap() {
+  Widget _liveView(
+    List<_Node> nodes,
+    int now,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    if (nodes.isEmpty) {
+      return _card(c, 'HEADROOM', 'free now', _empty('no live data', c.muted));
+    }
+    final pool =
+        nodes.map((n) => n.free).reduce((a, b) => a + b) / nodes.length;
+    final freest = nodes.last;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _chip(
+                '${pool.round()}%',
+                'pool free',
+                fleetColor(pool),
+                c,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _chip(
+                freest.label,
+                'most headroom (${freest.free.round()}%)',
+                fleetColor(freest.free),
+                c,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _card(
+          c,
+          'HEADROOM',
+          'free now, tightest first',
+          SizedBox(
+            height: nodes.length * 30.0,
+            child: CustomPaint(painter: _BarsPainter(nodes, now, dark, c.fg)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _card(
+          c,
+          'CONSUMPTION',
+          'share of total spend',
+          SizedBox(
+            height: 150,
+            child: nodes.every((n) => n.used <= 0.5)
+                ? _empty('nothing spent yet', c.muted)
+                : CustomPaint(
+                    painter: _DonutPainter(nodes, dark, c.fg, c.muted),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---- history (7d / 90d) ---------------------------------------------
+
+  Widget _historyView(
+    int now,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    final tz = DateTime.now().timeZoneOffset;
+    final days = _range.days!;
+    final cutoff = now - days * 86400;
+
+    final stats = <_Node>[];
+    final grids = <List<List<double?>>>[];
+    var maxSamples = 0;
+    var maxSpan = 0;
+    for (final q in widget.data) {
+      if (q.isLocal) continue;
+      final all = widget.buckets[q.provider] ?? const <HeadroomBucket>[];
+      final win = [
+        for (final b in all)
+          if (b.start >= cutoff) b,
+      ];
+      if (win.isEmpty) continue;
+      final ins = Insights.from(win, now, tzOffset: tz);
+      if (ins.samples == 0) continue;
+      final node = _Node(q.displayName, ins.p50 ?? 0, null)..insights = ins;
+      stats.add(node);
+      grids.add(weekHourHeatmap(win, tzOffset: tz));
+      maxSamples = math.max(maxSamples, ins.samples);
+      maxSpan = math.max(maxSpan, ins.spanDays);
+    }
+    stats.sort(
+      (a, b) => (a.insights!.p50 ?? 0).compareTo(b.insights!.p50 ?? 0),
+    );
+
+    if (stats.isEmpty) {
+      return _card(
+        c,
+        'OVER $days DAYS',
+        'history',
+        _empty('history is still warming up', c.muted),
+      );
+    }
+
+    final grid = _mergeGrids(grids);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _card(
+          c,
+          'DISTRIBUTION',
+          'free % p10-p90, median tick',
+          SizedBox(
+            height: stats.length * 26.0,
+            child: CustomPaint(
+              painter: _DistPainter(stats, dark, c.fg, c.muted),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _card(
+          c,
+          'RELIABILITY & TREND',
+          'usable rate, drift per day',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final n in stats) _statRow(n.label, n.insights!, c),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _card(
+          c,
+          'BEST TIME TO RUN',
+          'mean free % by weekday x hour, local',
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                height: 120,
+                child: grid == null
+                    ? _empty('not enough data', c.muted)
+                    : CustomPaint(
+                        painter: _HeatmapPainter(grid, dark, c.muted),
+                      ),
+              ),
+              const SizedBox(height: 6),
+              _legend(c.muted),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: Text(
+            '$maxSpan-day span, up to $maxSamples samples per provider',
+            style: TextStyle(fontSize: 10, color: c.muted),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _statRow(
+    String label,
+    Insights ins,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    final rel = ins.reliability;
+    final trend = ins.trendPerDay;
+    final r2 = ins.trendConfidence;
+    String trendStr;
+    Color trendCol;
+    if (trend == null || trend.abs() < 0.05) {
+      trendStr = 'flat';
+      trendCol = c.muted;
+    } else {
+      final up = trend > 0;
+      trendStr =
+          '${up ? '▲' : '▼'} ${trend.abs().toStringAsFixed(1)}%/d'
+          '${r2 == null ? '' : ' r2 ${r2.toStringAsFixed(2)}'}';
+      trendCol = up ? const Color(0xFF3FB950) : const Color(0xFFDB6D28);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: c.fg,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              rel == null ? '--' : 'usable ${(rel * 100).round()}%',
+              style: TextStyle(
+                fontSize: 11,
+                color: c.fg,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          Text(
+            trendStr,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: trendCol,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<List<double?>>? _mergeGrids(List<List<List<double?>>> grids) {
     final sum = List.generate(7, (_) => List<double>.filled(24, 0));
     final cnt = List.generate(7, (_) => List<int>.filled(24, 0));
     var any = false;
-    for (final grid in heatmaps.values) {
-      if (grid.length != 7) continue;
+    for (final g in grids) {
+      if (g.length != 7) continue;
       for (var d = 0; d < 7; d++) {
         for (var h = 0; h < 24; h++) {
-          final v = grid[d][h];
+          final v = g[d][h];
           if (v != null) {
             sum[d][h] += v;
             cnt[d][h]++;
@@ -250,37 +475,49 @@ class FleetScreen extends StatelessWidget {
 
   Widget _bar(
     BuildContext context,
-    Color fg,
-    Color muted,
-    Color line,
-    Color panel,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+    ({String glyph, String proof}) oracle,
   ) {
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: (_) => windowManager.startDragging(),
       child: Container(
         decoration: BoxDecoration(
-          color: panel,
-          border: Border(bottom: BorderSide(color: line)),
+          color: c.panel,
+          border: Border(bottom: BorderSide(color: c.line)),
         ),
-        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
         child: Row(
           children: [
             Icon(Icons.hub_rounded, size: 16, color: fleetColor(60)),
             const SizedBox(width: 8),
             Text(
-              'FLEET ANALYTICS',
+              'QUOTA ANALYTICS',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.5,
-                color: fg,
+                letterSpacing: 1.4,
+                color: c.fg,
               ),
             ),
             const Spacer(),
+            Tooltip(
+              message: oracle.proof,
+              child: InkResponse(
+                radius: 18,
+                onTap: () => _showOracle(context, oracle, c),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    oracle.glyph,
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ),
+            ),
             IconButton(
               tooltip: 'Close',
-              icon: Icon(Icons.close_rounded, size: 18, color: muted),
+              icon: Icon(Icons.close_rounded, size: 18, color: c.muted),
               onPressed: () => Navigator.of(context).maybePop(),
             ),
           ],
@@ -289,126 +526,141 @@ class FleetScreen extends StatelessWidget {
     );
   }
 
-  Widget _summary(
-    List<_Node> nodes,
-    double? avgFree,
-    PortfolioInsight pf,
-    Color fg,
-    Color muted,
-    Color panel,
-    Color line,
-  ) {
-    final live = nodes.length;
-    final tight = nodes.isEmpty ? null : nodes.first;
-    final spent = nodes.where((n) => n.free <= 0.5).length;
-    final busiest = pf.mostUsed;
-    return Row(
-      children: [
-        _stat(
-          '$live',
-          'live providers',
-          fleetColor(60),
-          fg,
-          muted,
-          panel,
-          line,
-        ),
-        const SizedBox(width: 10),
-        _stat(
-          avgFree == null ? '--' : '${avgFree.round()}%',
-          'pool free',
-          avgFree == null ? muted : fleetColor(avgFree),
-          fg,
-          muted,
-          panel,
-          line,
-        ),
-        const SizedBox(width: 10),
-        _stat(
-          tight == null ? '--' : '${tight.free.round()}%',
-          tight == null ? 'tightest' : 'tightest: ${tight.label}',
-          tight == null ? muted : fleetColor(tight.free),
-          fg,
-          muted,
-          panel,
-          line,
-        ),
-        const SizedBox(width: 10),
-        _stat(
-          busiest == null ? '--' : '${busiest.peakUsed.round()}%',
-          busiest == null ? 'busiest' : 'busiest: ${busiest.provider}',
-          spent > 0 ? const Color(0xFFF85149) : fg,
-          fg,
-          muted,
-          panel,
-          line,
-        ),
-      ],
-    );
-  }
-
-  Widget _stat(
-    String value,
-    String label,
-    Color accent,
-    Color fg,
-    Color muted,
-    Color panel,
-    Color line,
-  ) {
-    return Expanded(
+  Widget _tabs(({Color panel, Color fg, Color muted, Color line}) c) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
         decoration: BoxDecoration(
-          color: panel,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: line),
+          color: c.panel,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: c.line),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.all(3),
+        child: Row(
           children: [
-            Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                color: accent,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            for (final r in FleetRange.values)
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _range = r),
+                  child: Container(
+                    height: 28,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _range == r
+                          ? (dark
+                                ? const Color(0xFF24303B)
+                                : const Color(0xFFE7EBF0))
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(
+                      r.label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _range == r ? c.fg : c.muted,
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: muted),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _card(
-    Color panel,
-    Color line,
-    String title,
-    String subtitle,
-    Color muted,
-    Color fg,
-    Widget child,
+  void _showOracle(
+    BuildContext context,
+    ({String glyph, String proof}) oracle,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.panel,
+        title: Row(
+          children: [
+            Text(oracle.glyph, style: const TextStyle(fontSize: 22)),
+            const SizedBox(width: 10),
+            Text(
+              'Oracle of Pythagoras',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: c.fg,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          '${oracle.proof}.\n\nOne glyph per fleet, chosen by the numbers, not by you.',
+          style: TextStyle(fontSize: 12.5, color: c.muted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('So it is'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(
+    String value,
+    String label,
+    Color accent,
+    ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       decoration: BoxDecoration(
-        color: panel,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: line),
+        color: c.panel,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              color: accent,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10.5, color: c.muted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card(
+    ({Color panel, Color fg, Color muted, Color line}) c,
+    String title,
+    String subtitle,
+    Widget child,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: c.panel,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: c.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -419,8 +671,8 @@ class FleetScreen extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                  color: fg,
+                  letterSpacing: 1.1,
+                  color: c.fg,
                 ),
               ),
               const SizedBox(width: 8),
@@ -429,20 +681,23 @@ class FleetScreen extends StatelessWidget {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10.5, color: muted),
+                  style: TextStyle(fontSize: 10.5, color: c.muted),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           child,
         ],
       ),
     );
   }
 
-  Widget _empty(String text, Color muted) => Center(
-    child: Text(text, style: TextStyle(fontSize: 11, color: muted)),
+  Widget _empty(String text, Color muted) => SizedBox(
+    height: 60,
+    child: Center(
+      child: Text(text, style: TextStyle(fontSize: 11, color: muted)),
+    ),
   );
 
   Widget _legend(Color muted) => Row(
@@ -450,13 +705,13 @@ class FleetScreen extends StatelessWidget {
     children: [
       Text('spent', style: TextStyle(fontSize: 9.5, color: muted)),
       const SizedBox(width: 6),
-      for (final c in const [
+      for (final col in const [
         Color(0xFFF85149),
         Color(0xFFDB6D28),
         Color(0xFFD29922),
         Color(0xFF3FB950),
       ])
-        Container(width: 16, height: 8, color: c),
+        Container(width: 16, height: 8, color: col),
       const SizedBox(width: 6),
       Text('free', style: TextStyle(fontSize: 9.5, color: muted)),
     ],
@@ -465,162 +720,34 @@ class FleetScreen extends StatelessWidget {
 
 // ---- painters ----------------------------------------------------------
 
-/// Radial polygon ("constellation"): one spoke per provider, the filled polygon
-/// traces remaining headroom, concentric rings mark 25/50/75/100 percent.
-class _RadarPainter extends CustomPainter {
+/// Horizontal headroom bars: free % per provider with its reset, tightest first.
+class _BarsPainter extends CustomPainter {
   final List<_Node> nodes;
-  final double avgFree;
-  final bool dark;
-  _RadarPainter(this.nodes, this.avgFree, this.dark);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) / 2 - 46;
-    final n = nodes.length;
-    final grid = dark ? const Color(0xFF2A2F38) : const Color(0xFFDADDE3);
-    final gridPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1
-      ..color = grid;
-
-    // Concentric rings.
-    for (final frac in const [0.25, 0.5, 0.75, 1.0]) {
-      final path = Path();
-      for (var i = 0; i <= n; i++) {
-        final a = -math.pi / 2 + (2 * math.pi * i / n);
-        final p = center + Offset(math.cos(a), math.sin(a)) * (radius * frac);
-        i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
-      }
-      canvas.drawPath(path, gridPaint);
-    }
-
-    // Spokes + labels.
-    final label = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
-    for (var i = 0; i < n; i++) {
-      final a = -math.pi / 2 + (2 * math.pi * i / n);
-      final dir = Offset(math.cos(a), math.sin(a));
-      canvas.drawLine(center, center + dir * radius, gridPaint);
-      final tp = TextPainter(
-        text: TextSpan(
-          text: nodes[i].label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: label,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final lp = center + dir * (radius + 16);
-      tp.paint(canvas, Offset(lp.dx - tp.width / 2, lp.dy - tp.height / 2));
-    }
-
-    // Headroom polygon.
-    final pts = <Offset>[];
-    for (var i = 0; i < n; i++) {
-      final a = -math.pi / 2 + (2 * math.pi * i / n);
-      final frac = (nodes[i].free / 100).clamp(0.0, 1.0);
-      pts.add(center + Offset(math.cos(a), math.sin(a)) * (radius * frac));
-    }
-    final poly = Path()..moveTo(pts[0].dx, pts[0].dy);
-    for (var i = 1; i < pts.length; i++) {
-      poly.lineTo(pts[i].dx, pts[i].dy);
-    }
-    poly.close();
-    final tint = fleetColor(avgFree);
-    canvas.drawPath(poly, Paint()..color = tint.withValues(alpha: 0.16));
-    canvas.drawPath(
-      poly,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..strokeJoin = StrokeJoin.round
-        ..color = tint.withValues(alpha: 0.85),
-    );
-    for (var i = 0; i < pts.length; i++) {
-      canvas.drawCircle(
-        pts[i],
-        3.5,
-        Paint()..color = fleetColor(nodes[i].free),
-      );
-    }
-
-    // Center reading.
-    final ctp = TextPainter(
-      text: TextSpan(
-        children: [
-          TextSpan(
-            text: '${avgFree.round()}',
-            style: TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: tint,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          ),
-          TextSpan(
-            text: '%',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: tint,
-            ),
-          ),
-        ],
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    ctp.paint(
-      canvas,
-      Offset(center.dx - ctp.width / 2, center.dy - ctp.height / 2),
-    );
-  }
-
-  @override
-  bool shouldRepaint(_RadarPainter old) => old.nodes != nodes;
-}
-
-/// Horizontal ranking bars: free headroom per provider, tightest first.
-class _RankPainter extends CustomPainter {
-  final List<_Node> nodes;
+  final int now;
   final bool dark;
   final Color fg;
-  final Color muted;
-  _RankPainter(this.nodes, this.dark, this.fg, this.muted);
+  _BarsPainter(this.nodes, this.now, this.dark, this.fg);
 
   @override
   void paint(Canvas canvas, Size size) {
     final track = dark ? const Color(0xFF22262E) : const Color(0xFFEDEEF1);
     final rowH = size.height / nodes.length;
-    const labelW = 78.0;
-    const valW = 44.0;
+    const labelW = 70.0;
+    const valW = 78.0;
     final barL = labelW + 6;
-    final barW = size.width - barL - valW;
+    final barW = size.width - barL - valW - 6;
     for (var i = 0; i < nodes.length; i++) {
       final n = nodes[i];
       final cy = i * rowH + rowH / 2;
-      final bh = math.min(14.0, rowH - 8);
-      _text(
-        canvas,
-        n.label,
-        Offset(0, cy),
-        labelW,
-        fg,
-        11,
-        FontWeight.w600,
-        right: false,
-        vCenter: true,
-      );
-      final r = RRect.fromRectAndRadius(
-        Rect.fromCenter(
-          center: Offset(barL + barW / 2, cy),
-          width: barW,
-          height: bh,
+      final bh = math.min(13.0, rowH - 9);
+      _line(canvas, n.label, 0, cy, labelW, fg, FontWeight.w600, false);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(barL, cy - bh / 2, barW, bh),
+          const Radius.circular(3),
         ),
-        const Radius.circular(3),
+        Paint()..color = track,
       );
-      canvas.drawRRect(r, Paint()..color = track);
       final w = (n.free / 100).clamp(0.0, 1.0) * barW;
       if (w > 0) {
         canvas.drawRRect(
@@ -631,53 +758,72 @@ class _RankPainter extends CustomPainter {
           Paint()..color = fleetColor(n.free),
         );
       }
-      _text(
-        canvas,
-        '${n.free.round()}%',
-        Offset(size.width - valW, cy),
-        valW,
-        fg,
-        11,
-        FontWeight.w700,
-        right: true,
-        vCenter: true,
-      );
+      final reset = _reset(n.resetsAt, now);
+      _valueLine(canvas, '${n.free.round()}%', reset, size.width, valW, cy);
     }
   }
 
-  void _text(
+  void _line(
     Canvas canvas,
     String s,
-    Offset at,
+    double x,
+    double cy,
     double width,
     Color color,
-    double size,
-    FontWeight weight, {
-    required bool right,
-    required bool vCenter,
-  }) {
+    FontWeight weight,
+    bool right,
+  ) {
     final tp = TextPainter(
       text: TextSpan(
         text: s,
-        style: TextStyle(
-          fontSize: size,
-          fontWeight: weight,
-          color: color,
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
+        style: TextStyle(fontSize: 11, fontWeight: weight, color: color),
       ),
       textDirection: TextDirection.ltr,
-      textAlign: right ? TextAlign.right : TextAlign.left,
       maxLines: 1,
       ellipsis: '...',
     )..layout(maxWidth: width);
-    final dx = right ? at.dx + (width - tp.width) : at.dx;
-    final dy = vCenter ? at.dy - tp.height / 2 : at.dy;
-    tp.paint(canvas, Offset(dx, dy));
+    tp.paint(canvas, Offset(x, cy - tp.height / 2));
+  }
+
+  void _valueLine(
+    Canvas canvas,
+    String pct,
+    String reset,
+    double rightEdge,
+    double width,
+    double cy,
+  ) {
+    final tp = TextPainter(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: pct,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: fg,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+          if (reset.isNotEmpty)
+            TextSpan(
+              text: '  $reset',
+              style: TextStyle(
+                fontSize: 10,
+                color: dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280),
+              ),
+            ),
+        ],
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.right,
+      maxLines: 1,
+    )..layout(maxWidth: width);
+    tp.paint(canvas, Offset(rightEdge - tp.width, cy - tp.height / 2));
   }
 
   @override
-  bool shouldRepaint(_RankPainter old) => old.nodes != nodes;
+  bool shouldRepaint(_BarsPainter old) => old.nodes != nodes;
 }
 
 /// Donut of consumption share: how spend concentrates across providers.
@@ -707,40 +853,36 @@ class _DonutPainter extends CustomPainter {
     ];
     final total = spenders.fold<double>(0, (a, n) => a + n.used);
     if (total <= 0) return;
-    final center = Offset(size.height / 2 + 4, size.height / 2);
+    final center = Offset(size.height / 2 + 2, size.height / 2);
     final outer = size.height / 2 - 6;
     final inner = outer * 0.58;
     var start = -math.pi / 2;
     for (var i = 0; i < spenders.length; i++) {
       final sweep = 2 * math.pi * (spenders[i].used / total);
-      final paint = Paint()..color = _palette[i % _palette.length];
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: outer),
         start,
         sweep - 0.02,
         true,
-        paint,
+        Paint()..color = _palette[i % _palette.length],
       );
       start += sweep;
     }
-    // Punch the hole.
     canvas.drawCircle(
       center,
       inner,
       Paint()..color = dark ? const Color(0xFF14171D) : Colors.white,
     );
 
-    // Legend to the right of the donut.
     final lx = center.dx + outer + 14;
     var ly = center.dy - (spenders.length * 9.0);
     for (var i = 0; i < spenders.length; i++) {
-      final c = _palette[i % _palette.length];
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(lx, ly + 2, 9, 9),
           const Radius.circular(2),
         ),
-        Paint()..color = c,
+        Paint()..color = _palette[i % _palette.length],
       );
       final pct = (spenders[i].used / total * 100).round();
       final tp = TextPainter(
@@ -773,8 +915,7 @@ class _DonutPainter extends CustomPainter {
   bool shouldRepaint(_DonutPainter old) => old.nodes != nodes;
 }
 
-/// Floating distribution bars: the p10..p90 free range with a p50 tick, so you
-/// see how steady (narrow) or swingy (wide) each provider runs.
+/// Floating distribution bars: the p10..p90 free range with a p50 tick.
 class _DistPainter extends CustomPainter {
   final List<_Node> nodes;
   final bool dark;
@@ -786,12 +927,11 @@ class _DistPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final track = dark ? const Color(0xFF22262E) : const Color(0xFFEDEEF1);
     final rowH = size.height / nodes.length;
-    const labelW = 78.0;
+    const labelW = 70.0;
     final scaleL = labelW + 6;
     final scaleW = size.width - scaleL - 8;
     double x(double pct) => scaleL + (pct / 100).clamp(0.0, 1.0) * scaleW;
 
-    // Faint 0/50/100 guides.
     final guide = Paint()
       ..color = track
       ..strokeWidth = 1;
@@ -806,14 +946,12 @@ class _DistPainter extends CustomPainter {
       _label(canvas, nodes[i].label, cy, labelW);
       if (p10 == null || p90 == null) continue;
       final bh = math.min(12.0, rowH - 10);
-      final left = x(p10), right = x(p90);
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTRB(left, cy - bh / 2, right, cy + bh / 2),
+          Rect.fromLTRB(x(p10), cy - bh / 2, x(p90), cy + bh / 2),
           const Radius.circular(3),
         ),
-        Paint()
-          ..color = fleetColor(((p10) + (p90)) / 2).withValues(alpha: 0.55),
+        Paint()..color = fleetColor((p10 + p90) / 2).withValues(alpha: 0.55),
       );
       if (p50 != null) {
         canvas.drawRect(
@@ -842,11 +980,11 @@ class _DistPainter extends CustomPainter {
 }
 
 /// Fleet 7x24 heatmap with weekday labels: aggregate best-time-to-run.
-class _FleetHeatmapPainter extends CustomPainter {
+class _HeatmapPainter extends CustomPainter {
   final List<List<double?>> grid;
   final bool dark;
   final Color muted;
-  _FleetHeatmapPainter(this.grid, this.dark, this.muted);
+  _HeatmapPainter(this.grid, this.dark, this.muted);
 
   static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -868,28 +1006,42 @@ class _FleetHeatmapPainter extends CustomPainter {
         textDirection: TextDirection.ltr,
       )..layout();
       tp.paint(canvas, Offset(0, r * ch + ch / 2 - tp.height / 2));
-      for (var c = 0; c < cols; c++) {
-        final v = grid[r][c];
+      for (var col = 0; col < cols; col++) {
+        final v = grid[r][col];
         canvas.drawRect(
-          Rect.fromLTWH(labelW + c * cw, r * ch, cw - 0.6, ch - 0.6),
+          Rect.fromLTWH(labelW + col * cw, r * ch, cw - 0.6, ch - 0.6),
           Paint()..color = v == null ? empty : fleetColor(v),
         );
       }
     }
-    for (final h in const [0, 6, 12, 18]) {
+    for (final hh in const [0, 6, 12, 18]) {
       final tp = TextPainter(
         text: TextSpan(
-          text: h == 0
+          text: hh == 0
               ? '12a'
-              : (h == 12 ? '12p' : (h < 12 ? '${h}a' : '${h - 12}p')),
+              : (hh == 12 ? '12p' : (hh < 12 ? '${hh}a' : '${hh - 12}p')),
           style: TextStyle(fontSize: 8.5, color: muted),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, Offset(labelW + h * cw, gh + 2));
+      tp.paint(canvas, Offset(labelW + hh * cw, gh + 2));
     }
   }
 
   @override
-  bool shouldRepaint(_FleetHeatmapPainter old) => old.grid != grid;
+  bool shouldRepaint(_HeatmapPainter old) => old.grid != grid;
+}
+
+/// Compact reset countdown, e.g. "3h2m", "2d4h", "ready".
+String _reset(int? resetsAt, int now) {
+  if (resetsAt == null) return '';
+  var s = resetsAt - now;
+  if (s <= 0) return 'ready';
+  final d = s ~/ 86400;
+  s %= 86400;
+  final h = s ~/ 3600;
+  final m = (s % 3600) ~/ 60;
+  if (d > 0) return '${d}d${h}h';
+  if (h > 0) return '${h}h${m}m';
+  return '${m}m';
 }

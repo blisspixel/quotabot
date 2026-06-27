@@ -15,29 +15,18 @@ ProviderQuota _q(String id, String name, double usedPercent, {int? resetsAt}) {
   );
 }
 
-Insights _ins() => const Insights(
-  samples: 200,
-  spanDays: 14,
-  mean: 55,
-  stddev: 18,
-  p10: 22,
-  p50: 58,
-  p90: 88,
-  reliability: 0.95,
-  trendPerDay: -1.2,
-  trendConfidence: 0.4,
-  tightestHour: 14,
-  tightestDay: 2,
-  burnPerHour: 3.5,
-);
-
-List<List<double?>> _heatmap() => List.generate(
-  7,
-  (d) => List.generate(
-    24,
-    (h) => ((d + h) % 5 == 0) ? null : ((h * 4) % 100).toDouble(),
-  ),
-);
+/// A few weeks of synthetic hourly buckets so the historical views have data.
+List<HeadroomBucket> _buckets(double base) {
+  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final out = <HeadroomBucket>[];
+  for (var i = 0; i < 24 * 30; i++) {
+    final start = now - i * 3600;
+    final b = HeadroomBucket(start: start - (start % 3600));
+    b.add((base + (i % 17) - 8).clamp(0, 100).toDouble());
+    out.add(b);
+  }
+  return out;
+}
 
 Widget _wrap(Widget child) => MaterialApp(home: child);
 
@@ -62,27 +51,27 @@ void main() {
         kind: 'local',
       ),
     ];
-    final insights = {
-      for (final id in ['codex', 'claude', 'grok', 'antigravity']) id: _ins(),
-    };
-    final heatmaps = {
-      for (final id in ['codex', 'claude']) id: _heatmap(),
+    final buckets = {
+      'codex': _buckets(20),
+      'claude': _buckets(55),
+      'grok': _buckets(70),
+      'antigravity': _buckets(88),
     };
 
     await tester.pumpWidget(
-      _wrap(
-        FleetScreen(
-          data: data,
-          insights: insights,
-          heatmaps: heatmaps,
-          dark: true,
-        ),
-      ),
+      _wrap(FleetScreen(data: data, buckets: buckets, dark: true)),
     );
     await tester.pump();
 
-    expect(find.text('FLEET ANALYTICS'), findsOneWidget);
-    expect(find.text('CONSTELLATION'), findsOneWidget);
+    // Now view by default.
+    expect(find.text('QUOTA ANALYTICS'), findsOneWidget);
+    expect(find.text('HEADROOM'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    // Switch to the 90d historical view.
+    await tester.tap(find.text('90d'));
+    await tester.pump();
+    expect(find.text('DISTRIBUTION'), findsOneWidget);
     expect(find.text('BEST TIME TO RUN'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -92,13 +81,14 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      _wrap(
-        const FleetScreen(data: [], insights: {}, heatmaps: {}, dark: false),
-      ),
+      _wrap(const FleetScreen(data: [], buckets: {}, dark: false)),
     );
     await tester.pump();
 
-    expect(find.text('FLEET ANALYTICS'), findsOneWidget);
+    expect(find.text('QUOTA ANALYTICS'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('7d'));
+    await tester.pump();
     expect(tester.takeException(), isNull);
   });
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -127,6 +128,7 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   Map<String, List<ProviderQuota>> _history = {};
   Map<String, Insights> _insights = {};
   Map<String, List<List<double?>>> _heatmaps = {};
+  Map<String, List<HeadroomBucket>> _buckets = {};
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
   final Map<String, DateTime> _lastNotified =
@@ -258,12 +260,14 @@ class _DashboardState extends State<Dashboard> with WindowListener {
         _history = {};
         _insights = {};
         _heatmaps = {};
+        _buckets = {};
         final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
         final tz = DateTime.now().timeZoneOffset;
         for (final q in active) {
           _history[q.provider] = loadHistory(q.provider);
           if (!q.isLocal) {
             final buckets = loadBuckets(q.provider);
+            _buckets[q.provider] = buckets;
             _insights[q.provider] = Insights.from(
               buckets,
               nowSec,
@@ -276,10 +280,21 @@ class _DashboardState extends State<Dashboard> with WindowListener {
       _scheduleNext();
       _checkAndNotify();
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+      // Debug aid: auto-open the fleet view once so it can be screenshotted.
+      // Delayed so the strip's content-fit resize settles before the fleet view
+      // enlarges the window.
+      if (!_fleetAutoOpened && Platform.environment['QUOTABOT_FLEET'] == '1') {
+        _fleetAutoOpened = true;
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (mounted) _showFleet();
+        });
+      }
     } finally {
       if (mounted) setState(() => _isRefreshing = false);
     }
   }
+
+  bool _fleetAutoOpened = false;
 
   /// Adaptive polling: fast only when a reset is imminent or a cap is nearly
   /// hit; slow when everything is healthy and resets are far away.
@@ -1008,35 +1023,15 @@ class _DashboardState extends State<Dashboard> with WindowListener {
 
   void _showHelp() => _showSetup();
 
-  /// Opens the full-window Fleet Analytics dashboard. The widget normally lives
-  /// in a narrow strip, so the window is enlarged while the dashboard is open
-  /// and restored to its prior size and position on close.
+  /// Opens the Fleet Analytics dashboard in the same window. It is a mobile-style
+  /// vertical scroll, so the window size is left exactly as it is.
   Future<void> _showFleet() async {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final prevSize = await windowManager.getSize();
-    final prevPos = await windowManager.getPosition();
-    final wasOnTop = await windowManager.isAlwaysOnTop();
-
-    if (wasOnTop) await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSize(const Size(820, 900));
-    await windowManager.center();
-
-    if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => FleetScreen(
-          data: _data,
-          insights: _insights,
-          heatmaps: _heatmaps,
-          dark: dark,
-        ),
+        builder: (_) => FleetScreen(data: _data, buckets: _buckets, dark: dark),
       ),
     );
-
-    // Restore the strip exactly as it was.
-    await windowManager.setSize(prevSize);
-    await windowManager.setPosition(prevPos);
-    if (wasOnTop) await windowManager.setAlwaysOnTop(true);
   }
 
   /// Compact setup/help panel: a short intro, then every detected provider with
