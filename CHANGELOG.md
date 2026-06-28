@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Routing suggestions now carry a versioned `schema` (`quotabot.suggest.v1`) and a
+  guaranteed non-null `fallback` (a running local runtime, the soonest-resetting
+  subscription to wait for, or a passthrough to the requested model), so a caller
+  that skips the pick or gets no recommendation always has an actionable next step.
+
 ### Changed
 - Routing (`quotabot suggest`, the MCP `suggest_provider` tool, and the local
   `/suggest` endpoint) now ranks on burn-aware effective headroom: each

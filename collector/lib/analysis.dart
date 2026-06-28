@@ -134,8 +134,41 @@ class RouteCandidate {
       };
 }
 
+/// The fail-soft next step in a [RouteSuggestion]: what to do if the caller
+/// skips the recommendation, or there is no usable recommendation at all. Always
+/// present, so quotabot never leaves a caller without an actionable answer.
+class RouteFallback {
+  /// One of 'local' (use a local runtime), 'soonest_reset' (wait for the named
+  /// provider to reset), or 'passthrough' (no signal; use the requested model).
+  final String kind;
+
+  /// The local runtime, or the soonest-resetting provider, when applicable.
+  final String? provider;
+
+  /// Reset epoch of [provider], for the 'soonest_reset' kind.
+  final int? resetsAt;
+
+  /// One-line human explanation.
+  final String reason;
+
+  const RouteFallback({
+    required this.kind,
+    this.provider,
+    this.resetsAt,
+    required this.reason,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        if (provider != null) 'provider': provider,
+        if (resetsAt != null) 'resets_at': resetsAt,
+        'reason': reason,
+      };
+}
+
 /// A routing recommendation: which provider to use next, ranked alternatives,
-/// and a short human reason. Pure result of [suggestRoute].
+/// a short human reason, and a guaranteed fail-soft [fallback]. Pure result of
+/// [suggestRoute].
 class RouteSuggestion {
   /// The recommended provider, or null when nothing is usable.
   final RouteCandidate? recommended;
@@ -150,19 +183,57 @@ class RouteSuggestion {
   /// subscription is spent or below the comfort threshold.
   final bool usingLocalFallback;
 
+  /// Always-present next step if the recommendation is skipped or null.
+  final RouteFallback fallback;
+
   const RouteSuggestion({
     required this.recommended,
     required this.ranked,
     required this.reason,
     required this.usingLocalFallback,
+    required this.fallback,
   });
 
   Map<String, dynamic> toJson() => {
+        'schema': 'quotabot.suggest.v1',
         'recommended': recommended?.toJson(),
         'reason': reason,
         'using_local_fallback': usingLocalFallback,
+        'fallback': fallback.toJson(),
         'ranked': ranked.map((c) => c.toJson()).toList(),
       };
+}
+
+/// Builds the always-present fail-soft fallback from the available candidates:
+/// a running local runtime if present, else the soonest-resetting subscription
+/// to wait for, else a passthrough to the model the caller requested.
+RouteFallback _fallbackFor(
+  List<RouteCandidate> subs,
+  List<RouteCandidate> locals,
+) {
+  if (locals.isNotEmpty) {
+    final l = locals.first;
+    return RouteFallback(
+      kind: 'local',
+      provider: l.provider,
+      reason: 'Skip the pick? Use local ${l.provider} - free and always on.',
+    );
+  }
+  final resetting = subs.where((c) => c.resetsAt != null).toList()
+    ..sort((a, b) => a.resetsAt!.compareTo(b.resetsAt!));
+  if (resetting.isNotEmpty) {
+    final s = resetting.first;
+    return RouteFallback(
+      kind: 'soonest_reset',
+      provider: s.provider,
+      resetsAt: s.resetsAt,
+      reason: '${s.provider} resets soonest - wait for it.',
+    );
+  }
+  return const RouteFallback(
+    kind: 'passthrough',
+    reason: 'No quota signal - use the model you requested.',
+  );
 }
 
 /// A short ", ~N% after burn" note when recent burn materially discounts a
@@ -240,13 +311,27 @@ RouteSuggestion suggestRoute(
   // Ranked view: best subscription first, then locals as the tail fallback.
   final ranked = [...subs, ...locals];
 
+  // The fail-soft fallback is always present, so a caller that skips the pick
+  // (or gets a null recommendation) still has an actionable next step. The
+  // closure threads the shared [ranked] and [fallback] into every branch.
+  final fallback = _fallbackFor(subs, locals);
+  RouteSuggestion result(
+    RouteCandidate? recommended,
+    String reason, {
+    bool usingLocalFallback = false,
+  }) =>
+      RouteSuggestion(
+        recommended: recommended,
+        ranked: ranked,
+        reason: reason,
+        usingLocalFallback: usingLocalFallback,
+        fallback: fallback,
+      );
+
   if (usable.isEmpty) {
-    return const RouteSuggestion(
-      recommended: null,
-      ranked: [],
-      reason:
-          'No live quota data. Open a provider app or run a login to refresh.',
-      usingLocalFallback: false,
+    return result(
+      null,
+      'No live quota data. Open a provider app or run a login to refresh.',
     );
   }
 
@@ -258,12 +343,9 @@ RouteSuggestion suggestRoute(
     final best = comfy.first;
     final note = best.stale ? ' (cached)' : '';
     final burnNote = _burnNote(best);
-    return RouteSuggestion(
-      recommended: best,
-      ranked: ranked,
-      reason:
-          'Use ${best.provider}$note - most headroom (${best.headroom!.round()}% free$burnNote).',
-      usingLocalFallback: false,
+    return result(
+      best,
+      'Use ${best.provider}$note - most headroom (${best.headroom!.round()}% free$burnNote).',
     );
   }
 
@@ -274,11 +356,9 @@ RouteSuggestion suggestRoute(
     final subNote = tightest == null
         ? ''
         : ' (best subscription ${tightest.provider} only ${(tightest.headroom ?? 0).round()}% free)';
-    return RouteSuggestion(
-      recommended: best,
-      ranked: ranked,
-      reason:
-          'Subscriptions are low - fall back to local ${best.provider}$subNote.',
+    return result(
+      best,
+      'Subscriptions are low - fall back to local ${best.provider}$subNote.',
       usingLocalFallback: true,
     );
   }
@@ -287,12 +367,9 @@ RouteSuggestion suggestRoute(
   final withAny = liveSubs.where((c) => (c.headroom ?? 0) > 0.5).toList();
   if (withAny.isNotEmpty) {
     final best = withAny.first;
-    return RouteSuggestion(
-      recommended: best,
-      ranked: ranked,
-      reason:
-          'All subscriptions are low; ${best.provider} has the most left (${best.headroom!.round()}% free).',
-      usingLocalFallback: false,
+    return result(
+      best,
+      'All subscriptions are low; ${best.provider} has the most left (${best.headroom!.round()}% free).',
     );
   }
 
@@ -300,12 +377,9 @@ RouteSuggestion suggestRoute(
       subs.where((c) => c.stale && (c.headroom ?? 0) > 0.5).toList();
   if (staleWithAny.isNotEmpty) {
     final best = staleWithAny.first;
-    return RouteSuggestion(
-      recommended: best,
-      ranked: ranked,
-      reason:
-          'Only cached quota is available; ${best.provider} last had ${best.headroom!.round()}% free.',
-      usingLocalFallback: false,
+    return result(
+      best,
+      'Only cached quota is available; ${best.provider} last had ${best.headroom!.round()}% free.',
     );
   }
 
@@ -314,21 +388,13 @@ RouteSuggestion suggestRoute(
     ..sort((a, b) => a.resetsAt!.compareTo(b.resetsAt!));
   if (resetting.isNotEmpty) {
     final soonest = resetting.first;
-    return RouteSuggestion(
-      recommended: null,
-      ranked: ranked,
-      reason:
-          'Everything is spent. ${soonest.provider} resets soonest - wait for it.',
-      usingLocalFallback: false,
+    return result(
+      null,
+      'Everything is spent. ${soonest.provider} resets soonest - wait for it.',
     );
   }
 
-  return RouteSuggestion(
-    recommended: null,
-    ranked: ranked,
-    reason: 'Everything is spent and no reset time is known.',
-    usingLocalFallback: false,
-  );
+  return result(null, 'Everything is spent and no reset time is known.');
 }
 
 /// Computes simple average headroom from recent history snapshots.

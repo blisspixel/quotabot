@@ -319,4 +319,63 @@ void main() {
       expect(c.toJson().containsKey('burn_percent_per_hour'), isFalse);
     });
   });
+
+  group('suggestRoute fail-soft fallback and schema', () {
+    test('stamps the suggestion schema version', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 30)]),
+        ],
+        _now,
+      );
+      expect(s.toJson()['schema'], 'quotabot.suggest.v1');
+    });
+
+    test('fallback is a local runtime when one is present', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 30)]),
+          _local('ollama'),
+        ],
+        _now,
+      );
+      expect(s.fallback.kind, 'local');
+      expect(s.fallback.provider, 'ollama');
+      expect((s.toJson()['fallback'] as Map)['kind'], 'local');
+    });
+
+    test('fallback is the soonest reset when no local runtime exists', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [
+            QuotaWindow(label: 'w', usedPercent: 100, resetsAt: _now + 7200),
+          ]),
+          _q('claude', [
+            QuotaWindow(label: 'w', usedPercent: 100, resetsAt: _now + 3600),
+          ]),
+        ],
+        _now,
+      );
+      expect(s.fallback.kind, 'soonest_reset');
+      expect(s.fallback.provider, 'claude');
+      expect(s.fallback.resetsAt, _now + 3600);
+    });
+
+    test('fallback is passthrough when there is no signal at all', () {
+      final s = suggestRoute([_q('grok', const [])], _now);
+      expect(s.fallback.kind, 'passthrough');
+      expect(s.fallback.provider, isNull);
+    });
+
+    test('fallback is present on the happy path', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 10)]), // 90% free
+        ],
+        _now,
+      );
+      expect(s.recommended?.provider, 'codex');
+      expect(s.fallback.kind, 'passthrough'); // no local, no reset known
+    });
+  });
 }
