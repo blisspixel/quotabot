@@ -5,6 +5,23 @@ Prerequisites: the [Flutter SDK](https://docs.flutter.dev/get-started/install)
 with C++" (Windows), Xcode and CocoaPods (macOS), or
 `clang cmake ninja-build pkg-config libgtk-3-dev` (Linux).
 
+## One-command setup
+
+From a fresh clone, a single idempotent script builds and installs the CLI and
+the desktop app (with a Desktop/tray shortcut) and finishes by running
+`quotabot doctor`:
+
+```powershell
+pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
+```
+```bash
+bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
+```
+
+The CLI is installed to your per-user bin (`%LOCALAPPDATA%\quotabot\bin` on
+Windows, `~/.local/bin` on macOS and Linux) and added to PATH. Re-run after a
+`git pull` to update. The manual steps below are the same thing by hand.
+
 ## Run from source
 
 ```bash

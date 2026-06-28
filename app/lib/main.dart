@@ -11,6 +11,7 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'demo.dart';
@@ -127,7 +128,7 @@ class Dashboard extends StatefulWidget {
   State<Dashboard> createState() => _DashboardState();
 }
 
-class _DashboardState extends State<Dashboard> with WindowListener {
+class _DashboardState extends State<Dashboard> with WindowListener, TrayListener {
   List<ProviderQuota> _data = const [];
   bool _loading = true;
   late bool _compact = widget.prefs.compact;
@@ -198,6 +199,8 @@ class _DashboardState extends State<Dashboard> with WindowListener {
         ? null
         : Offset(widget.prefs.windowX!, widget.prefs.windowY ?? 0);
     windowManager.addListener(this);
+    trayManager.addListener(this);
+    unawaited(_initTray());
     unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
     unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
     unawaited(windowManager.setMinimumSize(const Size(120, 40)));
@@ -213,6 +216,7 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   @override
   void dispose() {
     windowManager.removeListener(this);
+    trayManager.removeListener(this);
     _refreshTimer?.cancel();
     _tick?.cancel();
     _scroll.dispose();
@@ -223,6 +227,69 @@ class _DashboardState extends State<Dashboard> with WindowListener {
   void onWindowMoved() async {
     _windowPos = await windowManager.getPosition();
     _persistPrefs();
+  }
+
+  // System tray: keep quotabot one click away, and let the window close to the
+  // tray instead of quitting so it can sit quietly in the background. The tray
+  // menu is the way back and the only place that truly quits.
+  Future<void> _initTray() async {
+    try {
+      await trayManager.setIcon(
+        Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
+      );
+      await trayManager.setToolTip('quotabot');
+      await trayManager.setContextMenu(Menu(items: [
+        MenuItem(key: 'show', label: 'Show quotabot'),
+        MenuItem(key: 'refresh', label: 'Refresh now'),
+        MenuItem(key: 'analytics', label: 'Quota analytics'),
+        MenuItem.separator(),
+        MenuItem(key: 'quit', label: 'Quit'),
+      ]));
+      // Only now that the tray exists do we redirect close to hide: otherwise a
+      // platform without a tray would have no way to reopen a hidden window.
+      await windowManager.setPreventClose(true);
+    } catch (_) {
+      // No tray on this platform/session; the window keeps normal close-to-quit.
+    }
+  }
+
+  Future<void> _showWindow() async {
+    await windowManager.show();
+    await windowManager.focus();
+  }
+
+  Future<void> _quit() async {
+    await windowManager.setPreventClose(false);
+    await trayManager.destroy();
+    await windowManager.destroy();
+  }
+
+  @override
+  void onTrayIconMouseDown() => unawaited(_showWindow());
+
+  @override
+  void onTrayIconRightMouseDown() => unawaited(trayManager.popUpContextMenu());
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case 'show':
+        unawaited(_showWindow());
+      case 'refresh':
+        unawaited(_showWindow());
+        _refresh();
+      case 'analytics':
+        unawaited(_showWindow());
+        _showFleet();
+      case 'quit':
+        unawaited(_quit());
+    }
+  }
+
+  @override
+  void onWindowClose() {
+    // Closing hides to the tray (see [_initTray]); Quit lives in the tray menu.
+    unawaited(windowManager.hide());
   }
 
   void _persistPrefs() {

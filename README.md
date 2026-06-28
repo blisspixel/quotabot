@@ -94,8 +94,12 @@ irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 
 Restart your terminal, then run `quotabot doctor`. Claude and Codex should read
 live immediately. Full getting-started guide, including which providers need a
-one-time login: [docs/SETUP.md](docs/SETUP.md). To run from source instead, see
-[docs/BUILDING.md](docs/BUILDING.md).
+one-time login: [docs/SETUP.md](docs/SETUP.md).
+
+To build everything from source in one command (CLI, desktop app, and a
+Desktop/tray shortcut), run `pwsh tools/setup.ps1` on Windows or
+`bash tools/setup.sh` on macOS/Linux (add `-CliOnly` / `--cli-only` for just the
+CLI). Details in [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Keeping Antigravity and Grok live
 

@@ -8,6 +8,21 @@ metadata read: no model calls, no usage tokens, no prompts or code ever read.
 If you are an agent or tool that picks a model/provider, use quotabot to route to
 whichever subscription still has budget instead of stalling on a spent cap.
 
+## Set it up from source (humans or agents)
+
+From a fresh clone, one idempotent command builds and installs everything (the
+CLI, the desktop app, and a Desktop/tray shortcut) and then verifies it with
+`quotabot doctor`. It needs only Flutter/Dart on the machine, and nothing leaves
+the machine.
+
+- Windows: `pwsh tools/setup.ps1`
+- macOS / Linux: `bash tools/setup.sh`
+
+Add `-CliOnly` (PowerShell) or `--cli-only` (bash) to skip the desktop build when
+you only need the routing CLI. For end users who just want the prebuilt CLI, the
+one-line installers in the README download a release binary instead. Build
+details and prerequisites: [docs/BUILDING.md](docs/BUILDING.md).
+
 ## How to call it
 
 Pick whichever transport you already speak. All return the same data.

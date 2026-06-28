@@ -5,6 +5,14 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- System tray for the desktop app: a tray icon with a context menu (show, refresh,
+  quota analytics, quit). The window now closes to the tray instead of quitting,
+  so quotabot can sit quietly in the background; Quit lives in the tray menu.
+- One-command from-source setup: `tools/setup.ps1` (Windows) and `tools/setup.sh`
+  (macOS/Linux) build and install the CLI and the desktop app, create a shortcut,
+  and finish with `quotabot doctor`. AGENTS.md documents it so an AI agent pointed
+  at the repo can set everything up unattended. `tools/create-shortcut.ps1`
+  (re)creates the Windows Desktop shortcut on its own.
 - Routing suggestions now carry a versioned `schema` (`quotabot.suggest.v1`) and a
   guaranteed non-null `fallback` (a running local runtime, the soonest-resetting
   subscription to wait for, or a passthrough to the requested model), so a caller

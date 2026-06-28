@@ -15,6 +15,7 @@ dependencies:
     path: ../collector
   flutter_local_notifications: ^17.2.2
   timezone: ^0.9.0
+  tray_manager: ^0.5.3
 
 dev_dependencies:
   flutter_test:
@@ -23,3 +24,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/tray_icon.ico
+    - assets/tray_icon.png
