@@ -93,8 +93,33 @@ class ProviderLogo extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final painter = switch (provider) {
+  Widget build(BuildContext context) => SizedBox(
+    width: size,
+    height: size,
+    child: CustomPaint(painter: providerLogoPainter(provider, color)),
+  );
+}
+
+/// Every provider id that has a dedicated branded mark (everything else falls
+/// back to a neutral dot). Kept beside [providerLogoPainter] as the single list
+/// the test pins, so a newly supported provider that forgets its logo is caught.
+const providersWithLogo = {
+  'codex',
+  'claude',
+  'grok',
+  'antigravity',
+  'kiro',
+  'cursor',
+  'windsurf',
+  'ollama',
+  'lmstudio',
+  'lemonade',
+};
+
+/// The painter for a provider's logo. A known [provider] gets its branded mark;
+/// anything else gets the neutral fallback dot.
+CustomPainter providerLogoPainter(String provider, Color color) =>
+    switch (provider) {
       'codex' => _OpenAIKnot(color),
       'claude' => _ClaudeBurst(),
       'grok' => _GrokX(color),
@@ -104,15 +129,9 @@ class ProviderLogo extends StatelessWidget {
       'windsurf' => _WindsurfW(color),
       'ollama' => _OllamaLlama(color),
       'lmstudio' => _LmStudioMark(),
+      'lemonade' => _LemonadeMark(),
       _ => _Fallback(color),
     };
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CustomPaint(painter: painter),
-    );
-  }
-}
 
 /// OpenAI-style interlocking knot, approximated by three rotated stroked
 /// rounded-hexagon loops - reads as the hexafoil mark, single color.
@@ -382,6 +401,44 @@ class _LmStudioMark extends CustomPainter {
         ..color = Colors.white.withValues(alpha: 0.92)
         ..style = PaintingStyle.fill,
     );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter o) => false;
+}
+
+/// Lemonade Server: a bright lemon (fixed palette, like the other brand marks),
+/// a slightly tilted yellow body with pointed tips and a small green leaf.
+class _LemonadeMark extends CustomPainter {
+  static const _yellow = Color(0xFFF5C518);
+  static const _leaf = Color(0xFF4CAF50);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final body = Paint()..color = _yellow;
+
+    canvas.save();
+    canvas.translate(w * 0.5, h * 0.56);
+    canvas.rotate(
+      -math.pi / 9,
+    ); // gentle tilt, like a lemon resting on its side
+    // Lemon body.
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset.zero, width: w * 0.7, height: h * 0.5),
+      body,
+    );
+    // Pointed tips at each end for the classic lemon silhouette.
+    canvas.drawCircle(Offset(w * 0.34, 0), w * 0.055, body);
+    canvas.drawCircle(Offset(-w * 0.34, 0), w * 0.055, body);
+    canvas.restore();
+
+    // A single leaf above the lemon.
+    final leaf = Path()
+      ..moveTo(w * 0.52, h * 0.30)
+      ..quadraticBezierTo(w * 0.78, h * 0.20, w * 0.62, h * 0.08)
+      ..quadraticBezierTo(w * 0.46, h * 0.20, w * 0.52, h * 0.30)
+      ..close();
+    canvas.drawPath(leaf, Paint()..color = _leaf);
   }
 
   @override

@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Lemonade Server now has its own branded lemon logo in the app instead of the
+  generic placeholder dot, so every supported provider shows a real mark. The
+  provider-to-logo map is pinned by a test, so a newly supported provider that
+  ships without a logo is caught.
 - `quotabot top`: a live, htop-style dashboard for the terminal. One bar per
   rolling window for every provider, colored on the headroom scale with live
   reset countdowns, local runtimes as always-on fallbacks, a header pool gauge,
