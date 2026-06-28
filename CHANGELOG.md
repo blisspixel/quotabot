@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.4.0 - 2026-06-28
+
 ### Added
 - `quotabot calibration`: grades quotabot's own strand predictions against your
   recorded history by replaying the predictor over the hourly buckets it already

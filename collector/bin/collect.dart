@@ -14,7 +14,7 @@ import 'package:quotabot_collector/util.dart';
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
 /// local metadata lookup, not a model call, so it costs no usage tokens.
 
-const _version = '0.3.0';
+const _version = '0.4.0';
 
 late AnsiStyle style;
 
