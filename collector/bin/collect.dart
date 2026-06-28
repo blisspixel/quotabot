@@ -110,6 +110,9 @@ Future<void> main(List<String> args) async {
         _printModels(buildModelRegistry(results, now, catalog: kModelCatalog));
       }
       return;
+    case 'calibration':
+      await _runCalibration(wantsJson);
+      return;
   }
 
   // Snapshot and the default status table share one collect.
@@ -316,6 +319,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  models              every model you can route to now, with budget + caps',
+  );
+  stdout.writeln(
+    '  calibration         how often quotabot\'s predictions come true (history)',
   );
   stdout.writeln(
     '  stats [provider]    90-day analytics: distribution, reliability, pace',
@@ -574,6 +580,78 @@ void _printDoctor(List<ProviderQuota> results) {
     }
     print(
       '  (Aider/Cline etc often use underlying provider quotas already tracked above.)',
+    );
+  }
+}
+
+/// `calibration`: grade quotabot's own strand predictions against the user's
+/// recorded history, so "how often is it right" is a measured number, not a claim.
+Future<void> _runCalibration(bool wantsJson) async {
+  final results = await _read();
+  final now = nowEpoch();
+  final byProvider = <String, List<HeadroomBucket>>{};
+  for (final q in results.where((q) => !q.isLocal)) {
+    final b = loadBuckets(q.provider);
+    if (b.isNotEmpty) byProvider[q.provider] = b;
+  }
+  final overall = calibrationAcross(byProvider, now);
+  if (wantsJson) {
+    print(_jsonPretty({
+      'schema': 'quotabot.calibration.v1',
+      'generated_at': now,
+      'overall': overall.toJson(),
+      'by_provider': {
+        for (final e in byProvider.entries)
+          e.key: calibrationFromHistory(e.value, now).toJson(),
+      },
+    }));
+  } else {
+    _printCalibration(overall, byProvider, now);
+  }
+}
+
+/// Prints the calibration report: the headline accuracy, a reliability diagram
+/// (predicted probability versus what actually happened), and a per-provider line.
+void _printCalibration(
+  CalibrationReport overall,
+  Map<String, List<HeadroomBucket>> byProvider,
+  int now,
+) {
+  print(
+    'quotabot calibration  (how often quotabot\'s strand calls come true, '
+    '0 usage tokens)\n',
+  );
+  if (overall.samples == 0) {
+    print(
+        '  not enough resolved history yet; leave quotabot running for a few');
+    print('  hours and check back. It grades each prediction once its horizon');
+    print('  has fully elapsed, so this fills in over time.');
+    return;
+  }
+  final pct = (overall.calibration! * 100).round();
+  print(
+    '  ${style.bold('$pct% calibrated')} over ${overall.samples} predictions, '
+    '${overall.spanDays}d of history',
+  );
+  print(
+    style.dim(
+      '  Brier ${overall.brier!.toStringAsFixed(3)} (0 = perfect), '
+      '${overall.horizonHours}h horizon\n',
+    ),
+  );
+  print(style.dim('  predicted -> actually spent   (predictions)'));
+  for (final b in overall.bins) {
+    final pp = (b.meanPredicted * 100).round().toString().padLeft(3);
+    final oo = (b.observedFrequency * 100).round().toString().padLeft(3);
+    print('    $pp%  ->  $oo%   ${style.dim('(${b.count})')}');
+  }
+  print('');
+  for (final e in byProvider.entries) {
+    final r = calibrationFromHistory(e.value, now);
+    if (r.samples == 0) continue;
+    print(
+      '  ${e.key.padRight(12)} ${(r.calibration! * 100).round()}% '
+      'calibrated  ${style.dim('(${r.samples})')}',
     );
   }
 }

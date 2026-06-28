@@ -67,6 +67,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
 | `top`                  | Live dashboard that redraws in place (q quit, r now). |
 | `models`               | Every model you can route to now, with budget + caps. |
+| `calibration`          | How often quotabot's predictions come true (history). |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, reliability, pace.    |

@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot calibration`: grades quotabot's own strand predictions against your
+  recorded history by replaying the predictor over the hourly buckets it already
+  keeps, and reports how often its calls come true as a calibration percentage, a
+  Brier score, and a reliability diagram (per provider and overall). No new
+  storage and no provider calls. It is honest by construction: a prediction is
+  only graded once its horizon has fully elapsed, and it says plainly when there
+  is not enough resolved history yet. A `quotabot.calibration.v1` JSON shape too.
 - `quotabot top` gains gradient meters: on a truecolor terminal each bar fills
   with a smooth green-to-red gradient that deepens toward exhaustion, with
   color-depth auto-detected (truecolor / 256 / 16 / none) and a clean fall back to
