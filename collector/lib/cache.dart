@@ -194,9 +194,20 @@ void recordHeadroomSample(String provider, double headroom, int now) {
 /// I/O shell over [loadBuckets] and [burnRatePerHour] so [suggestRoute] stays a
 /// pure function: the burn map is built here at the I/O boundary and passed in.
 Map<String, double?> recentBurnByProvider(Iterable<String> providers, int now) {
-  final out = <String, double?>{};
+  final stats = recentBurnStatsByProvider(providers, now);
+  return {for (final e in stats.entries) e.key: e.value.perHour};
+}
+
+/// Recent burn with its uncertainty per provider, for risk-aware routing. A thin
+/// I/O shell over [loadBuckets] and [burnRateWithError] so [suggestRoute] stays
+/// pure: the stats are read here at the I/O boundary and passed in.
+Map<String, BurnStat> recentBurnStatsByProvider(
+  Iterable<String> providers,
+  int now,
+) {
+  final out = <String, BurnStat>{};
   for (final provider in providers) {
-    out[provider] = burnRatePerHour(loadBuckets(provider), now);
+    out[provider] = burnRateWithError(loadBuckets(provider), now);
   }
   return out;
 }

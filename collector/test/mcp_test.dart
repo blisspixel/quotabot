@@ -151,7 +151,7 @@ void main() {
       registerQuotabotTools(
         server,
         snapshot: () async => snapshot,
-        burnByProvider: (providers, now) => const {},
+        burnByProvider: (providers, now) => const <String, BurnStat>{},
         now: () => _now,
       );
       await server.connect(serverT);

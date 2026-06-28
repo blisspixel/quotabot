@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'models.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
@@ -99,6 +101,18 @@ class RouteCandidate {
   /// history was available. Null when unknown; never set for local runtimes.
   final double? burnPerHour;
 
+  /// Standard error of [burnPerHour], when estimable. Null for local runtimes or
+  /// when there were too few history points to estimate it.
+  final double? burnSe;
+
+  /// Probability the binding window is spent before it resets (0..1), from a
+  /// first-passage forecast. Null when burn, its error, or the reset are unknown.
+  final double? strandProbability;
+
+  /// How much to trust this candidate's numbers, in (0, 1]: a blend of freshness
+  /// (cached reads count less) and burn-estimate sample adequacy.
+  final double? confidence;
+
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
@@ -118,6 +132,9 @@ class RouteCandidate {
     required this.stale,
     required this.available,
     this.burnPerHour,
+    this.burnSe,
+    this.strandProbability,
+    this.confidence,
   });
 
   Map<String, dynamic> toJson() => {
@@ -128,6 +145,9 @@ class RouteCandidate {
         'headroom_percent': headroom,
         'effective_headroom_percent': effectiveHeadroom,
         if (burnPerHour != null) 'burn_percent_per_hour': burnPerHour,
+        if (burnSe != null) 'burn_se_percent_per_hour': burnSe,
+        if (strandProbability != null) 'strand_probability': strandProbability,
+        if (confidence != null) 'confidence': confidence,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -186,16 +206,27 @@ class RouteSuggestion {
   /// Always-present next step if the recommendation is skipped or null.
   final RouteFallback fallback;
 
+  /// Epoch seconds the decision was made, for provenance (callers can age it).
+  final int asOf;
+
+  /// The risk aversion used: 0 ranks on mean headroom, higher discounts
+  /// uncertain (high burn-error) providers more. Echoed so callers know the mode.
+  final double riskZ;
+
   const RouteSuggestion({
     required this.recommended,
     required this.ranked,
     required this.reason,
     required this.usingLocalFallback,
     required this.fallback,
+    required this.asOf,
+    required this.riskZ,
   });
 
   Map<String, dynamic> toJson() => {
         'schema': 'quotabot.suggest.v1',
+        'as_of': asOf,
+        'risk_z': riskZ,
         'recommended': recommended?.toJson(),
         'reason': reason,
         'using_local_fallback': usingLocalFallback,
@@ -246,6 +277,73 @@ String _burnNote(RouteCandidate c) {
   return ', ~${e.round()}% after burn';
 }
 
+/// Headroom discounted by the expected burn over [leadHours] and, when [z] > 0
+/// and a burn standard error [burnSe] is known, by [z] standard deviations of
+/// forecast uncertainty (`z * burnSe * leadHours`). At `z = 0` this is exactly
+/// `headroom - burn * leadHours`, the risk-neutral effective headroom we already
+/// ship, so a caller that does not opt into risk sees identical numbers.
+double riskAdjustedHeadroom(
+  double headroom,
+  double? burn,
+  double? burnSe,
+  double leadHours,
+  double z,
+) {
+  final b = (burn != null && burn > 0) ? burn : 0.0;
+  final risk = (z > 0 && burnSe != null) ? z * burnSe * leadHours : 0.0;
+  return (headroom - b * leadHours - risk).clamp(0.0, 100.0);
+}
+
+/// Probability the binding window is spent before it resets, from a Gaussian
+/// first-passage approximation: `Phi((burn * T - headroom) / (burnSe * T))` with
+/// `T` the hours to reset. Null when burn, its error, or the reset are unknown,
+/// or when there is no burn (nothing to deplete it).
+double? strandProbability(
+  double headroom,
+  double? burn,
+  double? burnSe,
+  int? resetsAt,
+  int now,
+) {
+  if (burn == null || burn <= 0 || burnSe == null || resetsAt == null) {
+    return null;
+  }
+  final tHours = (resetsAt - now) / 3600.0;
+  if (tHours <= 0) return null;
+  final sd = burnSe * tHours;
+  if (sd <= 0) return burn * tHours >= headroom ? 1.0 : 0.0;
+  return _normalCdf((burn * tHours - headroom) / sd);
+}
+
+/// How much to trust a candidate's numbers, in (0, 1]: a stale (cached) read is
+/// half-trusted, and a metered provider's burn estimate is weighted by sample
+/// adequacy `n / (n + 4)` (a shrinkage prior, so a two-point fit is not trusted
+/// like a twenty-point one). Local runtimes need no burn, so only freshness.
+double _confidence(ProviderQuota q, double? burnSe, int samples) {
+  final fresh = q.stale ? 0.5 : 1.0;
+  if (q.isLocal) return fresh;
+  final adequacy = burnSe == null ? 0.6 : samples / (samples + 4);
+  return (fresh * adequacy).clamp(0.0, 1.0).toDouble();
+}
+
+/// Standard normal CDF via the Abramowitz & Stegun 7.1.26 erf approximation
+/// (max abs error ~1.5e-7), so routing needs no statistics dependency.
+double _normalCdf(double x) => 0.5 * (1 + _erf(x / math.sqrt2));
+
+double _erf(double x) {
+  final sign = x < 0 ? -1.0 : 1.0;
+  final ax = x.abs();
+  final t = 1.0 / (1.0 + 0.3275911 * ax);
+  final y = 1.0 -
+      (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t -
+                      0.284496736) *
+                  t +
+              0.254829592) *
+          t *
+          math.exp(-ax * ax);
+  return sign * y;
+}
+
 /// Recommends where to route the next request.
 ///
 /// Policy: prefer the metered subscription with the most remaining headroom,
@@ -271,14 +369,23 @@ RouteSuggestion suggestRoute(
   double comfortThreshold = 15,
   Map<String, double?> burnByProvider = const {},
   double leadHours = 1.0,
+  Map<String, BurnStat> burnStatsByProvider = const {},
+  double riskZ = 0,
 }) {
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
-    final burn = q.isLocal ? null : burnByProvider[q.provider];
-    final discount = (burn != null && burn > 0) ? burn * leadHours : 0.0;
-    final effective =
-        headroom == null ? null : (headroom - discount).clamp(0.0, 100.0);
+    final stat = q.isLocal ? null : burnStatsByProvider[q.provider];
+    final burn =
+        q.isLocal ? null : (stat?.perHour ?? burnByProvider[q.provider]);
+    final burnSe = stat?.sePerHour;
+    final samples = stat?.samples ?? 0;
+    final effective = headroom == null
+        ? null
+        : riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ);
+    final strand = headroom == null
+        ? null
+        : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
     return RouteCandidate(
       provider: q.provider,
       account: q.account,
@@ -287,6 +394,9 @@ RouteSuggestion suggestRoute(
       headroom: headroom,
       effectiveHeadroom: effective,
       burnPerHour: burn,
+      burnSe: burnSe,
+      strandProbability: strand,
+      confidence: _confidence(q, burnSe, samples),
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,
@@ -326,6 +436,8 @@ RouteSuggestion suggestRoute(
         reason: reason,
         usingLocalFallback: usingLocalFallback,
         fallback: fallback,
+        asOf: now,
+        riskZ: riskZ,
       );
 
   if (usable.isEmpty) {

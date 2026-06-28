@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'models.dart';
+
 /// Historical quota analytics over compact, mergeable aggregate buckets.
 ///
 /// Storing every raw snapshot for 90 days is wasteful, so headroom samples are
@@ -218,14 +220,27 @@ double? burnRatePerHour(
   List<HeadroomBucket> buckets,
   int now, {
   int lookbackHours = 6,
+}) =>
+    burnRateWithError(buckets, now, lookbackHours: lookbackHours).perHour;
+
+/// Recent burn rate with an uncertainty estimate, from the last [lookbackHours]
+/// of hourly buckets. Returns the burn (percent of quota per hour; negative when
+/// headroom is easing) as the negated least-squares slope of headroom over time,
+/// the standard error of that slope (`se = sqrt( (SSR / (n - 2)) / Sxx )`, the
+/// textbook OLS slope error; null with fewer than three points, where it is
+/// undefined), and the sample count. Pure.
+BurnStat burnRateWithError(
+  List<HeadroomBucket> buckets,
+  int now, {
+  int lookbackHours = 6,
 }) {
   final cutoff = now - lookbackHours * 3600;
   final recent =
       buckets.where((b) => b.count > 0 && b.start >= cutoff).toList();
-  if (recent.length < 2) return null;
-  final x0 = recent.first.start;
-  var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
   final n = recent.length;
+  if (n < 2) return BurnStat(samples: n);
+  final x0 = recent.first.start;
+  var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0, syy = 0.0;
   for (final b in recent) {
     final x = (b.start - x0) / 3600.0;
     final y = b.mean;
@@ -233,11 +248,18 @@ double? burnRatePerHour(
     sy += y;
     sxx += x * x;
     sxy += x * y;
+    syy += y * y;
   }
-  final denom = n * sxx - sx * sx;
-  if (denom == 0) return null;
-  final slope = (n * sxy - sx * sy) / denom;
-  return -slope; // headroom falling -> positive burn
+  final sxxC = sxx - sx * sx / n; // centered sum of squares in x
+  if (sxxC <= 0) return BurnStat(samples: n);
+  final slope = (sxy - sx * sy / n) / sxxC;
+  double? se;
+  if (n >= 3) {
+    final syyC = syy - sy * sy / n;
+    final ssr = (syyC - slope * slope * sxxC).clamp(0.0, double.infinity);
+    se = math.sqrt(ssr / (n - 2) / sxxC);
+  }
+  return BurnStat(perHour: -slope, sePerHour: se, samples: n);
 }
 
 /// Mean headroom by local day of week (0 = Monday .. 6 = Sunday), null where no

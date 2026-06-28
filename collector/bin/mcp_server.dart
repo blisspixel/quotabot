@@ -34,7 +34,7 @@ Future<void> main() async {
   registerQuotabotTools(
     server,
     snapshot: snapshot,
-    burnByProvider: recentBurnByProvider,
+    burnByProvider: recentBurnStatsByProvider,
   );
 
   await server.connect(StdioServerTransport());

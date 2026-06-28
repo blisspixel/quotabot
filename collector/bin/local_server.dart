@@ -73,8 +73,8 @@ Future<void> main(List<String> args) async {
           suggestRoute(
             snap,
             now,
-            burnByProvider:
-                recentBurnByProvider(snap.map((q) => q.provider), now),
+            burnStatsByProvider:
+                recentBurnStatsByProvider(snap.map((q) => q.provider), now),
           ).toJson(),
         );
       } else if (path == '/health') {

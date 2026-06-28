@@ -192,3 +192,15 @@ class ProviderQuota {
   /// True when this snapshot carries usable quota windows.
   bool get hasWindows => windows.isNotEmpty;
 }
+
+/// A recent burn-rate estimate with its uncertainty, the input routing uses to
+/// forecast headroom. [perHour] is percent of quota consumed per hour (negative
+/// when headroom is easing), [sePerHour] the standard error of that estimate
+/// (null when too few points to estimate it), and [samples] the number of points
+/// it was fit from. Produced by `burnRateWithError`; consumed by `suggestRoute`.
+class BurnStat {
+  final double? perHour;
+  final double? sePerHour;
+  final int samples;
+  const BurnStat({this.perHour, this.sePerHour, this.samples = 0});
+}

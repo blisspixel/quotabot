@@ -4,6 +4,19 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Risk-aware, self-explaining routing. `suggest` (CLI, the MCP `suggest_provider`
+  tool, and the local `/suggest`) now estimates each provider's burn-rate
+  uncertainty (the standard error of the fitted slope) and exposes, per candidate,
+  `burn_se_percent_per_hour`, a first-passage `strand_probability` (the chance the
+  binding window is spent before it resets), and a `confidence` (freshness times
+  burn-sample adequacy). The payload also carries `as_of` and `risk_z` provenance.
+  A new `--risk=Z` flag opts into risk-adjusted ranking: at the default `Z=0` the
+  result is identical to before (mean headroom), and higher `Z` discounts
+  providers whose burn is uncertain, so a cap being drawn down erratically is
+  preferred less than its average headroom suggests. The CLI `suggest` view shows
+  the confidence and a strand warning per candidate.
+
 ## 0.3.0 - 2026-06-27
 
 ### Added

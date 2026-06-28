@@ -90,7 +90,8 @@ Future<void> main(List<String> args) async {
       return;
     case 'suggest':
       final results = await _read();
-      final s = _suggestFor(results, nowEpoch());
+      final riskZ = _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
+      final s = _suggestFor(results, nowEpoch(), riskZ: riskZ);
       wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       return;
     case 'stats':
@@ -119,12 +120,29 @@ Future<void> main(List<String> args) async {
 
 /// The routing recommendation for [results], discounted by recent burn. Shared
 /// by `suggest`, `doctor`, and the live `top` view so they never diverge.
-RouteSuggestion _suggestFor(List<ProviderQuota> results, int now) =>
+RouteSuggestion _suggestFor(
+  List<ProviderQuota> results,
+  int now, {
+  double riskZ = 0,
+}) =>
     suggestRoute(
       results,
       now,
-      burnByProvider: recentBurnByProvider(results.map((q) => q.provider), now),
+      burnStatsByProvider:
+          recentBurnStatsByProvider(results.map((q) => q.provider), now),
+      riskZ: riskZ,
     );
+
+/// Reads a `--name=double` option from [flags], or [dflt] when absent or invalid.
+double _doubleOption(Iterable<String> flags, String name, double dflt) {
+  final prefix = '--$name=';
+  for (final f in flags) {
+    if (f.startsWith(prefix)) {
+      return double.tryParse(f.substring(prefix.length)) ?? dflt;
+    }
+  }
+  return dflt;
+}
 
 /// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
 int _intOption(Iterable<String> flags, String name, int dflt) {
@@ -310,6 +328,10 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --interval=N        top: seconds between refreshes (default 10, min 2)',
+  );
+  stdout.writeln(
+    '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
+    'uncertain caps)',
   );
   stdout.writeln('');
   stdout.writeln(
@@ -569,7 +591,13 @@ void _printSuggest(RouteSuggestion s) {
     final head = c.headroom == null ? pct : style.health(c.headroom!, pct);
     final kind = style.dim('[${c.stale ? 'cached' : 'live'}]');
     final state = c.available ? '' : style.red('  spent');
-    print('    ${c.provider.padRight(12)} $head free  $kind$state');
+    final conf = c.confidence == null
+        ? ''
+        : style.dim('  conf ${(c.confidence! * 100).round()}%');
+    final strand = (c.strandProbability != null && c.strandProbability! >= 0.2)
+        ? style.orange('  strand ${(c.strandProbability! * 100).round()}%')
+        : '';
+    print('    ${c.provider.padRight(12)} $head free  $kind$conf$strand$state');
   }
 }
 

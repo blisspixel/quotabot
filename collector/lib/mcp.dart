@@ -57,14 +57,15 @@ Map<String, dynamic> mostHeadroomResponse(
 }
 
 /// The full routing recommendation, ranked alternatives, and guaranteed
-/// fallback. [burnByProvider] discounts each provider's headroom by its recent
-/// burn; pass an empty map to rank on raw headroom.
+/// fallback. [burnStatsByProvider] supplies each provider's recent burn and its
+/// uncertainty; pass an empty map to rank on raw headroom.
 Map<String, dynamic> suggestResponse(
   List<ProviderQuota> providers,
   int now, {
-  Map<String, double?> burnByProvider = const {},
+  Map<String, BurnStat> burnStatsByProvider = const {},
 }) =>
-    suggestRoute(providers, now, burnByProvider: burnByProvider).toJson();
+    suggestRoute(providers, now, burnStatsByProvider: burnStatsByProvider)
+        .toJson();
 
 /// Whether a single named provider has quota available now, or an
 /// `{error: 'unknown provider'}` shape when it is not connected.
@@ -111,7 +112,7 @@ final _providerSchema = JsonSchema.object(
   description: 'A provider snapshot. Unlisted fields may be added over time.',
   properties: {
     'provider': JsonSchema.string(description: 'Stable provider id.'),
-    'name': JsonSchema.string(description: 'Human display name.'),
+    'display_name': JsonSchema.string(description: 'Human display name.'),
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
     'kind': JsonSchema.string(description: '"subscription" or "local".'),
@@ -171,9 +172,19 @@ final _candidateSchema = JsonSchema.object(
     'local': JsonSchema.boolean(description: 'True for a local runtime.'),
     'headroom_percent': _nullable(JsonSchema.number()),
     'effective_headroom_percent': _nullable(JsonSchema.number(
-      description: 'Headroom after discounting recent burn.',
+      description: 'Headroom after discounting recent burn (and risk if set).',
     )),
     'burn_percent_per_hour': JsonSchema.number(),
+    'burn_se_percent_per_hour': JsonSchema.number(
+      description: 'Standard error of the burn estimate, when estimable.',
+    ),
+    'strand_probability': JsonSchema.number(
+      description: 'Probability (0..1) the window is spent before it resets.',
+    ),
+    'confidence': JsonSchema.number(
+      description:
+          'Trust in this candidate (0..1): freshness x sample adequacy.',
+    ),
     'resets_at': JsonSchema.integer(),
     'stale': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),
@@ -200,6 +211,9 @@ final suggestOutputSchema = JsonSchema.object(
       'guaranteed fallback.',
   properties: {
     'schema': JsonSchema.string(),
+    'as_of':
+        JsonSchema.integer(description: 'Epoch seconds the decision was made.'),
+    'risk_z': JsonSchema.number(description: 'Risk aversion used (0 = mean).'),
     'recommended': _nullable(_candidateSchema),
     'reason': JsonSchema.string(),
     'using_local_fallback': JsonSchema.boolean(),
@@ -229,9 +243,9 @@ final availabilityOutputSchema = JsonSchema.object(
 /// share one wiring path while feeding real or fixture data respectively.
 typedef SnapshotProvider = Future<List<ProviderQuota>> Function();
 
-/// Returns recent burn (percent of quota per hour) per provider id. Kept out of
-/// the pure layer because the real implementation reads history from disk.
-typedef BurnProvider = Map<String, double?> Function(
+/// Returns recent burn and its uncertainty per provider id. Kept out of the pure
+/// layer because the real implementation reads history from disk.
+typedef BurnProvider = Map<String, BurnStat> Function(
   Iterable<String> providers,
   int now,
 );
@@ -314,7 +328,8 @@ void registerQuotabotTools(
         suggestResponse(
           results,
           n,
-          burnByProvider: burnByProvider(results.map((q) => q.provider), n),
+          burnStatsByProvider:
+              burnByProvider(results.map((q) => q.provider), n),
         ),
       );
     },
