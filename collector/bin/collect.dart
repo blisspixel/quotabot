@@ -188,6 +188,8 @@ String _clock() {
 /// exiting, so `quotabot top | cat` still yields a snapshot.
 Future<void> _runTop(Set<String> flags) async {
   final color = _useColor(flags);
+  final depth =
+      detectColorDepth(Platform.environment, hasTerminal: stdout.hasTerminal);
   final interval = _intOption(flags, 'interval', 10).clamp(2, 3600);
 
   if (!stdout.hasTerminal) {
@@ -224,6 +226,7 @@ Future<void> _runTop(Set<String> flags) async {
         width: _termCols(),
         color: color,
         clock: _clock(),
+        depth: depth,
       );
     }
     final buf = StringBuffer()

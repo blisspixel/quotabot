@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot top` gets btop-grade meters: on a truecolor terminal each bar fills
+  with a smooth green-to-red gradient that heats up toward exhaustion, with
+  color-depth auto-detected (truecolor / 256 / 16 / none) and a clean fall back to
+  the single-color bar, plain text, NO_COLOR, and narrow terminals.
 - Model registry: `quotabot models` (and the MCP `list_models` tool) list every
   model you can route to right now across cloud providers and local runtimes, each
   tagged with the live budget that gates it (headroom percent, binding window,

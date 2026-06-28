@@ -1,4 +1,5 @@
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:test/test.dart';
@@ -140,6 +141,64 @@ void main() {
     ];
     expect(_frame(providers, color: true).join(), contains('\x1B['));
     expect(_frame(providers, color: false).join(), isNot(contains('\x1B[')));
+  });
+
+  test('a truecolor terminal draws a 24-bit gradient meter', () {
+    final out = renderTopFrame(
+      providers: [
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 60)]),
+      ],
+      suggestion: suggestRoute(const [], _now),
+      now: _now,
+      width: 80,
+      color: true,
+      clock: '12:00:00',
+      depth: ColorDepth.truecolor,
+    ).join();
+    expect(out, contains('\x1B[38;2;')); // 24-bit foreground sequence
+  });
+
+  test('without truecolor the gradient sequence is not used', () {
+    final out = renderTopFrame(
+      providers: [
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 60)]),
+      ],
+      suggestion: suggestRoute(const [], _now),
+      now: _now,
+      width: 80,
+      color: true,
+      clock: '12:00:00',
+      depth: ColorDepth.ansi16,
+    ).join();
+    expect(out, isNot(contains('\x1B[38;2;')));
+  });
+
+  group('detectColorDepth', () {
+    test('NO_COLOR forces none even on a terminal', () {
+      expect(
+        detectColorDepth({'NO_COLOR': '1'}, hasTerminal: true),
+        ColorDepth.none,
+      );
+    });
+    test('no terminal is none', () {
+      expect(detectColorDepth({}, hasTerminal: false), ColorDepth.none);
+    });
+    test('COLORTERM=truecolor is truecolor', () {
+      expect(
+        detectColorDepth({'COLORTERM': 'truecolor'}, hasTerminal: true),
+        ColorDepth.truecolor,
+      );
+    });
+    test('a 256-color TERM is ansi256, else ansi16', () {
+      expect(
+        detectColorDepth({'TERM': 'xterm-256color'}, hasTerminal: true),
+        ColorDepth.ansi256,
+      );
+      expect(
+        detectColorDepth({'TERM': 'xterm'}, hasTerminal: true),
+        ColorDepth.ansi16,
+      );
+    });
   });
 
   test('an empty fleet still renders a usable frame', () {

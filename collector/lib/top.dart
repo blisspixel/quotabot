@@ -66,16 +66,37 @@ int _barWidth(int width) {
   return (width - overhead).clamp(6, _barMax);
 }
 
-/// A horizontal meter: filled to the used fraction and colored by the remaining
-/// headroom, htop-style (a fuller, redder bar means less budget left).
-List<_Cell> _bar(double usedPct, double remaining, int barW) {
+/// RGB on the headroom scale: red (spent) through amber to green (healthy),
+/// for smooth 24-bit gradient meters. Pure.
+(int, int, int) _healthRgb(double remaining) {
+  final r = remaining.clamp(0, 100).toDouble();
+  int lerp(int a, int b, double t) => (a + (b - a) * t).round();
+  if (r < 50) {
+    final t = r / 50; // red -> amber
+    return (lerp(0xDC, 0xD2, t), lerp(0x32, 0x96, t), lerp(0x2F, 0x14, t));
+  }
+  final t = (r - 50) / 50; // amber -> green
+  return (lerp(0xD2, 0x3C, t), lerp(0x96, 0xB4, t), lerp(0x14, 0x4B, t));
+}
+
+/// A horizontal meter: filled to the used fraction. On a truecolor terminal the
+/// fill is a green-to-red gradient (cells nearer the used frontier run redder, so
+/// the bar visibly "heats up" toward exhaustion); otherwise it falls back to a
+/// single headroom-colored fill. htop-style, but with btop-grade gradient.
+List<_Cell> _bar(double usedPct, double remaining, int barW, AnsiStyle s) {
   final filled = ((usedPct.clamp(0, 100) / 100) * barW).round().clamp(0, barW);
-  return [
-    _Cell('[', (s, t) => s.dim(t)),
-    _Cell('█' * filled, (s, t) => s.health(remaining, t)),
-    _Cell('░' * (barW - filled), (s, t) => s.dim(t)),
-    _Cell(']', (s, t) => s.dim(t)),
-  ];
+  final cells = <_Cell>[_Cell('[', (s, t) => s.dim(t))];
+  if (s.truecolor) {
+    for (var i = 0; i < filled; i++) {
+      final (r, g, b) = _healthRgb(100.0 * (1 - (i + 1) / barW));
+      cells.add(_Cell('█', (s, t) => s.rgb(r, g, b, t)));
+    }
+  } else {
+    cells.add(_Cell('█' * filled, (s, t) => s.health(remaining, t)));
+  }
+  cells.add(_Cell('░' * (barW - filled), (s, t) => s.dim(t)));
+  cells.add(_Cell(']', (s, t) => s.dim(t)));
+  return cells;
 }
 
 /// "3d12h" / "2h14m" / "now" countdown from [now] to [resetsAt].
@@ -149,7 +170,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s) {
     final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label),
-      ..._bar(used, remaining, barW),
+      ..._bar(used, remaining, barW, s),
       _Cell(' '),
       _Cell('${remaining.round().toString().padLeft(3)}% free',
           (s, t) => s.health(remaining, t)),
@@ -200,9 +221,10 @@ List<String> renderTopFrame({
   required int width,
   required bool color,
   required String clock,
+  ColorDepth depth = ColorDepth.none,
 }) {
   final w = width < 24 ? 24 : width;
-  final s = AnsiStyle(color);
+  final s = AnsiStyle(color, depth: depth);
   final lines = <String>[];
 
   final pool = _poolHeadroom(providers, now);
