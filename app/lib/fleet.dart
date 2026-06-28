@@ -198,20 +198,30 @@ class _FleetScreenState extends State<FleetScreen> {
     );
 
     return Scaffold(
-      backgroundColor: bg,
-      body: Column(
-        children: [
-          _bar(context, c, oracle),
-          _tabs(c),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-              child: _range == FleetRange.now
-                  ? _liveView(nodes, now, c)
-                  : _historyView(now, c),
+      // Transparent so the rounded card shows on the frameless window, matching
+      // the main quota view's corners instead of filling square to the edges.
+      backgroundColor: Colors.transparent,
+      body: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: c.line),
+        ),
+        child: Column(
+          children: [
+            _bar(context, c, oracle),
+            _tabs(c),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+                child: _range == FleetRange.now
+                    ? _liveView(nodes, now, c)
+                    : _historyView(now, c),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

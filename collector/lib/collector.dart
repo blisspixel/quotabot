@@ -7,9 +7,12 @@ import 'adapters/kiro.dart';
 import 'adapters/lemonade.dart';
 import 'adapters/lmstudio.dart';
 import 'adapters/ollama.dart';
+import 'dart:io';
+
 import 'adapters/windsurf.dart';
 import 'analysis.dart';
 import 'cache.dart';
+import 'demo.dart';
 import 'models.dart';
 import 'util.dart';
 
@@ -31,6 +34,11 @@ bool _sweptTemp = false;
 /// Runs every provider adapter concurrently and returns their snapshots.
 /// Shared by the CLI (bin/collect.dart) and the desktop app.
 Future<List<ProviderQuota>> collectAll() async {
+  // Demo mode: synthetic data for previews and screenshots. Returns before any
+  // adapter call or analytics write, so it touches no account and no history.
+  if (Platform.environment['QUOTABOT_DEMO'] == '1') {
+    return demoProviders(nowEpoch());
+  }
   if (!_sweptTemp) {
     _sweptTemp = true;
     sweepStaleTempFiles(); // once per process, clear any crash leftovers

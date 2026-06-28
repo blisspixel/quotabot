@@ -7,9 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/demo.dart' as cli_demo;
+import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -20,6 +23,7 @@ import 'demo.dart';
 import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
+import 'termshot.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -35,6 +39,9 @@ final bool _demoMode =
 
 /// Boundary around the live route, captured for screenshots.
 final GlobalKey _shotBoundaryKey = GlobalKey();
+
+/// Boundary around the rendered CLI `top` frame, captured for the README.
+final GlobalKey _termShotKey = GlobalKey();
 
 /// Global text-scale, applied to every route (strip and analytics) via the
 /// MaterialApp builder. Driven by the TextSize preference.
@@ -264,9 +271,9 @@ class _DashboardState extends State<Dashboard>
   /// Captures the current route under [_shotBoundaryKey] to a PNG. Used only by
   /// screenshot mode. The render object is read synchronously (callers settle the
   /// frame with a delay first), so no BuildContext crosses an async gap.
-  Future<void> _captureBoundary(String filename) async {
+  Future<void> _captureBoundary(String filename, [GlobalKey? key]) async {
     final boundary =
-        _shotBoundaryKey.currentContext?.findRenderObject()
+        (key ?? _shotBoundaryKey).currentContext?.findRenderObject()
             as RenderRepaintBoundary?;
     if (boundary == null) return;
     final image = await boundary.toImage(pixelRatio: 2.0);
@@ -288,8 +295,49 @@ class _DashboardState extends State<Dashboard>
     await Future.delayed(const Duration(milliseconds: 1400)); // route + charts
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-analytics.png');
+    _showTerminal(_demoTopFrame());
+    await Future.delayed(const Duration(milliseconds: 700));
+    await WidgetsBinding.instance.endOfFrame;
+    await _captureBoundary('screenshot-top.png', _termShotKey);
     await Future.delayed(const Duration(milliseconds: 150));
     exit(0);
+  }
+
+  /// Renders the `quotabot top` view over the demo fleet to ANSI lines, for the
+  /// terminal screenshot. Truecolor so the gradient meters show.
+  List<String> _demoTopFrame() {
+    final now = nowEpoch();
+    final demo = cli_demo.demoProviders(now);
+    return renderTopFrame(
+      providers: demo,
+      suggestion: suggestRoute(demo, now),
+      now: now,
+      width: 72,
+      color: true,
+      clock: '11:43:07',
+      depth: ColorDepth.truecolor,
+    );
+  }
+
+  /// Pushes a terminal panel showing [lines], wrapped in a boundary the exporter
+  /// captures. A horizontal scroll view gives the panel unbounded width so the
+  /// capture takes the frame's natural size instead of clipping to the (portrait)
+  /// window. Screenshot mode only.
+  void _showTerminal(List<String> lines) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          backgroundColor: const Color(0xFF0D1117),
+          body: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: RepaintBoundary(
+              key: _termShotKey,
+              child: TerminalShot(ansiLines: lines),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override

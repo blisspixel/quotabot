@@ -34,6 +34,12 @@ setup (Claude and Codex just work; a one-time login covers Antigravity and Grok)
 
 <p align="center"><sub>The widget, and the 90-day analytics view (demo data).</sub></p>
 
+<p align="center">
+  <img src="docs/screenshot-top.png" alt="quotabot top, the live terminal dashboard" width="620">
+</p>
+
+<p align="center"><sub><code>quotabot top</code>, the live terminal dashboard (demo data).</sub></p>
+
 Highlights:
 
 - **Cross-platform.** One codebase on Windows, macOS, and Linux.

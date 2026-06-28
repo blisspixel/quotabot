@@ -4,10 +4,18 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- A README screenshot of `quotabot top`, the live terminal dashboard, rendered
+  from demo data. The collector now has a demo mode (`QUOTABOT_DEMO=1`) so the CLI
+  and MCP can show a synthetic fleet without touching any account or history.
+
 ### Changed
 - The app uses tabular (fixed-width) figures everywhere via the theme, so digits
   line up and the main quota view and the analytics screen render numbers
-  consistently. Screenshots regenerated.
+  consistently.
+- The Quota Analytics screen now uses the same rounded-corner card as the main
+  quota view, so the window corners are consistent between the two. Screenshots
+  regenerated.
 
 ## 0.4.0 - 2026-06-28
 
