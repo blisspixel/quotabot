@@ -7,17 +7,26 @@ two binaries: a CLI and an MCP server.
 
 ```
 collector/ (Dart package)
-  models.dart        normalized ProviderQuota / QuotaWindow
+  models.dart        normalized ProviderQuota / QuotaWindow / ModelInfo / BurnStat
   parsing.dart       pure response/window parsing (no I/O)
-  analysis.dart      pure routing helpers (headroom, availability)
-  cache.dart         last-known-good snapshot cache
-  insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap
-  collector.dart     collectAll(): run adapters, apply cache
+  analysis.dart      pure routing: headroom, risk-adjusted headroom, strand
+                     probability, suggestRoute
+  insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap,
+                     burn rate with uncertainty
+  calibration.dart   pure: grade the strand predictor against recorded history
+  registry.dart      pure: assemble the cross-provider model registry with budget
+  model_catalog.dart committed, refreshable cloud model capability catalog
+  cache.dart         last-known-good snapshot cache; recent burn stats
+  ansi.dart          shared ANSI styling and color-depth detection
+  top.dart           pure renderer for the `quotabot top` live dashboard
+  mcp.dart           MCP tool shapes, output schemas, and registration
+  collector.dart     collectAll(): run adapters, apply cache; package exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      ollama, lmstudio, lemonade (thin I/O shells)
   auth/              tokens + store, PKCE/loopback util, xai + google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
-  bin/collect.dart        CLI: status/doctor, check, suggest, stats, json, login, logout
+  bin/collect.dart        CLI: status/doctor, top, models, calibration, check,
+                          suggest, stats, json, login, logout
   bin/mcp_server.dart     MCP server over stdio (tools + quotas://current resource)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing

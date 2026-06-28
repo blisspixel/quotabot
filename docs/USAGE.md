@@ -95,12 +95,31 @@ quotabot top --interval=2   # faster refresh (minimum 2s)
 Press `q` (or Ctrl-C) to quit and `r` to refresh immediately. A spent longer
 window collapses its provider to one line, the same binding-window rule the
 widget uses. Piped or on a dumb terminal it prints a single plain frame and
-exits, so `quotabot top | cat` still gives you a snapshot.
+exits, so `quotabot top | cat` still gives you a snapshot. On a truecolor
+terminal the bars use a smooth gradient; it degrades to 256/16/no color.
+
+### Models, calibration, and risk
+
+`quotabot models` lists every model you can route to now across providers and
+local runtimes, each with the live budget that gates it (headroom, window, reset)
+and capability hints (context window, tools, vision) where known, most routable
+first. Local-runtime models are read live; cloud capability hints come from a
+refreshable catalog.
+
+`quotabot calibration` grades quotabot's own strand predictions against your
+recorded history and reports how often they come true, as a calibration
+percentage, a Brier score, and a reliability diagram. It fills in over time, once
+predictions' horizons have elapsed, and says plainly when there is not enough yet.
+
+`quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
+the plain mean): a higher `Z` prefers providers whose recent burn is more certain.
+The suggestion JSON carries, per candidate, `effective_headroom_percent`,
+`confidence`, and `strand_probability`.
 
 ## Routing over MCP
 
 The collector runs as an MCP server so agents can query quota as a primitive. It
-speaks MCP over stdio and exposes four tools plus a resource:
+speaks MCP over stdio and exposes five tools plus a resource:
 
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.

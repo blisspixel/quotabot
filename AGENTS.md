@@ -39,7 +39,8 @@ Pick whichever transport you already speak. All return the same data.
     runtimes, each with its gating provider's live budget and capability hints.
   - Resource `quotas://current` - the same snapshot.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
-  for the full snapshot, `quotabot stats --json` for analytics.
+  for the full snapshot, `quotabot models --json` for per-model budget, and
+  `quotabot stats --json` for analytics.
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`).
 
@@ -71,9 +72,21 @@ else:
 
 ## Output schema
 
-JSON outputs carry `"schema": "quotabot.v1"` and a `generated_at` epoch. Treat
-unknown fields as additive. Headroom is a remaining-percent value (0..100);
-higher means more budget left.
+JSON outputs carry a versioned `schema` and a timestamp; treat unknown fields as
+additive. Headroom is a remaining-percent value (0..100); higher means more budget
+left. The shapes:
+
+- The snapshot is `quotabot.v1` (`generated_at`, `providers`, each provider's
+  `windows` and, when known, `models`).
+- `suggest` is `quotabot.suggest.v1`: `recommended`, `ranked`, `reason`, a
+  guaranteed `fallback`, and `as_of`/`risk_z` provenance. Each candidate carries
+  `headroom_percent`, `effective_headroom_percent` (headroom after discounting
+  recent burn), and, when estimable, `burn_se_percent_per_hour`,
+  `strand_probability` (0..1), and `confidence` (0..1). Rank on
+  `effective_headroom_percent`; treat low `confidence` or high `strand_probability`
+  with appropriate caution.
+- `list_models` is `quotabot.models.v1`: every routable model with its gating
+  provider's budget and capability hints.
 
 ## What quotabot does not do
 

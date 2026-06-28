@@ -60,7 +60,9 @@ collapses the card to a single "weekly spent - resets in 2d" line rather than
 showing a green 5 hour bar you cannot use. Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
 
-Full walkthrough of the widget, analytics, and CLI: [docs/USAGE.md](docs/USAGE.md).
+The same view is available live in the terminal with `quotabot top`, a small
+dashboard that redraws in place. Full walkthrough of the widget, analytics, and
+CLI: [docs/USAGE.md](docs/USAGE.md).
 
 ## Provider status
 
@@ -127,10 +129,11 @@ quotabot stores its own refresh token under your per-user config directory
 ```bash
 quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
+quotabot models           # every model you can route to now, with budget + caps
 ```
 
-The same recommendation is available over MCP (`suggest_provider`) and a loopback
-HTTP server. For how an agent should call quotabot and route, see
+The same recommendation is available over MCP (`suggest_provider`, `list_models`)
+and a loopback HTTP server. For how an agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin in
 [integrations/litellm/](integrations/litellm/), which routes each request to a
 deployment with budget and fails soft when quotabot is unavailable.
@@ -142,7 +145,7 @@ quotabot/
   app/           Flutter desktop application (Windows, macOS, Linux)
   collector/     Dart package: adapters, normalized model, auth, CLI, MCP server
   integrations/  LiteLLM proxy plugin for quota-aware request routing
-  docs/          Setup, usage, building, architecture, and data-source notes
+  docs/          Setup, usage, building, architecture, routing math, data sources
   tools/         Packaging, icon, and developer helper scripts
 ```
 
