@@ -11,6 +11,7 @@ library;
 import 'analysis.dart';
 import 'ansi.dart';
 import 'models.dart';
+import 'palette.dart';
 
 /// One painted run of text with a known visible width. [paint] is applied only
 /// when color is on; it never changes the visible length, so layout math can
@@ -66,30 +67,35 @@ int _barWidth(int width) {
   return (width - overhead).clamp(6, _barMax);
 }
 
-/// RGB on the headroom scale: red (spent) through amber to green (healthy),
-/// for smooth 24-bit gradient meters. Pure.
-(int, int, int) _healthRgb(double remaining) {
-  final r = remaining.clamp(0, 100).toDouble();
-  int lerp(int a, int b, double t) => (a + (b - a) * t).round();
-  if (r < 50) {
-    final t = r / 50; // red -> amber
-    return (lerp(0xDC, 0xD2, t), lerp(0x32, 0x96, t), lerp(0x2F, 0x14, t));
-  }
-  final t = (r - 50) / 50; // amber -> green
-  return (lerp(0xD2, 0x3C, t), lerp(0x96, 0xB4, t), lerp(0x14, 0x4B, t));
+/// Paints [t] in the palette's headroom color for [remaining] on a truecolor
+/// terminal, falling back to the standard named headroom color otherwise.
+String _healthPaint(AnsiStyle s, Palette p, double remaining, String t) {
+  if (!s.truecolor) return s.health(remaining, t);
+  final c = p.rgbFor(remaining);
+  return s.rgb(c.r, c.g, c.b, t);
+}
+
+/// Paints [t] bold, and in the palette accent on a truecolor terminal. Used for
+/// the wordmark and the route arrow.
+String _accent(AnsiStyle s, Palette p, String t) {
+  final bolded = s.bold(t);
+  return s.truecolor
+      ? s.rgb(p.accent.r, p.accent.g, p.accent.b, bolded)
+      : bolded;
 }
 
 /// A horizontal meter: filled to the used fraction. On a truecolor terminal the
-/// fill is a green-to-red gradient (cells nearer the used frontier run redder, so
-/// the bar visibly "heats up" toward exhaustion); otherwise it falls back to a
-/// single headroom-colored fill. htop-style, but with btop-grade gradient.
-List<_Cell> _bar(double usedPct, double remaining, int barW, AnsiStyle s) {
+/// fill is a palette gradient (cells nearer the used frontier run toward the
+/// spent color, so the bar visibly "heats up" toward exhaustion); otherwise it
+/// falls back to a single headroom-colored fill. htop-style, btop-grade gradient.
+List<_Cell> _bar(
+    double usedPct, double remaining, int barW, AnsiStyle s, Palette p) {
   final filled = ((usedPct.clamp(0, 100) / 100) * barW).round().clamp(0, barW);
   final cells = <_Cell>[_Cell('[', (s, t) => s.dim(t))];
   if (s.truecolor) {
     for (var i = 0; i < filled; i++) {
-      final (r, g, b) = _healthRgb(100.0 * (1 - (i + 1) / barW));
-      cells.add(_Cell('█', (s, t) => s.rgb(r, g, b, t)));
+      final cellRemaining = 100.0 * (1 - (i + 1) / barW);
+      cells.add(_Cell('█', (s, t) => _healthPaint(s, p, cellRemaining, t)));
     }
   } else {
     cells.add(_Cell('█' * filled, (s, t) => s.health(remaining, t)));
@@ -122,7 +128,8 @@ List<_Cell> _rowHead(String name, String label) => [
 /// collapse: when the most constrained window is spent, the whole provider
 /// collapses to a single "<label> spent" line instead of showing a misleading
 /// healthy shorter window.
-List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s) {
+List<String> _providerRows(
+    ProviderQuota q, int now, int width, AnsiStyle s, Palette p) {
   final barW = _barWidth(width);
   final cachedTag = q.stale ? const _Cell(' (cached)') : const _Cell('');
 
@@ -170,10 +177,10 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s) {
     final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label),
-      ..._bar(used, remaining, barW, s),
+      ..._bar(used, remaining, barW, s, p),
       _Cell(' '),
       _Cell('${remaining.round().toString().padLeft(3)}% free',
-          (s, t) => s.health(remaining, t)),
+          (s, t) => _healthPaint(s, p, remaining, t)),
       _Cell('  '),
       _Cell(reset, (s, t) => s.dim(t)),
       if (first) _Cell(cachedTag.text, (s, t) => s.dim(t)),
@@ -222,17 +229,20 @@ List<String> renderTopFrame({
   required bool color,
   required String clock,
   ColorDepth depth = ColorDepth.none,
+  Palette palette = kDefaultPalette,
 }) {
   final w = width < 24 ? 24 : width;
   final s = AnsiStyle(color, depth: depth);
+  final p = palette;
   final lines = <String>[];
 
   final pool = _poolHeadroom(providers, now);
   final poolText = pool == null ? 'pool   ? ' : 'pool ${pool.round()}% free';
   lines.add(_justify(
-    [_Cell('quotabot', (s, t) => s.bold(t))],
+    [_Cell('quotabot', (s, t) => _accent(s, p, t))],
     [
-      _Cell(poolText, (s, t) => pool == null ? s.dim(t) : s.health(pool, t)),
+      _Cell(poolText,
+          (s, t) => pool == null ? s.dim(t) : _healthPaint(s, p, pool, t)),
       const _Cell('   '),
       _Cell(clock, (s, t) => s.dim(t)),
     ],
@@ -251,7 +261,7 @@ List<String> renderTopFrame({
     ], w, s));
   }
   for (final q in cloud) {
-    lines.addAll(_providerRows(q, now, w, s));
+    lines.addAll(_providerRows(q, now, w, s, p));
   }
   for (final q in local) {
     lines.add(_localRow(q, w, s));
@@ -265,7 +275,7 @@ List<String> renderTopFrame({
     if (r == null)
       _Cell('waiting', (s, t) => s.dim(t))
     else ...[
-      _Cell('-> ', (s, t) => s.green(t)),
+      _Cell('-> ', (s, t) => _accent(s, p, t)),
       _Cell(r.provider, (s, t) => s.bold(t)),
       if (r.isLocal) _Cell(' (local fallback)', (s, t) => s.dim(t)),
     ],

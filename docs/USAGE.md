@@ -98,6 +98,12 @@ widget uses. Piped or on a dumb terminal it prints a single plain frame and
 exits, so `quotabot top | cat` still gives you a snapshot. On a truecolor
 terminal the bars use a smooth gradient; it degrades to 256/16/no color.
 
+Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
+(phosphor CRT), `dark`, `light`, or `synthwave`. Roll your own in one line with
+`--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]`, each a 6-digit hex color from
+most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`. Palettes
+apply on truecolor terminals; elsewhere the standard headroom colors are used.
+
 ### Models, calibration, and risk
 
 `quotabot models` lists every model you can route to now across providers and

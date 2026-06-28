@@ -1,6 +1,7 @@
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/palette.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:test/test.dart';
 
@@ -156,6 +157,34 @@ void main() {
       depth: ColorDepth.truecolor,
     ).join();
     expect(out, contains('\x1B[38;2;')); // 24-bit foreground sequence
+  });
+
+  test('a palette recolors the truecolor frame (accent shows)', () {
+    final providers = [
+      _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 60)]),
+    ];
+    final synth = renderTopFrame(
+      providers: providers,
+      suggestion: suggestRoute(providers, _now),
+      now: _now,
+      width: 80,
+      color: true,
+      clock: '12:00:00',
+      depth: ColorDepth.truecolor,
+      palette: paletteFromSpec('synthwave'),
+    ).join();
+    // synthwave accent is purple 200;120;255, used for the wordmark.
+    expect(synth, contains('\x1B[38;2;200;120;255m'));
+    final def = renderTopFrame(
+      providers: providers,
+      suggestion: suggestRoute(providers, _now),
+      now: _now,
+      width: 80,
+      color: true,
+      clock: '12:00:00',
+      depth: ColorDepth.truecolor,
+    ).join();
+    expect(def, isNot(contains('\x1B[38;2;200;120;255m')));
   });
 
   test('without truecolor the gradient sequence is not used', () {

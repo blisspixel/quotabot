@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Color palettes for `quotabot top`: `--theme=<name>` (or `QUOTABOT_THEME`) selects
+  `default`, `green` (phosphor CRT), `dark`, `light`, or `synthwave`, and a custom
+  palette is a one-liner: `--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]` of hex
+  colors. Palettes drive the truecolor gradient meters and accent; 256/16-color
+  terminals keep the standard named headroom colors, so a custom palette never
+  renders unreadably. A malformed spec falls back to the default.
 - A README screenshot of `quotabot top`, the live terminal dashboard, rendered
   from demo data. The collector now has a demo mode (`QUOTABOT_DEMO=1`) so the CLI
   and MCP can show a synthetic fleet without touching any account or history.

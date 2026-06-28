@@ -157,6 +157,15 @@ double _doubleOption(Iterable<String> flags, String name, double dflt) {
   return dflt;
 }
 
+/// Reads a `--name=value` string option from [flags], or [dflt] when absent.
+String? _stringOption(Iterable<String> flags, String name, String? dflt) {
+  final prefix = '--$name=';
+  for (final f in flags) {
+    if (f.startsWith(prefix)) return f.substring(prefix.length);
+  }
+  return dflt;
+}
+
 /// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
 int _intOption(Iterable<String> flags, String name, int dflt) {
   final prefix = '--$name=';
@@ -193,6 +202,9 @@ Future<void> _runTop(Set<String> flags) async {
   final color = _useColor(flags);
   final depth =
       detectColorDepth(Platform.environment, hasTerminal: stdout.hasTerminal);
+  final palette = paletteFromSpec(
+    _stringOption(flags, 'theme', Platform.environment['QUOTABOT_THEME']),
+  );
   final interval = _intOption(flags, 'interval', 10).clamp(2, 3600);
 
   if (!stdout.hasTerminal) {
@@ -205,6 +217,7 @@ Future<void> _runTop(Set<String> flags) async {
       width: 80,
       color: false,
       clock: _clock(),
+      palette: palette,
     );
     stdout.writeln(lines.join('\n'));
     return;
@@ -230,6 +243,7 @@ Future<void> _runTop(Set<String> flags) async {
         color: color,
         clock: _clock(),
         depth: depth,
+        palette: palette,
       );
     }
     final buf = StringBuffer()
@@ -350,6 +364,10 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --interval=N        top: seconds between refreshes (default 10, min 2)',
+  );
+  stdout.writeln(
+    '  --theme=NAME        top: palette (${paletteNames.join(', ')}, '
+    'or custom:HEX-HEX-HEX-HEX); also QUOTABOT_THEME',
   );
   stdout.writeln(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
