@@ -64,6 +64,52 @@ the SEE and ROUTE jobs done flawlessly on every platform, for the providers
 quotabot already claims. Adding a new provider does not get us to 1.0; Antigravity
 never lying about quota on any OS does.
 
+### What 1.0 needs (the checklist)
+
+The finish line, with honest status. 1.0 is reached when every box is checked and
+the suite is green on Windows, macOS, and Linux. The narrative below explains each.
+
+Routing and MCP
+- [x] `suggest` explains itself; provenance (`as_of`, risk-adjusted headroom,
+  strand probability, confidence, `--risk`)
+- [x] MCP 2025-11-25 output schemas and read-only annotations
+- [x] per-model registry (`quotabot models`, `list_models`, capability + tier filters)
+- [ ] `suggest` recommends a concrete model for a task profile (cheapest qualifying
+  with budget, escalate on strand)
+- [ ] forward-looking prediction surfaced plainly in `top`, the widget, and alerts
+- [ ] MCP Streamable HTTP transport alongside stdio, plus Python/TS client snippets
+- [ ] LiteLLM plugin covered by real-proxy integration tests
+- [ ] model-catalog currency: a refresh/audit tool (capabilities stay curated since
+  provider `/v1/models` endpoints do not expose context/tools/tier)
+
+SEE and reliability
+- [x] binding-window rule, staleness, honest "no live data"
+- [ ] real cross-platform verification on macOS and Linux machines
+- [ ] Cursor first-class, and each provider's plan tier surfaced
+- [ ] token-refresh edge cases tested (expiry, multi-account, signed-out)
+
+CLI and widget
+- [x] `quotabot top` (gradient meters, palettes), `--json` on every read command
+- [x] consistent fonts and rounded corners, full provider icon set
+- [ ] `top` interactivity (sort/filter/keys, suggest-and-copy) and documented,
+  stable exit codes
+- [ ] proactive low-quota routing alerts with an optional local webhook
+
+Quality, contract, shipping
+- [x] CI green with an 85%+ coverage floor enforced
+- [x] cross-platform release pipeline; v0.4.0 shipped
+- [x] calibration: `quotabot calibration` grades the predictor against history
+- [ ] property/fuzz tests on the untrusted parsers (they ingest external JSON/protobuf)
+- [ ] macOS and Linux CI runners, not just Linux
+- [ ] a recurring security pass and an adversarial bug-hunt round that returns empty
+- [ ] a `--mock-provider` simulation mode for deterministic core tests
+- [ ] freeze the `quotabot.v1` schema and add a compile-time adapter+fixture registry
+- [ ] an animated GIF in the README
+
+Self-tuning (using the calibration loop to fit the routing parameters on local
+history) and the deeper statistical layers are quality multipliers, valued but not
+gates for 1.0.
+
 **Quality and hardening (continuous, not a phase)**
 
 Getting to "exceptional" is a cadence, repeated until it stops finding anything:
