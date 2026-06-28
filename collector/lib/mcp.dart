@@ -266,6 +266,42 @@ final _modelEntrySchema = JsonSchema.object(
   required: ['id', 'provider', 'local', 'available'],
 );
 
+/// Shared capability filter for `list_models` and `suggest_model`. quotabot never
+/// reads the task; the caller supplies the requirements it needs.
+final _modelFilterInputSchema = JsonSchema.object(
+  description: 'Optional capability filter; all fields optional.',
+  properties: {
+    'task': JsonSchema.string(
+      description: 'Coarse profile: "simple", "standard", or "hard".',
+    ),
+    'min_context': JsonSchema.integer(
+      description: 'Require a context window of at least this many tokens.',
+    ),
+    'require_tools': JsonSchema.boolean(),
+    'require_vision': JsonSchema.boolean(),
+    'require_reasoning': JsonSchema.boolean(),
+    'tier_floor': JsonSchema.string(
+      description: 'Minimum provider tier: light, standard, or flagship.',
+    ),
+    'tier_ceiling': JsonSchema.string(
+      description: 'Maximum provider tier: light, standard, or flagship.',
+    ),
+  },
+);
+
+/// Output schema for `suggest_model`.
+final suggestModelOutputSchema = JsonSchema.object(
+  description: 'One concrete model recommended for a task profile.',
+  properties: {
+    'schema': JsonSchema.string(),
+    'generated_at': JsonSchema.integer(),
+    'recommended': _nullable(_modelEntrySchema),
+    'reason': JsonSchema.string(),
+    'ranked': JsonSchema.array(items: _modelEntrySchema),
+  },
+  required: ['schema', 'reason', 'ranked'],
+);
+
 /// Output schema for `list_models`.
 final listModelsOutputSchema = JsonSchema.object(
   description: 'Every model the user can route to now, with per-model budget.',
@@ -403,27 +439,7 @@ void registerQuotabotTools(
         '(context length, tools, vision) where known. Local-runtime models are '
         'read live; cloud models come from a refreshable capability catalog. Use '
         'this to pick a concrete model with budget, not just a provider.',
-    inputSchema: JsonSchema.object(
-      description: 'Optional capability filter. quotabot never reads the task; '
-          'the caller supplies the requirements it needs.',
-      properties: {
-        'task': JsonSchema.string(
-          description: 'Coarse profile: "simple", "standard", or "hard".',
-        ),
-        'min_context': JsonSchema.integer(
-          description: 'Require a context window of at least this many tokens.',
-        ),
-        'require_tools': JsonSchema.boolean(),
-        'require_vision': JsonSchema.boolean(),
-        'require_reasoning': JsonSchema.boolean(),
-        'tier_floor': JsonSchema.string(
-          description: 'Minimum provider tier: light, standard, or flagship.',
-        ),
-        'tier_ceiling': JsonSchema.string(
-          description: 'Maximum provider tier: light, standard, or flagship.',
-        ),
-      },
-    ),
+    inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async => CallToolResult.fromStructuredContent(
@@ -434,6 +450,29 @@ void registerQuotabotTools(
         requirements: _requirementsFromArgs(args),
       ),
     ),
+  );
+
+  server.registerTool(
+    'suggest_model',
+    title: 'Suggest model',
+    description:
+        'Recommend one concrete model for a task: the cheapest model that meets '
+        'the given requirements and has budget, local-first, escalating to a '
+        'heavier or paid tier only when the requirements force it. Takes the same '
+        'filter as list_models. quotabot never reads the task; the caller supplies '
+        'the profile, and tiers are the providers own, not a quality ranking.',
+    inputSchema: _modelFilterInputSchema,
+    outputSchema: suggestModelOutputSchema,
+    annotations: _readOnly,
+    callback: (args, extra) async {
+      final snap = await snapshot();
+      final n = now();
+      return CallToolResult.fromStructuredContent(
+        suggestModel(snap, n,
+                catalog: catalog, requirements: _requirementsFromArgs(args))
+            .toJson(n),
+      );
+    },
   );
 
   server.registerTool(

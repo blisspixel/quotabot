@@ -129,6 +129,11 @@ the plain mean): a higher `Z` prefers providers whose recent burn is more certai
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 `confidence`, and `strand_probability`.
 
+Pass a task profile to `suggest` and it recommends a concrete model instead of a
+provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
+`--min-context` filters) returns the cheapest model that meets the need and has
+budget, local-first. The MCP `suggest_model` tool does the same for agents.
+
 ## Routing over MCP
 
 The collector runs as an MCP server so agents can query quota as a primitive. It

@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- suggest-a-model: `quotabot suggest --task=hard` (or any capability flag) and the
+  MCP `suggest_model` tool recommend one concrete model - the cheapest that meets
+  the profile and has budget, local-first, escalating to a heavier or paid tier
+  only when the requirements force it. Same filters as `models`; quotabot still
+  never reads the task. Shapes: `quotabot.suggest_model.v1`.
 - Capability-aware model filtering. `quotabot models` and the MCP `list_models`
   tool take a coarse `--task` profile (`simple|standard|hard`) plus explicit
   filters (`--min-context`, `--require-tools`/`--require-vision`/

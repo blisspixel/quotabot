@@ -169,6 +169,56 @@ void main() {
     });
   });
 
+  group('suggestModel', () {
+    final providers = [
+      _cloud('claude', 20), // 80% free, available
+      _local('ollama', const [ModelInfo(id: 'qwen', local: true)]),
+    ];
+    const catalog = {
+      'claude': [
+        ModelInfo(
+          id: 'opus',
+          contextTokens: 200000,
+          tools: true,
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+            id: 'haiku', contextTokens: 200000, tools: true, tier: 'light'),
+      ],
+    };
+    ModelSuggestion sg(ModelRequirements r) =>
+        suggestModel(providers, _now, catalog: catalog, requirements: r);
+
+    test('a simple task prefers the free local model', () {
+      final s = sg(taskProfile('simple'));
+      expect(s.recommended?.local, isTrue);
+      expect(s.recommended?.model.id, 'qwen');
+    });
+
+    test('a hard task escalates past local to the qualifying cloud model', () {
+      final s = sg(taskProfile('hard')); // reasoning + tier >= standard
+      expect(s.recommended?.local, isFalse);
+      expect(s.recommended?.model.id, 'opus'); // only opus declares reasoning
+    });
+
+    test('the lightest cloud tier wins when several qualify', () {
+      final s = sg(const ModelRequirements(requireTools: true));
+      expect(s.recommended?.model.id, 'haiku'); // light beats flagship
+    });
+
+    test('no model with budget yields a null pick and a reason', () {
+      final s = suggestModel(
+        [_cloud('claude', 100)], // spent
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(requireReasoning: true),
+      );
+      expect(s.recommended, isNull);
+      expect(s.reason, isNotEmpty);
+    });
+  });
+
   test('entry JSON merges the model with its budget', () {
     final json = buildModelRegistry(
       [_cloud('claude', 20)],

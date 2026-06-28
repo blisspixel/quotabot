@@ -215,3 +215,76 @@ Map<String, dynamic> modelRegistryJson(
           .map((e) => e.toJson())
           .toList(),
     };
+
+/// Recommendation order for picking one model: usable now first, then local (free)
+/// before cloud, then the lightest provider tier (cheapest-capable), then the most
+/// remaining headroom. This is the "cheapest model that meets the need with budget,
+/// escalating only when forced" policy from the routing-by-complexity design.
+int _recommendCompare(ModelEntry a, ModelEntry b) {
+  if (a.available != b.available) return a.available ? -1 : 1;
+  if (a.local != b.local) return a.local ? -1 : 1;
+  final tier = _tierRank(a.model.tier).compareTo(_tierRank(b.model.tier));
+  if (tier != 0) return tier;
+  final ha = a.headroomPercent ?? 100.0;
+  final hb = b.headroomPercent ?? 100.0;
+  return hb.compareTo(ha);
+}
+
+String _recommendReason(ModelEntry e) {
+  if (e.local) {
+    return '${e.model.id} (local, free) handles this and keeps your paid quota.';
+  }
+  final h = e.headroomPercent?.round();
+  final tier = e.model.tier ?? 'available';
+  return '${e.model.id} on ${e.provider} - lightest $tier tier with budget'
+      '${h == null ? '' : ' ($h% free)'}.';
+}
+
+/// A concrete-model recommendation for a task profile.
+class ModelSuggestion {
+  /// The recommended model, or null when none with budget meets the profile.
+  final ModelEntry? recommended;
+
+  /// All qualifying models in recommendation order (best first).
+  final List<ModelEntry> ranked;
+
+  /// One-line human explanation.
+  final String reason;
+
+  const ModelSuggestion(this.recommended, this.ranked, this.reason);
+
+  Map<String, dynamic> toJson(int now) => {
+        'schema': 'quotabot.suggest_model.v1',
+        'generated_at': now,
+        'recommended': recommended?.toJson(),
+        'reason': reason,
+        'ranked': ranked.map((e) => e.toJson()).toList(),
+      };
+}
+
+/// Recommends one concrete model for a task: the cheapest model that meets
+/// [requirements] and has budget (local-first, then lightest tier, then most
+/// headroom). Pure.
+ModelSuggestion suggestModel(
+  List<ProviderQuota> snapshot,
+  int now, {
+  Map<String, List<ModelInfo>> catalog = const {},
+  ModelRequirements requirements = const ModelRequirements(),
+}) {
+  final ranked = buildModelRegistry(snapshot, now,
+      catalog: catalog, requirements: requirements)
+    ..sort(_recommendCompare);
+  ModelEntry? pick;
+  for (final e in ranked) {
+    if (e.available) {
+      pick = e;
+      break;
+    }
+  }
+  final reason = pick == null
+      ? (ranked.isEmpty
+          ? 'No model meets the requirements; relax them or connect a provider.'
+          : 'Models match but none has budget right now; wait for a reset.')
+      : _recommendReason(pick);
+  return ModelSuggestion(pick, ranked, reason);
+}

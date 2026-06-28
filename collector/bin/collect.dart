@@ -90,9 +90,17 @@ Future<void> main(List<String> args) async {
       return;
     case 'suggest':
       final results = await _read();
-      final riskZ = _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
-      final s = _suggestFor(results, nowEpoch(), riskZ: riskZ);
-      wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
+      final now = nowEpoch();
+      if (_hasModelProfile(flags)) {
+        final s = suggestModel(results, now,
+            catalog: kModelCatalog, requirements: _modelRequirements(flags));
+        wantsJson ? print(_jsonPretty(s.toJson(now))) : _printSuggestModel(s);
+      } else {
+        final riskZ =
+            _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
+        final s = _suggestFor(results, now, riskZ: riskZ);
+        wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
+      }
       return;
     case 'stats':
       await _runStats(pos.skip(1).toList(), wantsJson);
@@ -186,6 +194,50 @@ ModelRequirements _modelRequirements(Set<String> flags) {
     tierCeiling: _stringOption(flags, 'tier-ceiling', null),
   );
   return taskProfile(_stringOption(flags, 'task', null)).merge(explicit);
+}
+
+/// True when the user passed any model-capability flag, so `suggest` should
+/// recommend a concrete model rather than a provider.
+bool _hasModelProfile(Set<String> flags) {
+  const bare = {'--require-tools', '--require-vision', '--require-reasoning'};
+  if (flags.any(bare.contains)) return true;
+  const prefixed = [
+    '--task=',
+    '--min-context=',
+    '--tier-floor=',
+    '--tier-ceiling='
+  ];
+  return flags.any((f) => prefixed.any(f.startsWith));
+}
+
+/// Prints a concrete-model recommendation for a task profile.
+void _printSuggestModel(ModelSuggestion s) {
+  print('quotabot suggest  (best model for your task, 0 usage tokens)\n');
+  final r = s.recommended;
+  if (r == null) {
+    print('  no model to route to right now');
+  } else {
+    print(
+      '  ${style.green('->')} ${style.bold(r.model.id)} '
+      '${style.dim('on ${r.provider}')}',
+    );
+  }
+  print('  ${s.reason}\n');
+  if (s.ranked.isEmpty) return;
+  print('  candidates (best first):');
+  for (final e in s.ranked) {
+    final m = e.model;
+    final budget = e.local
+        ? style.cyan('local'.padRight(9))
+        : (e.headroomPercent == null
+            ? style.dim('?'.padRight(9))
+            : style.health(e.headroomPercent!,
+                '${e.headroomPercent!.round()}% free'.padRight(9)));
+    final tier = m.tier == null ? '' : style.dim('  ${m.tier}');
+    final spent = e.available ? '' : style.red('  spent');
+    print(
+        '    ${m.id.padRight(22)} ${e.provider.padRight(11)} $budget$tier$spent');
+  }
 }
 
 /// Reads a `--name=value` string option from [flags], or [dflt] when absent.
@@ -623,6 +675,10 @@ void _printDoctor(List<ProviderQuota> results) {
   final suggestion = _suggestFor(results, now);
   print('\nSuggested: ${suggestion.reason}');
   print('  (run "quotabot suggest" for the full ranked list)');
+  print(
+    '\n${style.cyan('Live view:')} ${style.bold('quotabot top')}  '
+    '${style.dim('a refreshing dashboard (q to quit). Also: quotabot models')}',
+  );
 
   // Passive detection for robustness: report installed popular agentic tools
   // even if no active subscription or full quota data (e.g. cancelled Kiro CLI).

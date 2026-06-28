@@ -245,6 +245,13 @@ void main() {
       );
       expect(filtered.structuredContent?['models'], isEmpty);
 
+      final pick = await client.callTool(
+        const CallToolRequest(name: 'suggest_model'),
+      );
+      expect(pick.structuredContent?['schema'], 'quotabot.suggest_model.v1');
+      expect(
+          (pick.structuredContent?['recommended'] as Map)['id'], 'claude-test');
+
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);
     });

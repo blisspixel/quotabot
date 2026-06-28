@@ -41,6 +41,8 @@ Pick whichever transport you already speak. All return the same data.
     `require_tools`/`require_vision`/`require_reasoning`, `tier_floor`/
     `tier_ceiling`) so you can ask for "a reasoning model with budget" without
     quotabot ever seeing the task.
+  - `suggest_model` - one concrete model for a task profile (same filter as
+    `list_models`): the cheapest model that meets it and has budget, local-first.
   - Resource `quotas://current` - the same snapshot.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
