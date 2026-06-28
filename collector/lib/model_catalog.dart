@@ -30,6 +30,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tools: true,
       vision: true,
       reasoning: 'reasoning',
+      tier: 'flagship',
     ),
     ModelInfo(
       id: 'claude-sonnet-4-6',
@@ -38,6 +39,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       maxOutputTokens: 64000,
       tools: true,
       vision: true,
+      tier: 'standard',
     ),
     ModelInfo(
       id: 'claude-haiku-4-5',
@@ -46,6 +48,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       maxOutputTokens: 32000,
       tools: true,
       vision: true,
+      tier: 'light',
     ),
   ],
   'codex': [
@@ -56,6 +59,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tools: true,
       vision: true,
       reasoning: 'reasoning',
+      tier: 'flagship',
     ),
     ModelInfo(
       id: 'gpt-5.1-codex',
@@ -63,6 +67,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       contextTokens: 400000,
       tools: true,
       reasoning: 'reasoning',
+      tier: 'standard',
     ),
   ],
   'grok': [
@@ -73,6 +78,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tools: true,
       vision: true,
       reasoning: 'reasoning',
+      tier: 'standard',
     ),
     ModelInfo(
       id: 'grok-4.20',
@@ -81,6 +87,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tools: true,
       vision: true,
       reasoning: 'reasoning',
+      tier: 'flagship',
     ),
   ],
   'antigravity': [
@@ -92,6 +99,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       tools: true,
       vision: true,
       reasoning: 'reasoning',
+      tier: 'flagship',
     ),
     ModelInfo(
       id: 'gemini-3-flash',
@@ -99,6 +107,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       contextTokens: 1000000,
       tools: true,
       vision: true,
+      tier: 'standard',
     ),
   ],
 };

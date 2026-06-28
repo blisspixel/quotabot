@@ -107,10 +107,17 @@ apply on truecolor terminals; elsewhere the standard headroom colors are used.
 ### Models, calibration, and risk
 
 `quotabot models` lists every model you can route to now across providers and
-local runtimes, each with the live budget that gates it (headroom, window, reset)
-and capability hints (context window, tools, vision) where known, most routable
-first. Local-runtime models are read live; cloud capability hints come from a
-refreshable catalog.
+local runtimes, each with the live budget that gates it (headroom, window, reset),
+capability hints (context window, tools, vision, reasoning), and the provider's own
+tier (light/standard/flagship), most routable first. Local-runtime models are read
+live; cloud capability hints come from a refreshable catalog.
+
+Filter to what a task needs with a coarse `--task=simple|standard|hard` profile or
+explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
+`--require-reasoning`, `--tier-floor=standard`, `--tier-ceiling=standard`. quotabot
+never sees the task; you supply the requirements, and it returns the models that
+meet them with budget. The same filters are arguments on the MCP `list_models`
+tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 
 `quotabot calibration` grades quotabot's own strand predictions against your
 recorded history and reports how often they come true, as a calibration

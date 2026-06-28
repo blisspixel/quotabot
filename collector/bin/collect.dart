@@ -103,11 +103,13 @@ Future<void> main(List<String> args) async {
     case 'models':
       final results = await _read();
       final now = nowEpoch();
+      final reqs = _modelRequirements(flags);
       if (wantsJson) {
-        print(_jsonPretty(
-            modelRegistryJson(results, now, catalog: kModelCatalog)));
+        print(_jsonPretty(modelRegistryJson(results, now,
+            catalog: kModelCatalog, requirements: reqs)));
       } else {
-        _printModels(buildModelRegistry(results, now, catalog: kModelCatalog));
+        _printModels(buildModelRegistry(results, now,
+            catalog: kModelCatalog, requirements: reqs));
       }
       return;
     case 'calibration':
@@ -155,6 +157,35 @@ double _doubleOption(Iterable<String> flags, String name, double dflt) {
     }
   }
   return dflt;
+}
+
+/// Parses a context size like "200k", "1m", or "200000" into tokens, or null.
+int? _parseContext(String? s) {
+  if (s == null) return null;
+  final t = s.toLowerCase().trim();
+  final mult = t.endsWith('m')
+      ? 1000000
+      : t.endsWith('k')
+          ? 1000
+          : 1;
+  final digits = mult == 1 ? t : t.substring(0, t.length - 1);
+  final value = double.tryParse(digits);
+  return value == null ? null : (value * mult).round();
+}
+
+/// Builds the model requirement filter from CLI flags: a coarse `--task` profile
+/// overlaid with explicit `--min-context`, `--require-*`, and `--tier-*` flags.
+/// quotabot never sees the task itself, only this profile.
+ModelRequirements _modelRequirements(Set<String> flags) {
+  final explicit = ModelRequirements(
+    minContextTokens: _parseContext(_stringOption(flags, 'min-context', null)),
+    requireTools: flags.contains('--require-tools'),
+    requireVision: flags.contains('--require-vision'),
+    requireReasoning: flags.contains('--require-reasoning'),
+    tierFloor: _stringOption(flags, 'tier-floor', null),
+    tierCeiling: _stringOption(flags, 'tier-ceiling', null),
+  );
+  return taskProfile(_stringOption(flags, 'task', null)).merge(explicit);
 }
 
 /// Reads a `--name=value` string option from [flags], or [dflt] when absent.
@@ -372,6 +403,13 @@ void _printHelp() {
   stdout.writeln(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
     'uncertain caps)',
+  );
+  stdout.writeln(
+    '  --task=LEVEL        models: simple|standard|hard (coarse capability needs)',
+  );
+  stdout.writeln(
+    '  --min-context=N --require-tools/vision/reasoning --tier-floor/ceiling=T'
+    '   models filters',
   );
   stdout.writeln('');
   stdout.writeln(
@@ -701,6 +739,7 @@ void _printModels(List<ModelEntry> reg) {
         ? ''
         : style.dim('  ${_ctxLabel(m.contextTokens!)} ctx');
     final caps = [
+      if (m.tier != null) m.tier!,
       if (m.tools == true) 'tools',
       if (m.vision == true) 'vision',
       if (m.reasoning != null) 'reason',

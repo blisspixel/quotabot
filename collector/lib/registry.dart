@@ -61,15 +61,107 @@ class ModelEntry {
       };
 }
 
+/// Tier ordering for floor/ceiling comparisons. Unknown and local tiers rank
+/// lowest, so a tier floor excludes them and a tier ceiling always admits them.
+int _tierRank(String? tier) {
+  switch (tier) {
+    case 'flagship':
+      return 2;
+    case 'standard':
+      return 1;
+    default: // 'light', null, local runtimes
+      return 0;
+  }
+}
+
+/// A caller-supplied task profile: the objective capabilities a task needs. It is
+/// never derived from the task itself, because quotabot does not read prompts; the
+/// caller, which legitimately knows the task, supplies it.
+class ModelRequirements {
+  final int? minContextTokens;
+  final bool requireTools;
+  final bool requireVision;
+  final bool requireReasoning;
+  final String? tierFloor;
+  final String? tierCeiling;
+
+  const ModelRequirements({
+    this.minContextTokens,
+    this.requireTools = false,
+    this.requireVision = false,
+    this.requireReasoning = false,
+    this.tierFloor,
+    this.tierCeiling,
+  });
+
+  bool get isEmpty =>
+      minContextTokens == null &&
+      !requireTools &&
+      !requireVision &&
+      !requireReasoning &&
+      tierFloor == null &&
+      tierCeiling == null;
+
+  /// Overlays [o] onto this: [o]'s set fields win, booleans OR together. Used to
+  /// layer explicit flags on top of a coarse task profile.
+  ModelRequirements merge(ModelRequirements o) => ModelRequirements(
+        minContextTokens: o.minContextTokens ?? minContextTokens,
+        requireTools: requireTools || o.requireTools,
+        requireVision: requireVision || o.requireVision,
+        requireReasoning: requireReasoning || o.requireReasoning,
+        tierFloor: o.tierFloor ?? tierFloor,
+        tierCeiling: o.tierCeiling ?? tierCeiling,
+      );
+}
+
+/// Maps a coarse task label to a default requirement set: a documented heuristic,
+/// fully overridable by explicit requirements. Unknown labels add nothing, so a
+/// typo never silently filters everything out.
+ModelRequirements taskProfile(String? task) {
+  switch (task?.toLowerCase()) {
+    case 'simple':
+      return const ModelRequirements(tierCeiling: 'standard');
+    case 'hard':
+    case 'complex':
+      return const ModelRequirements(
+          requireReasoning: true, tierFloor: 'standard');
+    case 'reasoning':
+      return const ModelRequirements(requireReasoning: true);
+    default:
+      return const ModelRequirements();
+  }
+}
+
+/// Whether [e] satisfies [r]. A capability the model does not declare fails a
+/// requirement for it: we never assume an unstated capability.
+bool meetsRequirements(ModelEntry e, ModelRequirements r) {
+  final m = e.model;
+  if (r.minContextTokens != null &&
+      (m.contextTokens == null || m.contextTokens! < r.minContextTokens!)) {
+    return false;
+  }
+  if (r.requireTools && m.tools != true) return false;
+  if (r.requireVision && m.vision != true) return false;
+  if (r.requireReasoning && m.reasoning == null) return false;
+  if (r.tierFloor != null && _tierRank(m.tier) < _tierRank(r.tierFloor)) {
+    return false;
+  }
+  if (r.tierCeiling != null && _tierRank(m.tier) > _tierRank(r.tierCeiling)) {
+    return false;
+  }
+  return true;
+}
+
 /// Builds the registry from a snapshot. For each provider, local models come from
 /// `q.models` (live) and cloud models from `catalog[provider]`; every model
-/// inherits its provider's binding-window budget. Sorted so the most routable
-/// models lead: available first, cloud before local (local is the fallback), then
-/// by most headroom.
+/// inherits its provider's binding-window budget. Optionally filtered to models
+/// meeting [requirements]. Sorted so the most routable models lead: available
+/// first, cloud before local (local is the fallback), then by most headroom.
 List<ModelEntry> buildModelRegistry(
   List<ProviderQuota> snapshot,
   int now, {
   Map<String, List<ModelInfo>> catalog = const {},
+  ModelRequirements requirements = const ModelRequirements(),
 }) {
   final entries = <ModelEntry>[];
   for (final q in snapshot) {
@@ -92,7 +184,10 @@ List<ModelEntry> buildModelRegistry(
     }
   }
 
-  entries.sort((x, y) {
+  final filtered = requirements.isEmpty
+      ? entries
+      : entries.where((e) => meetsRequirements(e, requirements)).toList();
+  filtered.sort((x, y) {
     if (x.available != y.available) return x.available ? -1 : 1;
     if (x.local != y.local) return x.local ? 1 : -1; // cloud before local
     final hx = x.headroomPercent ?? (x.local ? 100.0 : -1.0);
@@ -100,7 +195,7 @@ List<ModelEntry> buildModelRegistry(
     if (hx != hy) return hy.compareTo(hx);
     return x.model.id.compareTo(y.model.id);
   });
-  return entries;
+  return filtered;
 }
 
 /// The registry as the `quotabot.models.v1` JSON envelope, shared by the CLI
@@ -109,12 +204,14 @@ Map<String, dynamic> modelRegistryJson(
   List<ProviderQuota> providers,
   int now, {
   Map<String, List<ModelInfo>> catalog = const {},
+  ModelRequirements requirements = const ModelRequirements(),
 }) =>
     {
       'schema': 'quotabot.models.v1',
       'generated_at': now,
       'catalog_updated': kCatalogUpdated,
-      'models': buildModelRegistry(providers, now, catalog: catalog)
+      'models': buildModelRegistry(providers, now,
+              catalog: catalog, requirements: requirements)
           .map((e) => e.toJson())
           .toList(),
     };

@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Capability-aware model filtering. `quotabot models` and the MCP `list_models`
+  tool take a coarse `--task` profile (`simple|standard|hard`) plus explicit
+  filters (`--min-context`, `--require-tools`/`--require-vision`/
+  `--require-reasoning`, `--tier-floor`/`--tier-ceiling`), returning only the
+  models that meet the stated need, most routable first. Each model carries the
+  provider's own tier (light/standard/flagship). quotabot never reads the task: the
+  caller supplies the profile, and tiers are objective facts, not a quality ranking.
 - Color palettes for `quotabot top`: `--theme=<name>` (or `QUOTABOT_THEME`) selects
   `default`, `green` (phosphor CRT), `dark`, `light`, or `synthwave`, and a custom
   palette is a one-liner: `--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]` of hex

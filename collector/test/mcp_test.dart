@@ -236,6 +236,15 @@ void main() {
       expect((claude as Map)['provider'], 'claude');
       expect(claude['headroom_percent'], 80);
 
+      // A capability filter the fixture model does not meet excludes it.
+      final filtered = await client.callTool(
+        const CallToolRequest(
+          name: 'list_models',
+          arguments: {'require_reasoning': true},
+        ),
+      );
+      expect(filtered.structuredContent?['models'], isEmpty);
+
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);
     });

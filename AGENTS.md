@@ -36,7 +36,11 @@ Pick whichever transport you already speak. All return the same data.
   - `check_provider_availability` - whether a named provider is usable now and
     when it resets.
   - `list_models` - every model you can route to now across providers and local
-    runtimes, each with its gating provider's live budget and capability hints.
+    runtimes, each with its gating provider's live budget, capability hints, and
+    tier. Accepts an optional capability filter (`task`, `min_context`,
+    `require_tools`/`require_vision`/`require_reasoning`, `tier_floor`/
+    `tier_ceiling`) so you can ask for "a reasoning model with budget" without
+    quotabot ever seeing the task.
   - Resource `quotas://current` - the same snapshot.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and

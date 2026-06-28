@@ -241,6 +241,11 @@ class ModelInfo {
   /// Reasoning-tier hint (e.g. "reasoning"), when known.
   final String? reasoning;
 
+  /// The provider's own product tier: "light", "standard", or "flagship" (e.g.
+  /// Haiku/Flash, Sonnet/Pro, Opus/Heavy). A neutral, sourced fact for ordering
+  /// cheap-to-capable, never a quotabot quality judgement. Null when unknown.
+  final String? tier;
+
   /// True for a local-runtime model (Ollama/LM Studio/Lemonade).
   final bool local;
 
@@ -264,6 +269,7 @@ class ModelInfo {
     this.tools,
     this.vision,
     this.reasoning,
+    this.tier,
     this.local = false,
     this.loaded = false,
     this.sizeBytes,
@@ -279,6 +285,7 @@ class ModelInfo {
         if (tools != null) 'tools': tools,
         if (vision != null) 'vision': vision,
         if (reasoning != null) 'reasoning': reasoning,
+        if (tier != null) 'tier': tier,
         if (local) 'local': local,
         if (loaded) 'loaded': loaded,
         if (sizeBytes != null) 'size_bytes': sizeBytes,
@@ -294,6 +301,7 @@ class ModelInfo {
         tools: j['tools'] as bool?,
         vision: j['vision'] as bool?,
         reasoning: j['reasoning'] as String?,
+        tier: j['tier'] as String?,
         local: j['local'] as bool? ?? false,
         loaded: j['loaded'] as bool? ?? false,
         sizeBytes: (j['size_bytes'] as num?)?.toInt(),

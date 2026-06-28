@@ -99,6 +99,76 @@ void main() {
     expect(reg, isEmpty);
   });
 
+  group('requirement filtering', () {
+    final providers = [_cloud('claude', 20)];
+    const catalog = {
+      'claude': [
+        ModelInfo(
+          id: 'opus',
+          contextTokens: 200000,
+          tools: true,
+          vision: true,
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+            id: 'haiku', contextTokens: 200000, tools: true, tier: 'light'),
+      ],
+    };
+
+    List<String> ids(ModelRequirements r) => buildModelRegistry(
+          providers,
+          _now,
+          catalog: catalog,
+          requirements: r,
+        ).map((e) => e.model.id).toList();
+
+    test('no requirements returns everything', () {
+      expect(ids(const ModelRequirements()).toSet(), {'opus', 'haiku'});
+    });
+
+    test('require-reasoning keeps only the reasoning model', () {
+      expect(ids(const ModelRequirements(requireReasoning: true)), ['opus']);
+    });
+
+    test('require-vision filters by declared capability', () {
+      expect(ids(const ModelRequirements(requireVision: true)), ['opus']);
+    });
+
+    test('a tier floor excludes lighter tiers', () {
+      expect(ids(const ModelRequirements(tierFloor: 'flagship')), ['opus']);
+    });
+
+    test('a tier ceiling excludes heavier tiers', () {
+      expect(ids(const ModelRequirements(tierCeiling: 'light')), ['haiku']);
+    });
+
+    test('min-context excludes models below the requirement', () {
+      expect(ids(const ModelRequirements(minContextTokens: 500000)), isEmpty);
+      expect(ids(const ModelRequirements(minContextTokens: 100000)).toSet(),
+          {'opus', 'haiku'});
+    });
+
+    test('the hard task profile requires reasoning', () {
+      expect(ids(taskProfile('hard')), ['opus']);
+    });
+
+    test('the simple task profile caps the tier', () {
+      expect(ids(taskProfile('simple')), ['haiku']);
+    });
+
+    test('merge overlays explicit flags on a task profile', () {
+      final merged = taskProfile('simple')
+          .merge(const ModelRequirements(requireTools: true));
+      expect(merged.tierCeiling, 'standard');
+      expect(merged.requireTools, isTrue);
+    });
+
+    test('an unknown task label adds no constraints', () {
+      expect(taskProfile('banana').isEmpty, isTrue);
+    });
+  });
+
   test('entry JSON merges the model with its budget', () {
     final json = buildModelRegistry(
       [_cloud('claude', 20)],

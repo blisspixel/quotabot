@@ -69,6 +69,20 @@ Map<String, dynamic> suggestResponse(
     suggestRoute(providers, now, burnStatsByProvider: burnStatsByProvider)
         .toJson();
 
+/// Builds a [ModelRequirements] from `list_models` tool arguments: a coarse
+/// `task` profile overlaid with explicit capability/tier filters.
+ModelRequirements _requirementsFromArgs(Map<String, dynamic> args) {
+  final explicit = ModelRequirements(
+    minContextTokens: (args['min_context'] as num?)?.toInt(),
+    requireTools: args['require_tools'] == true,
+    requireVision: args['require_vision'] == true,
+    requireReasoning: args['require_reasoning'] == true,
+    tierFloor: args['tier_floor'] as String?,
+    tierCeiling: args['tier_ceiling'] as String?,
+  );
+  return taskProfile(args['task'] as String?).merge(explicit);
+}
+
 /// Whether a single named provider has quota available now, or an
 /// `{error: 'unknown provider'}` shape when it is not connected.
 Map<String, dynamic> availabilityResponse(
@@ -241,6 +255,10 @@ final _modelEntrySchema = JsonSchema.object(
     'max_output_tokens': JsonSchema.integer(),
     'tools': JsonSchema.boolean(),
     'vision': JsonSchema.boolean(),
+    'reasoning': JsonSchema.string(),
+    'tier': JsonSchema.string(
+      description: "The provider's own tier: light, standard, or flagship.",
+    ),
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': JsonSchema.integer(),
     'gating_window': JsonSchema.string(),
@@ -385,11 +403,36 @@ void registerQuotabotTools(
         '(context length, tools, vision) where known. Local-runtime models are '
         'read live; cloud models come from a refreshable capability catalog. Use '
         'this to pick a concrete model with budget, not just a provider.',
-    inputSchema: JsonSchema.object(properties: {}),
+    inputSchema: JsonSchema.object(
+      description: 'Optional capability filter. quotabot never reads the task; '
+          'the caller supplies the requirements it needs.',
+      properties: {
+        'task': JsonSchema.string(
+          description: 'Coarse profile: "simple", "standard", or "hard".',
+        ),
+        'min_context': JsonSchema.integer(
+          description: 'Require a context window of at least this many tokens.',
+        ),
+        'require_tools': JsonSchema.boolean(),
+        'require_vision': JsonSchema.boolean(),
+        'require_reasoning': JsonSchema.boolean(),
+        'tier_floor': JsonSchema.string(
+          description: 'Minimum provider tier: light, standard, or flagship.',
+        ),
+        'tier_ceiling': JsonSchema.string(
+          description: 'Maximum provider tier: light, standard, or flagship.',
+        ),
+      },
+    ),
     outputSchema: listModelsOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async => CallToolResult.fromStructuredContent(
-      modelRegistryJson(await snapshot(), now(), catalog: catalog),
+      modelRegistryJson(
+        await snapshot(),
+        now(),
+        catalog: catalog,
+        requirements: _requirementsFromArgs(args),
+      ),
     ),
   );
 
