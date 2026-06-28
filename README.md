@@ -43,8 +43,13 @@ Highlights:
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, best time to run). Only quota metadata is
   ever read, never prompts, code, or other content.
-- **Zero usage tokens.** Every read is local metadata, never a model call.
-- **Local-first.** Nothing leaves your machine; there is no account or cloud.
+- **Zero usage tokens.** Only quota metadata is ever read, never a model or
+  inference call, so quotabot never spends a usage token.
+- **Local-first, your data is yours.** No account, no cloud, no telemetry; your
+  tokens, history, and preferences stay on your machine. Most reads are local
+  files; for a few providers quotabot makes a minimal call to the provider's own
+  quota endpoint (reusing a token their app already stored) only when needed, and
+  sends none of your prompts, code, or content.
 
 ## What it shows
 
@@ -152,9 +157,11 @@ Codeium/Windsurf, or any other provider. All product names, logos, and trademark
 are the property of their respective owners and are used here only to identify the
 service whose quota is being displayed.
 
-quotabot reads usage and quota metadata from the local state and credential files
-each provider's own CLI or app has already stored on your machine. It makes no
-model/inference calls. Even so:
+quotabot reads only quota and usage metadata. It prefers local state, and for some
+providers it makes a minimal call to the provider's own quota/usage endpoint -
+reusing a token that provider's CLI or app already stored on your machine - to read
+live numbers. It makes no model or inference calls, sends none of your prompts,
+code, or content, and keeps your data on your machine. Even so:
 
 - **You are solely responsible for ensuring your use complies with the Terms of
   Service and acceptable-use policies of every provider you connect to it.**
