@@ -128,14 +128,43 @@ class QuotaBotApp extends StatelessWidget {
 
   ThemeData _theme(Brightness b) {
     final dark = b == Brightness.dark;
-    return ThemeData(
+    final base = ThemeData(
       brightness: b,
       scaffoldBackgroundColor: dark
           ? const Color(0xFF14161A)
           : const Color(0xFFF4F5F7),
       fontFamily: 'Segoe UI',
     );
+    // Use tabular (monospaced) figures everywhere so digits line up and the main
+    // quota view and the analytics screen render numbers identically. Text styles
+    // inherit and merge onto these defaults without setting fontFeatures
+    // themselves, so this one setting carries across both screens.
+    return base.copyWith(textTheme: _tabularFigures(base.textTheme));
   }
+}
+
+/// Returns [t] with tabular (fixed-width) figures applied to every text style, so
+/// numbers align and render consistently across the whole app.
+TextTheme _tabularFigures(TextTheme t) {
+  const feats = [FontFeature.tabularFigures()];
+  TextStyle? f(TextStyle? s) => s?.copyWith(fontFeatures: feats);
+  return TextTheme(
+    displayLarge: f(t.displayLarge),
+    displayMedium: f(t.displayMedium),
+    displaySmall: f(t.displaySmall),
+    headlineLarge: f(t.headlineLarge),
+    headlineMedium: f(t.headlineMedium),
+    headlineSmall: f(t.headlineSmall),
+    titleLarge: f(t.titleLarge),
+    titleMedium: f(t.titleMedium),
+    titleSmall: f(t.titleSmall),
+    bodyLarge: f(t.bodyLarge),
+    bodyMedium: f(t.bodyMedium),
+    bodySmall: f(t.bodySmall),
+    labelLarge: f(t.labelLarge),
+    labelMedium: f(t.labelMedium),
+    labelSmall: f(t.labelSmall),
+  );
 }
 
 class Dashboard extends StatefulWidget {

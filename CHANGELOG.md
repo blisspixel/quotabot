@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- The app uses tabular (fixed-width) figures everywhere via the theme, so digits
+  line up and the main quota view and the analytics screen render numbers
+  consistently. Screenshots regenerated.
+
 ## 0.4.0 - 2026-06-28
 
 ### Added
