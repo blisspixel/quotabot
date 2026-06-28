@@ -22,7 +22,7 @@ Future<void> main() async {
   }
 
   final server = McpServer(
-    Implementation(name: 'quotabot', version: '0.2.0'),
+    Implementation(name: 'quotabot', version: '0.3.0'),
     options: McpServerOptions(
       capabilities: ServerCapabilities(
         tools: ServerCapabilitiesTools(),

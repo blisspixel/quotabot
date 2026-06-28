@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.3.0 - 2026-06-27
+
 ### Added
 - Lemonade Server now has its own branded lemon logo in the app instead of the
   generic placeholder dot, so every supported provider shows a real mark. The
