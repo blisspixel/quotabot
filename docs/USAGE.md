@@ -65,6 +65,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
+| `top`                  | Live dashboard that redraws in place (q quit, r now). |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, reliability, pace.    |
@@ -74,6 +75,25 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `help`, `version`      | Usage and version.                                    |
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
+
+### Live view (`quotabot top`)
+
+`quotabot top` is the htop view of your plans: one bar per rolling window for
+every provider, each colored on the headroom scale (green healthy, amber
+tightening, orange low, red spent) with a live reset countdown, your local
+runtimes as always-on fallbacks, and a route line that names where to send the
+next request. It redraws in place on the alternate screen, repaints countdowns
+every second, and re-collects on an interval.
+
+```bash
+quotabot top                # refresh every 10s (default)
+quotabot top --interval=2   # faster refresh (minimum 2s)
+```
+
+Press `q` (or Ctrl-C) to quit and `r` to refresh immediately. A spent longer
+window collapses its provider to one line, the same binding-window rule the
+widget uses. Piped or on a dumb terminal it prints a single plain frame and
+exits, so `quotabot top | cat` still gives you a snapshot.
 
 ## Routing over MCP
 

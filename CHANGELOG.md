@@ -5,6 +5,16 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot top`: a live, htop-style dashboard for the terminal. One bar per
+  rolling window for every provider, colored on the headroom scale with live
+  reset countdowns, local runtimes as always-on fallbacks, a header pool gauge,
+  and a route line naming where to send the next request. It redraws in place on
+  the alternate screen (wrapped in synchronized-output to avoid tearing),
+  repaints countdowns every second, re-collects every `--interval` seconds
+  (default 10, minimum 2), and takes `q`/Ctrl-C to quit and `r` to refresh now.
+  Honors the binding-window collapse, and degrades to a single plain frame when
+  piped or on a dumb terminal. The frame renderer is a pure, fully tested
+  function; the ANSI styling is shared with the one-shot CLI output.
 - MCP 2025-11-25 depth: every tool now advertises a JSON output schema and returns
   structured content (`structuredContent` alongside the back-compat text block),
   plus read-only/idempotent tool annotations so clients can validate results and

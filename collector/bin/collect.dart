@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
-import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
@@ -14,29 +16,7 @@ import 'package:quotabot_collector/util.dart';
 
 const _version = '0.2.0';
 
-/// Minimal ANSI styling, gated on whether the output wants color.
-class _Style {
-  final bool on;
-  const _Style(this.on);
-  String _w(String code, String s) => on ? '\x1B[${code}m$s\x1B[0m' : s;
-  String bold(String s) => _w('1', s);
-  String dim(String s) => _w('2', s);
-  String green(String s) => _w('32', s);
-  String yellow(String s) => _w('33', s);
-  String orange(String s) => _w('38;5;208', s);
-  String red(String s) => _w('31', s);
-  String cyan(String s) => _w('36', s);
-
-  /// Colors text on the shared headroom scale (input is remaining percent).
-  String health(num remaining, String s) {
-    if (remaining >= 50) return green(s);
-    if (remaining >= 25) return yellow(s);
-    if (remaining > 0) return orange(s);
-    return red(s);
-  }
-}
-
-late _Style style;
+late AnsiStyle style;
 
 /// Honors NO_COLOR and CLICOLOR=0, an explicit --color/--no-color, then falls
 /// back to whether stdout is an interactive terminal.
@@ -82,7 +62,7 @@ Future<void> main(List<String> args) async {
   final pos = args.where((a) => !a.startsWith('-')).toList();
   final cmd = pos.isEmpty ? '' : pos.first;
   final wantsJson = flags.contains('--json');
-  style = _Style(_useColor(flags));
+  style = AnsiStyle(_useColor(flags));
 
   if (cmd == 'help' || flags.contains('--help') || flags.contains('-h')) {
     _printHelp();
@@ -110,17 +90,14 @@ Future<void> main(List<String> args) async {
       return;
     case 'suggest':
       final results = await _read();
-      final now = nowEpoch();
-      final s = suggestRoute(
-        results,
-        now,
-        burnByProvider:
-            recentBurnByProvider(results.map((q) => q.provider), now),
-      );
+      final s = _suggestFor(results, nowEpoch());
       wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       return;
     case 'stats':
       await _runStats(pos.skip(1).toList(), wantsJson);
+      return;
+    case 'top':
+      await _runTop(flags);
       return;
   }
 
@@ -140,6 +117,153 @@ Future<void> main(List<String> args) async {
   exitCode = 64;
 }
 
+/// The routing recommendation for [results], discounted by recent burn. Shared
+/// by `suggest`, `doctor`, and the live `top` view so they never diverge.
+RouteSuggestion _suggestFor(List<ProviderQuota> results, int now) =>
+    suggestRoute(
+      results,
+      now,
+      burnByProvider: recentBurnByProvider(results.map((q) => q.provider), now),
+    );
+
+/// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
+int _intOption(Iterable<String> flags, String name, int dflt) {
+  final prefix = '--$name=';
+  for (final f in flags) {
+    if (f.startsWith(prefix)) {
+      return int.tryParse(f.substring(prefix.length)) ?? dflt;
+    }
+  }
+  return dflt;
+}
+
+int _termCols() {
+  try {
+    return stdout.terminalColumns;
+  } catch (_) {
+    return 80;
+  }
+}
+
+String _clock() {
+  final d = DateTime.now();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
+}
+
+/// `top`: a live, htop-style dashboard that redraws in place.
+///
+/// On a real terminal it enters the alternate screen, hides the cursor, reads
+/// keys raw (q to quit, r to refresh now), repaints countdowns every second, and
+/// re-collects every `--interval` seconds (default 10, minimum 2). When stdout
+/// is not a terminal (piped or dumb) it degrades to printing one plain frame and
+/// exiting, so `quotabot top | cat` still yields a snapshot.
+Future<void> _runTop(Set<String> flags) async {
+  final color = _useColor(flags);
+  final interval = _intOption(flags, 'interval', 10).clamp(2, 3600);
+
+  if (!stdout.hasTerminal) {
+    final data = await collectAll();
+    final now = nowEpoch();
+    final lines = renderTopFrame(
+      providers: data,
+      suggestion: _suggestFor(data, now),
+      now: now,
+      width: 80,
+      color: false,
+      clock: _clock(),
+    );
+    stdout.writeln(lines.join('\n'));
+    return;
+  }
+
+  var data = <ProviderQuota>[];
+  var loading = true;
+  final quit = Completer<void>();
+  Timer? repaint;
+  Timer? refresh;
+
+  void draw() {
+    final now = nowEpoch();
+    final List<String> lines;
+    if (loading && data.isEmpty) {
+      lines = ['  ${style.bold('quotabot')}', '', '  reading quota...'];
+    } else {
+      lines = renderTopFrame(
+        providers: data,
+        suggestion: _suggestFor(data, now),
+        now: now,
+        width: _termCols(),
+        color: color,
+        clock: _clock(),
+      );
+    }
+    final buf = StringBuffer()
+      ..write('\x1B[?2026h') // begin synchronized update (no-op if unsupported)
+      ..write('\x1B[H'); // cursor home
+    for (final line in lines) {
+      buf
+        ..write(line)
+        ..write('\x1B[K') // clear stale tail from a previous, longer frame
+        ..write('\r\n');
+    }
+    buf
+      ..write('\x1B[J') // clear any rows below a now-shorter frame
+      ..write('\x1B[?2026l'); // end synchronized update
+    stdout.write(buf.toString());
+  }
+
+  Future<void> reload() async {
+    try {
+      data = await collectAll();
+      loading = false;
+      draw();
+    } catch (_) {
+      // Keep the last good frame on a transient collection error.
+    }
+  }
+
+  final priorEcho = stdin.echoMode;
+  final priorLine = stdin.lineMode;
+  stdout.write('\x1B[?1049h\x1B[?25l'); // alternate screen + hide cursor
+  try {
+    stdin.echoMode = false;
+    stdin.lineMode = false;
+  } catch (_) {
+    // Some terminals disallow raw mode; keys still arrive line-buffered.
+  }
+
+  void stop() {
+    if (!quit.isCompleted) quit.complete();
+  }
+
+  final keys = stdin.listen((bytes) {
+    for (final b in bytes) {
+      if (b == 113 || b == 81 || b == 3) return stop(); // q, Q, Ctrl-C
+      if (b == 114 || b == 82) reload(); // r, R
+    }
+  });
+  final sigint = ProcessSignal.sigint.watch().listen((_) => stop());
+
+  draw(); // immediate "reading quota" frame
+  await reload(); // first real snapshot
+  repaint = Timer.periodic(const Duration(seconds: 1), (_) => draw());
+  refresh = Timer.periodic(Duration(seconds: interval), (_) => reload());
+
+  await quit.future;
+  repaint.cancel();
+  refresh.cancel();
+  await keys.cancel();
+  await sigint.cancel();
+  try {
+    stdin.echoMode = priorEcho;
+    stdin.lineMode = priorLine;
+  } catch (_) {
+    // Best effort restore.
+  }
+  stdout.write('\x1B[?25h\x1B[?1049l'); // show cursor + leave alternate screen
+}
+
 void _printHelp() {
   String head(String s) => style.bold(s);
   stdout.writeln(
@@ -152,6 +276,9 @@ void _printHelp() {
   stdout.writeln(head('SEE QUOTA'));
   stdout.writeln(
     '  status, doctor      every provider, its windows and resets (default)',
+  );
+  stdout.writeln(
+    '  top                 live dashboard, redraws in place (q quit, r refresh)',
   );
   stdout.writeln(
     '  check <provider>    whether one provider is usable now, and its reset',
@@ -180,6 +307,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --color, --no-color force or disable color (also honors NO_COLOR)',
+  );
+  stdout.writeln(
+    '  --interval=N        top: seconds between refreshes (default 10, min 2)',
   );
   stdout.writeln('');
   stdout.writeln(
@@ -390,11 +520,7 @@ void _printDoctor(List<ProviderQuota> results) {
   }
 
   // Close the loop: tell the user where to route work next.
-  final suggestion = suggestRoute(
-    results,
-    now,
-    burnByProvider: recentBurnByProvider(results.map((q) => q.provider), now),
-  );
+  final suggestion = _suggestFor(results, now);
   print('\nSuggested: ${suggestion.reason}');
   print('  (run "quotabot suggest" for the full ranked list)');
 
