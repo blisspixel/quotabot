@@ -86,12 +86,20 @@ Getting to "exceptional" is a cadence, repeated until it stops finding anything:
 - No silent failures: a provider that cannot read says why, plainly.
 - Token-refresh and onboarding edge cases are handled and tested (Antigravity,
   Grok), including expiry, multi-account, and signed-out states.
+- Depth on providers we already claim: make Cursor a first-class read (it keeps
+  rich local state), and surface each provider's plan tier so the difference is
+  visible (e.g. Grok Free vs SuperGrok vs SuperGrok Heavy), since people pay for
+  the higher tier and want to see what it buys.
 
 **Routing and MCP you can trust (ROUTE earns trust)**
 
 - `suggest` explains itself ("picked X: 91% free, resets soonest").
 - Provenance on every payload (`as_of`, staleness/confidence) so a stale route is
-  never trusted blindly.
+  never trusted blindly. (Shipped: burn standard error, risk-adjusted headroom,
+  strand probability, and confidence, with a `--risk` opt-in.)
+- Forward-looking prediction surfaced plainly: "at this burn, Grok Heavy exhausts
+  in ~47 min - throttle to local?" from the runway and strand math, in `top`, the
+  widget, and the alerts.
 - Fail-soft verified end to end; callers always have a safe default.
 - **MCP depth:** complete tool-discovery metadata, capability scoping, a tested
   Streamable HTTP transport alongside stdio, and client snippets (Python/TS), so
@@ -126,7 +134,14 @@ for your quota plans: open it and the whole fleet is just there, live.
 
 - A `quotabot top` (watch) mode: a refreshing terminal dashboard of every
   provider's windows and your local runtimes, redrawing in place, honoring
-  NO_COLOR and degrading to plain text when piped or dumb-terminal.
+  NO_COLOR and degrading to plain text when piped or dumb-terminal. (Shipped.)
+- Interactive `top`: sort (by headroom, burn, or reset), filter/hide providers,
+  keyboard navigation, and a one-key "suggest and copy the route command", so the
+  terminal view is as capable as the widget.
+- Best-in-class visuals: not just functional but the most beautiful quota TUI
+  going - btop-grade rendering (truecolor gradient meters, braille burn
+  sparklines, clean box panels, a pool gauge), degrading cleanly to 256/16/no
+  color and narrow terminals. "htop, but better."
 - Every command fast, scriptable, and `--json`-complete, with documented, stable
   exit codes so a shell or agent can branch on them.
 - Identical behavior across Windows, macOS, and Linux terminals.
@@ -144,6 +159,9 @@ for your quota plans: open it and the whole fleet is just there, live.
 - Tray-first quiet mode: tray icon, optional global hotkey, native low-quota
   toasts, with the current frameless card as the expanded view.
 - Plain-language low warnings ("about an hour of usage left") alongside the bars.
+- Proactive routing alerts: when a window crosses amber/red, say where to route
+  next ("Claude 5h at 8% - send the next calls to Grok"), with an optional local
+  webhook so the same signal can reach a tray toast, a shell, or chat.
 - No layout jank; fast refresh. (Light/dark and text size are already in.)
 
 **A stable contract**
@@ -159,12 +177,17 @@ for your quota plans: open it and the whole fleet is just there, live.
 
 - A working release and install pipeline (the one-line install actually installs)
   and verified macOS and Linux packaging.
+- Presentation that earns the star: an animated GIF in the README (the widget
+  collapsing and expanding, `quotabot top` live, the 90-day analytics view) on top
+  of the static screenshots, generated from demo mode so it stays reproducible.
 
 ## After 1.0
 
 Breadth and depth, once the core is trusted:
 
-- **More quota-window providers:** Z.ai (GLM), Kimi, Amp, OpenCode.
+- **More quota-window providers:** Z.ai (GLM), Kimi, Amp, OpenCode, DeepSeek,
+  Perplexity. Spend-based aggregators (OpenRouter, Together, Fireworks) only as a
+  secondary cost view, since they are dollars, not rolling-window quota.
 - **Capability-aware routing:** `suggest --min-context`, `--require-tools`,
   `--budget`, `--exclude`, and an aggressive local-first mode that escalates to a
   paid plan only when the task needs it or a window is about to reset.
@@ -179,6 +202,9 @@ Breadth and depth, once the core is trusted:
 - **Richer analytics:** hour-by-weekday heatmap polish, a contribution calendar,
   streaks and summary stats, plan-tier modeling, and provider status polling.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
+- **Shareable reports:** a "weekly quota health" markdown export worth posting.
+- **Themes:** selectable color themes for the widget and `top`, including a
+  high-contrast "hacker" mode, all still honoring NO_COLOR and light/dark.
 - **MCP streamable HTTP transport** and client snippets.
 - **Ecosystem and packaging:** a plugin model, OS package managers (winget/MSIX,
   Homebrew, AppImage/flatpak), a docs site, and a reusable passive-reader adapter
