@@ -128,7 +128,8 @@ class Dashboard extends StatefulWidget {
   State<Dashboard> createState() => _DashboardState();
 }
 
-class _DashboardState extends State<Dashboard> with WindowListener, TrayListener {
+class _DashboardState extends State<Dashboard>
+    with WindowListener, TrayListener {
   List<ProviderQuota> _data = const [];
   bool _loading = true;
   late bool _compact = widget.prefs.compact;
@@ -238,13 +239,17 @@ class _DashboardState extends State<Dashboard> with WindowListener, TrayListener
         Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
       );
       await trayManager.setToolTip('quotabot');
-      await trayManager.setContextMenu(Menu(items: [
-        MenuItem(key: 'show', label: 'Show quotabot'),
-        MenuItem(key: 'refresh', label: 'Refresh now'),
-        MenuItem(key: 'analytics', label: 'Quota analytics'),
-        MenuItem.separator(),
-        MenuItem(key: 'quit', label: 'Quit'),
-      ]));
+      await trayManager.setContextMenu(
+        Menu(
+          items: [
+            MenuItem(key: 'show', label: 'Show quotabot'),
+            MenuItem(key: 'refresh', label: 'Refresh now'),
+            MenuItem(key: 'analytics', label: 'Quota analytics'),
+            MenuItem.separator(),
+            MenuItem(key: 'quit', label: 'Quit'),
+          ],
+        ),
+      );
       // Only now that the tray exists do we redirect close to hide: otherwise a
       // platform without a tray would have no way to reopen a hidden window.
       await windowManager.setPreventClose(true);

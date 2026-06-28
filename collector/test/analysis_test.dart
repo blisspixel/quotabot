@@ -256,7 +256,8 @@ void main() {
       expect(s.ranked.first.provider, 'claude');
     });
 
-    test('a raw-comfortable provider falls back to local once burn applies', () {
+    test('a raw-comfortable provider falls back to local once burn applies',
+        () {
       // codex 25% free is comfy raw, but burning 20/h over 1h -> eff 5 (< 15).
       final s = suggestRoute(
         [
