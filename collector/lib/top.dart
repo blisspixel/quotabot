@@ -190,16 +190,27 @@ List<String> _providerRows(
   return lines;
 }
 
-/// The single row for a local runtime: no quota, just what is loaded, marked as
-/// the always-on routing fallback.
-String _localRow(ProviderQuota q, int width, AnsiStyle s) {
+/// The rows for one local runtime: a headline (what is loaded, always-on) and any
+/// detail lines (VRAM, context, disk) the adapter provides, indented under it -
+/// the same detail the desktop app shows.
+List<String> _localRows(ProviderQuota q, int width, AnsiStyle s) {
   final status = q.status?.isNotEmpty == true ? q.status! : 'ready';
-  return _line([
-    ..._rowHead(q.displayName, 'local'),
-    _Cell(status, (s, t) => (q.active ? s.cyan(t) : s.dim(t))),
-    _Cell('  '),
-    _Cell('[always on]', (s, t) => s.dim(t)),
-  ], width, s);
+  final lines = <String>[
+    _line([
+      ..._rowHead(q.displayName, 'local'),
+      _Cell(status, (s, t) => q.active ? s.cyan(t) : s.dim(t)),
+      _Cell('  '),
+      _Cell('[always on]', (s, t) => s.dim(t)),
+    ], width, s),
+  ];
+  for (final d in q.details) {
+    lines.add(_line([
+      const _Cell('  '),
+      _Cell(' ' * (_nameW + _labelW)),
+      _Cell(d, (s, t) => s.dim(t)),
+    ], width, s));
+  }
+  return lines;
 }
 
 /// Average remaining headroom across cloud providers that have live numbers, for
@@ -230,6 +241,7 @@ List<String> renderTopFrame({
   required String clock,
   ColorDepth depth = ColorDepth.none,
   Palette palette = kDefaultPalette,
+  String updated = '',
 }) {
   final w = width < 24 ? 24 : width;
   final s = AnsiStyle(color, depth: depth);
@@ -264,7 +276,7 @@ List<String> renderTopFrame({
     lines.addAll(_providerRows(q, now, w, s, p));
   }
   for (final q in local) {
-    lines.add(_localRow(q, w, s));
+    lines.addAll(_localRows(q, w, s));
   }
 
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));
@@ -288,6 +300,7 @@ List<String> renderTopFrame({
     _Cell(' quit   ', (s, t) => s.dim(t)),
     _Cell('r', (s, t) => s.bold(t)),
     _Cell(' refresh   ', (s, t) => s.dim(t)),
+    if (updated.isNotEmpty) _Cell('$updated   ', (s, t) => s.dim(t)),
     _Cell('0 usage tokens', (s, t) => s.dim(t)),
   ], w, s));
 

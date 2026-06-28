@@ -379,4 +379,58 @@ void main() {
       expect(s.fallback.kind, 'passthrough'); // no local, no reset known
     });
   });
+
+  group('nextRefreshSeconds', () {
+    test('backs off after empty cycles', () {
+      expect(nextRefreshSeconds(const [], _now, failStreak: 1), 3600);
+      expect(nextRefreshSeconds(const [], _now, failStreak: 2), 6 * 3600);
+    });
+
+    test('polls fast when a reset is imminent', () {
+      expect(
+        nextRefreshSeconds([
+          _q('codex',
+              [QuotaWindow(label: '5h', usedPercent: 50, resetsAt: _now + 60)])
+        ], _now),
+        30,
+      );
+      expect(
+        nextRefreshSeconds([
+          _q('codex',
+              [QuotaWindow(label: '5h', usedPercent: 50, resetsAt: _now + 300)])
+        ], _now),
+        60,
+      );
+    });
+
+    test('watches closely near a cap', () {
+      final far = _now + 5 * 86400;
+      expect(
+        nextRefreshSeconds([
+          _q('codex',
+              [QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: far)])
+        ], _now),
+        300, // 5% free
+      );
+      expect(
+        nextRefreshSeconds([
+          _q('codex',
+              [QuotaWindow(label: 'weekly', usedPercent: 70, resetsAt: far)])
+        ], _now),
+        900, // 30% free
+      );
+    });
+
+    test('relaxes when healthy and resets are far off', () {
+      expect(
+        nextRefreshSeconds([
+          _q('claude', [
+            QuotaWindow(
+                label: 'weekly', usedPercent: 10, resetsAt: _now + 5 * 86400)
+          ])
+        ], _now),
+        12 * 3600,
+      );
+    });
+  });
 }

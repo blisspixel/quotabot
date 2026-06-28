@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -544,40 +543,11 @@ class _DashboardState extends State<Dashboard>
     // Fixed cadences override the smart logic.
     if (_cadence == Cadence.m15) return const Duration(minutes: 15);
     if (_cadence == Cadence.h1) return const Duration(hours: 1);
-
-    // Nothing came back live last cycle: back off instead of hammering.
-    if (_failStreak >= 2) return const Duration(hours: 6);
-    if (_failStreak >= 1) return const Duration(hours: 1);
-
+    // The adaptive cadence is shared with the CLI's `top` so both poll alike.
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    int? soonestReset;
-    double minRem = 100;
-    for (final q in _data) {
-      final h = providerHeadroom(q, now);
-      if (h != null && h < minRem) minRem = h;
-      for (final w in q.windows) {
-        if (w.resetsAt != null && w.resetsAt! > now) {
-          final dt = w.resetsAt! - now;
-          soonestReset = soonestReset == null ? dt : math.min(soonestReset, dt);
-        }
-      }
-    }
-    // A reset is about to flip the display - catch it promptly.
-    if (soonestReset != null && soonestReset < 600) {
-      return soonestReset < 120
-          ? const Duration(seconds: 30)
-          : const Duration(minutes: 1);
-    }
-    // Sitting near a cap - watch closely so the warning is timely.
-    if (minRem <= 10) return const Duration(minutes: 5);
-    if (minRem <= 40) return const Duration(minutes: 15);
-    // Healthy: relax based on how far the nearest reset is. If a weekly cap is
-    // days out and nothing is pressing, there is no point polling every minute.
-    if (soonestReset == null || soonestReset < 6 * 3600) {
-      return const Duration(minutes: 15);
-    }
-    if (soonestReset < 24 * 3600) return const Duration(hours: 1);
-    return const Duration(hours: 12);
+    return Duration(
+      seconds: nextRefreshSeconds(_data, now, failStreak: _failStreak),
+    );
   }
 
   /// Resize the window to hug the content. Live measurement of the rendered

@@ -5,6 +5,20 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot top` now refreshes on the same adaptive cadence as the desktop app:
+  it polls fast when a window is near its cap or a reset is imminent (down to 30s),
+  and relaxes to hours when the whole fleet is healthy and resets are far off. The
+  cadence is the shared `nextRefreshSeconds` used by the app, so both views agree.
+  `--interval=<secs>` still pins a fixed rate, and `r` refreshes on demand. The
+  footer shows an "updated Ns ago" indicator so a slow poll is never mistaken for
+  a stall.
+- `quotabot top` shows each local runtime's detail lines (VRAM, context, models
+  installed, disk) under its headline, matching the desktop app instead of a single
+  terse status line.
+- Truecolor detection for the live view without `COLORTERM`: Windows Terminal
+  (`WT_SESSION`) and known truecolor terminals (`TERM_PROGRAM` of vscode, iTerm,
+  WezTerm, Ghostty, Hyper, Tabby, Rio, Warp) now render the 24-bit gradient meters.
+  `--truecolor` forces it on for any terminal that supports it but is not detected.
 - suggest-a-model: `quotabot suggest --task=hard` (or any capability flag) and the
   MCP `suggest_model` tool recommend one concrete model - the cheapest that meets
   the profile and has budget, local-first, escalating to a heavier or paid tier

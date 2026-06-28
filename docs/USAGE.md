@@ -83,20 +83,29 @@ Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`)
 `quotabot top` is the htop view of your plans: one bar per rolling window for
 every provider, each colored on the headroom scale (green healthy, amber
 tightening, orange low, red spent) with a live reset countdown, your local
-runtimes as always-on fallbacks, and a route line that names where to send the
-next request. It redraws in place on the alternate screen, repaints countdowns
-every second, and re-collects on an interval.
+runtimes as always-on fallbacks (with their VRAM, context, and disk detail), and
+a route line that names where to send the next request. It redraws in place on
+the alternate screen and repaints countdowns every second.
 
 ```bash
-quotabot top                # refresh every 10s (default)
-quotabot top --interval=2   # faster refresh (minimum 2s)
+quotabot top                # adaptive refresh (the default)
+quotabot top --interval=2   # pin a fixed rate instead (minimum 2s)
+quotabot top --truecolor    # force 24-bit gradient meters
 ```
+
+By default the collection cadence adapts to the same logic the desktop app uses:
+it polls fast (down to 30s) when a window is near its cap or a reset is imminent,
+and relaxes to hours when the whole fleet is healthy and resets are far off, so
+it is responsive when it matters without hammering provider APIs. The footer
+shows when the data was last collected. `--interval` pins a fixed rate.
 
 Press `q` (or Ctrl-C) to quit and `r` to refresh immediately. A spent longer
 window collapses its provider to one line, the same binding-window rule the
 widget uses. Piped or on a dumb terminal it prints a single plain frame and
 exits, so `quotabot top | cat` still gives you a snapshot. On a truecolor
 terminal the bars use a smooth gradient; it degrades to 256/16/no color.
+Windows Terminal and common truecolor terminals are detected automatically;
+`--truecolor` forces it where detection cannot.
 
 Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
 (phosphor CRT), `dark`, `light`, or `synthwave`. Roll your own in one line with

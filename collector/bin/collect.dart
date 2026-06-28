@@ -274,21 +274,35 @@ String _clock() {
   return '${two(d.hour)}:${two(d.minute)}:${two(d.second)}';
 }
 
+/// A short "updated 5s ago" / "just now" label from a last-collect epoch.
+String _agoLabel(int lastCollect, int now) {
+  if (lastCollect == 0) return 'updating...';
+  final s = now - lastCollect;
+  if (s < 2) return 'updated just now';
+  if (s < 90) return 'updated ${s}s ago';
+  return 'updated ${(s / 60).round()}m ago';
+}
+
 /// `top`: a live, htop-style dashboard that redraws in place.
 ///
 /// On a real terminal it enters the alternate screen, hides the cursor, reads
 /// keys raw (q to quit, r to refresh now), repaints countdowns every second, and
-/// re-collects every `--interval` seconds (default 10, minimum 2). When stdout
-/// is not a terminal (piped or dumb) it degrades to printing one plain frame and
-/// exiting, so `quotabot top | cat` still yields a snapshot.
+/// re-collects on the same adaptive cadence as the desktop app (fast near a reset
+/// or a tight cap, relaxed when healthy). `--interval=N` forces a fixed cadence;
+/// `--truecolor` forces 24-bit gradients. When stdout is not a terminal it prints
+/// one plain frame and exits, so `quotabot top | cat` still yields a snapshot.
 Future<void> _runTop(Set<String> flags) async {
   final color = _useColor(flags);
-  final depth =
-      detectColorDepth(Platform.environment, hasTerminal: stdout.hasTerminal);
+  final depth = flags.contains('--truecolor')
+      ? ColorDepth.truecolor
+      : detectColorDepth(Platform.environment, hasTerminal: stdout.hasTerminal);
   final palette = paletteFromSpec(
     _stringOption(flags, 'theme', Platform.environment['QUOTABOT_THEME']),
   );
-  final interval = _intOption(flags, 'interval', 10).clamp(2, 3600);
+  // A fixed cadence only when --interval is given; otherwise adapt like the app.
+  final fixedInterval = flags.any((f) => f.startsWith('--interval='))
+      ? _intOption(flags, 'interval', 10).clamp(2, 3600)
+      : null;
 
   if (!stdout.hasTerminal) {
     final data = await collectAll();
@@ -308,6 +322,8 @@ Future<void> _runTop(Set<String> flags) async {
 
   var data = <ProviderQuota>[];
   var loading = true;
+  var lastCollect = 0;
+  var failStreak = 0;
   final quit = Completer<void>();
   Timer? repaint;
   Timer? refresh;
@@ -327,6 +343,7 @@ Future<void> _runTop(Set<String> flags) async {
         clock: _clock(),
         depth: depth,
         palette: palette,
+        updated: _agoLabel(lastCollect, now),
       );
     }
     final buf = StringBuffer()
@@ -344,15 +361,32 @@ Future<void> _runTop(Set<String> flags) async {
     stdout.write(buf.toString());
   }
 
-  Future<void> reload() async {
+  // scheduleRefresh and reload reference each other, so both are late bindings.
+  late final void Function() scheduleRefresh;
+  late final Future<void> Function() reload;
+
+  scheduleRefresh = () {
+    final secs = fixedInterval ??
+        nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak);
+    refresh = Timer(Duration(seconds: secs), reload);
+  };
+
+  // Re-collect, update the failure streak, redraw, and schedule the next refresh
+  // on the adaptive cadence.
+  reload = () async {
     try {
-      data = await collectAll();
+      final fresh = await collectAll();
+      data = fresh;
+      lastCollect = nowEpoch();
       loading = false;
+      final anyLive = fresh.any((q) => q.ok && q.hasWindows && !q.stale);
+      failStreak = anyLive ? 0 : failStreak + 1;
       draw();
     } catch (_) {
       // Keep the last good frame on a transient collection error.
     }
-  }
+    scheduleRefresh();
+  };
 
   final priorEcho = stdin.echoMode;
   final priorLine = stdin.lineMode;
@@ -371,19 +405,21 @@ Future<void> _runTop(Set<String> flags) async {
   final keys = stdin.listen((bytes) {
     for (final b in bytes) {
       if (b == 113 || b == 81 || b == 3) return stop(); // q, Q, Ctrl-C
-      if (b == 114 || b == 82) reload(); // r, R
+      if (b == 114 || b == 82) {
+        refresh?.cancel();
+        reload(); // r, R: refresh now and reschedule
+      }
     }
   });
   final sigint = ProcessSignal.sigint.watch().listen((_) => stop());
 
   draw(); // immediate "reading quota" frame
-  await reload(); // first real snapshot
+  await reload(); // first real snapshot (also schedules the next refresh)
   repaint = Timer.periodic(const Duration(seconds: 1), (_) => draw());
-  refresh = Timer.periodic(Duration(seconds: interval), (_) => reload());
 
   await quit.future;
   repaint.cancel();
-  refresh.cancel();
+  refresh?.cancel();
   await keys.cancel();
   await sigint.cancel();
   try {
@@ -446,7 +482,10 @@ void _printHelp() {
     '  --color, --no-color force or disable color (also honors NO_COLOR)',
   );
   stdout.writeln(
-    '  --interval=N        top: seconds between refreshes (default 10, min 2)',
+    '  --interval=N        top: fixed seconds between refreshes (default: adaptive)',
+  );
+  stdout.writeln(
+    '  --truecolor         top: force 24-bit gradient meters',
   );
   stdout.writeln(
     '  --theme=NAME        top: palette (${paletteNames.join(', ')}, '

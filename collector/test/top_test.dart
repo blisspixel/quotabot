@@ -228,6 +228,47 @@ void main() {
         ColorDepth.ansi16,
       );
     });
+    test('Windows Terminal and known terminal programs get truecolor', () {
+      expect(
+        detectColorDepth({'WT_SESSION': 'abc'}, hasTerminal: true),
+        ColorDepth.truecolor,
+      );
+      expect(
+        detectColorDepth({'TERM_PROGRAM': 'vscode'}, hasTerminal: true),
+        ColorDepth.truecolor,
+      );
+    });
+  });
+
+  test('the updated label appears in the footer', () {
+    final out = renderTopFrame(
+      providers: [
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+      ],
+      suggestion: suggestRoute(const [], _now),
+      now: _now,
+      width: 80,
+      color: false,
+      clock: '12:00:00',
+      updated: 'updated 5s ago',
+    ).join();
+    expect(_plain(out), contains('updated 5s ago'));
+  });
+
+  test('local runtime detail lines render under the headline', () {
+    final q = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: 'local',
+      asOf: _now,
+      kind: 'local',
+      status: 'qwen loaded',
+      active: true,
+      details: const ['4 GB VRAM . 32K ctx', '3 installed . 18 GB on disk'],
+    );
+    final lines = _frame([q]);
+    expect(lines.any((l) => _plain(l).contains('VRAM')), isTrue);
+    expect(lines.any((l) => _plain(l).contains('on disk')), isTrue);
   });
 
   test('an empty fleet still renders a usable frame', () {

@@ -22,7 +22,26 @@ ColorDepth detectColorDepth(Map<String, String> env,
   if (ct.contains('truecolor') || ct.contains('24bit')) {
     return ColorDepth.truecolor;
   }
+  // Many modern terminals support 24-bit color without setting COLORTERM.
+  // Windows Terminal sets WT_SESSION; the rest identify via TERM_PROGRAM.
+  if (env.containsKey('WT_SESSION')) return ColorDepth.truecolor;
+  const truecolorPrograms = {
+    'vscode',
+    'iterm.app',
+    'wezterm',
+    'ghostty',
+    'hyper',
+    'tabby',
+    'rio',
+    'warpterminal',
+  };
+  if (truecolorPrograms.contains((env['TERM_PROGRAM'] ?? '').toLowerCase())) {
+    return ColorDepth.truecolor;
+  }
   final term = (env['TERM'] ?? '').toLowerCase();
+  if (term.contains('truecolor') || term.contains('24bit')) {
+    return ColorDepth.truecolor;
+  }
   if (term.contains('256')) return ColorDepth.ansi256;
   return ColorDepth.ansi16;
 }

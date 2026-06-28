@@ -509,6 +509,41 @@ RouteSuggestion suggestRoute(
   return result(null, 'Everything is spent and no reset time is known.');
 }
 
+/// The adaptive refresh delay in seconds for a snapshot: fast when a reset is
+/// imminent or a cap is nearly hit, relaxed when everything is healthy and resets
+/// are far off, and backing off after [failStreak] cycles that returned nothing
+/// live. Pure, so the desktop app and `quotabot top` poll on identical logic
+/// rather than two drifting copies.
+int nextRefreshSeconds(List<ProviderQuota> data, int now,
+    {int failStreak = 0}) {
+  if (failStreak >= 2) return 6 * 3600;
+  if (failStreak >= 1) return 3600;
+
+  int? soonestReset;
+  double minRem = 100;
+  for (final q in data) {
+    final h = providerHeadroom(q, now);
+    if (h != null && h < minRem) minRem = h;
+    for (final w in q.windows) {
+      if (w.resetsAt != null && w.resetsAt! > now) {
+        final dt = w.resetsAt! - now;
+        soonestReset = soonestReset == null ? dt : math.min(soonestReset, dt);
+      }
+    }
+  }
+  // A reset about to flip the display: catch it promptly.
+  if (soonestReset != null && soonestReset < 600) {
+    return soonestReset < 120 ? 30 : 60;
+  }
+  // Near a cap: watch closely so a warning is timely.
+  if (minRem <= 10) return 300;
+  if (minRem <= 40) return 900;
+  // Healthy: relax with how far the nearest reset is.
+  if (soonestReset == null || soonestReset < 6 * 3600) return 900;
+  if (soonestReset < 24 * 3600) return 3600;
+  return 12 * 3600;
+}
+
 /// Computes simple average headroom from recent history snapshots.
 /// Returns null if no usable data. Pure for testability.
 double? averageRecentHeadroom(List<ProviderQuota> history, int now) {
