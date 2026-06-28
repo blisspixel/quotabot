@@ -56,6 +56,12 @@ Notable changes to quotabot. Newest first.
   `effective_headroom_percent` per candidate, plus `burn_percent_per_hour` when
   local history is available.
 
+### Changed
+- Prebuilt CLI binaries cover macOS (Apple Silicon), Linux x64/arm64, and Windows.
+  GitHub retired the Intel macOS runner, so Intel Macs build from source
+  (`tools/setup.sh`); the installer prints that instead of failing on a missing
+  asset.
+
 ## 0.2.0 - 2026-06-27
 
 ### Added

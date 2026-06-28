@@ -36,10 +36,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # macOS is Apple Silicon only: GitHub retired the Intel (macos-13)
+        # runner, and Dart compiles for the host arch, so Intel Macs build from
+        # source (install.sh says so). Re-add an Intel leg only if a hosted Intel
+        # runner returns or we add a Rosetta x64 cross-build.
         include:
           - { os: ubuntu-latest,    script: bash tools/package-cli.sh }
           - { os: ubuntu-24.04-arm, script: bash tools/package-cli.sh }
-          - { os: macos-13,         script: bash tools/package-cli.sh }
           - { os: macos-latest,     script: bash tools/package-cli.sh }
           - { os: windows-latest,   script: pwsh tools/package-cli.ps1 }
     runs-on: ${{ matrix.os }}

@@ -38,6 +38,16 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
+# Intel macOS has no prebuilt binary (GitHub retired the Intel runner and Intel
+# Macs are past end of life). Point those users at the from-source build instead
+# of failing on a 404.
+if [[ "$OS" == "darwin" && "$ARCH" == "x64" ]]; then
+  echo "No prebuilt CLI for Intel macOS. Build from source instead:" >&2
+  echo "  git clone https://github.com/${REPO}.git" >&2
+  echo "  cd quotabot && bash tools/setup.sh --cli-only" >&2
+  exit 1
+fi
+
 ASSET="quotabot-${OS}-${ARCH}"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
