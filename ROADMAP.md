@@ -188,8 +188,12 @@ Breadth and depth, once the core is trusted:
   Perplexity. Spend-based aggregators (OpenRouter, Together, Fireworks) only as a
   secondary cost view, since they are dollars, not rolling-window quota.
 - **Capability-aware routing:** `suggest --min-context`, `--require-tools`,
-  `--budget`, `--exclude`, and an aggressive local-first mode that escalates to a
-  paid plan only when the task needs it or a window is about to reset.
+  `--require-reasoning`, `--budget`, `--exclude`, an optional tier floor/ceiling,
+  and an aggressive local-first mode that escalates to a paid plan only when the
+  task needs it or a window is about to reset. Task complexity is a coarse,
+  caller-supplied profile (quotabot never reads the task); models are filtered by
+  objective capability and the provider's own tier, never a quotabot quality
+  ranking, and the cheapest qualifying model with budget wins.
 - **Concurrency leases** (`reserve` / `release`) so parallel agents do not dogpile
   the same pick.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
