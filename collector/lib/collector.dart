@@ -15,6 +15,8 @@ import 'util.dart';
 
 export 'models.dart';
 export 'insights.dart';
+export 'model_catalog.dart';
+export 'registry.dart';
 export 'cache.dart'
     show
         loadHistory,

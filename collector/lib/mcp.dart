@@ -21,7 +21,9 @@ import 'dart:convert';
 import 'package:mcp_dart/mcp_dart.dart';
 
 import 'analysis.dart';
+import 'model_catalog.dart';
 import 'models.dart';
+import 'registry.dart';
 import 'util.dart';
 
 /// A schema that accepts [schema] or an explicit null, for nullable fields.
@@ -223,6 +225,43 @@ final suggestOutputSchema = JsonSchema.object(
   required: ['schema', 'reason', 'using_local_fallback', 'fallback', 'ranked'],
 );
 
+/// One model entry in the registry: the model's capability fields plus the live
+/// budget of its gating provider. Permissive (additive fields allowed).
+final _modelEntrySchema = JsonSchema.object(
+  description: 'A routable model plus the gating provider budget.',
+  properties: {
+    'id': JsonSchema.string(description: 'Provider-native model id.'),
+    'display_name': JsonSchema.string(),
+    'provider': JsonSchema.string(),
+    'account': JsonSchema.string(),
+    'local': JsonSchema.boolean(),
+    'available': JsonSchema.boolean(),
+    'stale': JsonSchema.boolean(),
+    'context_tokens': JsonSchema.integer(),
+    'max_output_tokens': JsonSchema.integer(),
+    'tools': JsonSchema.boolean(),
+    'vision': JsonSchema.boolean(),
+    'headroom_percent': _nullable(JsonSchema.number()),
+    'resets_at': JsonSchema.integer(),
+    'gating_window': JsonSchema.string(),
+  },
+  required: ['id', 'provider', 'local', 'available'],
+);
+
+/// Output schema for `list_models`.
+final listModelsOutputSchema = JsonSchema.object(
+  description: 'Every model the user can route to now, with per-model budget.',
+  properties: {
+    'schema': JsonSchema.string(),
+    'generated_at': JsonSchema.integer(),
+    'catalog_updated': JsonSchema.string(
+      description: 'Date the cloud capability catalog was last refreshed.',
+    ),
+    'models': JsonSchema.array(items: _modelEntrySchema),
+  },
+  required: ['schema', 'generated_at', 'models'],
+);
+
 /// Output schema for `check_provider_availability`.
 final availabilityOutputSchema = JsonSchema.object(
   description: 'Whether one named provider has quota available now.',
@@ -271,6 +310,7 @@ void registerQuotabotTools(
   required SnapshotProvider snapshot,
   required BurnProvider burnByProvider,
   int Function() now = nowEpoch,
+  Map<String, List<ModelInfo>> catalog = kModelCatalog,
 }) {
   server.registerTool(
     'list_quotas',
@@ -333,6 +373,24 @@ void registerQuotabotTools(
         ),
       );
     },
+  );
+
+  server.registerTool(
+    'list_models',
+    title: 'List models',
+    description:
+        'Return every model the user can route to right now, across all cloud '
+        'providers and local runtimes, each tagged with the live budget that '
+        'gates it (headroom percent, binding window, reset) and capability hints '
+        '(context length, tools, vision) where known. Local-runtime models are '
+        'read live; cloud models come from a refreshable capability catalog. Use '
+        'this to pick a concrete model with budget, not just a provider.',
+    inputSchema: JsonSchema.object(properties: {}),
+    outputSchema: listModelsOutputSchema,
+    annotations: _readOnly,
+    callback: (args, extra) async => CallToolResult.fromStructuredContent(
+      modelRegistryJson(await snapshot(), now(), catalog: catalog),
+    ),
   );
 
   server.registerTool(

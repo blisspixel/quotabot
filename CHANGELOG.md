@@ -5,6 +5,15 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Model registry: `quotabot models` (and the MCP `list_models` tool) list every
+  model you can route to right now across cloud providers and local runtimes, each
+  tagged with the live budget that gates it (headroom percent, binding window,
+  reset) and capability hints (context window, tools, vision, reasoning), most
+  routable first. Local-runtime models are read live from the runtime; cloud
+  models come from a committed, stamped capability catalog that a refresh tool
+  regenerates from each provider's own model endpoint (so it never goes stale by
+  hand). The normalized snapshot now carries a provider's `models`, and the
+  registry has its own `quotabot.models.v1` shape shared by the CLI and MCP.
 - Risk-aware, self-explaining routing. `suggest` (CLI, the MCP `suggest_provider`
   tool, and the local `/suggest`) now estimates each provider's burn-rate
   uncertainty (the standard error of the fitted slope) and exposes, per candidate,

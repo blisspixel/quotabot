@@ -55,6 +55,42 @@ void main() {
       expect(q.details.any((d) => d.contains('on disk')), isTrue);
     });
 
+    test('exposes each installed model in the registry shape', () {
+      final q = localRuntimeQuota(
+        id: 'ollama',
+        name: 'Ollama',
+        asOf: 100,
+        installed: [
+          _m('qwen3-coder:latest', bytes: 4 * 1024 * 1024 * 1024),
+          _m('llama3:8b', bytes: 5 * 1024 * 1024 * 1024),
+        ],
+        loaded: [
+          _m(
+            'qwen3-coder:latest',
+            quant: 'Q4_K_M',
+            vramBytes: 4 * 1024 * 1024 * 1024,
+            context: 32768,
+          ),
+        ],
+      );
+      expect(q.models, hasLength(2));
+      final loaded = q.models.firstWhere((m) => m.id == 'qwen3-coder:latest');
+      expect(loaded.local, isTrue);
+      expect(loaded.loaded, isTrue);
+      expect(loaded.vramBytes, 4 * 1024 * 1024 * 1024);
+      expect(loaded.contextTokens, 32768);
+      final idle = q.models.firstWhere((m) => m.id == 'llama3:8b');
+      expect(idle.loaded, isFalse);
+      expect(idle.sizeBytes, 5 * 1024 * 1024 * 1024);
+      // Models survive a snapshot round-trip.
+      final back = ProviderQuota.fromJson(q.toJson());
+      expect(back.models.map((m) => m.id), q.models.map((m) => m.id));
+      expect(
+        back.models.firstWhere((m) => m.id == 'qwen3-coder:latest').loaded,
+        isTrue,
+      );
+    });
+
     test('reports idle with an installed count when nothing is loaded', () {
       final q = localRuntimeQuota(
         id: 'lmstudio',

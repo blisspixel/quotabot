@@ -100,6 +100,16 @@ Future<void> main(List<String> args) async {
     case 'top':
       await _runTop(flags);
       return;
+    case 'models':
+      final results = await _read();
+      final now = nowEpoch();
+      if (wantsJson) {
+        print(_jsonPretty(
+            modelRegistryJson(results, now, catalog: kModelCatalog)));
+      } else {
+        _printModels(buildModelRegistry(results, now, catalog: kModelCatalog));
+      }
+      return;
   }
 
   // Snapshot and the default status table share one collect.
@@ -300,6 +310,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  check <provider>    whether one provider is usable now, and its reset',
+  );
+  stdout.writeln(
+    '  models              every model you can route to now, with budget + caps',
   );
   stdout.writeln(
     '  stats [provider]    90-day analytics: distribution, reliability, pace',
@@ -560,6 +573,48 @@ void _printDoctor(List<ProviderQuota> results) {
       '  (Aider/Cline etc often use underlying provider quotas already tracked above.)',
     );
   }
+}
+
+/// A compact context-window label: "1M", "200K".
+String _ctxLabel(int tokens) => tokens >= 1000000
+    ? '${(tokens / 1000000).round()}M'
+    : '${(tokens / 1000).round()}K';
+
+/// Prints the model registry: every model you can route to now, with the live
+/// budget that gates it and its capability hints.
+void _printModels(List<ModelEntry> reg) {
+  print('quotabot models  (what you can route to now, 0 usage tokens)\n');
+  if (reg.isEmpty) {
+    print('  no models detected; start a local runtime or connect a provider');
+    return;
+  }
+  for (final e in reg) {
+    final m = e.model;
+    final budget = e.local
+        ? style.cyan('local'.padRight(9))
+        : (e.headroomPercent == null
+            ? style.dim('?'.padRight(9))
+            : style.health(
+                e.headroomPercent!,
+                '${e.headroomPercent!.round()}% free'.padRight(9),
+              ));
+    final ctx = m.contextTokens == null
+        ? ''
+        : style.dim('  ${_ctxLabel(m.contextTokens!)} ctx');
+    final caps = [
+      if (m.tools == true) 'tools',
+      if (m.vision == true) 'vision',
+      if (m.reasoning != null) 'reason',
+    ].join(',');
+    final capStr = caps.isEmpty ? '' : style.dim('  $caps');
+    final loaded = (e.local && m.loaded) ? style.cyan('  [loaded]') : '';
+    final spent = e.available ? '' : style.red('  spent');
+    print(
+      '  ${m.id.padRight(22)} ${e.provider.padRight(11)} '
+      '$budget$ctx$capStr$loaded$spent',
+    );
+  }
+  print(style.dim('\n  capability catalog updated $kCatalogUpdated'));
 }
 
 /// Prints a routing recommendation: where to send the next request and why,

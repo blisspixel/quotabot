@@ -66,6 +66,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 |------------------------|-------------------------------------------------------|
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
 | `top`                  | Live dashboard that redraws in place (q quit, r now). |
+| `models`               | Every model you can route to now, with budget + caps. |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, reliability, pace.    |
@@ -105,6 +106,8 @@ speaks MCP over stdio and exposes four tools plus a resource:
 - `suggest_provider` - the provider to route the next request to, with ranked
   alternatives and a local fallback when subscriptions are low.
 - `check_provider_availability` - whether a named provider is usable now.
+- `list_models` - every model you can route to now (cloud + local), each with its
+  gating provider's live budget and capability hints.
 - Resource `quotas://current` - the same snapshot.
 
 Run it with `dart run bin/mcp_server.dart`, or compile a binary:

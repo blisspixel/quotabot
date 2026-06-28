@@ -162,6 +162,22 @@ ProviderQuota localRuntimeQuota({
         : '${installed.length} installed',
   );
 
+  // Normalize the installed list into the registry model shape, marking which
+  // are loaded and folding in the loaded entry's live VRAM/context.
+  final loadedByName = {for (final m in loaded) m.name: m};
+  final models = [
+    for (final m in installed)
+      ModelInfo(
+        id: m.name,
+        local: true,
+        loaded: loadedByName.containsKey(m.name),
+        sizeBytes: m.bytes,
+        quant: m.quant,
+        contextTokens: loadedByName[m.name]?.context ?? m.context,
+        vramBytes: loadedByName[m.name]?.vramBytes,
+      ),
+  ];
+
   return ProviderQuota(
     provider: id,
     displayName: name,
@@ -172,6 +188,7 @@ ProviderQuota localRuntimeQuota({
     status: status,
     active: headline != null,
     details: details,
+    models: models,
   );
 }
 

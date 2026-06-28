@@ -153,6 +153,11 @@ void main() {
         snapshot: () async => snapshot,
         burnByProvider: (providers, now) => const <String, BurnStat>{},
         now: () => _now,
+        catalog: const {
+          'claude': [
+            ModelInfo(id: 'claude-test', contextTokens: 200000, tools: true),
+          ],
+        },
       );
       await server.connect(serverT);
 
@@ -220,6 +225,16 @@ void main() {
         ),
       );
       expect(unknown.structuredContent?['error'], 'unknown provider');
+
+      final models = await client.callTool(
+        const CallToolRequest(name: 'list_models'),
+      );
+      expect(models.structuredContent?['schema'], 'quotabot.models.v1');
+      // The fixture catalog gives claude one model, gated by its live budget.
+      final list = models.structuredContent?['models'] as List;
+      final claude = list.firstWhere((m) => (m as Map)['id'] == 'claude-test');
+      expect((claude as Map)['provider'], 'claude');
+      expect(claude['headroom_percent'], 80);
 
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);

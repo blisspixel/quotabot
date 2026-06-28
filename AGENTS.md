@@ -35,6 +35,8 @@ Pick whichever transport you already speak. All return the same data.
   - `provider_with_most_headroom` - the account with the most remaining budget.
   - `check_provider_availability` - whether a named provider is usable now and
     when it resets.
+  - `list_models` - every model you can route to now across providers and local
+    runtimes, each with its gating provider's live budget and capability hints.
   - Resource `quotas://current` - the same snapshot.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot stats --json` for analytics.

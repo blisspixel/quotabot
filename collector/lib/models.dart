@@ -88,6 +88,11 @@ class ProviderQuota {
   /// (e.g. a local runtime's loaded model size, quantization, and disk usage).
   final List<String> details;
 
+  /// The models this provider exposes, when known. Local runtimes fill this live
+  /// from their own model list; cloud providers are populated from the catalog by
+  /// the registry. Empty when the model set is unknown.
+  final List<ModelInfo> models;
+
   /// True when data was read successfully.
   final bool ok;
 
@@ -117,6 +122,7 @@ class ProviderQuota {
     this.status,
     this.active = false,
     this.details = const [],
+    this.models = const [],
   });
 
   /// True when this is a local, always-available runtime rather than a metered
@@ -152,6 +158,7 @@ class ProviderQuota {
         'as_of': asOf,
         'stale': stale,
         'windows': windows.map((w) => w.toJson()).toList(),
+        if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
       };
 
   factory ProviderQuota.fromJson(Map<String, dynamic> j) => ProviderQuota(
@@ -170,6 +177,9 @@ class ProviderQuota {
         windows: ((j['windows'] as List?) ?? const [])
             .map((w) => QuotaWindow.fromJson(w as Map<String, dynamic>))
             .toList(),
+        models: ((j['models'] as List?) ?? const [])
+            .map((m) => ModelInfo.fromJson(m as Map<String, dynamic>))
+            .toList(),
       );
 
   /// Returns a copy marked stale, preserving the original capture time.
@@ -187,6 +197,7 @@ class ProviderQuota {
         active: active,
         details: details,
         windows: windows,
+        models: models,
       );
 
   /// True when this snapshot carries usable quota windows.
@@ -203,4 +214,90 @@ class BurnStat {
   final double? sePerHour;
   final int samples;
   const BurnStat({this.perHour, this.sePerHour, this.samples = 0});
+}
+
+/// One model the user can route to, normalized across cloud providers and local
+/// runtimes. Capability fields are hints, null when unknown; local-only fields
+/// ([loaded], [sizeBytes], [vramBytes], [quant]) are null/false for cloud models.
+class ModelInfo {
+  /// Provider-native model id, e.g. "claude-opus-4-8" or "llama3.1:8b".
+  final String id;
+
+  /// Human display name when it differs usefully from [id].
+  final String? displayName;
+
+  /// Context window in tokens, when known.
+  final int? contextTokens;
+
+  /// Maximum output tokens, when known.
+  final int? maxOutputTokens;
+
+  /// Whether the model supports tool/function calling, when known.
+  final bool? tools;
+
+  /// Whether the model accepts image input, when known.
+  final bool? vision;
+
+  /// Reasoning-tier hint (e.g. "reasoning"), when known.
+  final String? reasoning;
+
+  /// True for a local-runtime model (Ollama/LM Studio/Lemonade).
+  final bool local;
+
+  /// Local only: currently loaded into memory.
+  final bool loaded;
+
+  /// Local only: on-disk size in bytes.
+  final int? sizeBytes;
+
+  /// Local only: VRAM in bytes when loaded.
+  final int? vramBytes;
+
+  /// Local only: quantization label, e.g. "Q4_K_M".
+  final String? quant;
+
+  const ModelInfo({
+    required this.id,
+    this.displayName,
+    this.contextTokens,
+    this.maxOutputTokens,
+    this.tools,
+    this.vision,
+    this.reasoning,
+    this.local = false,
+    this.loaded = false,
+    this.sizeBytes,
+    this.vramBytes,
+    this.quant,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        if (displayName != null) 'display_name': displayName,
+        if (contextTokens != null) 'context_tokens': contextTokens,
+        if (maxOutputTokens != null) 'max_output_tokens': maxOutputTokens,
+        if (tools != null) 'tools': tools,
+        if (vision != null) 'vision': vision,
+        if (reasoning != null) 'reasoning': reasoning,
+        if (local) 'local': local,
+        if (loaded) 'loaded': loaded,
+        if (sizeBytes != null) 'size_bytes': sizeBytes,
+        if (vramBytes != null) 'vram_bytes': vramBytes,
+        if (quant != null) 'quant': quant,
+      };
+
+  factory ModelInfo.fromJson(Map<String, dynamic> j) => ModelInfo(
+        id: j['id'] as String,
+        displayName: j['display_name'] as String?,
+        contextTokens: (j['context_tokens'] as num?)?.toInt(),
+        maxOutputTokens: (j['max_output_tokens'] as num?)?.toInt(),
+        tools: j['tools'] as bool?,
+        vision: j['vision'] as bool?,
+        reasoning: j['reasoning'] as String?,
+        local: j['local'] as bool? ?? false,
+        loaded: j['loaded'] as bool? ?? false,
+        sizeBytes: (j['size_bytes'] as num?)?.toInt(),
+        vramBytes: (j['vram_bytes'] as num?)?.toInt(),
+        quant: j['quant'] as String?,
+      );
 }
