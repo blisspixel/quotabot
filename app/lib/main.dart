@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
@@ -21,6 +23,18 @@ import 'prefs.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+
+/// Screenshot-export mode (`QUOTABOT_SHOTS=1`): the app loads demo data, captures
+/// the widget and analytics views to PNGs (in `QUOTABOT_SHOTS_DIR`, default the
+/// current directory), then exits. It reuses the real widget tree so the README
+/// images stay pixel-faithful. Shots mode implies demo data; both are no-ops on a
+/// normal run.
+final bool _shotsMode = Platform.environment['QUOTABOT_SHOTS'] == '1';
+final bool _demoMode =
+    _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
+
+/// Boundary around the live route, captured for screenshots.
+final GlobalKey _shotBoundaryKey = GlobalKey();
 
 /// Global text-scale, applied to every route (strip and analytics) via the
 /// MaterialApp builder. Driven by the TextSize preference.
@@ -96,13 +110,16 @@ class QuotaBotApp extends StatelessWidget {
       themeMode: ThemeMode.system, // follow OS light/dark
       theme: _theme(Brightness.light),
       darkTheme: _theme(Brightness.dark),
-      builder: (context, child) => ValueListenableBuilder<double>(
-        valueListenable: textScale,
-        builder: (context, scale, _) => MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(scale)),
-          child: child!,
+      builder: (context, child) => RepaintBoundary(
+        key: _shotBoundaryKey,
+        child: ValueListenableBuilder<double>(
+          valueListenable: textScale,
+          builder: (context, scale, _) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(scale)),
+            child: child!,
+          ),
         ),
       ),
       home: Dashboard(prefs: prefs),
@@ -206,12 +223,44 @@ class _DashboardState extends State<Dashboard>
     unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
     unawaited(windowManager.setMinimumSize(const Size(120, 40)));
     _refresh();
+    if (_shotsMode) unawaited(_exportShots());
     // Repaint periodically so the age label and reset countdowns stay current.
     // Thirty seconds is plenty when the labels are in minutes, and avoids the
     // distraction of a per-second ticking clock.
     _tick = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  /// Captures the current route under [_shotBoundaryKey] to a PNG. Used only by
+  /// screenshot mode. The render object is read synchronously (callers settle the
+  /// frame with a delay first), so no BuildContext crosses an async gap.
+  Future<void> _captureBoundary(String filename) async {
+    final boundary =
+        _shotBoundaryKey.currentContext?.findRenderObject()
+            as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    final image = await boundary.toImage(pixelRatio: 2.0);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (data == null) return;
+    final dir = Platform.environment['QUOTABOT_SHOTS_DIR'] ?? '.';
+    File('$dir/$filename').writeAsBytesSync(data.buffer.asUint8List());
+  }
+
+  /// Loads demo data (via [_demoMode]), captures the widget then the analytics
+  /// view, and exits. Reuses the real widgets so the README images stay faithful.
+  Future<void> _exportShots() async {
+    // The window show is gated behind windowManager.waitUntilReadyToShow, so wait
+    // out that plus the first real paint before the first capture.
+    await Future.delayed(const Duration(seconds: 2));
+    await WidgetsBinding.instance.endOfFrame;
+    await _captureBoundary('screenshot-widget.png');
+    _showFleet();
+    await Future.delayed(const Duration(milliseconds: 1400)); // route + charts
+    await WidgetsBinding.instance.endOfFrame;
+    await _captureBoundary('screenshot-analytics.png');
+    await Future.delayed(const Duration(milliseconds: 150));
+    exit(0);
   }
 
   @override
@@ -316,7 +365,7 @@ class _DashboardState extends State<Dashboard>
 
   Future<void> _refresh() async {
     if (_isRefreshing) return;
-    if (Platform.environment['QUOTABOT_DEMO'] == '1') {
+    if (_demoMode) {
       _loadDemo();
       return;
     }
