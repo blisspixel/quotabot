@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- MCP 2025-11-25 depth: every tool now advertises a JSON output schema and returns
+  structured content (`structuredContent` alongside the back-compat text block),
+  plus read-only/idempotent tool annotations so clients can validate results and
+  see that the tools never mutate state. Tool shapes, schemas, and wiring moved
+  into a tested `lib/mcp.dart` (the server binary is now a thin shell), covered by
+  an in-memory client/server round-trip that exercises the real schema validation.
 - System tray for the desktop app: a tray icon with a context menu (show, refresh,
   quota analytics, quit). The window now closes to the tray instead of quitting,
   so quotabot can sit quietly in the background; Quit lives in the tray menu.
