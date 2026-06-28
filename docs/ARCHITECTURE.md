@@ -106,11 +106,18 @@ rate limit or an expired token from blanking a provider.
 ## Routing helpers and the MCP server
 
 `analysis.dart` exposes `providerHeadroom`, `providerWithMostHeadroom`,
-`providerAvailability`, `bindingWindow`, and `averageRecentHeadroom`.
+`providerAvailability`, `bindingWindow`, `averageRecentHeadroom`, and the
+forecast helpers `riskAdjustedHeadroom`, `strandProbability`, and `suggestRoute`.
 `bin/mcp_server.dart` wraps `collectAll()` plus helpers as MCP tools and a
 `quotas://current` resource over stdio. `bin/example_routing_agent.dart` shows
 the same logic used for routing decisions. `bin/local_server.dart` provides a
-simple HTTP alternative.
+simple HTTP alternative. The reasoning behind the routing math (risk-adjusted
+headroom, strand probability, and the planned extensions) is written up in
+[ROUTING-MATH.md](ROUTING-MATH.md).
+
+The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
+cross-provider list of models with per-model budget, surfaced as `quotabot models`
+and the MCP `list_models` tool.
 
 ## The UI
 

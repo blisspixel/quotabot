@@ -138,10 +138,9 @@ for your quota plans: open it and the whole fleet is just there, live.
 - Interactive `top`: sort (by headroom, burn, or reset), filter/hide providers,
   keyboard navigation, and a one-key "suggest and copy the route command", so the
   terminal view is as capable as the widget.
-- Best-in-class visuals: not just functional but the most beautiful quota TUI
-  going - btop-grade rendering (truecolor gradient meters, braille burn
-  sparklines, clean box panels, a pool gauge), degrading cleanly to 256/16/no
-  color and narrow terminals. "htop, but better."
+- Considered visuals: truecolor gradient meters, small burn sparklines, clean
+  panels, and a pool gauge, degrading cleanly to 256/16/no color and narrow or
+  piped terminals. Pleasant to leave open, not just functional.
 - Every command fast, scriptable, and `--json`-complete, with documented, stable
   exit codes so a shell or agent can branch on them.
 - Identical behavior across Windows, macOS, and Linux terminals.
@@ -177,9 +176,9 @@ for your quota plans: open it and the whole fleet is just there, live.
 
 - A working release and install pipeline (the one-line install actually installs)
   and verified macOS and Linux packaging.
-- Presentation that earns the star: an animated GIF in the README (the widget
-  collapsing and expanding, `quotabot top` live, the 90-day analytics view) on top
-  of the static screenshots, generated from demo mode so it stays reproducible.
+- An animated GIF in the README (the widget collapsing and expanding, `quotabot
+  top` live, the 90-day analytics view) alongside the static screenshots,
+  generated from demo mode so it stays reproducible.
 
 ## After 1.0
 
