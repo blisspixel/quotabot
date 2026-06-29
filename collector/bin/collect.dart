@@ -8,6 +8,7 @@ import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 
@@ -151,8 +152,9 @@ RouteSuggestion _suggestFor(
     suggestRoute(
       results,
       now,
-      burnStatsByProvider:
-          recentBurnStatsByProvider(results.map((q) => q.provider), now),
+      burnStatsByProvider: Platform.environment['QUOTABOT_DEMO'] == '1'
+          ? demo.demoBurnStats()
+          : recentBurnStatsByProvider(results.map((q) => q.provider), now),
       riskZ: riskZ,
     );
 

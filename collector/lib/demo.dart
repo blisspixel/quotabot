@@ -10,6 +10,19 @@ library;
 import 'adapters/ollama.dart';
 import 'models.dart';
 
+/// Synthetic recent-burn estimates for the demo fleet, so previews and the
+/// README screenshot show quotabot's forward-looking forecast - strand risk and
+/// time-to-empty - without any real history. Keyed by provider id; providers not
+/// listed simply show no forecast, the same as a fleet with steady headroom.
+Map<String, BurnStat> demoBurnStats() => const {
+      // Claude's tight 5h window is being drawn down fast: a likely strand
+      // before it resets, with enough samples to be confident about it.
+      'claude': BurnStat(perHour: 18, sePerHour: 4, samples: 12),
+      // Codex is burning steadily but with no error estimate yet, so quotabot
+      // shows a plain time-to-empty rather than a strand probability.
+      'codex': BurnStat(perHour: 8, samples: 4),
+    };
+
 /// A believable full fleet of made-up quota for demos: a few metered
 /// subscriptions at various headrooms and a few local runtimes.
 List<ProviderQuota> demoProviders(int now) {

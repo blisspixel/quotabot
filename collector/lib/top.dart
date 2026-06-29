@@ -61,11 +61,45 @@ const _labelW = 8;
 const _barMax = 40;
 
 /// The width of the bar for this frame, shared by every row so they align.
-int _barWidth(int width) {
+/// When [reserveForecast] is set a column is held back for the forward-looking
+/// note, so the meters shrink to make room only when there is a forecast to show
+/// (a fleet with no burn history keeps full-width bars).
+int _barWidth(int width, {bool reserveForecast = false}) {
   // indent(2) name label gaps(3) bar "100% free"(10) gap(2) reset(~13).
-  final overhead = 2 + _nameW + _labelW + 3 + 10 + 2 + 13;
+  final overhead =
+      2 + _nameW + _labelW + 3 + 10 + 2 + 13 + (reserveForecast ? 13 : 0);
   return (width - overhead).clamp(6, _barMax);
 }
+
+/// A compact forward-looking note for a provider's binding window, derived from
+/// its routing candidate: the strand probability (chance the window is spent
+/// before it resets) when that is material, otherwise a time-to-empty estimate
+/// when the provider is visibly burning. Null when there is no burn signal - no
+/// history yet, or headroom is steady - so quotabot never invents a forecast.
+/// [sev] grades urgency for color: 2 likely to strand, 1 watch, 0 informational.
+({String text, int sev})? _forecast(RouteCandidate? c) {
+  if (c == null) return null;
+  final sp = c.strandProbability;
+  if (sp != null && sp >= 0.15) {
+    return (text: 'strand ${(sp * 100).round()}%', sev: sp >= 0.5 ? 2 : 1);
+  }
+  final burn = c.burnPerHour, h = c.headroom;
+  if (burn != null && burn > 0.5 && h != null && h > 0) {
+    final hours = h / burn;
+    final text = hours >= 24
+        ? '~${(hours / 24).round()}d left'
+        : hours >= 1
+            ? '~${hours.round()}h left'
+            : '~${(hours * 60).round()}m left';
+    return (text: text, sev: 0);
+  }
+  return null;
+}
+
+/// Paints a forecast note by urgency: red when a strand is likely, orange when
+/// it bears watching, dim for a calm time-to-empty estimate.
+String _forecastPaint(AnsiStyle s, int sev, String t) =>
+    sev == 2 ? s.red(t) : (sev == 1 ? s.orange(t) : s.dim(t));
 
 /// Paints [t] in the palette's headroom color for [remaining] on a truecolor
 /// terminal, falling back to the standard named headroom color otherwise.
@@ -128,9 +162,8 @@ List<_Cell> _rowHead(String name, String label) => [
 /// collapse: when the most constrained window is spent, the whole provider
 /// collapses to a single "<label> spent" line instead of showing a misleading
 /// healthy shorter window.
-List<String> _providerRows(
-    ProviderQuota q, int now, int width, AnsiStyle s, Palette p) {
-  final barW = _barWidth(width);
+List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
+    Palette p, int barW, ({String text, int sev})? forecast) {
   final cachedTag = q.stale ? const _Cell(' (cached)') : const _Cell('');
 
   if (!q.ok) {
@@ -175,6 +208,7 @@ List<String> _providerRows(
     final used = rolled ? 0.0 : (w.percent ?? 0).clamp(0, 100).toDouble();
     final remaining = 100 - used;
     final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
+    final showForecast = forecast != null && w.label == binding?.label;
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label),
       ..._bar(used, remaining, barW, s, p),
@@ -183,6 +217,10 @@ List<String> _providerRows(
           (s, t) => _healthPaint(s, p, remaining, t)),
       _Cell('  '),
       _Cell(reset, (s, t) => s.dim(t)),
+      if (showForecast) ...[
+        const _Cell('  '),
+        _Cell(forecast.text, (s, t) => _forecastPaint(s, forecast.sev, t)),
+      ],
       if (first) _Cell(cachedTag.text, (s, t) => s.dim(t)),
     ], width, s));
     first = false;
@@ -272,8 +310,16 @@ List<String> renderTopFrame({
           (s, t) => s.dim(t)),
     ], w, s));
   }
+  // A forward-looking note per provider, from its routing candidate. The bar
+  // only yields width when at least one provider has a forecast to show.
+  final byProvider = {for (final c in suggestion.ranked) c.provider: c};
+  final forecasts = <String, ({String text, int sev})?>{
+    for (final q in cloud) q.provider: _forecast(byProvider[q.provider]),
+  };
+  final barW =
+      _barWidth(w, reserveForecast: forecasts.values.any((f) => f != null));
   for (final q in cloud) {
-    lines.addAll(_providerRows(q, now, w, s, p));
+    lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q.provider]));
   }
   for (final q in local) {
     lines.addAll(_localRows(q, w, s));

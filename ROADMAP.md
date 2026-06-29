@@ -74,7 +74,7 @@ Routing and MCP
   strand probability, confidence, `--risk`)
 - [x] MCP 2025-11-25 output schemas and read-only annotations
 - [x] per-model registry (`quotabot models`, `list_models`, capability + tier filters)
-- [ ] `suggest` recommends a concrete model for a task profile (cheapest qualifying
+- [x] `suggest` recommends a concrete model for a task profile (cheapest qualifying
   with budget, escalate on strand)
 - [ ] forward-looking prediction surfaced plainly in `top`, the widget, and alerts
 - [ ] MCP Streamable HTTP transport alongside stdio, plus Python/TS client snippets

@@ -309,9 +309,12 @@ class _DashboardState extends State<Dashboard>
     final demo = cli_demo.demoProviders(now);
     return renderTopFrame(
       providers: demo,
-      suggestion: suggestRoute(demo, now),
+      suggestion: suggestRoute(demo, now,
+          burnStatsByProvider: cli_demo.demoBurnStats()),
       now: now,
-      width: 72,
+      // Wide enough that the meters stay generous with the forecast column held
+      // back, matching a typical 80-120 column terminal.
+      width: 84,
       color: true,
       clock: '11:43:07',
       depth: ColorDepth.truecolor,

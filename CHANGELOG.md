@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot top` surfaces the forward-looking forecast on each provider's binding
+  window: a strand probability (the chance the window is spent before it resets,
+  from the same first-passage model `suggest` uses) when burn history makes it
+  material, otherwise a plain time-to-empty. The note is colored by urgency and
+  only appears when there is a real burn signal - no history, no invented forecast.
+  The meter column yields width for it only when a forecast is present, so a steady
+  fleet keeps full-width bars.
 - `quotabot top` now refreshes on the same adaptive cadence as the desktop app:
   it polls fast when a window is near its cap or a reset is imminent (down to 30s),
   and relaxes to hours when the whole fleet is healthy and resets are far off. The

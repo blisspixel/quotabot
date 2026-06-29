@@ -84,8 +84,11 @@ Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`)
 every provider, each colored on the headroom scale (green healthy, amber
 tightening, orange low, red spent) with a live reset countdown, your local
 runtimes as always-on fallbacks (with their VRAM, context, and disk detail), and
-a route line that names where to send the next request. It redraws in place on
-the alternate screen and repaints countdowns every second.
+a route line that names where to send the next request. When recent history shows
+a window being drawn down, the binding window also carries a forward-looking note:
+a strand probability (the chance it is spent before it resets) when that is
+material, otherwise a time-to-empty estimate. It redraws in place on the alternate
+screen and repaints countdowns every second.
 
 ```bash
 quotabot top                # adaptive refresh (the default)

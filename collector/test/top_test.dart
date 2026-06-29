@@ -271,6 +271,63 @@ void main() {
     expect(lines.any((l) => _plain(l).contains('on disk')), isTrue);
   });
 
+  group('forward-looking forecast', () {
+    test('a burning provider shows a strand forecast on its binding window',
+        () {
+      final providers = [
+        _q('codex', [
+          QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600),
+        ]),
+      ];
+      // 30% free, burning 40%/hr (se 5) for an hour: a near-certain strand.
+      final suggestion = suggestRoute(providers, _now, burnStatsByProvider: {
+        'codex': const BurnStat(perHour: 40, sePerHour: 5, samples: 10),
+      });
+      final lines = renderTopFrame(
+        providers: providers,
+        suggestion: suggestion,
+        now: _now,
+        width: 100,
+        color: false,
+        clock: '12:00:00',
+      );
+      final row = lines.firstWhere((l) => _plain(l).contains('codex'));
+      expect(_plain(row), contains('strand'));
+    });
+
+    test('shows time-to-empty when burning but a strand cannot be computed',
+        () {
+      final providers = [
+        _q('codex', [QuotaWindow(label: '5h', usedPercent: 20)]), // 80% free
+      ];
+      // Burn but no standard error and no reset, so strand is null: fall back to
+      // a plain time-to-empty (80% / 10%/hr = ~8h).
+      final suggestion = suggestRoute(providers, _now, burnStatsByProvider: {
+        'codex': const BurnStat(perHour: 10, samples: 3),
+      });
+      final lines = renderTopFrame(
+        providers: providers,
+        suggestion: suggestion,
+        now: _now,
+        width: 100,
+        color: false,
+        clock: '12:00:00',
+      );
+      final row = lines.firstWhere((l) => _plain(l).contains('codex'));
+      expect(_plain(row), contains('left'));
+    });
+
+    test('no forecast is invented without burn history', () {
+      final lines = _frame([
+        _q('codex', [
+          QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600),
+        ]),
+      ], width: 100);
+      expect(lines.any((l) => _plain(l).contains('strand')), isFalse);
+      expect(lines.any((l) => _plain(l).contains('left')), isFalse);
+    });
+  });
+
   test('an empty fleet still renders a usable frame', () {
     final lines = _frame(const [], width: 60);
     expect(
