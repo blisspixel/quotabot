@@ -19,6 +19,12 @@ import 'package:quotabot_collector/webhook.dart';
 
 const _version = '0.5.0';
 
+/// Documented, stable CLI exit codes a shell or agent can branch on:
+/// 0 success; 64 usage error (bad arguments or an unknown provider); 69 the
+/// requested provider, or the whole fleet, has no usable quota right now.
+const int _exitUsage = 64;
+const int _exitUnavailable = 69;
+
 late AnsiStyle style;
 
 /// Honors NO_COLOR and CLICOLOR=0, an explicit --color/--no-color, then falls
@@ -341,6 +347,7 @@ Future<void> _runTop(Set<String> flags) async {
       sort: sort == TopSort.defaultOrder ? '' : sort.label,
     );
     stdout.writeln(lines.join('\n'));
+    if (!anyProviderUsable(data, now)) exitCode = _exitUnavailable;
     return;
   }
 
@@ -348,9 +355,23 @@ Future<void> _runTop(Set<String> flags) async {
   var loading = true;
   var lastCollect = 0;
   var failStreak = 0;
+  var selected = 0; // cursor index into the visible (sorted, unhidden) list
+  final hidden = <String>{}; // providers hidden this session with the x key
+  var copied = ''; // transient confirmation shown after the copy-route key
   final quit = Completer<void>();
   Timer? repaint;
   Timer? refresh;
+
+  // The sorted, unhidden providers plus the routing suggestion for this frame,
+  // computed together so the cursor, the rows, and the route line agree.
+  ({List<ProviderQuota> visible, RouteSuggestion suggestion}) frame() {
+    final now = nowEpoch();
+    final suggestion = _suggestFor(data, now);
+    final visible = sortProvidersForTop(data, suggestion, now, sort)
+        .where((q) => !hidden.contains(q.provider))
+        .toList();
+    return (visible: visible, suggestion: suggestion);
+  }
 
   void draw() {
     final now = nowEpoch();
@@ -358,10 +379,13 @@ Future<void> _runTop(Set<String> flags) async {
     if (loading && data.isEmpty) {
       lines = ['  ${style.bold('quotabot')}', '', '  reading quota...'];
     } else {
-      final suggestion = _suggestFor(data, now);
+      final f = frame();
+      final visible = f.visible;
+      if (selected >= visible.length) selected = visible.length - 1;
+      if (selected < 0 && visible.isNotEmpty) selected = 0;
       lines = renderTopFrame(
-        providers: sortProvidersForTop(data, suggestion, now, sort),
-        suggestion: suggestion,
+        providers: visible,
+        suggestion: f.suggestion,
         now: now,
         width: _termCols(),
         color: color,
@@ -370,6 +394,11 @@ Future<void> _runTop(Set<String> flags) async {
         palette: palette,
         updated: _agoLabel(lastCollect, now),
         sort: sort.label,
+        selected: (selected >= 0 && selected < visible.length)
+            ? visible[selected].provider
+            : null,
+        hidden: hidden.length,
+        copied: copied,
       );
     }
     final buf = StringBuffer()
@@ -428,15 +457,65 @@ Future<void> _runTop(Set<String> flags) async {
     if (!quit.isCompleted) quit.complete();
   }
 
+  void moveSel(int delta) {
+    copied = '';
+    selected = moveSelection(selected, delta, frame().visible.length);
+    draw();
+  }
+
+  void hideSel() {
+    copied = '';
+    final visible = frame().visible;
+    if (selected >= 0 && selected < visible.length) {
+      hidden.add(visible[selected].provider);
+    }
+    draw(); // draw() reclamps the cursor to the now-shorter list
+  }
+
+  void copyRoute() {
+    final r = frame().suggestion.recommended;
+    final route = r?.provider ?? '';
+    if (route.isEmpty) {
+      copied = '(no route)';
+    } else {
+      stdout
+          .write(osc52Copy(route)); // the terminal performs the clipboard copy
+      copied = route;
+    }
+    draw();
+  }
+
   final keys = stdin.listen((bytes) {
-    for (final b in bytes) {
+    for (var i = 0; i < bytes.length; i++) {
+      final b = bytes[i];
+      // Arrow keys arrive as ESC [ A/B; consume the three bytes together.
+      if (b == 27 && i + 2 < bytes.length && bytes[i + 1] == 91) {
+        if (bytes[i + 2] == 65) moveSel(-1); // up
+        if (bytes[i + 2] == 66) moveSel(1); // down
+        i += 2;
+        continue;
+      }
       if (b == 113 || b == 81 || b == 3) return stop(); // q, Q, Ctrl-C
       if (b == 114 || b == 82) {
+        copied = '';
         refresh?.cancel();
         reload(); // r, R: refresh now and reschedule
       } else if (b == 115 || b == 83) {
-        sort = sort.next; // s, S: cycle the ordering and repaint
+        copied = '';
+        sort = sort.next; // s, S: cycle the ordering
         draw();
+      } else if (b == 106) {
+        moveSel(1); // j: down
+      } else if (b == 107) {
+        moveSel(-1); // k: up
+      } else if (b == 120 || b == 104) {
+        hideSel(); // x, h: hide the selected provider
+      } else if (b == 117) {
+        copied = '';
+        hidden.clear(); // u: unhide all
+        draw();
+      } else if (b == 99) {
+        copyRoute(); // c: copy the recommended route to the clipboard
       }
     }
   });
@@ -474,7 +553,7 @@ void _printHelp() {
     '  status, doctor      every provider, its windows and resets (default)',
   );
   stdout.writeln(
-    '  top                 live dashboard, redraws in place (q quit, r refresh, s sort)',
+    '  top                 live dashboard (q quit, r refresh, s sort, j/k move, x hide, c copy route)',
   );
   stdout.writeln(
     '  watch               alert when a window goes red, naming where to route'
@@ -700,12 +779,14 @@ Future<void> _check(String name, bool wantsJson) async {
       stderr.writeln('no provider named "$name"');
       stderr.writeln('known: ${results.map((r) => r.provider).join(', ')}');
     }
-    exitCode = 1;
+    exitCode = _exitUsage;
     return;
   }
   final head = providerHeadroom(q, now);
   final binding = bindingWindow(q, now);
   final available = q.isLocal ? q.ok : (head != null && head > 0.5);
+  // Stable exit code so a script can branch on usability without parsing output.
+  exitCode = available ? 0 : _exitUnavailable;
   final reset = binding?.resetsAt;
   if (wantsJson) {
     print(_jsonPretty({

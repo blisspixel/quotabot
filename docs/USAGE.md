@@ -112,7 +112,15 @@ Press `q` (or Ctrl-C) to quit, `r` to refresh immediately, and `s` to cycle the
 ordering: `default` (collection order), `headroom` (most free first), `burn`
 (fastest-burning first), `strand` (most likely to run out before reset), and
 `reset` (soonest reset first). The active mode shows in the footer; `--sort=NAME`
-(or `QUOTABOT_SORT`) sets the starting order. A spent longer window collapses its
+(or `QUOTABOT_SORT`) sets the starting order.
+
+Navigate and act with the keyboard: `j`/`k` (or the up/down arrows) move the
+cursor, `x` (or `h`) hides the selected provider for the session and `u` brings
+them all back, and `c` copies the recommended route (the provider to send the
+next request to) to your clipboard via the terminal, so you can paste it straight
+into a tool. The footer shows the hidden count and a brief "copied" confirmation.
+
+A spent longer window collapses its
 provider to one line, the same binding-window rule the widget uses. Piped or on a dumb terminal it prints a single plain frame and
 exits, so `quotabot top | cat` still gives you a snapshot. On a truecolor
 terminal the bars use a smooth gradient; it degrades to 256/16/no color.
@@ -147,6 +155,20 @@ accident; a stray or stale URL is refused rather than silently sent. The desktop
 widget raises the same alerts (as a notification) and can POST to the same kind
 of webhook, set from its menu under "Alert webhook"; loopback is the default
 there too, with an explicit "allow external host" checkbox.
+
+## Exit codes
+
+The CLI uses stable exit codes so a shell or agent can branch without parsing
+output:
+
+- `0` success: the command ran, and (for `check` and a piped `top`) at least one
+  provider is usable right now.
+- `64` usage error: a bad argument or an unknown provider name.
+- `69` unavailable: the named provider (`check`), or the whole fleet (piped
+  `top`), has no usable quota at the moment.
+
+For example, `quotabot check claude || quotabot suggest --json` falls through to a
+route only when Claude is spent.
 
 ### Models, calibration, and risk
 

@@ -32,6 +32,17 @@ void main() {
     expect(providerHeadroom(q, _now), 30); // 100 - 70
   });
 
+  test('anyProviderUsable reflects whether there is anywhere to route', () {
+    expect(anyProviderUsable(const [], _now), isFalse);
+    final spent = _q('codex', [QuotaWindow(label: '5h', usedPercent: 100)]);
+    expect(anyProviderUsable([spent], _now), isFalse);
+    final healthy =
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]);
+    expect(anyProviderUsable([spent, healthy], _now), isTrue);
+    // A running local runtime is a usable fallback even with everything spent.
+    expect(anyProviderUsable([spent, _local('ollama')], _now), isTrue);
+  });
+
   test('providerHeadroom treats a passed reset as fresh', () {
     final q = _q('codex', [
       QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now - 10),

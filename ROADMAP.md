@@ -96,9 +96,12 @@ Windows, macOS, and Linux.
 Finish the features that already half-exist, so the CLI, the widget, and the
 alerts all tell the same story.
 
-1. [ ] Interactive `top`: sort (headroom / burn / strand risk / reset), filter or
+1. [x] Interactive `top`: sort (headroom / burn / strand risk / reset), filter or
    hide providers, keyboard navigation, and a one-key "suggest and copy the route
    command", with documented, stable exit codes a shell or agent can branch on.
+   Shipped: live sort (`s`), cursor navigation (`j`/`k`, arrows), hide/unhide
+   (`x`/`u`), copy-route to the clipboard via OSC 52 (`c`), and the 0/64/69 exit
+   codes on `check` and a piped `top`.
 2. [x] Forward-looking forecast in the **widget**, in plain language ("about an
    hour of usage left"), matching what `top` already shows.
 3. [x] Proactive low-quota routing alerts: when a window crosses amber/red, name

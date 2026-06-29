@@ -5,6 +5,17 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot top` is now fully interactive: navigate the fleet with `j`/`k` or the
+  arrow keys, hide a provider for the session with `x` (`h`) and bring them all
+  back with `u`, and copy the recommended route to your clipboard with `c` (via
+  an OSC 52 terminal escape, so it needs no clipboard dependency). The selected
+  row shows a cursor and the footer shows the hidden count and a copy
+  confirmation. The keyboard-navigation, hide, clipboard, and selection logic are
+  pure, tested functions.
+- Stable, documented CLI exit codes a shell or agent can branch on: `0` success,
+  `64` usage error (bad argument or unknown provider), and `69` unavailable
+  (the named provider for `check`, or the whole fleet for a piped `top`, has no
+  usable quota now). For example `quotabot check claude || quotabot suggest`.
 - New `quotabot watch` command: polls quota on the adaptive cadence and raises a
   low-quota alert the first time a provider's binding window crosses into red
   (spent or nearly so), naming where to route next ("Claude 5h at 8% free -

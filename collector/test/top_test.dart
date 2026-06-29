@@ -440,4 +440,58 @@ void main() {
       expect(TopSort.parse('nope'), isNull);
     });
   });
+
+  group('interactive top', () {
+    test('osc52Copy wraps base64 in the OSC 52 clipboard escape', () {
+      // "claude" -> base64 "Y2xhdWRl".
+      expect(osc52Copy('claude'), '\x1B]52;c;Y2xhdWRl\x07');
+    });
+
+    test('moveSelection clamps within range and handles an empty list', () {
+      expect(moveSelection(0, 1, 3), 1);
+      expect(moveSelection(2, 1, 3), 2); // clamped at the end
+      expect(moveSelection(0, -1, 3), 0); // clamped at the start
+      expect(moveSelection(5, 0, 3), 2); // an out-of-range start is clamped
+      expect(moveSelection(0, 1, 0), -1); // nothing to select
+    });
+
+    test('the selected provider row is marked with a cursor', () {
+      final providers = [
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+        _q('codex', [QuotaWindow(label: '5h', usedPercent: 40)]),
+      ];
+      final lines = renderTopFrame(
+        providers: providers,
+        suggestion: suggestRoute(providers, _now),
+        now: _now,
+        width: 80,
+        color: false,
+        clock: '12:00:00',
+        selected: 'codex',
+      );
+      final claude = lines.firstWhere((l) => _plain(l).contains('claude'));
+      final codex = lines.firstWhere((l) => _plain(l).contains('codex'));
+      expect(_plain(codex).startsWith('> '), isTrue);
+      expect(_plain(claude).startsWith('> '), isFalse);
+    });
+
+    test('the footer surfaces the hidden count and a copy confirmation', () {
+      final providers = [
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+      ];
+      final footer = renderTopFrame(
+        providers: providers,
+        suggestion: suggestRoute(providers, _now),
+        now: _now,
+        width: 120,
+        color: false,
+        clock: '12:00:00',
+        hidden: 2,
+        copied: 'grok',
+      ).last;
+      expect(_plain(footer), contains('show(2)'));
+      expect(_plain(footer), contains('copied grok'));
+      expect(_plain(footer), contains('x'));
+    });
+  });
 }

@@ -8,10 +8,28 @@
 /// unit tested directly against fixtures (the repo's pure-core rule).
 library;
 
+import 'dart:convert';
+
 import 'analysis.dart';
 import 'ansi.dart';
 import 'models.dart';
 import 'palette.dart';
+
+/// Builds the OSC 52 terminal escape that asks the terminal to copy [text] to
+/// the system clipboard. This needs no external process or platform clipboard
+/// dependency: the terminal itself does the copy, on the many terminals that
+/// support OSC 52. The watch loop writes the result to stdout. Pure.
+String osc52Copy(String text) =>
+    '\x1B]52;c;${base64.encode(utf8.encode(text))}\x07';
+
+/// Moves a selection [index] within a list of [length] by [delta], clamping to
+/// the valid range; an empty list has no selection (-1). Pure, so the keyboard
+/// navigation in the live view is unit tested without a terminal.
+int moveSelection(int index, int delta, int length) {
+  if (length <= 0) return -1;
+  final i = index.clamp(0, length - 1);
+  return (i + delta).clamp(0, length - 1);
+}
 
 /// The orderings the interactive `top` view can cycle through with the `s` key.
 /// [defaultOrder] keeps providers in collection order (the historical default);
@@ -245,8 +263,8 @@ String _eta(int resetsAt, int now) {
 
 /// The leading columns of a data row: indent, provider name (only on the first
 /// window of a provider), then the window label.
-List<_Cell> _rowHead(String name, String label) => [
-      const _Cell('  '),
+List<_Cell> _rowHead(String name, String label, {bool selected = false}) => [
+      _Cell(selected ? '> ' : '  ', (s, t) => s.bold(t)),
       _Cell(name.padRight(_nameW), (s, t) => s.bold(t)),
       _Cell(label.padRight(_labelW), (s, t) => s.dim(t)),
     ];
@@ -256,13 +274,14 @@ List<_Cell> _rowHead(String name, String label) => [
 /// collapses to a single "<label> spent" line instead of showing a misleading
 /// healthy shorter window.
 List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
-    Palette p, int barW, ({String text, int sev})? forecast) {
+    Palette p, int barW, ({String text, int sev})? forecast,
+    {bool selected = false}) {
   final cachedTag = q.stale ? const _Cell(' (cached)') : const _Cell('');
 
   if (!q.ok) {
     return [
       _line([
-        ..._rowHead(q.displayName, ''),
+        ..._rowHead(q.displayName, '', selected: selected),
         _Cell(q.error?.isNotEmpty == true ? q.error! : 'read failed',
             (s, t) => s.red(t)),
       ], width, s),
@@ -271,7 +290,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   if (q.windows.isEmpty) {
     return [
       _line([
-        ..._rowHead(q.displayName, ''),
+        ..._rowHead(q.displayName, '', selected: selected),
         _Cell('no live data', (s, t) => s.dim(t)),
         if (q.stale) _Cell(' (cached)', (s, t) => s.dim(t)),
       ], width, s),
@@ -286,7 +305,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         : 'resets ${_eta(binding.resetsAt!, now)}';
     return [
       _line([
-        ..._rowHead(q.displayName, binding.label),
+        ..._rowHead(q.displayName, binding.label, selected: selected),
         _Cell('spent', (s, t) => s.red(t)),
         _Cell('   $reset', (s, t) => s.dim(t)),
         _Cell(cachedTag.text, (s, t) => s.dim(t)),
@@ -303,7 +322,8 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
     final showForecast = forecast != null && w.label == binding?.label;
     lines.add(_line([
-      ..._rowHead(first ? q.displayName : '', w.label),
+      ..._rowHead(first ? q.displayName : '', w.label,
+          selected: first && selected),
       ..._bar(used, remaining, barW, s, p),
       _Cell(' '),
       _Cell('${remaining.round().toString().padLeft(3)}% free',
@@ -324,11 +344,12 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
 /// The rows for one local runtime: a headline (what is loaded, always-on) and any
 /// detail lines (VRAM, context, disk) the adapter provides, indented under it -
 /// the same detail the desktop app shows.
-List<String> _localRows(ProviderQuota q, int width, AnsiStyle s) {
+List<String> _localRows(ProviderQuota q, int width, AnsiStyle s,
+    {bool selected = false}) {
   final status = q.status?.isNotEmpty == true ? q.status! : 'ready';
   final lines = <String>[
     _line([
-      ..._rowHead(q.displayName, 'local'),
+      ..._rowHead(q.displayName, 'local', selected: selected),
       _Cell(status, (s, t) => q.active ? s.cyan(t) : s.dim(t)),
       _Cell('  '),
       _Cell('[always on]', (s, t) => s.dim(t)),
@@ -374,6 +395,9 @@ List<String> renderTopFrame({
   Palette palette = kDefaultPalette,
   String updated = '',
   String sort = '',
+  String? selected,
+  int hidden = 0,
+  String copied = '',
 }) {
   final w = width < 24 ? 24 : width;
   final s = AnsiStyle(color, depth: depth);
@@ -413,10 +437,11 @@ List<String> renderTopFrame({
   final barW =
       _barWidth(w, reserveForecast: forecasts.values.any((f) => f != null));
   for (final q in cloud) {
-    lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q.provider]));
+    lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q.provider],
+        selected: q.provider == selected));
   }
   for (final q in local) {
-    lines.addAll(_localRows(q, w, s));
+    lines.addAll(_localRows(q, w, s, selected: q.provider == selected));
   }
 
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));
@@ -437,14 +462,26 @@ List<String> renderTopFrame({
   lines.add(_line([
     const _Cell('  '),
     _Cell('q', (s, t) => s.bold(t)),
-    _Cell(' quit   ', (s, t) => s.dim(t)),
+    _Cell(' quit  ', (s, t) => s.dim(t)),
     _Cell('r', (s, t) => s.bold(t)),
-    _Cell(' refresh   ', (s, t) => s.dim(t)),
+    _Cell(' refresh  ', (s, t) => s.dim(t)),
     if (sort.isNotEmpty) ...[
       _Cell('s', (s, t) => s.bold(t)),
-      _Cell(' sort:$sort   ', (s, t) => s.dim(t)),
+      _Cell(' sort:$sort  ', (s, t) => s.dim(t)),
     ],
-    if (updated.isNotEmpty) _Cell('$updated   ', (s, t) => s.dim(t)),
+    _Cell('j/k', (s, t) => s.bold(t)),
+    _Cell(' move  ', (s, t) => s.dim(t)),
+    _Cell('x', (s, t) => s.bold(t)),
+    _Cell(' hide  ', (s, t) => s.dim(t)),
+    if (hidden > 0) ...[
+      _Cell('u', (s, t) => s.bold(t)),
+      _Cell(' show($hidden)  ', (s, t) => s.dim(t)),
+    ],
+    _Cell('c', (s, t) => s.bold(t)),
+    _Cell(' copy  ', (s, t) => s.dim(t)),
+    if (copied.isNotEmpty)
+      _Cell('copied $copied  ', (s, t) => _accent(s, p, t)),
+    if (updated.isNotEmpty) _Cell('$updated  ', (s, t) => s.dim(t)),
     _Cell('0 usage tokens', (s, t) => s.dim(t)),
   ], w, s));
 

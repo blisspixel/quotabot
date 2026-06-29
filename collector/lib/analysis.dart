@@ -63,6 +63,20 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   return (available: h > 0.5, headroom: h, resetsAt: bindingReset);
 }
 
+/// Whether any provider can take work right now: a running local runtime, or a
+/// metered subscription with headroom left. Lets a shell or agent branch on "is
+/// there anywhere to route?" through the CLI exit code.
+bool anyProviderUsable(List<ProviderQuota> quotas, int now) {
+  for (final q in quotas) {
+    if (q.isLocal) {
+      if (q.ok) return true;
+    } else if (providerAvailability(q, now).available) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Returns the window that is currently the binding constraint (lowest headroom).
 /// Used by display to decide collapse and which reset to show.
 QuotaWindow? bindingWindow(ProviderQuota q, int now) {
