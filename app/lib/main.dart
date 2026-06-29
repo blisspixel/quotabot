@@ -13,6 +13,7 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
+import 'package:quotabot_collector/webhook.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:tray_manager/tray_manager.dart';
@@ -192,6 +193,13 @@ class _DashboardState extends State<Dashboard>
   late bool _enableNotifications = widget.prefs.enableNotifications;
   late bool _showAccounts = widget.prefs.showAccounts;
   late TextSize _textSize = widget.prefs.textSize;
+  late String? _webhookUrl = widget.prefs.webhookUrl;
+  late bool _webhookAllowExternal = widget.prefs.webhookAllowExternal;
+
+  /// Providers currently in a red alert state, so a steady spent window is
+  /// alerted once on the crossing and re-armed only after it recovers. Mirrors
+  /// the edge-trigger state `quotabot watch` keeps.
+  Set<String> _armed = {};
   bool _isRefreshing = false;
   int _failStreak = 0; // consecutive refreshes with no live data at all
   late final Set<String> _hidden = {...widget.prefs.hidden};
@@ -440,6 +448,8 @@ class _DashboardState extends State<Dashboard>
       sort: _sort,
       textSize: _textSize,
       showAccounts: _showAccounts,
+      webhookUrl: _webhookUrl,
+      webhookAllowExternal: _webhookAllowExternal,
       setupDone: widget.prefs.setupDone,
       windowX: _windowPos?.dx,
       windowY: _windowPos?.dy,
@@ -1092,6 +1102,13 @@ class _DashboardState extends State<Dashboard>
             style: const TextStyle(fontSize: AppType.subtitle),
           ),
         ),
+        PopupMenuItem(
+          value: 'webhook',
+          child: Text(
+            _webhookUrl == null ? 'Alert webhook...' : 'Alert webhook: on',
+            style: const TextStyle(fontSize: AppType.subtitle),
+          ),
+        ),
         CheckedPopupMenuItem(
           value: 'show_accounts',
           checked: _showAccounts,
@@ -1162,6 +1179,8 @@ class _DashboardState extends State<Dashboard>
       _toggleNotifications();
     } else if (value == 'show_accounts') {
       _setShowAccounts(!_showAccounts);
+    } else if (value == 'webhook') {
+      _showWebhookDialog();
     } else if (value == 'text:small') {
       _setTextSize(TextSize.small);
     } else if (value == 'text:medium') {
@@ -1173,6 +1192,85 @@ class _DashboardState extends State<Dashboard>
 
   void _setShowAccounts(bool value) {
     setState(() => _showAccounts = value);
+    _persistPrefs();
+  }
+
+  /// Prompts for the optional low-quota alert webhook. An empty URL clears it.
+  /// A non-loopback host needs "allow external" on, so an alert never leaves the
+  /// machine without an explicit opt-in.
+  Future<void> _showWebhookDialog() async {
+    final controller = TextEditingController(text: _webhookUrl ?? '');
+    var allowExternal = _webhookAllowExternal;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          final url = controller.text.trim();
+          final needsExternal = url.isNotEmpty && !isLoopbackUrl(url);
+          final blocked = needsExternal && !allowExternal;
+          return AlertDialog(
+            title: const Text('Alert webhook'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'POST low-quota alerts as quotabot.alert.v1 JSON (quota '
+                  'metadata only). Leave blank to disable.',
+                  style: TextStyle(fontSize: AppType.caption),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'http://127.0.0.1:9000/quota',
+                    isDense: true,
+                  ),
+                  style: const TextStyle(fontSize: AppType.body),
+                  onChanged: (_) => setLocal(() {}),
+                ),
+                CheckboxListTile(
+                  value: allowExternal,
+                  onChanged: (v) => setLocal(() => allowExternal = v ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text(
+                    'Allow an external (non-loopback) host',
+                    style: TextStyle(fontSize: AppType.caption),
+                  ),
+                ),
+                if (blocked)
+                  const Text(
+                    'This host is not loopback; enable the option above to use it.',
+                    style: TextStyle(
+                      fontSize: AppType.label,
+                      color: Color(0xFFDB6D28),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: blocked ? null : () => Navigator.of(ctx).pop(true),
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    final url = controller.text.trim();
+    controller.dispose();
+    if (saved != true) return;
+    setState(() {
+      _webhookUrl = url.isEmpty ? null : url;
+      _webhookAllowExternal = allowExternal;
+    });
     _persistPrefs();
   }
 
@@ -1216,26 +1314,39 @@ class _DashboardState extends State<Dashboard>
       // Compute the routing recommendation once so a low-quota alert can point
       // the user at where to send work instead.
       final suggestion = suggestRoute(_data, nowSec);
-      for (final q in _data) {
-        final h = providerHeadroom(q, nowSec);
-        if (h != null && h < 15 && !q.stale) {
-          final key = '${q.provider}:low';
-          if (_shouldNotify(key, now)) {
-            final id = _notificationId(key);
-            await flutterLocalNotificationsPlugin.cancel(id);
-            final rec = suggestion.recommended;
-            final hint = (rec != null && rec.provider != q.provider)
-                ? ' Route to ${rec.provider}'
-                      '${rec.isLocal ? ' (local)' : ' (${rec.headroom?.round()}% free)'}.'
-                : '';
-            await flutterLocalNotificationsPlugin.show(
-              id,
-              'Low quota',
-              '${q.displayName} has ${h.toStringAsFixed(0)}% headroom.$hint',
-              _buildDetails(q.displayName),
-            );
-          }
+
+      // Proactive low-quota alerts: fire once when a provider's binding window
+      // crosses into red, naming where to route next, using the same
+      // edge-triggered engine as `quotabot watch`. Optionally mirror each alert
+      // to a local webhook so it can reach a tray, a shell, or chat.
+      final alerts = computeAlerts(
+        snapshot: _data,
+        suggestion: suggestion,
+        now: nowSec,
+        armed: _armed,
+      );
+      _armed = alerts.armed;
+      for (final a in alerts.fired) {
+        final id = _notificationId('${a.provider}:low');
+        await flutterLocalNotificationsPlugin.cancel(id);
+        await flutterLocalNotificationsPlugin.show(
+          id,
+          'Low quota',
+          a.message,
+          _buildDetails(a.displayName),
+        );
+        final url = _webhookUrl;
+        if (url != null) {
+          await postAlert(
+            url,
+            a.toJson(),
+            allowExternal: _webhookAllowExternal,
+          );
         }
+      }
+
+      // Scheduled "resets soon" reminders for windows that are nearly full.
+      for (final q in _data) {
         if (q.stale) continue;
         for (final w in q.windows) {
           if (w.resetsAt != null &&

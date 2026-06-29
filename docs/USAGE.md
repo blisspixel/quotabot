@@ -125,6 +125,29 @@ Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
 most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`. Palettes
 apply on truecolor terminals; elsewhere the standard headroom colors are used.
 
+## Proactive alerts (quotabot watch)
+
+`quotabot watch` polls quota on the same adaptive cadence as `top` and raises a
+low-quota alert the first time a provider's binding window crosses into red
+(spent or nearly so), naming where to route next. It is edge-triggered: it fires
+once per crossing and re-arms only after the window recovers, so a steady spent
+window never spams. Alerts carry quota metadata only, never prompts or content.
+
+```bash
+quotabot watch                                   # print alerts, adaptive cadence
+quotabot watch --once                            # a single pass (cron-friendly)
+quotabot watch --json                            # one quotabot.alert.v1 per line
+quotabot watch --interval=120                    # pin the poll rate (seconds)
+quotabot watch --webhook http://127.0.0.1:9000/quota   # POST each alert
+```
+
+The `--webhook` URL must be loopback unless you add `--allow-external`, so an
+alert can never reach an external service (Slack, Discord, a remote box) by
+accident; a stray or stale URL is refused rather than silently sent. The desktop
+widget raises the same alerts (as a notification) and can POST to the same kind
+of webhook, set from its menu under "Alert webhook"; loopback is the default
+there too, with an explicit "allow external host" checkbox.
+
 ### Models, calibration, and risk
 
 `quotabot models` lists every model you can route to now across providers and

@@ -101,9 +101,12 @@ alerts all tell the same story.
    command", with documented, stable exit codes a shell or agent can branch on.
 2. [x] Forward-looking forecast in the **widget**, in plain language ("about an
    hour of usage left"), matching what `top` already shows.
-3. [ ] Proactive low-quota routing alerts: when a window crosses amber/red, name
+3. [x] Proactive low-quota routing alerts: when a window crosses amber/red, name
    where to route next ("Claude 5h at 8% - send the next calls to Grok"), with an
    optional local webhook so the signal can reach a tray toast, a shell, or chat.
+   Shipped as the headless `quotabot watch` command and the desktop app, both on
+   one shared edge-triggered engine (`computeAlerts`) that fires once per
+   crossing; the webhook is loopback-only unless external is explicitly allowed.
 
 ### Phase 2 - SEE is flawless on every platform
 

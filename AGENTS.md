@@ -47,6 +47,11 @@ Pick whichever transport you already speak. All return the same data.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics.
+- **Push alerts.** `quotabot watch --json` streams a `quotabot.alert.v1` line
+  the moment a provider's binding window goes red, naming where to route next, so
+  a long-running agent can react to a crossing instead of polling. Add
+  `--webhook URL` to have each alert POSTed for you (loopback unless
+  `--allow-external`).
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`).
 
@@ -93,6 +98,9 @@ left. The shapes:
   with appropriate caution.
 - `list_models` is `quotabot.models.v1`: every routable model with its gating
   provider's budget and capability hints.
+- `quotabot watch` emits `quotabot.alert.v1`: `provider`, `window`, `severity`
+  (`amber`/`red`), `free_percent`, `as_of`, and, when a better option exists,
+  `route_to` with `route_free_percent`/`route_is_local`. Metadata only.
 
 ## What quotabot does not do
 

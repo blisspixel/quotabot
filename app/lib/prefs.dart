@@ -32,6 +32,14 @@ class Prefs {
   final bool showAccounts;
   final TextSize textSize;
 
+  /// Optional webhook that low-quota alerts are POSTed to (quotabot.alert.v1).
+  /// Null disables it. Empty or whitespace is treated as disabled.
+  final String? webhookUrl;
+
+  /// Whether [webhookUrl] may point at a non-loopback host. Off by default, so
+  /// an alert can never reach an external service without an explicit opt-in.
+  final bool webhookAllowExternal;
+
   /// True once the first-run setup walkthrough has been completed or dismissed.
   final bool setupDone;
   final double? windowX;
@@ -47,6 +55,8 @@ class Prefs {
     this.sort = ProviderSort.defaultOrder,
     this.showAccounts = false,
     this.textSize = TextSize.medium,
+    this.webhookUrl,
+    this.webhookAllowExternal = false,
     this.setupDone = false,
     this.windowX,
     this.windowY,
@@ -62,6 +72,9 @@ class Prefs {
     ProviderSort? sort,
     bool? showAccounts,
     TextSize? textSize,
+    String? webhookUrl,
+    bool? webhookAllowExternal,
+    bool clearWebhook = false,
     bool? setupDone,
     double? windowX,
     double? windowY,
@@ -76,6 +89,8 @@ class Prefs {
     sort: sort ?? this.sort,
     showAccounts: showAccounts ?? this.showAccounts,
     textSize: textSize ?? this.textSize,
+    webhookUrl: clearWebhook ? null : webhookUrl ?? this.webhookUrl,
+    webhookAllowExternal: webhookAllowExternal ?? this.webhookAllowExternal,
     setupDone: setupDone ?? this.setupDone,
     windowX: clearWindowPosition ? null : windowX ?? this.windowX,
     windowY: clearWindowPosition ? null : windowY ?? this.windowY,
@@ -91,6 +106,8 @@ class Prefs {
     'sort': sort.name,
     'show_accounts': showAccounts,
     'text_size': textSize.name,
+    if (webhookUrl != null) 'webhook_url': webhookUrl,
+    'webhook_allow_external': webhookAllowExternal,
     'setup_done': setupDone,
     if (windowX != null) 'window_x': windowX,
     if (windowY != null) 'window_y': windowY,
@@ -115,6 +132,10 @@ class Prefs {
       (t) => t.name == j['text_size'],
       orElse: () => TextSize.medium,
     ),
+    webhookUrl: (j['webhook_url'] as String?)?.trim().isEmpty ?? true
+        ? null
+        : (j['webhook_url'] as String).trim(),
+    webhookAllowExternal: j['webhook_allow_external'] as bool? ?? false,
     setupDone: j['setup_done'] as bool? ?? false,
     windowX: (j['window_x'] as num?)?.toDouble(),
     windowY: (j['window_y'] as num?)?.toDouble(),

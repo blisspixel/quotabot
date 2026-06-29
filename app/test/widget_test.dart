@@ -39,6 +39,8 @@ void main() {
         showInTaskbar: false,
         enableNotifications: false,
         sort: ProviderSort.mostUsed,
+        webhookUrl: 'http://127.0.0.1:9000/quota',
+        webhookAllowExternal: true,
         windowX: 100,
         windowY: 200,
       );
@@ -51,6 +53,8 @@ void main() {
       expect(back.enableNotifications, isFalse);
       expect(back.sort, ProviderSort.mostUsed);
       expect(back.showAccounts, isFalse);
+      expect(back.webhookUrl, 'http://127.0.0.1:9000/quota');
+      expect(back.webhookAllowExternal, isTrue);
       expect(back.windowX, 100);
       expect(back.windowY, 200);
     });
@@ -65,6 +69,8 @@ void main() {
       expect(p.enableNotifications, isTrue);
       expect(p.sort, ProviderSort.defaultOrder);
       expect(p.showAccounts, isFalse);
+      expect(p.webhookUrl, isNull);
+      expect(p.webhookAllowExternal, isFalse);
       expect(p.windowX, isNull);
     });
 

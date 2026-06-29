@@ -16,7 +16,9 @@ Notable changes to quotabot. Newest first.
   pins the poll rate. The decision is a pure, edge-triggered function
   (`computeAlerts`) that fires once per crossing and re-arms only after recovery,
   so a steady spent window never spams; payloads are quota metadata only, never
-  prompts, code, or content.
+  prompts, code, or content. The desktop widget raises the same alerts on the
+  same engine, and can POST to a webhook configured from its menu ("Alert
+  webhook"), loopback-only unless an external host is explicitly allowed.
 - The desktop widget now shows the same forward-looking forecast as `quotabot
   top`, on each provider's binding window, in plain language at a glance: a
   runway estimate ("about an hour of usage left") when a window is visibly
