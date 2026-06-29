@@ -137,10 +137,14 @@ quotabot stores its own refresh token under your per-user config directory
 quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
 quotabot models           # every model you can route to now, with budget + caps
+quotabot watch            # alert when a window goes low, naming where to route
 ```
 
-The same recommendation is available over MCP (`suggest_provider`, `list_models`)
-and a loopback HTTP server. For how an agent should call quotabot and route, see
+`quotabot watch` polls in the background and raises a low-quota alert the moment
+a window is spent or nearly so, naming where to send work next; add `--webhook`
+to POST each alert (loopback unless `--allow-external`) so it can reach a tray
+toast, a shell, or chat. The same recommendation is available over MCP
+(`suggest_provider`, `list_models`) and a loopback HTTP server. For how an agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin in
 [integrations/litellm/](integrations/litellm/), which routes each request to a
 deployment with budget and fails soft when quotabot is unavailable.

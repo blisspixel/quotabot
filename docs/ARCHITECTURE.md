@@ -16,15 +16,20 @@ collector/ (Dart package)
                      (nextRefreshSeconds, shared by top and the app)
   insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap,
                      burn rate with uncertainty
+  alerts.dart        pure: low-quota alert severity + edge-triggered computeAlerts
+                     (quotabot.alert.v1), shared by quotabot watch and the widget
+  webhook.dart       loopback-guarded, fail-soft alert webhook sender (postAlert)
   calibration.dart   pure: grade the strand predictor against recorded history
   registry.dart      pure: assemble the cross-provider model registry with budget
   model_catalog.dart committed, refreshable cloud model capability catalog
-  cache.dart         last-known-good snapshot cache; recent burn stats
+  cache.dart         last-known-good snapshot cache (per-account keyed where a
+                     provider reads several logins); recent burn stats
   ansi.dart          shared ANSI styling and color-depth detection
   top.dart           pure renderer for the `quotabot top` live dashboard:
                      gradient meters, palettes, local detail lines, the
                      forward-looking forecast (strand probability/time-to-empty),
-                     and the interactive sort (TopSort + sortProvidersForTop)
+                     the interactive sort (TopSort + sortProvidersForTop), and the
+                     keyboard helpers (moveSelection, osc52Copy clipboard)
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
   mcp.dart           MCP tool shapes, output schemas, and registration
   collector.dart     collectAll(): run adapters, apply cache; package exports
@@ -32,8 +37,9 @@ collector/ (Dart package)
                      ollama, lmstudio, lemonade (thin I/O shells)
   auth/              tokens + store, PKCE/loopback util, xai + google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
-  bin/collect.dart        CLI: status/doctor, top, models, calibration, check,
-                          suggest, stats, json, login, logout
+  bin/collect.dart        CLI: status/doctor, top, watch, models, calibration,
+                          check, suggest, stats, json, login, logout
+                          (stable exit codes 0/64/69)
   bin/mcp_server.dart     MCP server over stdio (tools + quotas://current resource)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing
@@ -135,6 +141,20 @@ headroom, strand probability, and the planned extensions) is written up in
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
 and the MCP `list_models` tool.
+
+## Alerts and `quotabot watch`
+
+`alerts.dart` is a pure, edge-triggered alert pass: `computeAlerts` takes the
+current snapshot, the routing suggestion, and the set of providers already
+alerting, and returns the alerts that newly crossed into a triggering severity
+(red by default) plus the updated armed set, so a provider fires once on the
+crossing and re-arms only after it recovers. Each `QuotaAlert` serializes as
+`quotabot.alert.v1` (metadata only, never content). Two thin shells consume it:
+the `quotabot watch` command in `bin/collect.dart` (poll, print, optionally POST)
+and the desktop app's notifier. `webhook.dart` delivers an alert with
+`postAlert`, which refuses a non-loopback host unless explicitly allowed and
+never throws, so delivery fails soft. An alert is just the binding-window
+forecast viewed as a threshold crossing, so it shares the same model as `top`.
 
 ## The UI
 

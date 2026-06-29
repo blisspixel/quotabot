@@ -82,9 +82,12 @@ binding-window SEE rule with honest staleness; self-explaining, risk-aware
 `--risk`); the per-model registry with capability and tier filters across CLI and
 MCP; concrete model recommendation (`suggest --task`); MCP 2025-11-25 output
 schemas and read-only annotations; calibration that grades the predictor;
-`quotabot top` with gradient meters, palettes, adaptive refresh, and the
-forward-looking forecast on the binding window; the cross-platform release
-pipeline; and CI green on an 85% coverage floor.
+`quotabot top` with gradient meters, palettes, adaptive refresh, the
+forward-looking forecast on the binding window, and full keyboard interaction
+(sort, navigate, hide, copy-route) with stable exit codes; the same forecast in
+the desktop widget; proactive low-quota alerts as `quotabot watch` and in the
+widget, with an optional loopback webhook; the cross-platform release pipeline;
+and CI green on an 85% coverage floor across Linux, macOS, and Windows.
 
 What is left is the ordered plan below. The phases are sequenced deliberately -
 each unblocks or de-risks the next - so this is the order to build in, not a menu
