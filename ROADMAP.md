@@ -117,7 +117,8 @@ The real 1.0 promise: every claimed provider reads correctly, everywhere, with n
 silent failures. It comes before the deeper testing work because the real runners
 it stands up serve every phase after it.
 
-4. [ ] macOS and Linux CI runners, not just Linux.
+4. [x] macOS and Linux CI runners, not just Linux. CI now runs the full suite on
+   a matrix of ubuntu-latest and macos-latest (Windows to follow with item 5).
 5. [ ] Real cross-platform verification on macOS and Linux machines, not just
    "code paths ready"; a provider that cannot read says why, plainly.
 6. [ ] Token-refresh and onboarding edge cases handled and tested (Antigravity,

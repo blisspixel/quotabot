@@ -6,10 +6,23 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Run the full suite on Linux and macOS so the cross-platform paths (config
+    # dirs, sqlite loader, file sources) are exercised on a real macOS host, not
+    # just assumed. fail-fast off so one OS failing still reports the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v5
+
+      # Pin Python so `python` resolves on every runner (macOS ships only
+      # python3), for the coverage gate and the LiteLLM router tests.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - uses: subosito/flutter-action@v2
         with:

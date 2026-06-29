@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- CI now runs the full suite on both Linux and macOS (a matrix of ubuntu-latest
+  and macos-latest), so the cross-platform paths are exercised on a real macOS
+  host instead of assumed. Python is pinned on the runners for the coverage gate
+  and the LiteLLM tests.
+
 ### Added
 - `quotabot top` is now fully interactive: navigate the fleet with `j`/`k` or the
   arrow keys, hide a provider for the session with `x` (`h`) and bring them all
