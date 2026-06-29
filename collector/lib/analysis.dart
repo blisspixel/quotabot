@@ -315,6 +315,88 @@ double? strandProbability(
   return _normalCdf((burn * tHours - headroom) / sd);
 }
 
+/// A strand probability must reach this before it leads a forecast; below it the
+/// risk is too faint to state plainly.
+const double _strandMateriality = 0.15;
+
+/// At or above this strand probability a window is judged more likely than not
+/// to be spent before it resets, which is the most urgent forecast severity.
+const double _strandLikely = 0.5;
+
+/// Minimum burn (percent of quota per hour) for a runway estimate to be worth
+/// stating; a window draining slower than this is effectively calm.
+const double _visibleBurnPerHour = 0.5;
+
+/// The kind of forward-looking statement a window's forecast makes.
+enum ForecastKind {
+  /// At material risk of being spent before it resets; the lead number is a
+  /// probability.
+  strand,
+
+  /// Visibly draining but not at strand risk; the lead number is an estimated
+  /// runway (hours of usage left at the current burn).
+  timeToEmpty,
+}
+
+/// One window's forward-looking forecast: the shared decision behind every
+/// surface's forecast note (the `top` dashboard and the desktop widget). It
+/// carries the classification and the lead number, not the wording, so each
+/// surface phrases it in its own register from a single source of truth. Built
+/// by [classifyForecast]; null there means there is no signal to forecast.
+class WindowForecast {
+  final ForecastKind kind;
+
+  /// Set when [kind] is [ForecastKind.strand]: the chance (0..1) the window is
+  /// spent before it resets.
+  final double? strandProbability;
+
+  /// Set when [kind] is [ForecastKind.timeToEmpty]: estimated hours of usage
+  /// left at the current burn.
+  final double? hoursToEmpty;
+
+  /// Urgency for coloring: 0 informational, 1 worth watching, 2 likely to strand.
+  final int severity;
+
+  const WindowForecast._({
+    required this.kind,
+    required this.severity,
+    this.strandProbability,
+    this.hoursToEmpty,
+  });
+}
+
+/// Classifies a window's forward-looking forecast from its already-computed
+/// [strandProbability] (see the function of the same name) and its current
+/// [burnPerHour] and [headroom]. A material strand risk leads; otherwise a
+/// visible burn gives a runway estimate; a calm window gets nothing (null), so
+/// quotabot never invents a forecast where there is no signal. Pure, so the CLI
+/// and the widget share one decision and differ only in how they word it.
+WindowForecast? classifyForecast({
+  required double? strandProbability,
+  required double? burnPerHour,
+  required double? headroom,
+}) {
+  final strand = strandProbability;
+  if (strand != null && strand >= _strandMateriality) {
+    return WindowForecast._(
+      kind: ForecastKind.strand,
+      strandProbability: strand,
+      severity: strand >= _strandLikely ? 2 : 1,
+    );
+  }
+  if (burnPerHour != null &&
+      burnPerHour > _visibleBurnPerHour &&
+      headroom != null &&
+      headroom > 0) {
+    return WindowForecast._(
+      kind: ForecastKind.timeToEmpty,
+      hoursToEmpty: headroom / burnPerHour,
+      severity: 0,
+    );
+  }
+  return null;
+}
+
 /// How much to trust a candidate's numbers, in (0, 1]: a stale (cached) read is
 /// half-trusted, and a metered provider's burn estimate is weighted by sample
 /// adequacy `n / (n + 4)` (a shrinkage prior, so a two-point fit is not trusted

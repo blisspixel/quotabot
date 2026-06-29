@@ -5,6 +5,16 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- The desktop widget now shows the same forward-looking forecast as `quotabot
+  top`, on each provider's binding window, in plain language at a glance: a
+  runway estimate ("about an hour of usage left") when a window is visibly
+  draining, or a plain warning ("likely to run out before it resets") once the
+  burn and its history make a strand material. It appears only when there is a
+  real burn signal, so a steady fleet shows nothing invented. The decision is one
+  shared pure function (`classifyForecast`) used by both the CLI and the widget,
+  so the two never drift; each only words it for its own surface. The burn
+  estimate now carries its standard error (`Insights.burnSePerHour`) so the
+  widget can state a calibrated strand probability rather than a point estimate.
 - `quotabot top` is now sortable. Press `s` to cycle the order live (default,
   headroom, burn, strand risk, soonest reset) or start in one with `--sort=NAME`
   (also `QUOTABOT_SORT`); the active mode shows in the footer. The reorder is a

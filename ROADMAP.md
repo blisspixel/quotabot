@@ -99,7 +99,7 @@ alerts all tell the same story.
 1. [ ] Interactive `top`: sort (headroom / burn / strand risk / reset), filter or
    hide providers, keyboard navigation, and a one-key "suggest and copy the route
    command", with documented, stable exit codes a shell or agent can branch on.
-2. [ ] Forward-looking forecast in the **widget**, in plain language ("about an
+2. [x] Forward-looking forecast in the **widget**, in plain language ("about an
    hour of usage left"), matching what `top` already shows.
 3. [ ] Proactive low-quota routing alerts: when a window crosses amber/red, name
    where to route next ("Claude 5h at 8% - send the next calls to Grok"), with an

@@ -169,22 +169,25 @@ int _barWidth(int width, {bool reserveForecast = false}) {
 /// [sev] grades urgency for color: 2 likely to strand, 1 watch, 0 informational.
 ({String text, int sev})? _forecast(RouteCandidate? c) {
   if (c == null) return null;
-  final sp = c.strandProbability;
-  if (sp != null && sp >= 0.15) {
-    return (text: 'strand ${(sp * 100).round()}%', sev: sp >= 0.5 ? 2 : 1);
-  }
-  final burn = c.burnPerHour, h = c.headroom;
-  if (burn != null && burn > 0.5 && h != null && h > 0) {
-    final hours = h / burn;
-    final text = hours >= 24
-        ? '~${(hours / 24).round()}d left'
-        : hours >= 1
-            ? '~${hours.round()}h left'
-            : '~${(hours * 60).round()}m left';
-    return (text: text, sev: 0);
-  }
-  return null;
+  final f = classifyForecast(
+    strandProbability: c.strandProbability,
+    burnPerHour: c.burnPerHour,
+    headroom: c.headroom,
+  );
+  if (f == null) return null;
+  final text = switch (f.kind) {
+    ForecastKind.strand => 'strand ${(f.strandProbability! * 100).round()}%',
+    ForecastKind.timeToEmpty => _runwayTerse(f.hoursToEmpty!),
+  };
+  return (text: text, sev: f.severity);
 }
+
+/// The compact runway wording for the width-constrained dashboard column.
+String _runwayTerse(double hours) => hours >= 24
+    ? '~${(hours / 24).round()}d left'
+    : hours >= 1
+        ? '~${hours.round()}h left'
+        : '~${(hours * 60).round()}m left';
 
 /// Paints a forecast note by urgency: red when a strand is likely, orange when
 /// it bears watching, dim for a calm time-to-empty estimate.

@@ -503,6 +503,11 @@ class Insights {
   /// Recent burn rate in percent of quota per hour (>= 0), null when unknown.
   final double? burnPerHour;
 
+  /// Standard error of [burnPerHour] (same units), null with fewer than three
+  /// recent points where it is undefined. Carried so a consumer can turn the
+  /// burn into a strand probability instead of a point estimate.
+  final double? burnSePerHour;
+
   /// Typical peak usage per cycle: the 90th percentile of used percent
   /// (100 - p10 free). How high usage usually climbs.
   double? get typicalPeakUsed => p10 == null ? null : 100 - p10!;
@@ -525,6 +530,7 @@ class Insights {
     this.tightestHour,
     this.tightestDay,
     this.burnPerHour,
+    this.burnSePerHour,
   });
 
   /// Computes insights from a provider's bucket series. [now] bounds the window
@@ -544,6 +550,7 @@ class Insights {
     final t = trend(dailyMeans(used));
     final tightest = _argMin(hourOfDayProfile(used, tzOffset: tzOffset));
     final tightestDay = _argMin(dayOfWeekProfile(used, tzOffset: tzOffset));
+    final burn = burnRateWithError(used, now);
     return Insights(
       samples: agg.count,
       spanDays: spanDays,
@@ -557,7 +564,8 @@ class Insights {
       trendConfidence: t?.r2,
       tightestHour: tightest,
       tightestDay: tightestDay,
-      burnPerHour: burnRatePerHour(used, now),
+      burnPerHour: burn.perHour,
+      burnSePerHour: burn.sePerHour,
     );
   }
 
@@ -589,6 +597,7 @@ class Insights {
         'tightest_hour_local': tightestHour,
         'tightest_day_local': tightestDay,
         'burn_percent_per_hour': burnPerHour,
+        'burn_se_percent_per_hour': burnSePerHour,
         'typical_peak_used': typicalPeakUsed,
         'typical_unused': typicalUnused,
       };

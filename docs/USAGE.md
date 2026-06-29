@@ -21,6 +21,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 - **Smart schedule:** refreshes more often as a reset nears or a cap fills, and
   relaxes to as little as twice a day when everything is healthy.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
+- **Forecast at a glance:** when a provider is visibly burning, the card adds a
+  plain-language line on the binding window ("about an hour of usage left", or
+  "likely to run out before it resets" once that risk is material), the same
+  forecast `quotabot top` shows. It appears only with a real burn signal.
 - **Insights panel:** tap a card to expand a headroom sparkline, the p10/p50/p90
   distribution, how often it is usable, any trend, and the tightest hour of day.
 - Your hidden providers, compact/expanded state, cadence, always-on-top, taskbar,

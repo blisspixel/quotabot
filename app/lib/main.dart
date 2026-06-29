@@ -1630,6 +1630,26 @@ class ProviderTile extends StatelessWidget {
         : _availColor(binding.remaining);
     final hasInsights = insights != null && insights!.samples > 0;
 
+    // A glance-layer forward-looking note on the binding window, in plain
+    // language backed by the calibrated forecast and matching what `quotabot
+    // top` shows. Shown only when a real burn signal exists; quotabot never
+    // invents one. The strand probability needs the burn standard error, so it
+    // appears once there is enough history; otherwise the runway estimate does.
+    final forecast =
+        (quota.isLocal || blocked || binding == null || !hasInsights)
+        ? null
+        : classifyForecast(
+            strandProbability: strandProbability(
+              binding.remaining,
+              insights!.burnPerHour,
+              insights!.burnSePerHour,
+              binding.resetsAt,
+              now,
+            ),
+            burnPerHour: insights!.burnPerHour,
+            headroom: binding.remaining,
+          );
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: hasInsights ? onToggle : null,
@@ -1728,6 +1748,7 @@ class ProviderTile extends StatelessWidget {
                   child: WindowBar(view: v, muted: muted, fg: fg, dark: dark),
                 ),
               ),
+            if (forecast != null) _forecastRow(forecast, muted),
             if (history.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -1761,6 +1782,61 @@ class ProviderTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Glance-layer forward-looking note on the binding window, phrased in plain
+  /// language from the shared [WindowForecast]. A strand risk is stated as words
+  /// (the probability lives a layer down, in the analytics screen), a quieter
+  /// drain as an estimated runway. Colored by urgency.
+  Widget _forecastRow(WindowForecast f, Color muted) {
+    const red = Color(0xFFF85149);
+    const orange = Color(0xFFDB6D28);
+    final (String text, Color color, IconData icon) = switch (f.kind) {
+      ForecastKind.strand => (
+        f.severity >= 2
+            ? 'likely to run out before it resets'
+            : 'may run out before it resets',
+        f.severity >= 2 ? red : orange,
+        Icons.warning_amber_rounded,
+      ),
+      ForecastKind.timeToEmpty => (
+        _runwayPhrase(f.hoursToEmpty!),
+        muted,
+        Icons.schedule_rounded,
+      ),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: AppType.caption,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Plain-language runway ("about an hour of usage left" and neighbors). The
+  /// coarse buckets are deliberate: this is an estimate, and rounding to a day,
+  /// an hour, or a handful of minutes avoids implying a precision it lacks.
+  static String _runwayPhrase(double hours) {
+    if (hours >= 36) return 'about ${(hours / 24).round()} days of usage left';
+    if (hours >= 1.5) return 'about ${hours.round()} hours of usage left';
+    if (hours >= 0.75) return 'about an hour of usage left';
+    final mins = (hours * 60).round().clamp(1, 59);
+    return mins == 1
+        ? 'about a minute of usage left'
+        : 'about $mins minutes of usage left';
   }
 
   /// Single collapsed line shown when the binding window is exhausted.

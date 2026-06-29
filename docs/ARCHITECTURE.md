@@ -10,7 +10,9 @@ collector/ (Dart package)
   models.dart        normalized ProviderQuota / QuotaWindow / ModelInfo / BurnStat
   parsing.dart       pure response/window parsing (no I/O)
   analysis.dart      pure routing: headroom, risk-adjusted headroom, strand
-                     probability, suggestRoute, adaptive refresh cadence
+                     probability, suggestRoute, the shared forward-looking
+                     forecast (classifyForecast/WindowForecast, used by both top
+                     and the widget), adaptive refresh cadence
                      (nextRefreshSeconds, shared by top and the app)
   insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap,
                      burn rate with uncertainty
@@ -150,7 +152,11 @@ and the MCP `list_models` tool.
 - `ProviderTile` computes the binding window (the one with the least headroom).
   If that window is exhausted, the card collapses to a single line; otherwise it
   renders one `WindowBar` per window. Windows with `resetsAt` (e.g. Claude weekly)
-  show countdowns (e.g. "80%  3d12h").
+  show countdowns (e.g. "80%  3d12h"). When a provider is visibly burning it adds
+  a glance-layer forecast line on the binding window, worded plainly from the
+  shared `classifyForecast` (the same forecast `top` shows): a runway estimate or,
+  once a strand is material, a plain warning. It is shown only with a real burn
+  signal, never invented.
 - `fleet.dart` is the Quota Analytics screen, opened from the header and pushed as
   a route over the strip (the window resizes to a steady portrait and restores on
   Back). It is a range switch (Now / 7d / 90d): the live view ranks headroom and
