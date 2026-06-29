@@ -2,7 +2,7 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.5.0 - 2026-06-29
 
 ### Added
 - `quotabot top` surfaces the forward-looking forecast on each provider's binding
