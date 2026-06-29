@@ -23,6 +23,7 @@ import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
 import 'termshot.dart';
+import 'typography.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -953,7 +954,7 @@ class _DashboardState extends State<Dashboard>
                   Text(
                     'Quota',
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppType.title,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.2,
                       color: dark ? Colors.white : const Color(0xFF111317),
@@ -962,7 +963,7 @@ class _DashboardState extends State<Dashboard>
                   const SizedBox(width: 8),
                   Text(
                     _ago(_updated),
-                    style: TextStyle(fontSize: 10.5, color: muted),
+                    style: TextStyle(fontSize: AppType.caption, color: muted),
                   ),
                 ],
               ),
@@ -1019,7 +1020,7 @@ class _DashboardState extends State<Dashboard>
           height: 26,
           child: Text(
             'PROVIDERS',
-            style: TextStyle(fontSize: 10, letterSpacing: 0.6),
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
         for (final q in _data)
@@ -1030,7 +1031,7 @@ class _DashboardState extends State<Dashboard>
               _showAccounts && q.account != 'default' && q.account != 'unknown'
                   ? '${q.displayName} (${q.account})'
                   : q.displayName,
-              style: const TextStyle(fontSize: 12.5),
+              style: const TextStyle(fontSize: AppType.subtitle),
             ),
           ),
         const PopupMenuDivider(),
@@ -1039,7 +1040,7 @@ class _DashboardState extends State<Dashboard>
           height: 26,
           child: Text(
             'REFRESH',
-            style: TextStyle(fontSize: 10, letterSpacing: 0.6),
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
         _cadenceItem('cad:smart', Cadence.smart, 'Smart (default)'),
@@ -1051,7 +1052,7 @@ class _DashboardState extends State<Dashboard>
           height: 26,
           child: Text(
             'SORT',
-            style: TextStyle(fontSize: 10, letterSpacing: 0.6),
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
         _sortItem('sort:default', ProviderSort.defaultOrder, 'Default order'),
@@ -1064,33 +1065,39 @@ class _DashboardState extends State<Dashboard>
           height: 26,
           child: Text(
             'OPTIONS',
-            style: TextStyle(fontSize: 10, letterSpacing: 0.6),
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
         CheckedPopupMenuItem(
           value: 'always_on_top',
           checked: _alwaysOnTop,
-          child: Text('Always on top', style: const TextStyle(fontSize: 12.5)),
+          child: Text(
+            'Always on top',
+            style: const TextStyle(fontSize: AppType.subtitle),
+          ),
         ),
         CheckedPopupMenuItem(
           value: 'show_in_taskbar',
           checked: _showInTaskbar,
           child: Text(
             'Show in taskbar',
-            style: const TextStyle(fontSize: 12.5),
+            style: const TextStyle(fontSize: AppType.subtitle),
           ),
         ),
         CheckedPopupMenuItem(
           value: 'notifications',
           checked: _enableNotifications,
-          child: Text('Notifications', style: const TextStyle(fontSize: 12.5)),
+          child: Text(
+            'Notifications',
+            style: const TextStyle(fontSize: AppType.subtitle),
+          ),
         ),
         CheckedPopupMenuItem(
           value: 'show_accounts',
           checked: _showAccounts,
           child: Text(
             'Show account names',
-            style: const TextStyle(fontSize: 12.5),
+            style: const TextStyle(fontSize: AppType.subtitle),
           ),
         ),
         const PopupMenuDivider(),
@@ -1099,7 +1106,7 @@ class _DashboardState extends State<Dashboard>
           height: 26,
           child: Text(
             'TEXT SIZE',
-            style: TextStyle(fontSize: 10, letterSpacing: 0.6),
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
         _textSizeItem('text:small', TextSize.small, 'Small'),
@@ -1113,21 +1120,21 @@ class _DashboardState extends State<Dashboard>
       CheckedPopupMenuItem(
         value: value,
         checked: _textSize == t,
-        child: Text(label, style: const TextStyle(fontSize: 12.5)),
+        child: Text(label, style: const TextStyle(fontSize: AppType.subtitle)),
       );
 
   PopupMenuItem<String> _cadenceItem(String value, Cadence c, String label) =>
       CheckedPopupMenuItem(
         value: value,
         checked: _cadence == c,
-        child: Text(label, style: const TextStyle(fontSize: 12.5)),
+        child: Text(label, style: const TextStyle(fontSize: AppType.subtitle)),
       );
 
   PopupMenuItem<String> _sortItem(String value, ProviderSort s, String label) =>
       CheckedPopupMenuItem(
         value: value,
         checked: _sort == s,
-        child: Text(label, style: const TextStyle(fontSize: 12.5)),
+        child: Text(label, style: const TextStyle(fontSize: AppType.subtitle)),
       );
 
   void _onMenu(String value) {
@@ -1338,7 +1345,7 @@ class _DashboardState extends State<Dashboard>
                         Text(
                           'Providers',
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: AppType.title,
                             fontWeight: FontWeight.w700,
                             color: fg,
                           ),
@@ -1364,7 +1371,11 @@ class _DashboardState extends State<Dashboard>
                       'connected once to stay live. Local models (Ollama, LM '
                       'Studio, Lemonade) appear only while their server is '
                       'running; in LM Studio, start the local server.',
-                      style: TextStyle(fontSize: 11, height: 1.3, color: muted),
+                      style: TextStyle(
+                        fontSize: AppType.bodySmall,
+                        height: 1.3,
+                        color: muted,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Flexible(
@@ -1382,7 +1393,7 @@ class _DashboardState extends State<Dashboard>
                     const SizedBox(height: 4),
                     Text(
                       'Tip: right-click any card to set it up or hide it.',
-                      style: TextStyle(fontSize: 10.5, color: muted),
+                      style: TextStyle(fontSize: AppType.caption, color: muted),
                     ),
                   ],
                 ),
@@ -1416,7 +1427,7 @@ class _DashboardState extends State<Dashboard>
           Expanded(
             child: Text(
               q.displayName,
-              style: TextStyle(fontSize: 12.5, color: fg),
+              style: TextStyle(fontSize: AppType.subtitle, color: fg),
             ),
           ),
           if (busy)
@@ -1426,7 +1437,10 @@ class _DashboardState extends State<Dashboard>
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           else
-            Text(label, style: TextStyle(fontSize: 10.5, color: color)),
+            Text(
+              label,
+              style: TextStyle(fontSize: AppType.caption, color: color),
+            ),
           const SizedBox(width: 8),
           if (canConnect && !isLive && !busy)
             TextButton(
@@ -1439,7 +1453,10 @@ class _DashboardState extends State<Dashboard>
                 await _connectAndValidate(q.provider);
                 if (ctx.mounted) setDlg(() => connecting.remove(q.provider));
               },
-              child: const Text('Connect', style: TextStyle(fontSize: 11)),
+              child: const Text(
+                'Connect',
+                style: TextStyle(fontSize: AppType.bodySmall),
+              ),
             )
           else if (!busy)
             IconButton(
@@ -1641,7 +1658,7 @@ class ProviderTile extends StatelessWidget {
                 Text(
                   quota.displayName,
                   style: TextStyle(
-                    fontSize: 12.5,
+                    fontSize: AppType.subtitle,
                     fontWeight: FontWeight.w600,
                     color: fg,
                   ),
@@ -1653,7 +1670,7 @@ class ProviderTile extends StatelessWidget {
                     quota.account != 'cli')
                   Text(
                     ' (${quota.account})',
-                    style: TextStyle(fontSize: 10.5, color: muted),
+                    style: TextStyle(fontSize: AppType.caption, color: muted),
                   ),
                 const SizedBox(width: 8),
                 if (quota.isLocal)
@@ -1670,7 +1687,7 @@ class ProviderTile extends StatelessWidget {
                   const SizedBox(width: 3),
                   Text(
                     _ageLabel(quota.asOf, now),
-                    style: TextStyle(fontSize: 10, color: muted),
+                    style: TextStyle(fontSize: AppType.label, color: muted),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -1678,7 +1695,7 @@ class ProviderTile extends StatelessWidget {
                   Text(
                     quota.plan!.toLowerCase(),
                     style: TextStyle(
-                      fontSize: 10.5,
+                      fontSize: AppType.caption,
                       fontWeight: FontWeight.w500,
                       color: muted,
                     ),
@@ -1722,7 +1739,7 @@ class ProviderTile extends StatelessWidget {
                         ? '${history.length} recent checks'
                         : 'usually ~${avg.toStringAsFixed(0)}% free (last ${history.length})',
                     style: TextStyle(
-                      fontSize: 10.5,
+                      fontSize: AppType.caption,
                       fontWeight: FontWeight.w500,
                       color: muted,
                     ),
@@ -1756,7 +1773,7 @@ class ProviderTile extends StatelessWidget {
         Text(
           '${v.label} spent',
           style: const TextStyle(
-            fontSize: 11.5,
+            fontSize: AppType.body,
             fontWeight: FontWeight.w600,
             color: red,
           ),
@@ -1765,7 +1782,7 @@ class ProviderTile extends StatelessWidget {
         Text(
           'resets ${_resetLabel(v.resetsAt, now)}',
           style: TextStyle(
-            fontSize: 10.5,
+            fontSize: AppType.caption,
             fontWeight: FontWeight.w500,
             color: muted,
           ),
@@ -1787,7 +1804,10 @@ class ProviderTile extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 7),
-        Text(msg, style: TextStyle(fontSize: 10.5, color: muted)),
+        Text(
+          msg,
+          style: TextStyle(fontSize: AppType.caption, color: muted),
+        ),
       ],
     );
   }
@@ -1804,7 +1824,10 @@ class ProviderTile extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 7),
-        Text('free tier', style: TextStyle(fontSize: 10.5, color: muted)),
+        Text(
+          'free tier',
+          style: TextStyle(fontSize: AppType.caption, color: muted),
+        ),
       ],
     );
   }
@@ -1831,7 +1854,7 @@ class ProviderTile extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 10.5,
+                  fontSize: AppType.caption,
                   fontWeight: FontWeight.w500,
                   color: fg,
                 ),
@@ -1840,7 +1863,7 @@ class ProviderTile extends StatelessWidget {
             const SizedBox(width: 6),
             Text(
               loaded ? 'in use' : 'idle',
-              style: TextStyle(fontSize: 9.5, color: muted),
+              style: TextStyle(fontSize: AppType.small, color: muted),
             ),
           ],
         ),
@@ -1851,7 +1874,7 @@ class ProviderTile extends StatelessWidget {
               d,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 9.5, color: muted),
+              style: TextStyle(fontSize: AppType.small, color: muted),
             ),
           ),
       ],
@@ -1914,7 +1937,7 @@ class WindowBar extends StatelessWidget {
             softWrap: false,
             overflow: TextOverflow.visible,
             style: TextStyle(
-              fontSize: 10,
+              fontSize: AppType.label,
               fontWeight: FontWeight.w600,
               color: muted,
             ),
@@ -1945,7 +1968,7 @@ class WindowBar extends StatelessWidget {
                 : '${remaining.round()}% free',
             textAlign: TextAlign.end,
             style: TextStyle(
-              fontSize: 9.5,
+              fontSize: AppType.small,
               fontWeight: FontWeight.w600,
               color: view.rolledOver ? const Color(0xFF3FB950) : fg,
             ),
@@ -2067,7 +2090,7 @@ class InsightsPanel extends StatelessWidget {
                     child: Text(
                       headline,
                       style: TextStyle(
-                        fontSize: 10.5,
+                        fontSize: AppType.caption,
                         fontWeight: FontWeight.w600,
                         color: fg,
                       ),
@@ -2081,14 +2104,14 @@ class InsightsPanel extends StatelessWidget {
               padding: const EdgeInsets.only(top: 2),
               child: Text(
                 sub.join(' . '),
-                style: TextStyle(fontSize: 10, color: muted),
+                style: TextStyle(fontSize: AppType.label, color: muted),
               ),
             ),
           if (heatmap != null && _filledCells(heatmap!) >= 8) ...[
             const SizedBox(height: 6),
             Text(
               'free by hour x weekday (greener = freer)',
-              style: TextStyle(fontSize: 9, color: muted),
+              style: TextStyle(fontSize: AppType.micro, color: muted),
             ),
             const SizedBox(height: 3),
             SizedBox(
@@ -2103,7 +2126,7 @@ class InsightsPanel extends StatelessWidget {
               child: Text(
                 pace.verdict,
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: AppType.label,
                   fontWeight: FontWeight.w500,
                   color: pace.hoursEarlyExhaust != null
                       ? const Color(0xFFDB6D28)

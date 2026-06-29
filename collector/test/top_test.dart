@@ -345,4 +345,99 @@ void main() {
       expect(_plain(line).length, 30, reason: line);
     }
   });
+
+  group('sortProvidersForTop', () {
+    // Three clouds with distinct headroom and resets, plus a local runtime.
+    List<ProviderQuota> fleet() => [
+          _q('claude', [
+            QuotaWindow(
+                label: 'weekly', usedPercent: 30, resetsAt: _now + 3000),
+          ]), // 70% free
+          _q('codex', [
+            QuotaWindow(label: '5h', usedPercent: 90, resetsAt: _now + 1000),
+          ]), // 10% free, soonest reset
+          _q('grok', [
+            QuotaWindow(label: '5h', usedPercent: 60, resetsAt: _now + 5000),
+          ]), // 40% free, latest reset
+          _q('ollama', const [], kind: 'local', status: 'ready'),
+        ];
+
+    List<String> order(List<ProviderQuota> ps) =>
+        [for (final q in ps) q.provider];
+
+    test('default order leaves the fleet untouched', () {
+      final ps = fleet();
+      final out = sortProvidersForTop(
+          ps, suggestRoute(ps, _now), _now, TopSort.defaultOrder);
+      expect(order(out), ['claude', 'codex', 'grok', 'ollama']);
+    });
+
+    test('headroom puts the most free cloud first and sinks the local', () {
+      final ps = fleet();
+      final out = sortProvidersForTop(
+          ps, suggestRoute(ps, _now), _now, TopSort.headroom);
+      expect(order(out), ['claude', 'grok', 'codex', 'ollama']);
+    });
+
+    test('reset puts the soonest-resetting window first', () {
+      final ps = fleet();
+      final out =
+          sortProvidersForTop(ps, suggestRoute(ps, _now), _now, TopSort.reset);
+      expect(order(out).take(3).toList(), ['codex', 'claude', 'grok']);
+    });
+
+    test('burn floats the fastest-burning provider up, others hold order', () {
+      final ps = fleet();
+      final sug = suggestRoute(ps, _now, burnStatsByProvider: const {
+        'grok': BurnStat(perHour: 30, sePerHour: 5, samples: 8),
+        'claude': BurnStat(perHour: 5, sePerHour: 2, samples: 8),
+      });
+      final out = sortProvidersForTop(ps, sug, _now, TopSort.burn);
+      // grok burns fastest, then claude; codex (no burn) and the local sink,
+      // keeping their original relative order.
+      expect(order(out), ['grok', 'claude', 'codex', 'ollama']);
+    });
+
+    test('an unrankable sort keeps the fleet stable (no burn history)', () {
+      final ps = fleet();
+      final out =
+          sortProvidersForTop(ps, suggestRoute(ps, _now), _now, TopSort.burn);
+      expect(order(out), ['claude', 'codex', 'grok', 'ollama']);
+    });
+
+    test('the footer shows the active sort label', () {
+      final ps = fleet();
+      final lines = renderTopFrame(
+        providers: ps,
+        suggestion: suggestRoute(ps, _now),
+        now: _now,
+        width: 100,
+        color: false,
+        clock: '12:00:00',
+        sort: TopSort.headroom.label,
+      );
+      expect(lines.any((l) => _plain(l).contains('sort:headroom')), isTrue);
+    });
+  });
+
+  group('TopSort', () {
+    test('next cycles through every mode and wraps to the start', () {
+      final seen = <TopSort>[];
+      var m = TopSort.defaultOrder;
+      for (var i = 0; i < TopSort.values.length; i++) {
+        seen.add(m);
+        m = m.next;
+      }
+      expect(seen.toSet(), TopSort.values.toSet());
+      expect(m, TopSort.defaultOrder);
+    });
+
+    test('parse accepts names, labels, and aliases; rejects junk', () {
+      expect(TopSort.parse('headroom'), TopSort.headroom);
+      expect(TopSort.parse('strand risk'), TopSort.strand);
+      expect(TopSort.parse('risk'), TopSort.strand);
+      expect(TopSort.parse('FLEET'), TopSort.defaultOrder);
+      expect(TopSort.parse('nope'), isNull);
+    });
+  });
 }

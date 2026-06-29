@@ -6,6 +6,8 @@ import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'typography.dart';
+
 /// Health color on the shared green-to-red scale (input is remaining free %).
 Color fleetColor(num freePct) {
   if (freePct >= 50) return const Color(0xFF3FB950);
@@ -308,7 +310,11 @@ class _FleetScreenState extends State<FleetScreen> {
       padding: const EdgeInsets.only(top: 10, left: 2, right: 2),
       child: Text(
         'no live data: ${missing.join(', ')} (reopen the app or reconnect)',
-        style: TextStyle(fontSize: 10.5, color: c.muted, height: 1.3),
+        style: TextStyle(
+          fontSize: AppType.caption,
+          color: c.muted,
+          height: 1.3,
+        ),
       ),
     );
   }
@@ -408,7 +414,7 @@ class _FleetScreenState extends State<FleetScreen> {
         Center(
           child: Text(
             '$maxSpan-day span, up to $maxSamples samples per provider',
-            style: TextStyle(fontSize: 10, color: c.muted),
+            style: TextStyle(fontSize: AppType.label, color: c.muted),
           ),
         ),
       ],
@@ -446,7 +452,7 @@ class _FleetScreenState extends State<FleetScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: AppType.body,
                 fontWeight: FontWeight.w600,
                 color: c.fg,
               ),
@@ -456,7 +462,7 @@ class _FleetScreenState extends State<FleetScreen> {
             child: Text(
               rel == null ? '--' : 'usable ${(rel * 100).round()}%',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: AppType.bodySmall,
                 color: c.fg,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
@@ -465,7 +471,7 @@ class _FleetScreenState extends State<FleetScreen> {
           Text(
             trendStr,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: AppType.bodySmall,
               fontWeight: FontWeight.w600,
               color: trendCol,
               fontFeatures: const [FontFeature.tabularFigures()],
@@ -526,7 +532,7 @@ class _FleetScreenState extends State<FleetScreen> {
             label: Text(
               'Back',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: AppType.subtitle,
                 fontWeight: FontWeight.w600,
                 color: c.fg,
               ),
@@ -548,7 +554,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   Text(
                     'Quota Analytics',
                     style: TextStyle(
-                      fontSize: 13.5,
+                      fontSize: AppType.title,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.2,
                       color: c.fg,
@@ -567,7 +573,10 @@ class _FleetScreenState extends State<FleetScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Opacity(
                 opacity: 0.85,
-                child: Text(oracle.glyph, style: const TextStyle(fontSize: 15)),
+                child: Text(
+                  oracle.glyph,
+                  style: const TextStyle(fontSize: AppType.glyph),
+                ),
               ),
             ),
           ),
@@ -606,7 +615,7 @@ class _FleetScreenState extends State<FleetScreen> {
                     child: Text(
                       r.label,
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppType.subtitle,
                         fontWeight: FontWeight.w700,
                         color: _range == r ? c.fg : c.muted,
                       ),
@@ -641,7 +650,7 @@ class _FleetScreenState extends State<FleetScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 20,
+              fontSize: AppType.stat,
               fontWeight: FontWeight.w800,
               color: accent,
               fontFeatures: const [FontFeature.tabularFigures()],
@@ -652,7 +661,7 @@ class _FleetScreenState extends State<FleetScreen> {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 10.5, color: c.muted),
+            style: TextStyle(fontSize: AppType.caption, color: c.muted),
           ),
         ],
       ),
@@ -682,7 +691,7 @@ class _FleetScreenState extends State<FleetScreen> {
               Text(
                 title,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: AppType.bodySmall,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.1,
                   color: c.fg,
@@ -694,7 +703,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10.5, color: c.muted),
+                  style: TextStyle(fontSize: AppType.caption, color: c.muted),
                 ),
               ),
             ],
@@ -709,14 +718,20 @@ class _FleetScreenState extends State<FleetScreen> {
   Widget _empty(String text, Color muted) => SizedBox(
     height: 60,
     child: Center(
-      child: Text(text, style: TextStyle(fontSize: 11, color: muted)),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: AppType.bodySmall, color: muted),
+      ),
     ),
   );
 
   Widget _legend(Color muted) => Row(
     mainAxisAlignment: MainAxisAlignment.center,
     children: [
-      Text('spent', style: TextStyle(fontSize: 9.5, color: muted)),
+      Text(
+        'spent',
+        style: TextStyle(fontSize: AppType.small, color: muted),
+      ),
       const SizedBox(width: 6),
       for (final col in const [
         Color(0xFFF85149),
@@ -726,7 +741,10 @@ class _FleetScreenState extends State<FleetScreen> {
       ])
         Container(width: 16, height: 8, color: col),
       const SizedBox(width: 6),
-      Text('free', style: TextStyle(fontSize: 9.5, color: muted)),
+      Text(
+        'free',
+        style: TextStyle(fontSize: AppType.small, color: muted),
+      ),
     ],
   );
 }
@@ -789,7 +807,11 @@ class _BarsPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: s,
-        style: TextStyle(fontSize: 11, fontWeight: weight, color: color),
+        style: TextStyle(
+          fontSize: AppType.bodySmall,
+          fontWeight: weight,
+          color: color,
+        ),
       ),
       textDirection: TextDirection.ltr,
       maxLines: 1,
@@ -812,7 +834,7 @@ class _BarsPainter extends CustomPainter {
           TextSpan(
             text: pct,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: AppType.bodySmall,
               fontWeight: FontWeight.w700,
               color: fg,
               fontFeatures: const [FontFeature.tabularFigures()],
@@ -822,7 +844,7 @@ class _BarsPainter extends CustomPainter {
             TextSpan(
               text: '  $reset',
               style: TextStyle(
-                fontSize: 10,
+                fontSize: AppType.label,
                 color: dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280),
               ),
             ),
@@ -903,12 +925,12 @@ class _DonutPainter extends CustomPainter {
           children: [
             TextSpan(
               text: '${spenders[i].label}  ',
-              style: TextStyle(fontSize: 10.5, color: fg),
+              style: TextStyle(fontSize: AppType.caption, color: fg),
             ),
             TextSpan(
               text: '$pct%',
               style: TextStyle(
-                fontSize: 10.5,
+                fontSize: AppType.caption,
                 fontWeight: FontWeight.w700,
                 color: muted,
               ),
@@ -979,7 +1001,11 @@ class _DistPainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: s,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg),
+        style: TextStyle(
+          fontSize: AppType.bodySmall,
+          fontWeight: FontWeight.w600,
+          color: fg,
+        ),
       ),
       textDirection: TextDirection.ltr,
       maxLines: 1,
@@ -1014,7 +1040,7 @@ class _HeatmapPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: _days[r],
-          style: TextStyle(fontSize: 9, color: muted),
+          style: TextStyle(fontSize: AppType.micro, color: muted),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
@@ -1033,7 +1059,7 @@ class _HeatmapPainter extends CustomPainter {
           text: hh == 0
               ? '12a'
               : (hh == 12 ? '12p' : (hh < 12 ? '${hh}a' : '${hh - 12}p')),
-          style: TextStyle(fontSize: 8.5, color: muted),
+          style: TextStyle(fontSize: AppType.micro, color: muted),
         ),
         textDirection: TextDirection.ltr,
       )..layout();

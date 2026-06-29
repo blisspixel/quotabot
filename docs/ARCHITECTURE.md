@@ -20,8 +20,9 @@ collector/ (Dart package)
   cache.dart         last-known-good snapshot cache; recent burn stats
   ansi.dart          shared ANSI styling and color-depth detection
   top.dart           pure renderer for the `quotabot top` live dashboard:
-                     gradient meters, palettes, local detail lines, and the
-                     forward-looking forecast (strand probability/time-to-empty)
+                     gradient meters, palettes, local detail lines, the
+                     forward-looking forecast (strand probability/time-to-empty),
+                     and the interactive sort (TopSort + sortProvidersForTop)
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
   mcp.dart           MCP tool shapes, output schemas, and registration
   collector.dart     collectAll(): run adapters, apply cache; package exports
@@ -41,6 +42,7 @@ app/ (Flutter desktop)
   demo.dart   synthetic data for QUOTABOT_DEMO previews/screenshots
   logos.dart  vector provider logos (CustomPainter)
   prefs.dart  persisted UI preferences
+  typography.dart  shared text-size scale (AppType) used by both screens
 ```
 
 ## The normalized model

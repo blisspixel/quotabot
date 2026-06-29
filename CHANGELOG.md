@@ -2,7 +2,21 @@
 
 Notable changes to quotabot. Newest first.
 
-## 0.5.0 - 2026-06-29
+## Unreleased
+
+### Added
+- `quotabot top` is now sortable. Press `s` to cycle the order live (default,
+  headroom, burn, strand risk, soonest reset) or start in one with `--sort=NAME`
+  (also `QUOTABOT_SORT`); the active mode shows in the footer. The reorder is a
+  pure, tested function (`sortProvidersForTop`) that is stable - providers a sort
+  cannot rank (no burn history yet, or a local under a cloud-only metric) keep
+  their order and sink below the ranked ones, so a cold fleet never reshuffles
+  into nonsense. A piped `top` honors `--sort` and still prints one plain frame.
+
+### Changed
+- The desktop widget and the analytics screen now draw text from one shared size
+  scale (`app/lib/typography.dart`), so the same kind of text is the same size on
+  both screens (the few half-point mismatches between the views are gone).
 
 ### Added
 - `quotabot top` surfaces the forward-looking forecast on each provider's binding

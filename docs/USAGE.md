@@ -65,7 +65,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
-| `top`                  | Live dashboard that redraws in place (q quit, r now). |
+| `top`                  | Live dashboard that redraws in place (q quit, r now, s sort). |
 | `models`               | Every model you can route to now, with budget + caps. |
 | `calibration`          | How often quotabot's predictions come true (history). |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
@@ -95,6 +95,7 @@ screen and repaints countdowns every second.
 quotabot top                # adaptive refresh (the default)
 quotabot top --interval=2   # pin a fixed rate instead (minimum 2s)
 quotabot top --truecolor    # force 24-bit gradient meters
+quotabot top --sort=headroom  # order providers by a routing metric
 ```
 
 By default the collection cadence adapts to the same logic the desktop app uses:
@@ -103,9 +104,12 @@ and relaxes to hours when the whole fleet is healthy and resets are far off, so
 it is responsive when it matters without hammering provider APIs. The footer
 shows when the data was last collected. `--interval` pins a fixed rate.
 
-Press `q` (or Ctrl-C) to quit and `r` to refresh immediately. A spent longer
-window collapses its provider to one line, the same binding-window rule the
-widget uses. Piped or on a dumb terminal it prints a single plain frame and
+Press `q` (or Ctrl-C) to quit, `r` to refresh immediately, and `s` to cycle the
+ordering: `default` (collection order), `headroom` (most free first), `burn`
+(fastest-burning first), `strand` (most likely to run out before reset), and
+`reset` (soonest reset first). The active mode shows in the footer; `--sort=NAME`
+(or `QUOTABOT_SORT`) sets the starting order. A spent longer window collapses its
+provider to one line, the same binding-window rule the widget uses. Piped or on a dumb terminal it prints a single plain frame and
 exits, so `quotabot top | cat` still gives you a snapshot. On a truecolor
 terminal the bars use a smooth gradient; it degrades to 256/16/no color.
 Windows Terminal and common truecolor terminals are detected automatically;

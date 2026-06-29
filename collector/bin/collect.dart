@@ -306,17 +306,34 @@ Future<void> _runTop(Set<String> flags) async {
       ? _intOption(flags, 'interval', 10).clamp(2, 3600)
       : null;
 
+  // Initial ordering: --sort=NAME (or QUOTABOT_SORT); the `s` key cycles it live.
+  var sort = TopSort.defaultOrder;
+  final sortSpec =
+      _stringOption(flags, 'sort', Platform.environment['QUOTABOT_SORT']);
+  if (sortSpec != null && sortSpec.isNotEmpty) {
+    final parsed = TopSort.parse(sortSpec);
+    if (parsed == null) {
+      stderr.writeln('quotabot: unknown --sort value "$sortSpec" (use '
+          '${TopSort.values.map((m) => m.cliName).join(', ')})');
+      exitCode = 64;
+      return;
+    }
+    sort = parsed;
+  }
+
   if (!stdout.hasTerminal) {
     final data = await collectAll();
     final now = nowEpoch();
+    final suggestion = _suggestFor(data, now);
     final lines = renderTopFrame(
-      providers: data,
-      suggestion: _suggestFor(data, now),
+      providers: sortProvidersForTop(data, suggestion, now, sort),
+      suggestion: suggestion,
       now: now,
       width: 80,
       color: false,
       clock: _clock(),
       palette: palette,
+      sort: sort == TopSort.defaultOrder ? '' : sort.label,
     );
     stdout.writeln(lines.join('\n'));
     return;
@@ -336,9 +353,10 @@ Future<void> _runTop(Set<String> flags) async {
     if (loading && data.isEmpty) {
       lines = ['  ${style.bold('quotabot')}', '', '  reading quota...'];
     } else {
+      final suggestion = _suggestFor(data, now);
       lines = renderTopFrame(
-        providers: data,
-        suggestion: _suggestFor(data, now),
+        providers: sortProvidersForTop(data, suggestion, now, sort),
+        suggestion: suggestion,
         now: now,
         width: _termCols(),
         color: color,
@@ -346,6 +364,7 @@ Future<void> _runTop(Set<String> flags) async {
         depth: depth,
         palette: palette,
         updated: _agoLabel(lastCollect, now),
+        sort: sort.label,
       );
     }
     final buf = StringBuffer()
@@ -410,6 +429,9 @@ Future<void> _runTop(Set<String> flags) async {
       if (b == 114 || b == 82) {
         refresh?.cancel();
         reload(); // r, R: refresh now and reschedule
+      } else if (b == 115 || b == 83) {
+        sort = sort.next; // s, S: cycle the ordering and repaint
+        draw();
       }
     }
   });
@@ -447,7 +469,7 @@ void _printHelp() {
     '  status, doctor      every provider, its windows and resets (default)',
   );
   stdout.writeln(
-    '  top                 live dashboard, redraws in place (q quit, r refresh)',
+    '  top                 live dashboard, redraws in place (q quit, r refresh, s sort)',
   );
   stdout.writeln(
     '  check <provider>    whether one provider is usable now, and its reset',
@@ -487,6 +509,10 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --interval=N        top: fixed seconds between refreshes (default: adaptive)',
+  );
+  stdout.writeln(
+    '  --sort=NAME         top: initial order (${TopSort.values.map((m) => m.cliName).join(', ')}); '
+    'the s key cycles it; also QUOTABOT_SORT',
   );
   stdout.writeln(
     '  --truecolor         top: force 24-bit gradient meters',

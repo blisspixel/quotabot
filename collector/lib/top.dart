@@ -13,6 +13,96 @@ import 'ansi.dart';
 import 'models.dart';
 import 'palette.dart';
 
+/// The orderings the interactive `top` view can cycle through with the `s` key.
+/// [defaultOrder] keeps providers in collection order (the historical default);
+/// the others float the most relevant provider to the top of its group by a
+/// routing metric. The reorder is a pure, tested function ([sortProvidersForTop]);
+/// the watch loop only holds which mode is active.
+enum TopSort {
+  defaultOrder('default'),
+  headroom('headroom'),
+  burn('burn'),
+  strand('strand risk'),
+  reset('reset');
+
+  const TopSort(this.label);
+
+  /// Short name shown in the footer keymap.
+  final String label;
+
+  /// The single token a user types for `--sort=` (every mode is one word).
+  String get cliName => this == defaultOrder ? 'default' : name;
+
+  /// The next mode in the cycle, wrapping around. Drives the `s` key.
+  TopSort get next => values[(index + 1) % values.length];
+
+  /// Parses a `--sort=` value (name or label, case-insensitive); null when
+  /// unrecognized so the caller can report a usage error.
+  static TopSort? parse(String s) {
+    final k = s.trim().toLowerCase();
+    for (final m in values) {
+      if (m.name.toLowerCase() == k || m.label == k) return m;
+    }
+    if (k == 'fleet' || k == 'none') return defaultOrder;
+    if (k == 'risk') return strand;
+    return null;
+  }
+}
+
+/// Reorders [providers] for display under [sort], reading each provider's routing
+/// metrics from [suggestion]. The render still groups cloud above local; this
+/// only sets the order within each group.
+///
+/// Stable and total: providers the sort cannot rank (no metric yet, or a local
+/// runtime under a cloud-only metric) keep their original relative order and sink
+/// below the ranked ones, so a fleet with no burn history never reshuffles into
+/// nonsense. Pure: no clock or I/O, [now] is supplied by the caller.
+List<ProviderQuota> sortProvidersForTop(
+  List<ProviderQuota> providers,
+  RouteSuggestion suggestion,
+  int now,
+  TopSort sort,
+) {
+  if (sort == TopSort.defaultOrder) return List.of(providers);
+  final cand = {for (final c in suggestion.ranked) c.provider: c};
+
+  // (value, rankable). Lower value sorts first; unrankable rows sink and hold
+  // their original order. Signs are chosen so each mode's "most urgent" leads.
+  (double, bool) keyFor(ProviderQuota q) {
+    switch (sort) {
+      case TopSort.headroom:
+        final h = providerHeadroom(q, now);
+        return (-(h ?? 0), h != null); // most free first
+      case TopSort.burn:
+        final b = cand[q.provider]?.burnPerHour;
+        return (-(b ?? 0), b != null && b > 0); // fastest burn first
+      case TopSort.strand:
+        final p = cand[q.provider]?.strandProbability;
+        return (-(p ?? 0), p != null); // most likely to strand first
+      case TopSort.reset:
+        final r = bindingWindow(q, now)?.resetsAt;
+        return ((r ?? 0).toDouble(), r != null); // soonest reset first
+      case TopSort.defaultOrder:
+        return (0, false);
+    }
+  }
+
+  final decorated = [
+    for (var i = 0; i < providers.length; i++)
+      (i, providers[i], keyFor(providers[i])),
+  ];
+  decorated.sort((a, b) {
+    final ka = a.$3, kb = b.$3;
+    if (ka.$2 != kb.$2) return ka.$2 ? -1 : 1; // ranked rows before unranked
+    if (ka.$2) {
+      final c = ka.$1.compareTo(kb.$1);
+      if (c != 0) return c;
+    }
+    return a.$1.compareTo(b.$1); // original index keeps the sort stable
+  });
+  return [for (final d in decorated) d.$2];
+}
+
 /// One painted run of text with a known visible width. [paint] is applied only
 /// when color is on; it never changes the visible length, so layout math can
 /// work in plain characters and still produce correct colored output.
@@ -280,6 +370,7 @@ List<String> renderTopFrame({
   ColorDepth depth = ColorDepth.none,
   Palette palette = kDefaultPalette,
   String updated = '',
+  String sort = '',
 }) {
   final w = width < 24 ? 24 : width;
   final s = AnsiStyle(color, depth: depth);
@@ -346,6 +437,10 @@ List<String> renderTopFrame({
     _Cell(' quit   ', (s, t) => s.dim(t)),
     _Cell('r', (s, t) => s.bold(t)),
     _Cell(' refresh   ', (s, t) => s.dim(t)),
+    if (sort.isNotEmpty) ...[
+      _Cell('s', (s, t) => s.bold(t)),
+      _Cell(' sort:$sort   ', (s, t) => s.dim(t)),
+    ],
     if (updated.isNotEmpty) _Cell('$updated   ', (s, t) => s.dim(t)),
     _Cell('0 usage tokens', (s, t) => s.dim(t)),
   ], w, s));

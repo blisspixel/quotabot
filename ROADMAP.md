@@ -13,14 +13,17 @@ cap, and never leave paid quota sitting unspent.
 It **is**:
 
 - a live rolling-window quota monitor (5h / weekly / monthly windows, real resets);
-- a routing advisor, available as a CLI, an MCP server, and a LiteLLM plugin;
+- a routing advisor: a signal source any router, proxy, or meta-router can read,
+  available as a CLI, an MCP server, and a LiteLLM plugin;
 - local-first and cross-platform (Windows, macOS, Linux), desktop widget plus CLI;
 - aware of local runtimes (Ollama, LM Studio, Lemonade) as first-class fallbacks.
 
 It is **not**:
 
 - a cost or dollar-spend ledger (a different, already-crowded category);
-- a proxy that sits in your request path (it advises; LiteLLM is an optional add-on);
+- a router or proxy in your request path: it advises, and something else routes on
+  that advice (LiteLLM is the shipped example, a hand-rolled meta-router is
+  another); quotabot never becomes the data path itself;
 - telemetry, a cloud service, or an account;
 - a model quality or benchmark tool.
 
@@ -64,6 +67,15 @@ the SEE and ROUTE jobs done flawlessly on every platform, for the providers
 quotabot already claims. Adding a new provider does not get us to 1.0; Antigravity
 never lying about quota on any OS does.
 
+"Done flawlessly" is meant strictly, so 1.0 is the excellent, polished product,
+not a minimal core. That is why two things that round out the core are 1.0 gates
+rather than later breadth: **profiles** (so the multi-account user sees work and
+personal cleanly in one place, item 8) and the **router-grade signal** a real
+meta-router leans on - leases, a cheap cached decision, scoped queries, and a
+subscribe path (items 15-16). Both deepen SEE and ROUTE for the providers already
+claimed; neither is a new provider. Sheer breadth (more providers, optimizer math,
+ecosystem) stays After 1.0.
+
 **Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
 binding-window SEE rule with honest staleness; self-explaining, risk-aware
 `suggest` with provenance (burn standard error, strand probability, confidence,
@@ -103,45 +115,77 @@ it stands up serve every phase after it.
 5. [ ] Real cross-platform verification on macOS and Linux machines, not just
    "code paths ready"; a provider that cannot read says why, plainly.
 6. [ ] Token-refresh and onboarding edge cases handled and tested (Antigravity,
-   Grok): expiry, multi-account, and signed-out states.
-7. [ ] Cursor a first-class read (it keeps rich local state), and each provider's
-   plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok Heavy), so the
-   value of the higher tier is visible.
+   Grok, Codex): expiry, multi-account, and signed-out states. Generalize the
+   per-account model Antigravity already has (cross-platform profile scan, one
+   card per active account, per-account caches keyed by email, auto-hide of
+   signed-out accounts) to the other providers, keying auth and cache by
+   (provider, account) in independent owner-only slots so work and home accounts
+   under different emails coexist and the UI can group or filter by account. One
+   primary account per provider stays the zero-config default; multi-account is
+   additive, never forced on the common case. (Copilot's per-account read lands
+   post-1.0 with the provider itself.)
+7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
+   each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
+   Heavy), so the value of the higher tier is visible. Two moving targets to
+   absorb here: Cursor's paid plans are now a dollar-denominated monthly credit
+   pool with pay-as-you-go overage, so surface it as remaining-pool-percent on
+   its monthly reset (a window) rather than per-token cost accounting; and
+   Windsurf was acquired by Cognition and folded under the Devin brand
+   (renamed Devin Desktop in mid-2026), so the Cascade daily/weekly quota must
+   keep reading under the new product name and local state path.
+8. [ ] Profiles: named bundles (work / personal / per-project) that select which
+   accounts and providers are in view, carry their own UI preferences (theme,
+   sort, hidden providers), and pin a routing policy (local-only here,
+   paid-tier-first there). Built on the per-(provider, account) plumbing from
+   item 6, this is the polished way the multi-account case is handled: toggle in
+   the app, or pass `--profile NAME` to the CLI and MCP so a router routes within
+   the right identity. One default profile stays the zero-config path.
 
 ### Phase 3 - Deterministic testability, then hard testing
 
-8. [ ] A simulation mode (`--mock-provider claude --state exhausted`) for
+9. [ ] A simulation mode (`--mock-provider claude --state exhausted`) for
    deterministic core tests - built first here, since the tests below lean on it.
-9. [ ] Property/fuzz tests on the untrusted parsers (they ingest external JSON and
+10. [ ] Property/fuzz tests on the untrusted parsers (they ingest external JSON and
    protobuf), plus integration tests against recorded provider fixtures.
-10. [ ] LiteLLM plugin covered by real-proxy integration tests.
-11. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
+11. [ ] LiteLLM plugin covered by real-proxy integration tests.
+12. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
     catalog against each provider's own model list (capabilities stay curated,
     since `/v1/models` endpoints do not expose context/tools/tier).
 
-### Phase 4 - MCP reference depth
+### Phase 4 - MCP reference depth and the router-grade signal
 
 Make quotabot the de-facto quota/routing MCP server, on the one routing contract
-shared by the CLI, MCP, and the LiteLLM plugin.
+shared by the CLI, MCP, and the LiteLLM plugin - including the primitives a real
+router or meta-router leans on. quotabot advises, it is never the data path; the
+leverage is the quality of the signal it hands a router.
 
-12. [ ] Streamable HTTP transport alongside stdio, tested, with capability scoping
+13. [ ] Streamable HTTP transport alongside stdio, tested, with capability scoping
     and complete tool-discovery metadata.
-13. [ ] Client snippets (Python/TS) so the contract is trivial to adopt.
+14. [ ] Client snippets (Python/TS) so the contract is trivial to adopt.
+15. [ ] Concurrency leases (`reserve` / `release`) so parallel agents do not
+    dogpile the same pick and the next caller sees the reduced effective headroom,
+    paired with a cheap cached "decide now" read that always states its
+    `as_of`/staleness so a router can query per request without forcing a live
+    collect.
+16. [ ] Profile- and account-scoped routing queries (`--profile`, from item 8),
+    plus a subscribe path - the Phase 1 threshold webhook generalized to an MCP
+    notification - so a router reacts to a window crossing amber or red instead of
+    polling for it.
 
 ### Phase 5 - Freeze and ship
 
 Last, once every schema-touching feature above has landed, so the contract frozen
 here is the final one.
 
-14. [ ] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
+17. [ ] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
     required-fixture registry, with an "add a provider in 10 minutes" checklist in
     CONTRIBUTING.
-15. [ ] A recurring security pass and an adversarial bug-hunt round that returns
+18. [ ] A recurring security pass and an adversarial bug-hunt round that returns
     empty (see continuous hardening below).
-16. [ ] An animated GIF in the README (the widget collapsing and expanding, `top`
+19. [ ] An animated GIF in the README (the widget collapsing and expanding, `top`
     live, the 90-day analytics view), generated from demo mode so it stays
     reproducible, plus verified macOS and Linux packaging.
-17. [ ] Final cut: every box above checked, suite green on Windows, macOS, and
+20. [ ] Final cut: every box above checked, suite green on Windows, macOS, and
     Linux.
 
 ### Continuous hardening (runs throughout, not a phase)
@@ -164,9 +208,24 @@ pursued continuously, but not 1.0 gates.
 
 Breadth and depth, once the core is trusted:
 
-- **More quota-window providers:** Z.ai (GLM), Kimi, Amp, OpenCode, DeepSeek,
-  Perplexity. Spend-based aggregators (OpenRouter, Together, Fireworks) only as a
-  secondary cost view, since they are dollars, not rolling-window quota.
+- **More quota-window providers:** the "coding plan" cohort is the truest fit and
+  the priority, since it sells Claude-Max-style rolling request windows that map
+  straight onto the SEE model - Z.ai (GLM), MiniMax, Kimi, and Qwen all meter
+  prompts per 5h / week / month with real resets. Then Amp, OpenCode, DeepSeek,
+  Perplexity, and GitHub Copilot (see Not doing below; its premium-request
+  allowance has become a per-user monthly window with a usage API, so it earns a
+  second look). Spend-based aggregators (OpenRouter, Together, Fireworks), the
+  credit-metered app builders (Replit, v0, Lovable, Bolt), and credit-pool tools
+  like Warp and JetBrains AI only ever as a secondary cost view, since they meter
+  dollars or credits, not a rolling-window quota. Amazon Q is deliberately
+  skipped: AWS is sunsetting it in favor of Kiro, which quotabot already reads, so
+  the AWS path is to deepen Kiro rather than chase a retiring product.
+- **User-defined manual quota entries:** an optional way to add a tool quotabot
+  has no adapter for (a limit, a reset, and an updatable used figure), so the
+  long tail (Tabnine, JetBrains Junie, Trae, and similar) still shows in one
+  place. Clearly marked self-reported, never fed into the routing confidence math
+  as if it were measured burn, and never invented - the number is only ever what
+  the user typed.
 - **Capability-aware routing, deeper.** The foundation shipped (`--task`,
   `--min-context`, `--require-tools`/`--require-vision`/`--require-reasoning`, tier
   floor/ceiling, cheapest-qualifying-with-budget-wins, local-first, and the
@@ -175,8 +234,6 @@ Breadth and depth, once the core is trusted:
   that escalates to a paid plan only when the requirements force it or a window is
   about to reset. Models stay filtered by objective capability and the provider's
   own tier, never a quotabot quality ranking.
-- **Concurrency leases** (`reserve` / `release`) so parallel agents do not dogpile
-  the same pick.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling.
@@ -198,6 +255,20 @@ others) to keep leaning on: a cross-platform widget (most rivals are macOS
 menu-bar only), real rate-limit windows (not token or dollar accounting), routing
 as a primitive, and first-class local runtimes.
 
+Staying relevant is a standing habit, re-checked each release rather than a fixed
+list: re-survey what people actually run and what quota model each tool uses,
+because the market is splitting in two. One camp keeps true rolling-window prompt
+quotas - Claude, Codex, and the fast-growing coding-plan cohort (GLM, MiniMax,
+Kimi, Qwen) that sells Claude-Max-style 5h / weekly / monthly request windows -
+and that camp is quotabot's home turf, where new coverage pays off most. The other
+camp (Cursor, Warp, JetBrains AI, Replit, the app builders) has moved to dollar-
+or credit-metered pools with a monthly reset; quotabot can show those as
+remaining-pool-percent on their reset (a window) but never crosses into per-token
+cost accounting. The whole premise keeps checking out: a clear majority of
+engineers now run two to four of these tools at once, which is the exact problem
+quotabot exists to solve, so the relevance test for any new provider is simply
+whether it has a quota people are juggling, not how new or hyped it is.
+
 ## Not doing (and why)
 
 Deliberately out of scope. Listed so the boundary is explicit.
@@ -206,10 +277,15 @@ Deliberately out of scope. Listed so the boundary is explicit.
   app to chase packaging debt that is real but overstated.
 - **Runtime plugin discovery from pub.dev.** Not feasible in an AOT-compiled
   Flutter app; a compile-time adapter registry is the workable form.
-- **GitHub Copilot.** For individuals it is a monthly premium-request allowance
-  with pay-as-you-go overage, not a rolling-window quota; usage is server-side
-  only and the token lives in the OS keyring, not a file. Revisit only if GitHub
-  exposes a local premium-request read.
+- **GitHub Copilot - reclassified as a post-1.0 candidate (see After 1.0), no
+  longer a flat exclusion.** The original objection was that premium requests
+  were server-side only with the token in the OS keyring, not a file. As of 2026
+  the premium-request allowance is a clean monthly window (counters reset on the
+  1st, UTC) and GitHub exposes a per-user usage API. It still is not a silent
+  local read: it needs an opt-in personal access token (the same one-time-login
+  pattern as Grok and Antigravity), and seats managed by an org or enterprise do
+  not appear on the user endpoint. Worth doing post-1.0 for individual plans,
+  with those limits stated plainly.
 - **Token/dollar cost ledgers as the primary view.** quotabot tracks rolling
   windows, not spend accounting; a cost dimension stays optional and secondary.
 - **Pay-as-you-go API vendors** (as quota providers). That is cost, not a
