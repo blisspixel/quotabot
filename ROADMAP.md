@@ -77,6 +77,8 @@ Routing and MCP
 - [x] `suggest` recommends a concrete model for a task profile (cheapest qualifying
   with budget, escalate on strand)
 - [ ] forward-looking prediction surfaced plainly in `top`, the widget, and alerts
+  (done in `top`: strand probability / time-to-empty on the binding window; widget
+  and alerts pending)
 - [ ] MCP Streamable HTTP transport alongside stdio, plus Python/TS client snippets
 - [ ] LiteLLM plugin covered by real-proxy integration tests
 - [ ] model-catalog currency: a refresh/audit tool (capabilities stay curated since

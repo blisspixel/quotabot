@@ -463,8 +463,10 @@ void _printHelp() {
   );
   stdout.writeln('');
   stdout.writeln(head('ROUTE'));
-  stdout
-      .writeln('  suggest             which subscription to use next (ranked)');
+  stdout.writeln(
+    '  suggest             which subscription to use next (ranked); add a model'
+    ' filter (e.g. --task) to get one recommended model',
+  );
   stdout.writeln('');
   stdout.writeln(head('CONNECT'));
   stdout.writeln(
@@ -498,7 +500,7 @@ void _printHelp() {
     'uncertain caps)',
   );
   stdout.writeln(
-    '  --task=LEVEL        models: simple|standard|hard (coarse capability needs)',
+    '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',
   );
   stdout.writeln(
     '  --min-context=N --require-tools/vision/reasoning --tier-floor/ceiling=T'

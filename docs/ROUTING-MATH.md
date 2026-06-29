@@ -396,7 +396,8 @@ the measurable improvement over the shipped heuristic.
 |---|---|---|
 | burn + se, robust | `insights.dart` `burnRateWithError` -> `BurnStat` | shipped |
 | `h_risk`, `p_strand` | `analysis.dart` `riskAdjustedHeadroom`, `strandProbability` | shipped |
-| confidence + provenance | `RouteCandidate.confidence`, `as_of`/`risk_z` | shipped (suggest); top/widget pending |
+| confidence + provenance | `RouteCandidate.confidence`, `as_of`/`risk_z` | shipped (suggest, top); widget pending |
+| `p_strand` surfaced in `top` | `top.dart` `_forecast` (strand % / time-to-empty) | shipped |
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | next |
 | shrinkage | `insights.dart` (cross-provider pool) | next |

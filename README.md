@@ -67,7 +67,8 @@ showing a green 5 hour bar you cannot use. Local runtimes have no quota, so thei
 card reports installed and loaded models instead, and acts as a routing fallback.
 
 The same view is available live in the terminal with `quotabot top`, a small
-dashboard that redraws in place. Full walkthrough of the widget, analytics, and
+dashboard that redraws in place and, when it has enough history, notes which
+window is likely to run out first. Full walkthrough of the widget, analytics, and
 CLI: [docs/USAGE.md](docs/USAGE.md).
 
 ## Provider status

@@ -10,7 +10,8 @@ collector/ (Dart package)
   models.dart        normalized ProviderQuota / QuotaWindow / ModelInfo / BurnStat
   parsing.dart       pure response/window parsing (no I/O)
   analysis.dart      pure routing: headroom, risk-adjusted headroom, strand
-                     probability, suggestRoute
+                     probability, suggestRoute, adaptive refresh cadence
+                     (nextRefreshSeconds, shared by top and the app)
   insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap,
                      burn rate with uncertainty
   calibration.dart   pure: grade the strand predictor against recorded history
@@ -18,7 +19,10 @@ collector/ (Dart package)
   model_catalog.dart committed, refreshable cloud model capability catalog
   cache.dart         last-known-good snapshot cache; recent burn stats
   ansi.dart          shared ANSI styling and color-depth detection
-  top.dart           pure renderer for the `quotabot top` live dashboard
+  top.dart           pure renderer for the `quotabot top` live dashboard:
+                     gradient meters, palettes, local detail lines, and the
+                     forward-looking forecast (strand probability/time-to-empty)
+  demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
   mcp.dart           MCP tool shapes, output schemas, and registration
   collector.dart     collectAll(): run adapters, apply cache; package exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
