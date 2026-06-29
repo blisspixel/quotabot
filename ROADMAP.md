@@ -119,8 +119,13 @@ it stands up serve every phase after it.
 
 4. [x] macOS and Linux CI runners, not just Linux. CI now runs the full suite on
    a matrix of ubuntu-latest and macos-latest (Windows to follow with item 5).
-5. [ ] Real cross-platform verification on macOS and Linux machines, not just
-   "code paths ready"; a provider that cannot read says why, plainly.
+5. [x] Real cross-platform verification on macOS and Linux machines, not just
+   "code paths ready"; a provider that cannot read says why, plainly. CI now runs
+   the full suite on Linux, macOS, and Windows, so the paths are exercised on
+   real hosts of every claimed OS; each adapter returns a plain error note
+   (`ProviderQuota.error`, e.g. "no ~/.claude/.credentials.json", "token expired
+   (re-run claude)") and `collectAll` falls back to the last-known snapshot
+   rather than blanking. (Deeper hardware/manual passes continue as needed.)
 6. [ ] Token-refresh and onboarding edge cases handled and tested (Antigravity,
    Grok, Codex): expiry, multi-account, and signed-out states. Generalize the
    per-account model Antigravity already has (cross-platform profile scan, one

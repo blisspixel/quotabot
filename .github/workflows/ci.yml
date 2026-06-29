@@ -6,14 +6,21 @@ on:
 
 jobs:
   test:
-    # Run the full suite on Linux and macOS so the cross-platform paths (config
-    # dirs, sqlite loader, file sources) are exercised on a real macOS host, not
-    # just assumed. fail-fast off so one OS failing still reports the other.
+    # Run the full suite on every claimed platform (Linux, macOS, Windows) so the
+    # cross-platform paths (config dirs, sqlite loader, file sources) are
+    # exercised on real hosts, not just assumed. fail-fast off so one OS failing
+    # still reports the others.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+
+    # Use bash on every runner (Git Bash on Windows) so the multi-line coverage
+    # step's line continuations and paths behave the same everywhere.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v5
