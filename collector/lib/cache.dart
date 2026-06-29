@@ -83,12 +83,24 @@ void saveHistory(ProviderQuota q) {
   } catch (_) {}
 }
 
+/// True when an account string names a specific account worth keying a per-
+/// account cache file by, rather than a placeholder.
+bool _hasAccount(String account) =>
+    account.isNotEmpty && account != 'unknown' && account != 'default';
+
+/// Path of the per-account snapshot file for [provider]/[account], e.g.
+/// `antigravity_work_at_example.com.json`. One machine can hold several logins
+/// for a provider, so each account's last-known-good snapshot is cached apart.
+File _accountedPath(String provider, String account) => File(
+    '${cacheDir().path}/${_safeProviderStem(provider)}_${_safeProviderStem(account)}.json');
+
 File _accountedFile(ProviderQuota q) {
-  if (q.provider == 'antigravity' &&
-      q.account != 'unknown' &&
-      q.account.isNotEmpty) {
-    final safe = _safeProviderStem(q.account);
-    return File('${cacheDir().path}/antigravity_$safe.json');
+  // Antigravity is the one provider that currently reads several accounts, so
+  // its snapshot is keyed per account. Other providers write the plain file
+  // until they gain multi-account reads; the keying itself is generic
+  // ([_accountedPath]) so opting a provider in is a one-line change.
+  if (q.provider == 'antigravity' && _hasAccount(q.account)) {
+    return _accountedPath(q.provider, q.account);
   }
   return _file(q.provider);
 }
@@ -106,17 +118,14 @@ ProviderQuota? loadSnapshot(String provider) {
   }
 }
 
-/// Loads the last-known-good Antigravity snapshot for a specific account.
-/// Antigravity snapshots are written per account (`antigravity_<email>.json`)
-/// because one machine can hold several logins, so the generic
-/// `loadSnapshot('antigravity')` path never finds them. Returns null when no
-/// cache exists for that account.
-ProviderQuota? loadAntigravitySnapshot(String account) {
-  if (account.isEmpty || account == 'unknown') return null;
-  final safe = _safeProviderStem(account);
-  final f = File('${cacheDir().path}/antigravity_$safe.json');
-  if (!f.existsSync()) return null;
-  if (f.lengthSync() > _maxJsonBytes) return null;
+/// Loads the last-known-good per-account snapshot for [provider]/[account], or
+/// null when none exists. Per-account snapshots are written as
+/// `<provider>_<account>.json` because one machine can hold several logins, so
+/// the plain `loadSnapshot(provider)` path never finds them.
+ProviderQuota? loadAccountSnapshot(String provider, String account) {
+  if (!_hasAccount(account)) return null;
+  final f = _accountedPath(provider, account);
+  if (!f.existsSync() || f.lengthSync() > _maxJsonBytes) return null;
   try {
     return ProviderQuota.fromJson(
       jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
@@ -126,34 +135,45 @@ ProviderQuota? loadAntigravitySnapshot(String account) {
   }
 }
 
-List<ProviderQuota> loadAllAntigravitySnapshots() {
+/// Every cached per-account snapshot for [provider] across the accounts seen on
+/// this machine, plus the plain file when it holds a distinct account. The
+/// generic form of the per-account scan (used today by Antigravity).
+List<ProviderQuota> loadAccountSnapshots(String provider) {
   final results = <ProviderQuota>[];
   final dir = cacheDir();
   if (!dir.existsSync()) return results;
+  final stem = _safeProviderStem(provider);
   try {
     for (final entity in dir.listSync()) {
-      if (entity is File &&
-          entity.path.contains('antigravity_') &&
-          entity.path.endsWith('.json')) {
-        try {
-          if (entity.lengthSync() > _maxJsonBytes) continue;
-          final content =
-              jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>;
-          final q = ProviderQuota.fromJson(content);
-          if (q.provider == 'antigravity') {
-            results.add(q);
-          }
-        } catch (_) {}
-      }
+      if (entity is! File || !entity.path.endsWith('.json')) continue;
+      // Per-account files are "<stem>_<account>.json"; this prefix excludes the
+      // history_/buckets_ siblings, and the parsed provider is checked below.
+      if (!entity.uri.pathSegments.last.startsWith('${stem}_')) continue;
+      try {
+        if (entity.lengthSync() > _maxJsonBytes) continue;
+        final q = ProviderQuota.fromJson(
+          jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
+        );
+        if (q.provider == provider) results.add(q);
+      } catch (_) {}
     }
-    // also main if not profile
-    final main = loadSnapshot('antigravity');
+    final main = loadSnapshot(provider);
     if (main != null && !results.any((r) => r.account == main.account)) {
       results.add(main);
     }
   } catch (_) {}
   return results;
 }
+
+/// Antigravity's per-account snapshot, by account. Thin alias over the generic
+/// [loadAccountSnapshot]; kept for call-site clarity.
+ProviderQuota? loadAntigravitySnapshot(String account) =>
+    loadAccountSnapshot('antigravity', account);
+
+/// All cached Antigravity snapshots across logged-in accounts. Thin alias over
+/// the generic [loadAccountSnapshots].
+List<ProviderQuota> loadAllAntigravitySnapshots() =>
+    loadAccountSnapshots('antigravity');
 
 // --- Long-term analytics buckets -------------------------------------------
 //

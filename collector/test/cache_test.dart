@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/cache.dart';
@@ -128,5 +129,44 @@ void main() {
       loadAllAntigravitySnapshots().any((s) => s.account == 'test-account'),
       isTrue,
     );
+  });
+
+  group('generic per-account snapshots', () {
+    const ap = '__test_acct__';
+
+    ProviderQuota aq(String account, double used) => ProviderQuota(
+          provider: ap,
+          displayName: 'AcctTest',
+          account: account,
+          asOf: 1782000000,
+          windows: [QuotaWindow(label: '5h', usedPercent: used)],
+        );
+
+    void writeAccount(String account, double used) =>
+        File('${cacheDir().path}/${ap}_$account.json')
+            .writeAsStringSync(jsonEncode(aq(account, used).toJson()));
+
+    tearDown(() {
+      for (final n in ['${ap}_work.json', '${ap}_home.json', '$ap.json']) {
+        final f = File('${cacheDir().path}/$n');
+        if (f.existsSync()) f.deleteSync();
+      }
+    });
+
+    test('loadAccountSnapshot reads one account, ignores placeholders', () {
+      writeAccount('work', 20);
+      final q = loadAccountSnapshot(ap, 'work');
+      expect(q?.account, 'work');
+      expect(loadAccountSnapshot(ap, 'missing'), isNull);
+      expect(loadAccountSnapshot(ap, 'unknown'), isNull);
+      expect(loadAccountSnapshot(ap, ''), isNull);
+    });
+
+    test('loadAccountSnapshots gathers every account for the provider', () {
+      writeAccount('work', 20);
+      writeAccount('home', 40);
+      final all = loadAccountSnapshots(ap);
+      expect(all.map((q) => q.account).toSet(), {'work', 'home'});
+    });
   });
 }
