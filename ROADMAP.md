@@ -59,174 +59,106 @@ wrong feature.
 ## Road to 1.0
 
 1.0 is a promise that the **core works exceptionally** and the public surface is
-**stable**, not a feature count. Everything here is depth on what already exists:
+**stable**, not a feature count. Everything below is depth on what already exists:
 the SEE and ROUTE jobs done flawlessly on every platform, for the providers
 quotabot already claims. Adding a new provider does not get us to 1.0; Antigravity
 never lying about quota on any OS does.
 
-### What 1.0 needs (the checklist)
+**Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
+binding-window SEE rule with honest staleness; self-explaining, risk-aware
+`suggest` with provenance (burn standard error, strand probability, confidence,
+`--risk`); the per-model registry with capability and tier filters across CLI and
+MCP; concrete model recommendation (`suggest --task`); MCP 2025-11-25 output
+schemas and read-only annotations; calibration that grades the predictor;
+`quotabot top` with gradient meters, palettes, adaptive refresh, and the
+forward-looking forecast on the binding window; the cross-platform release
+pipeline; and CI green on an 85% coverage floor.
 
-The finish line, with honest status. 1.0 is reached when every box is checked and
-the suite is green on Windows, macOS, and Linux. The narrative below explains each.
+What is left is the ordered plan below. The phases are sequenced deliberately -
+each unblocks or de-risks the next - so this is the order to build in, not a menu
+to pick from. 1.0 is cut when every box is checked and the suite is green on
+Windows, macOS, and Linux.
 
-Routing and MCP
-- [x] `suggest` explains itself; provenance (`as_of`, risk-adjusted headroom,
-  strand probability, confidence, `--risk`)
-- [x] MCP 2025-11-25 output schemas and read-only annotations
-- [x] per-model registry (`quotabot models`, `list_models`, capability + tier filters)
-- [x] `suggest` recommends a concrete model for a task profile (cheapest qualifying
-  with budget, escalate on strand)
-- [ ] forward-looking prediction surfaced plainly in `top`, the widget, and alerts
-  (done in `top`: strand probability / time-to-empty on the binding window; widget
-  and alerts pending)
-- [ ] MCP Streamable HTTP transport alongside stdio, plus Python/TS client snippets
-- [ ] LiteLLM plugin covered by real-proxy integration tests
-- [ ] model-catalog currency: a refresh/audit tool (capabilities stay curated since
-  provider `/v1/models` endpoints do not expose context/tools/tier)
+### Phase 1 - Parity across the surfaces
 
-SEE and reliability
-- [x] binding-window rule, staleness, honest "no live data"
-- [ ] real cross-platform verification on macOS and Linux machines
-- [ ] Cursor first-class, and each provider's plan tier surfaced
-- [ ] token-refresh edge cases tested (expiry, multi-account, signed-out)
+Finish the features that already half-exist, so the CLI, the widget, and the
+alerts all tell the same story.
 
-CLI and widget
-- [x] `quotabot top` (gradient meters, palettes), `--json` on every read command
-- [x] consistent fonts and rounded corners, full provider icon set
-- [ ] `top` interactivity (sort/filter/keys, suggest-and-copy) and documented,
-  stable exit codes
-- [ ] proactive low-quota routing alerts with an optional local webhook
+1. [ ] Interactive `top`: sort (headroom / burn / strand risk / reset), filter or
+   hide providers, keyboard navigation, and a one-key "suggest and copy the route
+   command", with documented, stable exit codes a shell or agent can branch on.
+2. [ ] Forward-looking forecast in the **widget**, in plain language ("about an
+   hour of usage left"), matching what `top` already shows.
+3. [ ] Proactive low-quota routing alerts: when a window crosses amber/red, name
+   where to route next ("Claude 5h at 8% - send the next calls to Grok"), with an
+   optional local webhook so the signal can reach a tray toast, a shell, or chat.
 
-Quality, contract, shipping
-- [x] CI green with an 85%+ coverage floor enforced
-- [x] cross-platform release pipeline; v0.4.0 shipped
-- [x] calibration: `quotabot calibration` grades the predictor against history
-- [ ] property/fuzz tests on the untrusted parsers (they ingest external JSON/protobuf)
-- [ ] macOS and Linux CI runners, not just Linux
-- [ ] a recurring security pass and an adversarial bug-hunt round that returns empty
-- [ ] a `--mock-provider` simulation mode for deterministic core tests
-- [ ] freeze the `quotabot.v1` schema and add a compile-time adapter+fixture registry
-- [ ] an animated GIF in the README
+### Phase 2 - SEE is flawless on every platform
 
-Self-tuning (using the calibration loop to fit the routing parameters on local
-history) and the deeper statistical layers are quality multipliers, valued but not
-gates for 1.0.
+The real 1.0 promise: every claimed provider reads correctly, everywhere, with no
+silent failures. It comes before the deeper testing work because the real runners
+it stands up serve every phase after it.
 
-**Quality and hardening (continuous, not a phase)**
+4. [ ] macOS and Linux CI runners, not just Linux.
+5. [ ] Real cross-platform verification on macOS and Linux machines, not just
+   "code paths ready"; a provider that cannot read says why, plainly.
+6. [ ] Token-refresh and onboarding edge cases handled and tested (Antigravity,
+   Grok): expiry, multi-account, and signed-out states.
+7. [ ] Cursor a first-class read (it keeps rich local state), and each provider's
+   plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok Heavy), so the
+   value of the higher tier is visible.
 
-Getting to "exceptional" is a cadence, repeated until it stops finding anything:
+### Phase 3 - Deterministic testability, then hard testing
 
-- **Repeated adversarial bug-hunt rounds.** Multi-agent sweeps over the whole
-  codebase, each finding fixed and pinned with a regression test, run again until
-  a round comes back empty.
-- **Recurring security reviews**, not a one-time pass: token handling, host/SSRF
-  validation for local runtimes, injection via provider data, and the install
-  supply chain. Each pass fixes what it finds.
-- **Validation beyond unit tests:** integration tests against recorded provider
-  fixtures, a per-provider `doctor` smoke check, property/fuzz tests on the
-  parsers (they ingest untrusted external JSON and protobuf), and real
-  cross-platform CI (macOS and Linux runners, not just Linux).
+8. [ ] A simulation mode (`--mock-provider claude --state exhausted`) for
+   deterministic core tests - built first here, since the tests below lean on it.
+9. [ ] Property/fuzz tests on the untrusted parsers (they ingest external JSON and
+   protobuf), plus integration tests against recorded provider fixtures.
+10. [ ] LiteLLM plugin covered by real-proxy integration tests.
+11. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
+    catalog against each provider's own model list (capabilities stay curated,
+    since `/v1/models` endpoints do not expose context/tools/tier).
 
-**Reliability (SEE is flawless)**
+### Phase 4 - MCP reference depth
 
-- Every claimed provider reads correctly on Windows, macOS, and Linux, verified
-  on real machines, not just "code paths ready".
-- No silent failures: a provider that cannot read says why, plainly.
-- Token-refresh and onboarding edge cases are handled and tested (Antigravity,
-  Grok), including expiry, multi-account, and signed-out states.
-- Depth on providers we already claim: make Cursor a first-class read (it keeps
-  rich local state), and surface each provider's plan tier so the difference is
-  visible (e.g. Grok Free vs SuperGrok vs SuperGrok Heavy), since people pay for
-  the higher tier and want to see what it buys.
+Make quotabot the de-facto quota/routing MCP server, on the one routing contract
+shared by the CLI, MCP, and the LiteLLM plugin.
 
-**Routing and MCP you can trust (ROUTE earns trust)**
+12. [ ] Streamable HTTP transport alongside stdio, tested, with capability scoping
+    and complete tool-discovery metadata.
+13. [ ] Client snippets (Python/TS) so the contract is trivial to adopt.
 
-- `suggest` explains itself ("picked X: 91% free, resets soonest").
-- Provenance on every payload (`as_of`, staleness/confidence) so a stale route is
-  never trusted blindly. (Shipped: burn standard error, risk-adjusted headroom,
-  strand probability, and confidence, with a `--risk` opt-in.)
-- Forward-looking prediction surfaced plainly: "at this burn, Grok Heavy exhausts
-  in ~47 min - throttle to local?" from the runway and strand math, in `top`, the
-  widget, and the alerts.
-- Fail-soft verified end to end; callers always have a safe default.
-- **MCP depth:** complete tool-discovery metadata, capability scoping, a tested
-  Streamable HTTP transport alongside stdio, and client snippets (Python/TS), so
-  quotabot is the de-facto quota/routing MCP reference. One routing contract,
-  shared by the CLI, MCP, and the LiteLLM plugin, with the plugin covered by
-  real-proxy integration tests.
+### Phase 5 - Freeze and ship
 
-**A model registry (what can I run, right now?)**
+Last, once every schema-touching feature above has landed, so the contract frozen
+here is the final one.
 
-The flagship that turns quotabot from a quota monitor into a routing primitive any
-agentic app can build on. Today it reports quota per provider; the next layer is a
-normalized list of the **models** available to you right now, across every
-provider and local runtime, each tagged with:
+14. [ ] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
+    required-fixture registry, with an "add a provider in 10 minutes" checklist in
+    CONTRIBUTING.
+15. [ ] A recurring security pass and an adversarial bug-hunt round that returns
+    empty (see continuous hardening below).
+16. [ ] An animated GIF in the README (the widget collapsing and expanding, `top`
+    live, the 90-day analytics view), generated from demo mode so it stays
+    reproducible, plus verified macOS and Linux packaging.
+17. [ ] Final cut: every box above checked, suite green on Windows, macOS, and
+    Linux.
 
-- its provider and account, and the quota window that gates it;
-- current headroom and reset (so an agent sees budget per model, not per provider);
-- capability hints where known: context length, tool use, vision, reasoning tier.
+### Continuous hardening (runs throughout, not a phase)
 
-Sourced from each provider's own model list (Antigravity `fetchAvailableModels`,
-Ollama `/api/tags`, LM Studio / Lemonade `/v1/models`, and the lists the CLIs
-expose), surfaced as `quotabot models` (CLI), a `list_models` MCP tool, and a
-field in the `quotabot.v1` snapshot. With it, `suggest` recommends a concrete
-*model*, not just a provider, and any app can use quotabot as its auto-router:
-"give me a long-context coding model that still has budget; fall back to local."
-This is the CLI/MCP primitive the whole project is in service of, and it must be
-rock-solid: stable schema, fail-soft, fast, zero-token.
+Getting to "exceptional" is a cadence, repeated until it stops finding anything,
+in parallel with the phases above rather than after them:
 
-**An exceptional CLI (the htop view)**
+- **Repeated adversarial bug-hunt rounds:** multi-agent sweeps over the whole
+  codebase, each finding fixed and pinned with a regression test, run again until a
+  round comes back empty.
+- **Recurring security reviews:** token handling, host/SSRF validation for local
+  runtimes, injection via provider data, and the install supply chain. Each pass
+  fixes what it finds.
 
-The CLI is the primitive everything else builds on, and it should feel like htop
-for your quota plans: open it and the whole fleet is just there, live.
-
-- A `quotabot top` (watch) mode: a refreshing terminal dashboard of every
-  provider's windows and your local runtimes, redrawing in place, honoring
-  NO_COLOR and degrading to plain text when piped or dumb-terminal. (Shipped.)
-- Interactive `top`: sort (by headroom, burn, or reset), filter/hide providers,
-  keyboard navigation, and a one-key "suggest and copy the route command", so the
-  terminal view is as capable as the widget.
-- Considered visuals: truecolor gradient meters, small burn sparklines, clean
-  panels, and a pool gauge, degrading cleanly to 256/16/no color and narrow or
-  piped terminals. Pleasant to leave open, not just functional.
-- Every command fast, scriptable, and `--json`-complete, with documented, stable
-  exit codes so a shell or agent can branch on them.
-- Identical behavior across Windows, macOS, and Linux terminals.
-
-**Local runtimes, first-class**
-
-- Deeper Ollama / LM Studio / Lemonade reads: load-state, VRAM, context length,
-  and tokens/sec where the API exposes them, with graceful degradation when it
-  does not.
-- A clean onboarding path for any OpenAI-compatible server, so a new local runtime
-  is a few lines, not a fork.
-
-**A widget that disappears when you want it to**
-
-- Tray-first quiet mode: tray icon, optional global hotkey, native low-quota
-  toasts, with the current frameless card as the expanded view.
-- Plain-language low warnings ("about an hour of usage left") alongside the bars.
-- Proactive routing alerts: when a window crosses amber/red, say where to route
-  next ("Claude 5h at 8% - send the next calls to Grok"), with an optional local
-  webhook so the same signal can reach a tray toast, a shell, or chat.
-- No layout jank; fast refresh. (Light/dark and text size are already in.)
-
-**A stable contract**
-
-- Freeze the `quotabot.v1` JSON schema, the surface agents depend on.
-- A small adapter interface plus a required fixture per adapter (a compile-time
-  registry), so the provider set stays correct and is easy to keep correct, with
-  an "add a provider in 10 minutes" checklist in CONTRIBUTING.
-- A simulation mode (`--mock-provider claude --state exhausted`) for deterministic
-  testing of the core.
-
-**Shipping**
-
-- A working release and install pipeline (the one-line install actually installs)
-  and verified macOS and Linux packaging.
-- An animated GIF in the README (the widget collapsing and expanding, `quotabot
-  top` live, the 90-day analytics view) alongside the static screenshots,
-  generated from demo mode so it stays reproducible.
+Self-tuning - using the calibration loop to fit the routing parameters on local
+history - and the deeper statistical layers are quality multipliers: valued and
+pursued continuously, but not 1.0 gates.
 
 ## After 1.0
 
@@ -235,13 +167,14 @@ Breadth and depth, once the core is trusted:
 - **More quota-window providers:** Z.ai (GLM), Kimi, Amp, OpenCode, DeepSeek,
   Perplexity. Spend-based aggregators (OpenRouter, Together, Fireworks) only as a
   secondary cost view, since they are dollars, not rolling-window quota.
-- **Capability-aware routing:** `suggest --min-context`, `--require-tools`,
-  `--require-reasoning`, `--budget`, `--exclude`, an optional tier floor/ceiling,
-  and an aggressive local-first mode that escalates to a paid plan only when the
-  task needs it or a window is about to reset. Task complexity is a coarse,
-  caller-supplied profile (quotabot never reads the task); models are filtered by
-  objective capability and the provider's own tier, never a quotabot quality
-  ranking, and the cheapest qualifying model with budget wins.
+- **Capability-aware routing, deeper.** The foundation shipped (`--task`,
+  `--min-context`, `--require-tools`/`--require-vision`/`--require-reasoning`, tier
+  floor/ceiling, cheapest-qualifying-with-budget-wins, local-first, and the
+  invariant that quotabot never reads the task). What remains post-1.0 is the rest
+  of the knobs (`--budget`, `--exclude`) and a cohesive aggressive local-first mode
+  that escalates to a paid plan only when the requirements force it or a window is
+  about to reset. Models stay filtered by objective capability and the provider's
+  own tier, never a quotabot quality ranking.
 - **Concurrency leases** (`reserve` / `release`) so parallel agents do not dogpile
   the same pick.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
@@ -254,9 +187,8 @@ Breadth and depth, once the core is trusted:
   streaks and summary stats, plan-tier modeling, and provider status polling.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
 - **Shareable reports:** a "weekly quota health" markdown export worth posting.
-- **Themes:** selectable color themes for the widget and `top`, including a
-  high-contrast "hacker" mode, all still honoring NO_COLOR and light/dark.
-- **MCP streamable HTTP transport** and client snippets.
+- **Themes for the widget:** selectable color themes (the `top` palettes already
+  shipped), including a high-contrast "hacker" mode, still honoring light/dark.
 - **Ecosystem and packaging:** a plugin model, OS package managers (winget/MSIX,
   Homebrew, AppImage/flatpak), a docs site, and a reusable passive-reader adapter
   taxonomy to widen coverage cheaply.
