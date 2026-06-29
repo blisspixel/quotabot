@@ -5,6 +5,18 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- New `quotabot watch` command: polls quota on the adaptive cadence and raises a
+  low-quota alert the first time a provider's binding window crosses into red
+  (spent or nearly so), naming where to route next ("Claude 5h at 8% free -
+  route next to Grok (74% free)"). `--webhook URL` POSTs each alert as
+  `quotabot.alert.v1` JSON so the signal can reach a tray toast, a shell, or
+  chat; the host must be loopback unless `--allow-external`, so a stray or stale
+  URL cannot send even quota metadata off the machine. `--json` emits alerts as
+  JSON lines, `--once` runs a single pass (cron-friendly), and `--interval=N`
+  pins the poll rate. The decision is a pure, edge-triggered function
+  (`computeAlerts`) that fires once per crossing and re-arms only after recovery,
+  so a steady spent window never spams; payloads are quota metadata only, never
+  prompts, code, or content.
 - The desktop widget now shows the same forward-looking forecast as `quotabot
   top`, on each provider's binding window, in plain language at a glance: a
   runway estimate ("about an hour of usage left") when a window is visibly

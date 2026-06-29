@@ -7,10 +7,12 @@ import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
+import 'package:http/http.dart' as http;
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
+import 'package:quotabot_collector/webhook.dart';
 
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
 /// local metadata lookup, not a model call, so it costs no usage tokens.
@@ -108,6 +110,9 @@ Future<void> main(List<String> args) async {
       return;
     case 'top':
       await _runTop(flags);
+      return;
+    case 'watch':
+      await _runWatch(flags);
       return;
     case 'models':
       final results = await _read();
@@ -472,6 +477,10 @@ void _printHelp() {
     '  top                 live dashboard, redraws in place (q quit, r refresh, s sort)',
   );
   stdout.writeln(
+    '  watch               alert when a window goes red, naming where to route'
+    ' (--webhook URL, --json, --once)',
+  );
+  stdout.writeln(
     '  check <provider>    whether one provider is usable now, and its reset',
   );
   stdout.writeln(
@@ -549,6 +558,100 @@ void _printHelp() {
     style.dim(
         '  Agents: see AGENTS.md. MCP server: dart run bin/mcp_server.dart.'),
   );
+}
+
+/// `quotabot watch`: poll quota on the adaptive cadence and emit a low-quota
+/// alert the first time a provider's binding window crosses into red (spent or
+/// nearly so), naming where to route next. With --webhook each alert is POSTed
+/// as quotabot.alert.v1 JSON (loopback only unless --allow-external). --json
+/// prints alerts as JSON lines; --once runs a single pass (for cron or tests);
+/// --interval=N pins the poll rate, otherwise the adaptive cadence is used.
+Future<void> _runWatch(Set<String> flags) async {
+  final webhook = _stringOption(flags, 'webhook', null);
+  final allowExternal = flags.contains('--allow-external');
+  final wantsJson = flags.contains('--json');
+  final once = flags.contains('--once');
+  final fixedInterval = flags.any((f) => f.startsWith('--interval='))
+      ? _intOption(flags, 'interval', 60).clamp(2, 86400)
+      : null;
+
+  // Fail loudly on an external webhook host that was not explicitly allowed,
+  // rather than silently dropping every POST later.
+  if (webhook != null && !allowExternal && !isLoopbackUrl(webhook)) {
+    stderr.writeln('quotabot: webhook host is not loopback; pass '
+        '--allow-external to post to "$webhook"');
+    exitCode = 64;
+    return;
+  }
+
+  final client = http.Client();
+  var armed = <String>{};
+  var failStreak = 0;
+  var data = <ProviderQuota>[];
+
+  Future<void> pass() async {
+    data = await collectAll();
+    final now = nowEpoch();
+    final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
+    failStreak = anyLive ? 0 : failStreak + 1;
+    final suggestion = _suggestFor(data, now);
+    final result = computeAlerts(
+        snapshot: data, suggestion: suggestion, now: now, armed: armed);
+    armed = result.armed;
+    for (final a in result.fired) {
+      if (wantsJson) {
+        stdout.writeln(jsonEncode(a.toJson()));
+      } else {
+        final tag = a.severity == AlertSeverity.red
+            ? style.red('[red]')
+            : style.orange('[amber]');
+        stdout.writeln('$tag ${a.message}');
+      }
+      if (webhook != null) {
+        final r = await postAlert(webhook, a.toJson(),
+            allowExternal: allowExternal, client: client);
+        if (!r.ok) {
+          stderr.writeln('quotabot: webhook POST failed '
+              '(${r.error ?? 'HTTP ${r.statusCode}'})');
+        }
+      }
+    }
+  }
+
+  if (once) {
+    await pass();
+    client.close();
+    return;
+  }
+
+  if (!wantsJson) {
+    stderr.writeln('quotabot watch: alerting on red crossings'
+        '${webhook != null ? ' -> $webhook' : ''}. Ctrl-C to stop.');
+  }
+
+  final quit = Completer<void>();
+  final sigint = ProcessSignal.sigint.watch().listen((_) {
+    if (!quit.isCompleted) quit.complete();
+  });
+
+  Timer? timer;
+  late final Future<void> Function() loop;
+  loop = () async {
+    try {
+      await pass();
+    } catch (_) {
+      // Keep watching across a transient collection error.
+    }
+    final secs = fixedInterval ??
+        nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak);
+    timer = Timer(Duration(seconds: secs), loop);
+  };
+
+  await loop();
+  await quit.future;
+  timer?.cancel();
+  await sigint.cancel();
+  client.close();
 }
 
 Future<void> _runStats(List<String> rest, bool wantsJson) async {

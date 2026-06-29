@@ -18,6 +18,7 @@ import 'util.dart';
 
 export 'models.dart';
 export 'insights.dart';
+export 'alerts.dart';
 export 'calibration.dart';
 export 'model_catalog.dart';
 export 'palette.dart';
