@@ -45,6 +45,7 @@ docs/dev/
 
 # Agent loop-engineering workspace and runtime logs (local only)
 docs/.agent/
+.agent/
 logs/
 
 # Local env, credential, and database files
