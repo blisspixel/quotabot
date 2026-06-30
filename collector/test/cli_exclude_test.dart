@@ -74,6 +74,17 @@ void main() {
     expect((json['recommended'] as Map)['local'], isTrue);
   });
 
+  test('suggest can opt into expiring-quota model routing', () async {
+    final result = await runCli(['suggest', '--json', '--use-expiring-quota']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.suggest_model.v1');
+    expect(json['use_expiring_quota'], isTrue);
+    expect(json['expiring_quota_threshold_percent'], 35.0);
+    expect(json['recommended'], isA<Map>());
+  });
+
   test('suggest rejects malformed exclude providers', () async {
     final result = await runCli(['suggest', '--json', '--exclude=../bad']);
 

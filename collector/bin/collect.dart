@@ -144,8 +144,22 @@ Future<void> main(List<String> rawArgs) async {
           exitCode = _exitUsage;
           return;
         }
-        final s = suggestModel(results, now,
-            catalog: kModelCatalog, requirements: reqs.requirements);
+        final burnStats = _burnStatsFor(results, now);
+        final useExpiringQuota = flags.contains('--use-expiring-quota');
+        final s = suggestModel(
+          results,
+          now,
+          catalog: kModelCatalog,
+          requirements: reqs.requirements,
+          useExpiringQuota: useExpiringQuota,
+          expiringQuotaByProvider: useExpiringQuota
+              ? expiringQuotaSignals(
+                  results,
+                  now,
+                  burnStatsByProvider: burnStats,
+                )
+              : const <String, ExpiringQuotaSignal>{},
+        );
         wantsJson ? print(_jsonPretty(s.toJson(now))) : _printSuggestModel(s);
       } else {
         final riskZ =
@@ -227,14 +241,16 @@ RouteSuggestion _suggestFor(
     suggestRoute(
       results,
       now,
-      burnStatsByProvider: Platform.environment['QUOTABOT_DEMO'] == '1'
-          ? demo.demoBurnStats()
-          : _usingSimulation
-              ? const <String, BurnStat>{}
-              : recentBurnStatsByProvider(results.map((q) => q.provider), now),
+      burnStatsByProvider: _burnStatsFor(results, now),
       riskZ: riskZ,
       preferLocal: preferLocal,
     );
+
+Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
+  if (Platform.environment['QUOTABOT_DEMO'] == '1') return demo.demoBurnStats();
+  if (_usingSimulation) return const <String, BurnStat>{};
+  return recentBurnStatsByProvider(results.map((q) => q.provider), now);
+}
 
 List<HeadroomBucket> _historyBuckets(String provider) =>
     _usingSimulation ? const <HeadroomBucket>[] : loadBuckets(provider);
@@ -305,7 +321,12 @@ int? _parseContext(String? s) {
 /// True when the user passed any model-capability flag, so `suggest` should
 /// recommend a concrete model rather than a provider.
 bool _hasModelProfile(Set<String> flags) {
-  const bare = {'--require-tools', '--require-vision', '--require-reasoning'};
+  const bare = {
+    '--require-tools',
+    '--require-vision',
+    '--require-reasoning',
+    '--use-expiring-quota',
+  };
   if (flags.any(bare.contains)) return true;
   const prefixed = [
     '--task=',
@@ -948,6 +969,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --budget=POLICY     models/suggest: any|quota|local spend envelope',
+  );
+  stdout.writeln(
+    '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
   );
   stdout.writeln(
     '  --min-context=N --require-tools/vision/reasoning --tier-floor/ceiling=T'

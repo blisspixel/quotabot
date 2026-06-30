@@ -163,6 +163,7 @@ void main() {
       ProfileLoader profileLoader = _noProfile,
       CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
       RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
+      BurnProvider? burnProvider,
       bool enableSubscriptionTimers = false,
     }) async {
       final serverT = _PairedTransport();
@@ -182,7 +183,8 @@ void main() {
       subscriptions = registerQuotabotTools(
         server,
         snapshot: snapshotProvider ?? () async => snapshot,
-        burnByProvider: (providers, now) => const <String, BurnStat>{},
+        burnByProvider:
+            burnProvider ?? ((providers, now) => const <String, BurnStat>{}),
         cachedSnapshot: cachedSnapshot,
         leaseStore: leaseStore,
         enableSubscriptionTimers: enableSubscriptionTimers,
@@ -241,6 +243,13 @@ void main() {
           as Map)['properties'] as Map);
       expect(modelProperties.keys,
           containsAll(['size_bytes', 'vram_bytes', 'quant']));
+      final suggestModelProperties = byName['suggest_model']!
+          .outputSchema!
+          .toJson()['properties'] as Map<String, dynamic>;
+      expect(
+        suggestModelProperties.keys,
+        containsAll(['use_expiring_quota', 'expiring_quota']),
+      );
     });
 
     // A schema/payload mismatch makes the server (and the client) raise, so a
@@ -342,6 +351,51 @@ void main() {
 
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);
+    });
+
+    test('suggest_model can prefer expiring included quota when requested',
+        () async {
+      final snapshot = [
+        _q('claude', [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 10,
+            resetsAt: _now + 10 * 3600,
+          ),
+        ]),
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'ollama',
+          account: 'local',
+          asOf: _now,
+          kind: 'local',
+          models: const [ModelInfo(id: 'qwen', local: true)],
+        ),
+      ];
+      await connect(
+        snapshot,
+        burnProvider: (providers, now) => const {
+          'claude': BurnStat(perHour: 2, samples: 8),
+        },
+      );
+
+      final pick = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_model',
+          arguments: {'use_expiring_quota': true},
+        ),
+      );
+
+      expect(pick.structuredContent?['use_expiring_quota'], isTrue);
+      expect(
+        (pick.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+      expect(
+        pick.structuredContent?['expiring_quota']['projected_waste_percent'],
+        70.0,
+      );
+      expect(pick.structuredContent?['expiring_quota']['account'], 'a');
     });
 
     test('profile arguments filter tools without changing default calls',

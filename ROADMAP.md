@@ -151,8 +151,7 @@ it stands up serve every phase after it.
    tested and suppresses stale account snapshots once the provider's current
    local account index no longer contains that account. No additional pre-1.0
    provider exposes a reliable inactive-account index here; full named profiles
-   remain item 8. (Copilot's per-account read lands post-1.0 with the provider
-   itself.)
+   remain item 8.
 7. [x] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to
@@ -325,12 +324,13 @@ Breadth and depth, once the core is trusted:
   the priority, since it sells Claude-Max-style rolling request windows that map
   straight onto the SEE model - Z.ai (GLM), MiniMax, Kimi, and Qwen all meter
   prompts per 5h / week / month with real resets. Then Amp, OpenCode, DeepSeek,
-  Perplexity, and GitHub Copilot (see Not doing below; its premium-request
-  allowance has become a per-user monthly window with a usage API, so it earns a
-  second look). Spend-based aggregators (OpenRouter, Together, Fireworks), the
-  credit-metered app builders (Replit, v0, Lovable, Bolt), and credit-pool tools
-  like Warp and JetBrains AI only ever as a secondary cost view, since they meter
-  dollars or credits, not a rolling-window quota. Amazon Q is deliberately
+  and Perplexity. GitHub Copilot moved most plans to AI Credits in June 2026,
+  with legacy premium requests only for some annual Pro and Pro+ subscribers, so
+  it is no longer in the primary quota-window tranche. Spend-based aggregators
+  (OpenRouter, Together, Fireworks), the credit-metered app builders (Replit,
+  v0, Lovable, Bolt), Copilot AI Credits, and credit-pool tools like Warp and
+  JetBrains AI only ever as a secondary cost view, since they meter dollars or
+  credits, not a rolling-window quota. Amazon Q is deliberately
   skipped: AWS is sunsetting it in favor of Kiro, which quotabot already reads, so
   the AWS path is to deepen Kiro rather than chase a retiring product.
 - **User-defined manual quota entries:** an optional way to add a tool quotabot
@@ -363,7 +363,10 @@ Breadth and depth, once the core is trusted:
   skipped by default. Model routing now has a `budget` envelope too:
   `--budget=local` is a hard local-only cap, while `--budget=quota` allows local
   runtimes plus measured built-in quota plans and rejects self-reported manual
-  quotas.
+  quotas. Profiled `suggest --use-expiring-quota` and MCP `suggest_model` with
+  `use_expiring_quota: true` now cover the use-it-or-lose-it branch: a measured
+  quota-backed model can outrank local only when local burn analytics project at
+  least 35 percent of included quota would expire unused within 24 hours.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation
@@ -427,15 +430,11 @@ Deliberately out of scope. Listed so the boundary is explicit.
   app to chase packaging debt that is real but overstated.
 - **Runtime plugin discovery from pub.dev.** Not feasible in an AOT-compiled
   Flutter app; a compile-time adapter registry is the workable form.
-- **GitHub Copilot - reclassified as a post-1.0 candidate (see After 1.0), no
-  longer a flat exclusion.** The original objection was that premium requests
-  were server-side only with the token in the OS keyring, not a file. As of 2026
-  the premium-request allowance is a clean monthly window (counters reset on the
-  1st, UTC) and GitHub exposes a per-user usage API. It still is not a silent
-  local read: it needs an opt-in personal access token (the same one-time-login
-  pattern as Grok and Antigravity), and seats managed by an org or enterprise do
-  not appear on the user endpoint. Worth doing post-1.0 for individual plans,
-  with those limits stated plainly.
+- **GitHub Copilot as a primary quota provider.** Rechecked on June 30, 2026:
+  Copilot usage is now governed by AI Credits for most plans, while premium
+  requests remain only for legacy annual Pro and Pro+ subscribers. That makes it
+  a secondary cost/credit view at most, not a clean rolling-window quota source
+  for quotabot's primary routing surface.
 - **Token/dollar cost ledgers as the primary view.** quotabot tracks rolling
   windows, not spend accounting; a cost dimension stays optional and secondary.
 - **Pay-as-you-go API vendors** (as quota providers). That is cost, not a

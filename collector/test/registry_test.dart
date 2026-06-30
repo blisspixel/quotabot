@@ -9,15 +9,23 @@ ProviderQuota _cloud(
   double usedPercent, {
   bool stale = false,
   String? source,
+  int? resetsAt,
+  String account = 'a',
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id,
-      account: 'a',
+      account: account,
       asOf: _now,
       stale: stale,
       source: source,
-      windows: [QuotaWindow(label: 'weekly', usedPercent: usedPercent)],
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: usedPercent,
+          resetsAt: resetsAt,
+        ),
+      ],
     );
 
 ProviderQuota _local(String id, List<ModelInfo> models) => ProviderQuota(
@@ -327,6 +335,111 @@ void main() {
         ),
       );
       expect(s.toJson(_now)['budget_policy'], 'local');
+    });
+
+    test('expiring included quota can beat local when explicitly requested',
+        () {
+      final reset = _now + 10 * 3600;
+      final cloud = _cloud('claude', 10, resetsAt: reset);
+      final local =
+          _local('ollama', const [ModelInfo(id: 'qwen', local: true)]);
+      final signals = expiringQuotaSignals(
+        [cloud, local],
+        _now,
+        burnStatsByProvider: const {
+          'claude': BurnStat(perHour: 2, samples: 6),
+        },
+      );
+
+      final s = suggestModel(
+        [cloud, local],
+        _now,
+        catalog: catalog,
+        useExpiringQuota: true,
+        expiringQuotaByProvider: signals,
+      );
+      final json = s.toJson(_now);
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.recommended?.local, isFalse);
+      expect(s.reason, contains('expire 70% unused'));
+      expect(json['use_expiring_quota'], isTrue);
+      expect(json['expiring_quota']['provider'], 'claude');
+      expect(json['expiring_quota']['account'], 'a');
+      expect(json['expiring_quota']['projected_waste_percent'], 70.0);
+    });
+
+    test('expiring quota policy still honors a hard local budget', () {
+      final reset = _now + 10 * 3600;
+      final cloud = _cloud('claude', 10, resetsAt: reset);
+      final local =
+          _local('ollama', const [ModelInfo(id: 'qwen', local: true)]);
+      final signals = expiringQuotaSignals(
+        [cloud, local],
+        _now,
+        burnStatsByProvider: const {
+          'claude': BurnStat(perHour: 2, samples: 6),
+        },
+      );
+
+      final s = suggestModel(
+        [cloud, local],
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.local,
+        ),
+        useExpiringQuota: true,
+        expiringQuotaByProvider: signals,
+      );
+
+      expect(s.recommended?.local, isTrue);
+      expect(s.expiringQuotaUsed, isNull);
+    });
+  });
+
+  group('expiringQuotaSignals', () {
+    test('requires measured available quota near reset with projected waste',
+        () {
+      final reset = _now + 10 * 3600;
+      final signals = expiringQuotaSignals(
+        [
+          _cloud('claude', 10, resetsAt: reset),
+          _cloud('manual', 10, source: 'manual', resetsAt: reset),
+          _cloud('stale', 10, stale: true, resetsAt: reset),
+          _cloud('later', 10, resetsAt: _now + 48 * 3600),
+          _local('ollama', const [ModelInfo(id: 'qwen', local: true)]),
+        ],
+        _now,
+        burnStatsByProvider: const {
+          'claude': BurnStat(perHour: 2, samples: 6),
+          'manual': BurnStat(perHour: 2, samples: 6),
+          'stale': BurnStat(perHour: 2, samples: 6),
+          'later': BurnStat(perHour: 2, samples: 6),
+        },
+      );
+
+      expect(signals.values.map((signal) => signal.provider).toList(), [
+        'claude',
+      ]);
+      expect(signals.values.single.wastedAtReset, closeTo(70, 0.001));
+    });
+
+    test('skips multi-account providers while burn stats are provider-scoped',
+        () {
+      final reset = _now + 10 * 3600;
+      final signals = expiringQuotaSignals(
+        [
+          _cloud('claude', 10, resetsAt: reset, account: 'a'),
+          _cloud('claude', 10, resetsAt: reset, account: 'b'),
+        ],
+        _now,
+        burnStatsByProvider: const {
+          'claude': BurnStat(perHour: 2, samples: 6),
+        },
+      );
+
+      expect(signals, isEmpty);
     });
   });
 

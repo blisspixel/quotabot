@@ -57,7 +57,10 @@ Pick whichever transport you already speak. All return the same data.
     Local-runtime model entries include `local_readiness` (`loaded` or `cold`);
     prefer loaded local models when equivalent candidates are available.
   - `suggest_model` - one concrete model for a task profile (same filter as
-    `list_models`): the cheapest model that meets it and has budget, local-first.
+    `list_models`): the cheapest model that meets it and has budget,
+    local-first. Pass `use_expiring_quota: true` to let a measured quota-backed
+    model beat local only when local analytics project meaningful included quota
+    would otherwise expire unused soon.
   - Resource `quotas://current` - the same unfiltered live snapshot.
   - Resource `quotas://alerts` - the last MCP quota alerts fired by the
     subscription loop.
@@ -74,7 +77,9 @@ Pick whichever transport you already speak. All return the same data.
   `quotabot stats --json` for analytics. Add `--local-first` to `suggest` when
   you prefer local capacity before spending subscription quota, and
   `--budget=local` or `--budget=quota` to `models`/profiled `suggest` calls
-  when the model choice must stay inside a no-surprise spend envelope.
+  when the model choice must stay inside a no-surprise spend envelope. Add
+  `--use-expiring-quota` to a profiled `suggest` call only when you want
+  soon-resetting included quota to outrank local capacity.
 - **Push alerts.** `quotabot watch --json` streams a `quotabot.alert.v1` line
   the moment a provider's binding window goes red, naming where to route next, so
   a long-running agent can react to a crossing instead of polling. Add

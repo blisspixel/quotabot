@@ -576,6 +576,10 @@ final _modelFilterInputSchema = JsonSchema.object(
       description:
           'Budget envelope: any, quota, or local. quota allows measured built-in quota plans plus local runtimes, but not self-reported manual quota.',
     ),
+    'use_expiring_quota': JsonSchema.boolean(
+      description:
+          'Prefer a qualifying measured quota plan when local burn analytics project that included quota would expire unused soon.',
+    ),
     'exclude': JsonSchema.array(
       items: JsonSchema.string(),
       description:
@@ -631,6 +635,19 @@ final suggestModelOutputSchema = JsonSchema.object(
     'budget_policy': JsonSchema.string(),
     'recommended': _nullable(_modelEntrySchema),
     'reason': JsonSchema.string(),
+    'use_expiring_quota': JsonSchema.boolean(),
+    'expiring_quota_threshold_percent': JsonSchema.number(),
+    'expiring_quota_max_hours': JsonSchema.integer(),
+    'expiring_quota': JsonSchema.object(
+      properties: {
+        'provider': JsonSchema.string(),
+        'account': JsonSchema.string(),
+        'projected_waste_percent': JsonSchema.number(),
+        'resets_at': JsonSchema.integer(),
+        'burn_percent_per_hour': JsonSchema.number(),
+      },
+      required: ['provider', 'account', 'projected_waste_percent', 'resets_at'],
+    ),
     'ranked': JsonSchema.array(items: _modelEntrySchema),
   },
   required: ['schema', 'reason', 'ranked'],
@@ -1482,7 +1499,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'heavier or paid tier only when the requirements force it. Takes the same '
         'filter as list_models, including budget=local or budget=quota. quotabot '
         'never reads the task; the caller supplies the profile, and tiers are the '
-        'providers own, not a quality ranking.',
+        'providers own, not a quality ranking. Pass use_expiring_quota=true to '
+        'let soon-resetting measured included quota outrank local capacity when '
+        'projected waste is high.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: suggestModelOutputSchema,
     annotations: _readOnly,
@@ -1498,11 +1517,27 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           ),
         );
       }
+      final burnStats = burnByProvider(
+        profiled.providers.map((q) => q.provider),
+        n,
+      );
+      final useExpiringQuota = args['use_expiring_quota'] == true;
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
-          suggestModel(profiled.providers, n,
-                  catalog: catalog, requirements: requirements.requirements)
-              .toJson(n),
+          suggestModel(
+            profiled.providers,
+            n,
+            catalog: catalog,
+            requirements: requirements.requirements,
+            useExpiringQuota: useExpiringQuota,
+            expiringQuotaByProvider: useExpiringQuota
+                ? expiringQuotaSignals(
+                    profiled.providers,
+                    n,
+                    burnStatsByProvider: burnStats,
+                  )
+                : const <String, ExpiringQuotaSignal>{},
+          ).toJson(n),
           profiled,
         ),
       );

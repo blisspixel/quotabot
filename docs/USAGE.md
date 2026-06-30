@@ -253,6 +253,14 @@ Add `--budget=local` for a hard cap to free local-runtime models, or
 excluding self-reported manual quotas. `quota` is not permission to use
 request-metered paid APIs; those remain blocked by the LiteLLM guardrails unless
 explicitly enabled in that integration.
+For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
+want soon-resetting included quota to beat a local model. The signal is bounded:
+it uses only local burn analytics, only measured quota-backed providers, and only
+when at least 35 percent of included quota is projected to expire unused within
+24 hours. Providers with multiple measured accounts are skipped until burn
+history is account-scoped, so one account's reset is not inferred from another
+account's usage. MCP `suggest_model` exposes the same policy as
+`use_expiring_quota: true`.
 
 For a one-off routing decision, add `--exclude=codex,grok` to `models` or
 `suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and
@@ -309,8 +317,10 @@ The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
 `--min-context`/`--budget` filters) returns the cheapest model that meets the need
-and has budget, local-first. The MCP `suggest_model` tool does the same for
-agents.
+and has budget, local-first. With `--use-expiring-quota`, a qualifying measured
+quota-backed model may outrank local when the reset is soon and the included
+quota would otherwise expire unused. The MCP `suggest_model` tool does the same
+for agents.
 
 ## Routing over MCP
 
@@ -334,7 +344,8 @@ and exposes nine tools plus two resources:
 - `list_models` - every model you can route to now (cloud + local), each with its
   gating provider's live budget and capability hints.
 - `suggest_model` - one concrete model that meets the supplied capability filter
-  and has budget.
+  and has budget. Add `use_expiring_quota: true` to let soon-resetting included
+  quota outrank local capacity when projected waste is high.
 - Resource `quotas://current` - the same unfiltered live snapshot.
 - Resource `quotas://alerts` - the last MCP quota alerts fired by the
   subscription loop.

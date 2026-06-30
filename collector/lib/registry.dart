@@ -10,9 +10,14 @@
 library;
 
 import 'analysis.dart';
+import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'util.dart';
+
+/// Conservative defaults for opt-in use-it-or-lose-it model routing.
+const double kDefaultExpiringQuotaWasteThreshold = 35.0;
+const int kDefaultExpiringQuotaMaxHours = 24;
 
 /// One routable model plus the live budget of the provider that gates it.
 class ModelEntry {
@@ -98,6 +103,87 @@ enum ModelBudgetPolicy {
 
   final String wireName;
   const ModelBudgetPolicy(this.wireName);
+}
+
+/// Evidence that a measured quota-backed provider is likely to leave included
+/// quota unused at its imminent reset. This never applies to local runtimes,
+/// manual quota entries, or request-metered paid APIs.
+class ExpiringQuotaSignal {
+  final String provider;
+  final String account;
+  final double wastedAtReset;
+  final int resetsAt;
+  final double burnPerHour;
+
+  const ExpiringQuotaSignal({
+    required this.provider,
+    required this.account,
+    required this.wastedAtReset,
+    required this.resetsAt,
+    required this.burnPerHour,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'provider': provider,
+        'account': account,
+        'projected_waste_percent':
+            double.parse(wastedAtReset.toStringAsFixed(1)),
+        'resets_at': resetsAt,
+        'burn_percent_per_hour': double.parse(burnPerHour.toStringAsFixed(2)),
+      };
+}
+
+/// Computes opt-in expiring-quota signals from the live snapshot and already
+/// local burn statistics. A signal means the provider is measured, quota-backed,
+/// available now, close to reset, and on pace to leave at least [thresholdPercent]
+/// of included quota unused. Because burn history is provider-scoped today, a
+/// provider with multiple measured accounts is skipped until account-scoped burn
+/// data exists. Pure, so CLI/MCP callers share the same boundary.
+Map<String, ExpiringQuotaSignal> expiringQuotaSignals(
+  List<ProviderQuota> providers,
+  int now, {
+  Map<String, BurnStat> burnStatsByProvider = const {},
+  double thresholdPercent = kDefaultExpiringQuotaWasteThreshold,
+  int maxHoursToReset = kDefaultExpiringQuotaMaxHours,
+}) {
+  final threshold = thresholdPercent.clamp(0.0, 100.0).toDouble();
+  final maxSeconds = maxHoursToReset.clamp(0, 24 * 14).toInt() * 3600;
+  final measuredProviderCounts = <String, int>{};
+  for (final q in providers) {
+    if (q.isLocal || q.source == 'manual' || q.windows.isEmpty) continue;
+    measuredProviderCounts[q.provider] =
+        (measuredProviderCounts[q.provider] ?? 0) + 1;
+  }
+  final out = <String, ExpiringQuotaSignal>{};
+  for (final q in providers) {
+    if (q.isLocal || q.source == 'manual' || q.stale || q.windows.isEmpty) {
+      continue;
+    }
+    if ((measuredProviderCounts[q.provider] ?? 0) != 1) continue;
+    final availability = providerAvailability(q, now);
+    final headroom = availability.headroom;
+    final reset = availability.resetsAt;
+    if (!availability.available || headroom == null || reset == null) continue;
+    final secondsToReset = reset - now;
+    if (secondsToReset <= 0 || secondsToReset > maxSeconds) continue;
+    final burn = burnStatsByProvider[q.provider]?.perHour;
+    final pace = computePace(
+      headroom: headroom,
+      resetsAt: reset,
+      burnPerHour: burn,
+      now: now,
+    );
+    final waste = pace?.wastedAtReset;
+    if (waste == null || waste < threshold) continue;
+    out[_quotaSignalKey(q.provider, q.account)] = ExpiringQuotaSignal(
+      provider: q.provider,
+      account: q.account,
+      wastedAtReset: waste,
+      resetsAt: reset,
+      burnPerHour: pace!.burnPerHour,
+    );
+  }
+  return out;
 }
 
 const String modelBudgetPolicyChoices = 'any, quota, local';
@@ -282,12 +368,40 @@ Map<String, dynamic> modelRegistryJson(
           .toList(),
     };
 
-/// Recommendation order for picking one model: usable now first, then local (free)
-/// before cloud, then the lightest provider tier (cheapest-capable), then the most
-/// remaining headroom. This is the "cheapest model that meets the need with budget,
-/// escalating only when forced" policy from the routing-by-complexity design.
-int _recommendCompare(ModelEntry a, ModelEntry b) {
+ExpiringQuotaSignal? _entryExpiringSignal(
+  ModelEntry e,
+  Map<String, ExpiringQuotaSignal> signals,
+) =>
+    !e.local && e.quotaBacked && e.available
+        ? signals[_quotaSignalKey(e.provider, e.account)]
+        : null;
+
+String _quotaSignalKey(String provider, String account) =>
+    '$provider\u0000$account';
+
+/// Recommendation order for picking one model: usable now first, then optionally
+/// soon-expiring included quota, then local (free) before cloud, then the
+/// lightest provider tier (cheapest-capable), then the most remaining headroom.
+/// This is the "cheapest model that meets the need with budget, escalating only
+/// when forced or when included quota would expire unused" policy from the
+/// routing-by-complexity design.
+int _recommendCompare(
+  ModelEntry a,
+  ModelEntry b, {
+  Map<String, ExpiringQuotaSignal> expiringQuotaByProvider = const {},
+}) {
   if (a.available != b.available) return a.available ? -1 : 1;
+  if (expiringQuotaByProvider.isNotEmpty) {
+    final aw = _entryExpiringSignal(a, expiringQuotaByProvider);
+    final bw = _entryExpiringSignal(b, expiringQuotaByProvider);
+    if ((aw != null) != (bw != null)) return aw != null ? -1 : 1;
+    if (aw != null && bw != null) {
+      final tier = _tierRank(a.model.tier).compareTo(_tierRank(b.model.tier));
+      if (tier != 0) return tier;
+      final waste = bw.wastedAtReset.compareTo(aw.wastedAtReset);
+      if (waste != 0) return waste;
+    }
+  }
   if (a.local != b.local) return a.local ? -1 : 1;
   if (a.local && b.local && a.model.loaded != b.model.loaded) {
     return a.model.loaded ? -1 : 1;
@@ -299,7 +413,10 @@ int _recommendCompare(ModelEntry a, ModelEntry b) {
   return hb.compareTo(ha);
 }
 
-String _recommendReason(ModelEntry e) {
+String _recommendReason(
+  ModelEntry e, {
+  ExpiringQuotaSignal? expiringQuota,
+}) {
   if (e.local) {
     final readiness = e.model.loaded
         ? 'loaded and ready now'
@@ -311,6 +428,11 @@ String _recommendReason(ModelEntry e) {
   }
   final h = e.headroomPercent?.round();
   final tier = e.model.tier ?? 'available';
+  if (expiringQuota != null) {
+    return '${e.model.id} on ${e.provider} uses included quota projected to '
+        'expire ${expiringQuota.wastedAtReset.round()}% unused at reset'
+        '${h == null ? '' : ' ($h% free)'}.';
+  }
   return '${e.model.id} on ${e.provider} - lightest $tier tier with budget'
       '${h == null ? '' : ' ($h% free)'}.';
 }
@@ -343,18 +465,42 @@ class ModelSuggestion {
   /// One-line human explanation.
   final String reason;
 
+  /// True when the recommendation was allowed to prefer soon-expiring included
+  /// quota over a local model.
+  final bool useExpiringQuota;
+
+  /// The waste floor used for opt-in expiring-quota preference.
+  final double expiringQuotaThresholdPercent;
+
+  /// The reset horizon used for opt-in expiring-quota preference.
+  final int expiringQuotaMaxHours;
+
+  /// Evidence used when the recommendation preferred expiring included quota.
+  final ExpiringQuotaSignal? expiringQuotaUsed;
+
   const ModelSuggestion(
     this.recommended,
     this.ranked,
     this.reason, {
     this.budgetPolicy = ModelBudgetPolicy.any,
+    this.useExpiringQuota = false,
+    this.expiringQuotaThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
+    this.expiringQuotaMaxHours = kDefaultExpiringQuotaMaxHours,
+    this.expiringQuotaUsed,
   });
 
   Map<String, dynamic> toJson(int now) => {
         'schema': 'quotabot.suggest_model.v1',
         'generated_at': now,
         'budget_policy': budgetPolicy.wireName,
+        if (useExpiringQuota) ...{
+          'use_expiring_quota': true,
+          'expiring_quota_threshold_percent': expiringQuotaThresholdPercent,
+          'expiring_quota_max_hours': expiringQuotaMaxHours,
+        },
         'recommended': recommended?.toJson(),
+        if (expiringQuotaUsed != null)
+          'expiring_quota': expiringQuotaUsed!.toJson(),
         'reason': reason,
         'ranked': ranked.map((e) => e.toJson()).toList(),
       };
@@ -368,10 +514,18 @@ ModelSuggestion suggestModel(
   int now, {
   Map<String, List<ModelInfo>> catalog = const {},
   ModelRequirements requirements = const ModelRequirements(),
+  bool useExpiringQuota = false,
+  Map<String, ExpiringQuotaSignal> expiringQuotaByProvider = const {},
+  double expiringQuotaThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
+  int expiringQuotaMaxHours = kDefaultExpiringQuotaMaxHours,
 }) {
   final ranked = buildModelRegistry(snapshot, now,
       catalog: catalog, requirements: requirements)
-    ..sort(_recommendCompare);
+    ..sort((a, b) => _recommendCompare(
+          a,
+          b,
+          expiringQuotaByProvider: expiringQuotaByProvider,
+        ));
   ModelEntry? pick;
   for (final e in ranked) {
     if (e.available) {
@@ -383,11 +537,23 @@ ModelSuggestion suggestModel(
       ? (ranked.isEmpty
           ? 'No model meets the requirements; relax them or connect a provider.'
           : 'Models match but none has budget right now; wait for a reset.')
-      : _recommendReason(pick);
+      : _recommendReason(
+          pick,
+          expiringQuota: _entryExpiringSignal(
+            pick,
+            expiringQuotaByProvider,
+          ),
+        );
   return ModelSuggestion(
     pick,
     ranked,
     reason,
     budgetPolicy: requirements.budgetPolicy,
+    useExpiringQuota: useExpiringQuota,
+    expiringQuotaThresholdPercent: expiringQuotaThresholdPercent,
+    expiringQuotaMaxHours: expiringQuotaMaxHours,
+    expiringQuotaUsed: pick == null
+        ? null
+        : _entryExpiringSignal(pick, expiringQuotaByProvider),
   );
 }

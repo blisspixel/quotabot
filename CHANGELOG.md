@@ -19,6 +19,10 @@ Notable changes to quotabot. Newest first.
   and `suggest_model`. `local` is a hard local-runtime cap; `quota` allows local
   runtimes plus measured built-in quota plans and excludes self-reported manual
   quotas so no-surprise routing stays explicit.
+- Profiled `quotabot suggest --use-expiring-quota` and MCP
+  `suggest_model` with `use_expiring_quota: true` can now let a qualifying
+  measured quota-backed model outrank local capacity when local analytics project
+  at least 35 percent of included quota would expire unused within 24 hours.
 - Model registry entries now expose local runtime readiness as `local_readiness`
   (`loaded` or `cold`), and concrete model suggestions prefer loaded local
   models over installed-but-cold local models when both meet the requested

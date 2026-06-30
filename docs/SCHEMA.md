@@ -70,7 +70,12 @@ distinguish ready-now models from installed models that may need a cold start.
 
 `quotabot suggest --json` with a model profile and MCP `suggest_model` emit
 `quotabot.suggest_model.v1` with `schema`, `generated_at`, `budget_policy`,
-optional `recommended`, `reason`, and ranked model candidates.
+optional `recommended`, `reason`, and ranked model candidates. When the caller
+opts into expiring-quota routing, the response adds `use_expiring_quota`,
+`expiring_quota_threshold_percent`, `expiring_quota_max_hours`, and, when the
+pick used that signal, `expiring_quota` with provider, account, projected waste
+percent, reset epoch, and burn percent per hour. The signal is omitted for
+multi-account providers while burn history is provider-scoped.
 
 `quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
 `recommended_provider`, `recommendation_reason`, `fallback_kind`, and

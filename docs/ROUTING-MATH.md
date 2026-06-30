@@ -401,7 +401,7 @@ the measurable improvement over the shipped heuristic.
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | next |
 | shrinkage | `insights.dart` (cross-provider pool) | next |
-| pacing controller | `computePace` -> routing weight | medium |
+| pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | post-1.0 |

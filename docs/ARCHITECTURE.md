@@ -238,6 +238,15 @@ local models ahead of cold installed models when both satisfy the same profile.
 Recommendations also echo available local memory/context evidence so callers can
 see why "free" is ready now versus merely installed without forcing a model
 call.
+Concrete-model suggestions can opt into `use_expiring_quota`, which computes a
+pure `ExpiringQuotaSignal` from existing headroom, reset, and local burn
+statistics. The signal is intentionally narrow: measured quota-backed providers
+only, no manual entries, no local runtimes, no paid API routes, reset within the
+bounded horizon, projected unused quota above the threshold, and exactly one
+measured account for that provider in the current snapshot. That last guard
+keeps provider-scoped burn history from being misread as account-scoped usage.
+When present it lets included quota that would otherwise expire unused outrank
+local capacity, but the hard `budget=local` filter still wins.
 `catalog_audit.dart` keeps the
 committed cloud catalog honest without adding runtime network calls: the standalone
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
