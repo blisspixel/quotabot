@@ -45,8 +45,9 @@ class QuotaProfile {
 
   bool allows(ProviderQuota quota) {
     final provider = normalizeProviderId(quota.provider) ?? quota.provider;
-    final hidden = _providerSet(hiddenProviders);
-    if (hidden.contains(provider)) return false;
+    if (hiddenTargetsQuota(hiddenProviders, quota)) {
+      return false;
+    }
     final allowedProviders = _providerSet(providers);
     if (allowedProviders.isNotEmpty && !allowedProviders.contains(provider)) {
       return false;
@@ -69,7 +70,7 @@ class QuotaProfile {
   Map<String, dynamic> toJson() {
     final normalizedProviders = _providerSet(providers);
     final normalizedAccounts = _accountMap(accounts);
-    final normalizedHidden = _providerSet(hiddenProviders);
+    final normalizedHidden = _hiddenSet(hiddenProviders);
     return {
       'schema': profileSchema,
       'name': normalizeProfileName(name) ?? name,
@@ -104,7 +105,7 @@ class QuotaProfile {
       name: name,
       providers: _providerSet(_stringSet(json['providers'])),
       accounts: accounts,
-      hiddenProviders: _providerSet(_stringSet(json['hidden'])),
+      hiddenProviders: _hiddenSet(_stringSet(json['hidden'])),
       routingPolicy: ProfileRoutingPolicy.parse(json['routing_policy']),
       theme: _nonEmptyString(json['theme']),
       sort: _nonEmptyString(json['sort']),
@@ -139,7 +140,7 @@ void saveProfile(QuotaProfile profile, {Directory? dir}) {
     name: normalized,
     providers: _providerSet(profile.providers),
     accounts: _accountMap(profile.accounts),
-    hiddenProviders: _providerSet(profile.hiddenProviders),
+    hiddenProviders: _hiddenSet(profile.hiddenProviders),
     routingPolicy: profile.routingPolicy,
     theme: profile.theme,
     sort: profile.sort,
@@ -217,6 +218,36 @@ const _maxProfileBytes = 256 * 1024;
 
 Set<String> _providerSet(Set<String> values) =>
     values.map(normalizeProviderId).nonNulls.toSet();
+
+String? normalizeHiddenTarget(String? value) {
+  final raw = value?.trim();
+  if (raw == null || raw.isEmpty || raw.length > 320) return null;
+  final provider = normalizeProviderId(raw);
+  if (provider != null) return provider;
+  final split = raw.indexOf('|');
+  if (split <= 0 || split == raw.length - 1) return null;
+  final keyProvider = normalizeProviderId(raw.substring(0, split));
+  final account = raw.substring(split + 1).trim();
+  if (keyProvider == null || account.isEmpty || account.length > 256) {
+    return null;
+  }
+  if (RegExp(r'[\x00-\x1f\x7f]').hasMatch(account)) return null;
+  return '$keyProvider|$account';
+}
+
+String quotaHiddenTarget(ProviderQuota quota) {
+  final provider = normalizeProviderId(quota.provider) ?? quota.provider;
+  return '$provider|${quota.account.trim()}';
+}
+
+bool hiddenTargetsQuota(Set<String> hiddenTargets, ProviderQuota quota) {
+  final provider = normalizeProviderId(quota.provider) ?? quota.provider;
+  final hidden = _hiddenSet(hiddenTargets);
+  return hidden.contains(provider) || hidden.contains(quotaHiddenTarget(quota));
+}
+
+Set<String> _hiddenSet(Set<String> values) =>
+    values.map(normalizeHiddenTarget).nonNulls.toSet();
 
 Map<String, Set<String>> _accountMap(Map<String, Set<String>> values) {
   final out = <String, Set<String>>{};

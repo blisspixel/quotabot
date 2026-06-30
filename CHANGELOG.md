@@ -4,7 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+- Grok usage now labels the shared paid-plan pool as a weekly window, matching
+  the current Grok Usage tab semantics where Imagine, Chat, and Build are
+  category breakdowns inside one shared allowance.
+- The desktop widget can now hide one account for a multi-account provider
+  without hiding every account for that provider.
+- Antigravity setup guidance no longer says persistent login requires custom
+  Google OAuth client environment variables.
 
 ## 0.5.1 - 2026-06-30
 

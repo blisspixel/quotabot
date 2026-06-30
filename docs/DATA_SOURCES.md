@@ -40,8 +40,10 @@ the adapters resolve the user home directory cross-platform.
 - Live usage: a gRPC-web POST to
   `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` with the
   bearer token and an empty request frame. The protobuf response carries the
-  credit usage percent for the billing cycle and the cycle reset timestamp,
-  parsed into a single monthly window. This is a billing metadata call, not a
+  credit usage percent for the shared paid-plan weekly pool and the pool reset
+  timestamp, parsed into a single weekly window. The usage page's Imagine, Chat,
+  and Build percentages are category breakdowns inside that shared pool, not
+  independent spendable buckets. This is a billing metadata call, not a
   model call, so it costs no tokens.
 - Multi-account: every account object in `auth.json` is read. quotabot tries the
   matching account-scoped grant before the provider-default grant (primary

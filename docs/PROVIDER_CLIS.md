@@ -52,8 +52,9 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
   Open-source coding CLI: https://github.com/superagent-ai/grok-cli
 - Check usage yourself: `/usage` in the Grok TUI tracks token and credit use.
   Headless mode is `grok -p "..."`; ACP mode is `grok agent stdio`.
-- Windows: monthly credit usage for the billing cycle (SuperGrok / Premium+
-  raise the limits).
+- Windows: paid-plan usage is a shared weekly usage pool. The Usage tab's
+  Imagine, Chat, and Build percentages are category breakdowns inside that
+  shared pool (SuperGrok / Premium+ raise the limits).
 - quotabot reads: the gRPC-web billing endpoint, reusing the token the Grok CLI
   stores. Live while that token is fresh; `quotabot login grok` keeps it live.
 

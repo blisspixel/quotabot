@@ -273,7 +273,7 @@ class _DashboardState extends State<Dashboard>
       applyProfile(_data, profileWithoutUiPrefs(_activeProfile));
 
   List<ProviderQuota> get _visible =>
-      _profiledData.where((q) => !_hidden.contains(q.provider)).toList();
+      _profiledData.where((q) => !hiddenTargetsQuota(_hidden, q)).toList();
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
@@ -322,8 +322,10 @@ class _DashboardState extends State<Dashboard>
   List<ProviderQuota> get _menuProviders {
     final seen = <String>{};
     final out = <ProviderQuota>[];
+    final counts = _providerCounts(_profiledData);
     for (final q in _profiledData) {
-      if (seen.add(q.provider)) out.add(q);
+      final target = quotaHideTarget(q, counts);
+      if (seen.add(target)) out.add(q);
     }
     return out;
   }
@@ -825,9 +827,31 @@ class _DashboardState extends State<Dashboard>
     _persistPrefs();
   }
 
-  void _toggleHidden(String provider) {
+  void _toggleHidden(String target) {
     setState(() {
-      if (!_hidden.remove(provider)) _hidden.add(provider);
+      if (!_hidden.remove(target)) _hidden.add(target);
+    });
+    _applySize();
+    _persistPrefs(saveProfileUiState: true);
+  }
+
+  void _toggleQuotaHidden(ProviderQuota quota) {
+    final counts = _providerCounts(_profiledData);
+    final target = quotaHideTarget(quota, counts);
+    setState(() {
+      if (_hidden.contains(quota.provider) && target != quota.provider) {
+        _hidden.remove(quota.provider);
+        for (final other in _profiledData.where(
+          (q) => q.provider == quota.provider && q != quota,
+        )) {
+          _hidden.add(quotaHideTarget(other, counts));
+        }
+        _hidden.remove(target);
+      } else if (hiddenTargetsQuota(_hidden, quota)) {
+        _hidden.remove(target);
+      } else {
+        _hidden.add(target);
+      }
     });
     _applySize();
     _persistPrefs(saveProfileUiState: true);
@@ -845,11 +869,18 @@ class _DashboardState extends State<Dashboard>
       ),
       items: [
         PopupMenuItem(value: 'setup', child: Text('Set up ${q.displayName}')),
-        PopupMenuItem(value: 'hide', child: Text('Hide ${q.displayName}')),
+        PopupMenuItem(
+          value: 'hide',
+          child: Text(
+            _shouldShowAccount(q, _providerCounts(_profiledData))
+                ? 'Hide ${q.displayName} (${q.account})'
+                : 'Hide ${q.displayName}',
+          ),
+        ),
       ],
     );
     if (choice == 'hide') {
-      _toggleHidden(q.provider);
+      _toggleQuotaHidden(q);
     } else if (choice == 'setup') {
       _showProviderSetup(q);
     }
@@ -896,9 +927,8 @@ class _DashboardState extends State<Dashboard>
             'code (works on Windows, macOS, and Linux).';
       case 'antigravity':
         return 'Antigravity shows live while the IDE token is fresh. To keep it '
-            'live without reopening the IDE, provide QUOTABOT_GOOGLE_CLIENT_ID '
-            'and QUOTABOT_GOOGLE_CLIENT_SECRET for your own Google OAuth client, '
-            'then connect via your browser.';
+            'live without reopening the IDE, connect quotabot once and sign in '
+            'with the account you want shown.';
       case 'kiro':
       case 'cursor':
       case 'windsurf':
@@ -1289,11 +1319,13 @@ class _DashboardState extends State<Dashboard>
         ),
         for (final q in _menuProviders)
           CheckedPopupMenuItem(
-            value: 'show:${q.provider}',
-            checked: !_hidden.contains(q.provider),
+            value: 'show:${quotaHideTarget(q, counts)}',
+            checked: !hiddenTargetsQuota(_hidden, q),
             child: Text(
               (counts[q.provider] ?? 0) > 1
-                  ? '${q.displayName} (${counts[q.provider]} accounts)'
+                  ? _shouldShowAccount(q, counts)
+                        ? '${q.displayName} (${q.account})'
+                        : '${q.displayName} (${counts[q.provider]} accounts)'
                   : _shouldShowAccount(q, counts)
                   ? '${q.displayName} (${q.account})'
                   : q.displayName,
@@ -1416,7 +1448,16 @@ class _DashboardState extends State<Dashboard>
     } else if (value == 'profiles:manage') {
       _showProfileEditor();
     } else if (value.startsWith('show:')) {
-      _toggleHidden(value.substring(5));
+      final target = value.substring(5);
+      ProviderQuota? quota;
+      final counts = _providerCounts(_profiledData);
+      for (final q in _profiledData) {
+        if (quotaHideTarget(q, counts) == target || q.provider == target) {
+          quota = q;
+          break;
+        }
+      }
+      quota == null ? _toggleHidden(target) : _toggleQuotaHidden(quota);
     } else if (value == 'cad:smart') {
       _setCadence(Cadence.smart);
     } else if (value == 'cad:m15') {

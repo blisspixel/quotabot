@@ -645,14 +645,14 @@ List<int> grpcMessage(Uint8List resp) {
   return resp.sublist(5, 5 + len);
 }
 
-/// Parses the Grok billing protobuf into a single monthly usage window.
+/// Parses the Grok billing protobuf into a single shared weekly usage window.
 QuotaWindow? grokWindow(List<int> message, int now) {
   if (message.isEmpty) return null;
   final scan = ProtoScan()..walk(message);
   final percent = scan.firstPercent;
   if (percent == null) return null;
   return QuotaWindow(
-    label: 'monthly',
+    label: 'weekly',
     usedPercent: percent,
     resetsAt: scan.nearestFutureTimestamp(now),
   );
