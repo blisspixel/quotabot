@@ -31,10 +31,9 @@ ProviderQuota _quota(
     );
 
 Insights _insights() => Insights.from([
-      HeadroomBucket(start: _now - 6 * 3600)..add(80),
-      HeadroomBucket(start: _now - 5 * 3600)..add(70),
-      HeadroomBucket(start: _now - 4 * 3600)..add(60),
-      HeadroomBucket(start: _now - 3 * 3600)..add(50),
+      HeadroomBucket(start: _now - 3 * 86400)..add(80),
+      HeadroomBucket(start: _now - 2 * 86400)..add(70),
+      HeadroomBucket(start: _now - 86400)..add(60),
     ], _now);
 
 void main() {
@@ -54,6 +53,9 @@ void main() {
     expect(json['schema'], quotaHealthReportSchema);
     expect(json['recommended_provider'], 'claude');
     expect(json['providers'], hasLength(2));
+    final claude = (json['providers'] as List).first as Map<String, dynamic>;
+    expect(claude['weekly_sampled_days'], 3);
+    expect(claude['weekly_usable_day_streak'], 3);
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {
@@ -73,6 +75,7 @@ void main() {
     expect(markdown, startsWith('# quotabot weekly quota health'));
     expect(markdown, contains('Recommendation: claude'));
     expect(markdown, contains('| claude | work | available | 80.0% |'));
+    expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
     expect(markdown, contains('Local runtimes are fallback capacity'));
   });

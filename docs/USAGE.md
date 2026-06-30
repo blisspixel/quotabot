@@ -283,9 +283,10 @@ percentage, a Brier score, and a reliability diagram. It fills in over time, onc
 predictions' horizons have elapsed, and says plainly when there is not enough yet.
 
 `quotabot report` prints a shareable weekly quota-health markdown report with the
-current recommendation, provider headroom, reset times, and seven-day history
-metrics where enough local history exists. Add `--json` for the structured
-`quotabot.report.v1` shape. It is still local metadata only.
+current recommendation, provider headroom, reset times, seven-day history
+metrics, and current sampled-day usable/spent streaks where enough local history
+exists. Add `--json` for the structured `quotabot.report.v1` shape. It is still
+local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from
 `~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped

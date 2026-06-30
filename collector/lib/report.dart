@@ -15,6 +15,9 @@ class QuotaHealthProviderLine {
   final int? resetsAt;
   final double? p50Free;
   final double? reliability;
+  final int? sampledDays;
+  final int? usableDayStreak;
+  final int? spentDayStreak;
   final String? pace;
 
   const QuotaHealthProviderLine({
@@ -28,6 +31,9 @@ class QuotaHealthProviderLine {
     required this.resetsAt,
     required this.p50Free,
     required this.reliability,
+    required this.sampledDays,
+    required this.usableDayStreak,
+    required this.spentDayStreak,
     required this.pace,
   });
 
@@ -42,6 +48,9 @@ class QuotaHealthProviderLine {
         'resets_at': resetsAt,
         'weekly_p50_free_percent': p50Free,
         'weekly_reliability': reliability,
+        'weekly_sampled_days': sampledDays,
+        'weekly_usable_day_streak': usableDayStreak,
+        'weekly_spent_day_streak': spentDayStreak,
         'pace': pace,
       };
 }
@@ -80,13 +89,14 @@ class QuotaHealthReport {
       '',
       '## Providers',
       '',
-      '| Provider | Account | State | Headroom | Reset | 7d p50 free | 7d reliability | Pace |',
-      '| --- | --- | --- | ---: | --- | ---: | ---: | --- |',
+      '| Provider | Account | State | Headroom | Reset | 7d p50 free | 7d reliability | Streak | Pace |',
+      '| --- | --- | --- | ---: | --- | ---: | ---: | --- | --- |',
       for (final provider in providers)
         '| ${_cell(provider.displayName)} | ${_cell(provider.account)} | '
             '${_cell(provider.state)} | ${_percent(provider.headroomPercent)} | '
             '${provider.resetsAt == null ? 'n/a' : _iso(provider.resetsAt!)} | '
             '${_percent(provider.p50Free)} | ${_ratio(provider.reliability)} | '
+            '${_cell(_streak(provider))} | '
             '${_cell(provider.pace ?? 'n/a')} |',
     ];
     if (providers.any((provider) => provider.source == 'manual')) {
@@ -162,6 +172,9 @@ QuotaHealthProviderLine _providerLine(
     resetsAt: binding?.resetsAt,
     p50Free: insights?.p50,
     reliability: insights?.reliability,
+    sampledDays: insights?.sampledDays,
+    usableDayStreak: insights?.usableDayStreak,
+    spentDayStreak: insights?.spentDayStreak,
     pace: pace,
   );
 }
@@ -186,6 +199,16 @@ String _percent(double? value) =>
 
 String _ratio(double? value) =>
     value == null ? 'n/a' : '${(value * 100).toStringAsFixed(1)}%';
+
+String _streak(QuotaHealthProviderLine provider) {
+  final sampled = provider.sampledDays;
+  if (sampled == null || sampled == 0) return 'n/a';
+  final spent = provider.spentDayStreak ?? 0;
+  if (spent > 0) return '${spent}d spent';
+  final usable = provider.usableDayStreak ?? 0;
+  if (usable > 0) return '${usable}d usable';
+  return '${sampled}d sampled';
+}
 
 String _cell(String value) =>
     value.replaceAll('|', '\\|').replaceAll('\n', ' ');

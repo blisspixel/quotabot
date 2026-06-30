@@ -24,6 +24,7 @@ void main() {
     expect(output, startsWith('# quotabot weekly quota health'));
     expect(output, contains('Recommendation:'));
     expect(output, contains('| Provider | Account | State | Headroom |'));
+    expect(output, contains('| Streak | Pace |'));
   });
 
   test('report --json prints the structured report', () async {
@@ -33,5 +34,22 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.report.v1');
     expect(json['providers'], isNotEmpty);
+    final providers = json['providers'] as List;
+    expect(
+      providers.any(
+        (provider) => (provider as Map<String, dynamic>)
+            .containsKey('weekly_usable_day_streak'),
+      ),
+      isTrue,
+    );
+  });
+
+  test('stats prints sampled-day streaks', () async {
+    final result = await runCli(['stats']);
+
+    expect(result.exitCode, 0);
+    final output = result.stdout as String;
+    expect(output, contains('sampled days'));
+    expect(output, contains('usable streak'));
   });
 }

@@ -87,6 +87,41 @@ void main() {
     });
   });
 
+  group('currentDayStreaks', () {
+    test('counts usable days through the latest contiguous sampled day', () {
+      final buckets = [
+        HeadroomBucket(start: 0)..add(0),
+        HeadroomBucket(start: 86400)..add(80),
+        HeadroomBucket(start: 2 * 86400)..add(60),
+        HeadroomBucket(start: 2 * 86400 + 3600)..add(50),
+      ];
+      final streaks = currentDayStreaks(buckets);
+      expect(streaks.sampledDays, 3);
+      expect(streaks.usableDays, 2);
+      expect(streaks.spentDays, 0);
+    });
+
+    test('counts spent days and stops both streaks on gaps or mixed days', () {
+      final mixed = currentDayStreaks([
+        HeadroomBucket(start: 0)..add(80),
+        HeadroomBucket(start: 2 * 86400)
+          ..add(0)
+          ..add(40),
+      ]);
+      expect(mixed.sampledDays, 2);
+      expect(mixed.usableDays, 0);
+      expect(mixed.spentDays, 0);
+
+      final spent = currentDayStreaks([
+        HeadroomBucket(start: 0)..add(90),
+        HeadroomBucket(start: 86400)..add(0),
+        HeadroomBucket(start: 2 * 86400)..add(0),
+      ]);
+      expect(spent.usableDays, 0);
+      expect(spent.spentDays, 2);
+    });
+  });
+
   group('hourOfDayProfile', () {
     test('buckets headroom by local hour', () {
       // Two samples in hour 0 (low) and hour 12 (high), UTC.
@@ -229,10 +264,15 @@ void main() {
       }
       final ins = Insights.from(buckets, now);
       expect(ins.samples, 4);
+      expect(ins.sampledDays, 4);
       expect(ins.mean, closeTo(85, 0.001)); // (100+90+80+70)/4
       expect(ins.trendPerDay, lessThan(0)); // declining
       expect(ins.reliability, 1); // never spent
+      expect(ins.usableDayStreak, 4);
+      expect(ins.spentDayStreak, 0);
       expect(ins.spanDays, inInclusiveRange(4, 5));
+      expect(ins.toJson()['sampled_days'], 4);
+      expect(ins.toJson()['usable_day_streak'], 4);
     });
 
     test('reports zero samples for an empty series', () {

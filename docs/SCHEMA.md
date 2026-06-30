@@ -72,6 +72,12 @@ distinguish ready-now models from installed models that may need a cold start.
 `quotabot.suggest_model.v1` with `schema`, `generated_at`, `budget_policy`,
 optional `recommended`, `reason`, and ranked model candidates.
 
+`quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
+`recommended_provider`, `recommendation_reason`, `fallback_kind`, and
+`providers`. Provider rows include state, headroom/reset metadata, weekly p50
+free percent, weekly reliability, weekly sampled-day counts, current
+usable/spent day streaks, and pace when history is available.
+
 ## `quotabot.alert.v1`
 
 `quotabot watch --json`, alert webhooks, and `quotas://alerts` emit alert objects

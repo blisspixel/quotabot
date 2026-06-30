@@ -377,6 +377,9 @@ Breadth and depth, once the core is trusted:
   include available VRAM/context/size evidence without making a model call.
 - **Richer analytics:** hour-by-weekday heatmap polish, a contribution calendar,
   streaks and summary stats, plan-tier modeling, and provider status polling.
+  Foundation shipped: analytics now compute current sampled-day usable/spent
+  streaks from the same compact hourly history buckets and surface them in
+  `quotabot stats`, `quotabot report`, and `quotabot.report.v1`.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL
@@ -386,7 +389,8 @@ Breadth and depth, once the core is trusted:
 - **Shareable reports:** a "weekly quota health" markdown export worth posting.
   Foundation shipped: `quotabot report` prints markdown and `--json` emits
   `quotabot.report.v1`, covering the current recommendation, headroom, resets,
-  local/manual caveats, and seven-day history metrics.
+  local/manual caveats, seven-day history metrics, and current sampled-day
+  streaks.
 - **Themes for the widget:** selectable color themes (the `top` palettes already
   shipped), including a high-contrast "hacker" mode, still honoring light/dark.
 - **Ecosystem and packaging:** a plugin model, OS package managers (winget/MSIX,

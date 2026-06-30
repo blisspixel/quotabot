@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Analytics now compute current sampled-day usable/spent streaks from the
+  existing compact hourly history buckets. `quotabot stats`, `quotabot report`,
+  and `quotabot.report.v1` surface the streaks without adding provider calls or
+  storing raw long-term samples.
 - `quotabot suggest --local-first`, MCP `local_first`, and loopback HTTP
   `GET /suggest?local_first=true` now prefer an available local runtime before
   subscription quota for cost-sensitive dispatch. Routing JSON includes

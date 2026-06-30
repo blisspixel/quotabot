@@ -15,7 +15,7 @@ collector/ (Dart package)
                      and the widget), adaptive refresh cadence
                      (nextRefreshSeconds, shared by top and the app)
   insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap,
-                     burn rate with uncertainty
+                     sampled-day streaks, burn rate with uncertainty
   alerts.dart        pure low-quota alerts shared by watch/app/MCP, plus
                      watch-only projected-waste thresholding
   webhook.dart       loopback-guarded, fail-soft alert webhook sender (postAlert)

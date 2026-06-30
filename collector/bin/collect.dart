@@ -1597,7 +1597,12 @@ void _printStats(
         '${ins.tightestDay != null ? ' ${_dayLabel(ins.tightestDay!)}' : ''}',
       );
     }
-    extras.add('${ins.samples} samples / ${ins.spanDays}d');
+    if (ins.spentDayStreak > 0) {
+      extras.add('${ins.spentDayStreak}d spent streak');
+    } else if (ins.usableDayStreak > 0) {
+      extras.add('${ins.usableDayStreak}d usable streak');
+    }
+    extras.add('${ins.samples} samples / ${ins.sampledDays} sampled days');
     print('  ${' '.padRight(12)} ${extras.join('   ')}');
     final pace = _paceFor(live[p], ins, now);
     if (pace != null && pace.burnPerHour >= 0.2) {

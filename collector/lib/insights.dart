@@ -163,6 +163,50 @@ List<({int day, double mean})> dailyMeans(Iterable<HeadroomBucket> buckets) {
   return out;
 }
 
+/// Current consecutive sampled-day streaks through the latest sample.
+///
+/// A usable day has at least one sample and no spent samples. A spent day has at
+/// least one sample and every sample spent. Mixed days or gaps break both
+/// streaks. The result is based on local calendar days after [tzOffset].
+({int sampledDays, int usableDays, int spentDays}) currentDayStreaks(
+  Iterable<HeadroomBucket> buckets, {
+  Duration tzOffset = Duration.zero,
+}) {
+  final byDay = <int, ({int count, int exhausted})>{};
+  final offset = tzOffset.inSeconds;
+  for (final b in buckets) {
+    if (b.count == 0) continue;
+    final day = (b.start + offset) ~/ 86400;
+    final existing = byDay[day];
+    byDay[day] = (
+      count: (existing?.count ?? 0) + b.count,
+      exhausted: (existing?.exhausted ?? 0) + b.exhausted,
+    );
+  }
+  if (byDay.isEmpty) return (sampledDays: 0, usableDays: 0, spentDays: 0);
+
+  final latest = byDay.keys.reduce(math.max);
+  var usable = 0;
+  for (var day = latest;; day--) {
+    final sampled = byDay[day];
+    if (sampled == null || sampled.exhausted != 0) break;
+    usable++;
+  }
+
+  var spent = 0;
+  for (var day = latest;; day--) {
+    final sampled = byDay[day];
+    if (sampled == null ||
+        sampled.count == 0 ||
+        sampled.exhausted != sampled.count) {
+      break;
+    }
+    spent++;
+  }
+
+  return (sampledDays: byDay.length, usableDays: usable, spentDays: spent);
+}
+
 /// Ordinary least squares fit of headroom against day index. Returns the slope
 /// in percent-per-day, the intercept, and the coefficient of determination
 /// (R squared, 0..1) as a confidence in the trend. Null with fewer than two
@@ -480,6 +524,7 @@ PortfolioInsight portfolioInsight(
 class Insights {
   final int samples;
   final int spanDays;
+  final int sampledDays;
   final double? mean;
   final double? stddev;
   final double? p10;
@@ -500,6 +545,14 @@ class Insights {
   /// Local day of week (0 = Monday .. 6 = Sunday) that runs tightest, or null.
   final int? tightestDay;
 
+  /// Consecutive sampled local days through the latest sample with no spent
+  /// readings. Gaps or mixed days break the streak.
+  final int usableDayStreak;
+
+  /// Consecutive sampled local days through the latest sample where every
+  /// reading was spent. Gaps or mixed days break the streak.
+  final int spentDayStreak;
+
   /// Recent burn rate in percent of quota per hour (>= 0), null when unknown.
   final double? burnPerHour;
 
@@ -519,6 +572,7 @@ class Insights {
   const Insights({
     required this.samples,
     required this.spanDays,
+    this.sampledDays = 0,
     this.mean,
     this.stddev,
     this.p10,
@@ -529,6 +583,8 @@ class Insights {
     this.trendConfidence,
     this.tightestHour,
     this.tightestDay,
+    this.usableDayStreak = 0,
+    this.spentDayStreak = 0,
     this.burnPerHour,
     this.burnSePerHour,
   });
@@ -550,10 +606,12 @@ class Insights {
     final t = trend(dailyMeans(used));
     final tightest = _argMin(hourOfDayProfile(used, tzOffset: tzOffset));
     final tightestDay = _argMin(dayOfWeekProfile(used, tzOffset: tzOffset));
+    final streaks = currentDayStreaks(used, tzOffset: tzOffset);
     final burn = burnRateWithError(used, now);
     return Insights(
       samples: agg.count,
       spanDays: spanDays,
+      sampledDays: streaks.sampledDays,
       mean: agg.mean,
       stddev: agg.stddev,
       p10: percentile(agg, 10),
@@ -564,6 +622,8 @@ class Insights {
       trendConfidence: t?.r2,
       tightestHour: tightest,
       tightestDay: tightestDay,
+      usableDayStreak: streaks.usableDays,
+      spentDayStreak: streaks.spentDays,
       burnPerHour: burn.perHour,
       burnSePerHour: burn.sePerHour,
     );
@@ -586,6 +646,7 @@ class Insights {
   Map<String, dynamic> toJson() => {
         'samples': samples,
         'span_days': spanDays,
+        'sampled_days': sampledDays,
         'mean_free_percent': mean,
         'stddev': stddev,
         'p10_free': p10,
@@ -596,6 +657,8 @@ class Insights {
         'trend_confidence_r2': trendConfidence,
         'tightest_hour_local': tightestHour,
         'tightest_day_local': tightestDay,
+        'usable_day_streak': usableDayStreak,
+        'spent_day_streak': spentDayStreak,
         'burn_percent_per_hour': burnPerHour,
         'burn_se_percent_per_hour': burnSePerHour,
         'typical_peak_used': typicalPeakUsed,
