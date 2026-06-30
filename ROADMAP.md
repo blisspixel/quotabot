@@ -344,10 +344,12 @@ Breadth and depth, once the core is trusted:
   `--min-context`, `--require-tools`/`--require-vision`/`--require-reasoning`, tier
   floor/ceiling, cheapest-qualifying-with-budget-wins, local-first, and the
   invariant that quotabot never reads the task). What remains post-1.0 is the rest
-  of the knobs (`--budget`, `--exclude`) and a cohesive aggressive local-first mode
-  that escalates to a paid plan only when the requirements force it or a window is
-  about to reset. Models stay filtered by objective capability and the provider's
-  own tier, never a quotabot quality ranking.
+  of the knobs (`--budget`, broader `--exclude` surfaces) and a cohesive
+  aggressive local-first mode that escalates to a paid plan only when the
+  requirements force it or a window is about to reset. Models stay filtered by
+  objective capability and the provider's own tier, never a quotabot quality
+  ranking. Foundation shipped: CLI `suggest` and `models` accept
+  `--exclude=A,B` for one-off provider exclusion without editing profiles.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling.

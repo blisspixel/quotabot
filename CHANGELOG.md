@@ -9,6 +9,8 @@ Notable changes to quotabot. Newest first.
   `quotabot manual list`, and removed with `quotabot manual remove`. They are
   stored locally, appear in normal quota views and JSON as `source: "manual"`,
   and are excluded from measured analytics history.
+- `quotabot suggest` and `quotabot models` now accept `--exclude=A,B` to ignore
+  specific providers for one routing decision without editing profiles.
 
 ### Fixed
 - Grok usage now labels the shared paid-plan pool as a weekly window, matching

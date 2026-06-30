@@ -130,7 +130,13 @@ Future<void> main(List<String> rawArgs) async {
       await _check(pos[1], wantsJson, profile);
       return;
     case 'suggest':
-      final results = await _read(profile);
+      final excluded = _excludedProviders(flags);
+      if (!excluded.ok) {
+        exitCode = _exitUsage;
+        return;
+      }
+      final results =
+          _applyExclusions(await _read(profile), excluded.providers);
       final now = nowEpoch();
       if (_hasModelProfile(flags)) {
         final s = suggestModel(results, now,
@@ -153,7 +159,13 @@ Future<void> main(List<String> rawArgs) async {
       await _runWatch(flags, profile);
       return;
     case 'models':
-      final results = await _read(profile);
+      final excluded = _excludedProviders(flags);
+      if (!excluded.ok) {
+        exitCode = _exitUsage;
+        return;
+      }
+      final results =
+          _applyExclusions(await _read(profile), excluded.providers);
       final now = nowEpoch();
       final reqs = _modelRequirements(flags);
       if (wantsJson) {
@@ -304,6 +316,7 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
 const _valueOptions = {
   'account',
   'display-name',
+  'exclude',
   'interval',
   'limit',
   'min-context',
@@ -343,6 +356,38 @@ List<String> _normalizeArgs(List<String> args) {
     normalized.add(arg);
   }
   return normalized;
+}
+
+List<ProviderQuota> _applyExclusions(
+  List<ProviderQuota> results,
+  Set<String> excluded,
+) {
+  if (excluded.isEmpty) return results;
+  return [
+    for (final quota in results)
+      if (!excluded.contains(
+        normalizeProviderId(quota.provider) ?? quota.provider,
+      ))
+        quota,
+  ];
+}
+
+({Set<String> providers, bool ok}) _excludedProviders(Set<String> flags) {
+  final raw = _stringOption(flags, 'exclude', null);
+  if (raw == null || raw.trim().isEmpty) {
+    return (providers: const {}, ok: true);
+  }
+  final providers = <String>{};
+  for (final part in raw.split(',')) {
+    if (part.trim().isEmpty) continue;
+    final provider = normalizeProviderId(part);
+    if (provider == null) {
+      stderr.writeln('quotabot: invalid --exclude provider "$part"');
+      return (providers: const {}, ok: false);
+    }
+    providers.add(provider);
+  }
+  return (providers: providers, ok: true);
 }
 
 ({QuotaProfile? profile, bool ok}) _profileFromFlags(Set<String> flags) {
@@ -861,6 +906,9 @@ void _printHelp() {
   stdout.writeln(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
     'uncertain caps)',
+  );
+  stdout.writeln(
+    '  --exclude=A,B       suggest/models: ignore these providers',
   );
   stdout.writeln(
     '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',

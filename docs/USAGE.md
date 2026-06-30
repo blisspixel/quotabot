@@ -240,6 +240,9 @@ never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 
+For a one-off routing decision, add `--exclude=codex,grok` to `models` or
+`suggest` to ignore those providers without changing your named profiles.
+
 For catalog maintenance, run the audit tool from the collector package:
 
 ```bash
