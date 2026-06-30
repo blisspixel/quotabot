@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     # Run the full suite on every claimed platform (Linux, macOS, Windows) so the
@@ -29,7 +32,7 @@ jobs:
       # python3), for the coverage gate and the LiteLLM router tests.
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.13'
 
       - uses: subosito/flutter-action@v2
         with:
@@ -55,6 +58,7 @@ jobs:
           dart pub global activate coverage
           dart pub global run coverage:format_coverage \
             --lcov \
+            --check-ignore \
             --in=coverage \
             --out=coverage/lcov.info \
             --packages=.dart_tool/package_config.json \
@@ -77,6 +81,31 @@ jobs:
         working-directory: app
         run: flutter test
 
+      - name: Linux desktop build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev
+
+      - name: Verify Linux desktop package build
+        if: runner.os == 'Linux'
+        run: bash tools/package-linux.sh --no-archive
+
+      - name: Verify macOS desktop package build
+        if: runner.os == 'macOS'
+        run: bash tools/package-macos.sh --no-archive
+
+      - name: MCP client snippet tests
+        working-directory: integrations/mcp_clients
+        run: |
+          npm ci
+          npm run typecheck
+          python -m unittest test_mcp_client_snippets.py
+
       - name: LiteLLM router tests
         working-directory: integrations/litellm
-        run: python -m unittest test_quotabot_router.py
+        env:
+          QUOTABOT_RUN_LITELLM_PROXY_TEST: '1'
+        run: |
+          python -m pip install "litellm[proxy]"
+          python -m unittest test_quotabot_router.py test_quotabot_proxy_integration.py

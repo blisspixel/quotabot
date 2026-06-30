@@ -158,12 +158,14 @@ class FleetScreen extends StatefulWidget {
   final List<ProviderQuota> data;
   final Map<String, List<HeadroomBucket>> buckets;
   final bool dark;
+  final FleetRange initialRange;
 
   const FleetScreen({
     super.key,
     required this.data,
     required this.buckets,
     required this.dark,
+    this.initialRange = FleetRange.now,
   });
 
   @override
@@ -171,7 +173,7 @@ class FleetScreen extends StatefulWidget {
 }
 
 class _FleetScreenState extends State<FleetScreen> {
-  FleetRange _range = FleetRange.now;
+  late FleetRange _range = widget.initialRange;
 
   bool get dark => widget.dark;
 

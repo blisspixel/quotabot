@@ -1,0 +1,13 @@
+{
+  "models": [
+    {
+      "name": "qwen2.5-coder:7b",
+      "size": 4294967296,
+      "size_vram": 2147483648,
+      "details": {
+        "parameter_size": "7B",
+        "quantization_level": "Q4_K_M"
+      }
+    }
+  ]
+}

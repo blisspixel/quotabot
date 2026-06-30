@@ -75,6 +75,13 @@ if (-not (Test-Path $asset)) { throw "CLI build did not produce $asset" }
 Write-Step "Installing the CLI to $installDir"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 $exe = Join-Path $installDir 'quotabot.exe'
+foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
+  $legacyPath = Join-Path $installDir $legacy
+  if (Test-Path $legacyPath) {
+    Remove-Item -LiteralPath $legacyPath -Force
+    Write-Ok "Removed legacy shim $legacy"
+  }
+}
 Copy-Item $asset $exe -Force
 Write-Ok "Installed quotabot.exe"
 

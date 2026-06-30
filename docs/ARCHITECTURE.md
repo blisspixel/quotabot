@@ -21,9 +21,15 @@ collector/ (Dart package)
   webhook.dart       loopback-guarded, fail-soft alert webhook sender (postAlert)
   calibration.dart   pure: grade the strand predictor against recorded history
   registry.dart      pure: assemble the cross-provider model registry with budget
-  model_catalog.dart committed, refreshable cloud model capability catalog
+  model_catalog.dart committed cloud model capability catalog
+  catalog_audit.dart pure/provider-owned model-list diffing for catalog currency
+  schema_contracts.dart frozen quotabot.v1 JSON Schema and validator
+  provider_adapters.dart compile-time adapter and fixture registry
+  profiles.dart      named local profile schema, storage, and filtering
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
+  leases.dart        local routing leases for parallel-agent reservation and
+                     release, backed by file locking in production
   ansi.dart          shared ANSI styling and color-depth detection
   top.dart           pure renderer for the `quotabot top` live dashboard:
                      gradient meters, palettes, local detail lines, the
@@ -31,7 +37,9 @@ collector/ (Dart package)
                      the interactive sort (TopSort + sortProvidersForTop), and the
                      keyboard helpers (moveSelection, osc52Copy clipboard)
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
-  mcp.dart           MCP tool shapes, output schemas, and registration
+  simulation.dart    exact one-provider snapshots for deterministic CLI tests
+  mcp.dart           MCP tool shapes, output schemas, shared server factory
+  mcp_http.dart      Opt-in Streamable HTTP MCP wrapper with loopback guards
   collector.dart     collectAll(): run adapters, apply cache; package exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      ollama, lmstudio, lemonade (thin I/O shells)
@@ -40,9 +48,16 @@ collector/ (Dart package)
   bin/collect.dart        CLI: status/doctor, top, watch, models, calibration,
                           check, suggest, stats, json, login, logout
                           (stable exit codes 0/64/69)
-  bin/mcp_server.dart     MCP server over stdio (tools + quotas://current resource)
+  bin/mcp_server.dart     MCP server over stdio or opt-in Streamable HTTP
+                          (tools, local leases, quotas://current and
+                          quotas://alerts resources)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing
+
+integrations/mcp_clients/
+  Python and TypeScript MCP client snippets for stdio and Streamable HTTP,
+  plus smoke tests that compile Python, typecheck TypeScript, and verify current
+  SDK transport use.
 
 app/ (Flutter desktop)
   main.dart   imports collectAll(), renders cards, adaptive refresh
@@ -61,6 +76,10 @@ Everything funnels into one shape (`models.dart`):
   error note, capture time (`asOf`), a `stale` flag, and a list of windows.
 - `QuotaWindow`: a label (such as `5h` or `weekly`), percent used, optional raw
   used and limit counts, and a reset time as a Unix timestamp.
+- `QuotaProfile`: a local-only named view over a quota snapshot. It can allow
+  providers, allow accounts per provider, hide providers, carry a routing
+  policy, and remember UI-facing theme/sort labels. The `default` profile is
+  implicit and preserves the zero-config behavior.
 
 Adapters never talk to the UI. They return `ProviderQuota`, and the UI derives
 everything it shows from that, including colors and the binding-constraint
@@ -72,6 +91,17 @@ The bulk of the logic lives in `parsing.dart` and `analysis.dart` with no
 network or disk access, so it is unit tested directly against fixtures. Adapters
 are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate parsing.
 This is why the core has high test coverage even though the adapters do I/O.
+`simulation.dart` follows the same rule: it produces deterministic
+`ProviderQuota` snapshots for CLI tests without adapter calls, history reads, or
+burn-history influence. It is intentionally separate from `demo.dart`, which is a
+believable multi-provider screenshot fleet rather than an exact assertion tool.
+The parser test layer includes seeded property/fuzz tests over malformed JSON,
+protobuf-like byte streams, gRPC-web frames, and embedded-token blobs, plus
+sanitized provider-shape fixtures loaded from `collector/test/fixtures/` so the
+pure parsers are checked against stable recorded shapes without touching live
+credentials or provider APIs. `provider_adapters.dart` is the compile-time
+registry for all built-in adapters and their required sanitized fixtures; tests
+fail when a new adapter lacks a registry row or fixture.
 
 ## Adapters
 
@@ -82,11 +112,17 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
 - Claude, Grok, and Antigravity call live metadata endpoints (no model calls, no
   token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
   prefer quotabot's own OAuth grant (see Authentication) and fall back to the
-  token the host CLI or IDE currently holds. Antigravity additionally refreshes
-  the Gemini CLI token from disk and runs the Cloud Code onboarding step before
-  reading per-model quota.
+  token the host CLI or IDE currently holds. Grok reads every account in the CLI
+  auth file and caches them separately. Antigravity scans the active account and
+  profile databases, attempts live reads for each discovered account, refreshes
+  the Gemini CLI token from disk when it is the active token source, and runs the
+  Cloud Code onboarding step before reading per-model quota.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
+  Cursor's current included-usage pool is normalized as a monthly quota window
+  when the local SQLite state exposes used/included values. Windsurf/Devin
+  Desktop daily and weekly Cascade quota shapes are normalized from local SQLite
+  state, with account and plan labels surfaced when present.
 - Ollama, LM Studio, and Lemonade are local-runtime adapters: they report
   installed and loaded models instead of a quota window and act as a routing
   fallback. Any OpenAI-compatible runtime can be added with the shared
@@ -101,8 +137,10 @@ shows that as "no live data" instead of a gap.
 `auth/` holds quotabot's own OAuth, kept separate from the host apps' tokens:
 
 - `tokens.dart`: the `Tokens` model and `TokenStore`, which persists tokens per
-  provider under the config directory, owner-only on POSIX. Rotated refresh
-  tokens are saved on every refresh or the next refresh would fail.
+  provider, and optionally per provider account, under the config directory,
+  owner-only on POSIX. Account-scoped filenames use a hash of the account id
+  rather than the raw email. Rotated refresh tokens are saved on every refresh or
+  the next refresh would fail.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -125,33 +163,104 @@ profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`
 The cache lives under the platform application-data directory
 (`%LOCALAPPDATA%/quotabot/cache` on Windows). This is what keeps a transient
 rate limit or an expired token from blanking a provider.
+The cache directory and atomic-write files are best-effort owner-only local
+metadata. Cache-only routing reads only canonical snapshot filenames that match
+the parsed provider/account identity and rejects snapshots dated materially in
+the future, so a stray JSON file in the cache directory cannot become a fresh
+routing recommendation.
+For multi-account providers, stale per-account snapshots are appended only when
+the account is still present in that provider's current local account index and
+the live adapter did not already return it. This is the signed-out auto-hide
+rule: a cached work account disappears once the provider's own local account
+state no longer lists it.
 
 ## Routing helpers and the MCP server
 
 `analysis.dart` exposes `providerHeadroom`, `providerWithMostHeadroom`,
 `providerAvailability`, `bindingWindow`, `averageRecentHeadroom`, and the
 forecast helpers `riskAdjustedHeadroom`, `strandProbability`, and `suggestRoute`.
-`bin/mcp_server.dart` wraps `collectAll()` plus helpers as MCP tools and a
-`quotas://current` resource over stdio. `bin/example_routing_agent.dart` shows
-the same logic used for routing decisions. `bin/local_server.dart` provides a
-simple HTTP alternative. The reasoning behind the routing math (risk-adjusted
-headroom, strand probability, and the planned extensions) is written up in
+`suggestRoute` can accept active local lease discounts so concurrent routers see
+reduced effective headroom for the provider/account another caller already
+reserved. `leases.dart` owns those reservations: production uses a small
+file-backed store protected by a lock file, while tests use an in-memory store.
+Leases are advisory local metadata with TTLs and idempotency keys; they never
+contact providers and never sit in the prompt or inference data path.
+
+`mcp.dart` builds one MCP server definition: tools, resources, output schemas,
+read-only/idempotent annotations, capability scope, and standard MCP resource
+subscription handlers. Most tools read a live `collectAll()` snapshot. They can
+also apply exact `account` filters after named profile filters for routers that
+need one provider account without creating a profile. `decide_now` is
+deliberately different: it reads the in-memory or disk last-known snapshot only,
+returns `source`, `snapshot_as_of`, age, and staleness, and never forces a live
+collect. `reserve_provider` and `release_provider` are the only local-write
+tools, and their annotations mark that distinction for MCP clients.
+`quotas://current` remains the unfiltered live snapshot resource.
+`quotas://alerts` stores the last `quotabot.alert.v1` objects fired by the MCP
+subscription loop. Clients subscribe with `resources/subscribe`; on an amber/red
+crossing, the server emits the standard `notifications/resources/updated` event
+for `quotas://alerts`, so clients react by reading the resource instead of
+polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
+by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
+keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
+rejects batch JSON-RPC payloads, and can require a bearer token.
+`bin/example_routing_agent.dart` shows the same logic used for direct Dart
+routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
+MCP clients for both stdio and Streamable HTTP.
+`bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
+consumers. The reasoning behind the routing math (risk-adjusted headroom, strand
+probability, and lease discounts) is written up in
 [ROUTING-MATH.md](ROUTING-MATH.md).
+
+The public snapshot contract is frozen as `quotabot.v1` in
+`schema_contracts.dart` and documented in [SCHEMA.md](SCHEMA.md). The contract is
+additive: consumers must tolerate unknown fields, while quotabot must keep the
+meaning and type of existing fields stable until a new schema id is introduced.
 
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
-and the MCP `list_models` tool.
+and the MCP `list_models` tool. `catalog_audit.dart` keeps the committed cloud
+catalog honest without adding runtime network calls: the standalone
+`bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
+OpenAI/Codex, Anthropic/Claude, xAI/Grok, and Gemini/Antigravity, follows
+pagination tokens, filters obvious non-language modalities, redacts query-string
+secrets, and emits a diff. It does not rewrite the catalog automatically because
+capability fields such as context, tools, vision, reasoning, and tier remain
+curated routing metadata.
+
+## LiteLLM proxy integration
+
+`integrations/litellm/` is the shipped example of using quotabot as a routing
+signal without putting quotabot in the request data path. The Python
+`quotabot_router.py` plugin registers a LiteLLM `async_pre_call_hook` that reads
+only the local quotabot `/suggest` quota recommendation and rewrites a logical
+model to a concrete LiteLLM deployment. It fails soft: bad policy, unreachable
+quotabot, or malformed response leaves the requested model unchanged.
+
+The integration is covered at two layers. Unit tests import the hook directly to
+check policy precedence, trusted key alias/user_id agent identity, local-fallback
+ordering, loopback URL hardening, no-redirect quotabot fetches, and metrics path
+containment under `~/.quotabot`. CI also installs the current `litellm[proxy]`
+package and starts a real LiteLLM proxy on loopback with a fake quotabot
+`/suggest` server and a fake OpenAI-compatible backend. That test proves the
+actual proxy `async_pre_call_hook` path rewrites a logical model to the provider
+with budget, spends no model tokens, and performs no external network calls. The
+plugin uses plain value classes rather than dataclasses because LiteLLM's
+current config-relative custom-callback loader executes modules before
+registering them in `sys.modules`, which breaks dataclass decoration on Python
+3.13.
 
 ## Alerts and `quotabot watch`
 
 `alerts.dart` is a pure, edge-triggered alert pass: `computeAlerts` takes the
 current snapshot, the routing suggestion, and the set of providers already
 alerting, and returns the alerts that newly crossed into a triggering severity
-(red by default) plus the updated armed set, so a provider fires once on the
-crossing and re-arms only after it recovers. Each `QuotaAlert` serializes as
-`quotabot.alert.v1` (metadata only, never content). Two thin shells consume it:
-the `quotabot watch` command in `bin/collect.dart` (poll, print, optionally POST)
-and the desktop app's notifier. `webhook.dart` delivers an alert with
+(red by default for CLI/app, amber or red for MCP subscriptions) plus the updated
+armed set, so a provider fires once on the crossing and re-arms only after it
+recovers. Each `QuotaAlert` serializes as `quotabot.alert.v1` (metadata only,
+never content). Three thin shells consume it: the `quotabot watch` command in
+`bin/collect.dart` (poll, print, optionally POST), the desktop app's notifier,
+and the MCP `quotas://alerts` subscription loop. `webhook.dart` delivers an alert with
 `postAlert`, which refuses a non-loopback host unless explicitly allowed and
 never throws, so delivery fails soft. An alert is just the binding-window
 forecast viewed as a threshold crossing, so it shares the same model as `top`.
@@ -192,13 +301,29 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   red when spent; neutral grey when no data). The OS application icon
   (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style
   mark (light/dark friendly) for the desktop icon.
-- Compact and expanded views, plus hide/show per provider. "Show account names"
-  toggle (global, in menu) controls display of usernames (Grok uses email as
-  account; others often default/hidden); on top of the toggle, a username is
-  only shown when the provider has more than one account on screen, so
-  single-account providers auto-hide it. `prefs.dart` persists hidden providers,
-  compact state, cadence, always on top, taskbar visibility, enable notifications,
-  showAccounts, and window position across restarts.
+- Compact and expanded views, plus hide/show per provider. The expanded view
+  groups distinct account identities when work and personal accounts coexist,
+  and expansion state is keyed by provider/account so opening one account's
+  details does not open its sibling. Duplicate-provider cards always show their
+  account to avoid ambiguity; the "Show account names" toggle still exposes
+  usernames for single-account providers. `prefs.dart` persists hidden providers,
+  compact state, cadence, always on top, taskbar visibility, enable
+  notifications, showAccounts, and window position across restarts.
+- Named profiles live under the per-user quotabot config directory as
+  `quotabot.profile.v1` JSON files. Profile names and provider ids are validated
+  against safe filename/id characters, profile files are bounded in size, and
+  filtering is pure over the already-normalized `ProviderQuota` list.
+- The CLI loads `--profile=NAME` once, then every quota-reading command consumes
+  the same profiled snapshot. Missing profiles fail with usage exit code 64.
+- The MCP tools accept optional `profile` and exact `account` filters, applying
+  the same pure profile filter before account narrowing for quota, routing,
+  availability, and model responses. Missing profiles return a structured
+  `error` field and no providers; resources remain unfiltered for compatibility.
+- The desktop app loads local profiles at startup and on refresh, lets users
+  create/edit/delete non-default profiles, applies the active profile before
+  display, notifications, webhook alerts, and analytics, and persists
+  non-default profile hidden-provider, sort, and theme preferences back into the
+  profile file. The `default` profile keeps the legacy app prefs file.
 - A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
   countdowns stay current; actual data refresh is on a separate adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a

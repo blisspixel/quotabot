@@ -27,18 +27,10 @@ It reads the usage your tools already track locally, so most providers need no
 setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).
 
 <p align="center">
-  <img src="docs/screenshot-widget.png" alt="quotabot widget showing per-provider quota" width="300">
-  &nbsp;&nbsp;
-  <img src="docs/screenshot-analytics.png" alt="quotabot quota analytics over 90 days" width="300">
+  <img src="docs/quotabot-demo.gif" alt="quotabot demo showing the widget, compact strip, 90-day analytics, and top dashboard" width="620">
 </p>
 
-<p align="center"><sub>The widget, and the 90-day analytics view (demo data).</sub></p>
-
-<p align="center">
-  <img src="docs/screenshot-top.png" alt="quotabot top, the live terminal dashboard" width="620">
-</p>
-
-<p align="center"><sub><code>quotabot top</code>, the live terminal dashboard (demo data).</sub></p>
+<p align="center"><sub>Demo mode: the desktop widget, compact strip, 90-day analytics view, and <code>quotabot top</code>.</sub></p>
 
 Highlights:
 
@@ -143,11 +135,17 @@ quotabot watch            # alert when a window goes low, naming where to route
 `quotabot watch` polls in the background and raises a low-quota alert the moment
 a window is spent or nearly so, naming where to send work next; add `--webhook`
 to POST each alert (loopback unless `--allow-external`) so it can reach a tray
-toast, a shell, or chat. The same recommendation is available over MCP
-(`suggest_provider`, `list_models`) and a loopback HTTP server. For how an agent should call quotabot and route, see
-[AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin in
-[integrations/litellm/](integrations/litellm/), which routes each request to a
-deployment with budget and fails soft when quotabot is unavailable.
+toast, a shell, or chat. The same recommendation is available over MCP stdio or
+opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
+`reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
+with optional `profile`/`account`, plus `quotas://alerts` subscriptions) and a
+plain loopback HTTP JSON server. For how an agent should call quotabot and route,
+see
+[AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
+in [integrations/litellm/](integrations/litellm/), which routes each request to
+a deployment with budget and fails soft when quotabot is unavailable. For
+language-client adoption, see the Python and TypeScript MCP snippets in
+[integrations/mcp_clients/](integrations/mcp_clients/).
 
 ## Project layout
 
@@ -155,7 +153,7 @@ deployment with budget and fails soft when quotabot is unavailable.
 quotabot/
   app/           Flutter desktop application (Windows, macOS, Linux)
   collector/     Dart package: adapters, normalized model, auth, CLI, MCP server
-  integrations/  LiteLLM proxy plugin for quota-aware request routing
+  integrations/  LiteLLM proxy plugin and MCP client snippets
   docs/          Setup, usage, building, architecture, routing math, data sources
   tools/         Packaging, icon, and developer helper scripts
 ```

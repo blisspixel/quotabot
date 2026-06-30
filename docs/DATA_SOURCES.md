@@ -43,6 +43,10 @@ the adapters resolve the user home directory cross-platform.
   credit usage percent for the billing cycle and the cycle reset timestamp,
   parsed into a single monthly window. This is a billing metadata call, not a
   model call, so it costs no tokens.
+- Multi-account: every account object in `auth.json` is read. quotabot tries the
+  matching account-scoped grant before the provider-default grant (primary
+  account only) or that account's CLI token, and successful reads are cached per
+  account.
 
 ## Antigravity (Google)
 
@@ -70,8 +74,10 @@ State lives in the Antigravity globalStorage SQLite database at
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
-  Library, Linux XDG) and scans Antigravity profile directories; per-account
-  cache files support showing multiple accounts when switching.
+  Library, Linux XDG) and scans Antigravity profile directories. Each active
+  account gets its own live read when a matching account grant, active CLI token,
+  or IDE token is available; per-account cache files are used only while the
+  account remains present in the active local profile set.
 
 ## Authentication
 
@@ -87,8 +93,12 @@ stores. Grok and Antigravity can run two ways:
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET` to use your own).
   These grants are independent of the host apps, so they never invalidate the
   CLI's or IDE's credentials. quotabot's tokens live under the per-user config
-  directory, owner-only on POSIX and ACL-restricted on Windows, and rotated
-  refresh tokens are persisted on every refresh.
+  directory, owner-only on POSIX and ACL-restricted on Windows. A grant can be
+  stored as the provider default or in an account-scoped slot; the account slot
+  filename uses a hash rather than the raw email. Grok derives the account slot
+  from the device-login id token when present; Antigravity resolves it from
+  Google's userinfo endpoint after OAuth exchange. Rotated refresh tokens are
+  persisted on every refresh.
 
 ## Kiro (agentic CLI + IDE)
 
@@ -100,22 +110,37 @@ stores. Grok and Antigravity can run two ways:
 
 ## Cursor (agentic IDE)
 
-- Credit-based (premium requests, completions) on Pro; free tier limits.
+- Current paid plans expose a monthly included-usage pool with optional
+  pay-as-you-go overage; quotabot surfaces that pool as a `monthly` window when
+  local state provides used/included values and a period reset.
 - Local data primarily ~/.cursor (config + SQLite state like other forks).
 - Usage often shown in-app Settings, but local state allows passive detection
-  and opportunistic reads. Free account users benefit from detection.
-- Account shown only if non-default, the provider has more than one account on
-  screen, and "Show account names" enabled (see UI). Single-account providers
-  (e.g. Grok) auto-hide the username regardless of the global toggle.
+  and opportunistic reads. The adapter scans usage/credit/plan/account rows in
+  Cursor's `state.vscdb`, accepts JSON stored as either strings or blobs, and
+  surfaces account and plan labels when the local state includes them.
+- Account shown automatically for duplicate-provider cards so two accounts are
+  never visually ambiguous. The global "Show account names" setting also shows
+  non-default account labels for single-account providers.
 
 ## Windsurf / Devin (Codeium / Cognition)
 
-- Now branded Devin Desktop (IDE) and Devin CLI. Agentic Cascade uses daily + weekly quota.
-- Local passive (IDE/Desktop): ItemTable key `windsurf.settings.cachedPlanInfo` (or similar) in globalStorage/state.vscdb.
-- Paths covered: Windsurf, .codeium/windsurf, Devin (Roaming/Devin, Local/devin etc).
-- CLI-only installs (devin CLI): passive detection via `config.json` / `credentials.toml` (no rich daily/weekly cache). Shows as "cli" or org snippet.
-- Full local quota (daily/weekly % via cachedPlanInfo): requires the Devin Desktop app (the IDE formerly known as Windsurf), which populates state.vscdb.
-- Adapter always graceful for free tier / no sub. For live numbers when only CLI: check app.devin.ai.
+- Now branded Devin Desktop (IDE) and Devin CLI. Agentic Cascade uses daily +
+  weekly quota.
+- Local passive (IDE/Desktop): ItemTable key
+  `windsurf.settings.cachedPlanInfo` plus related Windsurf/Codeium/Devin
+  usage, quota, account, and plan rows in `globalStorage/state.vscdb`.
+- Paths covered: Windsurf, .codeium/windsurf, Devin (Roaming/Devin, Local/devin
+  etc).
+- The adapter accepts JSON state stored as strings or blobs, normalizes
+  daily/weekly quota evidence from direct percent fields or nested quota maps,
+  carries reset timestamps when present, and surfaces account/plan labels when
+  local state includes them.
+- CLI-only installs (devin CLI): passive detection via `config.json` /
+  `credentials.toml` (no rich daily/weekly cache). Shows as "cli" or org
+  snippet.
+- The adapter does not invent usage from undecodable raw blobs; free tier, no
+  subscription, missing cache, and CLI-only cases stay graceful detection-only
+  results. For live numbers when only CLI: check app.devin.ai.
 
 ## Local runtimes (Ollama, LM Studio, ...)
 
@@ -143,6 +168,30 @@ actually down).
   llama.cpp / llamafile, GPT4All, text-generation-webui, KoboldCpp) can be added
   with the same shared `localRuntimeQuota` helper; only the discovery URL and
   load-state field differ.
+
+## Cloud model catalog audit
+
+The runtime model registry does not call cloud model-list endpoints. It combines
+live provider quota with the committed capability catalog in
+`collector/lib/model_catalog.dart`, keeping normal quota reads local-first and
+zero-extra-network.
+
+For maintenance, `collector/bin/catalog_audit.dart` can diff that committed
+catalog against provider-owned model-list endpoints:
+
+- Codex/OpenAI: `GET https://api.openai.com/v1/models` with `OPENAI_API_KEY`.
+- Claude/Anthropic: `GET https://api.anthropic.com/v1/models` with
+  `ANTHROPIC_API_KEY` and the `anthropic-version` header.
+- Grok/xAI: `GET https://api.x.ai/v1/models` with `XAI_API_KEY`.
+- Antigravity/Gemini: `GET
+  https://generativelanguage.googleapis.com/v1beta/models` with
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+
+The audit follows provider pagination tokens and reports model-id drift only:
+`missing_from_catalog` and `catalog_only`. Context window, tool support, vision,
+reasoning, and tier remain curated because provider list endpoints are
+inconsistent and often account-scoped. Missing API keys are reported as skipped,
+not failures, unless the caller opts into `--fail-on-error`.
 
 ## Google (Antigravity)
 

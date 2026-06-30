@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../models.dart';
+import '../provider_ids.dart';
 import '../util.dart';
 import 'ollama.dart' show LocalModel, localBaseUrl, localRuntimeQuota;
 
@@ -16,8 +17,8 @@ import 'ollama.dart' show LocalModel, localBaseUrl, localRuntimeQuota;
 /// OpenAI-compatible `GET /v1/models`, which lists models without load state.
 /// LM Studio's local server defaults to 127.0.0.1:1234; honors LMSTUDIO_HOST.
 class LmStudioAdapter {
-  static const id = 'lmstudio';
-  static const name = 'LM Studio';
+  static const id = lmStudioProviderId;
+  static const name = lmStudioProviderName;
 
   static String baseUrl() =>
       localBaseUrl(Platform.environment['LMSTUDIO_HOST'], 1234);

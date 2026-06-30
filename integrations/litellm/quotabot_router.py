@@ -36,7 +36,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -49,6 +48,10 @@ except Exception:  # pragma: no cover - allows importing/testing without litellm
 
 def _expand(path: str) -> Path:
     return Path(os.path.expanduser(os.path.expandvars(path)))
+
+
+def _default_metrics_dir() -> Path:
+    return Path.home() / ".quotabot"
 
 
 def _is_loopback_url(url: str) -> bool:
@@ -66,7 +69,29 @@ def _is_loopback_url(url: str) -> bool:
         return False
 
 
-@dataclass(frozen=True)
+def _safe_metrics_path(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    try:
+        base = _default_metrics_dir().resolve()
+        path = _expand(raw)
+        if not path.is_absolute():
+            path = base / path
+        path = path.resolve(strict=False)
+        path.relative_to(base)
+        return str(path)
+    except Exception:
+        return None
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
 class Candidate:
     """One deployment a logical model may route to.
 
@@ -76,33 +101,54 @@ class Candidate:
     local runtime that is never gated by headroom.
     """
 
-    deployment: str
-    provider: Optional[str] = None
-    local: bool = False
+    __slots__ = ("deployment", "provider", "local")
+
+    def __init__(
+        self,
+        deployment: str,
+        provider: Optional[str] = None,
+        local: bool = False,
+    ) -> None:
+        self.deployment = deployment
+        self.provider = provider
+        self.local = local
 
 
-@dataclass(frozen=True)
 class AgentRule:
     """How to route a named agent. ``pin`` forces a concrete deployment and
     skips routing entirely; ``model`` redirects the agent to a logical model
     that is then routed normally."""
 
-    pin: Optional[str] = None
-    model: Optional[str] = None
+    __slots__ = ("pin", "model")
+
+    def __init__(self, pin: Optional[str] = None, model: Optional[str] = None) -> None:
+        self.pin = pin
+        self.model = model
 
 
-@dataclass
 class Policy:
-    quotabot_url: str = "http://127.0.0.1:8721"
-    snapshot_ttl_seconds: float = 45.0
-    comfort_threshold: float = 15.0
-    metrics_path: Optional[str] = None
-    models: dict[str, list[Candidate]] = field(default_factory=dict)
-    agents: dict[str, AgentRule] = field(default_factory=dict)
+    default_quotabot_url = "http://127.0.0.1:8721"
+    default_snapshot_ttl_seconds = 45.0
+    default_comfort_threshold = 15.0
 
-    def __post_init__(self) -> None:
+    def __init__(
+        self,
+        quotabot_url: str = default_quotabot_url,
+        snapshot_ttl_seconds: float = default_snapshot_ttl_seconds,
+        comfort_threshold: float = default_comfort_threshold,
+        metrics_path: Optional[str] = None,
+        models: Optional[dict[str, list[Candidate]]] = None,
+        agents: Optional[dict[str, AgentRule]] = None,
+    ) -> None:
+        self.quotabot_url = quotabot_url
+        self.snapshot_ttl_seconds = snapshot_ttl_seconds
+        self.comfort_threshold = comfort_threshold
+        self.metrics_path = _safe_metrics_path(metrics_path)
+        self.models = models or {}
+        self.agents = agents or {}
+
         if not _is_loopback_url(self.quotabot_url):
-            self.quotabot_url = "http://127.0.0.1:8721"
+            self.quotabot_url = self.default_quotabot_url
         self.snapshot_ttl_seconds = max(1.0, min(float(self.snapshot_ttl_seconds), 3600.0))
         self.comfort_threshold = max(0.0, min(float(self.comfort_threshold), 100.0))
 
@@ -128,12 +174,12 @@ class Policy:
             for name, rule in (raw.get("agents") or {}).items()
         }
         return cls(
-            quotabot_url=raw.get("quotabot_url", cls.quotabot_url),
+            quotabot_url=raw.get("quotabot_url", cls.default_quotabot_url),
             snapshot_ttl_seconds=float(
-                raw.get("snapshot_ttl_seconds", cls.snapshot_ttl_seconds)
+                raw.get("snapshot_ttl_seconds", cls.default_snapshot_ttl_seconds)
             ),
             comfort_threshold=float(
-                raw.get("comfort_threshold", cls.comfort_threshold)
+                raw.get("comfort_threshold", cls.default_comfort_threshold)
             ),
             metrics_path=raw.get("metrics_path"),
             models=models,
@@ -186,7 +232,7 @@ class QuotabotRouter(CustomLogger):
                 data["model"] = chosen
         except Exception:
             # Fail soft: leave the request exactly as it was.
-            pass
+            return data
         return data
 
     async def _route(
@@ -227,17 +273,12 @@ class QuotabotRouter(CustomLogger):
     def _agent_id(data: dict, key: Any) -> Optional[str]:
         """Best-effort identity for per-agent rules.
 
-        Prefer LiteLLM key identity when present. Request metadata is
-        client-controlled in many proxy setups and is only a fallback for local
-        trusted clients that do not use key aliases.
+        Only LiteLLM key identity is trusted for per-agent rules. Request
+        metadata is client-controlled in many proxy setups, so it cannot select
+        pinned or redirected deployments.
         """
         for attr in ("key_alias", "user_id"):
             value = getattr(key, attr, None)
-            if isinstance(value, str) and value:
-                return value
-        meta = data.get("metadata") or {}
-        for field_name in ("agent", "agent_id", "user"):
-            value = meta.get(field_name)
             if isinstance(value, str) and value:
                 return value
         return None
@@ -263,9 +304,9 @@ class QuotabotRouter(CustomLogger):
             return None
         url = self.policy.quotabot_url.rstrip("/") + "/suggest"
         try:
-            with urllib.request.urlopen(url, timeout=2) as resp:  # noqa: S310 (local only)
+            with _NO_REDIRECT_OPENER.open(url, timeout=2) as resp:  # noqa: S310 (local only)
                 return json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, OSError, ValueError):
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError):
             return None
 
     # -- metrics ------------------------------------------------------------
@@ -288,10 +329,12 @@ class QuotabotRouter(CustomLogger):
             }
             await asyncio.to_thread(self._append_metric, record)
         except Exception:
-            pass
+            return
 
     def _append_metric(self, record: dict) -> None:
-        path = _expand(self.policy.metrics_path)  # type: ignore[arg-type]
+        if not self.policy.metrics_path:
+            return
+        path = Path(self.policy.metrics_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")

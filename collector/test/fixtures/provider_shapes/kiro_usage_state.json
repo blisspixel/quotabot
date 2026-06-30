@@ -1,0 +1,11 @@
+{
+  "usageBreakdowns": [
+    {
+      "currentUsage": 8200,
+      "usageLimit": 10000,
+      "percentageUsed": 82,
+      "resetDate": "2026-07-01T00:00:00Z",
+      "displayName": "Credits"
+    }
+  ]
+}

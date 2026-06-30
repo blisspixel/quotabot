@@ -28,10 +28,19 @@ details and prerequisites: [docs/BUILDING.md](docs/BUILDING.md).
 Pick whichever transport you already speak. All return the same data.
 
 - **MCP (preferred for agents).** Point an MCP client at `dart run
-  bin/mcp_server.dart` (or a compiled `quotabot-mcp`). Tools:
+  bin/mcp_server.dart` (or a compiled `quotabot-mcp`) for stdio. For clients
+  that need MCP Streamable HTTP, run `dart run bin/mcp_server.dart --http`
+  (loopback only, optional bearer token flags). Tools:
   - `list_quotas` - full normalized snapshot for every provider.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low.
+  - `decide_now` - the same routing decision from the cheapest cached snapshot,
+    with explicit `as_of`, age, and staleness so per-request routers do not force
+    live collection.
+  - `reserve_provider` - create a short local quota lease for a cloud provider
+    before dispatching parallel work, reducing later effective headroom.
+  - `release_provider` - idempotently release a local routing lease when the
+    caller finishes or abandons the dispatch.
   - `provider_with_most_headroom` - the account with the most remaining budget.
   - `check_provider_availability` - whether a named provider is usable now and
     when it resets.
@@ -43,7 +52,15 @@ Pick whichever transport you already speak. All return the same data.
     quotabot ever seeing the task.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): the cheapest model that meets it and has budget, local-first.
-  - Resource `quotas://current` - the same snapshot.
+  - Resource `quotas://current` - the same unfiltered live snapshot.
+  - Resource `quotas://alerts` - the last MCP quota alerts fired by the
+    subscription loop.
+  - All read/routing tools accept optional `profile` and exact `account` filters
+    to route inside a local named profile or one provider account; resources stay
+    unfiltered.
+  - MCP clients can subscribe to `quotas://alerts` or `quotas://current` with
+    standard `resources/subscribe`; alert crossings emit
+    `notifications/resources/updated` for `quotas://alerts`.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics.
@@ -92,15 +109,26 @@ left. The shapes:
 - `suggest` is `quotabot.suggest.v1`: `recommended`, `ranked`, `reason`, a
   guaranteed `fallback`, and `as_of`/`risk_z` provenance. Each candidate carries
   `headroom_percent`, `effective_headroom_percent` (headroom after discounting
-  recent burn), and, when estimable, `burn_se_percent_per_hour`,
-  `strand_probability` (0..1), and `confidence` (0..1). Rank on
-  `effective_headroom_percent`; treat low `confidence` or high `strand_probability`
-  with appropriate caution.
+  recent burn and active local leases), optional `lease_discount_percent`, and,
+  when estimable, `burn_se_percent_per_hour`, `strand_probability` (0..1), and
+  `confidence` (0..1). Rank on `effective_headroom_percent`; treat low
+  `confidence` or high `strand_probability` with appropriate caution.
+- `decide_now` is `quotabot.decision.v1`: a cache-only routing decision with
+  `source`, `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`, ranked
+  candidates, fallback, and active local leases. It never forces a live collect.
+- `reserve_provider` is `quotabot.reserve.v1`: a local metadata write returning
+  `reserved`, `lease`, and the chosen candidate when a cloud provider can be
+  reserved. It does not call a model or contact the provider.
+- `release_provider` is `quotabot.release.v1`: an idempotent local release result
+  for a lease id.
 - `list_models` is `quotabot.models.v1`: every routable model with its gating
   provider's budget and capability hints.
 - `quotabot watch` emits `quotabot.alert.v1`: `provider`, `window`, `severity`
   (`amber`/`red`), `free_percent`, `as_of`, and, when a better option exists,
   `route_to` with `route_free_percent`/`route_is_local`. Metadata only.
+- `quotas://alerts` is `quotabot.alerts.v1`: `generated_at`, `last_alert_at`,
+  and the last fired `quotabot.alert.v1` objects. Subscribe to it to react to
+  amber/red crossings without polling.
 
 ## What quotabot does not do
 
@@ -109,5 +137,7 @@ left. The shapes:
 - It stays local: no account, no cloud, nothing leaves the machine.
 
 A turnkey example of routing a fleet through quotabot is the LiteLLM proxy plugin
-in [integrations/litellm/](integrations/litellm/); a minimal Dart example is in
-`collector/bin/example_routing_agent.dart`.
+in [integrations/litellm/](integrations/litellm/). Minimal clients are in
+`collector/bin/example_routing_agent.dart` for Dart and
+[integrations/mcp_clients/](integrations/mcp_clients/) for Python and
+TypeScript MCP transports.

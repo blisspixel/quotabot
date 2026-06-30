@@ -10,7 +10,11 @@ import 'util.dart';
 /// Successful provider reads are written here; when a later read fails or comes
 /// back empty (rate limit, expired token, logged-out account) the collector
 /// serves the cached snapshot marked stale instead of blanking the provider.
-Directory cacheDir() => quotabotDir('cache');
+Directory cacheDir() {
+  final dir = quotabotDir('cache');
+  restrictOwnerOnlyDirectory(dir);
+  return dir;
+}
 
 String _safeProviderStem(String provider) {
   final safe = provider.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
@@ -27,9 +31,13 @@ const _maxHistoryBytes = 5 * 1024 * 1024;
 /// app and the CLI can run at once) never sees a half-written file, and two
 /// concurrent writers do not share one temp path.
 void _atomicWrite(File f, String contents) {
+  restrictOwnerOnlyDirectory(f.parent);
   final tmp = File('${f.path}.$pid.tmp');
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictOwnerOnlyFile(tmp);
   tmp.writeAsStringSync(contents);
   tmp.renameSync(f.path);
+  restrictOwnerOnlyFile(f);
 }
 
 /// Deletes leftover atomic-write temp files (e.g. from a process killed between
@@ -71,7 +79,7 @@ void saveHistory(ProviderQuota q) {
         '${cacheDir().path}/history_${_safeProviderStem(q.provider)}.jsonl');
     final line = jsonEncode(q.toJson());
     if (!f.existsSync() || f.lengthSync() > _maxHistoryBytes) {
-      f.writeAsStringSync('$line\n');
+      _atomicWrite(f, '$line\n');
       return;
     }
     final lines = f.readAsLinesSync().where((l) => l.trim().isNotEmpty).toList()
@@ -88,6 +96,8 @@ void saveHistory(ProviderQuota q) {
 bool _hasAccount(String account) =>
     account.isNotEmpty && account != 'unknown' && account != 'default';
 
+const _accountScopedProviders = {'antigravity', 'grok'};
+
 /// Path of the per-account snapshot file for [provider]/[account], e.g.
 /// `antigravity_work_at_example.com.json`. One machine can hold several logins
 /// for a provider, so each account's last-known-good snapshot is cached apart.
@@ -95,11 +105,7 @@ File _accountedPath(String provider, String account) => File(
     '${cacheDir().path}/${_safeProviderStem(provider)}_${_safeProviderStem(account)}.json');
 
 File _accountedFile(ProviderQuota q) {
-  // Antigravity is the one provider that currently reads several accounts, so
-  // its snapshot is keyed per account. Other providers write the plain file
-  // until they gain multi-account reads; the keying itself is generic
-  // ([_accountedPath]) so opting a provider in is a one-line change.
-  if (q.provider == 'antigravity' && _hasAccount(q.account)) {
+  if (_accountScopedProviders.contains(q.provider) && _hasAccount(q.account)) {
     return _accountedPath(q.provider, q.account);
   }
   return _file(q.provider);
@@ -165,6 +171,52 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
   return results;
 }
 
+/// Loads every last-known provider snapshot in the cache directory without
+/// touching live providers. This is the cheap routing surface for per-request
+/// routers: it trades freshness for speed, and callers receive explicit age and
+/// stale metadata from the MCP layer.
+List<ProviderQuota> loadCachedSnapshots({int? now}) {
+  final dir = cacheDir();
+  if (!dir.existsSync()) return const [];
+  final byIdentity = <String, ProviderQuota>{};
+  final newestAllowedAsOf = (now ?? nowEpoch()) + 60;
+  try {
+    for (final entity in dir.listSync()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (!name.endsWith('.json') || name.startsWith('buckets_')) continue;
+      if (entity.lengthSync() > _maxJsonBytes) continue;
+      try {
+        final q = ProviderQuota.fromJson(
+          jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
+        );
+        if (q.asOf > newestAllowedAsOf) continue;
+        if (!_isCanonicalSnapshotFileName(name, q)) continue;
+        final key = '${q.provider}\u0000${q.account}';
+        final existing = byIdentity[key];
+        if (existing == null || q.asOf >= existing.asOf) {
+          byIdentity[key] = q;
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  final out = byIdentity.values.toList()
+    ..sort((a, b) {
+      final byProvider = a.provider.compareTo(b.provider);
+      return byProvider != 0 ? byProvider : a.account.compareTo(b.account);
+    });
+  return out;
+}
+
+bool _isCanonicalSnapshotFileName(String name, ProviderQuota quota) {
+  if (_accountScopedProviders.contains(quota.provider) &&
+      _hasAccount(quota.account)) {
+    return name ==
+        '${_safeProviderStem(quota.provider)}_${_safeProviderStem(quota.account)}.json';
+  }
+  return name == '${_safeProviderStem(quota.provider)}.json';
+}
+
 /// Antigravity's per-account snapshot, by account. Thin alias over the generic
 /// [loadAccountSnapshot]; kept for call-site clarity.
 ProviderQuota? loadAntigravitySnapshot(String account) =>
@@ -174,6 +226,31 @@ ProviderQuota? loadAntigravitySnapshot(String account) =>
 /// the generic [loadAccountSnapshots].
 List<ProviderQuota> loadAllAntigravitySnapshots() =>
     loadAccountSnapshots('antigravity');
+
+ProviderQuota? loadGrokSnapshot(String account) =>
+    loadAccountSnapshot('grok', account);
+
+List<ProviderQuota> loadAllGrokSnapshots() => loadAccountSnapshots('grok');
+
+/// Returns stale cache fallbacks only for accounts still present in the live
+/// account index and not already returned by the adapter. This is the
+/// signed-out auto-hide rule for multi-account providers.
+List<ProviderQuota> currentAccountFallbacks({
+  required Iterable<ProviderQuota> liveResults,
+  required Iterable<ProviderQuota> cachedSnapshots,
+  required Set<String> currentAccounts,
+}) {
+  final liveAccounts = {for (final q in liveResults) q.account};
+  final out = <ProviderQuota>[];
+  for (final cached in cachedSnapshots) {
+    if (cached.hasWindows &&
+        currentAccounts.contains(cached.account) &&
+        !liveAccounts.contains(cached.account)) {
+      out.add(cached.asStale(cached.error ?? 'cached account'));
+    }
+  }
+  return out;
+}
 
 // --- Long-term analytics buckets -------------------------------------------
 //

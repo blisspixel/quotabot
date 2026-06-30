@@ -1,0 +1,13 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "llama-3.2-3b-instruct",
+      "object": "model"
+    },
+    {
+      "id": "qwen2.5-coder-7b",
+      "object": "model"
+    }
+  ]
+}

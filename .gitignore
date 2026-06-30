@@ -33,6 +33,9 @@ release/
 __pycache__/
 *.py[cod]
 
+# JavaScript / TypeScript generated files
+node_modules/
+
 # Agent working journals (kept locally, not part of the public repo)
 PROGRESS-LOG.md
 CURRENT-STATE-ANALYSIS.md

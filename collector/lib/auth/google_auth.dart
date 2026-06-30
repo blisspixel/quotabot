@@ -14,6 +14,8 @@ class GoogleAuth {
   static const provider = 'antigravity';
   static const _authEndpoint = 'https://accounts.google.com/o/oauth2/v2/auth';
   static const _tokenEndpoint = 'https://oauth2.googleapis.com/token';
+  static const _userinfoEndpoint =
+      'https://www.googleapis.com/oauth2/v2/userinfo';
   static const _scope =
       'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email';
 
@@ -55,6 +57,7 @@ class GoogleAuth {
   /// exchanges the code for tokens. Saves and returns them.
   Future<Tokens> loginLoopback({
     required void Function(String url) showUrl,
+    String? account,
   }) async {
     if (clientId.isEmpty || clientSecret.isEmpty) {
       throw StateError(
@@ -96,7 +99,11 @@ class GoogleAuth {
     });
     if (json == null) throw StateError('token exchange failed');
     final tokens = Tokens.fromOAuth(json);
-    TokenStore.save(provider, tokens);
+    final resolvedAccount = account ??
+        (tokens.accessToken == null
+            ? null
+            : await emailForAccessToken(tokens.accessToken!));
+    _saveGrant(tokens, account: resolvedAccount);
     return tokens;
   }
 
@@ -113,15 +120,40 @@ class GoogleAuth {
 
   /// Fresh access token from quotabot's own grant, refreshing and persisting as
   /// needed. Null when there is no stored grant.
-  Future<String?> freshAccessToken() async {
-    final stored = TokenStore.load(provider);
+  Future<String?> freshAccessToken({String? account}) async {
+    final stored = TokenStore.load(provider, account: account);
     if (stored == null) return null;
     if (stored.isFresh) return stored.accessToken;
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
     if (refreshed?.accessToken == null) return null;
-    TokenStore.save(provider, refreshed!);
+    _saveGrant(refreshed!, account: account);
     return refreshed.accessToken;
+  }
+
+  static void _saveGrant(Tokens tokens, {String? account}) {
+    TokenStore.save(provider, tokens);
+    if (account != null) {
+      TokenStore.save(provider, tokens, account: account);
+    }
+  }
+
+  /// Returns the signed-in Google account email for an access token, or null
+  /// when Google does not return a plain email. Raw userinfo bodies are never
+  /// propagated into errors because they are account metadata.
+  Future<String?> emailForAccessToken(String accessToken) async {
+    try {
+      final resp = await _http.get(
+        Uri.parse(_userinfoEndpoint),
+        headers: {'Authorization': 'Bearer $accessToken'},
+      ).timeout(const Duration(seconds: 15));
+      if (resp.statusCode != 200) return null;
+      final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
+      final email = decoded['email'];
+      return email is String && email.isNotEmpty ? email : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> _post(Map<String, String> form) async {

@@ -4,14 +4,148 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.5.1 - 2026-06-30
+
+### Security
+- Completed a repository-wide adversarial security pass and fixed every
+  candidate it found. Cache-only routing now accepts only canonical snapshot
+  filenames with non-future timestamps, local cache directories are
+  owner-restricted, Windows SQLite loading no longer trusts `WINDIR`, Windows
+  ACL grants use the authenticated current-user SID, the LiteLLM router refuses
+  HTTP redirects from the loopback quotabot endpoint, LiteLLM agent rules only
+  trust key alias or user_id identity, LiteLLM metrics writes are contained
+  under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
+
 ### Changed
+- macOS/Linux desktop package verification now includes the required tracked
+  Flutter desktop scaffold files and Linux tray indicator development package,
+  so native CI package builds exercise the same release bundles users build.
+- The 1.0 roadmap final cut is now checked: every roadmap item is marked
+  complete, the Windows local gate is green, and GitHub Actions passed the full
+  suite plus macOS/Linux desktop package builds on native runners.
+- Windows setup now removes legacy `quotabot.ps1`, `quotabot.cmd`, and
+  `quotabot.bat` shims from the install directory before copying
+  `quotabot.exe`, so stale source-launcher shims cannot shadow the release CLI.
+- CI now verifies macOS and Linux desktop release bundle packaging on native
+  runners. `tools/package-macos.sh` and `tools/package-linux.sh` build and
+  validate the platform bundles, with optional local archives for release work.
+- Owner-only local file hardening is now shared across token storage and routing
+  lease metadata. Lease directories, lock files, and atomic write files are
+  restricted with the same best-effort permissions used for OAuth tokens.
+- Parser boundaries now reject non-finite numeric values and clamp direct
+  provider percentages to 0..100 before they can reach routing or UI code.
 - CI now runs the full suite on Linux, macOS, and Windows (a matrix of
   ubuntu-latest, macos-latest, and windows-latest), so the cross-platform paths
   are exercised on a real host of every claimed OS instead of assumed. The job
   uses bash on every runner (Git Bash on Windows) for consistent multi-line
-  steps, and Python is pinned for the coverage gate and the LiteLLM tests.
+  steps, and Python is pinned to 3.13 for the coverage gate and current
+  `litellm[proxy]` integration tests.
 
 ### Added
+- The README now has a reproducible animated demo GIF generated from Flutter
+  demo screenshot mode. `tools/generate_readme_demo.py` captures the expanded
+  widget, compact strip, 90-day analytics view, and demo `top` frame, refreshes
+  the static screenshot PNGs, and assembles `docs/quotabot-demo.gif`.
+- `quotabot.v1` is now frozen as an additive JSON Schema 2020-12 contract with a
+  focused validator and tests. Built-in providers are also listed in a
+  compile-time adapter registry, and every adapter now owns a required sanitized
+  provider-shape fixture.
+- MCP routing tools now accept exact `account` filters in addition to named
+  `profile` filters, so routers can query one provider account without creating
+  a profile. MCP also exposes `quotas://alerts` and standard
+  `resources/subscribe` support: the subscription loop runs the existing
+  edge-triggered alert engine and sends `notifications/resources/updated` when a
+  provider crosses amber or red.
+- MCP routing now has local concurrency leases and a cache-only decision path.
+  `reserve_provider` and `release_provider` let parallel routers reserve a
+  cloud provider/account locally before dispatch, and active leases reduce later
+  `effective_headroom_percent` through `lease_discount_percent`. `decide_now`
+  reads only the in-memory or disk last-known snapshot and reports source, age,
+  and staleness so per-request routers can make a cheap decision without forcing
+  live collection.
+- Python and TypeScript MCP client snippets now cover quotabot over both stdio
+  and Streamable HTTP. The snippets pin Python consumers to the stable MCP SDK
+  v1 line, use the current TypeScript SDK transport imports, keep bearer tokens
+  in headers only, print a compact routing decision, and are smoke-tested in CI
+  with Python compilation plus strict TypeScript typechecking against the MCP
+  TypeScript SDK.
+- The MCP server now supports opt-in Streamable HTTP alongside stdio:
+  `dart run bin/mcp_server.dart --http` serves the same nine tools and
+  `quotas://current`/`quotas://alerts` resources on a loopback-only `/mcp` endpoint with
+  DNS-rebinding host/origin checks, batch JSON-RPC rejection, optional bearer
+  token auth, and integration tests through the package's Streamable HTTP client.
+- A model-catalog audit tool now diffs the committed cloud catalog against
+  provider-owned model-list endpoints. `dart run bin/catalog_audit.dart --json`
+  emits `quotabot.catalog_audit.v1` with per-provider endpoint ids,
+  `missing_from_catalog`, and `catalog_only` sets for OpenAI/Codex,
+  Anthropic/Claude, xAI/Grok, and Gemini/Antigravity. It follows provider
+  pagination tokens, skips missing API keys without failing by default, redacts
+  query-string secrets, filters obvious non-language modalities, and leaves
+  context/tools/vision/reasoning/tier fields curated.
+- The LiteLLM router is now covered by a real proxy integration test. CI
+  installs `litellm[proxy]`, launches a LiteLLM proxy on loopback with the
+  actual quotabot `async_pre_call_hook`, serves a fake quotabot `/suggest`
+  endpoint and a fake OpenAI-compatible backend, and verifies that a logical
+  model is rewritten to the provider with budget. The test is token-free,
+  external-network-free, and catches current LiteLLM loader behavior.
+- Deterministic property/fuzz tests now cover the untrusted JSON, protobuf,
+  gRPC-web, embedded-token, and local-runtime parser boundaries. Sanitized
+  provider-shape fixtures for Codex, Claude, Antigravity, Cursor, Windsurf/Devin
+  Desktop, Kiro, Grok, LM Studio, and Ollama are loaded from disk as integration
+  fixtures.
+- CLI simulation mode for deterministic tests: `--mock-provider NAME --state
+  STATE` now returns a single synthetic provider snapshot without adapter calls,
+  history reads, or burn-history influence. Supported states are `healthy`,
+  `low`, `exhausted`, `blocked`, `signed-out`, and `stale`, with process-level
+  tests covering JSON snapshots, `check`, `suggest`, and usage errors.
+- The desktop app now has full profile controls: create, edit, delete, select,
+  provider/account filters, routing policy, theme, and profile-scoped hidden
+  providers plus sort. The widget, analytics, notifications, and alert webhooks
+  all follow the active profile.
+- MCP quota, routing, availability, and model tools now accept optional
+  `profile`, applying the same local named profile filters as the CLI while
+  preserving the unfiltered `quotas://current` resource.
+- CLI quota reads now accept `--profile=NAME`, applying local named profile
+  filters before status, JSON snapshots, suggestions, models, checks, stats,
+  watch alerts, or top render.
+- Named profile foundations now exist in the collector: `quotabot.profile.v1`
+  JSON storage, safe profile names, provider/account filters, routing policy
+  metadata, and an implicit zero-config default profile.
+- Windsurf/Devin Desktop now reads daily and weekly Cascade quota shapes from
+  local SQLite state, carries reset timestamps, surfaces account and plan labels
+  when present, and no longer invents a 0% quota from undecodable raw blobs.
+- Cursor now treats the current included-usage pool as a monthly quota window,
+  reads string or blob SQLite state rows, and surfaces account and plan labels
+  when local state provides them.
+- Multi-account cache fallback now uses a shared tested active-account rule: a
+  cached account is shown only while that account is still present in the
+  provider's current local account index.
+- The desktop widget now groups distinct account identities in the expanded
+  view, scopes expansion state by provider/account, automatically disambiguates
+  duplicate-provider cards, and keeps provider visibility menu rows unique when
+  several accounts exist for the same provider.
+- Antigravity now attempts a live read for every discovered active account from
+  its cross-platform profile scan, merging duplicate profile records and keeping
+  per-account cache fallback limited to accounts still present locally.
+- Grok now reads every account present in `~/.grok/auth.json`, tries an
+  account-scoped quotabot grant for each one, and caches successful reads per
+  account so switching accounts does not overwrite the previous account's
+  last-known-good quota.
+- Antigravity OAuth login now resolves the signed-in Google email from userinfo
+  after token exchange and stores the grant in the matching account-scoped slot
+  as well as the provider-default slot. Userinfo failures fail closed and keep
+  the default grant path.
+- Codex adapter edge-case tests now cover missing session directories, rollout
+  files with no `rate_limits`, stale snapshots whose file mtime is fresh, and
+  multi-bucket scans that must keep only the newest snapshot per limit bucket.
+- OAuth grants can now be stored in independent account-scoped slots as well as
+  the existing provider-default slot. The auth filenames contain only a provider
+  id plus a hash of the account id, never the raw email, and Grok/Antigravity now
+  prefer the account-scoped grant for the detected account before falling back to
+  the default grant or host-app token. This is foundation work for the Phase 2
+  multi-account edge cases; current zero-config behavior is unchanged.
 - `quotabot top` is now fully interactive: navigate the fleet with `j`/`k` or the
   arrow keys, hide a provider for the session with `x` (`h`) and bring them all
   back with `u`, and copy the recommended route to your clipboard with `c` (via

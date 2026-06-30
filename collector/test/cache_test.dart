@@ -19,6 +19,9 @@ void main() {
       'history_.._escape.jsonl',
       'buckets_.._escape.json',
       'antigravity_test-account.json',
+      'grok_test-account.json',
+      'rogue-cache-entry.json',
+      'claude_forged.json',
     ]) {
       final f = File('${cacheDir().path}/$name');
       if (f.existsSync()) f.deleteSync();
@@ -70,6 +73,75 @@ void main() {
     expect(loadSnapshot('__nope_does_not_exist__'), isNull);
   });
 
+  test('sweepStaleTempFiles deletes old atomic-write leftovers', () {
+    final stale = File('${cacheDir().path}/old-cache-write.tmp')
+      ..writeAsStringSync('stale');
+    final fresh = File('${cacheDir().path}/fresh-cache-write.tmp')
+      ..writeAsStringSync('fresh');
+    stale.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(minutes: 10)),
+    );
+    fresh.setLastModifiedSync(DateTime.now());
+    addTearDown(() {
+      if (stale.existsSync()) stale.deleteSync();
+      if (fresh.existsSync()) fresh.deleteSync();
+    });
+
+    sweepStaleTempFiles();
+
+    expect(stale.existsSync(), isFalse);
+    expect(fresh.existsSync(), isTrue);
+  });
+
+  test('loadCachedSnapshots scans last-known provider files only', () {
+    final q = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: '5h', usedPercent: 25)],
+    );
+    saveSnapshot(q);
+    recordHeadroomSample(id, 75, 1782000000);
+
+    final cached = loadCachedSnapshots()
+        .where((provider) => provider.provider == id)
+        .toList();
+    expect(cached, hasLength(1));
+    expect(cached.single.account, 'acct');
+    expect(cached.single.windows.single.usedPercent, 25);
+  });
+
+  test('loadCachedSnapshots rejects noncanonical and future cache entries', () {
+    final forged = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'forged',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 0)],
+    );
+    File('${cacheDir().path}/rogue-cache-entry.json')
+        .writeAsStringSync(jsonEncode(forged.toJson()));
+
+    final future = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782003601,
+      windows: [QuotaWindow(label: '5h', usedPercent: 1)],
+    );
+    File('${cacheDir().path}/$id.json')
+        .writeAsStringSync(jsonEncode(future.toJson()));
+
+    final cached = loadCachedSnapshots(now: 1782000000);
+    expect(
+      cached.any((provider) =>
+          provider.provider == 'claude' && provider.account == 'forged'),
+      isFalse,
+    );
+    expect(cached.any((provider) => provider.provider == id), isFalse);
+  });
+
   test('recordHeadroomSample accumulates into one hourly bucket', () {
     final now = 1782000000;
     recordHeadroomSample(id, 80, now);
@@ -91,6 +163,16 @@ void main() {
 
   test('loadBuckets returns empty for an unknown provider', () {
     expect(loadBuckets('__nope_does_not_exist__'), isEmpty);
+  });
+
+  test('recentBurnByProvider reads bucket stats by provider', () {
+    final now = 1782000000;
+    recordHeadroomSample(id, 80, now - 3600);
+    recordHeadroomSample(id, 70, now);
+
+    final stats = recentBurnStatsByProvider([id], now);
+    expect(stats[id], isNotNull);
+    expect(recentBurnByProvider([id], now)[id], stats[id]!.perHour);
   });
 
   test('provider cache filenames stay inside the cache directory', () {
@@ -131,6 +213,23 @@ void main() {
     );
   });
 
+  test('loadGrokSnapshot round-trips per account', () {
+    final q = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'test-account',
+      asOf: 1,
+      windows: [QuotaWindow(label: 'monthly', usedPercent: 44)],
+    );
+    saveSnapshot(q);
+    final back = loadGrokSnapshot('test-account');
+    expect(back, isNotNull);
+    expect(back!.account, 'test-account');
+    expect(back.windows.single.usedPercent, 44);
+    expect(
+        loadAllGrokSnapshots().map((s) => s.account), contains('test-account'));
+  });
+
   group('generic per-account snapshots', () {
     const ap = '__test_acct__';
 
@@ -167,6 +266,29 @@ void main() {
       writeAccount('home', 40);
       final all = loadAccountSnapshots(ap);
       expect(all.map((q) => q.account).toSet(), {'work', 'home'});
+    });
+
+    test('currentAccountFallbacks hides signed-out account caches', () {
+      final fallbacks = currentAccountFallbacks(
+        liveResults: [aq('work', 20)],
+        cachedSnapshots: [
+          aq('work', 25),
+          aq('home', 40),
+          aq('old', 60),
+          ProviderQuota(
+            provider: ap,
+            displayName: 'AcctTest',
+            account: 'empty',
+            asOf: 1782000000,
+            windows: const [],
+          ),
+        ],
+        currentAccounts: {'work', 'home'},
+      );
+
+      expect(fallbacks.map((q) => q.account).toList(), ['home']);
+      expect(fallbacks.single.stale, isTrue);
+      expect(fallbacks.single.error, 'cached account');
     });
   });
 }

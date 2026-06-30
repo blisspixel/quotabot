@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -54,7 +55,10 @@ void main() {
 
   group('TokenStore', () {
     const provider = '__test_auth__';
-    tearDown(() => TokenStore.clear(provider));
+    tearDown(() {
+      TokenStore.clear(provider);
+      TokenStore.clearAccounts(provider);
+    });
 
     test('save, load, exists, clear', () {
       expect(TokenStore.exists(provider), isFalse);
@@ -73,6 +77,61 @@ void main() {
       expect(() => TokenStore.exists('../escape'), throwsArgumentError);
       expect(() => TokenStore.clear('../escape'), throwsArgumentError);
       expect(() => TokenStore.load('../escape'), throwsArgumentError);
+    });
+
+    test('keeps account-scoped grants isolated from the default grant', () {
+      TokenStore.save(provider, Tokens(accessToken: 'default'));
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'work', refreshToken: 'rw'),
+        account: 'work@example.com',
+      );
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'home', refreshToken: 'rh'),
+        account: 'home@example.com',
+      );
+
+      expect(TokenStore.load(provider)!.accessToken, 'default');
+      expect(
+        TokenStore.load(provider, account: 'work@example.com')!.refreshToken,
+        'rw',
+      );
+      expect(
+        TokenStore.load(provider, account: 'home@example.com')!.refreshToken,
+        'rh',
+      );
+      expect(TokenStore.accounts(provider), [
+        'home@example.com',
+        'work@example.com',
+      ]);
+    });
+
+    test('does not put account names in auth filenames', () {
+      const account = 'private.person@example.com';
+      TokenStore.save(provider, Tokens(accessToken: 'a'), account: account);
+
+      final names = quotabotDir('auth')
+          .listSync()
+          .whereType<File>()
+          .map((f) => f.uri.pathSegments.last)
+          .where((name) => name.startsWith(provider))
+          .toList();
+
+      expect(names, isNotEmpty);
+      expect(names.any((name) => name.contains('private.person')), isFalse);
+      expect(TokenStore.exists(provider, account: account), isTrue);
+    });
+
+    test('rejects empty or control-character account ids', () {
+      expect(
+        () => TokenStore.save(provider, Tokens(accessToken: 'a'), account: ' '),
+        throwsArgumentError,
+      );
+      expect(
+        () => TokenStore.exists(provider, account: 'bad\nid'),
+        throwsArgumentError,
+      );
     });
   });
 
@@ -129,9 +188,93 @@ void main() {
       expect(t.refreshToken, 'R1');
     });
 
+    test('GoogleAuth.freshAccessToken returns a fresh account grant', () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.save(
+        provider,
+        Tokens(
+            accessToken: 'GA',
+            refreshToken: 'GR',
+            expiresAt: nowEpoch() + 3600),
+        account: account,
+      );
+      final auth = GoogleAuth(
+        client: MockClient((_) async => throw StateError('unexpected network')),
+      );
+
+      expect(await auth.freshAccessToken(account: account), 'GA');
+    });
+
+    test('GoogleAuth.freshAccessToken refreshes an account grant', () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'GR', expiresAt: 1),
+        account: account,
+      );
+      final auth = GoogleAuth(
+        client: MockClient((req) async {
+          expect(req.body, contains('refresh_token=GR'));
+          return http.Response(
+            jsonEncode({'access_token': 'fresh', 'expires_in': 3600}),
+            200,
+          );
+        }),
+      );
+
+      expect(await auth.freshAccessToken(account: account), 'fresh');
+      expect(TokenStore.load(provider)!.accessToken, 'fresh');
+      expect(
+        TokenStore.load(provider, account: account)!.accessToken,
+        'fresh',
+      );
+    });
+
     test('XaiAuth.refresh returns null on a non-200', () async {
       final mock = MockClient((req) async => http.Response('no', 400));
       expect(await XaiAuth(client: mock).refresh('R'), isNull);
+    });
+
+    test('XaiAuth.freshAccessToken refreshes the selected account grant',
+        () async {
+      const provider = XaiAuth.provider;
+      const account = 'work@example.com';
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'RW', expiresAt: 1),
+        account: account,
+      );
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+
+      final mock = MockClient((req) async {
+        expect(req.body, contains('refresh_token=RW'));
+        return http.Response(
+          jsonEncode({'access_token': 'fresh', 'expires_in': 21600}),
+          200,
+        );
+      });
+
+      expect(
+        await XaiAuth(client: mock).freshAccessToken(account: account),
+        'fresh',
+      );
+      expect(
+        TokenStore.load(provider, account: account)!.accessToken,
+        'fresh',
+      );
     });
   });
 
@@ -146,6 +289,36 @@ void main() {
       final g = GoogleAuth(clientId: 'X', clientSecret: 'Y');
       expect(g.clientId, 'X');
       expect(g.clientSecret, 'Y');
+    });
+
+    test('emailForAccessToken reads a plain userinfo email', () async {
+      final mock = MockClient((req) async {
+        expect(req.url.toString(), contains('/oauth2/v2/userinfo'));
+        expect(req.headers['Authorization'], 'Bearer GA');
+        return http.Response(jsonEncode({'email': 'work@example.com'}), 200);
+      });
+
+      expect(
+        await GoogleAuth(client: mock).emailForAccessToken('GA'),
+        'work@example.com',
+      );
+    });
+
+    test('emailForAccessToken fails closed on bad userinfo', () async {
+      final badStatus = GoogleAuth(
+        client: MockClient((_) async => http.Response('no', 401)),
+      );
+      expect(await badStatus.emailForAccessToken('GA'), isNull);
+
+      final badJson = GoogleAuth(
+        client: MockClient((_) async => http.Response('{', 200)),
+      );
+      expect(await badJson.emailForAccessToken('GA'), isNull);
+
+      final noEmail = GoogleAuth(
+        client: MockClient((_) async => http.Response('{}', 200)),
+      );
+      expect(await noEmail.emailForAccessToken('GA'), isNull);
     });
   });
 
@@ -190,5 +363,52 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    test('stores a successful device login under the id-token email', () async {
+      const provider = XaiAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      final idToken = _unsignedJwt({'email': account});
+      final mock = MockClient((req) async {
+        if (req.url.toString().contains('device/code')) {
+          return http.Response(
+            jsonEncode({
+              'device_code': 'DC',
+              'interval': 0,
+              'verification_uri_complete': 'https://x.ai/activate',
+              'user_code': 'ABCD',
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'access_token': 'AT',
+            'refresh_token': 'RT',
+            'expires_in': 21600,
+            'id_token': idToken,
+          }),
+          200,
+        );
+      });
+
+      await XaiAuth(client: mock).deviceLogin(prompt: (_, __) {});
+
+      expect(TokenStore.load(provider)!.refreshToken, 'RT');
+      expect(
+        TokenStore.load(provider, account: account)!.accessToken,
+        'AT',
+      );
+      expect(TokenStore.accounts(provider), contains(account));
+    });
   });
+}
+
+String _unsignedJwt(Map<String, dynamic> payload) {
+  String enc(Object value) =>
+      base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
+  return '${enc({})}.${enc(payload)}.sig';
 }

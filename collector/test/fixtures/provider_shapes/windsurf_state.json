@@ -1,0 +1,13 @@
+{
+  "quotaUsage": {
+    "daily": {
+      "used": 71,
+      "limit": 100,
+      "resetAt": 1782086400
+    },
+    "weekly": {
+      "remainingPercent": 44,
+      "resetAt": 1782432000
+    }
+  }
+}

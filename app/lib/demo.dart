@@ -71,6 +71,10 @@ List<ProviderQuota> demoData() => [
     _w('5h', 9, 9600),
     _w('weekly', 21, 469800),
   ]),
+  _p('antigravity', 'Antigravity', 'AI Pro', 'work@example.com', [
+    _w('5h', 34, 14400),
+    _w('weekly', 46, 381600),
+  ]),
   _p('grok', 'Grok', 'SuperGrok', 'you@example.com', [
     _w('monthly', 57, 712800),
   ]),

@@ -4,6 +4,12 @@ import 'models.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
 
+/// Returns the currently active reservation discount for a provider account.
+typedef LeaseDiscountProvider = double Function(
+    String provider, String account);
+
+double _noLeaseDiscount(String provider, String account) => 0;
+
 /// Remaining headroom for a provider as a percent (0..100), governed by its
 /// most constrained window. A window whose reset time has passed is treated as
 /// fresh. Returns null when the provider has no usable windows.
@@ -115,6 +121,11 @@ class RouteCandidate {
   /// history was available. Null when unknown; never set for local runtimes.
   final double? burnPerHour;
 
+  /// Temporary routing reservation discount applied to [effectiveHeadroom].
+  /// Reservations do not mutate provider data; they only nudge parallel callers
+  /// away from the same currently attractive account.
+  final double leaseDiscount;
+
   /// Standard error of [burnPerHour], when estimable. Null for local runtimes or
   /// when there were too few history points to estimate it.
   final double? burnSe;
@@ -145,6 +156,7 @@ class RouteCandidate {
     required this.resetsAt,
     required this.stale,
     required this.available,
+    this.leaseDiscount = 0,
     this.burnPerHour,
     this.burnSe,
     this.strandProbability,
@@ -158,6 +170,7 @@ class RouteCandidate {
         'local': isLocal,
         'headroom_percent': headroom,
         'effective_headroom_percent': effectiveHeadroom,
+        if (leaseDiscount > 0) 'lease_discount_percent': leaseDiscount,
         if (burnPerHour != null) 'burn_percent_per_hour': burnPerHour,
         if (burnSe != null) 'burn_se_percent_per_hour': burnSe,
         if (strandProbability != null) 'strand_probability': strandProbability,
@@ -286,9 +299,12 @@ RouteFallback _fallbackFor(
 String _burnNote(RouteCandidate c) {
   final h = c.headroom, e = c.effectiveHeadroom;
   if (h == null || e == null) return '';
-  if (c.burnPerHour == null || c.burnPerHour! <= 0) return '';
+  if ((c.burnPerHour == null || c.burnPerHour! <= 0) && c.leaseDiscount <= 0) {
+    return '';
+  }
   if (h - e < 1) return '';
-  return ', ~${e.round()}% after burn';
+  final cause = c.leaseDiscount > 0 ? 'burn/leases' : 'burn';
+  return ', ~${e.round()}% after $cause';
 }
 
 /// Headroom discounted by the expected burn over [leadHours] and, when [z] > 0
@@ -467,6 +483,7 @@ RouteSuggestion suggestRoute(
   double leadHours = 1.0,
   Map<String, BurnStat> burnStatsByProvider = const {},
   double riskZ = 0,
+  LeaseDiscountProvider leaseDiscountFor = _noLeaseDiscount,
 }) {
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
@@ -476,9 +493,15 @@ RouteSuggestion suggestRoute(
         q.isLocal ? null : (stat?.perHour ?? burnByProvider[q.provider]);
     final burnSe = stat?.sePerHour;
     final samples = stat?.samples ?? 0;
+    final leaseDiscount = q.isLocal
+        ? 0.0
+        : leaseDiscountFor(q.provider, q.account).clamp(0.0, 100.0).toDouble();
     final effective = headroom == null
         ? null
-        : riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ);
+        : (riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ) -
+                leaseDiscount)
+            .clamp(0.0, 100.0)
+            .toDouble();
     final strand = headroom == null
         ? null
         : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
@@ -496,6 +519,7 @@ RouteSuggestion suggestRoute(
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,
+      leaseDiscount: leaseDiscount,
     );
   }
 

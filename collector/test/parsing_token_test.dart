@@ -22,10 +22,9 @@ void main() {
       expect(w[1].usedPercent, 25);
     });
 
-    test('falls back to a raw placeholder window', () {
+    test('does not invent quota from an undecodable raw blob', () {
       final w = windsurfWindows({'raw': 'blob'}, now);
-      expect(w.single.label, 'quota');
-      expect(w.single.usedPercent, 0);
+      expect(w, isEmpty);
     });
 
     test('returns nothing for a non-map', () {

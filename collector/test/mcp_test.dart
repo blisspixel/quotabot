@@ -2,8 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
+import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/profiles.dart';
+import 'package:quotabot_collector/schema_contracts.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
@@ -25,6 +28,17 @@ ProviderQuota _q(
     );
 
 ProviderQuota _local(String id) => _q(id, const [], kind: 'local');
+
+ProviderQuota _accountQ(String id, String account, double usedPercent) =>
+    ProviderQuota(
+      provider: id,
+      displayName: id,
+      account: account,
+      asOf: _now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: usedPercent)],
+    );
+
+QuotaProfile? _noProfile(String name) => null;
 
 /// A snapshot exercising all builders: a healthy subscription, a nearly spent
 /// one, and a local runtime fallback.
@@ -81,6 +95,7 @@ void main() {
       final providers = snap['providers'] as List;
       expect(providers, hasLength(3));
       expect((providers.first as Map)['provider'], 'claude');
+      expect(validateQuotabotV1Snapshot(snap), isEmpty);
     });
 
     test('quotasSnapshot of nothing is still a valid empty snapshot', () {
@@ -111,7 +126,7 @@ void main() {
     });
 
     test('availabilityResponse answers for a known provider', () {
-      final r = availabilityResponse(_fixture(), _now, 'CLAUDE');
+      final r = availabilityResponse(_fixture(), _now, 'CLAUDE', null);
       expect(r['provider'], 'claude');
       expect(r['available'], isTrue);
       expect(r['headroom_percent'], 80);
@@ -119,11 +134,11 @@ void main() {
 
     test('availabilityResponse flags an unknown provider', () {
       expect(
-        availabilityResponse(_fixture(), _now, 'nope')['error'],
+        availabilityResponse(_fixture(), _now, 'nope', null)['error'],
         'unknown provider',
       );
       expect(
-        availabilityResponse(_fixture(), _now, null)['error'],
+        availabilityResponse(_fixture(), _now, null, null)['error'],
         'unknown provider',
       );
     });
@@ -132,8 +147,16 @@ void main() {
   group('registered server (real round-trip)', () {
     late McpServer server;
     late McpClient client;
+    late QuotaResourceSubscriptionHub subscriptions;
 
-    Future<void> connect(List<ProviderQuota> snapshot) async {
+    Future<void> connect(
+      List<ProviderQuota> snapshot, {
+      SnapshotProvider? snapshotProvider,
+      ProfileLoader profileLoader = _noProfile,
+      CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
+      RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
+      bool enableSubscriptionTimers = false,
+    }) async {
       final serverT = _PairedTransport();
       final clientT = _PairedTransport();
       serverT.peer = clientT;
@@ -148,11 +171,15 @@ void main() {
           ),
         ),
       );
-      registerQuotabotTools(
+      subscriptions = registerQuotabotTools(
         server,
-        snapshot: () async => snapshot,
+        snapshot: snapshotProvider ?? () async => snapshot,
         burnByProvider: (providers, now) => const <String, BurnStat>{},
+        cachedSnapshot: cachedSnapshot,
+        leaseStore: leaseStore,
+        enableSubscriptionTimers: enableSubscriptionTimers,
         now: () => _now,
+        profileLoader: profileLoader,
         catalog: const {
           'claude': [
             ModelInfo(id: 'claude-test', contextTokens: 200000, tools: true),
@@ -180,11 +207,23 @@ void main() {
           'list_quotas',
           'provider_with_most_headroom',
           'suggest_provider',
+          'decide_now',
+          'reserve_provider',
+          'release_provider',
           'check_provider_availability',
         ]),
       );
       for (final t in tools.tools) {
-        expect(t.annotations?.readOnlyHint, isTrue, reason: t.name);
+        if (t.name == 'reserve_provider') {
+          expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
+          expect(t.annotations?.idempotentHint, isFalse, reason: t.name);
+        } else if (t.name == 'release_provider') {
+          expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
+          expect(t.annotations?.idempotentHint, isTrue, reason: t.name);
+        } else {
+          expect(t.annotations?.readOnlyHint, isTrue, reason: t.name);
+          expect(t.annotations?.idempotentHint, isTrue, reason: t.name);
+        }
         expect(t.outputSchema, isNotNull, reason: t.name);
       }
     });
@@ -256,12 +295,363 @@ void main() {
       expect(quotas.content, isNotEmpty);
     });
 
+    test('profile arguments filter tools without changing default calls',
+        () async {
+      await connect(
+        _fixture(),
+        profileLoader: (name) => name == 'local'
+            ? const QuotaProfile(
+                name: 'local',
+                routingPolicy: ProfileRoutingPolicy.localOnly,
+              )
+            : null,
+      );
+
+      final all = await client.callTool(
+        const CallToolRequest(name: 'list_quotas'),
+      );
+      expect(all.structuredContent?['profile'], isNull);
+      expect(all.structuredContent?['providers'] as List, hasLength(3));
+
+      final filtered = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {'profile': 'local'},
+        ),
+      );
+      expect(filtered.isError, isFalse);
+      expect(filtered.structuredContent?['profile'], 'local');
+      final providers = filtered.structuredContent?['providers'] as List;
+      expect(providers, hasLength(1));
+      expect((providers.single as Map)['provider'], 'ollama');
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'profile': 'local'},
+        ),
+      );
+      expect(suggestion.structuredContent?['profile'], 'local');
+      expect(suggestion.structuredContent?['using_local_fallback'], isTrue);
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+    });
+
+    test('account arguments scope routing queries after profile filtering',
+        () async {
+      await connect([
+        _accountQ('claude', 'work@example.com', 20),
+        _accountQ('codex', 'home@example.com', 10),
+      ]);
+
+      final quotas = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {'account': 'work@example.com'},
+        ),
+      );
+      expect(quotas.structuredContent?['account_filter'], 'work@example.com');
+      final providers = quotas.structuredContent?['providers'] as List;
+      expect(providers, hasLength(1));
+      expect((providers.single as Map)['provider'], 'claude');
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'account': 'home@example.com'},
+        ),
+      );
+      expect(
+          suggestion.structuredContent?['account_filter'], 'home@example.com');
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+
+      final missingAccount = await client.callTool(
+        const CallToolRequest(
+          name: 'check_provider_availability',
+          arguments: {
+            'provider': 'claude',
+            'account': 'home@example.com',
+          },
+        ),
+      );
+      expect(
+        missingAccount.structuredContent?['error'],
+        'unknown provider/account',
+      );
+    });
+
+    test('reserve_provider shifts later suggestions until release', () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 20),
+          ]),
+          _q('codex', [
+            QuotaWindow(label: 'weekly', usedPercent: 30),
+          ]),
+        ],
+        leaseStore: store,
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'provider': 'claude',
+            'weight_percent': 30,
+            'lease_seconds': 120,
+            'idempotency_key': 'retry-lease',
+          },
+        ),
+      );
+      expect(reserved.structuredContent?['reserved'], isTrue);
+      expect(reserved.structuredContent?['reused'], isFalse);
+      final lease = reserved.structuredContent?['lease'] as Map;
+      expect(lease['id'], 'lease-1');
+      expect(lease['provider'], 'claude');
+
+      final retry = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'provider': 'claude',
+            'weight_percent': 30,
+            'lease_seconds': 120,
+            'idempotency_key': 'retry-lease',
+          },
+        ),
+      );
+      expect(retry.structuredContent?['reused'], isTrue);
+      expect((retry.structuredContent?['lease'] as Map)['id'], 'lease-1');
+
+      final leasedSuggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+      expect(
+        (leasedSuggestion.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+      final active =
+          leasedSuggestion.structuredContent?['active_leases'] as List;
+      expect((active.single as Map)['discount_percent'], 30);
+
+      final released = await client.callTool(
+        const CallToolRequest(
+          name: 'release_provider',
+          arguments: {'lease_id': 'lease-1'},
+        ),
+      );
+      expect(released.structuredContent?['released'], isTrue);
+      expect(released.structuredContent?['active_leases'], isEmpty);
+
+      final clearSuggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+      expect(
+        (clearSuggestion.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+    });
+
+    test('reserve_provider reports profile and explicit target failures',
+        () async {
+      await connect(_fixture());
+
+      final missingProfile = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'profile': 'missing'},
+        ),
+      );
+      expect(missingProfile.structuredContent?['reserved'], isFalse);
+      expect(
+        missingProfile.structuredContent?['reason'],
+        'unknown profile: missing',
+      );
+
+      final missingTarget = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'claude', 'account': 'other'},
+        ),
+      );
+      expect(missingTarget.structuredContent?['reserved'], isFalse);
+      expect(
+        missingTarget.structuredContent?['reason'],
+        'requested provider/account unavailable',
+      );
+    });
+
+    test('reserve_provider refuses local and spent targets', () async {
+      await connect([
+        _local('ollama'),
+        _q('claude', [
+          QuotaWindow(label: 'weekly', usedPercent: 100),
+        ]),
+      ]);
+
+      final local = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'ollama'},
+        ),
+      );
+      expect(local.structuredContent?['reserved'], isFalse);
+      expect(
+        local.structuredContent?['reason'],
+        'local runtimes do not need quota leases',
+      );
+
+      final spent = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'claude'},
+        ),
+      );
+      expect(spent.structuredContent?['reserved'], isFalse);
+      expect(
+        spent.structuredContent?['reason'],
+        'claude has no effective headroom available',
+      );
+    });
+
+    test('release_provider handles a blank lease id without throwing',
+        () async {
+      await connect(_fixture());
+
+      final released = await client.callTool(
+        const CallToolRequest(
+          name: 'release_provider',
+          arguments: {'lease_id': '   '},
+        ),
+      );
+      expect(released.structuredContent?['released'], isFalse);
+      expect(released.structuredContent?['reason'], 'lease_id is required');
+    });
+
+    test('decide_now uses cached snapshot without live collection', () async {
+      var liveCalls = 0;
+      await connect(
+        const [],
+        snapshotProvider: () async {
+          liveCalls++;
+          throw StateError('live collection should not run');
+        },
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: _fixture(),
+          asOf: _now - 10,
+          source: 'disk',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'max_age_seconds': 60},
+        ),
+      );
+      expect(decision.structuredContent?['schema'], 'quotabot.decision.v1');
+      expect(decision.structuredContent?['source'], 'disk');
+      expect(decision.structuredContent?['snapshot_as_of'], _now - 10);
+      expect(decision.structuredContent?['snapshot_age_seconds'], 10);
+      expect(decision.structuredContent?['snapshot_stale'], isFalse);
+      expect(
+        (decision.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+      expect(liveCalls, 0);
+    });
+
+    test('resource subscriptions notify when a quota alert fires', () async {
+      var snapshotIndex = 0;
+      final snapshots = [
+        [
+          _accountQ('claude', 'work@example.com', 20),
+          _accountQ('codex', 'home@example.com', 30),
+        ],
+        [
+          _accountQ('claude', 'work@example.com', 95),
+          _accountQ('codex', 'home@example.com', 30),
+        ],
+      ];
+      await connect(
+        const [],
+        snapshotProvider: () async => snapshots[snapshotIndex],
+      );
+      final updated = <String>[];
+      client.setNotificationHandler<JsonRpcResourceUpdatedNotification>(
+        Method.notificationsResourcesUpdated,
+        (notification) async {
+          updated.add(notification.updatedParams.uri);
+        },
+        (params, meta) => JsonRpcResourceUpdatedNotification.fromJson({
+          'params': {
+            ...?params,
+            if (meta != null) '_meta': meta,
+          },
+        }),
+      );
+
+      await client.subscribeResource(
+        const SubscribeRequest(uri: 'quotas://alerts'),
+      );
+      await subscriptions.pollOnce();
+      expect(updated, isEmpty);
+
+      snapshotIndex = 1;
+      await subscriptions.pollOnce();
+      expect(updated, ['quotas://alerts']);
+
+      final alerts = await client.readResource(
+        const ReadResourceRequest(uri: 'quotas://alerts'),
+      );
+      final alertJson = jsonDecode(
+        (alerts.contents.first as TextResourceContents).text,
+      ) as Map<String, dynamic>;
+      final fired = alertJson['alerts'] as List;
+      expect(fired, hasLength(1));
+      expect((fired.single as Map)['provider'], 'claude');
+      expect((fired.single as Map)['severity'], 'red');
+
+      await client.unsubscribeResource(
+        const UnsubscribeRequest(uri: 'quotas://alerts'),
+      );
+      await subscriptions.pollOnce();
+      expect(updated, ['quotas://alerts']);
+    });
+
+    test('missing profile returns a structured error', () async {
+      await connect(_fixture());
+
+      final quotas = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {'profile': 'missing'},
+        ),
+      );
+
+      expect(quotas.isError, isFalse);
+      expect(quotas.structuredContent?['profile'], 'missing');
+      expect(quotas.structuredContent?['error'], 'unknown profile: missing');
+      expect(quotas.structuredContent?['providers'], isEmpty);
+    });
+
     test('the no-data snapshot still validates against every schema', () async {
       await connect(const []);
       for (final name in [
         'list_quotas',
         'provider_with_most_headroom',
         'suggest_provider',
+        'decide_now',
       ]) {
         final r = await client.callTool(CallToolRequest(name: name));
         expect(r.isError, isFalse, reason: name);
@@ -278,6 +668,15 @@ void main() {
       final decoded = jsonDecode(text) as Map<String, dynamic>;
       expect(decoded['schema'], 'quotabot.v1');
       expect((decoded['providers'] as List), hasLength(3));
+
+      final alerts = await client.readResource(
+        const ReadResourceRequest(uri: 'quotas://alerts'),
+      );
+      final alertJson = jsonDecode(
+        (alerts.contents.first as TextResourceContents).text,
+      ) as Map<String, dynamic>;
+      expect(alertJson['schema'], 'quotabot.alerts.v1');
+      expect(alertJson['alerts'], isEmpty);
     });
   });
 }

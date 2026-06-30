@@ -14,10 +14,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   each; expand to restore the full view.
 - **Menu:** hide or show individual providers, set the refresh cadence (smart,
   every 15 minutes, or every hour), choose the icon sort (default, alphabetical,
-  most available, most used), and toggle always-on-top, taskbar visibility,
-  notifications, and "Show account names". Account names auto-hide for
-  single-account providers and show only when a provider has more than one
-  account on screen.
+  most available, most used), choose or manage a named profile, and toggle
+  always-on-top, taskbar visibility, notifications, and "Show account names".
+  Account names auto-hide for single-account providers and show only when a
+  provider has more than one account on screen.
 - **Smart schedule:** refreshes more often as a reset nears or a cap fills, and
   relaxes to as little as twice a day when everything is healthy.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
@@ -28,7 +28,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 - **Insights panel:** tap a card to expand a headroom sparkline, the p10/p50/p90
   distribution, how often it is usable, any trend, and the tightest hour of day.
 - Your hidden providers, compact/expanded state, cadence, always-on-top, taskbar,
-  notifications, account-names, and window position persist across restarts.
+  notifications, account-names, active profile, and window position persist
+  across restarts. Non-default profiles keep their own hidden-provider, sort,
+  and theme preferences.
 
 The header shows a radial "pool gauge" next to the "Quota" wordmark: it fills to
 the average remaining headroom across visible providers, colored green (>=50%
@@ -81,6 +83,25 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `help`, `version`      | Usage and version.                                    |
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
+The frozen `quotabot.v1` contract is documented in [SCHEMA.md](SCHEMA.md).
+
+### Deterministic simulation
+
+For tests and reproducible integration checks, every quota-reading CLI command
+can use one synthetic provider snapshot instead of real adapters:
+
+```bash
+quotabot --json --mock-provider claude --state exhausted
+quotabot check claude --json --mock-provider=claude --state=blocked
+quotabot suggest --json --mock-provider claude --state healthy
+```
+
+Supported states are `healthy`, `low`, `exhausted`, `blocked`, `signed-out`, and
+`stale`. `blocked` is specifically for the binding-window rule: the short window
+looks healthy, but the longer window is spent, so the provider is unavailable.
+Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
+state for assertions, skips live adapter calls, ignores real burn history, and
+does not read analytics buckets.
 
 ### Live view (`quotabot top`)
 
@@ -132,6 +153,22 @@ Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
 `--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]`, each a 6-digit hex color from
 most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`. Palettes
 apply on truecolor terminals; elsewhere the standard headroom colors are used.
+
+## Named profiles
+
+CLI quota-reading commands accept `--profile=NAME` to view and route within an
+existing local profile. The profile filters the already-normalized snapshot by
+provider, account, hidden providers, and routing policy before status, JSON,
+`suggest`, `models`, `check`, `stats`, `watch`, or `top` render anything. The
+implicit `default` profile keeps the zero-config fleet unchanged.
+
+The desktop widget can create, edit, delete, and select the same profiles from
+its menu. A profile can choose providers, specific accounts where quotabot has
+account evidence, routing policy, and theme. Profile selection changes the
+displayed providers, low-quota notifications, webhook alerts, and analytics
+view. Hiding providers and choosing sort order are scoped to the active
+non-default profile; the default profile keeps the app's legacy global
+preferences.
 
 ## Proactive alerts (quotabot watch)
 
@@ -185,6 +222,19 @@ never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 
+For catalog maintenance, run the audit tool from the collector package:
+
+```bash
+cd collector
+dart run bin/catalog_audit.dart --json
+```
+
+It calls provider-owned model-list endpoints only when the matching API key is in
+the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, or
+`GEMINI_API_KEY` / `GOOGLE_API_KEY`) and otherwise marks that provider skipped.
+The output is a diff of model ids only; capability fields stay curated. Add
+`--fail-on-drift` or `--fail-on-error` when using it as a maintenance CI gate.
+
 `quotabot calibration` grades quotabot's own strand predictions against your
 recorded history and reports how often they come true, as a calibration
 percentage, a Brier score, and a reliability diagram. It fills in over time, once
@@ -203,26 +253,75 @@ budget, local-first. The MCP `suggest_model` tool does the same for agents.
 ## Routing over MCP
 
 The collector runs as an MCP server so agents can query quota as a primitive. It
-speaks MCP over stdio and exposes five tools plus a resource:
+speaks MCP over stdio by default, can opt into MCP Streamable HTTP on loopback,
+and exposes nine tools plus two resources:
 
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.
 - `suggest_provider` - the provider to route the next request to, with ranked
   alternatives and a local fallback when subscriptions are low.
+- `decide_now` - the same routing decision from the cheapest cached snapshot,
+  with explicit snapshot source, age, and staleness. It never forces a live
+  collect.
+- `reserve_provider` - create a short local quota lease for a cloud provider
+  before dispatching parallel work, reducing later effective headroom.
+- `release_provider` - idempotently release a local routing lease when the
+  caller finishes or abandons the dispatch.
 - `check_provider_availability` - whether a named provider is usable now.
 - `list_models` - every model you can route to now (cloud + local), each with its
   gating provider's live budget and capability hints.
-- Resource `quotas://current` - the same snapshot.
+- `suggest_model` - one concrete model that meets the supplied capability filter
+  and has budget.
+- Resource `quotas://current` - the same unfiltered live snapshot.
+- Resource `quotas://alerts` - the last MCP quota alerts fired by the
+  subscription loop.
 
-Run it with `dart run bin/mcp_server.dart`, or compile a binary:
+Read and routing tools accept an optional `profile` argument to filter the
+snapshot through a local named profile before routing or model selection, and an
+optional exact `account` argument to route inside one account after profile
+filtering. Missing profiles fail soft: the tool returns a structured `error`
+field with an empty provider list instead of throwing. Resources remain
+unfiltered snapshots for clients that only consume MCP resources.
+
+`suggest_provider` and `decide_now` include active local leases in the response
+and expose each candidate's `lease_discount_percent` when a concurrent caller has
+reserved the same provider/account. `reserve_provider` and `release_provider`
+write only local metadata under quotabot's application-data directory. They do
+not contact a model provider, read prompts, or enter the request data path.
+
+MCP clients can subscribe to `quotas://alerts` with standard
+`resources/subscribe`. The server runs the same edge-triggered alert scan as
+`quotabot watch`; when a provider crosses amber or red, it sends
+`notifications/resources/updated` for `quotas://alerts`, and the client can read
+that resource to get `quotabot.alerts.v1` with the fired `quotabot.alert.v1`
+metadata. Subscribing to `quotas://current` sends resource-updated notifications
+after live subscription-loop reads.
+
+Run stdio with `dart run bin/mcp_server.dart`, or compile a binary:
 
 ```bash
 cd collector
 dart compile exe bin/mcp_server.dart -o build/quotabot-mcp.exe
 ```
 
+Run MCP Streamable HTTP only when a client cannot use stdio:
+
+```bash
+cd collector
+dart run bin/mcp_server.dart --http --port 8722 --path /mcp
+```
+
+The HTTP transport binds only to `localhost`, `127.0.0.1`, or `::1`, enables
+DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and uses the
+same tool/resource factory as stdio. Add `--token-file PATH`, `--token-env NAME`,
+or `--token TOKEN` to require `Authorization: Bearer ...`; prefer a local
+owner-only token file for normal use. The endpoint is MCP Streamable HTTP, not
+the plain JSON endpoint below.
+
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
-and `collector/bin/example_routing_agent.dart` for a runnable example.
+`collector/bin/example_routing_agent.dart` for a Dart routing example, and
+[../integrations/mcp_clients/](../integrations/mcp_clients/) for Python and
+TypeScript MCP client snippets covering stdio and Streamable HTTP.
 
 ## Local HTTP endpoint
 

@@ -1,0 +1,466 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:quotabot_collector/adapters/antigravity.dart';
+import 'package:quotabot_collector/auth/google_auth.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
+import 'package:quotabot_collector/sqlite_loader.dart';
+import 'package:quotabot_collector/util.dart';
+import 'package:sqlite3/sqlite3.dart';
+import 'package:test/test.dart';
+
+void main() {
+  late Directory temp;
+
+  setUp(() {
+    temp = Directory.systemTemp.createTempSync('quotabot_antigravity_adapter_');
+  });
+
+  tearDown(() {
+    if (temp.existsSync()) temp.deleteSync(recursive: true);
+  });
+
+  AntigravityAccountCandidate candidate(
+    String account, {
+    String? plan,
+    String? ideAccessToken,
+    bool useCliToken = false,
+  }) =>
+      (
+        account: account,
+        plan: plan,
+        ideAccessToken: ideAccessToken,
+        useCliToken: useCliToken,
+      );
+
+  File writeDb(String name, {String? email, String? token}) {
+    configureSqliteLibrary();
+    final file = File('${temp.path}/$name.vscdb');
+    final db = sqlite3.open(file.path);
+    try {
+      db.execute('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)');
+      if (email != null) {
+        db.execute(
+          'INSERT INTO ItemTable (key, value) VALUES (?, ?)',
+          [
+            'antigravityAuthStatus',
+            jsonEncode({'email': email}),
+          ],
+        );
+      }
+      if (token != null) {
+        db.execute(
+          'INSERT INTO ItemTable (key, value) VALUES (?, ?)',
+          [
+            'antigravityUnifiedStateSync.oauthToken',
+            base64Encode(utf8.encode('wrapped $token')),
+          ],
+        );
+      }
+    } finally {
+      db.dispose();
+    }
+    return file;
+  }
+
+  String tokenSuffix(String char) => List.filled(31, char).join();
+
+  Map<String, dynamic> load({
+    String? project,
+    String? email,
+    String tierId = 'PRO',
+    String tierName = 'AI Pro',
+  }) =>
+      {
+        if (project != null) 'cloudaicompanionProject': {'id': project},
+        if (email != null) 'userEmail': email,
+        'allowedTiers': [
+          {'id': tierId, 'isDefault': true}
+        ],
+        'currentTier': {'id': tierId, 'name': tierName},
+      };
+
+  Map<String, dynamic> models(double remainingFraction) => {
+        'models': {
+          'gemini': {
+            'quotaInfo': {
+              'remainingFraction': remainingFraction,
+              'resetTime': DateTime.now()
+                  .add(const Duration(hours: 2))
+                  .toUtc()
+                  .toIso8601String(),
+            }
+          }
+        }
+      };
+
+  test('collectAccounts reads every active account in order', () async {
+    final tokenCalls = <String>[];
+    final loadTokens = <String>[];
+    final onboardCalls = <String>[];
+    final fetchCalls = <String>[];
+
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('a@example.com'),
+        candidate('b@example.com', ideAccessToken: 'ide-b'),
+        candidate('c@example.com', ideAccessToken: 'ide-c'),
+      ],
+      tokenResolver: (account, allowDefault) async {
+        tokenCalls.add('$account:$allowDefault');
+        if (account == 'b@example.com') return 'grant-b';
+        return allowDefault ? 'default-token' : null;
+      },
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (access) async {
+        loadTokens.add(access);
+        return load(project: 'load-$access');
+      },
+      onboardUser: (access, tier) async {
+        onboardCalls.add('$access:$tier');
+        return 'onboard-$access';
+      },
+      fetchModels: (access, project) async {
+        fetchCalls.add('$access:$project');
+        return models(access == 'ide-c' ? 0.25 : 0.75);
+      },
+    ).collectAccounts();
+
+    expect(q.map((p) => p.account).toList(), [
+      'a@example.com',
+      'b@example.com',
+      'c@example.com',
+    ]);
+    expect(q.map((p) => p.windows.single.usedPercent).toList(), [25, 25, 75]);
+    expect(tokenCalls, [
+      'a@example.com:true',
+      'b@example.com:false',
+      'c@example.com:false',
+    ]);
+    expect(loadTokens, ['default-token', 'grant-b', 'ide-c']);
+    expect(onboardCalls, [
+      'default-token:PRO',
+      'grant-b:PRO',
+      'ide-c:PRO',
+    ]);
+    expect(fetchCalls, [
+      'default-token:onboard-default-token',
+      'grant-b:onboard-grant-b',
+      'ide-c:onboard-ide-c',
+    ]);
+  });
+
+  test('currentAccounts default scan is fail-soft', () {
+    expect(AntigravityAdapter.currentAccounts, isA<Set<String>>());
+  });
+
+  test('stored Antigravity grants are resolved by account and default scope',
+      () async {
+    TokenStore.clear(GoogleAuth.provider);
+    TokenStore.clearAccounts(GoogleAuth.provider);
+    addTearDown(() {
+      TokenStore.clear(GoogleAuth.provider);
+      TokenStore.clearAccounts(GoogleAuth.provider);
+    });
+    final expiry = nowEpoch() + 3600;
+    TokenStore.save(
+      GoogleAuth.provider,
+      Tokens(accessToken: 'default-token', expiresAt: expiry),
+    );
+    TokenStore.save(
+      GoogleAuth.provider,
+      Tokens(accessToken: 'work-token', expiresAt: expiry),
+      account: 'work-grant@example.com',
+    );
+    final loaded = <String>[];
+
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('primary-grant@example.com'),
+        candidate('work-grant@example.com'),
+        candidate('missing-grant@example.com'),
+      ],
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (access) async {
+        loaded.add(access);
+        return load();
+      },
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.7),
+    ).collectAccounts();
+
+    expect(loaded, ['default-token', 'work-token']);
+    expect(q.last.account, 'missing-grant@example.com');
+    expect(q.last.error, contains('quotabot login antigravity'));
+  });
+
+  test('discovers active CLI and every profile database account', () async {
+    final workDb = writeDb(
+      'work',
+      email: 'work@example.com',
+      token: 'ya29.${tokenSuffix('A')}',
+    );
+    final homeDb = writeDb(
+      'home',
+      email: 'home@example.com',
+      token: 'ya29.${tokenSuffix('B')}',
+    );
+    final tokenCalls = <String>[];
+
+    final q = await AntigravityAdapter(
+      dbPathSource: () => [workDb.path, homeDb.path],
+      activeAccountSource: () => 'active@example.com',
+      hasGeminiCreds: () => false,
+      tokenResolver: (account, allowDefault) async {
+        tokenCalls.add('$account:$allowDefault');
+        return 'grant-$account';
+      },
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.7),
+    ).collectAccounts();
+
+    expect(q.map((p) => p.account).toList(), [
+      'active@example.com',
+      'work@example.com',
+      'home@example.com',
+    ]);
+    expect(tokenCalls, [
+      'active@example.com:true',
+      'work@example.com:false',
+      'home@example.com:false',
+    ]);
+  });
+
+  test('discovery keeps a default database account when no email exists',
+      () async {
+    final db = writeDb('default', token: 'ya29.${tokenSuffix('C')}');
+
+    final q = await AntigravityAdapter(
+      dbPathSource: () => [db.path],
+      activeAccountSource: () => null,
+      hasGeminiCreds: () => false,
+      tokenResolver: (_, __) async => null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(email: 'from-db-token@example.com'),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.65),
+    ).collectAccounts();
+
+    expect(q.single.account, 'from-db-token@example.com');
+    expect(q.single.windows.single.usedPercent, closeTo(35, 0.001));
+  });
+
+  test('discovery falls back to a default CLI account with only credentials',
+      () async {
+    final q = await AntigravityAdapter(
+      dbPathSource: () => const [],
+      activeAccountSource: () => null,
+      hasGeminiCreds: () => true,
+      tokenResolver: (_, allowDefault) async =>
+          allowDefault ? 'default-grant' : null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(email: 'default@example.com'),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.55),
+    ).collectAccounts();
+
+    expect(q.single.account, 'default@example.com');
+    expect(q.single.windows.single.usedPercent, closeTo(45, 0.001));
+  });
+
+  test('default Cloud Code flow posts load, onboard, and model requests',
+      () async {
+    final methods = <String>[];
+    final projects = <String?>[];
+    final client = MockClient((req) async {
+      expect(req.headers['Authorization'], 'Bearer api-token');
+      expect(req.headers['Content-Type'], 'application/json');
+      expect(req.headers['User-Agent'], 'antigravity');
+      final method = req.url.toString().split(':').last;
+      methods.add(method);
+      final body = jsonDecode(req.body) as Map<String, dynamic>;
+      switch (method) {
+        case 'loadCodeAssist':
+          expect(body['metadata'], isA<Map>());
+          return http.Response(jsonEncode(load()), 200);
+        case 'onboardUser':
+          expect(body['tierId'], 'PRO');
+          return http.Response(
+            jsonEncode({
+              'done': true,
+              'response': {
+                'cloudaicompanionProject': {'id': 'project-api'}
+              }
+            }),
+            200,
+          );
+        case 'fetchAvailableModels':
+          projects.add(body['project']?.toString());
+          return http.Response(jsonEncode(models(0.4)), 200);
+      }
+      return http.Response('bad method', 404);
+    });
+
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('api@example.com')],
+      tokenResolver: (_, __) async => 'api-token',
+      emailResolver: (_, __, ___) async => null,
+      client: client,
+    ).collectAccounts();
+
+    expect(methods, ['loadCodeAssist', 'onboardUser', 'fetchAvailableModels']);
+    expect(projects, ['project-api']);
+    expect(q.single.windows.single.usedPercent, 60);
+  });
+
+  test('onboarding picks the first tier when none is marked default', () async {
+    final tiers = <String?>[];
+
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('tier@example.com')],
+      tokenResolver: (_, __) async => 'tier-token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => {
+        'allowedTiers': [
+          {'id': 'FIRST'}
+        ],
+        'currentTier': {'id': 'CURRENT', 'name': 'AI Pro'},
+      },
+      onboardUser: (_, tier) async {
+        tiers.add(tier);
+        return 'project';
+      },
+      fetchModels: (_, __) async => models(0.8),
+    ).collectAccounts();
+
+    expect(tiers, ['FIRST']);
+    expect(q.single.windows.single.usedPercent, closeTo(20, 0.001));
+  });
+
+  test('default Cloud Code flow fails soft on non-200 load', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('api-fail@example.com')],
+      tokenResolver: (_, __) async => 'api-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient((_) async => http.Response('denied', 403)),
+    ).collectAccounts();
+
+    expect(q.single.account, 'api-fail@example.com');
+    expect(q.single.ok, isTrue);
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, contains('quotabot login antigravity'));
+  });
+
+  test('connected account with no model quota gets an honest note', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('empty-models@example.com')],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => {'models': {}},
+    ).collectAccounts();
+
+    expect(q.single.ok, isTrue);
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error,
+        'connected; Antigravity is not returning live quota here yet');
+  });
+
+  test('collect returns the first account snapshot', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('primary@example.com', ideAccessToken: 'token-primary'),
+        candidate('other@example.com', ideAccessToken: 'token-other'),
+      ],
+      tokenResolver: (_, __) async => null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.9),
+    ).collect();
+
+    expect(q.account, 'primary@example.com');
+    expect(q.windows.single.usedPercent, closeTo(10, 0.001));
+  });
+
+  test('account failures do not hide later account snapshots', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('signed-out@example.com'),
+        candidate('live@example.com', ideAccessToken: 'live-token'),
+      ],
+      tokenResolver: (_, __) async => null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (access) async => access == 'live-token' ? load() : null,
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.6),
+    ).collectAccounts();
+
+    expect(q, hasLength(2));
+    expect(q.first.account, 'signed-out@example.com');
+    expect(q.first.ok, isTrue);
+    expect(q.first.windows, isEmpty);
+    expect(q.first.error, contains('quotabot login antigravity'));
+    expect(q.last.account, 'live@example.com');
+    expect(q.last.windows.single.usedPercent, 40);
+  });
+
+  test('duplicate account candidates are merged without duplicate cards',
+      () async {
+    final loaded = <String>[];
+
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('dup@example.com', plan: 'Pro'),
+        candidate('dup@example.com', ideAccessToken: 'ide-token'),
+      ],
+      tokenResolver: (_, __) async => null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (access) async {
+        loaded.add(access);
+        return load();
+      },
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.5),
+    ).collectAccounts();
+
+    expect(q, hasLength(1));
+    expect(q.single.account, 'dup@example.com');
+    expect(q.single.plan, 'Pro');
+    expect(loaded, ['ide-token']);
+  });
+
+  test('load response can identify a default account', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('default', ideAccessToken: 'token'),
+      ],
+      tokenResolver: (_, __) async => null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(email: 'resolved@example.com'),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.8),
+    ).collectAccounts();
+
+    expect(q.single.account, 'resolved@example.com');
+  });
+
+  test('empty or throwing account sources fail softly', () async {
+    final empty = await AntigravityAdapter(
+      accountSource: () => const [],
+    ).collectAccounts();
+    expect(empty.single.ok, isFalse);
+    expect(empty.single.error, 'Antigravity not installed');
+
+    final thrown = await AntigravityAdapter(
+      accountSource: () => throw StateError('boom'),
+    ).collectAccounts();
+    expect(thrown.single.ok, isFalse);
+    expect(thrown.single.error, 'unable to read Antigravity state');
+  });
+}

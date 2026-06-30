@@ -23,6 +23,8 @@ import 'demo.dart';
 import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
+import 'profile_editor.dart';
+import 'profile_ui.dart';
 import 'termshot.dart';
 import 'typography.dart';
 
@@ -35,6 +37,7 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
 /// images stay pixel-faithful. Shots mode implies demo data; both are no-ops on a
 /// normal run.
 final bool _shotsMode = Platform.environment['QUOTABOT_SHOTS'] == '1';
+final bool _gifFramesMode = Platform.environment['QUOTABOT_GIF_FRAMES'] == '1';
 final bool _demoMode =
     _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
 
@@ -47,6 +50,11 @@ final GlobalKey _termShotKey = GlobalKey();
 /// Global text-scale, applied to every route (strip and analytics) via the
 /// MaterialApp builder. Driven by the TextSize preference.
 final ValueNotifier<double> textScale = ValueNotifier<double>(1.0);
+
+/// Driven by the active profile. The default profile follows the OS theme.
+final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier<ThemeMode>(
+  ThemeMode.system,
+);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -113,24 +121,27 @@ class QuotaBotApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system, // follow OS light/dark
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
-      builder: (context, child) => RepaintBoundary(
-        key: _shotBoundaryKey,
-        child: ValueListenableBuilder<double>(
-          valueListenable: textScale,
-          builder: (context, scale, _) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: TextScaler.linear(scale)),
-            child: child!,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeMode,
+      builder: (context, mode, _) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        themeMode: mode,
+        theme: _theme(Brightness.light),
+        darkTheme: _theme(Brightness.dark),
+        builder: (context, child) => RepaintBoundary(
+          key: _shotBoundaryKey,
+          child: ValueListenableBuilder<double>(
+            valueListenable: textScale,
+            builder: (context, scale, _) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
+              child: child!,
+            ),
           ),
         ),
+        home: Dashboard(prefs: prefs),
       ),
-      home: Dashboard(prefs: prefs),
     );
   }
 
@@ -175,6 +186,41 @@ TextTheme _tabularFigures(TextTheme t) {
   );
 }
 
+@visibleForTesting
+class ProviderDisplayGroup {
+  final String? account;
+  final List<ProviderQuota> quotas;
+
+  const ProviderDisplayGroup({required this.account, required this.quotas});
+}
+
+@visibleForTesting
+List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
+  final accounts = <String>{};
+  for (final q in data) {
+    if (quotaHasSpecificAccount(q)) accounts.add(q.account);
+  }
+  if (accounts.length < 2) {
+    return [ProviderDisplayGroup(account: null, quotas: List.of(data))];
+  }
+
+  final grouped = <String, List<ProviderQuota>>{};
+  final groupAccounts = <String, String?>{};
+  for (final q in data) {
+    final account = quotaHasSpecificAccount(q) ? q.account : null;
+    final key = account ?? '';
+    grouped.putIfAbsent(key, () => <ProviderQuota>[]).add(q);
+    groupAccounts.putIfAbsent(key, () => account);
+  }
+  return [
+    for (final entry in grouped.entries)
+      ProviderDisplayGroup(
+        account: groupAccounts[entry.key],
+        quotas: List.of(entry.value),
+      ),
+  ];
+}
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   const Dashboard({super.key, required this.prefs});
@@ -195,6 +241,10 @@ class _DashboardState extends State<Dashboard>
   late TextSize _textSize = widget.prefs.textSize;
   late String? _webhookUrl = widget.prefs.webhookUrl;
   late bool _webhookAllowExternal = widget.prefs.webhookAllowExternal;
+  late List<QuotaProfile> _profiles;
+  late QuotaProfile _activeProfile;
+  late Set<String> _defaultHidden;
+  late ProviderSort _defaultSort;
 
   /// Providers currently in a red alert state, so a steady spent window is
   /// alerted once on the crossing and re-armed only after it recovers. Mirrors
@@ -202,8 +252,8 @@ class _DashboardState extends State<Dashboard>
   Set<String> _armed = {};
   bool _isRefreshing = false;
   int _failStreak = 0; // consecutive refreshes with no live data at all
-  late final Set<String> _hidden = {...widget.prefs.hidden};
-  late ProviderSort _sort = widget.prefs.sort;
+  late Set<String> _hidden;
+  late ProviderSort _sort;
   Map<String, List<ProviderQuota>> _history = {};
   Map<String, Insights> _insights = {};
   Map<String, List<List<double?>>> _heatmaps = {};
@@ -219,8 +269,11 @@ class _DashboardState extends State<Dashboard>
   final GlobalKey _contentKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
 
+  List<ProviderQuota> get _profiledData =>
+      applyProfile(_data, profileWithoutUiPrefs(_activeProfile));
+
   List<ProviderQuota> get _visible =>
-      _data.where((q) => !_hidden.contains(q.provider)).toList();
+      _profiledData.where((q) => !_hidden.contains(q.provider)).toList();
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
@@ -254,9 +307,87 @@ class _DashboardState extends State<Dashboard>
     return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
   }
 
+  Map<String, int> _providerCounts(Iterable<ProviderQuota> data) {
+    final counts = <String, int>{};
+    for (final q in data) {
+      counts[q.provider] = (counts[q.provider] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  bool _shouldShowAccount(ProviderQuota q, Map<String, int> counts) =>
+      (_showAccounts || (counts[q.provider] ?? 0) > 1) &&
+      quotaHasSpecificAccount(q);
+
+  List<ProviderQuota> get _menuProviders {
+    final seen = <String>{};
+    final out = <ProviderQuota>[];
+    for (final q in _profiledData) {
+      if (seen.add(q.provider)) out.add(q);
+    }
+    return out;
+  }
+
+  List<QuotaProfile> _loadProfiles() {
+    final loaded = listProfiles();
+    return loaded.isEmpty ? [QuotaProfile.defaultProfile()] : loaded;
+  }
+
+  QuotaProfile _profileByName(String name) {
+    final normalized = normalizeProfileName(name) ?? defaultProfileName;
+    for (final profile in _profiles) {
+      if (profile.name == normalized) return profile;
+    }
+    return _profiles.firstWhere(
+      (profile) => profile.name == defaultProfileName,
+      orElse: QuotaProfile.defaultProfile,
+    );
+  }
+
+  void _applyProfileUiState(QuotaProfile profile) {
+    appThemeMode.value = switch (profile.theme) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+    if (profile.name == defaultProfileName) {
+      _hidden = {..._defaultHidden};
+      _sort = _defaultSort;
+      return;
+    }
+    _hidden = {...profile.hiddenProviders};
+    _sort = sortFromProfile(profile);
+  }
+
+  void _saveActiveProfileUiState() {
+    if (_activeProfile.name == defaultProfileName) {
+      _defaultHidden = {..._hidden};
+      _defaultSort = _sort;
+      return;
+    }
+    final updated = profileWithUiPrefs(
+      _activeProfile,
+      hiddenProviders: _hidden,
+      sort: _sort,
+    );
+    try {
+      saveProfile(updated);
+    } catch (_) {}
+    _activeProfile = updated;
+    _profiles = [
+      for (final profile in _profiles)
+        if (profile.name == updated.name) updated else profile,
+    ];
+  }
+
   @override
   void initState() {
     super.initState();
+    _defaultHidden = {...widget.prefs.hidden};
+    _defaultSort = widget.prefs.sort;
+    _profiles = _loadProfiles();
+    _activeProfile = _profileByName(widget.prefs.activeProfile);
+    _applyProfileUiState(_activeProfile);
     _windowPos = widget.prefs.windowX == null
         ? null
         : Offset(widget.prefs.windowX!, widget.prefs.windowY ?? 0);
@@ -291,6 +422,15 @@ class _DashboardState extends State<Dashboard>
     File('$dir/$filename').writeAsBytesSync(data.buffer.asUint8List());
   }
 
+  Future<void> _setShotCompact(bool value) async {
+    if (_compact != value) {
+      setState(() => _compact = value);
+      _applySize();
+    }
+    await Future.delayed(const Duration(milliseconds: 650));
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
   /// Loads demo data (via [_demoMode]), captures the widget then the analytics
   /// view, and exits. Reuses the real widgets so the README images stay faithful.
   Future<void> _exportShots() async {
@@ -298,15 +438,29 @@ class _DashboardState extends State<Dashboard>
     // out that plus the first real paint before the first capture.
     await Future.delayed(const Duration(seconds: 2));
     await WidgetsBinding.instance.endOfFrame;
+    await _setShotCompact(false);
     await _captureBoundary('screenshot-widget.png');
-    _showFleet();
+    if (_gifFramesMode) {
+      await _captureBoundary('demo-01-widget-expanded.png');
+      await _setShotCompact(true);
+      await _captureBoundary('demo-02-widget-collapsed.png');
+      await _setShotCompact(false);
+      await _captureBoundary('demo-03-widget-expanded.png');
+    }
+    _showFleet(initialRange: FleetRange.quarter);
     await Future.delayed(const Duration(milliseconds: 1400)); // route + charts
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-analytics.png');
+    if (_gifFramesMode) {
+      await _captureBoundary('demo-04-analytics-90d.png');
+    }
     _showTerminal(_demoTopFrame());
     await Future.delayed(const Duration(milliseconds: 700));
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-top.png', _termShotKey);
+    if (_gifFramesMode) {
+      await _captureBoundary('demo-05-top.png', _termShotKey);
+    }
     await Future.delayed(const Duration(milliseconds: 150));
     exit(0);
   }
@@ -437,15 +591,17 @@ class _DashboardState extends State<Dashboard>
     unawaited(windowManager.hide());
   }
 
-  void _persistPrefs() {
+  void _persistPrefs({bool saveProfileUiState = false}) {
+    if (saveProfileUiState) _saveActiveProfileUiState();
     Prefs(
-      hidden: _hidden,
+      hidden: _defaultHidden,
       compact: _compact,
       cadence: _cadence,
       alwaysOnTop: _alwaysOnTop,
       showInTaskbar: _showInTaskbar,
       enableNotifications: _enableNotifications,
-      sort: _sort,
+      sort: _defaultSort,
+      activeProfile: _activeProfile.name,
       textSize: _textSize,
       showAccounts: _showAccounts,
       webhookUrl: _webhookUrl,
@@ -483,12 +639,17 @@ class _DashboardState extends State<Dashboard>
         }
         return true;
       }).toList();
+      final profiles = _loadProfiles();
+      final selectedProfile = _activeProfile.name;
       // Track systemic failure...
       final anyLive = active.any(
         (q) => q.ok && q.windows.isNotEmpty && !q.stale,
       );
       _failStreak = anyLive ? 0 : _failStreak + 1;
       setState(() {
+        _profiles = profiles;
+        _activeProfile = _profileByName(selectedProfile);
+        _applyProfileUiState(_activeProfile);
         _data = active;
         _loading = false;
         _updated = DateTime.now();
@@ -527,6 +688,11 @@ class _DashboardState extends State<Dashboard>
     final tz = DateTime.now().timeZoneOffset;
     final buckets = demoBuckets();
     setState(() {
+      if (_shotsMode) {
+        _compact = false;
+        _hidden = {};
+        _sort = ProviderSort.defaultOrder;
+      }
       _showAccounts = true; // show the (fake) account names in the demo
       _data = demoData();
       _loading = false;
@@ -581,8 +747,9 @@ class _DashboardState extends State<Dashboard>
       double w;
       double h;
       if (_compact) {
-        final n = _displayed.length.clamp(1, 8);
-        w = (n * 42 + 70).clamp(140.0, 400.0).toDouble();
+        final n = _displayed.length.clamp(1, _shotsMode ? 16 : 8);
+        final maxCompactWidth = _shotsMode ? 680.0 : 400.0;
+        w = (n * 46 + 96).clamp(140.0, maxCompactWidth).toDouble();
         h = 50;
       } else {
         final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -663,7 +830,7 @@ class _DashboardState extends State<Dashboard>
       if (!_hidden.remove(provider)) _hidden.add(provider);
     });
     _applySize();
-    _persistPrefs();
+    _persistPrefs(saveProfileUiState: true);
   }
 
   /// Right-click / long-press menu on a provider card: quick set-up help and
@@ -799,54 +966,82 @@ class _DashboardState extends State<Dashboard>
   }
 
   Widget _expandedView(bool dark, Color card) {
-    // Only providers with more than one account on screen need their account
-    // name shown to tell them apart (e.g. multiple Antigravity logins). For a
-    // single-account provider like Grok the username is just noise, so hide it.
-    final counts = <String, int>{};
-    for (final q in _displayed) {
-      counts[q.provider] = (counts[q.provider] ?? 0) + 1;
-    }
+    final displayed = _displayed;
+    final counts = _providerCounts(displayed);
+    final groups = groupProvidersForDisplay(displayed);
+    final showGroupHeaders = groups.length > 1;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _header(dark),
         const SizedBox(height: 2),
-        GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onPanStart: (_) => windowManager.startDragging(),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var i = 0; i < _displayed.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 8),
-                  ProviderTile(
-                    quota: _displayed[i],
-                    cardColor: card,
-                    history: _history[_displayed[i].provider] ?? const [],
-                    insights: _insights[_displayed[i].provider],
-                    heatmap: _heatmaps[_displayed[i].provider],
-                    expanded: _expanded.contains(_displayed[i].provider),
-                    onToggle: () => setState(() {
-                      final p = _displayed[i].provider;
-                      if (!_expanded.remove(p)) _expanded.add(p);
-                      WidgetsBinding.instance.addPostFrameCallback(
-                        (_) => _applySize(),
-                      );
-                    }),
-                    onContextMenu: (pos) => _showCardMenu(_displayed[i], pos),
-                    showAccounts:
-                        _showAccounts &&
-                        (counts[_displayed[i].provider] ?? 0) > 1,
-                  ),
+        if (groups.isEmpty)
+          _emptyProfileState(dark)
+        else
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onPanStart: (_) => windowManager.startDragging(),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var g = 0; g < groups.length; g++) ...[
+                    if (showGroupHeaders) ...[
+                      if (g > 0) const SizedBox(height: 10),
+                      _AccountGroupHeader(
+                        account: groups[g].account,
+                        count: groups[g].quotas.length,
+                        dark: dark,
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    for (var i = 0; i < groups[g].quotas.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 8),
+                      _providerTile(groups[g].quotas[i], card, counts),
+                    ],
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
       ],
+    );
+  }
+
+  Widget _emptyProfileState(bool dark) {
+    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => windowManager.startDragging(),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+        child: Text(
+          'No providers in ${profileLabel(_activeProfile)}',
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: AppType.caption, color: muted),
+        ),
+      ),
+    );
+  }
+
+  Widget _providerTile(ProviderQuota q, Color card, Map<String, int> counts) {
+    final key = quotaDisplayKey(q);
+    return ProviderTile(
+      key: ValueKey(key),
+      quota: q,
+      cardColor: card,
+      history: _history[q.provider] ?? const [],
+      insights: _insights[q.provider],
+      heatmap: _heatmaps[q.provider],
+      expanded: _expanded.contains(key),
+      onToggle: () => setState(() {
+        if (!_expanded.remove(key)) _expanded.add(key);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+      }),
+      onContextMenu: (pos) => _showCardMenu(q, pos),
+      showAccounts: _shouldShowAccount(q, counts),
     );
   }
 
@@ -855,6 +1050,8 @@ class _DashboardState extends State<Dashboard>
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
     final fg = dark ? Colors.white : const Color(0xFF111317);
+    final displayed = _displayed;
+    final counts = _providerCounts(displayed);
     return SizedBox(
       height: 46,
       child: Padding(
@@ -865,27 +1062,36 @@ class _DashboardState extends State<Dashboard>
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onPanStart: (_) => windowManager.startDragging(),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (int i = 0; i < _displayed.length; i++)
-                      Padding(
-                        padding: EdgeInsets.only(
-                          right: i == _displayed.length - 1 ? 0 : 10,
-                        ),
-                        child: Tooltip(
-                          message:
-                              _showAccounts &&
-                                  _displayed[i].account != 'default' &&
-                                  _displayed[i].account != 'unknown'
-                              ? '${_displayed[i].displayName} (${_displayed[i].account})'
-                              : _displayed[i].stale
-                              ? '${_displayed[i].displayName} (cached)'
-                              : _displayed[i].displayName,
-                          child: _compactChip(_displayed[i], now, fg),
-                        ),
-                      ),
-                  ],
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: _shotsMode
+                      ? const NeverScrollableScrollPhysics()
+                      : const ClampingScrollPhysics(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (displayed.isEmpty)
+                        Text(
+                          'No providers',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppType.caption,
+                            color: muted,
+                          ),
+                        )
+                      else
+                        for (int i = 0; i < displayed.length; i++)
+                          Padding(
+                            padding: EdgeInsets.only(
+                              right: i == displayed.length - 1 ? 0 : 10,
+                            ),
+                            child: Tooltip(
+                              message: _compactTooltip(displayed[i], counts),
+                              child: _compactChip(displayed[i], now, fg),
+                            ),
+                          ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -916,6 +1122,13 @@ class _DashboardState extends State<Dashboard>
               ),
       ],
     );
+  }
+
+  String _compactTooltip(ProviderQuota q, Map<String, int> counts) {
+    final base = _shouldShowAccount(q, counts)
+        ? '${q.displayName} (${q.account})'
+        : q.displayName;
+    return q.stale ? '$base (cached)' : base;
   }
 
   /// Average remaining headroom across visible providers that report quota,
@@ -975,6 +1188,20 @@ class _DashboardState extends State<Dashboard>
                     _ago(_updated),
                     style: TextStyle(fontSize: AppType.caption, color: muted),
                   ),
+                  if (_activeProfile.name != defaultProfileName) ...[
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(
+                        profileLabel(_activeProfile),
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppType.label,
+                          fontWeight: FontWeight.w600,
+                          color: muted,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1018,6 +1245,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   Widget _menuButton(Color muted) {
+    final counts = _providerCounts(_profiledData);
     return PopupMenuButton<String>(
       tooltip: 'Providers and refresh',
       padding: EdgeInsets.zero,
@@ -1029,16 +1257,44 @@ class _DashboardState extends State<Dashboard>
           enabled: false,
           height: 26,
           child: Text(
+            'PROFILE',
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
+          ),
+        ),
+        for (final profile in _profiles)
+          CheckedPopupMenuItem(
+            value: 'profile:${profile.name}',
+            checked: _activeProfile.name == profile.name,
+            child: Text(
+              profileLabel(profile),
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: AppType.subtitle),
+            ),
+          ),
+        PopupMenuItem(
+          value: 'profiles:manage',
+          child: Text(
+            'Manage profiles...',
+            style: const TextStyle(fontSize: AppType.subtitle),
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          enabled: false,
+          height: 26,
+          child: Text(
             'PROVIDERS',
             style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
-        for (final q in _data)
+        for (final q in _menuProviders)
           CheckedPopupMenuItem(
             value: 'show:${q.provider}',
             checked: !_hidden.contains(q.provider),
             child: Text(
-              _showAccounts && q.account != 'default' && q.account != 'unknown'
+              (counts[q.provider] ?? 0) > 1
+                  ? '${q.displayName} (${counts[q.provider]} accounts)'
+                  : _shouldShowAccount(q, counts)
                   ? '${q.displayName} (${q.account})'
                   : q.displayName,
               style: const TextStyle(fontSize: AppType.subtitle),
@@ -1155,7 +1411,11 @@ class _DashboardState extends State<Dashboard>
       );
 
   void _onMenu(String value) {
-    if (value.startsWith('show:')) {
+    if (value.startsWith('profile:')) {
+      _setActiveProfile(value.substring(8));
+    } else if (value == 'profiles:manage') {
+      _showProfileEditor();
+    } else if (value.startsWith('show:')) {
       _toggleHidden(value.substring(5));
     } else if (value == 'cad:smart') {
       _setCadence(Cadence.smart);
@@ -1188,6 +1448,73 @@ class _DashboardState extends State<Dashboard>
     } else if (value == 'text:large') {
       _setTextSize(TextSize.large);
     }
+  }
+
+  void _setActiveProfile(String name) {
+    final normalized = normalizeProfileName(name);
+    if (normalized == null || normalized == _activeProfile.name) return;
+    _saveActiveProfileUiState();
+    _profiles = _loadProfiles();
+    final next = _profileByName(normalized);
+    setState(() {
+      _activeProfile = next;
+      _applyProfileUiState(next);
+      _armed = {};
+    });
+    _applySize();
+    _persistPrefs();
+  }
+
+  Future<void> _showProfileEditor() async {
+    _saveActiveProfileUiState();
+    final result = await showDialog<ProfileEditorResult>(
+      context: context,
+      builder: (_) => ProfileEditorDialog(
+        profiles: _loadProfiles(),
+        providers: _data,
+        activeProfile: _activeProfile.name,
+        currentSort: _sort,
+        currentHidden: _hidden,
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (result.action == ProfileEditorAction.delete) {
+      final name = result.deleteName;
+      if (name == null) return;
+      deleteProfile(name);
+      final next = name == _activeProfile.name
+          ? defaultProfileName
+          : _activeProfile.name;
+      _profiles = _loadProfiles();
+      final profile = _profileByName(next);
+      setState(() {
+        _activeProfile = profile;
+        _applyProfileUiState(profile);
+        _armed = {};
+      });
+      _persistPrefs();
+      _applySize();
+      return;
+    }
+    final profile = result.profile;
+    if (profile == null) return;
+    try {
+      saveProfile(profile);
+    } catch (_) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not save profile.')));
+      return;
+    }
+    _profiles = _loadProfiles();
+    final saved = _profileByName(profile.name);
+    setState(() {
+      _activeProfile = saved;
+      _applyProfileUiState(saved);
+      _armed = {};
+    });
+    _persistPrefs();
+    _applySize();
   }
 
   void _setShowAccounts(bool value) {
@@ -1291,7 +1618,7 @@ class _DashboardState extends State<Dashboard>
     if (_sort == s) return;
     setState(() => _sort = s);
     _applySize();
-    _persistPrefs();
+    _persistPrefs(saveProfileUiState: true);
   }
 
   void _setAlwaysOnTop(bool value) {
@@ -1311,16 +1638,17 @@ class _DashboardState extends State<Dashboard>
     try {
       final now = DateTime.now();
       final nowSec = now.millisecondsSinceEpoch ~/ 1000;
+      final snapshot = _visible;
       // Compute the routing recommendation once so a low-quota alert can point
       // the user at where to send work instead.
-      final suggestion = suggestRoute(_data, nowSec);
+      final suggestion = suggestRoute(snapshot, nowSec);
 
       // Proactive low-quota alerts: fire once when a provider's binding window
       // crosses into red, naming where to route next, using the same
       // edge-triggered engine as `quotabot watch`. Optionally mirror each alert
       // to a local webhook so it can reach a tray, a shell, or chat.
       final alerts = computeAlerts(
-        snapshot: _data,
+        snapshot: snapshot,
         suggestion: suggestion,
         now: nowSec,
         armed: _armed,
@@ -1346,7 +1674,7 @@ class _DashboardState extends State<Dashboard>
       }
 
       // Scheduled "resets soon" reminders for windows that are nearly full.
-      for (final q in _data) {
+      for (final q in snapshot) {
         if (q.stale) continue;
         for (final w in q.windows) {
           if (w.resetsAt != null &&
@@ -1411,13 +1739,18 @@ class _DashboardState extends State<Dashboard>
 
   /// Opens the Fleet Analytics dashboard in the same window. It is a mobile-style
   /// vertical scroll, so the window size is left exactly as it is.
-  Future<void> _showFleet() async {
+  Future<void> _showFleet({FleetRange initialRange = FleetRange.now}) async {
     final dark = Theme.of(context).brightness == Brightness.dark;
     // Open analytics in the existing window: no resize, no move, so nothing
     // reflows or appears to change scale. The analytics body scrolls to fit.
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => FleetScreen(data: _data, buckets: _buckets, dark: dark),
+        builder: (_) => FleetScreen(
+          data: _visible,
+          buckets: _buckets,
+          dark: dark,
+          initialRange: initialRange,
+        ),
       ),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
@@ -1697,6 +2030,51 @@ class _DashboardState extends State<Dashboard>
   }
 }
 
+class _AccountGroupHeader extends StatelessWidget {
+  final String? account;
+  final int count;
+  final bool dark;
+
+  const _AccountGroupHeader({
+    required this.account,
+    required this.count,
+    required this.dark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
+    final fg = dark ? Colors.white : const Color(0xFF111317);
+    final line = dark ? const Color(0xFF2A2E36) : const Color(0xFFE2E4E8);
+    final label = account ?? 'default and local';
+    return Row(
+      children: [
+        Icon(Icons.account_circle_outlined, size: 14, color: muted),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: AppType.caption,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(height: 1, width: 34, color: line),
+        const SizedBox(width: 8),
+        Text(
+          '$count ${count == 1 ? 'provider' : 'providers'}',
+          style: TextStyle(fontSize: AppType.label, color: muted),
+        ),
+      ],
+    );
+  }
+}
+
 class ProviderTile extends StatelessWidget {
   final ProviderQuota quota;
   final Color cardColor;
@@ -1786,23 +2164,33 @@ class ProviderTile extends StatelessWidget {
               children: [
                 ProviderLogo(quota.provider, size: 20, color: fg),
                 const SizedBox(width: 10),
-                Text(
-                  quota.displayName,
-                  style: TextStyle(
-                    fontSize: AppType.subtitle,
-                    fontWeight: FontWeight.w600,
-                    color: fg,
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: quota.displayName,
+                          style: TextStyle(
+                            fontSize: AppType.subtitle,
+                            fontWeight: FontWeight.w600,
+                            color: fg,
+                          ),
+                        ),
+                        if (showAccounts && quotaHasSpecificAccount(quota))
+                          TextSpan(
+                            text: ' (${quota.account})',
+                            style: TextStyle(
+                              fontSize: AppType.caption,
+                              fontWeight: FontWeight.w500,
+                              color: muted,
+                            ),
+                          ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (showAccounts &&
-                    quota.account != 'default' &&
-                    quota.account != 'unknown' &&
-                    quota.account != 'installed' &&
-                    quota.account != 'cli')
-                  Text(
-                    ' (${quota.account})',
-                    style: TextStyle(fontSize: AppType.caption, color: muted),
-                  ),
                 const SizedBox(width: 8),
                 if (quota.isLocal)
                   _Dot(
@@ -1812,7 +2200,6 @@ class ProviderTile extends StatelessWidget {
                   ) // running but idle
                 else if (quota.windows.isNotEmpty)
                   _Dot(statusColor),
-                const Spacer(),
                 if (quota.stale) ...[
                   Icon(Icons.history_rounded, size: 12, color: muted),
                   const SizedBox(width: 3),

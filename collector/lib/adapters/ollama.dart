@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../util.dart';
 
 /// One local model with whatever detail the runtime exposes. Fields are
@@ -32,8 +33,8 @@ typedef LocalModel = ({
 /// Reads `GET /api/tags` (installed) and `GET /api/ps` (loaded). No login or
 /// token. Honors the standard OLLAMA_HOST override (default 127.0.0.1:11434).
 class OllamaAdapter {
-  static const id = 'ollama';
-  static const name = 'Ollama';
+  static const id = ollamaProviderId;
+  static const name = ollamaProviderName;
 
   static String baseUrl() =>
       localBaseUrl(Platform.environment['OLLAMA_HOST'], 11434);

@@ -129,7 +129,7 @@ it stands up serve every phase after it.
    (`ProviderQuota.error`, e.g. "no ~/.claude/.credentials.json", "token expired
    (re-run claude)") and `collectAll` falls back to the last-known snapshot
    rather than blanking. (Deeper hardware/manual passes continue as needed.)
-6. [ ] Token-refresh and onboarding edge cases handled and tested (Antigravity,
+6. [x] Token-refresh and onboarding edge cases handled and tested (Antigravity,
    Grok, Codex): expiry, multi-account, and signed-out states. Generalize the
    per-account model Antigravity already has (cross-platform profile scan, one
    card per active account, per-account caches keyed by email, auto-hide of
@@ -137,9 +137,23 @@ it stands up serve every phase after it.
    (provider, account) in independent owner-only slots so work and home accounts
    under different emails coexist and the UI can group or filter by account. One
    primary account per provider stays the zero-config default; multi-account is
-   additive, never forced on the common case. (Copilot's per-account read lands
-   post-1.0 with the provider itself.)
-7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
+   additive, never forced on the common case. Foundation shipped: the OAuth token
+   store now supports independent account-scoped grants; Grok device login and
+   Antigravity OAuth login persist an account-scoped grant when the account email
+   is available; Grok/Antigravity prefer the matching account grant before
+   falling back to the provider-default grant or host-app token; Grok reads every
+   account in its auth file with per-account cache fallback; Antigravity now
+   attempts a live quota read for every discovered active profile/account. Codex
+   now has adapter fixtures for missing sessions, absent `rate_limits`, stale
+   snapshots, and multi-bucket scans. The desktop widget now groups distinct
+   account identities, scopes expansion by provider/account, and automatically
+   labels duplicate-provider cards. The shared active-account cache rule is
+   tested and suppresses stale account snapshots once the provider's current
+   local account index no longer contains that account. No additional pre-1.0
+   provider exposes a reliable inactive-account index here; full named profiles
+   remain item 8. (Copilot's per-account read lands post-1.0 with the provider
+   itself.)
+7. [x] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to
    absorb here: Cursor's paid plans are now a dollar-denominated monthly credit
@@ -147,25 +161,63 @@ it stands up serve every phase after it.
    its monthly reset (a window) rather than per-token cost accounting; and
    Windsurf was acquired by Cognition and folded under the Devin brand
    (renamed Devin Desktop in mid-2026), so the Cascade daily/weekly quota must
-   keep reading under the new product name and local state path.
-8. [ ] Profiles: named bundles (work / personal / per-project) that select which
+   keep reading under the new product name and local state path. Cursor now
+   reads monthly included-usage pool shapes from local SQLite state and
+   Windsurf/Devin Desktop reads daily/weekly Cascade quota shapes from its
+   local state database. Both adapters surface account and plan labels when
+   local metadata provides them; CLI-only Devin installs remain truthful
+   detection-only results rather than fabricated quota windows.
+8. [x] Profiles: named bundles (work / personal / per-project) that select which
    accounts and providers are in view, carry their own UI preferences (theme,
    sort, hidden providers), and pin a routing policy (local-only here,
    paid-tier-first there). Built on the per-(provider, account) plumbing from
    item 6, this is the polished way the multi-account case is handled: toggle in
    the app, or pass `--profile NAME` to the CLI and MCP so a router routes within
-   the right identity. One default profile stays the zero-config path.
+   the right identity. Shipped: `quotabot.profile.v1` storage, safe names,
+   provider/account filters, routing policy, CLI `--profile`, MCP `profile`,
+   desktop switching, desktop create/edit/delete, profile-scoped hidden
+   providers, sort, theme, notifications, alert webhooks, and analytics. The
+   `default` profile remains file-free and keeps the zero-config path.
 
 ### Phase 3 - Deterministic testability, then hard testing
 
-9. [ ] A simulation mode (`--mock-provider claude --state exhausted`) for
+9. [x] A simulation mode (`--mock-provider claude --state exhausted`) for
    deterministic core tests - built first here, since the tests below lean on it.
-10. [ ] Property/fuzz tests on the untrusted parsers (they ingest external JSON and
-   protobuf), plus integration tests against recorded provider fixtures.
-11. [ ] LiteLLM plugin covered by real-proxy integration tests.
-12. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
+   Shipped: CLI simulation flags accept both `--name=value` and separated
+   `--name value` forms, create one exact synthetic provider snapshot, and
+   isolate the run from real adapter calls, analytics history, and burn-history
+   influence. Covered states are `healthy`, `low`, `exhausted`, `blocked`
+   (healthy short window but spent longer binding window), `signed-out`, and
+   `stale`, with pure tests and process-level CLI tests for snapshots, checks,
+   suggestions, and invalid-state usage errors.
+10. [x] Property/fuzz tests on the untrusted parsers (they ingest external JSON
+   and protobuf), plus integration tests against recorded provider fixtures.
+   Shipped: seeded deterministic property/fuzz tests now exercise the JSON quota
+   parsers, local-runtime JSON parsers, gRPC-web frame extraction, schema-less
+   protobuf scanner, Grok billing window parser, Antigravity plan scanner, and
+   embedded-token recovery. Parser boundaries reject non-finite numbers and keep
+   emitted percentages bounded to 0..100. Sanitized provider-shape fixture files
+   cover Codex, Claude, Antigravity, Cursor, Windsurf/Devin Desktop, Kiro, Grok,
+   LM Studio, and Ollama through the pure parser paths.
+11. [x] LiteLLM plugin covered by real-proxy integration tests. Shipped: CI now
+    installs current `litellm[proxy]` under Python 3.13 and runs the plugin
+    against a real LiteLLM proxy process, a loopback fake quotabot `/suggest`
+    endpoint, and a loopback fake OpenAI-compatible backend. The test proves the
+    actual `async_pre_call_hook` rewrites a logical model to the provider with
+    budget, spends no model tokens, avoids external network calls, and exercises
+    the current config-relative custom-callback loader. The plugin no longer
+    depends on dataclass decoration so it remains loadable through LiteLLM's
+    Python 3.13 config loader.
+12. [x] Model-catalog currency: a refresh/audit tool that diffs the curated
     catalog against each provider's own model list (capabilities stay curated,
-    since `/v1/models` endpoints do not expose context/tools/tier).
+    since `/v1/models` endpoints do not expose context/tools/tier). Shipped:
+    `collector/bin/catalog_audit.dart` reads provider-owned model-list endpoints
+    for OpenAI/Codex, Anthropic/Claude, xAI/Grok, and Gemini/Antigravity,
+    follows provider pagination tokens, filters obvious non-language modalities,
+    redacts query-string secrets, and emits `quotabot.catalog_audit.v1` with
+    `missing_from_catalog` and `catalog_only` diffs. It skips missing API keys
+    without failing by default and offers `--fail-on-drift` / `--fail-on-error`
+    for CI wiring; it never rewrites curated capability metadata automatically.
 
 ### Phase 4 - MCP reference depth and the router-grade signal
 
@@ -174,34 +226,78 @@ shared by the CLI, MCP, and the LiteLLM plugin - including the primitives a real
 router or meta-router leans on. quotabot advises, it is never the data path; the
 leverage is the quality of the signal it hands a router.
 
-13. [ ] Streamable HTTP transport alongside stdio, tested, with capability scoping
-    and complete tool-discovery metadata.
-14. [ ] Client snippets (Python/TS) so the contract is trivial to adopt.
-15. [ ] Concurrency leases (`reserve` / `release`) so parallel agents do not
+13. [x] Streamable HTTP transport alongside stdio, tested, with capability scoping
+    and complete tool-discovery metadata. Shipped: stdio remains the default;
+    `bin/mcp_server.dart --http` starts an MCP Streamable HTTP endpoint on a
+    loopback host only, with DNS-rebinding host/origin checks, batch rejection,
+    optional bearer-token auth, and the same shared server factory, schemas,
+    read-only annotations, resources, and tool metadata as stdio.
+14. [x] Client snippets (Python/TS) so the contract is trivial to adopt.
+    Shipped: `integrations/mcp_clients/` now contains Python and TypeScript MCP
+    clients for both stdio and Streamable HTTP, shared summary helpers, stable
+    SDK guidance checked on June 29, 2026, bearer-token support for HTTP, and CI
+    smoke tests that compile Python snippets, typecheck TypeScript snippets
+    against the current SDK, and assert current SDK transport imports.
+15. [x] Concurrency leases (`reserve` / `release`) so parallel agents do not
     dogpile the same pick and the next caller sees the reduced effective headroom,
     paired with a cheap cached "decide now" read that always states its
     `as_of`/staleness so a router can query per request without forcing a live
-    collect.
-16. [ ] Profile- and account-scoped routing queries (`--profile`, from item 8),
+    collect. Shipped: MCP now exposes cache-only `decide_now`, local
+    `reserve_provider`, and idempotent `release_provider`; active leases are
+    file-backed with locking in production, in-memory in tests, TTL-bound, capped,
+    idempotency-key aware, and surfaced as `lease_discount_percent` on ranked
+    candidates without entering the prompt or model-request path.
+16. [x] Profile- and account-scoped routing queries (`--profile`, from item 8),
     plus a subscribe path - the Phase 1 threshold webhook generalized to an MCP
     notification - so a router reacts to a window crossing amber or red instead of
-    polling for it.
+    polling for it. Shipped: MCP read/routing tools accept exact `account`
+    filters after named `profile` filters, `check_provider_availability` can
+    target a provider/account pair, and the server exposes `quotas://alerts` with
+    standard `resources/subscribe` / `resources/unsubscribe`. The subscription
+    loop reuses the existing edge-triggered alert engine, emits
+    `notifications/resources/updated` for `quotas://alerts` on amber/red
+    crossings, and keeps resources unfiltered for compatibility.
 
 ### Phase 5 - Freeze and ship
 
 Last, once every schema-touching feature above has landed, so the contract frozen
 here is the final one.
 
-17. [ ] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
+17. [x] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
     required-fixture registry, with an "add a provider in 10 minutes" checklist in
     CONTRIBUTING.
-18. [ ] A recurring security pass and an adversarial bug-hunt round that returns
+    Shipped: `schema_contracts.dart` now defines the additive JSON Schema
+    2020-12 contract and validator for `quotabot.v1`; `provider_adapters.dart`
+    is the compile-time built-in adapter and fixture registry; registry tests
+    require one committed sanitized provider-shape fixture per adapter, including
+    Lemonade; CONTRIBUTING has the provider checklist.
+18. [x] A recurring security pass and an adversarial bug-hunt round that returns
     empty (see continuous hardening below).
-19. [ ] An animated GIF in the README (the widget collapsing and expanding, `top`
+    Shipped: a repository-wide adversarial scan reviewed 101 tracked source,
+    integration, installer, and CI files, fixed seven plausible security
+    candidates, pinned each fix with regression tests, and closed with no open
+    reportable findings. Hardened areas include cache snapshot provenance,
+    owner-only local metadata permissions, Windows SQLite library loading,
+    LiteLLM agent identity, LiteLLM loopback fetch redirects, LiteLLM metrics
+    path containment, and least-privilege GitHub Actions token permissions.
+19. [x] An animated GIF in the README (the widget collapsing and expanding, `top`
     live, the 90-day analytics view), generated from demo mode so it stays
     reproducible, plus verified macOS and Linux packaging.
-20. [ ] Final cut: every box above checked, suite green on Windows, macOS, and
+    Shipped: README now uses `docs/quotabot-demo.gif`, generated by
+    `tools/generate_readme_demo.py` from the Flutter demo screenshot exporter.
+    Screenshot mode captures expanded and compact widget frames, a 90-day
+    analytics frame, and the demo `top` frame. CI now verifies macOS and Linux
+    desktop release bundle builds on native runners through dedicated package
+    scripts.
+20. [x] Final cut: every box above checked, suite green on Windows, macOS, and
     Linux.
+    Shipped: all 1.0 roadmap boxes are checked. The final local gate passed on
+    Windows with collector format/analyze/tests/coverage, app
+    format/analyze/tests/build, MCP client checks, LiteLLM direct plus real
+    proxy tests, collector executable builds, generated README media validation,
+    shell script syntax checks through Git Bash, and hygiene scans. GitHub
+    Actions passed the matrix on Linux, macOS, and Windows, including native
+    macOS/Linux desktop package-build verification.
 
 ### Continuous hardening (runs throughout, not a phase)
 

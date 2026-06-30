@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
 import '../util.dart';
 
 /// An OAuth token set for one provider.
@@ -46,9 +48,17 @@ class Tokens {
 /// on every refresh, or the next refresh will fail.
 class TokenStore {
   static final _providerPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+  static const _accountKey = '_account';
+  static const _maxTokenBytes = 128 * 1024;
 
-  static File _file(String provider) =>
-      File('${quotabotDir('auth').path}/${_providerFileName(provider)}.json');
+  static File _file(String provider, {String? account}) {
+    final providerName = _providerFileName(provider);
+    final accountName = _normalizeAccount(account);
+    final stem = accountName == null
+        ? providerName
+        : '${providerName}_account_${_accountHash(accountName)}';
+    return File('${quotabotDir('auth').path}/$stem.json');
+  }
 
   static String _providerFileName(String provider) {
     if (!_providerPattern.hasMatch(provider)) {
@@ -61,10 +71,29 @@ class TokenStore {
     return provider;
   }
 
-  static Tokens? load(String provider) {
-    final f = _file(provider);
+  static String? _normalizeAccount(String? account) {
+    if (account == null) return null;
+    final trimmed = account.trim();
+    if (trimmed.isEmpty ||
+        trimmed.length > 512 ||
+        trimmed.runes.any((c) => c < 0x20 || c == 0x7f)) {
+      throw ArgumentError.value(
+        account,
+        'account',
+        'must be a non-empty printable account identifier',
+      );
+    }
+    return trimmed;
+  }
+
+  static String _accountHash(String account) =>
+      sha256.convert(utf8.encode(account)).toString();
+
+  static Tokens? load(String provider, {String? account}) {
+    final f = _file(provider, account: account);
     try {
       if (!f.existsSync()) return null;
+      if (f.lengthSync() > _maxTokenBytes) return null;
       return Tokens.fromJson(
         jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
       );
@@ -73,65 +102,58 @@ class TokenStore {
     }
   }
 
-  static void save(String provider, Tokens tokens) {
-    final f = _file(provider);
+  static void save(String provider, Tokens tokens, {String? account}) {
+    final accountName = _normalizeAccount(account);
+    final f = _file(provider, account: accountName);
     // Lock down the directory and pre-create the file with restrictive
     // permissions BEFORE writing the secret, so the token is never briefly
     // world-readable under the default umask.
-    _restrictDir(f.parent);
+    restrictOwnerOnlyDirectory(f.parent);
     if (!f.existsSync()) {
       f.createSync(recursive: true);
     }
-    _restrictPermissions(f);
-    f.writeAsStringSync(jsonEncode(tokens.toJson()));
-    _restrictPermissions(f);
+    restrictOwnerOnlyFile(f);
+    f.writeAsStringSync(jsonEncode({
+      ...tokens.toJson(),
+      if (accountName != null) _accountKey: accountName,
+    }));
+    restrictOwnerOnlyFile(f);
   }
 
-  static void clear(String provider) {
-    final f = _file(provider);
+  static void clear(String provider, {String? account}) {
+    final f = _file(provider, account: account);
     if (f.existsSync()) f.deleteSync();
   }
 
-  static bool exists(String provider) => _file(provider).existsSync();
+  static bool exists(String provider, {String? account}) =>
+      _file(provider, account: account).existsSync();
 
-  /// Best-effort: restrict the refresh-token file to the current user. On POSIX
-  /// this is `chmod 600`; on Windows it resets inheritance and grants only the
-  /// current user, so other accounts on the machine cannot read the token.
-  static void _restrictPermissions(File f) {
+  static List<String> accounts(String provider) {
+    final prefix = '${_providerFileName(provider)}_account_';
+    final dir = quotabotDir('auth');
+    final found = <String>{};
     try {
-      if (Platform.isWindows) {
-        final user = _windowsUser();
-        if (user == null || user.isEmpty) return;
-        // /inheritance:r removes inherited ACEs; then grant only this user.
-        Process.runSync('icacls', [f.path, '/inheritance:r']);
-        Process.runSync('icacls', [f.path, '/grant:r', '$user:F']);
-      } else {
-        Process.runSync('chmod', ['600', f.path]);
+      for (final entity in dir.listSync()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (!name.startsWith(prefix) || !name.endsWith('.json')) continue;
+        if (entity.lengthSync() > _maxTokenBytes) continue;
+        try {
+          final decoded =
+              jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>;
+          final account = decoded[_accountKey];
+          if (account is String && _normalizeAccount(account) != null) {
+            found.add(account);
+          }
+        } catch (_) {}
       }
     } catch (_) {}
+    return found.toList()..sort();
   }
 
-  /// Best-effort: make the auth directory owner-only so other local users
-  /// cannot traverse or list the stored token files.
-  static void _restrictDir(Directory d) {
-    try {
-      if (!d.existsSync()) d.createSync(recursive: true);
-      if (Platform.isWindows) {
-        final user = _windowsUser();
-        if (user == null || user.isEmpty) return;
-        Process.runSync('icacls', [d.path, '/inheritance:r']);
-        Process.runSync('icacls', [d.path, '/grant:r', '${user}:(OI)(CI)F']);
-      } else {
-        Process.runSync('chmod', ['700', d.path]);
-      }
-    } catch (_) {}
-  }
-
-  static String? _windowsUser() {
-    final username = Platform.environment['USERNAME'];
-    if (username == null || username.isEmpty) return null;
-    final domain = Platform.environment['USERDOMAIN'];
-    if (domain == null || domain.isEmpty) return username;
-    return '$domain\\$username';
+  static void clearAccounts(String provider) {
+    for (final account in accounts(provider)) {
+      clear(provider, account: account);
+    }
   }
 }
