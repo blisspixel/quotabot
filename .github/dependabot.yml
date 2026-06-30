@@ -1,0 +1,53 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pub"
+    directory: "/collector"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:15"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    groups:
+      collector-dart:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pub"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:30"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    groups:
+      app-dart:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/integrations/mcp_clients"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:45"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    groups:
+      mcp-client-npm:
+        patterns:
+          - "*"
