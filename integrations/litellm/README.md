@@ -93,6 +93,12 @@ request (requested model, served model, tokens, cost). The path is constrained t
 `~/.quotabot`; relative paths are placed there. This closes the loop: LiteLLM
 spend plus quotabot subscription headroom in one place.
 
+Use the default `~/.quotabot/litellm-metrics.jsonl` path when you want the
+desktop Quota Analytics screen to show the routed-request summary. The widget
+reads a bounded tail of that local JSONL file and shows only metadata totals:
+served requests, routed requests, tokens, tracked cost, top served models, and
+last request age.
+
 ## Failure behavior
 
 Routing is an optimization, never a dependency. If quotabot is unreachable, the

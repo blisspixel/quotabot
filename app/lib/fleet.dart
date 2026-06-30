@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/insights.dart';
+import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -157,6 +158,7 @@ class _Node {
 class FleetScreen extends StatefulWidget {
   final List<ProviderQuota> data;
   final Map<String, List<HeadroomBucket>> buckets;
+  final RoutedRequestSummary? routedRequests;
   final bool dark;
   final FleetRange initialRange;
 
@@ -165,6 +167,7 @@ class FleetScreen extends StatefulWidget {
     required this.data,
     required this.buckets,
     required this.dark,
+    this.routedRequests,
     this.initialRange = FleetRange.now,
   });
 
@@ -238,7 +241,13 @@ class _FleetScreenState extends State<FleetScreen> {
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
     if (nodes.isEmpty) {
-      return _card(c, 'HEADROOM', 'free now', _empty('no live data', c.muted));
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _card(c, 'HEADROOM', 'free now', _empty('no live data', c.muted)),
+          _routedRequestsCard(now, c),
+        ],
+      );
     }
     final pool =
         nodes.map((n) => n.free).reduce((a, b) => a + b) / nodes.length;
@@ -291,8 +300,80 @@ class _FleetScreenState extends State<FleetScreen> {
                   ),
           ),
         ),
+        _routedRequestsCard(now, c),
         _missingNote(now, c),
       ],
+    );
+  }
+
+  Widget _routedRequestsCard(
+    int now,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    final summary = widget.routedRequests;
+    if (summary == null || !summary.hasData) return const SizedBox.shrink();
+    final topServed = summary.topServedModels
+        .map((model) => '${model.model} (${model.count})')
+        .join(', ');
+    final top = topServed.isEmpty
+        ? 'no served-model breakdown'
+        : 'top served: $topServed';
+    final last = summary.lastAt == null
+        ? 'last request unknown'
+        : 'last request ${_age(summary.lastAt!, now)} ago';
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: _card(
+        c,
+        'ROUTED REQUESTS',
+        'LiteLLM proxy, local JSONL',
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _routeMetric(
+                    '${summary.totalRequests}',
+                    '${summary.routedRequests} routed',
+                    const Color(0xFF58A6FF),
+                    c,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _routeMetric(
+                    _compactInt(summary.totalTokens),
+                    'tokens',
+                    const Color(0xFF3FB950),
+                    c,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _routeMetric(
+                    _money(summary.cost),
+                    'tracked cost',
+                    const Color(0xFFD29922),
+                    c,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '$top | $last',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppType.caption,
+                height: 1.3,
+                color: c.muted,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -670,6 +751,37 @@ class _FleetScreenState extends State<FleetScreen> {
     );
   }
 
+  Widget _routeMetric(
+    String value,
+    String label,
+    Color accent,
+    ({Color panel, Color fg, Color muted, Color line}) c,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: AppType.stat,
+            fontWeight: FontWeight.w800,
+            color: accent,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: AppType.caption, color: c.muted),
+        ),
+      ],
+    );
+  }
+
   Widget _card(
     ({Color panel, Color fg, Color muted, Color line}) c,
     String title,
@@ -749,6 +861,26 @@ class _FleetScreenState extends State<FleetScreen> {
       ),
     ],
   );
+
+  String _compactInt(int value) {
+    if (value >= 1000000) return '${(value / 1000000).toStringAsFixed(1)}M';
+    if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}K';
+    return value.toString();
+  }
+
+  String _money(double value) {
+    if (value <= 0) return r'$0.00';
+    if (value < 0.01) return '<\$0.01';
+    return '\$${value.toStringAsFixed(2)}';
+  }
+
+  String _age(int then, int now) {
+    final seconds = math.max(0, now - then);
+    if (seconds < 60) return '${seconds}s';
+    if (seconds < 3600) return '${seconds ~/ 60}m';
+    if (seconds < 86400) return '${seconds ~/ 3600}h';
+    return '${seconds ~/ 86400}d';
+  }
 }
 
 // ---- painters ----------------------------------------------------------

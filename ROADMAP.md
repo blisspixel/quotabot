@@ -363,6 +363,10 @@ Breadth and depth, once the core is trusted:
 - **Richer analytics:** hour-by-weekday heatmap polish, a contribution calendar,
   streaks and summary stats, plan-tier modeling, and provider status polling.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
+  Foundation shipped: the desktop Quota Analytics Now view reads the default
+  `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL
+  tail, and shows served requests, routed requests, tokens, tracked cost, top
+  served models, and last request age.
 - **Shareable reports:** a "weekly quota health" markdown export worth posting.
   Foundation shipped: `quotabot report` prints markdown and `--json` emits
   `quotabot.report.v1`, covering the current recommendation, headroom, resets,

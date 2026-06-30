@@ -92,6 +92,57 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('FleetScreen shows LiteLLM routed-request metrics', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final summary = summarizeRoutedRequests([
+      const LiteLlmRouteMetric(
+        at: 1782042000,
+        requestedModel: 'frontier-coder',
+        servedModel: 'codex/gpt-5.2',
+        promptTokens: 1200,
+        completionTokens: 300,
+        cost: 0.08,
+      ),
+      const LiteLlmRouteMetric(
+        at: 1782045600,
+        requestedModel: 'frontier-coder',
+        servedModel: 'claude/sonnet-4.5',
+        promptTokens: 2400,
+        completionTokens: 600,
+        cost: 0.16,
+      ),
+      const LiteLlmRouteMetric(
+        at: 1782046500,
+        requestedModel: 'codex/gpt-5.2',
+        servedModel: 'codex/gpt-5.2',
+        promptTokens: 500,
+        completionTokens: 100,
+        cost: 0.02,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('codex', 'Codex', 20, resetsAt: 1782050000)],
+          buckets: const {},
+          dark: true,
+          routedRequests: summary,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('ROUTED REQUESTS'), findsOneWidget);
+    expect(find.text('2 routed'), findsOneWidget);
+    expect(find.textContaining('top served:'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   test('fleetColor maps the headroom scale', () {
     expect(fleetColor(80), const Color(0xFF3FB950));
     expect(fleetColor(30), const Color(0xFFD29922));

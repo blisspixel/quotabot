@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- The desktop Quota Analytics Now view now surfaces optional LiteLLM
+  routed-request metrics from the default `~/.quotabot/litellm-metrics.jsonl`
+  file, including served requests, routed requests, tokens, tracked cost, top
+  served models, and last request age.
 - `quotabot watch --waste-threshold=N` now raises opt-in `projected_waste`
   alerts when current burn pace shows paid quota is likely to expire unused at
   reset. The additive `quotabot.alert.v1` fields include `kind`,

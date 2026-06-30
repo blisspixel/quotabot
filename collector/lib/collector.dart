@@ -23,6 +23,7 @@ export 'alerts.dart';
 export 'calibration.dart';
 export 'catalog_audit.dart';
 export 'leases.dart';
+export 'litellm_metrics.dart';
 export 'manual_quota.dart';
 export 'model_catalog.dart';
 export 'palette.dart';

@@ -43,8 +43,9 @@ Back button returns you to the strip) and scrolls like a phone, switchable by
 time range:
 
 - **Now:** pool-free and most-headroom chips, ranked headroom per provider with
-  reset countdowns, and a consumption-share donut. Providers with no live data
-  are listed so they do not silently disappear.
+  reset countdowns, a consumption-share donut, and LiteLLM routed-request totals
+  when the proxy writes `~/.quotabot/litellm-metrics.jsonl`. Providers with no
+  live data are listed so they do not silently disappear.
 - **7d / 90d:** the free-% distribution (p10-p90 with a median tick), reliability
   and per-day trend, and a best-time-to-run weekday-by-hour heatmap.
 
@@ -272,6 +273,12 @@ predictions' horizons have elapsed, and says plainly when there is not enough ye
 current recommendation, provider headroom, reset times, and seven-day history
 metrics where enough local history exists. Add `--json` for the structured
 `quotabot.report.v1` shape. It is still local metadata only.
+
+The desktop analytics screen also reads optional LiteLLM proxy metrics from
+`~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped
+LiteLLM router. It summarizes served requests, routed requests, tokens, tracked
+cost, top served models, and the last request age. The file is local JSONL only;
+quotabot reads a bounded tail of it and never reads prompts or response content.
 
 `quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
 the plain mean): a higher `Z` prefers providers whose recent burn is more certain.

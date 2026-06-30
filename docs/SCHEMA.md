@@ -55,6 +55,25 @@ with:
 Alert payloads are metadata only. They never contain prompts, generated text, or
 source code. The contract is additive; consumers should ignore unknown fields.
 
+## `quotabot.routed_requests.v1`
+
+The desktop analytics screen uses this local summary shape for LiteLLM proxy
+metrics read from `~/.quotabot/litellm-metrics.jsonl`:
+
+- `schema`: always `quotabot.routed_requests.v1`.
+- `total_requests`: served requests summarized from the bounded JSONL tail.
+- `routed_requests`: requests whose requested model differed from the served
+  model.
+- `prompt_tokens`, `completion_tokens`, and `total_tokens`.
+- `cost`: tracked LiteLLM response cost when present, otherwise zero.
+- `first_at` and `last_at`: optional Unix epoch seconds from the summarized
+  records.
+- `top_served_models`: an array of `{model, count}` entries.
+
+The source JSONL records are local metadata only: timestamp, requested model,
+served model, token counts, and response cost. They never contain prompts,
+responses, or source code.
+
 ## Provider fixture registry
 
 Every built-in adapter has one compile-time row in

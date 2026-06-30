@@ -155,7 +155,10 @@ plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok`). For how an
 agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/), which routes each request to
-a deployment with budget and fails soft when quotabot is unavailable. For
+a deployment with budget, writes optional local routed-request metrics, and
+fails soft when quotabot is unavailable. The analytics view surfaces those
+metrics when the plugin writes the default `~/.quotabot/litellm-metrics.jsonl`
+file. For
 language-client adoption, see the Python and TypeScript MCP snippets in
 [integrations/mcp_clients/](integrations/mcp_clients/).
 

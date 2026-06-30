@@ -258,6 +258,7 @@ class _DashboardState extends State<Dashboard>
   Map<String, Insights> _insights = {};
   Map<String, List<List<double?>>> _heatmaps = {};
   Map<String, List<HeadroomBucket>> _buckets = {};
+  RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
   final Map<String, DateTime> _lastNotified =
@@ -623,6 +624,7 @@ class _DashboardState extends State<Dashboard>
     setState(() => _isRefreshing = true);
     try {
       final results = await collectAll();
+      final routeSummary = loadRoutedRequestSummary();
       if (!mounted) return;
       final det = detectInstalledAgenticTools();
       // Only keep providers that have data or are detected as installed.
@@ -659,6 +661,7 @@ class _DashboardState extends State<Dashboard>
         _insights = {};
         _heatmaps = {};
         _buckets = {};
+        _routeSummary = routeSummary;
         final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
         final tz = DateTime.now().timeZoneOffset;
         for (final q in active) {
@@ -703,6 +706,7 @@ class _DashboardState extends State<Dashboard>
       _insights = {};
       _heatmaps = {};
       _buckets = buckets;
+      _routeSummary = demoRoutedRequestSummary();
       buckets.forEach((id, b) {
         _insights[id] = Insights.from(b, nowSec, tzOffset: tz);
         _heatmaps[id] = weekHourHeatmap(b, tzOffset: tz);
@@ -1790,6 +1794,7 @@ class _DashboardState extends State<Dashboard>
           data: _visible,
           buckets: _buckets,
           dark: dark,
+          routedRequests: _routeSummary,
           initialRange: initialRange,
         ),
       ),

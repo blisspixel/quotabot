@@ -30,6 +30,8 @@ collector/ (Dart package)
                      provider reads several logins); recent burn stats
   leases.dart        local routing leases for parallel-agent reservation and
                      release, backed by file locking in production
+  litellm_metrics.dart  bounded parser and summarizer for local LiteLLM
+                     routed-request JSONL metrics
   ansi.dart          shared ANSI styling and color-depth detection
   top.dart           pure renderer for the `quotabot top` live dashboard:
                      gradient meters, palettes, local detail lines, the
@@ -61,7 +63,8 @@ integrations/mcp_clients/
 
 app/ (Flutter desktop)
   main.dart   imports collectAll(), renders cards, adaptive refresh
-  fleet.dart  the Quota Analytics screen (Now/7d/90d, charts, the oracle glyph)
+  fleet.dart  the Quota Analytics screen (Now/7d/90d, charts, optional LiteLLM
+              routed-request metrics, the oracle glyph)
   demo.dart   synthetic data for QUOTABOT_DEMO previews/screenshots
   logos.dart  vector provider logos (CustomPainter)
   prefs.dart  persisted UI preferences
@@ -249,6 +252,12 @@ plugin uses plain value classes rather than dataclasses because LiteLLM's
 current config-relative custom-callback loader executes modules before
 registering them in `sys.modules`, which breaks dataclass decoration on Python
 3.13.
+
+When the plugin writes the default `~/.quotabot/litellm-metrics.jsonl`, the
+desktop analytics screen reads a bounded tail of that local JSONL file through
+`litellm_metrics.dart` and shows request count, routed count, token count,
+tracked cost, top served models, and last-request age. This keeps routed-request
+usage visible without making quotabot a proxy or request data path.
 
 ## Alerts and `quotabot watch`
 

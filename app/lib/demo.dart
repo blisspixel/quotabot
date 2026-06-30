@@ -128,3 +128,33 @@ Map<String, List<HeadroomBucket>> demoBuckets() {
   });
   return out;
 }
+
+RoutedRequestSummary demoRoutedRequestSummary() {
+  final now = _now();
+  return summarizeRoutedRequests([
+    LiteLlmRouteMetric(
+      at: now - 4200,
+      requestedModel: 'frontier-coder',
+      servedModel: 'codex/gpt-5.2',
+      promptTokens: 18400,
+      completionTokens: 3200,
+      cost: 0.42,
+    ),
+    LiteLlmRouteMetric(
+      at: now - 2600,
+      requestedModel: 'frontier-coder',
+      servedModel: 'antigravity/gemini-3-pro',
+      promptTokens: 9100,
+      completionTokens: 1800,
+      cost: 0.18,
+    ),
+    LiteLlmRouteMetric(
+      at: now - 900,
+      requestedModel: 'cheap-bulk',
+      servedModel: 'ollama/qwen2.5-coder',
+      promptTokens: 7200,
+      completionTokens: 1400,
+      cost: 0,
+    ),
+  ]);
+}
