@@ -11,7 +11,8 @@
 # pay-as-you-go bills. The companion quotabot-routing.example.yaml marks them
 # `spend: paid_api`, so the router skips them unless you explicitly set
 # `allow_paid_api: true`. Mark a deployment `spend: quota_plan` only when it is
-# backed by a real included quota plan with overages disabled.
+# backed by a real included quota plan, and set `overages_disabled: true` or
+# `overages: disabled` in the routing policy.
 
 model_list:
   - model_name: claude-sonnet

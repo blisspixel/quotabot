@@ -358,7 +358,8 @@ Breadth and depth, once the core is trusted:
   `local_first`, and HTTP `?local_first=true` recommend a local runtime before
   subscription quota when local capacity is available. The LiteLLM plugin also
   distinguishes `spend: quota_plan` from `spend: paid_api` so included quota
-  plans with overages disabled can be used while request-metered API routes are
+  plans can be used only after an explicit `overages_disabled: true` or
+  `overages: disabled` declaration, while request-metered API routes are
   skipped by default. Model routing now has a `budget` envelope too:
   `--budget=local` is a hard local-only cap, while `--budget=quota` allows local
   runtimes plus measured built-in quota plans and rejects self-reported manual

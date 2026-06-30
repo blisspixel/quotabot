@@ -296,8 +296,9 @@ is local JSONL only; quotabot reads a bounded tail of it and never reads prompts
 or response content.
 The router treats request-metered API keys as `spend: paid_api` and skips them
 unless `allow_paid_api: true` is set. Use `spend: quota_plan` only for included
-quota plans with overages disabled; managed logical models fail closed when no
-safe route exists.
+quota plans with overages disabled, and set `overages_disabled: true` or
+`overages: disabled` so the router can enforce that claim. Managed logical
+models fail closed when no safe route exists.
 
 `quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
 the plain mean): a higher `Z` prefers providers whose recent burn is more certain.

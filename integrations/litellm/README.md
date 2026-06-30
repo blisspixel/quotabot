@@ -9,7 +9,8 @@ The router is no-surprise-billing by default. Normal API-key deployments
 (`openai/*`, `anthropic/*`, `xai/*`, and similar) are request-metered paid APIs;
 mark them `spend: paid_api` and they are skipped unless you deliberately set
 `allow_paid_api: true`. Mark `spend: quota_plan` only for a deployment backed by
-a real included quota plan with overages disabled.
+a real included quota plan, and also set `overages_disabled: true` or
+`overages: disabled`; otherwise the router treats the route as unsafe.
 
 This works the same on Windows, macOS, and Linux.
 
@@ -61,7 +62,8 @@ so routing here stays consistent with the desktop widget and the MCP server.
    `model_name`s. Set `provider` on each candidate to the quotabot provider id
    that gates it (codex, claude, grok, antigravity), and set `spend` honestly:
    `quota_plan` for included quota with overages disabled, `paid_api` for
-   request-metered API keys.
+   request-metered API keys. Quota-plan candidates also need
+   `overages_disabled: true` or `overages: disabled`.
 
 3. Launch the proxy with that config:
 
@@ -100,7 +102,7 @@ through unchanged.
 Use `allow_paid_api: true` only when you intentionally want request-metered API
 spend. To use a provider subscription quota safely, route to a deployment whose
 cost is bounded by that quota plan and has overages disabled, then mark that
-candidate `spend: quota_plan`.
+candidate `spend: quota_plan` plus `overages_disabled: true`.
 
 ## Steering specific agents
 
@@ -109,14 +111,19 @@ Use a LiteLLM key alias or user_id and add a rule in
 
 ```yaml
 agents:
-  architect:        { pin: claude-sonnet, pin_spend: quota_plan }
+  architect:
+    pin: claude-sonnet
+    pin_spend: quota_plan
+    pin_overages_disabled: true
   bulk-summarizer:  { model: cheap-bulk }    # prefer local, spill to Claude
 ```
 
 `pin` forces a concrete deployment and skips headroom routing, but it does not
 skip the spend policy. Set `pin_spend: quota_plan` or `pin_spend: local` for a
-safe pin, or enable `allow_paid_api: true` intentionally for a paid API pin.
-`model` redirects the agent to a logical model that is then routed normally.
+safe pin; quota-plan pins also require `pin_overages_disabled: true` or
+`pin_overages: disabled`. Enable `allow_paid_api: true` only intentionally for a
+paid API pin. `model` redirects the agent to a logical model that is then routed
+normally.
 
 ## Usage metrics
 

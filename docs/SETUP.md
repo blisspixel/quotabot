@@ -151,7 +151,8 @@ recommendation in a pre-call hook and sends each request to whichever deployment
 has safe budget, falling back to a local model when your subscriptions are low.
 By default, request-metered API-key deployments are skipped unless explicitly
 enabled; use `spend: quota_plan` only for included quota plans with overages
-disabled. It runs the same on all three platforms.
+disabled, and add `overages_disabled: true` or `overages: disabled` to make that
+route eligible. It runs the same on all three platforms.
 
 ---
 

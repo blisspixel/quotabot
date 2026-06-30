@@ -53,6 +53,7 @@ class RouterTests(unittest.TestCase):
                 "trusted-agent": AgentRule(
                     pin="claude-subscription",
                     pin_spend="quota_plan",
+                    pin_overages_disabled=True,
                 )
             }
         )
@@ -123,7 +124,36 @@ class RouterTests(unittest.TestCase):
         chosen = asyncio.run(router._route("frontier", {}, None))
         self.assertEqual(chosen, "ollama-qwen")
 
-    def test_quota_plan_candidates_are_allowed_by_default(self):
+    def test_quota_plan_candidates_require_overages_disabled(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    ),
+                    Candidate(deployment="ollama-qwen", local=True),
+                ]
+            }
+        )
+
+        async def availability():
+            return {
+                "claude": {
+                    "provider": "claude",
+                    "available": True,
+                    "headroom_percent": 99,
+                }
+            }
+
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", {}, None))
+        self.assertEqual(chosen, "claude-subscription")
+
+    def test_quota_plan_without_overage_proof_uses_local_fallback(self):
         router = QuotabotRouter()
         router.policy = Policy(
             models={
@@ -149,7 +179,34 @@ class RouterTests(unittest.TestCase):
 
         router._availability = availability  # type: ignore[method-assign]
         chosen = asyncio.run(router._route("frontier", {}, None))
-        self.assertEqual(chosen, "claude-subscription")
+        self.assertEqual(chosen, "ollama-qwen")
+
+    def test_quota_plan_without_overage_proof_fails_closed(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                    )
+                ]
+            }
+        )
+
+        async def availability():
+            return {
+                "claude": {
+                    "provider": "claude",
+                    "available": True,
+                    "headroom_percent": 99,
+                }
+            }
+
+        router._availability = availability  # type: ignore[method-assign]
+        with self.assertRaises(UnsafeRouteError):
+            asyncio.run(router._route("frontier", {}, None))
 
     def test_route_marks_spend_class_for_local_metrics(self):
         router = QuotabotRouter()
@@ -172,6 +229,21 @@ class RouterTests(unittest.TestCase):
 
         self.assertTrue(candidate.local)
         self.assertEqual(candidate.spend, "local")
+
+    def test_programmatic_overage_proof_requires_true_boolean(self):
+        candidate = Candidate(
+            deployment="claude-subscription",
+            spend="quota_plan",
+            overages_disabled="true",  # type: ignore[arg-type]
+        )
+        rule = AgentRule(
+            pin="claude-subscription",
+            pin_spend="quota_plan",
+            pin_overages_disabled="true",  # type: ignore[arg-type]
+        )
+
+        self.assertFalse(candidate.overages_disabled)
+        self.assertFalse(rule.pin_overages_disabled)
 
     def test_paid_api_candidates_require_explicit_opt_in(self):
         router = QuotabotRouter()
@@ -229,6 +301,7 @@ class RouterTests(unittest.TestCase):
                         deployment="claude-subscription",
                         provider="claude",
                         spend="quota_plan",
+                        overages_disabled=True,
                     ),
                     Candidate(deployment="ollama-qwen", local=True),
                 ]
@@ -252,6 +325,7 @@ class RouterTests(unittest.TestCase):
                         deployment="claude-sonnet",
                         provider="claude",
                         spend="quota_plan",
+                        overages_disabled=True,
                     )
                 ],
             },
@@ -338,10 +412,20 @@ models:
       - deployment: xai-api
         provider: grok
         spend: paid_api
+      - deployment: claude-subscription
+        provider: claude
+        spend: quota_plan
+        overages: disabled
+      - deployment: misconfigured-subscription
+        provider: claude
+        spend: quota_plan
+        overages_disabled: false
+        overages: disabled
 agents:
   architect:
     pin: claude-subscription
     pin_spend: quota_plan
+    pin_overages_disabled: true
 """,
                 encoding="utf-8",
             )
@@ -351,7 +435,11 @@ agents:
         self.assertTrue(policy.allow_paid_api)
         self.assertFalse(policy.block_unsafe_passthrough)
         self.assertEqual(policy.models["frontier"][0].spend, "paid_api")
+        self.assertEqual(policy.models["frontier"][1].spend, "quota_plan")
+        self.assertTrue(policy.models["frontier"][1].overages_disabled)
+        self.assertFalse(policy.models["frontier"][2].overages_disabled)
         self.assertEqual(policy.agents["architect"].pin_spend, "quota_plan")
+        self.assertTrue(policy.agents["architect"].pin_overages_disabled)
 
     def test_policy_string_booleans_do_not_enable_paid_api(self):
         with tempfile.TemporaryDirectory() as tmp:

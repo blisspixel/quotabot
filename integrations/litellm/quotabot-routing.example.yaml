@@ -20,9 +20,10 @@ comfort_threshold: 15
 
 # No-surprise-billing default. Candidates marked `spend: paid_api` are skipped
 # unless this is set to true. Mark a cloud candidate `spend: quota_plan` only
-# when it is backed by a real included quota plan with overages disabled. API
-# keys billed per request are `paid_api`, even if quotabot can read that
-# provider's separate subscription quota.
+# when it is backed by a real included quota plan, and also set
+# `overages_disabled: true` or `overages: disabled`; otherwise the route fails
+# closed. API keys billed per request are `paid_api`, even if quotabot can read
+# that provider's separate subscription quota.
 allow_paid_api: false
 
 # For managed logical models, fail closed instead of passing through to a

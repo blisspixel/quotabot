@@ -163,8 +163,10 @@ TypeScript MCP transports.
 The LiteLLM plugin is no-surprise-billing by default: candidates marked
 `spend: paid_api` are skipped unless `allow_paid_api: true` is set, while
 `spend: quota_plan` should be used only for real included quota plans with
-overages disabled. Managed logical models fail closed when no safe route exists.
-Its local routed-request metrics include the selected spend class so the desktop
-analytics view can flag local, quota-plan, and paid-API traffic separately.
+overages disabled and now requires `overages_disabled: true` or
+`overages: disabled` in the routing policy. Managed logical models fail closed
+when no safe route exists. Its local routed-request metrics include the selected
+spend class so the desktop analytics view can flag local, quota-plan, and
+paid-API traffic separately.
 The model-router `budget: "quota"` filter follows the same goal: verified quota
 plans and local runtimes only, never request-metered paid API passthrough.

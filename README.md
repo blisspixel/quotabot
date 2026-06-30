@@ -162,9 +162,9 @@ in [integrations/litellm/](integrations/litellm/), which routes each request to
 a deployment with budget, writes optional local routed-request metrics, and
 defaults to no-surprise-billing guardrails: normal API-key deployments are
 treated as paid API spend and skipped unless explicitly enabled, while true
-included quota-plan deployments must be labeled separately. The analytics view
-surfaces those metrics, including local/quota/paid API spend-class counts, when
-the plugin writes the default
+included quota-plan deployments must be labeled separately and explicitly marked
+with overages disabled. The analytics view surfaces those metrics, including
+local/quota/paid API spend-class counts, when the plugin writes the default
 `~/.quotabot/litellm-metrics.jsonl` file. For
 language-client adoption, see the Python and TypeScript MCP snippets in
 [integrations/mcp_clients/](integrations/mcp_clients/).

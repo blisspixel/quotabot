@@ -104,11 +104,12 @@ class Candidate:
     ``provider`` is the quotabot provider id whose headroom gates this candidate
     (codex, claude, grok, antigravity, ...). ``local`` marks an always-available
     local runtime that is never gated by headroom. ``spend`` is a safety label:
-    ``quota_plan`` means an included quota plan with overages disabled; ``paid_api``
-    means request-metered API spend that must be explicitly enabled.
+    ``quota_plan`` means an included quota plan; ``overages_disabled`` is the
+    separate proof bit that lets that plan route. ``paid_api`` means
+    request-metered API spend that must be explicitly enabled.
     """
 
-    __slots__ = ("deployment", "provider", "local", "spend")
+    __slots__ = ("deployment", "provider", "local", "spend", "overages_disabled")
 
     def __init__(
         self,
@@ -116,12 +117,14 @@ class Candidate:
         provider: Optional[str] = None,
         local: bool = False,
         spend: Optional[str] = None,
+        overages_disabled: bool = False,
     ) -> None:
         self.deployment = deployment
         self.provider = provider
         normalized_spend = "local" if local else _normalize_spend(spend)
         self.local = local or normalized_spend == "local"
         self.spend = "local" if self.local else normalized_spend
+        self.overages_disabled = overages_disabled is True if not self.local else True
 
 
 def _normalize_spend(value: Optional[str]) -> str:
@@ -147,22 +150,35 @@ def _bool_value(value: Any, default: bool) -> bool:
     return default
 
 
+def _overages_disabled_value(value: Any, overages: Any = None) -> bool:
+    if value is not None:
+        return _bool_value(value, False)
+    if isinstance(overages, bool):
+        return not overages
+    if isinstance(overages, str):
+        normalized = overages.strip().lower().replace("-", "_")
+        return normalized in {"0", "false", "no", "off", "disabled", "none"}
+    return False
+
+
 class AgentRule:
     """How to route a named agent. ``pin`` forces a concrete deployment and
     skips headroom routing after spend-policy checks; ``model`` redirects the
     agent to a logical model that is then routed normally."""
 
-    __slots__ = ("pin", "model", "pin_spend")
+    __slots__ = ("pin", "model", "pin_spend", "pin_overages_disabled")
 
     def __init__(
         self,
         pin: Optional[str] = None,
         model: Optional[str] = None,
         pin_spend: Optional[str] = None,
+        pin_overages_disabled: bool = False,
     ) -> None:
         self.pin = pin
         self.model = model
         self.pin_spend = _normalize_spend(pin_spend) if pin else None
+        self.pin_overages_disabled = pin_overages_disabled is True if pin else False
 
 
 class Policy:
@@ -215,6 +231,10 @@ class Policy:
                         provider=c.get("provider"),
                         local=_bool_value(c.get("local"), False),
                         spend=c.get("spend"),
+                        overages_disabled=_overages_disabled_value(
+                            c.get("overages_disabled"),
+                            c.get("overages"),
+                        ),
                     )
                 )
             models[name] = cands
@@ -223,6 +243,10 @@ class Policy:
                 pin=rule.get("pin"),
                 model=rule.get("model"),
                 pin_spend=rule.get("pin_spend"),
+                pin_overages_disabled=_overages_disabled_value(
+                    rule.get("pin_overages_disabled"),
+                    rule.get("pin_overages"),
+                ),
             )
             for name, rule in (raw.get("agents") or {}).items()
         }
@@ -307,7 +331,7 @@ class QuotabotRouter(CustomLogger):
         # An agent pinned to a concrete deployment skips headroom routing, but
         # still must satisfy the spend policy.
         if rule and rule.pin:
-            if self._spend_allowed(rule.pin_spend):
+            if self._spend_allowed(rule.pin_spend, rule.pin_overages_disabled):
                 self._mark_spend(data, rule.pin_spend)
                 return rule.pin
             return self._unsafe_passthrough(requested)
@@ -353,13 +377,20 @@ class QuotabotRouter(CustomLogger):
         data.setdefault("metadata", {})[_SPEND_METADATA_KEY] = _normalize_spend(spend)
 
     def _candidate_allowed(self, candidate: Candidate) -> bool:
-        return candidate.local or self._spend_allowed(candidate.spend)
+        return candidate.local or self._spend_allowed(
+            candidate.spend,
+            candidate.overages_disabled,
+        )
 
-    def _spend_allowed(self, spend: Optional[str]) -> bool:
+    def _spend_allowed(
+        self,
+        spend: Optional[str],
+        overages_disabled: bool = False,
+    ) -> bool:
         if spend == "local":
             return True
         if spend == "quota_plan":
-            return True
+            return overages_disabled
         return self.policy.allow_paid_api
 
     def _unsafe_passthrough(self, requested: Optional[str]) -> Optional[str]:

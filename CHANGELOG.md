@@ -30,9 +30,9 @@ Notable changes to quotabot. Newest first.
   unknown records separately.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
-  `spend: quota_plan` is reserved for included quota plans with overages
-  disabled, pinned agent deployments obey the same spend policy, and managed
-  logical models fail closed when no safe route exists.
+  `spend: quota_plan` is reserved for included quota plans with explicit
+  overages-disabled proof, pinned agent deployments obey the same spend policy,
+  and managed logical models fail closed when no safe route exists.
 - The desktop Quota Analytics Now view now surfaces optional LiteLLM
   routed-request metrics from the default `~/.quotabot/litellm-metrics.jsonl`
   file, including served requests, routed requests, tokens, tracked cost, top
@@ -59,6 +59,9 @@ Notable changes to quotabot. Newest first.
 - GitHub security automation now includes Dependabot update schedules for
   GitHub Actions, Dart packages, and the TypeScript MCP client snippet package,
   plus CodeQL analysis for the repository's Python and TypeScript surfaces.
+- LiteLLM quota-plan routes now require `overages_disabled: true` or
+  `overages: disabled`; ambiguous quota-plan labels fail closed instead of
+  being treated as safe.
 
 ### Fixed
 - CI now pins the macOS runner to `macos-15`, avoiding the current

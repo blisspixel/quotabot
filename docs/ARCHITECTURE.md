@@ -258,11 +258,13 @@ unchanged so the proxy can serve ordinary LiteLLM traffic.
 For managed logical models, the plugin now has a stricter billing guardrail:
 normal API-key deployments are `spend: paid_api` and skipped unless
 `allow_paid_api` is explicitly true; included quota-plan deployments must be
-marked `spend: quota_plan`; local candidates are always allowed. Agent pins skip
-headroom ranking but still require a safe `pin_spend` class or paid API opt-in.
-If a managed logical model has no safe route and `block_unsafe_passthrough` is
-true, the request fails closed before any provider call instead of falling
-through to surprise API spend.
+marked `spend: quota_plan` and must also declare `overages_disabled: true` or
+`overages: disabled`; local candidates are always allowed. Agent pins skip
+headroom ranking but still require a safe `pin_spend` class plus
+`pin_overages_disabled: true` for quota-plan pins, or paid API opt-in. If a
+managed logical model has no safe route and `block_unsafe_passthrough` is true,
+the request fails closed before any provider call instead of falling through to
+surprise API spend.
 
 The integration is covered at two layers. Unit tests import the hook directly to
 check policy precedence, trusted key alias/user_id agent identity, spend-class

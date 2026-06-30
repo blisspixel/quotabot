@@ -198,9 +198,11 @@ models:
       - deployment: claude-sonnet
         provider: claude
         spend: quota_plan
+        overages_disabled: true
       - deployment: codex-gpt
         provider: codex
         spend: quota_plan
+        overages_disabled: true
       - deployment: ollama-qwen
         local: true
 """,
