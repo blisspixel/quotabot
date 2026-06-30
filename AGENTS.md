@@ -55,9 +55,11 @@ Pick whichever transport you already speak. All return the same data.
   - Resource `quotas://current` - the same unfiltered live snapshot.
   - Resource `quotas://alerts` - the last MCP quota alerts fired by the
     subscription loop.
-  - All read/routing tools accept optional `profile` and exact `account` filters
-    to route inside a local named profile or one provider account; resources stay
-    unfiltered.
+  - Snapshot-backed read, routing, reservation, and model tools accept optional
+    `profile`, exact `account`, and one-request `exclude` filters to route
+    inside a local named profile or one provider account while avoiding specified
+    providers; resources stay unfiltered. `check_provider_availability` targets
+    one named provider and accepts `profile` plus `account`.
   - MCP clients can subscribe to `quotas://alerts` or `quotas://current` with
     standard `resources/subscribe`; alert crossings emit
     `notifications/resources/updated` for `quotas://alerts`.

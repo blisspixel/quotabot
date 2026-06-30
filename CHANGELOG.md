@@ -11,6 +11,9 @@ Notable changes to quotabot. Newest first.
   and are excluded from measured analytics history.
 - `quotabot suggest` and `quotabot models` now accept `--exclude=A,B` to ignore
   specific providers for one routing decision without editing profiles.
+- MCP read/routing/reservation/model tools now accept an `exclude` provider-id
+  list, giving agents the same one-request provider avoidance available from the
+  CLI.
 
 ### Fixed
 - Grok usage now labels the shared paid-plan pool as a weekly window, matching

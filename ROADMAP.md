@@ -349,7 +349,8 @@ Breadth and depth, once the core is trusted:
   requirements force it or a window is about to reset. Models stay filtered by
   objective capability and the provider's own tier, never a quotabot quality
   ranking. Foundation shipped: CLI `suggest` and `models` accept
-  `--exclude=A,B` for one-off provider exclusion without editing profiles.
+  `--exclude=A,B`, and MCP read/routing/reservation/model tools accept
+  `exclude`, for one-off provider exclusion without editing profiles.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling.

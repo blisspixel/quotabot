@@ -385,6 +385,93 @@ void main() {
       );
     });
 
+    test('exclude arguments filter MCP routing and model tools', () async {
+      await connect(_fixture());
+
+      final quotas = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {
+            'exclude': ['claude'],
+          },
+        ),
+      );
+      final providers = quotas.structuredContent?['providers'] as List;
+      expect(providers.map((p) => (p as Map)['provider']),
+          isNot(contains('claude')));
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {
+            'exclude': ['claude'],
+          },
+        ),
+      );
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+
+      final models = await client.callTool(
+        const CallToolRequest(
+          name: 'list_models',
+          arguments: {
+            'exclude': ['claude'],
+          },
+        ),
+      );
+      expect(models.structuredContent?['models'], isEmpty);
+    });
+
+    test('malformed MCP exclude arguments return a structured error', () async {
+      await connect(_fixture());
+
+      final quotas = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {
+            'exclude': ['../bad'],
+          },
+        ),
+      );
+
+      expect(quotas.structuredContent?['error'],
+          'invalid exclude provider: ../bad');
+      expect(quotas.structuredContent?['providers'], isEmpty);
+    });
+
+    test('exclude arguments filter reservation choice', () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 20),
+          ]),
+          _q('codex', [
+            QuotaWindow(label: 'weekly', usedPercent: 30),
+          ]),
+        ],
+        leaseStore: store,
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'exclude': ['claude'],
+          },
+        ),
+      );
+
+      expect(reserved.structuredContent?['reserved'], isTrue);
+      final lease = reserved.structuredContent?['lease'] as Map;
+      expect(lease['provider'], 'codex');
+    });
+
     test('reserve_provider shifts later suggestions until release', () async {
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(

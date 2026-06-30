@@ -20,7 +20,7 @@ void main() {
       ..['NO_COLOR'] = '1';
     return Process.run(
       Platform.resolvedExecutable,
-      ['run', 'bin/collect.dart', ...args],
+      ['bin/collect.dart', ...args],
       workingDirectory: Directory.current.path,
       environment: env,
     );

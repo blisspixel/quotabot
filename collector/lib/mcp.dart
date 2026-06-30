@@ -532,6 +532,11 @@ final _modelFilterInputSchema = JsonSchema.object(
     'tier_ceiling': JsonSchema.string(
       description: 'Maximum provider tier: light, standard, or flagship.',
     ),
+    'exclude': JsonSchema.array(
+      items: JsonSchema.string(),
+      description:
+          'Optional provider ids to ignore for this one request, after profile filtering.',
+    ),
   },
 );
 
@@ -543,6 +548,11 @@ final _profileAndAccountInputSchema = JsonSchema.object(
     'account': JsonSchema.string(
       description:
           'Optional exact account label to route within after profile filtering.',
+    ),
+    'exclude': JsonSchema.array(
+      items: JsonSchema.string(),
+      description:
+          'Optional provider ids to ignore for this one request, after profile filtering.',
     ),
   },
 );
@@ -690,17 +700,71 @@ List<ProviderQuota> _filterAccount(
   return providers.where((provider) => provider.account == account).toList();
 }
 
+({Set<String> providers, String? error}) _excludeFilter(Object? value) {
+  if (value == null) return (providers: const {}, error: null);
+  final Iterable<Object?> raw;
+  if (value is String) {
+    raw = value.split(',');
+  } else if (value is List) {
+    raw = value;
+  } else {
+    return (
+      providers: const {},
+      error: 'exclude must be a string or list of provider ids',
+    );
+  }
+  final providers = <String>{};
+  for (final item in raw) {
+    if (item is! String || item.trim().isEmpty) continue;
+    final provider = normalizeProviderId(item);
+    if (provider == null) {
+      return (
+        providers: const {},
+        error: 'invalid exclude provider: $item',
+      );
+    }
+    providers.add(provider);
+  }
+  return (providers: providers, error: null);
+}
+
+List<ProviderQuota> _filterExcluded(
+  List<ProviderQuota> providers,
+  Set<String> excluded,
+) {
+  if (excluded.isEmpty) return providers;
+  return [
+    for (final provider in providers)
+      if (!excluded.contains(
+        normalizeProviderId(provider.provider) ?? provider.provider,
+      ))
+        provider,
+  ];
+}
+
 Future<_ProfiledSnapshot> _profiledSnapshot(
   Map<String, dynamic> args,
   SnapshotProvider snapshot,
   ProfileLoader profileLoader,
 ) async {
   final account = _accountFilter(args['account']);
+  final exclude = _excludeFilter(args['exclude']);
   final rawProfile = args['profile'];
   final requested = rawProfile is String ? rawProfile.trim() : null;
+  if (exclude.error != null) {
+    return _ProfiledSnapshot(
+      providers: const [],
+      profile: requested == null || requested.isEmpty ? null : requested,
+      accountFilter: account,
+      error: exclude.error,
+    );
+  }
   if (requested == null || requested.isEmpty) {
     return _ProfiledSnapshot(
-      providers: _filterAccount(await snapshot(), account),
+      providers: _filterExcluded(
+        _filterAccount(await snapshot(), account),
+        exclude.providers,
+      ),
       accountFilter: account,
     );
   }
@@ -713,8 +777,10 @@ Future<_ProfiledSnapshot> _profiledSnapshot(
       error: 'unknown profile: $requested',
     );
   }
-  final providers =
-      _filterAccount(applyProfile(await snapshot(), profile), account);
+  final providers = _filterExcluded(
+    _filterAccount(applyProfile(await snapshot(), profile), account),
+    exclude.providers,
+  );
   return _ProfiledSnapshot(
     providers: providers,
     profile: profile.name,
@@ -1101,6 +1167,11 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           description:
               'Optional exact account label to route within after profile filtering.',
         ),
+        'exclude': JsonSchema.array(
+          items: JsonSchema.string(),
+          description:
+              'Optional provider ids to ignore for this one request, after profile filtering.',
+        ),
         'max_age_seconds': JsonSchema.integer(
           description:
               'Age above which snapshot_stale becomes true. Defaults to 300.',
@@ -1162,6 +1233,11 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'profile': JsonSchema.string(
           description:
               'Optional local named profile to filter providers/accounts.',
+        ),
+        'exclude': JsonSchema.array(
+          items: JsonSchema.string(),
+          description:
+              'Optional provider ids to ignore for this one request, after profile filtering.',
         ),
         'lease_seconds': JsonSchema.integer(
           description: 'Lease TTL, clamped to 15..3600 seconds.',

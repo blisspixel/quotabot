@@ -241,7 +241,8 @@ meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 
 For a one-off routing decision, add `--exclude=codex,grok` to `models` or
-`suggest` to ignore those providers without changing your named profiles.
+`suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and
+model tools, to ignore those providers without changing your named profiles.
 
 For catalog maintenance, run the audit tool from the collector package:
 
@@ -297,12 +298,16 @@ and exposes nine tools plus two resources:
 - Resource `quotas://alerts` - the last MCP quota alerts fired by the
   subscription loop.
 
-Read and routing tools accept an optional `profile` argument to filter the
-snapshot through a local named profile before routing or model selection, and an
-optional exact `account` argument to route inside one account after profile
-filtering. Missing profiles fail soft: the tool returns a structured `error`
-field with an empty provider list instead of throwing. Resources remain
-unfiltered snapshots for clients that only consume MCP resources.
+Snapshot-backed read, routing, reservation, and model tools accept an optional
+`profile` argument to filter the snapshot through a local named profile before
+routing or model selection, an optional exact `account` argument to route inside
+one account after profile filtering, and an `exclude` provider-id list for
+one-request routing decisions after profile and account filtering.
+`check_provider_availability` answers for one named provider and accepts
+`profile` plus `account`, not `exclude`. Missing profiles or malformed
+exclusions fail soft: the tool returns a structured `error` field with an empty
+provider list instead of throwing. Resources remain unfiltered snapshots for
+clients that only consume MCP resources.
 
 `suggest_provider` and `decide_now` include active local leases in the response
 and expose each candidate's `lease_discount_percent` when a concurrent caller has
