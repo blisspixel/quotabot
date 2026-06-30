@@ -30,6 +30,7 @@ export 'provider_adapters.dart';
 export 'provider_filters.dart';
 export 'provider_ids.dart';
 export 'profiles.dart';
+export 'report.dart';
 export 'registry.dart';
 export 'schema_contracts.dart';
 export 'simulation.dart';

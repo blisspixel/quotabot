@@ -56,6 +56,7 @@ The same numbers are on the command line:
 ```bash
 quotabot stats          # human-readable analytics per provider
 quotabot stats --json   # the same numbers for scripts
+quotabot report         # weekly quota-health markdown for sharing
 ```
 
 quotabot keeps two tiers of local history, both zero-token: a short raw buffer of
@@ -78,6 +79,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, reliability, pace.    |
+| `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect grok or antigravity so it stays live.         |
 | `logout <provider>`    | Disconnect a provider.                                |
@@ -262,6 +264,11 @@ The output is a diff of model ids only; capability fields stay curated. Add
 recorded history and reports how often they come true, as a calibration
 percentage, a Brier score, and a reliability diagram. It fills in over time, once
 predictions' horizons have elapsed, and says plainly when there is not enough yet.
+
+`quotabot report` prints a shareable weekly quota-health markdown report with the
+current recommendation, provider headroom, reset times, and seven-day history
+metrics where enough local history exists. Add `--json` for the structured
+`quotabot.report.v1` shape. It is still local metadata only.
 
 `quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
 the plain mean): a higher `Z` prefers providers whose recent burn is more certain.

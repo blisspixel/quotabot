@@ -152,6 +152,9 @@ Future<void> main(List<String> rawArgs) async {
     case 'stats':
       await _runStats(pos.skip(1).toList(), wantsJson, profile);
       return;
+    case 'report':
+      await _runReport(wantsJson, profile);
+      return;
     case 'top':
       await _runTop(flags, profile);
       return;
@@ -219,6 +222,14 @@ RouteSuggestion _suggestFor(
 
 List<HeadroomBucket> _historyBuckets(String provider) =>
     _usingSimulation ? const <HeadroomBucket>[] : loadBuckets(provider);
+
+List<HeadroomBucket> _weeklyHistoryBuckets(String provider, int now) {
+  final cutoff = now - 7 * 86400;
+  return [
+    for (final bucket in _historyBuckets(provider))
+      if (bucket.start >= cutoff) bucket,
+  ];
+}
 
 /// Reads a `--name=double` option from [flags], or [dflt] when absent or invalid.
 double _doubleOption(Iterable<String> flags, String name, double dflt) {
@@ -836,6 +847,9 @@ void _printHelp() {
   stdout.writeln(
     '  stats [provider]    90-day analytics: distribution, reliability, pace',
   );
+  stdout.writeln(
+    '  report              weekly quota health markdown export',
+  );
   stdout.writeln('');
   stdout.writeln(head('ROUTE'));
   stdout.writeln(
@@ -1037,6 +1051,32 @@ Future<void> _runStats(
   } else {
     _printStats(providers, byProvider, now, tz);
   }
+}
+
+Future<void> _runReport(
+  bool wantsJson,
+  QuotaProfile? profile,
+) async {
+  final now = nowEpoch();
+  final results = await _read(profile);
+  final tz = DateTime.now().timeZoneOffset;
+  final insights = <String, Insights>{};
+  for (final provider in results.where((provider) => !provider.isLocal)) {
+    insights[provider.provider] = Insights.from(
+      _weeklyHistoryBuckets(provider.provider, now),
+      now,
+      tzOffset: tz,
+    );
+  }
+  final report = buildQuotaHealthReport(
+    results,
+    now,
+    _suggestFor(results, now),
+    insightsByProvider: insights,
+  );
+  wantsJson
+      ? print(_jsonPretty(report.toJson()))
+      : stdout.write(report.toMarkdown());
 }
 
 /// `check <provider>`: is this one usable right now, and when does it reset.

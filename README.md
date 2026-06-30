@@ -136,6 +136,7 @@ quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
 quotabot models           # every model you can route to now, with budget + caps
 quotabot watch            # alert when a window goes low, naming where to route
+quotabot report           # weekly quota-health markdown export
 ```
 
 `quotabot watch` polls in the background and raises a low-quota alert the moment

@@ -5,6 +5,8 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot report` now prints a weekly quota-health markdown export, with
+  structured `quotabot.report.v1` output behind `--json`.
 - Manual quota entries can now be added with `quotabot manual set`, listed with
   `quotabot manual list`, and removed with `quotabot manual remove`. They are
   stored locally, appear in normal quota views and JSON as `source: "manual"`,

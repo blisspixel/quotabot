@@ -362,6 +362,9 @@ Breadth and depth, once the core is trusted:
   streaks and summary stats, plan-tier modeling, and provider status polling.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
 - **Shareable reports:** a "weekly quota health" markdown export worth posting.
+  Foundation shipped: `quotabot report` prints markdown and `--json` emits
+  `quotabot.report.v1`, covering the current recommendation, headroom, resets,
+  local/manual caveats, and seven-day history metrics.
 - **Themes for the widget:** selectable color themes (the `top` palettes already
   shipped), including a high-contrast "hacker" mode, still honoring light/dark.
 - **Ecosystem and packaging:** a plugin model, OS package managers (winget/MSIX,
