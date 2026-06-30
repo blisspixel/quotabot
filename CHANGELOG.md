@@ -55,6 +55,11 @@ Notable changes to quotabot. Newest first.
 - The loopback HTTP `GET /suggest` endpoint now accepts `?exclude=codex,grok`
   and returns a JSON 400 error for malformed provider ids.
 
+### Security
+- GitHub security automation now includes Dependabot update schedules for
+  GitHub Actions, Dart packages, and the TypeScript MCP client snippet package,
+  plus CodeQL analysis for the repository's Python and TypeScript surfaces.
+
 ### Fixed
 - CI now pins the macOS runner to `macos-15`, avoiding the current
   `macos-latest` migration warning while keeping the desktop package build on a

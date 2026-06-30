@@ -309,7 +309,9 @@ in parallel with the phases above rather than after them:
   round comes back empty.
 - **Recurring security reviews:** token handling, host/SSRF validation for local
   runtimes, injection via provider data, and the install supply chain. Each pass
-  fixes what it finds.
+  fixes what it finds. Automation shipped: Dependabot now tracks GitHub Actions,
+  Dart `pub`, and the MCP TypeScript snippet package, and CodeQL analyzes the
+  Python and TypeScript surfaces that GitHub supports for this repository.
 
 Self-tuning - using the calibration loop to fit the routing parameters on local
 history - and the deeper statistical layers are quality multipliers: valued and
