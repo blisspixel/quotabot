@@ -22,6 +22,7 @@ collector/ (Dart package)
   calibration.dart   pure: grade the strand predictor against recorded history
   registry.dart      pure: assemble the cross-provider model registry with budget
   model_catalog.dart committed, refreshable cloud model capability catalog
+  profiles.dart      named local profile schema, storage, and filtering
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
   ansi.dart          shared ANSI styling and color-depth detection
@@ -61,6 +62,10 @@ Everything funnels into one shape (`models.dart`):
   error note, capture time (`asOf`), a `stale` flag, and a list of windows.
 - `QuotaWindow`: a label (such as `5h` or `weekly`), percent used, optional raw
   used and limit counts, and a reset time as a Unix timestamp.
+- `QuotaProfile`: a local-only named view over a quota snapshot. It can allow
+  providers, allow accounts per provider, hide providers, carry a routing
+  policy, and remember UI-facing theme/sort labels. The `default` profile is
+  implicit and preserves the zero-config behavior.
 
 Adapters never talk to the UI. They return `ProviderQuota`, and the UI derives
 everything it shows from that, including colors and the binding-constraint
@@ -213,6 +218,10 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   usernames for single-account providers. `prefs.dart` persists hidden providers,
   compact state, cadence, always on top, taskbar visibility, enable
   notifications, showAccounts, and window position across restarts.
+- Named profiles live under the per-user quotabot config directory as
+  `quotabot.profile.v1` JSON files. Profile names and provider ids are validated
+  against safe filename/id characters, profile files are bounded in size, and
+  filtering is pure over the already-normalized `ProviderQuota` list.
 - A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
   countdowns stay current; actual data refresh is on a separate adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a

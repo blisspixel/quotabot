@@ -173,7 +173,11 @@ it stands up serve every phase after it.
    paid-tier-first there). Built on the per-(provider, account) plumbing from
    item 6, this is the polished way the multi-account case is handled: toggle in
    the app, or pass `--profile NAME` to the CLI and MCP so a router routes within
-   the right identity. One default profile stays the zero-config path.
+   the right identity. One default profile stays the zero-config path. The
+   profile model, JSON schema, safe-name validation, local profile persistence,
+   and provider/account filtering core now exist. Remaining: wire `--profile`
+   through CLI and MCP, then add desktop profile controls and scoped UI
+   preferences.
 
 ### Phase 3 - Deterministic testability, then hard testing
 

@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Named profile foundations now exist in the collector: `quotabot.profile.v1`
+  JSON storage, safe profile names, provider/account filters, routing policy
+  metadata, and an implicit zero-config default profile.
 - Windsurf/Devin Desktop now reads daily and weekly Cascade quota shapes from
   local SQLite state, carries reset timestamps, surfaces account and plan labels
   when present, and no longer invents a 0% quota from undecodable raw blobs.
