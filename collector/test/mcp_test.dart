@@ -234,6 +234,13 @@ void main() {
         }
         expect(t.outputSchema, isNotNull, reason: t.name);
       }
+      final listModelsProperties = byName['list_models']!
+          .outputSchema!
+          .toJson()['properties'] as Map<String, dynamic>;
+      final modelProperties = (((listModelsProperties['models'] as Map)['items']
+          as Map)['properties'] as Map);
+      expect(modelProperties.keys,
+          containsAll(['size_bytes', 'vram_bytes', 'quant']));
     });
 
     // A schema/payload mismatch makes the server (and the client) raise, so a

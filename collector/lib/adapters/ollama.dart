@@ -147,8 +147,9 @@ ProviderQuota localRuntimeQuota({
   if (headline != null) {
     final bits = <String>[];
     if (headline.vramBytes != null)
-      bits.add('${_gb(headline.vramBytes!)} VRAM');
-    if (headline.context != null) bits.add('${_ctx(headline.context!)} ctx');
+      bits.add('${formatCompactBytes(headline.vramBytes!)} VRAM');
+    if (headline.context != null)
+      bits.add('${formatContextTokens(headline.context!)} ctx');
     if (headline.expiresAt != null) {
       final secs = headline.expiresAt! - (now ?? nowEpoch());
       if (secs > 0) bits.add('unloads in ${_dur(secs)}');
@@ -159,7 +160,7 @@ ProviderQuota localRuntimeQuota({
   final totalBytes = installed.fold<int>(0, (s, m) => s + (m.bytes ?? 0));
   details.add(
     totalBytes > 0
-        ? '${installed.length} installed . ${_gb(totalBytes)} on disk'
+        ? '${installed.length} installed . ${formatCompactBytes(totalBytes)} on disk'
         : '${installed.length} installed',
   );
 
@@ -192,15 +193,6 @@ ProviderQuota localRuntimeQuota({
     models: models,
   );
 }
-
-String _gb(int bytes) {
-  final gb = bytes / (1024 * 1024 * 1024);
-  if (gb >= 1) return '${gb.toStringAsFixed(1)} GB';
-  return '${(bytes / (1024 * 1024)).round()} MB';
-}
-
-String _ctx(int tokens) =>
-    tokens >= 1000 ? '${(tokens / 1024).round()}K' : '$tokens';
 
 String _dur(int secs) {
   if (secs < 3600) return '${(secs / 60).round()}m';

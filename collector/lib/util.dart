@@ -186,6 +186,17 @@ String? asciiString(List<int> chunk) {
   return String.fromCharCodes(chunk);
 }
 
+/// Formats model storage or memory bytes for compact quota/status text.
+String formatCompactBytes(int bytes) {
+  final gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return '${gb.toStringAsFixed(1)} GB';
+  return '${(bytes / (1024 * 1024)).round()} MB';
+}
+
+/// Formats a model context window for compact quota/status text.
+String formatContextTokens(int tokens) =>
+    tokens >= 1000 ? '${(tokens / 1024).round()}K' : '$tokens';
+
 /// Detects installed popular agentic dev coding CLI/IDE tools by common data dirs.
 /// Used for passive robustness even if no active subscription or full adapter data.
 Set<String> detectInstalledAgenticTools({

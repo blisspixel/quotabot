@@ -12,6 +12,7 @@ library;
 import 'analysis.dart';
 import 'model_catalog.dart';
 import 'models.dart';
+import 'util.dart';
 
 /// One routable model plus the live budget of the provider that gates it.
 class ModelEntry {
@@ -303,12 +304,29 @@ String _recommendReason(ModelEntry e) {
     final readiness = e.model.loaded
         ? 'loaded and ready now'
         : 'installed locally; cold start may be required';
-    return '${e.model.id} (local, free) is $readiness and keeps your paid quota.';
+    final evidence = _localModelEvidence(e.model);
+    return '${e.model.id} (local, free) is $readiness'
+        '${evidence.isEmpty ? '' : ' (${evidence.join(', ')})'} '
+        'and keeps your paid quota.';
   }
   final h = e.headroomPercent?.round();
   final tier = e.model.tier ?? 'available';
   return '${e.model.id} on ${e.provider} - lightest $tier tier with budget'
       '${h == null ? '' : ' ($h% free)'}.';
+}
+
+List<String> _localModelEvidence(ModelInfo model) {
+  final evidence = <String>[];
+  if (model.loaded && model.vramBytes != null) {
+    evidence.add('${formatCompactBytes(model.vramBytes!)} VRAM');
+  } else if (!model.loaded && model.sizeBytes != null) {
+    evidence.add('${formatCompactBytes(model.sizeBytes!)} on disk');
+  }
+  if (model.contextTokens != null) {
+    evidence.add('${formatContextTokens(model.contextTokens!)} ctx');
+  }
+  if (model.quant != null) evidence.add(model.quant!);
+  return evidence;
 }
 
 /// A concrete-model recommendation for a task profile.

@@ -235,6 +235,9 @@ measured built-in quota plans but excludes self-reported manual quotas because
 quotabot cannot verify their overage settings. Local-runtime entries surface
 `local_readiness` (`loaded` or `cold`), and model recommendations rank loaded
 local models ahead of cold installed models when both satisfy the same profile.
+Recommendations also echo available local memory/context evidence so callers can
+see why "free" is ready now versus merely installed without forcing a model
+call.
 `catalog_audit.dart` keeps the
 committed cloud catalog honest without adding runtime network calls: the standalone
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for

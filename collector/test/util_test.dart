@@ -80,6 +80,18 @@ void main() {
     });
   });
 
+  group('compact model formatting', () {
+    test('formats bytes using the existing local-runtime display units', () {
+      expect(formatCompactBytes(4 * 1024 * 1024 * 1024), '4.0 GB');
+      expect(formatCompactBytes(300 * 1024 * 1024), '300 MB');
+    });
+
+    test('formats context tokens compactly', () {
+      expect(formatContextTokens(32768), '32K');
+      expect(formatContextTokens(512), '512');
+    });
+  });
+
   group('Windows ACL identity parsing', () {
     test('extracts an SID from whoami csv output', () {
       expect(

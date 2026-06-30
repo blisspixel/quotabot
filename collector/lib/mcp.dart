@@ -529,6 +529,15 @@ final _modelEntrySchema = JsonSchema.object(
     'tier': JsonSchema.string(
       description: "The provider's own tier: light, standard, or flagship.",
     ),
+    'size_bytes': JsonSchema.integer(
+      description: 'For local-runtime models: installed model size in bytes.',
+    ),
+    'vram_bytes': JsonSchema.integer(
+      description: 'For loaded local-runtime models: VRAM bytes when known.',
+    ),
+    'quant': JsonSchema.string(
+      description: 'For local-runtime models: quantization label when known.',
+    ),
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': JsonSchema.integer(),
     'gating_window': JsonSchema.string(),

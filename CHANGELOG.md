@@ -18,7 +18,9 @@ Notable changes to quotabot. Newest first.
 - Model registry entries now expose local runtime readiness as `local_readiness`
   (`loaded` or `cold`), and concrete model suggestions prefer loaded local
   models over installed-but-cold local models when both meet the requested
-  profile.
+  profile. MCP model schemas now advertise local model size, loaded VRAM, and
+  quantization fields, and local model recommendation reasons include available
+  VRAM/context/size evidence without making model calls.
 - LiteLLM routed-request metrics now record the selected spend class, and the
   desktop analytics view summarizes local, quota-plan, paid-API, and legacy
   unknown records separately.

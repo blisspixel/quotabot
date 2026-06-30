@@ -372,7 +372,9 @@ Breadth and depth, once the core is trusted:
   Foundation shipped: model registry entries now surface `local_readiness`
   (`loaded` or `cold`), and concrete model suggestions prefer loaded local
   models ahead of installed-but-cold local models when both satisfy the same
-  requirements.
+  requirements. MCP model schemas now advertise local `size_bytes`,
+  `vram_bytes`, and `quant` metadata, and local model recommendation reasons
+  include available VRAM/context/size evidence without making a model call.
 - **Richer analytics:** hour-by-weekday heatmap polish, a contribution calendar,
   streaks and summary stats, plan-tier modeling, and provider status polling.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.

@@ -268,13 +268,42 @@ void main() {
         [
           _local('ollama', const [
             ModelInfo(id: 'z-cold', local: true),
-            ModelInfo(id: 'a-loaded', local: true, loaded: true),
+            ModelInfo(
+              id: 'a-loaded',
+              local: true,
+              loaded: true,
+              contextTokens: 32768,
+              vramBytes: 4 * 1024 * 1024 * 1024,
+              quant: 'Q4_K_M',
+            ),
           ]),
         ],
         _now,
       );
       expect(s.recommended?.model.id, 'a-loaded');
       expect(s.reason, contains('loaded and ready now'));
+      expect(s.reason, contains('4.0 GB VRAM'));
+      expect(s.reason, contains('32K ctx'));
+      expect(s.reason, contains('Q4_K_M'));
+    });
+
+    test('a cold local model recommendation includes installed size evidence',
+        () {
+      final s = suggestModel(
+        [
+          _local('ollama', const [
+            ModelInfo(
+              id: 'cold-local',
+              local: true,
+              sizeBytes: 5 * 1024 * 1024 * 1024,
+            ),
+          ]),
+        ],
+        _now,
+      );
+      expect(s.recommended?.model.id, 'cold-local');
+      expect(s.reason, contains('cold start may be required'));
+      expect(s.reason, contains('5.0 GB on disk'));
     });
 
     test('no model with budget yields a null pick and a reason', () {
