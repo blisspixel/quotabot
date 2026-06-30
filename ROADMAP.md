@@ -296,8 +296,8 @@ here is the final one.
     format/analyze/tests/build, MCP client checks, LiteLLM direct plus real
     proxy tests, collector executable builds, generated README media validation,
     shell script syntax checks through Git Bash, and hygiene scans. GitHub
-    Actions run 28426864041 passed the matrix on Linux, macOS, and Windows,
-    including native macOS/Linux desktop package-build verification.
+    Actions passed the matrix on Linux, macOS, and Windows, including native
+    macOS/Linux desktop package-build verification.
 
 ### Continuous hardening (runs throughout, not a phase)
 

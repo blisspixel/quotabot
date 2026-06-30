@@ -4,6 +4,10 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.5.1 - 2026-06-30
+
 ### Security
 - Completed a repository-wide adversarial security pass and fixed every
   candidate it found. Cache-only routing now accepts only canonical snapshot
@@ -19,9 +23,11 @@ Notable changes to quotabot. Newest first.
   Flutter desktop scaffold files and Linux tray indicator development package,
   so native CI package builds exercise the same release bundles users build.
 - The 1.0 roadmap final cut is now checked: every roadmap item is marked
-  complete, the Windows local gate is green, and GitHub Actions run 28426864041
-  passed the full suite plus macOS/Linux desktop package builds on native
-  runners.
+  complete, the Windows local gate is green, and GitHub Actions passed the full
+  suite plus macOS/Linux desktop package builds on native runners.
+- Windows setup now removes legacy `quotabot.ps1`, `quotabot.cmd`, and
+  `quotabot.bat` shims from the install directory before copying
+  `quotabot.exe`, so stale source-launcher shims cannot shadow the release CLI.
 - CI now verifies macOS and Linux desktop release bundle packaging on native
   runners. `tools/package-macos.sh` and `tools/package-linux.sh` build and
   validate the platform bundles, with optional local archives for release work.

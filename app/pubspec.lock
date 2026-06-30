@@ -257,7 +257,7 @@ packages:
       path: "../collector"
       relative: true
     source: path
-    version: "0.5.0"
+    version: "0.5.1"
   screen_retriever:
     dependency: transitive
     description:
