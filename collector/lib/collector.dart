@@ -21,6 +21,7 @@ export 'insights.dart';
 export 'alerts.dart';
 export 'calibration.dart';
 export 'catalog_audit.dart';
+export 'leases.dart';
 export 'model_catalog.dart';
 export 'palette.dart';
 export 'profiles.dart';
@@ -29,6 +30,7 @@ export 'simulation.dart';
 export 'cache.dart'
     show
         loadHistory,
+        loadCachedSnapshots,
         loadBuckets,
         recentBurnByProvider,
         recentBurnStatsByProvider;

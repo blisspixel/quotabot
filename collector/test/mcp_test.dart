@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
+import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/profiles.dart';
@@ -138,7 +139,10 @@ void main() {
 
     Future<void> connect(
       List<ProviderQuota> snapshot, {
+      SnapshotProvider? snapshotProvider,
       ProfileLoader profileLoader = _noProfile,
+      CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
+      RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
     }) async {
       final serverT = _PairedTransport();
       final clientT = _PairedTransport();
@@ -156,8 +160,10 @@ void main() {
       );
       registerQuotabotTools(
         server,
-        snapshot: () async => snapshot,
+        snapshot: snapshotProvider ?? () async => snapshot,
         burnByProvider: (providers, now) => const <String, BurnStat>{},
+        cachedSnapshot: cachedSnapshot,
+        leaseStore: leaseStore,
         now: () => _now,
         profileLoader: profileLoader,
         catalog: const {
@@ -187,11 +193,23 @@ void main() {
           'list_quotas',
           'provider_with_most_headroom',
           'suggest_provider',
+          'decide_now',
+          'reserve_provider',
+          'release_provider',
           'check_provider_availability',
         ]),
       );
       for (final t in tools.tools) {
-        expect(t.annotations?.readOnlyHint, isTrue, reason: t.name);
+        if (t.name == 'reserve_provider') {
+          expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
+          expect(t.annotations?.idempotentHint, isFalse, reason: t.name);
+        } else if (t.name == 'release_provider') {
+          expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
+          expect(t.annotations?.idempotentHint, isTrue, reason: t.name);
+        } else {
+          expect(t.annotations?.readOnlyHint, isTrue, reason: t.name);
+          expect(t.annotations?.idempotentHint, isTrue, reason: t.name);
+        }
         expect(t.outputSchema, isNotNull, reason: t.name);
       }
     });
@@ -307,6 +325,192 @@ void main() {
       );
     });
 
+    test('reserve_provider shifts later suggestions until release', () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 20),
+          ]),
+          _q('codex', [
+            QuotaWindow(label: 'weekly', usedPercent: 30),
+          ]),
+        ],
+        leaseStore: store,
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'provider': 'claude',
+            'weight_percent': 30,
+            'lease_seconds': 120,
+            'idempotency_key': 'retry-lease',
+          },
+        ),
+      );
+      expect(reserved.structuredContent?['reserved'], isTrue);
+      expect(reserved.structuredContent?['reused'], isFalse);
+      final lease = reserved.structuredContent?['lease'] as Map;
+      expect(lease['id'], 'lease-1');
+      expect(lease['provider'], 'claude');
+
+      final retry = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'provider': 'claude',
+            'weight_percent': 30,
+            'lease_seconds': 120,
+            'idempotency_key': 'retry-lease',
+          },
+        ),
+      );
+      expect(retry.structuredContent?['reused'], isTrue);
+      expect((retry.structuredContent?['lease'] as Map)['id'], 'lease-1');
+
+      final leasedSuggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+      expect(
+        (leasedSuggestion.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+      final active =
+          leasedSuggestion.structuredContent?['active_leases'] as List;
+      expect((active.single as Map)['discount_percent'], 30);
+
+      final released = await client.callTool(
+        const CallToolRequest(
+          name: 'release_provider',
+          arguments: {'lease_id': 'lease-1'},
+        ),
+      );
+      expect(released.structuredContent?['released'], isTrue);
+      expect(released.structuredContent?['active_leases'], isEmpty);
+
+      final clearSuggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+      expect(
+        (clearSuggestion.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+    });
+
+    test('reserve_provider reports profile and explicit target failures',
+        () async {
+      await connect(_fixture());
+
+      final missingProfile = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'profile': 'missing'},
+        ),
+      );
+      expect(missingProfile.structuredContent?['reserved'], isFalse);
+      expect(
+        missingProfile.structuredContent?['reason'],
+        'unknown profile: missing',
+      );
+
+      final missingTarget = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'claude', 'account': 'other'},
+        ),
+      );
+      expect(missingTarget.structuredContent?['reserved'], isFalse);
+      expect(
+        missingTarget.structuredContent?['reason'],
+        'requested provider/account unavailable',
+      );
+    });
+
+    test('reserve_provider refuses local and spent targets', () async {
+      await connect([
+        _local('ollama'),
+        _q('claude', [
+          QuotaWindow(label: 'weekly', usedPercent: 100),
+        ]),
+      ]);
+
+      final local = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'ollama'},
+        ),
+      );
+      expect(local.structuredContent?['reserved'], isFalse);
+      expect(
+        local.structuredContent?['reason'],
+        'local runtimes do not need quota leases',
+      );
+
+      final spent = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'claude'},
+        ),
+      );
+      expect(spent.structuredContent?['reserved'], isFalse);
+      expect(
+        spent.structuredContent?['reason'],
+        'claude has no effective headroom available',
+      );
+    });
+
+    test('release_provider handles a blank lease id without throwing',
+        () async {
+      await connect(_fixture());
+
+      final released = await client.callTool(
+        const CallToolRequest(
+          name: 'release_provider',
+          arguments: {'lease_id': '   '},
+        ),
+      );
+      expect(released.structuredContent?['released'], isFalse);
+      expect(released.structuredContent?['reason'], 'lease_id is required');
+    });
+
+    test('decide_now uses cached snapshot without live collection', () async {
+      var liveCalls = 0;
+      await connect(
+        const [],
+        snapshotProvider: () async {
+          liveCalls++;
+          throw StateError('live collection should not run');
+        },
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: _fixture(),
+          asOf: _now - 10,
+          source: 'disk',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'max_age_seconds': 60},
+        ),
+      );
+      expect(decision.structuredContent?['schema'], 'quotabot.decision.v1');
+      expect(decision.structuredContent?['source'], 'disk');
+      expect(decision.structuredContent?['snapshot_as_of'], _now - 10);
+      expect(decision.structuredContent?['snapshot_age_seconds'], 10);
+      expect(decision.structuredContent?['snapshot_stale'], isFalse);
+      expect(
+        (decision.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+      expect(liveCalls, 0);
+    });
+
     test('missing profile returns a structured error', () async {
       await connect(_fixture());
 
@@ -329,6 +533,7 @@ void main() {
         'list_quotas',
         'provider_with_most_headroom',
         'suggest_provider',
+        'decide_now',
       ]) {
         final r = await client.callTool(CallToolRequest(name: name));
         expect(r.isError, isFalse, reason: name);

@@ -15,6 +15,13 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- MCP routing now has local concurrency leases and a cache-only decision path.
+  `reserve_provider` and `release_provider` let parallel routers reserve a
+  cloud provider/account locally before dispatch, and active leases reduce later
+  `effective_headroom_percent` through `lease_discount_percent`. `decide_now`
+  reads only the in-memory or disk last-known snapshot and reports source, age,
+  and staleness so per-request routers can make a cheap decision without forcing
+  live collection.
 - Python and TypeScript MCP client snippets now cover quotabot over both stdio
   and Streamable HTTP. The snippets pin Python consumers to the stable MCP SDK
   v1 line, use the current TypeScript SDK transport imports, keep bearer tokens
@@ -22,7 +29,7 @@ Notable changes to quotabot. Newest first.
   with Python compilation plus strict TypeScript typechecking against the MCP
   TypeScript SDK.
 - The MCP server now supports opt-in Streamable HTTP alongside stdio:
-  `dart run bin/mcp_server.dart --http` serves the same six tools and
+  `dart run bin/mcp_server.dart --http` serves the same nine tools and
   `quotas://current` resource on a loopback-only `/mcp` endpoint with
   DNS-rebinding host/origin checks, batch JSON-RPC rejection, optional bearer
   token auth, and integration tests through the package's Streamable HTTP client.

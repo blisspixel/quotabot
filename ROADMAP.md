@@ -238,11 +238,15 @@ leverage is the quality of the signal it hands a router.
     SDK guidance checked on June 29, 2026, bearer-token support for HTTP, and CI
     smoke tests that compile Python snippets, typecheck TypeScript snippets
     against the current SDK, and assert current SDK transport imports.
-15. [ ] Concurrency leases (`reserve` / `release`) so parallel agents do not
+15. [x] Concurrency leases (`reserve` / `release`) so parallel agents do not
     dogpile the same pick and the next caller sees the reduced effective headroom,
     paired with a cheap cached "decide now" read that always states its
     `as_of`/staleness so a router can query per request without forcing a live
-    collect.
+    collect. Shipped: MCP now exposes cache-only `decide_now`, local
+    `reserve_provider`, and idempotent `release_provider`; active leases are
+    file-backed with locking in production, in-memory in tests, TTL-bound, capped,
+    idempotency-key aware, and surfaced as `lease_discount_percent` on ranked
+    candidates without entering the prompt or model-request path.
 16. [ ] Profile- and account-scoped routing queries (`--profile`, from item 8),
     plus a subscribe path - the Phase 1 threshold webhook generalized to an MCP
     notification - so a router reacts to a window crossing amber or red instead of

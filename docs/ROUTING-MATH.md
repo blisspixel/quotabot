@@ -402,13 +402,13 @@ the measurable improvement over the shipped heuristic.
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | next |
 | shrinkage | `insights.dart` (cross-provider pool) | next |
 | pacing controller | `computePace` -> routing weight | medium |
-| leases reserve/release | new `leases.dart` + MCP `reserve`/`release` | post-1.0 |
+| leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | post-1.0 |
 
 Build order honors the roadmap: ship `se` + `h_risk` + the unified score with
 neutral weights first (zero behavior change, full machinery in place), then turn on
-risk (`z`), then shrinkage (Pip), then leases (Dev), then the optimizer (Maya) and
+risk (`z`), then leases (Dev), then shrinkage (Pip), then the optimizer (Maya) and
 scheduler. Each step is a one-knob, reduces-to-previous change with its own tests.
 
 ---

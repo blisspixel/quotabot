@@ -253,12 +253,19 @@ budget, local-first. The MCP `suggest_model` tool does the same for agents.
 
 The collector runs as an MCP server so agents can query quota as a primitive. It
 speaks MCP over stdio by default, can opt into MCP Streamable HTTP on loopback,
-and exposes six tools plus a resource:
+and exposes nine tools plus a resource:
 
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.
 - `suggest_provider` - the provider to route the next request to, with ranked
   alternatives and a local fallback when subscriptions are low.
+- `decide_now` - the same routing decision from the cheapest cached snapshot,
+  with explicit snapshot source, age, and staleness. It never forces a live
+  collect.
+- `reserve_provider` - create a short local quota lease for a cloud provider
+  before dispatching parallel work, reducing later effective headroom.
+- `release_provider` - idempotently release a local routing lease when the
+  caller finishes or abandons the dispatch.
 - `check_provider_availability` - whether a named provider is usable now.
 - `list_models` - every model you can route to now (cloud + local), each with its
   gating provider's live budget and capability hints.
@@ -271,6 +278,12 @@ local named profile before routing or model selection. Missing profiles fail sof
 the tool returns a structured `error` field with an empty provider list instead
 of throwing. The `quotas://current` resource remains the unfiltered current
 snapshot for clients that only consume MCP resources.
+
+`suggest_provider` and `decide_now` include active local leases in the response
+and expose each candidate's `lease_discount_percent` when a concurrent caller has
+reserved the same provider/account. `reserve_provider` and `release_provider`
+write only local metadata under quotabot's application-data directory. They do
+not contact a model provider, read prompts, or enter the request data path.
 
 Run stdio with `dart run bin/mcp_server.dart`, or compile a binary:
 

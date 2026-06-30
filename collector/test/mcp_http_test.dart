@@ -114,6 +114,9 @@ void main() {
         'list_quotas',
         'provider_with_most_headroom',
         'suggest_provider',
+        'decide_now',
+        'reserve_provider',
+        'release_provider',
         'check_provider_availability',
         'list_models',
         'suggest_model',
@@ -122,8 +125,16 @@ void main() {
     for (final tool in tools.tools) {
       expect(tool.title, isNotEmpty, reason: tool.name);
       expect(tool.description, isNotEmpty, reason: tool.name);
-      expect(tool.annotations?.readOnlyHint, isTrue, reason: tool.name);
-      expect(tool.annotations?.idempotentHint, isTrue, reason: tool.name);
+      if (tool.name == 'reserve_provider') {
+        expect(tool.annotations?.readOnlyHint, isFalse, reason: tool.name);
+        expect(tool.annotations?.idempotentHint, isFalse, reason: tool.name);
+      } else if (tool.name == 'release_provider') {
+        expect(tool.annotations?.readOnlyHint, isFalse, reason: tool.name);
+        expect(tool.annotations?.idempotentHint, isTrue, reason: tool.name);
+      } else {
+        expect(tool.annotations?.readOnlyHint, isTrue, reason: tool.name);
+        expect(tool.annotations?.idempotentHint, isTrue, reason: tool.name);
+      }
       expect(tool.outputSchema, isNotNull, reason: tool.name);
     }
 

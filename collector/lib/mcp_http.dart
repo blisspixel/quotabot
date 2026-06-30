@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:mcp_dart/mcp_dart.dart';
 
+import 'leases.dart';
 import 'mcp.dart';
 import 'model_catalog.dart';
 import 'models.dart';
@@ -61,6 +62,8 @@ StreamableMcpServer buildQuotabotStreamableHttpServer({
   required QuotabotMcpHttpConfig config,
   required SnapshotProvider snapshot,
   required BurnProvider burnByProvider,
+  CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
+  RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -91,6 +94,8 @@ StreamableMcpServer buildQuotabotStreamableHttpServer({
     serverFactory: (_) => buildQuotabotMcpServer(
       snapshot: snapshot,
       burnByProvider: burnByProvider,
+      cachedSnapshot: cachedSnapshot,
+      leaseStore: leaseStore,
       now: now,
       catalog: catalog,
       profileLoader: profileLoader,

@@ -163,6 +163,40 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
   return results;
 }
 
+/// Loads every last-known provider snapshot in the cache directory without
+/// touching live providers. This is the cheap routing surface for per-request
+/// routers: it trades freshness for speed, and callers receive explicit age and
+/// stale metadata from the MCP layer.
+List<ProviderQuota> loadCachedSnapshots() {
+  final dir = cacheDir();
+  if (!dir.existsSync()) return const [];
+  final byIdentity = <String, ProviderQuota>{};
+  try {
+    for (final entity in dir.listSync()) {
+      if (entity is! File) continue;
+      final name = entity.uri.pathSegments.last;
+      if (!name.endsWith('.json') || name.startsWith('buckets_')) continue;
+      if (entity.lengthSync() > _maxJsonBytes) continue;
+      try {
+        final q = ProviderQuota.fromJson(
+          jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
+        );
+        final key = '${q.provider}\u0000${q.account}';
+        final existing = byIdentity[key];
+        if (existing == null || q.asOf >= existing.asOf) {
+          byIdentity[key] = q;
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  final out = byIdentity.values.toList()
+    ..sort((a, b) {
+      final byProvider = a.provider.compareTo(b.provider);
+      return byProvider != 0 ? byProvider : a.account.compareTo(b.account);
+    });
+  return out;
+}
+
 /// Antigravity's per-account snapshot, by account. Thin alias over the generic
 /// [loadAccountSnapshot]; kept for call-site clarity.
 ProviderQuota? loadAntigravitySnapshot(String account) =>

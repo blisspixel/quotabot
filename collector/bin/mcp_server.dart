@@ -40,6 +40,34 @@ Future<void> main(List<String> args) async {
     return cached!;
   }
 
+  int? newestSnapshotAsOf(List<ProviderQuota> providers) {
+    int? newest;
+    for (final provider in providers) {
+      newest =
+          newest == null || provider.asOf > newest ? provider.asOf : newest;
+    }
+    return newest;
+  }
+
+  Future<CachedQuotaSnapshot> cachedDecisionSnapshot() async {
+    final current = cached;
+    if (current != null) {
+      return CachedQuotaSnapshot(
+        providers: current,
+        asOf: cachedAt,
+        source: 'memory',
+      );
+    }
+    final disk = loadCachedSnapshots();
+    return CachedQuotaSnapshot(
+      providers: disk,
+      asOf: newestSnapshotAsOf(disk),
+      source: disk.isEmpty ? 'empty' : 'disk',
+    );
+  }
+
+  const leaseStore = FileRouteLeaseStore();
+
   if (options.http) {
     late final String? token;
     late final StreamableMcpServer server;
@@ -54,6 +82,8 @@ Future<void> main(List<String> args) async {
         ),
         snapshot: snapshot,
         burnByProvider: recentBurnStatsByProvider,
+        cachedSnapshot: cachedDecisionSnapshot,
+        leaseStore: leaseStore,
       );
     } on FormatException catch (error) {
       stderr.writeln(error.message);
@@ -84,6 +114,8 @@ Future<void> main(List<String> args) async {
   final server = buildQuotabotMcpServer(
     snapshot: snapshot,
     burnByProvider: recentBurnStatsByProvider,
+    cachedSnapshot: cachedDecisionSnapshot,
+    leaseStore: leaseStore,
   );
   await server.connect(StdioServerTransport());
 }

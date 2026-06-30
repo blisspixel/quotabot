@@ -71,6 +71,25 @@ void main() {
     expect(loadSnapshot('__nope_does_not_exist__'), isNull);
   });
 
+  test('loadCachedSnapshots scans last-known provider files only', () {
+    final q = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: '5h', usedPercent: 25)],
+    );
+    saveSnapshot(q);
+    recordHeadroomSample(id, 75, 1782000000);
+
+    final cached = loadCachedSnapshots()
+        .where((provider) => provider.provider == id)
+        .toList();
+    expect(cached, hasLength(1));
+    expect(cached.single.account, 'acct');
+    expect(cached.single.windows.single.usedPercent, 25);
+  });
+
   test('recordHeadroomSample accumulates into one hourly bucket', () {
     final now = 1782000000;
     recordHeadroomSample(id, 80, now);

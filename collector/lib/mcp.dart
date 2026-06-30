@@ -21,6 +21,7 @@ import 'dart:convert';
 import 'package:mcp_dart/mcp_dart.dart';
 
 import 'analysis.dart';
+import 'leases.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'profiles.dart';
@@ -77,9 +78,83 @@ Map<String, dynamic> suggestResponse(
   List<ProviderQuota> providers,
   int now, {
   Map<String, BurnStat> burnStatsByProvider = const {},
-}) =>
-    suggestRoute(providers, now, burnStatsByProvider: burnStatsByProvider)
-        .toJson();
+  List<RouteLease> activeLeases = const [],
+}) {
+  final response = suggestRoute(
+    providers,
+    now,
+    burnStatsByProvider: burnStatsByProvider,
+    leaseDiscountFor: (provider, account) =>
+        leaseDiscountFor(activeLeases, provider, account),
+  ).toJson();
+  response['active_leases'] = leaseDiscounts(activeLeases)
+      .map((discount) => discount.toJson())
+      .toList();
+  return response;
+}
+
+class CachedQuotaSnapshot {
+  final List<ProviderQuota> providers;
+  final int? asOf;
+  final String source;
+
+  const CachedQuotaSnapshot({
+    required this.providers,
+    required this.asOf,
+    required this.source,
+  });
+
+  const CachedQuotaSnapshot.empty()
+      : providers = const [],
+        asOf = null,
+        source = 'empty';
+}
+
+typedef CachedSnapshotProvider = Future<CachedQuotaSnapshot> Function();
+
+Future<CachedQuotaSnapshot> emptyCachedSnapshot() async =>
+    const CachedQuotaSnapshot.empty();
+
+Map<String, dynamic> decideNowResponse(
+  CachedQuotaSnapshot cached,
+  int now, {
+  int maxAgeSeconds = 300,
+  Map<String, BurnStat> burnStatsByProvider = const {},
+  List<RouteLease> activeLeases = const [],
+}) {
+  final age = cached.asOf == null
+      ? null
+      : (now - cached.asOf!).clamp(0, 1 << 31).toInt();
+  final stale = cached.providers.isEmpty ||
+      cached.asOf == null ||
+      (age != null && age > maxAgeSeconds) ||
+      cached.providers.any((provider) => provider.stale);
+  final suggestion = suggestRoute(
+    cached.providers,
+    now,
+    burnStatsByProvider: burnStatsByProvider,
+    leaseDiscountFor: (provider, account) =>
+        leaseDiscountFor(activeLeases, provider, account),
+  ).toJson();
+  return {
+    'schema': 'quotabot.decision.v1',
+    'as_of': now,
+    'risk_z': suggestion['risk_z'],
+    'source': cached.source,
+    'snapshot_as_of': cached.asOf,
+    'snapshot_age_seconds': age,
+    'snapshot_stale': stale,
+    'max_age_seconds': maxAgeSeconds,
+    'recommended': suggestion['recommended'],
+    'reason': suggestion['reason'],
+    'using_local_fallback': suggestion['using_local_fallback'],
+    'fallback': suggestion['fallback'],
+    'ranked': suggestion['ranked'],
+    'active_leases': leaseDiscounts(activeLeases)
+        .map((discount) => discount.toJson())
+        .toList(),
+  };
+}
 
 /// Builds a [ModelRequirements] from `list_models` tool arguments: a coarse
 /// `task` profile overlaid with explicit capability/tier filters.
@@ -208,6 +283,10 @@ final _candidateSchema = JsonSchema.object(
     'effective_headroom_percent': _nullable(JsonSchema.number(
       description: 'Headroom after discounting recent burn (and risk if set).',
     )),
+    'lease_discount_percent': JsonSchema.number(
+      description:
+          'Temporary active lease discount applied to effective headroom.',
+    ),
     'burn_percent_per_hour': JsonSchema.number(),
     'burn_se_percent_per_hour': JsonSchema.number(
       description: 'Standard error of the burn estimate, when estimable.',
@@ -224,6 +303,41 @@ final _candidateSchema = JsonSchema.object(
     'available': JsonSchema.boolean(),
   },
   required: ['provider', 'account', 'local', 'stale', 'available'],
+);
+
+final _leaseDiscountSchema = JsonSchema.object(
+  description:
+      'Active temporary routing reservations for one provider account.',
+  properties: {
+    'provider': JsonSchema.string(),
+    'account': JsonSchema.string(),
+    'discount_percent': JsonSchema.number(),
+    'leases': JsonSchema.integer(),
+    'expires_at': JsonSchema.integer(),
+  },
+  required: ['provider', 'account', 'discount_percent', 'leases'],
+);
+
+final _routeLeaseSchema = JsonSchema.object(
+  description: 'A temporary local routing reservation.',
+  properties: {
+    'id': JsonSchema.string(),
+    'provider': JsonSchema.string(),
+    'account': JsonSchema.string(),
+    'created_at': JsonSchema.integer(),
+    'expires_at': JsonSchema.integer(),
+    'weight_percent': JsonSchema.number(),
+    'client': JsonSchema.string(),
+    'idempotency_key': JsonSchema.string(),
+  },
+  required: [
+    'id',
+    'provider',
+    'account',
+    'created_at',
+    'expires_at',
+    'weight_percent',
+  ],
 );
 
 /// The always-present fail-soft fallback inside a routing suggestion.
@@ -253,8 +367,85 @@ final suggestOutputSchema = JsonSchema.object(
     'using_local_fallback': JsonSchema.boolean(),
     'fallback': _fallbackSchema,
     'ranked': JsonSchema.array(items: _candidateSchema),
+    'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
   },
   required: ['schema', 'reason', 'using_local_fallback', 'fallback', 'ranked'],
+);
+
+final decideNowOutputSchema = JsonSchema.object(
+  description:
+      'A cache-only routing decision that never forces live collection.',
+  properties: {
+    'schema': JsonSchema.string(),
+    'as_of': JsonSchema.integer(),
+    'risk_z': JsonSchema.number(),
+    'source': JsonSchema.string(
+      description: '"memory", "disk", or "empty".',
+    ),
+    'snapshot_as_of': _nullable(JsonSchema.integer()),
+    'snapshot_age_seconds': _nullable(JsonSchema.integer()),
+    'snapshot_stale': JsonSchema.boolean(),
+    'max_age_seconds': JsonSchema.integer(),
+    'recommended': _nullable(_candidateSchema),
+    'reason': JsonSchema.string(),
+    'using_local_fallback': JsonSchema.boolean(),
+    'fallback': _fallbackSchema,
+    'ranked': JsonSchema.array(items: _candidateSchema),
+    'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+  },
+  required: [
+    'schema',
+    'as_of',
+    'source',
+    'snapshot_stale',
+    'max_age_seconds',
+    'reason',
+    'using_local_fallback',
+    'fallback',
+    'ranked',
+  ],
+);
+
+final reserveProviderOutputSchema = JsonSchema.object(
+  description: 'Result of creating a temporary local routing reservation.',
+  properties: {
+    'schema': JsonSchema.string(),
+    'as_of': JsonSchema.integer(),
+    'reserved': JsonSchema.boolean(),
+    'reused': JsonSchema.boolean(),
+    'reason': JsonSchema.string(),
+    'lease': _nullable(_routeLeaseSchema),
+    'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+  },
+  required: [
+    'schema',
+    'as_of',
+    'reserved',
+    'reused',
+    'reason',
+    'active_leases'
+  ],
+);
+
+final releaseProviderOutputSchema = JsonSchema.object(
+  description: 'Result of releasing a temporary local routing reservation.',
+  properties: {
+    'schema': JsonSchema.string(),
+    'as_of': JsonSchema.integer(),
+    'released': JsonSchema.boolean(),
+    'reason': JsonSchema.string(),
+    'lease_id': JsonSchema.string(),
+    'lease': _nullable(_routeLeaseSchema),
+    'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+  },
+  required: [
+    'schema',
+    'as_of',
+    'released',
+    'reason',
+    'lease_id',
+    'active_leases'
+  ],
 );
 
 /// One model entry in the registry: the model's capability fields plus the live
@@ -377,6 +568,8 @@ typedef BurnProvider = Map<String, BurnStat> Function(
 McpServer buildQuotabotMcpServer({
   required SnapshotProvider snapshot,
   required BurnProvider burnByProvider,
+  CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
+  RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -395,6 +588,8 @@ McpServer buildQuotabotMcpServer({
     server,
     snapshot: snapshot,
     burnByProvider: burnByProvider,
+    cachedSnapshot: cachedSnapshot,
+    leaseStore: leaseStore,
     now: now,
     catalog: catalog,
     profileLoader: profileLoader,
@@ -410,6 +605,20 @@ const _readOnly = ToolAnnotations(
   idempotentHint: true,
   destructiveHint: false,
   openWorldHint: true,
+);
+
+const _localWrite = ToolAnnotations(
+  readOnlyHint: false,
+  idempotentHint: false,
+  destructiveHint: false,
+  openWorldHint: false,
+);
+
+const _localRelease = ToolAnnotations(
+  readOnlyHint: false,
+  idempotentHint: true,
+  destructiveHint: false,
+  openWorldHint: false,
 );
 
 class _ProfiledSnapshot {
@@ -451,6 +660,81 @@ Map<String, dynamic> _withProfileMeta(
   return response;
 }
 
+List<Map<String, dynamic>> _leaseDiscountJson(List<RouteLease> activeLeases) =>
+    leaseDiscounts(activeLeases)
+        .map((discount) => discount.toJson())
+        .toList(growable: false);
+
+Map<String, dynamic> _reserveJson(
+  RouteLeaseReservation reservation,
+  int now,
+) =>
+    {
+      'schema': 'quotabot.reserve.v1',
+      'as_of': now,
+      'reserved': reservation.reserved,
+      'reused': reservation.reused,
+      'reason': reservation.reason,
+      'lease': reservation.lease?.toJson(),
+      'active_leases': _leaseDiscountJson(reservation.activeLeases),
+    };
+
+Map<String, dynamic> _releaseJson(
+  RouteLeaseRelease release,
+  String leaseId,
+  int now,
+) =>
+    {
+      'schema': 'quotabot.release.v1',
+      'as_of': now,
+      'released': release.released,
+      'reason': release.reason,
+      'lease_id': leaseId,
+      'lease': release.lease?.toJson(),
+      'active_leases': _leaseDiscountJson(release.activeLeases),
+    };
+
+RouteCandidate? _explicitReserveTarget(
+  List<ProviderQuota> providers,
+  int now,
+  Map<String, dynamic> args,
+  List<RouteLease> activeLeases,
+  Map<String, BurnStat> burnStatsByProvider,
+) {
+  final requestedProvider = normalizeLeaseText(args['provider'])?.toLowerCase();
+  if (requestedProvider == null) return null;
+  final requestedAccount = normalizeLeaseText(args['account']);
+  final matches = providers.where((provider) {
+    if (provider.provider != requestedProvider) return false;
+    if (requestedAccount == null) return true;
+    return provider.account == requestedAccount;
+  }).toList();
+  if (matches.isEmpty) return null;
+  final ranked = suggestRoute(
+    matches,
+    now,
+    burnStatsByProvider: burnStatsByProvider,
+    leaseDiscountFor: (provider, account) =>
+        leaseDiscountFor(activeLeases, provider, account),
+  ).ranked;
+  return ranked.isEmpty ? null : ranked.first;
+}
+
+Map<String, dynamic> _reserveUnavailable(
+  String reason,
+  int now,
+  List<RouteLease> activeLeases,
+) =>
+    {
+      'schema': 'quotabot.reserve.v1',
+      'as_of': now,
+      'reserved': false,
+      'reused': false,
+      'reason': reason,
+      'lease': null,
+      'active_leases': _leaseDiscountJson(activeLeases),
+    };
+
 /// Registers quotabot's tools and the `quotas://current` resource on [server].
 ///
 /// This is the single wiring point shared by `bin/mcp_server.dart` (which feeds
@@ -462,6 +746,8 @@ void registerQuotabotTools(
   McpServer server, {
   required SnapshotProvider snapshot,
   required BurnProvider burnByProvider,
+  CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
+  RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -521,8 +807,9 @@ void registerQuotabotTools(
     description:
         'Recommend which provider to route the next request to. Prefers the '
         'metered subscription with the most remaining headroom (above a comfort '
-        'threshold, after discounting recent burn), and falls back to a local '
-        'runtime (e.g. Ollama) when every subscription is low. Returns the '
+        'threshold, after discounting recent burn and active local leases), and '
+        'falls back to a local runtime (e.g. Ollama) when every subscription is '
+        'low. Returns the '
         'recommended provider, a human reason, a using_local_fallback flag, a '
         'guaranteed fallback, and the full ranked candidate list. Local runtimes '
         'never win on headroom; they are fallbacks only.',
@@ -533,6 +820,7 @@ void registerQuotabotTools(
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final results = profiled.providers;
       final n = now();
+      final activeLeases = leaseStore.active(n);
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           suggestResponse(
@@ -540,9 +828,230 @@ void registerQuotabotTools(
             n,
             burnStatsByProvider:
                 burnByProvider(results.map((q) => q.provider), n),
+            activeLeases: activeLeases,
           ),
           profiled,
         ),
+      );
+    },
+  );
+
+  server.registerTool(
+    'decide_now',
+    title: 'Decide now from cache',
+    description:
+        'Return a routing decision from the latest cached quota snapshot without '
+        'forcing a live provider collection. The response always states the '
+        'cache source, snapshot_as_of, snapshot_age_seconds, and snapshot_stale '
+        'so a router can decide whether the answer is fresh enough for a '
+        'per-request path. Active temporary leases are applied to effective '
+        'headroom.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'profile': JsonSchema.string(
+          description:
+              'Optional local named profile to filter providers/accounts.',
+        ),
+        'max_age_seconds': JsonSchema.integer(
+          description:
+              'Age above which snapshot_stale becomes true. Defaults to 300.',
+        ),
+      },
+    ),
+    outputSchema: decideNowOutputSchema,
+    annotations: _readOnly,
+    callback: (args, extra) async {
+      final cached = await cachedSnapshot();
+      final profiled = await _profiledSnapshot(
+        args,
+        () async => cached.providers,
+        profileLoader,
+      );
+      final n = now();
+      final activeLeases = leaseStore.active(n);
+      final maxAge = (args['max_age_seconds'] as num?)?.toInt() ?? 300;
+      final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
+      return CallToolResult.fromStructuredContent(
+        _withProfileMeta(
+          decideNowResponse(
+            CachedQuotaSnapshot(
+              providers: profiled.providers,
+              asOf: cached.asOf,
+              source: cached.source,
+            ),
+            n,
+            maxAgeSeconds: boundedMaxAge,
+            burnStatsByProvider:
+                burnByProvider(profiled.providers.map((q) => q.provider), n),
+            activeLeases: activeLeases,
+          ),
+          profiled,
+        ),
+      );
+    },
+  );
+
+  server.registerTool(
+    'reserve_provider',
+    title: 'Reserve provider',
+    description:
+        'Create a short local routing lease for the current best subscription, '
+        'or for an explicit provider/account. The lease reduces that account '
+        'effective headroom for later suggestions so parallel agents do not all '
+        'choose the same provider at once. This writes only local metadata and '
+        'expires automatically.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'provider': JsonSchema.string(
+          description:
+              'Optional provider id to reserve. If omitted, quotabot reserves '
+              'the current best subscription.',
+        ),
+        'account': JsonSchema.string(
+          description: 'Optional account disambiguator for provider.',
+        ),
+        'profile': JsonSchema.string(
+          description:
+              'Optional local named profile to filter providers/accounts.',
+        ),
+        'lease_seconds': JsonSchema.integer(
+          description: 'Lease TTL, clamped to 15..3600 seconds.',
+        ),
+        'weight_percent': JsonSchema.number(
+          description: 'Effective-headroom discount, clamped to 1..50.',
+        ),
+        'client': JsonSchema.string(
+          description: 'Optional caller label stored with the local lease.',
+        ),
+        'idempotency_key': JsonSchema.string(
+          description: 'Optional retry key; a matching active lease is reused.',
+        ),
+      },
+    ),
+    outputSchema: reserveProviderOutputSchema,
+    annotations: _localWrite,
+    callback: (args, extra) async {
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      final n = now();
+      var activeLeases = leaseStore.active(n);
+      if (profiled.error != null) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(
+            _reserveUnavailable(profiled.error!, n, activeLeases),
+            profiled,
+          ),
+        );
+      }
+
+      final results = profiled.providers;
+      final burnStats = burnByProvider(results.map((q) => q.provider), n);
+      final explicit = normalizeLeaseText(args['provider']) != null;
+      final target = _explicitReserveTarget(
+            results,
+            n,
+            args,
+            activeLeases,
+            burnStats,
+          ) ??
+          (explicit
+              ? null
+              : suggestRoute(
+                  results,
+                  n,
+                  burnStatsByProvider: burnStats,
+                  leaseDiscountFor: (provider, account) =>
+                      leaseDiscountFor(activeLeases, provider, account),
+                ).recommended);
+      if (target == null) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(
+            _reserveUnavailable(
+              explicit
+                  ? 'requested provider/account unavailable'
+                  : 'no reservable provider available',
+              n,
+              activeLeases,
+            ),
+            profiled,
+          ),
+        );
+      }
+      if (target.isLocal) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(
+            _reserveUnavailable(
+              'local runtimes do not need quota leases',
+              n,
+              activeLeases,
+            ),
+            profiled,
+          ),
+        );
+      }
+      if (!target.available || (target.effectiveHeadroom ?? 0) <= 0) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(
+            _reserveUnavailable(
+              '${target.provider} has no effective headroom available',
+              n,
+              activeLeases,
+            ),
+            profiled,
+          ),
+        );
+      }
+
+      final reservation = leaseStore.reserve(
+        provider: target.provider,
+        account: target.account,
+        now: n,
+        leaseSeconds: normalizeLeaseSeconds(args['lease_seconds']),
+        weightPercent: normalizeLeaseWeight(args['weight_percent']),
+        client: normalizeLeaseText(args['client']),
+        idempotencyKey: normalizeLeaseText(args['idempotency_key']),
+      );
+      return CallToolResult.fromStructuredContent(
+        _withProfileMeta(_reserveJson(reservation, n), profiled),
+      );
+    },
+  );
+
+  server.registerTool(
+    'release_provider',
+    title: 'Release provider reservation',
+    description:
+        'Release a local routing lease before its expiry. The operation is '
+        'idempotent: releasing an unknown or expired lease returns released '
+        'false with the current active lease summary.',
+    inputSchema: JsonSchema.object(
+      properties: {
+        'lease_id': JsonSchema.string(
+            description: 'Lease id returned by reserve_provider.'),
+      },
+      required: ['lease_id'],
+    ),
+    outputSchema: releaseProviderOutputSchema,
+    annotations: _localRelease,
+    callback: (args, extra) async {
+      final n = now();
+      final leaseId = normalizeLeaseText(args['lease_id'], maxLength: 96);
+      if (leaseId == null) {
+        return CallToolResult.fromStructuredContent(
+          _releaseJson(
+            RouteLeaseRelease(
+              released: false,
+              reason: 'lease_id is required',
+              lease: null,
+              activeLeases: leaseStore.active(n),
+            ),
+            '',
+            n,
+          ),
+        );
+      }
+      final release = leaseStore.release(leaseId: leaseId, now: n);
+      return CallToolResult.fromStructuredContent(
+        _releaseJson(release, leaseId, n),
       );
     },
   );
