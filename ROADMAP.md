@@ -176,8 +176,9 @@ it stands up serve every phase after it.
    the right identity. One default profile stays the zero-config path. The
    profile model, JSON schema, safe-name validation, local profile persistence,
    provider/account filtering core, CLI `--profile` filtering, and MCP profile
-   filtering now exist. Remaining: add desktop profile controls and scoped UI
-   preferences.
+   filtering now exist. The desktop app can switch existing profiles and scopes
+   hidden providers, sort, alerts, and analytics to the active profile. Remaining:
+   add first-class desktop profile creation/editing and theme scoping.
 
 ### Phase 3 - Deterministic testability, then hard testing
 

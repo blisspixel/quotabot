@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
+import 'package:quotabot/profile_ui.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _provider(
@@ -52,6 +53,7 @@ void main() {
         showInTaskbar: false,
         enableNotifications: false,
         sort: ProviderSort.mostUsed,
+        activeProfile: 'work',
         webhookUrl: 'http://127.0.0.1:9000/quota',
         webhookAllowExternal: true,
         windowX: 100,
@@ -65,6 +67,7 @@ void main() {
       expect(back.showInTaskbar, isFalse);
       expect(back.enableNotifications, isFalse);
       expect(back.sort, ProviderSort.mostUsed);
+      expect(back.activeProfile, 'work');
       expect(back.showAccounts, isFalse);
       expect(back.webhookUrl, 'http://127.0.0.1:9000/quota');
       expect(back.webhookAllowExternal, isTrue);
@@ -81,6 +84,7 @@ void main() {
       expect(p.showInTaskbar, isTrue);
       expect(p.enableNotifications, isTrue);
       expect(p.sort, ProviderSort.defaultOrder);
+      expect(p.activeProfile, 'default');
       expect(p.showAccounts, isFalse);
       expect(p.webhookUrl, isNull);
       expect(p.webhookAllowExternal, isFalse);
@@ -93,6 +97,57 @@ void main() {
       expect(back.windowX, isNull);
       expect(back.windowY, isNull);
     });
+  });
+
+  group('profile UI preferences', () {
+    test('labels default and named profiles for compact UI', () {
+      expect(profileLabel(QuotaProfile.defaultProfile()), 'Default');
+      expect(
+        profileLabel(const QuotaProfile(name: 'work-project')),
+        'Work Project',
+      );
+    });
+
+    test('maps profile sort strings to app sort values safely', () {
+      expect(
+        sortFromProfile(const QuotaProfile(name: 'work', sort: 'mostUsed')),
+        ProviderSort.mostUsed,
+      );
+      expect(
+        sortFromProfile(const QuotaProfile(name: 'work', sort: 'unknown')),
+        ProviderSort.defaultOrder,
+      );
+    });
+
+    test(
+      'updates and strips UI preferences without changing routing filters',
+      () {
+        final profile = profileWithUiPrefs(
+          const QuotaProfile(
+            name: 'work',
+            providers: {'codex'},
+            accounts: {
+              'codex': {'work@example.com'},
+            },
+            routingPolicy: ProfileRoutingPolicy.subscriptionsFirst,
+          ),
+          hiddenProviders: {'grok'},
+          sort: ProviderSort.alphabetical,
+        );
+
+        expect(profile.providers, {'codex'});
+        expect(profile.accounts['codex'], {'work@example.com'});
+        expect(profile.hiddenProviders, {'grok'});
+        expect(profile.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+        expect(profile.sort, ProviderSort.alphabetical.name);
+
+        final routing = profileWithoutUiPrefs(profile);
+        expect(routing.providers, {'codex'});
+        expect(routing.accounts['codex'], {'work@example.com'});
+        expect(routing.hiddenProviders, isEmpty);
+        expect(routing.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+      },
+    );
   });
 
   group('provider display grouping', () {

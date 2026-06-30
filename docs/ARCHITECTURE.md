@@ -228,6 +228,10 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   quota, routing, availability, and model responses. Missing profiles return a
   structured `error` field and no providers; `quotas://current` remains the
   unfiltered resource shape for compatibility.
+- The desktop app loads local profiles at startup and on refresh, applies the
+  active profile before display, notifications, webhook alerts, and analytics,
+  and persists non-default profile hidden-provider plus sort preferences back
+  into the profile file. The `default` profile keeps the legacy app prefs file.
 - A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
   countdowns stay current; actual data refresh is on a separate adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a

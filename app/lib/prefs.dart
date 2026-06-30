@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/profiles.dart';
 import 'package:quotabot_collector/util.dart';
 
 /// Refresh cadence: smart (adaptive) or a fixed interval.
@@ -29,6 +30,7 @@ class Prefs {
   final bool showInTaskbar;
   final bool enableNotifications;
   final ProviderSort sort;
+  final String activeProfile;
   final bool showAccounts;
   final TextSize textSize;
 
@@ -53,6 +55,7 @@ class Prefs {
     this.showInTaskbar = true,
     this.enableNotifications = true,
     this.sort = ProviderSort.defaultOrder,
+    this.activeProfile = defaultProfileName,
     this.showAccounts = false,
     this.textSize = TextSize.medium,
     this.webhookUrl,
@@ -70,6 +73,7 @@ class Prefs {
     bool? showInTaskbar,
     bool? enableNotifications,
     ProviderSort? sort,
+    String? activeProfile,
     bool? showAccounts,
     TextSize? textSize,
     String? webhookUrl,
@@ -87,6 +91,7 @@ class Prefs {
     showInTaskbar: showInTaskbar ?? this.showInTaskbar,
     enableNotifications: enableNotifications ?? this.enableNotifications,
     sort: sort ?? this.sort,
+    activeProfile: activeProfile ?? this.activeProfile,
     showAccounts: showAccounts ?? this.showAccounts,
     textSize: textSize ?? this.textSize,
     webhookUrl: clearWebhook ? null : webhookUrl ?? this.webhookUrl,
@@ -104,6 +109,7 @@ class Prefs {
     'show_in_taskbar': showInTaskbar,
     'enable_notifications': enableNotifications,
     'sort': sort.name,
+    'active_profile': activeProfile,
     'show_accounts': showAccounts,
     'text_size': textSize.name,
     if (webhookUrl != null) 'webhook_url': webhookUrl,
@@ -127,6 +133,9 @@ class Prefs {
       (s) => s.name == j['sort'],
       orElse: () => ProviderSort.defaultOrder,
     ),
+    activeProfile:
+        normalizeProfileName(j['active_profile'] as String?) ??
+        defaultProfileName,
     showAccounts: j['show_accounts'] as bool? ?? false,
     textSize: TextSize.values.firstWhere(
       (t) => t.name == j['text_size'],

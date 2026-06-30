@@ -23,6 +23,7 @@ import 'demo.dart';
 import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
+import 'profile_ui.dart';
 import 'termshot.dart';
 import 'typography.dart';
 
@@ -241,6 +242,10 @@ class _DashboardState extends State<Dashboard>
   late TextSize _textSize = widget.prefs.textSize;
   late String? _webhookUrl = widget.prefs.webhookUrl;
   late bool _webhookAllowExternal = widget.prefs.webhookAllowExternal;
+  late List<QuotaProfile> _profiles;
+  late QuotaProfile _activeProfile;
+  late Set<String> _defaultHidden;
+  late ProviderSort _defaultSort;
 
   /// Providers currently in a red alert state, so a steady spent window is
   /// alerted once on the crossing and re-armed only after it recovers. Mirrors
@@ -248,8 +253,8 @@ class _DashboardState extends State<Dashboard>
   Set<String> _armed = {};
   bool _isRefreshing = false;
   int _failStreak = 0; // consecutive refreshes with no live data at all
-  late final Set<String> _hidden = {...widget.prefs.hidden};
-  late ProviderSort _sort = widget.prefs.sort;
+  late Set<String> _hidden;
+  late ProviderSort _sort;
   Map<String, List<ProviderQuota>> _history = {};
   Map<String, Insights> _insights = {};
   Map<String, List<List<double?>>> _heatmaps = {};
@@ -265,8 +270,11 @@ class _DashboardState extends State<Dashboard>
   final GlobalKey _contentKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
 
+  List<ProviderQuota> get _profiledData =>
+      applyProfile(_data, profileWithoutUiPrefs(_activeProfile));
+
   List<ProviderQuota> get _visible =>
-      _data.where((q) => !_hidden.contains(q.provider)).toList();
+      _profiledData.where((q) => !_hidden.contains(q.provider)).toList();
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
@@ -315,15 +323,67 @@ class _DashboardState extends State<Dashboard>
   List<ProviderQuota> get _menuProviders {
     final seen = <String>{};
     final out = <ProviderQuota>[];
-    for (final q in _data) {
+    for (final q in _profiledData) {
       if (seen.add(q.provider)) out.add(q);
     }
     return out;
   }
 
+  List<QuotaProfile> _loadProfiles() {
+    final loaded = listProfiles();
+    return loaded.isEmpty ? [QuotaProfile.defaultProfile()] : loaded;
+  }
+
+  QuotaProfile _profileByName(String name) {
+    final normalized = normalizeProfileName(name) ?? defaultProfileName;
+    for (final profile in _profiles) {
+      if (profile.name == normalized) return profile;
+    }
+    return _profiles.firstWhere(
+      (profile) => profile.name == defaultProfileName,
+      orElse: QuotaProfile.defaultProfile,
+    );
+  }
+
+  void _applyProfileUiState(QuotaProfile profile) {
+    if (profile.name == defaultProfileName) {
+      _hidden = {..._defaultHidden};
+      _sort = _defaultSort;
+      return;
+    }
+    _hidden = {...profile.hiddenProviders};
+    _sort = sortFromProfile(profile);
+  }
+
+  void _saveActiveProfileUiState() {
+    if (_activeProfile.name == defaultProfileName) {
+      _defaultHidden = {..._hidden};
+      _defaultSort = _sort;
+      return;
+    }
+    final updated = profileWithUiPrefs(
+      _activeProfile,
+      hiddenProviders: _hidden,
+      sort: _sort,
+    );
+    try {
+      saveProfile(updated);
+    } catch (_) {}
+    _activeProfile = updated;
+    _profiles = [
+      for (final profile in _profiles)
+        if (profile.name == updated.name) updated else profile,
+    ];
+  }
+
   @override
   void initState() {
     super.initState();
+    _defaultHidden = {...widget.prefs.hidden};
+    _defaultSort = widget.prefs.sort;
+    _profiles = _loadProfiles();
+    _activeProfile = _profileByName(widget.prefs.activeProfile);
+    _applyProfileUiState(_activeProfile);
     _windowPos = widget.prefs.windowX == null
         ? null
         : Offset(widget.prefs.windowX!, widget.prefs.windowY ?? 0);
@@ -504,15 +564,17 @@ class _DashboardState extends State<Dashboard>
     unawaited(windowManager.hide());
   }
 
-  void _persistPrefs() {
+  void _persistPrefs({bool saveProfileUiState = false}) {
+    if (saveProfileUiState) _saveActiveProfileUiState();
     Prefs(
-      hidden: _hidden,
+      hidden: _defaultHidden,
       compact: _compact,
       cadence: _cadence,
       alwaysOnTop: _alwaysOnTop,
       showInTaskbar: _showInTaskbar,
       enableNotifications: _enableNotifications,
-      sort: _sort,
+      sort: _defaultSort,
+      activeProfile: _activeProfile.name,
       textSize: _textSize,
       showAccounts: _showAccounts,
       webhookUrl: _webhookUrl,
@@ -550,12 +612,17 @@ class _DashboardState extends State<Dashboard>
         }
         return true;
       }).toList();
+      final profiles = _loadProfiles();
+      final selectedProfile = _activeProfile.name;
       // Track systemic failure...
       final anyLive = active.any(
         (q) => q.ok && q.windows.isNotEmpty && !q.stale,
       );
       _failStreak = anyLive ? 0 : _failStreak + 1;
       setState(() {
+        _profiles = profiles;
+        _activeProfile = _profileByName(selectedProfile);
+        _applyProfileUiState(_activeProfile);
         _data = active;
         _loading = false;
         _updated = DateTime.now();
@@ -730,7 +797,7 @@ class _DashboardState extends State<Dashboard>
       if (!_hidden.remove(provider)) _hidden.add(provider);
     });
     _applySize();
-    _persistPrefs();
+    _persistPrefs(saveProfileUiState: true);
   }
 
   /// Right-click / long-press menu on a provider card: quick set-up help and
@@ -876,34 +943,53 @@ class _DashboardState extends State<Dashboard>
       children: [
         _header(dark),
         const SizedBox(height: 2),
-        GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onPanStart: (_) => windowManager.startDragging(),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (var g = 0; g < groups.length; g++) ...[
-                  if (showGroupHeaders) ...[
-                    if (g > 0) const SizedBox(height: 10),
-                    _AccountGroupHeader(
-                      account: groups[g].account,
-                      count: groups[g].quotas.length,
-                      dark: dark,
-                    ),
-                    const SizedBox(height: 6),
-                  ],
-                  for (var i = 0; i < groups[g].quotas.length; i++) ...[
-                    if (i > 0) const SizedBox(height: 8),
-                    _providerTile(groups[g].quotas[i], card, counts),
+        if (groups.isEmpty)
+          _emptyProfileState(dark)
+        else
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onPanStart: (_) => windowManager.startDragging(),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var g = 0; g < groups.length; g++) ...[
+                    if (showGroupHeaders) ...[
+                      if (g > 0) const SizedBox(height: 10),
+                      _AccountGroupHeader(
+                        account: groups[g].account,
+                        count: groups[g].quotas.length,
+                        dark: dark,
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    for (var i = 0; i < groups[g].quotas.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 8),
+                      _providerTile(groups[g].quotas[i], card, counts),
+                    ],
                   ],
                 ],
-              ],
+              ),
             ),
           ),
-        ),
       ],
+    );
+  }
+
+  Widget _emptyProfileState(bool dark) {
+    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => windowManager.startDragging(),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+        child: Text(
+          'No providers in ${profileLabel(_activeProfile)}',
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: AppType.caption, color: muted),
+        ),
+      ),
     );
   }
 
@@ -946,16 +1032,28 @@ class _DashboardState extends State<Dashboard>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (int i = 0; i < displayed.length; i++)
-                      Padding(
-                        padding: EdgeInsets.only(
-                          right: i == displayed.length - 1 ? 0 : 10,
+                    if (displayed.isEmpty)
+                      Flexible(
+                        child: Text(
+                          'No providers',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppType.caption,
+                            color: muted,
+                          ),
                         ),
-                        child: Tooltip(
-                          message: _compactTooltip(displayed[i], counts),
-                          child: _compactChip(displayed[i], now, fg),
+                      )
+                    else
+                      for (int i = 0; i < displayed.length; i++)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            right: i == displayed.length - 1 ? 0 : 10,
+                          ),
+                          child: Tooltip(
+                            message: _compactTooltip(displayed[i], counts),
+                            child: _compactChip(displayed[i], now, fg),
+                          ),
                         ),
-                      ),
                   ],
                 ),
               ),
@@ -1053,6 +1151,20 @@ class _DashboardState extends State<Dashboard>
                     _ago(_updated),
                     style: TextStyle(fontSize: AppType.caption, color: muted),
                   ),
+                  if (_activeProfile.name != defaultProfileName) ...[
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(
+                        profileLabel(_activeProfile),
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppType.label,
+                          fontWeight: FontWeight.w600,
+                          color: muted,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1096,7 +1208,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   Widget _menuButton(Color muted) {
-    final counts = _providerCounts(_data);
+    final counts = _providerCounts(_profiledData);
     return PopupMenuButton<String>(
       tooltip: 'Providers and refresh',
       padding: EdgeInsets.zero,
@@ -1104,6 +1216,25 @@ class _DashboardState extends State<Dashboard>
       icon: Icon(Icons.more_vert_rounded, size: 16, color: muted),
       onSelected: _onMenu,
       itemBuilder: (_) => [
+        const PopupMenuItem(
+          enabled: false,
+          height: 26,
+          child: Text(
+            'PROFILE',
+            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
+          ),
+        ),
+        for (final profile in _profiles)
+          CheckedPopupMenuItem(
+            value: 'profile:${profile.name}',
+            checked: _activeProfile.name == profile.name,
+            child: Text(
+              profileLabel(profile),
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: AppType.subtitle),
+            ),
+          ),
+        const PopupMenuDivider(),
         const PopupMenuItem(
           enabled: false,
           height: 26,
@@ -1236,7 +1367,9 @@ class _DashboardState extends State<Dashboard>
       );
 
   void _onMenu(String value) {
-    if (value.startsWith('show:')) {
+    if (value.startsWith('profile:')) {
+      _setActiveProfile(value.substring(8));
+    } else if (value.startsWith('show:')) {
       _toggleHidden(value.substring(5));
     } else if (value == 'cad:smart') {
       _setCadence(Cadence.smart);
@@ -1269,6 +1402,21 @@ class _DashboardState extends State<Dashboard>
     } else if (value == 'text:large') {
       _setTextSize(TextSize.large);
     }
+  }
+
+  void _setActiveProfile(String name) {
+    final normalized = normalizeProfileName(name);
+    if (normalized == null || normalized == _activeProfile.name) return;
+    _saveActiveProfileUiState();
+    _profiles = _loadProfiles();
+    final next = _profileByName(normalized);
+    setState(() {
+      _activeProfile = next;
+      _applyProfileUiState(next);
+      _armed = {};
+    });
+    _applySize();
+    _persistPrefs();
   }
 
   void _setShowAccounts(bool value) {
@@ -1372,7 +1520,7 @@ class _DashboardState extends State<Dashboard>
     if (_sort == s) return;
     setState(() => _sort = s);
     _applySize();
-    _persistPrefs();
+    _persistPrefs(saveProfileUiState: true);
   }
 
   void _setAlwaysOnTop(bool value) {
@@ -1392,16 +1540,17 @@ class _DashboardState extends State<Dashboard>
     try {
       final now = DateTime.now();
       final nowSec = now.millisecondsSinceEpoch ~/ 1000;
+      final snapshot = _visible;
       // Compute the routing recommendation once so a low-quota alert can point
       // the user at where to send work instead.
-      final suggestion = suggestRoute(_data, nowSec);
+      final suggestion = suggestRoute(snapshot, nowSec);
 
       // Proactive low-quota alerts: fire once when a provider's binding window
       // crosses into red, naming where to route next, using the same
       // edge-triggered engine as `quotabot watch`. Optionally mirror each alert
       // to a local webhook so it can reach a tray, a shell, or chat.
       final alerts = computeAlerts(
-        snapshot: _data,
+        snapshot: snapshot,
         suggestion: suggestion,
         now: nowSec,
         armed: _armed,
@@ -1427,7 +1576,7 @@ class _DashboardState extends State<Dashboard>
       }
 
       // Scheduled "resets soon" reminders for windows that are nearly full.
-      for (final q in _data) {
+      for (final q in snapshot) {
         if (q.stale) continue;
         for (final w in q.windows) {
           if (w.resetsAt != null &&
@@ -1498,7 +1647,8 @@ class _DashboardState extends State<Dashboard>
     // reflows or appears to change scale. The analytics body scrolls to fit.
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => FleetScreen(data: _data, buckets: _buckets, dark: dark),
+        builder: (_) =>
+            FleetScreen(data: _visible, buckets: _buckets, dark: dark),
       ),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
