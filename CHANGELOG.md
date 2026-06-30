@@ -15,6 +15,9 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- The 1.0 roadmap final cut is now checked: every roadmap item is marked
+  complete, the Windows local gate is green, and CI is configured to verify the
+  full suite plus macOS/Linux desktop package builds on native runners.
 - CI now verifies macOS and Linux desktop release bundle packaging on native
   runners. `tools/package-macos.sh` and `tools/package-linux.sh` build and
   validate the platform bundles, with optional local archives for release work.

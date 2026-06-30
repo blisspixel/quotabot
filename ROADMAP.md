@@ -289,8 +289,15 @@ here is the final one.
     analytics frame, and the demo `top` frame. CI now verifies macOS and Linux
     desktop release bundle builds on native runners through dedicated package
     scripts.
-20. [ ] Final cut: every box above checked, suite green on Windows, macOS, and
+20. [x] Final cut: every box above checked, suite green on Windows, macOS, and
     Linux.
+    Shipped: all 1.0 roadmap boxes are checked. The final local gate passed on
+    Windows with collector format/analyze/tests/coverage, app
+    format/analyze/tests/build, MCP client checks, LiteLLM direct plus real
+    proxy tests, collector executable builds, generated README media validation,
+    shell script syntax checks through Git Bash, and hygiene scans. The CI
+    matrix is configured to run the same test suite on Linux, macOS, and
+    Windows, with native macOS/Linux desktop package-build verification.
 
 ### Continuous hardening (runs throughout, not a phase)
 
