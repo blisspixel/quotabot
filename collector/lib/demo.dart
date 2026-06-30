@@ -82,7 +82,7 @@ List<ProviderQuota> demoProviders(int now) {
       w('weekly', 21, 468000), // 79% free, resets ~5d10h
     ]),
     sub('grok', 'Grok', 'you@example.com', 'supergrok', [
-      w('monthly', 57, 712800), // 43% free, resets ~8d6h
+      w('weekly', 57, 540000), // 43% free, resets ~6d6h
     ]),
     sub('cursor', 'Cursor', 'default', 'pro', [
       w('monthly', 38, 745200), // 62% free, resets ~8d15h

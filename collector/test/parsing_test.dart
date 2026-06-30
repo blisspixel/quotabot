@@ -223,7 +223,7 @@ void main() {
       final msg = _grokMessage(6.0, now + 86400);
       final w = grokWindow(msg, now);
       expect(w, isNotNull);
-      expect(w!.label, 'monthly');
+      expect(w!.label, 'weekly');
       expect(w.usedPercent, 6.0);
       expect(w.resetsAt, now + 86400);
     });

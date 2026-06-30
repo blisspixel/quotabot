@@ -12,6 +12,11 @@ bool quotaHasSpecificAccount(ProviderQuota q) =>
 String quotaDisplayKey(ProviderQuota q) =>
     quotaHasSpecificAccount(q) ? '${q.provider}|${q.account}' : q.provider;
 
+String quotaHideTarget(ProviderQuota quota, Map<String, int> providerCounts) =>
+    (providerCounts[quota.provider] ?? 0) > 1 && quotaHasSpecificAccount(quota)
+    ? quotaHiddenTarget(quota)
+    : quota.provider;
+
 ProviderSort sortFromProfile(QuotaProfile profile) =>
     ProviderSort.values.firstWhere(
       (sort) => sort.name == profile.sort,

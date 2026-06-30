@@ -68,6 +68,20 @@ void main() {
       'ollama',
     ]);
 
+    final hiddenAccount = QuotaProfile(
+      name: 'quiet-work',
+      hiddenProviders: {'grok|work@example.com'},
+    );
+    expect(applyProfile(fleet, hiddenAccount).map((q) => q.account), [
+      'default',
+      'personal@example.com',
+      'default',
+    ]);
+    expect(hiddenAccount.toJson()['hidden'], ['grok|work@example.com']);
+    expect(hiddenTargetsQuota({'grok| work@example.com '}, fleet[1]), isTrue);
+    expect(hiddenTargetsQuota({'grok| work@example.com '}, fleet[2]), isFalse);
+    expect(normalizeHiddenTarget('grok|bad${String.fromCharCode(7)}'), isNull);
+
     final local = QuotaProfile(
       name: 'offline',
       routingPolicy: ProfileRoutingPolicy.localOnly,

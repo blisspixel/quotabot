@@ -61,7 +61,7 @@ class GoogleAuth {
   }) async {
     if (clientId.isEmpty || clientSecret.isEmpty) {
       throw StateError(
-        'Antigravity login requires QUOTABOT_GOOGLE_CLIENT_ID and QUOTABOT_GOOGLE_CLIENT_SECRET',
+        'Antigravity login has no configured OAuth client',
       );
     }
     final pkce = pkcePair();

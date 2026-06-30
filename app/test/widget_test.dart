@@ -234,6 +234,23 @@ void main() {
       expect(quotaDisplayKey(_provider('grok', 'unknown')), 'grok');
     });
 
+    test('targets one account when hiding a multi-account provider', () {
+      final work = _provider('antigravity', 'work@example.com');
+      final home = _provider('antigravity', 'home@example.com');
+      final counts = {'antigravity': 2};
+
+      expect(quotaHideTarget(work, counts), 'antigravity|work@example.com');
+      expect(
+        hiddenTargetsQuota({'antigravity|work@example.com'}, work),
+        isTrue,
+      );
+      expect(
+        hiddenTargetsQuota({'antigravity|work@example.com'}, home),
+        isFalse,
+      );
+      expect(hiddenTargetsQuota({'antigravity'}, home), isTrue);
+    });
+
     test('keeps a flat group for the common single-account case', () {
       final groups = groupProvidersForDisplay([
         _provider('codex', 'you@example.com'),

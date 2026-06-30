@@ -22,8 +22,8 @@ typedef GrokTokenResolver = Future<String?> Function(
 /// Grok Build does not persist usage to disk, but its billing config is
 /// available from a gRPC-web endpoint on grok.com using the bearer token the
 /// CLI already stores in ~/.grok/auth.json. The response carries the credit
-/// usage percent for the current billing cycle and the cycle reset time. This
-/// is a billing metadata call, not a model call, so it costs no tokens.
+/// usage percent for the shared paid-plan weekly pool and reset time. This is a
+/// billing metadata call, not a model call, so it costs no tokens.
 class GrokAdapter {
   static const id = grokProviderId;
   static const name = grokProviderName;
