@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Cursor now treats the current included-usage pool as a monthly quota window,
+  reads string or blob SQLite state rows, and surfaces account and plan labels
+  when local state provides them.
 - Multi-account cache fallback now uses a shared tested active-account rule: a
   cached account is shown only while that account is still present in the
   provider's current local account index.

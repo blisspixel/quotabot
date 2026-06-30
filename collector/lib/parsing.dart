@@ -145,6 +145,10 @@ List<QuotaWindow> cursorWindows(dynamic usageData, int now) {
   if (usageData is! Map) return const [];
   final windows = <QuotaWindow>[];
 
+  final monthly = _cursorMonthlyPool(usageData);
+  if (monthly != null) windows.add(monthly);
+  if (windows.isNotEmpty) return windows;
+
   // Try usageBreakdowns like Kiro
   final breakdowns = usageData['usageBreakdowns'];
   if (breakdowns is List) {
@@ -172,22 +176,85 @@ List<QuotaWindow> cursorWindows(dynamic usageData, int now) {
     }
   }
 
-  // Fallback for planUsage or credits
-  final plan = usageData['planUsage'];
-  if (plan is Map && windows.isEmpty) {
-    final used = (plan['used'] as num?)?.toDouble();
-    final limit = (plan['limit'] as num?)?.toDouble();
-    if (used != null && limit != null && limit > 0) {
-      windows.add(
-        QuotaWindow(
-          label: 'credits',
-          usedPercent: (used / limit * 100).clamp(0, 100),
-        ),
-      );
+  return windows;
+}
+
+QuotaWindow? _cursorMonthlyPool(Map usageData) {
+  final candidates = <Map>[
+    usageData,
+    for (final key in const [
+      'monthlyUsage',
+      'usagePool',
+      'includedUsage',
+      'planUsage',
+      'billingUsage',
+      'creditPool',
+    ])
+      if (usageData[key] is Map) usageData[key] as Map,
+  ];
+
+  for (final c in candidates) {
+    final used = _firstNum(c, const [
+      'usedCents',
+      'used_cents',
+      'currentUsageCents',
+      'current_usage_cents',
+      'usageCents',
+      'spentCents',
+      'used',
+      'currentUsage',
+      'amountUsed',
+      'spent',
+    ]);
+    final limit = _firstNum(c, const [
+      'includedCents',
+      'included_cents',
+      'includedUsageCents',
+      'limitCents',
+      'monthlyLimitCents',
+      'usageLimitCents',
+      'includedUsage',
+      'included',
+      'limit',
+      'usageLimit',
+      'hardLimit',
+    ]);
+    if (used == null || limit == null || limit <= 0) continue;
+    return QuotaWindow(
+      label: 'monthly',
+      usedPercent: (used / limit * 100).clamp(0.0, 100.0),
+      resetsAt: _cursorReset(c) ?? _cursorReset(usageData),
+    );
+  }
+  return null;
+}
+
+double? _firstNum(Map data, List<String> keys) {
+  for (final key in keys) {
+    final value = data[key];
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      final parsed = double.tryParse(value.replaceAll(',', '').trim());
+      if (parsed != null) return parsed;
     }
   }
+  return null;
+}
 
-  return windows;
+int? _cursorReset(Map data) {
+  for (final key in const [
+    'resetAt',
+    'resetsAt',
+    'resetDate',
+    'periodEnd',
+    'currentPeriodEnd',
+    'billingPeriodEnd',
+    'nextResetAt',
+  ]) {
+    final reset = parseReset(data[key]);
+    if (reset != null) return reset;
+  }
+  return null;
 }
 
 // --- Windsurf -----------------------------------------------------------------

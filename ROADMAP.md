@@ -161,7 +161,10 @@ it stands up serve every phase after it.
    its monthly reset (a window) rather than per-token cost accounting; and
    Windsurf was acquired by Cognition and folded under the Devin brand
    (renamed Devin Desktop in mid-2026), so the Cascade daily/weekly quota must
-   keep reading under the new product name and local state path.
+   keep reading under the new product name and local state path. Cursor now
+   reads monthly included-usage pool shapes from local SQLite state and surfaces
+   account and plan labels when present. Remaining: Windsurf/Devin Desktop
+   first-class reads and plan tier surfacing.
 8. [ ] Profiles: named bundles (work / personal / per-project) that select which
    accounts and providers are in view, carry their own UI preferences (theme,
    sort, hidden providers), and pin a routing policy (local-only here,

@@ -15,11 +15,14 @@ class CursorAdapter {
   static const id = 'cursor';
   static const name = 'Cursor';
   static bool _sqliteReady = false;
+  final String? _dbPath;
+
+  CursorAdapter({String? dbPath}) : _dbPath = dbPath;
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
-      final dbPath = _cursorDbPath();
+      final dbPath = _dbPath ?? _cursorDbPath();
       if (!File(dbPath).existsSync()) {
         return ProviderQuota(
           provider: id,
@@ -34,8 +37,8 @@ class CursorAdapter {
         );
       }
 
-      final usageData = _readCursorUsage(dbPath);
-      final windows = cursorWindows(usageData, asOf);
+      final state = _readCursorState(dbPath);
+      final windows = cursorWindows(state.usage, asOf);
 
       String? err;
       if (windows.isEmpty) {
@@ -50,8 +53,8 @@ class CursorAdapter {
       return ProviderQuota(
         provider: id,
         displayName: name,
-        account: 'default',
-        plan: null,
+        account: state.account ?? 'default',
+        plan: state.plan,
         asOf: asOf,
         windows: windows,
         error: err,
@@ -61,37 +64,81 @@ class CursorAdapter {
     }
   }
 
-  Map<String, dynamic>? _readCursorUsage(String dbPath) {
+  _CursorState _readCursorState(String dbPath) {
     _ensureSqlite();
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
-      // Look for usage/credits keys, similar to Kiro. From research: planUsage, credits, etc in ItemTable.
       final rows = db.select(
-        "SELECT value FROM ItemTable WHERE key LIKE '%usage%' OR key LIKE '%credit%' OR key LIKE '%plan%' LIMIT 5;",
+        "SELECT value FROM ItemTable WHERE key LIKE '%usage%' OR key LIKE '%credit%' OR key LIKE '%plan%' OR key LIKE '%account%' OR key LIKE '%user%' LIMIT 40;",
       );
-      if (rows.isEmpty) return null;
+      Map<String, dynamic>? usage;
+      String? account;
+      String? plan;
       for (final row in rows) {
-        final raw = row['value'];
-        if (raw is List<int>) {
-          try {
-            final str = utf8.decode(raw, allowMalformed: true);
-            final parsed = jsonDecode(str) as Map<String, dynamic>;
-            if (parsed.containsKey('usageBreakdowns') ||
-                parsed.containsKey('planUsage') ||
-                parsed.containsKey('credits')) {
-              return parsed;
-            }
-          } catch (_) {}
+        final parsed = _decodeJsonObject(row['value']);
+        if (parsed == null) continue;
+        account ??= _firstString(parsed, const [
+          'email',
+          'userEmail',
+          'accountEmail',
+          'username',
+          'login',
+        ]);
+        plan ??= _firstString(parsed, const [
+          'plan',
+          'planName',
+          'tier',
+          'subscriptionPlan',
+          'membershipType',
+        ]);
+        if (usage == null && _looksLikeUsage(parsed)) {
+          usage = parsed;
         }
       }
-      return null;
+      return _CursorState(usage: usage, account: account, plan: plan);
     } catch (_) {
-      return null;
+      return const _CursorState();
     } finally {
       db.dispose();
     }
   }
 
+  Map<String, dynamic>? _decodeJsonObject(Object? raw) {
+    try {
+      final text = raw is List<int>
+          ? utf8.decode(raw, allowMalformed: true)
+          : raw?.toString();
+      if (text == null || text.trim().isEmpty) return null;
+      final parsed = jsonDecode(text);
+      return parsed is Map ? Map<String, dynamic>.from(parsed) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _looksLikeUsage(Map<String, dynamic> data) =>
+      data.containsKey('usageBreakdowns') ||
+      data.containsKey('planUsage') ||
+      data.containsKey('credits') ||
+      data.containsKey('monthlyUsage') ||
+      data.containsKey('usagePool') ||
+      data.containsKey('includedUsage') ||
+      data.containsKey('billingUsage') ||
+      data.containsKey('creditPool') ||
+      (data.containsKey('usedCents') && data.containsKey('includedCents')) ||
+      (data.containsKey('used') && data.containsKey('limit'));
+
+  String? _firstString(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final found = findKey(data, key);
+      if (found is String && found.trim().isNotEmpty) return found.trim();
+    }
+    return null;
+  }
+
+  // Default path discovery reads real per-user application directories; tests
+  // exercise Cursor reads through an injected state database path.
+  // coverage:ignore-start
   static String _cursorDbPath() {
     if (Platform.isWindows) {
       final appData =
@@ -105,12 +152,21 @@ class CursorAdapter {
       return '$dataHome/Cursor/User/globalStorage/state.vscdb';
     }
   }
+  // coverage:ignore-end
 
   void _ensureSqlite() {
     if (_sqliteReady) return;
     configureSqliteLibrary();
     _sqliteReady = true;
   }
+}
+
+class _CursorState {
+  final Map<String, dynamic>? usage;
+  final String? account;
+  final String? plan;
+
+  const _CursorState({this.usage, this.account, this.plan});
 }
 
 String _resetLabel(int? resetsAt, int now) {

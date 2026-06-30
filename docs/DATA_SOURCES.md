@@ -110,10 +110,14 @@ stores. Grok and Antigravity can run two ways:
 
 ## Cursor (agentic IDE)
 
-- Credit-based (premium requests, completions) on Pro; free tier limits.
+- Current paid plans expose a monthly included-usage pool with optional
+  pay-as-you-go overage; quotabot surfaces that pool as a `monthly` window when
+  local state provides used/included values and a period reset.
 - Local data primarily ~/.cursor (config + SQLite state like other forks).
 - Usage often shown in-app Settings, but local state allows passive detection
-  and opportunistic reads. Free account users benefit from detection.
+  and opportunistic reads. The adapter scans usage/credit/plan/account rows in
+  Cursor's `state.vscdb`, accepts JSON stored as either strings or blobs, and
+  surfaces account and plan labels when the local state includes them.
 - Account shown automatically for duplicate-provider cards so two accounts are
   never visually ambiguous. The global "Show account names" setting also shows
   non-default account labels for single-account providers.

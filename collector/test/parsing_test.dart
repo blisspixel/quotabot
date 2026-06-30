@@ -307,6 +307,19 @@ void main() {
 
   group('cursor', () {
     const now = 1782000000;
+    test('cursorWindows reads the current monthly included-usage pool', () {
+      final w = cursorWindows({
+        'monthlyUsage': {
+          'usedCents': 1250,
+          'includedCents': 2000,
+          'currentPeriodEnd': '2026-07-01T00:00:00.000Z',
+        },
+      }, now);
+      expect(w.single.label, 'monthly');
+      expect(w.single.usedPercent, closeTo(62.5, 0.1));
+      expect(w.single.resetsAt, isNotNull);
+    });
+
     test('cursorWindows reads usageBreakdowns', () {
       final w = cursorWindows({
         'usageBreakdowns': [
@@ -327,7 +340,7 @@ void main() {
       final w = cursorWindows({
         'planUsage': {'used': 40, 'limit': 50},
       }, now);
-      expect(w.single.label, 'credits');
+      expect(w.single.label, 'monthly');
       expect(w.single.usedPercent, closeTo(80, 0.1));
       expect(cursorWindows('nope', now), isEmpty);
     });

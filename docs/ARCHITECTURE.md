@@ -89,6 +89,8 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   Cloud Code onboarding step before reading per-model quota.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
+  Cursor's current included-usage pool is normalized as a monthly quota window
+  when the local SQLite state exposes used/included values.
 - Ollama, LM Studio, and Lemonade are local-runtime adapters: they report
   installed and loaded models instead of a quota window and act as a routing
   fallback. Any OpenAI-compatible runtime can be added with the shared
