@@ -133,6 +133,14 @@ Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
 most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`. Palettes
 apply on truecolor terminals; elsewhere the standard headroom colors are used.
 
+## Named profiles
+
+CLI quota-reading commands accept `--profile=NAME` to view and route within an
+existing local profile. The profile filters the already-normalized snapshot by
+provider, account, hidden providers, and routing policy before status, JSON,
+`suggest`, `models`, `check`, `stats`, `watch`, or `top` render anything. The
+implicit `default` profile keeps the zero-config fleet unchanged.
+
 ## Proactive alerts (quotabot watch)
 
 `quotabot watch` polls quota on the same adaptive cadence as `top` and raises a

@@ -57,15 +57,27 @@ Future<T> _withSpinner<T>(String label, Future<T> Function() task) async {
   }
 }
 
-/// Collects every provider's quota behind the spinner.
-Future<List<ProviderQuota>> _read() =>
-    _withSpinner('reading quota', collectAll);
+/// Collects every provider's quota behind the spinner, then applies an optional
+/// local profile view.
+Future<List<ProviderQuota>> _read([QuotaProfile? profile]) =>
+    _withSpinner('reading quota', () => _collectProfiled(profile));
 
-Map<String, dynamic> _snapshot(List<ProviderQuota> results) => {
+Future<List<ProviderQuota>> _collectProfiled(QuotaProfile? profile) async {
+  final results = await collectAll();
+  return profile == null ? results : applyProfile(results, profile);
+}
+
+Map<String, dynamic> _snapshot(
+  List<ProviderQuota> results, [
+  QuotaProfile? profile,
+]) =>
+    {
       'schema': 'quotabot.v1',
+      if (profile != null) 'profile': profile.name,
       'generated_at': nowEpoch(),
       'providers': results.map((r) => r.toJson()).toList(),
     };
+
 Future<void> main(List<String> args) async {
   final flags = args.where((a) => a.startsWith('-')).toSet();
   final pos = args.where((a) => !a.startsWith('-')).toList();
@@ -82,6 +94,13 @@ Future<void> main(List<String> args) async {
     return;
   }
 
+  final profileSelection = _profileFromFlags(flags);
+  if (!profileSelection.ok) {
+    exitCode = _exitUsage;
+    return;
+  }
+  final profile = profileSelection.profile;
+
   switch (cmd) {
     case 'login':
       await _login(pos.length > 1 ? pos[1] : '');
@@ -95,10 +114,10 @@ Future<void> main(List<String> args) async {
         exitCode = 64;
         return;
       }
-      await _check(pos[1], wantsJson);
+      await _check(pos[1], wantsJson, profile);
       return;
     case 'suggest':
-      final results = await _read();
+      final results = await _read(profile);
       final now = nowEpoch();
       if (_hasModelProfile(flags)) {
         final s = suggestModel(results, now,
@@ -112,16 +131,16 @@ Future<void> main(List<String> args) async {
       }
       return;
     case 'stats':
-      await _runStats(pos.skip(1).toList(), wantsJson);
+      await _runStats(pos.skip(1).toList(), wantsJson, profile);
       return;
     case 'top':
-      await _runTop(flags);
+      await _runTop(flags, profile);
       return;
     case 'watch':
-      await _runWatch(flags);
+      await _runWatch(flags, profile);
       return;
     case 'models':
-      final results = await _read();
+      final results = await _read(profile);
       final now = nowEpoch();
       final reqs = _modelRequirements(flags);
       if (wantsJson) {
@@ -133,18 +152,20 @@ Future<void> main(List<String> args) async {
       }
       return;
     case 'calibration':
-      await _runCalibration(wantsJson);
+      await _runCalibration(wantsJson, profile);
       return;
   }
 
   // Snapshot and the default status table share one collect.
-  final results = await _read();
+  final results = await _read(profile);
   if (cmd == 'json' || (cmd.isEmpty && wantsJson)) {
-    print(_jsonPretty(_snapshot(results)));
+    print(_jsonPretty(_snapshot(results, profile)));
     return;
   }
   if (cmd.isEmpty || cmd == 'status' || cmd == 'doctor') {
-    wantsJson ? print(_jsonPretty(_snapshot(results))) : _printDoctor(results);
+    wantsJson
+        ? print(_jsonPretty(_snapshot(results, profile)))
+        : _printDoctor(results);
     return;
   }
 
@@ -262,6 +283,19 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
   return dflt;
 }
 
+({QuotaProfile? profile, bool ok}) _profileFromFlags(Set<String> flags) {
+  final requested = _stringOption(flags, 'profile', null);
+  if (requested == null || requested.trim().isEmpty) {
+    return (profile: null, ok: true);
+  }
+  final profile = loadProfile(requested);
+  if (profile == null) {
+    stderr.writeln('quotabot: no profile named "$requested"');
+    return (profile: null, ok: false);
+  }
+  return (profile: profile, ok: true);
+}
+
 /// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
 int _intOption(Iterable<String> flags, String name, int dflt) {
   final prefix = '--$name=';
@@ -304,7 +338,7 @@ String _agoLabel(int lastCollect, int now) {
 /// or a tight cap, relaxed when healthy). `--interval=N` forces a fixed cadence;
 /// `--truecolor` forces 24-bit gradients. When stdout is not a terminal it prints
 /// one plain frame and exits, so `quotabot top | cat` still yields a snapshot.
-Future<void> _runTop(Set<String> flags) async {
+Future<void> _runTop(Set<String> flags, QuotaProfile? profile) async {
   final color = _useColor(flags);
   final depth = flags.contains('--truecolor')
       ? ColorDepth.truecolor
@@ -333,7 +367,7 @@ Future<void> _runTop(Set<String> flags) async {
   }
 
   if (!stdout.hasTerminal) {
-    final data = await collectAll();
+    final data = await _collectProfiled(profile);
     final now = nowEpoch();
     final suggestion = _suggestFor(data, now);
     final lines = renderTopFrame(
@@ -430,7 +464,7 @@ Future<void> _runTop(Set<String> flags) async {
   // on the adaptive cadence.
   reload = () async {
     try {
-      final fresh = await collectAll();
+      final fresh = await _collectProfiled(profile);
       data = fresh;
       lastCollect = nowEpoch();
       loading = false;
@@ -593,6 +627,9 @@ void _printHelp() {
     '  --json              machine-readable output (status/check/suggest/stats/json)',
   );
   stdout.writeln(
+    '  --profile=NAME      use a local named profile view',
+  );
+  stdout.writeln(
     '  --color, --no-color force or disable color (also honors NO_COLOR)',
   );
   stdout.writeln(
@@ -645,7 +682,7 @@ void _printHelp() {
 /// as quotabot.alert.v1 JSON (loopback only unless --allow-external). --json
 /// prints alerts as JSON lines; --once runs a single pass (for cron or tests);
 /// --interval=N pins the poll rate, otherwise the adaptive cadence is used.
-Future<void> _runWatch(Set<String> flags) async {
+Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
   final webhook = _stringOption(flags, 'webhook', null);
   final allowExternal = flags.contains('--allow-external');
   final wantsJson = flags.contains('--json');
@@ -669,7 +706,7 @@ Future<void> _runWatch(Set<String> flags) async {
   var data = <ProviderQuota>[];
 
   Future<void> pass() async {
-    data = await collectAll();
+    data = await _collectProfiled(profile);
     final now = nowEpoch();
     final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
     failStreak = anyLive ? 0 : failStreak + 1;
@@ -733,10 +770,14 @@ Future<void> _runWatch(Set<String> flags) async {
   client.close();
 }
 
-Future<void> _runStats(List<String> rest, bool wantsJson) async {
+Future<void> _runStats(
+  List<String> rest,
+  bool wantsJson,
+  QuotaProfile? profile,
+) async {
   final only = rest.isEmpty ? null : rest.first.toLowerCase();
   final now = nowEpoch();
-  final results = await _read();
+  final results = await _read(profile);
   final providers = {
     ...results.where((q) => !q.isLocal).map((q) => q.provider),
   }.where((p) => only == null || p == only).toList()
@@ -757,8 +798,12 @@ Future<void> _runStats(List<String> rest, bool wantsJson) async {
 }
 
 /// `check <provider>`: is this one usable right now, and when does it reset.
-Future<void> _check(String name, bool wantsJson) async {
-  final results = await _read();
+Future<void> _check(
+  String name,
+  bool wantsJson,
+  QuotaProfile? profile,
+) async {
+  final results = await _read(profile);
   final now = nowEpoch();
   final key = name.toLowerCase();
   ProviderQuota? q;
@@ -951,8 +996,8 @@ void _printDoctor(List<ProviderQuota> results) {
 
 /// `calibration`: grade quotabot's own strand predictions against the user's
 /// recorded history, so "how often is it right" is a measured number, not a claim.
-Future<void> _runCalibration(bool wantsJson) async {
-  final results = await _read();
+Future<void> _runCalibration(bool wantsJson, QuotaProfile? profile) async {
+  final results = await _read(profile);
   final now = nowEpoch();
   final byProvider = <String, List<HeadroomBucket>>{};
   for (final q in results.where((q) => !q.isLocal)) {

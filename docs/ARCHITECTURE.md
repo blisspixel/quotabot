@@ -222,6 +222,8 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   `quotabot.profile.v1` JSON files. Profile names and provider ids are validated
   against safe filename/id characters, profile files are bounded in size, and
   filtering is pure over the already-normalized `ProviderQuota` list.
+- The CLI loads `--profile=NAME` once, then every quota-reading command consumes
+  the same profiled snapshot. Missing profiles fail with usage exit code 64.
 - A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
   countdowns stay current; actual data refresh is on a separate adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a

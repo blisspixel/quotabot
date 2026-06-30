@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- CLI quota reads now accept `--profile=NAME`, applying local named profile
+  filters before status, JSON snapshots, suggestions, models, checks, stats,
+  watch alerts, or top render.
 - Named profile foundations now exist in the collector: `quotabot.profile.v1`
   JSON storage, safe profile names, provider/account filters, routing policy
   metadata, and an implicit zero-config default profile.
