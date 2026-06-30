@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Manual quota entries can now be added with `quotabot manual set`, listed with
+  `quotabot manual list`, and removed with `quotabot manual remove`. They are
+  stored locally, appear in normal quota views and JSON as `source: "manual"`,
+  and are excluded from measured analytics history.
+
 ### Fixed
 - Grok usage now labels the shared paid-plan pool as a weekly window, matching
   the current Grok Usage tab semantics where Imagine, Chat, and Build are

@@ -118,6 +118,9 @@ Future<void> main(List<String> rawArgs) async {
     case 'logout':
       _logout(pos.length > 1 ? pos[1] : '');
       return;
+    case 'manual':
+      await _runManual(pos.skip(1).toList(), flags, wantsJson);
+      return;
     case 'check':
       if (pos.length < 2) {
         stderr.writeln('usage: quotabot check <provider>');
@@ -299,9 +302,13 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
 }
 
 const _valueOptions = {
+  'account',
+  'display-name',
   'interval',
+  'limit',
   'min-context',
   'mock-provider',
+  'plan',
   'profile',
   'risk',
   'sort',
@@ -310,7 +317,10 @@ const _valueOptions = {
   'theme',
   'tier-ceiling',
   'tier-floor',
+  'reset',
+  'used',
   'webhook',
+  'window',
 };
 
 List<String> _normalizeArgs(List<String> args) {
@@ -382,6 +392,110 @@ List<String> _normalizeArgs(List<String> args) {
   }
   return (snapshot: snapshot, ok: true);
 }
+
+Future<void> _runManual(
+  List<String> pos,
+  Set<String> flags,
+  bool wantsJson,
+) async {
+  final action = pos.isEmpty ? 'list' : pos.first;
+  switch (action) {
+    case 'list':
+      final entries = loadManualQuotaEntries();
+      if (wantsJson) {
+        print(_jsonPretty(_manualEntriesJson(entries)));
+      } else {
+        _printManualEntries(entries);
+      }
+      return;
+    case 'set':
+      if (pos.length < 2) {
+        stderr.writeln(
+          'usage: quotabot manual set <provider> --used N --limit N --reset VALUE',
+        );
+        exitCode = _exitUsage;
+        return;
+      }
+      final entry = buildManualQuotaEntry(
+        provider: pos[1],
+        displayName: _stringOption(flags, 'display-name', null),
+        account: _stringOption(flags, 'account', null),
+        plan: _stringOption(flags, 'plan', null),
+        window: _stringOption(flags, 'window', null),
+        used: _stringOption(flags, 'used', null),
+        limit: _stringOption(flags, 'limit', null),
+        reset: _stringOption(flags, 'reset', null),
+        now: nowEpoch(),
+      );
+      if (entry == null) {
+        stderr.writeln(
+          'usage: quotabot manual set <provider> --used N --limit N --reset VALUE',
+        );
+        exitCode = _exitUsage;
+        return;
+      }
+      setManualQuotaEntry(entry);
+      if (wantsJson) {
+        print(_jsonPretty({
+          'schema': manualQuotaSchema,
+          'entry': entry.toJson(),
+        }));
+      } else {
+        stdout.writeln(
+          'saved ${entry.provider} (${entry.account}) '
+          '${_manualNumber(entry.used)}/${_manualNumber(entry.limit)} '
+          '${entry.window}',
+        );
+      }
+      return;
+    case 'remove':
+      if (pos.length < 2) {
+        stderr.writeln('usage: quotabot manual remove <provider>');
+        exitCode = _exitUsage;
+        return;
+      }
+      final removed = removeManualQuotaEntry(
+        pos[1],
+        account: _stringOption(flags, 'account', 'default') ?? 'default',
+      );
+      if (wantsJson) {
+        print(_jsonPretty({
+          'schema': manualQuotaSchema,
+          'removed': removed,
+        }));
+      } else {
+        stdout.writeln(removed ? 'removed ${pos[1]}' : 'no manual entry found');
+      }
+      return;
+  }
+  stderr.writeln('usage: quotabot manual [list|set|remove]');
+  exitCode = _exitUsage;
+}
+
+Map<String, dynamic> _manualEntriesJson(List<ManualQuotaEntry> entries) => {
+      'schema': manualQuotaSchema,
+      'entries': entries.map((entry) => entry.toJson()).toList(),
+    };
+
+void _printManualEntries(List<ManualQuotaEntry> entries) {
+  if (entries.isEmpty) {
+    stdout.writeln('No manual quota entries.');
+    return;
+  }
+  final now = nowEpoch();
+  for (final entry in entries) {
+    stdout.writeln(
+      '${entry.provider.padRight(14)} '
+      '${entry.account.padRight(18)} '
+      '${_manualNumber(entry.used)}/${_manualNumber(entry.limit)} '
+      '${entry.window} '
+      'resets in ${_in(entry.resetsAt, now)}',
+    );
+  }
+}
+
+String _manualNumber(double value) =>
+    value == value.roundToDouble() ? value.toInt().toString() : '$value';
 
 /// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
 int _intOption(Iterable<String> flags, String name, int dflt) {
@@ -690,6 +804,9 @@ void _printHelp() {
     '  calibration         how often quotabot\'s predictions come true (history)',
   );
   stdout.writeln(
+    '  manual              list, set, or remove self-reported quota entries',
+  );
+  stdout.writeln(
     '  stats [provider]    90-day analytics: distribution, reliability, pace',
   );
   stdout.writeln('');
@@ -704,6 +821,10 @@ void _printHelp() {
     '  login <provider>    connect grok or antigravity (keeps it live)',
   );
   stdout.writeln('  logout <provider>   disconnect a provider');
+  stdout.writeln(
+    '  manual set NAME --used N --limit N --reset VALUE'
+    '  add/update a local entry',
+  );
   stdout.writeln('');
   stdout.writeln(head('OTHER'));
   stdout.writeln('  json                full snapshot as quotabot.v1 JSON');

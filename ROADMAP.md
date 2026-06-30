@@ -336,7 +336,10 @@ Breadth and depth, once the core is trusted:
   long tail (Tabnine, JetBrains Junie, Trae, and similar) still shows in one
   place. Clearly marked self-reported, never fed into the routing confidence math
   as if it were measured burn, and never invented - the number is only ever what
-  the user typed.
+  the user typed. Foundation shipped: `quotabot manual set/list/remove` stores
+  local self-reported windows, exposes them in normal views and JSON as
+  `source: "manual"`, excludes them from measured analytics history, and lowers
+  routing confidence for them.
 - **Capability-aware routing, deeper.** The foundation shipped (`--task`,
   `--min-context`, `--require-tools`/`--require-vision`/`--require-reasoning`, tier
   floor/ceiling, cheapest-qualifying-with-budget-wins, local-first, and the

@@ -20,8 +20,11 @@ Provider snapshots keep these stable fields:
 
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
-- Optional `plan`, `status`, `active`, `details`, `error`, and `models`.
+- Optional `plan`, `source`, `status`, `active`, `details`, `error`, and
+  `models`.
 - `kind` is `subscription` or `local`.
+- `source` is an additive hint. When set to `manual`, the provider window is a
+  local self-reported quota entry, not measured adapter telemetry.
 - `windows` is always present. Local runtimes use an empty list because they have
   no spendable quota.
 

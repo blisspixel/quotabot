@@ -9,6 +9,7 @@ ProviderQuota _q(
   List<QuotaWindow> windows, {
   bool stale = false,
   String kind = 'subscription',
+  String? source,
 }) =>
     ProviderQuota(
       provider: id,
@@ -18,6 +19,7 @@ ProviderQuota _q(
       windows: windows,
       stale: stale,
       kind: kind,
+      source: source,
     );
 
 // A local runtime carries no quota windows; it is available simply by running.
@@ -234,6 +236,19 @@ void main() {
         expect(s.reason, contains('cached'));
       },
     );
+
+    test('manual entries carry lower routing confidence', () {
+      final s = suggestRoute([
+        _q(
+          'manual-tool',
+          [QuotaWindow(label: 'monthly', usedPercent: 10)],
+          source: 'manual',
+        ),
+      ], _now);
+
+      expect(s.recommended?.provider, 'manual-tool');
+      expect(s.recommended?.confidence, 0.35);
+    });
   });
 
   group('suggestRoute burn-aware effective headroom', () {

@@ -75,6 +75,7 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 | Windsurf     | Local `cachedPlanInfo` (daily/weekly Cascade quota)       | opportunistic   |
 | Kiro         | Local credits/state (CLI+IDE); passive detect             | opportunistic   |
 | Ollama / LM Studio / Lemonade | Local server; installed and loaded models | when running |
+| Manual entries | User-entered limit, used count, and reset for any tool  | self-reported   |
 
 Claude and Codex are always live with no setup. Antigravity and Grok are live for
 the account their app is signed into; quotabot refreshes that token on its own.
@@ -85,6 +86,11 @@ coverage runs through the Antigravity adapter. Any OpenAI-compatible local serve
 For exactly where each number comes from, see
 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md); for each provider's own usage
 command, [docs/PROVIDER_CLIS.md](docs/PROVIDER_CLIS.md).
+
+For a tool quotabot does not read yet, `quotabot manual set` adds a local
+self-reported quota window. Manual entries appear in the same views and JSON
+snapshots with `source: "manual"`, but they are not treated as measured provider
+telemetry.
 
 ## Install
 

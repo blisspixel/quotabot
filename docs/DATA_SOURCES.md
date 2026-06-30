@@ -3,6 +3,17 @@
 Exactly where each provider's numbers come from. Paths are shown for Windows;
 the adapters resolve the user home directory cross-platform.
 
+## Manual entries
+
+- Source: the user's own local entries under quotabot's per-user config
+  directory, managed with `quotabot manual set/list/remove`.
+- Required fields: provider id, used count, limit, and reset time. Optional
+  fields include display name, account, plan, and window label.
+- These entries are self-reported. quotabot never invents or refreshes them, does
+  not write them into measured analytics history, and marks their snapshots with
+  `source: "manual"` so routers can treat their confidence differently from live
+  adapter telemetry.
+
 ## Codex (OpenAI)
 
 - Source: the newest `rollout-*.jsonl` under `~/.codex/sessions/<date>/`.

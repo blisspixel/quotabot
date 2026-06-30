@@ -74,6 +74,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `top`                  | Live dashboard that redraws in place (q quit, r now, s sort). |
 | `models`               | Every model you can route to now, with budget + caps. |
 | `calibration`          | How often quotabot's predictions come true (history). |
+| `manual`               | List, set, or remove self-reported quota entries.     |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, reliability, pace.    |
@@ -102,6 +103,23 @@ looks healthy, but the longer window is spent, so the provider is unavailable.
 Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
 state for assertions, skips live adapter calls, ignores real burn history, and
 does not read analytics buckets.
+
+### Manual quota entries
+
+For a tool quotabot does not read yet, add a local self-reported window:
+
+```bash
+quotabot manual set z-ai --display-name "Z.ai" --used 12 --limit 50 --reset 2027-01-01T00:00:00Z --window monthly
+quotabot manual list
+quotabot manual remove z-ai
+```
+
+`manual set` is an upsert, so rerun it with a new `--used` value whenever you
+want to refresh the entry. These entries are stored only on your machine under
+quotabot's config directory, appear in `status`, `json`, `top`, the widget, and
+`suggest`, and carry `source: "manual"` in JSON. They are intentionally marked as
+self-reported: quotabot does not record them into measured analytics history, and
+routing confidence is lower than for live provider telemetry.
 
 ### Live view (`quotabot top`)
 

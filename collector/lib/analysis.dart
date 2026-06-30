@@ -434,6 +434,7 @@ WindowForecast? classifyForecast({
 double _confidence(ProviderQuota q, double? burnSe, int samples) {
   final fresh = q.stale ? 0.5 : 1.0;
   if (q.isLocal) return fresh;
+  if (q.source == 'manual') return fresh * 0.35;
   final adequacy = burnSe == null ? 0.6 : samples / (samples + 4);
   return (fresh * adequacy).clamp(0.0, 1.0).toDouble();
 }

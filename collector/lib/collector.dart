@@ -13,6 +13,7 @@ import 'adapters/windsurf.dart';
 import 'analysis.dart';
 import 'cache.dart';
 import 'demo.dart';
+import 'manual_quota.dart';
 import 'models.dart';
 import 'util.dart';
 
@@ -22,6 +23,7 @@ export 'alerts.dart';
 export 'calibration.dart';
 export 'catalog_audit.dart';
 export 'leases.dart';
+export 'manual_quota.dart';
 export 'model_catalog.dart';
 export 'palette.dart';
 export 'provider_adapters.dart';
@@ -70,12 +72,14 @@ Future<List<ProviderQuota>> collectAll() async {
   ]);
   final groks = await _collectGrokMulti();
   final antis = await _collectAntigravityMulti();
+  final manual = loadManualProviderQuotas();
   // A local runtime that is not running is not ok; drop it so users who do not
   // run one never see an empty card. Cloud providers stay even when empty.
   final results = [
     ...others,
     ...groks,
     ...antis,
+    ...manual,
   ].where((q) => !(q.isLocal && !q.ok)).toList();
   _recordAnalytics(results);
   return results;
@@ -89,6 +93,7 @@ void _recordAnalytics(List<ProviderQuota> results) {
   final seen = <String>{};
   for (final q in results) {
     if (q.isLocal || !q.hasWindows) continue;
+    if (q.source == manualQuotaSource) continue;
     if (!seen.add(q.provider)) continue; // one sample per provider per collect
     final h = providerHeadroom(q, now);
     if (h != null) recordHeadroomSample(q.provider, h, now);

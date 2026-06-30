@@ -70,6 +70,10 @@ class ProviderQuota {
   /// Plan/tier string when known, e.g. "pro", "max".
   final String? plan;
 
+  /// Data source hint. Null means a built-in adapter or local runtime produced
+  /// the snapshot; "manual" means the user entered the quota themselves.
+  final String? source;
+
   /// Provider class. "subscription" (default) is a metered paid/free account
   /// whose headroom governs routing. "local" is an always-available local
   /// runtime (e.g. Ollama, LM Studio) used as a fallback and never counted as
@@ -114,6 +118,7 @@ class ProviderQuota {
     required this.account,
     required this.asOf,
     this.plan,
+    this.source,
     this.ok = true,
     this.error,
     this.windows = const [],
@@ -149,6 +154,7 @@ class ProviderQuota {
         'display_name': displayName,
         'account': account,
         if (plan != null) 'plan': plan,
+        if (source != null) 'source': source,
         'kind': kind,
         if (status != null) 'status': status,
         if (active) 'active': active,
@@ -166,6 +172,7 @@ class ProviderQuota {
         displayName: j['display_name'] as String,
         account: j['account'] as String,
         plan: j['plan'] as String?,
+        source: j['source'] as String?,
         ok: j['ok'] as bool? ?? true,
         error: j['error'] as String?,
         asOf: j['as_of'] as int? ?? 0,
@@ -188,6 +195,7 @@ class ProviderQuota {
         displayName: displayName,
         account: account,
         plan: plan,
+        source: source,
         ok: true,
         error: note,
         asOf: asOf,
