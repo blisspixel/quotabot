@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Codex adapter edge-case tests now cover missing session directories, rollout
+  files with no `rate_limits`, stale snapshots whose file mtime is fresh, and
+  multi-bucket scans that must keep only the newest snapshot per limit bucket.
 - OAuth grants can now be stored in independent account-scoped slots as well as
   the existing provider-default slot. The auth filenames contain only a provider
   id plus a hash of the account id, never the raw email, and Grok/Antigravity now

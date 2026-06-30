@@ -16,6 +16,9 @@ import '../util.dart';
 class CodexAdapter {
   static const id = 'codex';
   static const name = 'Codex';
+  final Directory? _sessionsDir;
+
+  CodexAdapter({Directory? sessionsDir}) : _sessionsDir = sessionsDir;
 
   /// How many recent rollout files to scan for per-bucket snapshots. Enough to
   /// catch buckets touched across a normal working window without reading the
@@ -25,7 +28,8 @@ class CodexAdapter {
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
-      final sessionsDir = Directory('${home()}/.codex/sessions');
+      final sessionsDir =
+          _sessionsDir ?? Directory('${home()}/.codex/sessions');
       if (!sessionsDir.existsSync()) {
         return ProviderQuota.error(id, name, 'no ~/.codex/sessions', asOf);
       }
