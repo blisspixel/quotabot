@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Windsurf/Devin Desktop now reads daily and weekly Cascade quota shapes from
+  local SQLite state, carries reset timestamps, surfaces account and plan labels
+  when present, and no longer invents a 0% quota from undecodable raw blobs.
 - Cursor now treats the current included-usage pool as a monthly quota window,
   reads string or blob SQLite state rows, and surfaces account and plan labels
   when local state provides them.

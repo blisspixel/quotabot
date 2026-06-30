@@ -153,7 +153,7 @@ it stands up serve every phase after it.
    provider exposes a reliable inactive-account index here; full named profiles
    remain item 8. (Copilot's per-account read lands post-1.0 with the provider
    itself.)
-7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
+7. [x] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to
    absorb here: Cursor's paid plans are now a dollar-denominated monthly credit
@@ -162,9 +162,11 @@ it stands up serve every phase after it.
    Windsurf was acquired by Cognition and folded under the Devin brand
    (renamed Devin Desktop in mid-2026), so the Cascade daily/weekly quota must
    keep reading under the new product name and local state path. Cursor now
-   reads monthly included-usage pool shapes from local SQLite state and surfaces
-   account and plan labels when present. Remaining: Windsurf/Devin Desktop
-   first-class reads and plan tier surfacing.
+   reads monthly included-usage pool shapes from local SQLite state and
+   Windsurf/Devin Desktop reads daily/weekly Cascade quota shapes from its
+   local state database. Both adapters surface account and plan labels when
+   local metadata provides them; CLI-only Devin installs remain truthful
+   detection-only results rather than fabricated quota windows.
 8. [ ] Profiles: named bundles (work / personal / per-project) that select which
    accounts and providers are in view, carry their own UI preferences (theme,
    sort, hidden providers), and pin a routing policy (local-only here,

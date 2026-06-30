@@ -7,6 +7,7 @@ import '../models.dart';
 import '../parsing.dart';
 import '../sqlite_loader.dart';
 import '../util.dart';
+import '../vscode_state.dart';
 
 /// Windsurf / Devin adapter.
 /// Supports both the legacy Windsurf IDE and the current Devin (Desktop + CLI).
@@ -17,17 +18,28 @@ class WindsurfAdapter {
   static const id = 'windsurf';
   static const name = 'Windsurf';
   static bool _sqliteReady = false;
+  final String? _dbPath;
+  final bool? _hasDevinCli;
+  final String? _devinConfigPath;
+
+  WindsurfAdapter({
+    String? dbPath,
+    bool? hasDevinCli,
+    String? devinConfigPath,
+  })  : _dbPath = dbPath,
+        _hasDevinCli = hasDevinCli,
+        _devinConfigPath = devinConfigPath;
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
-      final dbPath = _findWindsurfDbPath();
-      final hasDevinCli = _hasDevinCli();
-      if (dbPath == null) {
+      final dbPath = _dbPath ?? _findWindsurfDbPath();
+      final hasDevinCli = _hasDevinCli ?? _hasDevinCliInstalled();
+      if (dbPath == null || !File(dbPath).existsSync()) {
         String account = hasDevinCli ? 'cli' : 'installed';
         if (hasDevinCli) {
           // Try to pull org/account from devin CLI config for better identification
-          final cfgPath = _findDevinConfigPath();
+          final cfgPath = _devinConfigPath ?? _findDevinConfigPath();
           if (cfgPath != null) {
             try {
               final cfg = jsonDecode(File(cfgPath).readAsStringSync());
@@ -57,8 +69,8 @@ class WindsurfAdapter {
         );
       }
 
-      final usageData = _readWindsurfUsage(dbPath);
-      final windows = windsurfWindows(usageData, asOf);
+      final state = _readWindsurfState(dbPath);
+      final windows = windsurfWindows(state.usage, asOf);
 
       String? err;
       if (windows.isEmpty) {
@@ -73,8 +85,8 @@ class WindsurfAdapter {
       return ProviderQuota(
         provider: id,
         displayName: name,
-        account: 'default',
-        plan: null,
+        account: state.account ?? 'default',
+        plan: state.plan,
         asOf: asOf,
         windows: windows,
         error: err,
@@ -89,65 +101,71 @@ class WindsurfAdapter {
     }
   }
 
-  Map<String, dynamic>? _readWindsurfUsage(String dbPath) {
+  _WindsurfState _readWindsurfState(String dbPath) {
     _ensureSqlite();
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
-      // Preferred: exact key from research on Windsurf (post quota change) local cache.
-      var rows = db.select(
-        "SELECT value FROM ItemTable WHERE key = 'windsurf.settings.cachedPlanInfo' LIMIT 1;",
+      final rows = db.select(
+        "SELECT key, value FROM ItemTable WHERE key = 'windsurf.settings.cachedPlanInfo' OR key LIKE '%cachedPlanInfo%' OR key LIKE '%codeium.windsurf%' OR key LIKE '%windsurf%' OR key LIKE '%devin%' OR key LIKE '%usage%' OR key LIKE '%quota%' OR key LIKE '%plan%' OR key LIKE '%account%' OR key LIKE '%user%' ORDER BY CASE WHEN key = 'windsurf.settings.cachedPlanInfo' THEN 0 WHEN key LIKE '%cachedPlanInfo%' THEN 1 ELSE 2 END LIMIT 80;",
       );
-      if (rows.isEmpty) {
-        rows = db.select(
-          "SELECT value FROM ItemTable WHERE key LIKE '%cachedPlanInfo%' OR key LIKE '%codeium.windsurf%' LIMIT 3;",
-        );
-      }
+      Map<String, dynamic>? usage;
+      String? account;
+      String? plan;
       for (final row in rows) {
-        final raw = row['value'];
-        if (raw is List<int>) {
-          try {
-            final str = utf8.decode(raw, allowMalformed: true);
-            final parsed = jsonDecode(str) as Map<String, dynamic>;
-            if (parsed.isNotEmpty) return parsed;
-          } catch (_) {
-            // fallback to raw string scan
-            final str = String.fromCharCodes(
-              raw.where((b) => b < 128 && b > 31),
-            );
-            if (str.contains('quota') ||
-                str.contains('usage') ||
-                str.contains('messages')) {
-              return {'raw': str};
-            }
-          }
-        } else if (raw is String) {
-          try {
-            return jsonDecode(raw) as Map<String, dynamic>;
-          } catch (_) {}
+        final parsed = decodeStateJsonObject(row['value']);
+        if (parsed == null) continue;
+        account ??= firstNestedString(parsed, const [
+          'email',
+          'userEmail',
+          'accountEmail',
+          'username',
+          'login',
+          'orgName',
+          'org_id',
+          'orgId',
+          'teamName',
+        ]);
+        plan ??= firstNestedString(parsed, const [
+          'plan',
+          'planName',
+          'tier',
+          'planTier',
+          'subscriptionPlan',
+          'membershipType',
+          'quotaPlan',
+          'currentPlan',
+        ]);
+        if (usage == null && _looksLikeWindsurfUsage(parsed)) {
+          usage = parsed;
         }
       }
-      // last resort broad scan
-      rows = db.select(
-        "SELECT value FROM ItemTable WHERE key LIKE '%usage%' OR key LIKE '%quota%' LIMIT 3;",
-      );
-      for (final row in rows) {
-        final raw = row['value'];
-        if (raw is List<int>) {
-          try {
-            final str = utf8.decode(raw, allowMalformed: true);
-            final p = jsonDecode(str);
-            if (p is Map) return Map<String, dynamic>.from(p);
-          } catch (_) {}
-        }
-      }
-      return null;
+      return _WindsurfState(usage: usage, account: account, plan: plan);
     } catch (_) {
-      return null;
+      return const _WindsurfState();
     } finally {
       db.dispose();
     }
   }
 
+  bool _looksLikeWindsurfUsage(Map<String, dynamic> data) =>
+      data.containsKey('daily_quota_remaining_percent') ||
+      data.containsKey('dailyQuotaRemainingPercent') ||
+      data.containsKey('weekly_quota_remaining_percent') ||
+      data.containsKey('weeklyQuotaRemainingPercent') ||
+      data.containsKey('daily') ||
+      data.containsKey('weekly') ||
+      data.containsKey('quotaUsage') ||
+      data.containsKey('usageQuotas') ||
+      data.containsKey('quotas') ||
+      data.containsKey('quota') ||
+      data.containsKey('usedMessages') ||
+      data.containsKey('usedFlowActions') ||
+      data.containsKey('usageBreakdowns') ||
+      data.containsKey('credits');
+
+  // Real-user application and CLI discovery is environment-specific; tests use
+  // injected database and config paths for deterministic coverage.
+  // coverage:ignore-start
   static String? _findDevinConfigPath() {
     final app = Platform.environment['APPDATA'] ?? '${home()}/AppData/Roaming';
     final candidates = ['$app/devin/config.json', '$app/Devin/config.json'];
@@ -157,7 +175,7 @@ class WindsurfAdapter {
     return null;
   }
 
-  static bool _hasDevinCli() {
+  static bool _hasDevinCliInstalled() {
     final candidates = <String>[];
     if (Platform.isWindows) {
       final local =
@@ -224,12 +242,21 @@ class WindsurfAdapter {
     }
     return null;
   }
+  // coverage:ignore-end
 
   void _ensureSqlite() {
     if (_sqliteReady) return;
     configureSqliteLibrary();
     _sqliteReady = true;
   }
+}
+
+class _WindsurfState {
+  final Map<String, dynamic>? usage;
+  final String? account;
+  final String? plan;
+
+  const _WindsurfState({this.usage, this.account, this.plan});
 }
 
 String _resetLabel(int? resetsAt, int now) {

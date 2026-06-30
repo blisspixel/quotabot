@@ -124,12 +124,23 @@ stores. Grok and Antigravity can run two ways:
 
 ## Windsurf / Devin (Codeium / Cognition)
 
-- Now branded Devin Desktop (IDE) and Devin CLI. Agentic Cascade uses daily + weekly quota.
-- Local passive (IDE/Desktop): ItemTable key `windsurf.settings.cachedPlanInfo` (or similar) in globalStorage/state.vscdb.
-- Paths covered: Windsurf, .codeium/windsurf, Devin (Roaming/Devin, Local/devin etc).
-- CLI-only installs (devin CLI): passive detection via `config.json` / `credentials.toml` (no rich daily/weekly cache). Shows as "cli" or org snippet.
-- Full local quota (daily/weekly % via cachedPlanInfo): requires the Devin Desktop app (the IDE formerly known as Windsurf), which populates state.vscdb.
-- Adapter always graceful for free tier / no sub. For live numbers when only CLI: check app.devin.ai.
+- Now branded Devin Desktop (IDE) and Devin CLI. Agentic Cascade uses daily +
+  weekly quota.
+- Local passive (IDE/Desktop): ItemTable key
+  `windsurf.settings.cachedPlanInfo` plus related Windsurf/Codeium/Devin
+  usage, quota, account, and plan rows in `globalStorage/state.vscdb`.
+- Paths covered: Windsurf, .codeium/windsurf, Devin (Roaming/Devin, Local/devin
+  etc).
+- The adapter accepts JSON state stored as strings or blobs, normalizes
+  daily/weekly quota evidence from direct percent fields or nested quota maps,
+  carries reset timestamps when present, and surfaces account/plan labels when
+  local state includes them.
+- CLI-only installs (devin CLI): passive detection via `config.json` /
+  `credentials.toml` (no rich daily/weekly cache). Shows as "cli" or org
+  snippet.
+- The adapter does not invent usage from undecodable raw blobs; free tier, no
+  subscription, missing cache, and CLI-only cases stay graceful detection-only
+  results. For live numbers when only CLI: check app.devin.ai.
 
 ## Local runtimes (Ollama, LM Studio, ...)
 

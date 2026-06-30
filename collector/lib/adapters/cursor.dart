@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
@@ -7,6 +6,7 @@ import '../models.dart';
 import '../parsing.dart';
 import '../sqlite_loader.dart';
 import '../util.dart';
+import '../vscode_state.dart';
 
 /// Cursor adapter (VSCode fork with agentic features and credit system).
 /// Local data in ~/.cursor (SQLite state.vscdb like other forks).
@@ -75,16 +75,16 @@ class CursorAdapter {
       String? account;
       String? plan;
       for (final row in rows) {
-        final parsed = _decodeJsonObject(row['value']);
+        final parsed = decodeStateJsonObject(row['value']);
         if (parsed == null) continue;
-        account ??= _firstString(parsed, const [
+        account ??= firstNestedString(parsed, const [
           'email',
           'userEmail',
           'accountEmail',
           'username',
           'login',
         ]);
-        plan ??= _firstString(parsed, const [
+        plan ??= firstNestedString(parsed, const [
           'plan',
           'planName',
           'tier',
@@ -103,19 +103,6 @@ class CursorAdapter {
     }
   }
 
-  Map<String, dynamic>? _decodeJsonObject(Object? raw) {
-    try {
-      final text = raw is List<int>
-          ? utf8.decode(raw, allowMalformed: true)
-          : raw?.toString();
-      if (text == null || text.trim().isEmpty) return null;
-      final parsed = jsonDecode(text);
-      return parsed is Map ? Map<String, dynamic>.from(parsed) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
   bool _looksLikeUsage(Map<String, dynamic> data) =>
       data.containsKey('usageBreakdowns') ||
       data.containsKey('planUsage') ||
@@ -127,14 +114,6 @@ class CursorAdapter {
       data.containsKey('creditPool') ||
       (data.containsKey('usedCents') && data.containsKey('includedCents')) ||
       (data.containsKey('used') && data.containsKey('limit'));
-
-  String? _firstString(Map<String, dynamic> data, List<String> keys) {
-    for (final key in keys) {
-      final found = findKey(data, key);
-      if (found is String && found.trim().isNotEmpty) return found.trim();
-    }
-    return null;
-  }
 
   // Default path discovery reads real per-user application directories; tests
   // exercise Cursor reads through an injected state database path.

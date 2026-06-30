@@ -266,22 +266,23 @@ List<QuotaWindow> windsurfWindows(dynamic usageData, int now) {
   if (usageData is! Map) return const [];
   final windows = <QuotaWindow>[];
 
-  // Direct remaining percent style (from some caches / API mirrors). A blob may
-  // carry both snake_case and camelCase spellings of the same field, so the
-  // first spelling seen for a label wins and later duplicates are skipped.
   final seenLabels = <String>{};
-  for (final spec in const [
-    ['daily_quota_remaining_percent', 'daily'],
-    ['dailyQuotaRemainingPercent', 'daily'],
-    ['weekly_quota_remaining_percent', 'weekly'],
-    ['weeklyQuotaRemainingPercent', 'weekly'],
-  ]) {
-    if (seenLabels.contains(spec[1])) continue;
-    final rem = (usageData[spec[0]] as num?)?.toDouble();
-    if (rem != null) {
-      final used = (100 - rem).clamp(0.0, 100.0);
-      windows.add(QuotaWindow(label: spec[1], usedPercent: used));
-      seenLabels.add(spec[1]);
+
+  void addWindow(QuotaWindow? window) {
+    if (window == null) return;
+    if (!seenLabels.add(window.label)) return;
+    windows.add(window);
+  }
+
+  addWindow(_windsurfDirectQuotaWindow('daily', usageData));
+  addWindow(_windsurfDirectQuotaWindow('weekly', usageData));
+
+  for (final container in _windsurfQuotaContainers(usageData)) {
+    for (final label in const ['daily', 'weekly', 'cascade']) {
+      final quota = _windsurfNestedQuota(container, label);
+      if (quota is Map) {
+        addWindow(_windsurfQuotaWindowFromMap(label, quota, usageData));
+      }
     }
   }
 
@@ -310,27 +311,6 @@ List<QuotaWindow> windsurfWindows(dynamic usageData, int now) {
     );
   }
 
-  // quotaUsage nested or direct
-  dynamic qu = usageData['quotaUsage'];
-  if (qu is Map) {
-    // try common subfields
-    for (final k in ['daily', 'weekly', 'cascade']) {
-      final v = qu[k];
-      if (v is Map) {
-        final used = (v['used'] as num?)?.toDouble();
-        final lim = (v['limit'] as num?)?.toDouble();
-        if (used != null && lim != null && lim > 0) {
-          windows.add(
-            QuotaWindow(
-              label: k,
-              usedPercent: (used / lim * 100).clamp(0.0, 100.0),
-            ),
-          );
-        }
-      }
-    }
-  }
-
   // Try similar to Kiro/Cursor breakdowns as last resort
   if (windows.isEmpty) {
     final breakdowns = usageData['usageBreakdowns'] ?? usageData['credits'];
@@ -352,13 +332,180 @@ List<QuotaWindow> windsurfWindows(dynamic usageData, int now) {
     }
   }
 
-  // raw fallback placeholder (will show as 0 until better data)
-  if (windows.isEmpty && usageData.containsKey('raw')) {
-    windows.add(QuotaWindow(label: 'quota', usedPercent: 0));
-  }
-
   return windows;
 }
+
+QuotaWindow? _windsurfDirectQuotaWindow(String label, Map data) {
+  final cap = _cap(label);
+  final remaining = _firstNum(data, [
+    '${label}_quota_remaining_percent',
+    '${label}QuotaRemainingPercent',
+    '${label}_remaining_percent',
+    '${label}RemainingPercent',
+  ]);
+  if (remaining != null) {
+    return QuotaWindow(
+      label: label,
+      usedPercent: (100 - remaining).clamp(0.0, 100.0),
+      resetsAt: _windsurfReset(label, data, data),
+    );
+  }
+
+  final usedPercent = _firstNum(data, [
+    '${label}_quota_used_percent',
+    '${label}QuotaUsedPercent',
+    '${label}_used_percent',
+    '${label}UsedPercent',
+  ]);
+  if (usedPercent != null) {
+    return QuotaWindow(
+      label: label,
+      usedPercent: usedPercent.clamp(0.0, 100.0),
+      resetsAt: _windsurfReset(label, data, data),
+    );
+  }
+
+  final used = _firstNum(data, [
+    '${label}_used',
+    '${label}Used',
+    '${label}_usage',
+    '${label}Usage',
+    'used$cap',
+    'used${cap}Quota',
+  ]);
+  final limit = _firstNum(data, [
+    '${label}_limit',
+    '${label}Limit',
+    '${label}_quota',
+    '${label}Quota',
+    '${label}_quota_limit',
+    '${label}QuotaLimit',
+  ]);
+  if (used == null || limit == null || limit <= 0) return null;
+  return QuotaWindow(
+    label: label,
+    usedPercent: (used / limit * 100).clamp(0.0, 100.0),
+    resetsAt: _windsurfReset(label, data, data),
+  );
+}
+
+Iterable<Map> _windsurfQuotaContainers(Map data) sync* {
+  yield data;
+  for (final key in const [
+    'quotaUsage',
+    'usageQuotas',
+    'quota',
+    'quotas',
+    'usage',
+    'planInfo',
+    'cachedPlanInfo',
+  ]) {
+    final value = data[key];
+    if (value is Map) yield value;
+  }
+}
+
+dynamic _windsurfNestedQuota(Map container, String label) {
+  final cap = _cap(label);
+  for (final key in [
+    label,
+    '${label}Quota',
+    '${label}Usage',
+    '${label}UsageQuota',
+    '${label}Allowance',
+    '${label}_quota',
+    '${label}_usage',
+    '${label}_usage_quota',
+    '${label}_allowance',
+    'quota$cap',
+    'usage$cap',
+  ]) {
+    final value = container[key];
+    if (value is Map) return value;
+  }
+  return null;
+}
+
+QuotaWindow? _windsurfQuotaWindowFromMap(String label, Map data, Map root) {
+  final remaining = _firstNum(data, const [
+    'remainingPercent',
+    'remaining_percent',
+    'quotaRemainingPercent',
+    'quota_remaining_percent',
+    'freePercent',
+    'free_percent',
+  ]);
+  if (remaining != null) {
+    return QuotaWindow(
+      label: label,
+      usedPercent: (100 - remaining).clamp(0.0, 100.0),
+      resetsAt: _windsurfReset(label, data, root),
+    );
+  }
+
+  final usedPercent = _firstNum(data, const [
+    'usedPercent',
+    'used_percent',
+    'usagePercent',
+    'usage_percent',
+    'percentageUsed',
+    'percentUsed',
+    'quotaUsedPercent',
+    'quota_used_percent',
+  ]);
+  if (usedPercent != null) {
+    return QuotaWindow(
+      label: label,
+      usedPercent: usedPercent.clamp(0.0, 100.0),
+      resetsAt: _windsurfReset(label, data, root),
+    );
+  }
+
+  final used = _firstNum(data, const [
+    'used',
+    'currentUsage',
+    'usage',
+    'consumed',
+    'count',
+  ]);
+  final limit = _firstNum(data, const [
+    'limit',
+    'usageLimit',
+    'quota',
+    'quotaLimit',
+    'allowance',
+    'total',
+  ]);
+  if (used == null || limit == null || limit <= 0) return null;
+  return QuotaWindow(
+    label: label,
+    usedPercent: (used / limit * 100).clamp(0.0, 100.0),
+    resetsAt: _windsurfReset(label, data, root),
+  );
+}
+
+int? _windsurfReset(String label, Map data, Map root) {
+  final cap = _cap(label);
+  for (final source in [data, root]) {
+    for (final key in [
+      'resetsAt',
+      'resetAt',
+      'resetDate',
+      'periodEnd',
+      '${label}ResetAt',
+      '${label}QuotaResetAt',
+      'next${cap}ResetAt',
+      '${label}_reset_at',
+      '${label}_quota_reset_at',
+    ]) {
+      final reset = parseReset(source[key]);
+      if (reset != null) return reset;
+    }
+  }
+  return null;
+}
+
+String _cap(String label) => '${label[0].toUpperCase()}${label.substring(1)}';
 
 // --- Kiro -------------------------------------------------------------------
 
