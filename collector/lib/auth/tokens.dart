@@ -108,16 +108,16 @@ class TokenStore {
     // Lock down the directory and pre-create the file with restrictive
     // permissions BEFORE writing the secret, so the token is never briefly
     // world-readable under the default umask.
-    _restrictDir(f.parent);
+    restrictOwnerOnlyDirectory(f.parent);
     if (!f.existsSync()) {
       f.createSync(recursive: true);
     }
-    _restrictPermissions(f);
+    restrictOwnerOnlyFile(f);
     f.writeAsStringSync(jsonEncode({
       ...tokens.toJson(),
       if (accountName != null) _accountKey: accountName,
     }));
-    _restrictPermissions(f);
+    restrictOwnerOnlyFile(f);
   }
 
   static void clear(String provider, {String? account}) {
@@ -155,46 +155,5 @@ class TokenStore {
     for (final account in accounts(provider)) {
       clear(provider, account: account);
     }
-  }
-
-  /// Best-effort: restrict the refresh-token file to the current user. On POSIX
-  /// this is `chmod 600`; on Windows it resets inheritance and grants only the
-  /// current user, so other accounts on the machine cannot read the token.
-  static void _restrictPermissions(File f) {
-    try {
-      if (Platform.isWindows) {
-        final user = _windowsUser();
-        if (user == null || user.isEmpty) return;
-        // /inheritance:r removes inherited ACEs; then grant only this user.
-        Process.runSync('icacls', [f.path, '/inheritance:r']);
-        Process.runSync('icacls', [f.path, '/grant:r', '$user:F']);
-      } else {
-        Process.runSync('chmod', ['600', f.path]);
-      }
-    } catch (_) {}
-  }
-
-  /// Best-effort: make the auth directory owner-only so other local users
-  /// cannot traverse or list the stored token files.
-  static void _restrictDir(Directory d) {
-    try {
-      if (!d.existsSync()) d.createSync(recursive: true);
-      if (Platform.isWindows) {
-        final user = _windowsUser();
-        if (user == null || user.isEmpty) return;
-        Process.runSync('icacls', [d.path, '/inheritance:r']);
-        Process.runSync('icacls', [d.path, '/grant:r', '${user}:(OI)(CI)F']);
-      } else {
-        Process.runSync('chmod', ['700', d.path]);
-      }
-    } catch (_) {}
-  }
-
-  static String? _windowsUser() {
-    final username = Platform.environment['USERNAME'];
-    if (username == null || username.isEmpty) return null;
-    final domain = Platform.environment['USERDOMAIN'];
-    if (domain == null || domain.isEmpty) return username;
-    return '$domain\\$username';
   }
 }

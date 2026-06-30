@@ -5,6 +5,9 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Owner-only local file hardening is now shared across token storage and routing
+  lease metadata. Lease directories, lock files, and atomic write files are
+  restricted with the same best-effort permissions used for OAuth tokens.
 - Parser boundaries now reject non-finite numeric values and clamp direct
   provider percentages to 0..100 before they can reach routing or UI code.
 - CI now runs the full suite on Linux, macOS, and Windows (a matrix of
@@ -15,6 +18,12 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- MCP routing tools now accept exact `account` filters in addition to named
+  `profile` filters, so routers can query one provider account without creating
+  a profile. MCP also exposes `quotas://alerts` and standard
+  `resources/subscribe` support: the subscription loop runs the existing
+  edge-triggered alert engine and sends `notifications/resources/updated` when a
+  provider crosses amber or red.
 - MCP routing now has local concurrency leases and a cache-only decision path.
   `reserve_provider` and `release_provider` let parallel routers reserve a
   cloud provider/account locally before dispatch, and active leases reduce later
@@ -30,7 +39,7 @@ Notable changes to quotabot. Newest first.
   TypeScript SDK.
 - The MCP server now supports opt-in Streamable HTTP alongside stdio:
   `dart run bin/mcp_server.dart --http` serves the same nine tools and
-  `quotas://current` resource on a loopback-only `/mcp` endpoint with
+  `quotas://current`/`quotas://alerts` resources on a loopback-only `/mcp` endpoint with
   DNS-rebinding host/origin checks, batch JSON-RPC rejection, optional bearer
   token auth, and integration tests through the package's Streamable HTTP client.
 - A model-catalog audit tool now diffs the committed cloud catalog against

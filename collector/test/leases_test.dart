@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/leases.dart';
@@ -232,20 +233,18 @@ void main() {
       dirFactory: () => dir,
       idFactory: _idFactory(),
     );
-    for (var i = 0; i < maxActiveLeases; i++) {
-      expect(
-        store
-            .reserve(
-              provider: 'claude',
-              account: 'account-$i',
-              now: 100,
-              leaseSeconds: 60,
-              weightPercent: 1,
-            )
-            .reserved,
-        isTrue,
-      );
-    }
+    final seeded = List.generate(
+      maxActiveLeases,
+      (i) => RouteLease(
+        id: 'seed-$i',
+        provider: 'claude',
+        account: 'account-$i',
+        createdAt: 100,
+        expiresAt: 160,
+        weightPercent: 1,
+      ).toJson(),
+    );
+    File('${dir.path}/route_leases.json').writeAsStringSync(jsonEncode(seeded));
 
     final rejected = store.reserve(
       provider: 'claude',

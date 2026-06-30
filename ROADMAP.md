@@ -247,10 +247,16 @@ leverage is the quality of the signal it hands a router.
     file-backed with locking in production, in-memory in tests, TTL-bound, capped,
     idempotency-key aware, and surfaced as `lease_discount_percent` on ranked
     candidates without entering the prompt or model-request path.
-16. [ ] Profile- and account-scoped routing queries (`--profile`, from item 8),
+16. [x] Profile- and account-scoped routing queries (`--profile`, from item 8),
     plus a subscribe path - the Phase 1 threshold webhook generalized to an MCP
     notification - so a router reacts to a window crossing amber or red instead of
-    polling for it.
+    polling for it. Shipped: MCP read/routing tools accept exact `account`
+    filters after named `profile` filters, `check_provider_availability` can
+    target a provider/account pair, and the server exposes `quotas://alerts` with
+    standard `resources/subscribe` / `resources/unsubscribe`. The subscription
+    loop reuses the existing edge-triggered alert engine, emits
+    `notifications/resources/updated` for `quotas://alerts` on amber/red
+    crossings, and keeps resources unfiltered for compatibility.
 
 ### Phase 5 - Freeze and ship
 

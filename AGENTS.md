@@ -52,9 +52,15 @@ Pick whichever transport you already speak. All return the same data.
     quotabot ever seeing the task.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): the cheapest model that meets it and has budget, local-first.
-  - Resource `quotas://current` - the same snapshot.
-  - All tools accept optional `profile` to route inside a local named profile;
-    the resource stays the unfiltered current snapshot.
+  - Resource `quotas://current` - the same unfiltered live snapshot.
+  - Resource `quotas://alerts` - the last MCP quota alerts fired by the
+    subscription loop.
+  - All read/routing tools accept optional `profile` and exact `account` filters
+    to route inside a local named profile or one provider account; resources stay
+    unfiltered.
+  - MCP clients can subscribe to `quotas://alerts` or `quotas://current` with
+    standard `resources/subscribe`; alert crossings emit
+    `notifications/resources/updated` for `quotas://alerts`.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics.
@@ -120,6 +126,9 @@ left. The shapes:
 - `quotabot watch` emits `quotabot.alert.v1`: `provider`, `window`, `severity`
   (`amber`/`red`), `free_percent`, `as_of`, and, when a better option exists,
   `route_to` with `route_free_percent`/`route_is_local`. Metadata only.
+- `quotas://alerts` is `quotabot.alerts.v1`: `generated_at`, `last_alert_at`,
+  and the last fired `quotabot.alert.v1` objects. Subscribe to it to react to
+  amber/red crossings without polling.
 
 ## What quotabot does not do
 

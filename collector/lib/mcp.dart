@@ -16,10 +16,12 @@
 /// over-strict schema would break the fail-soft routing contract.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
 
+import 'alerts.dart';
 import 'analysis.dart';
 import 'leases.dart';
 import 'model_catalog.dart';
@@ -30,6 +32,8 @@ import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
 const quotabotMcpVersion = '0.5.0';
+const quotasCurrentResourceUri = 'quotas://current';
+const quotasAlertsResourceUri = 'quotas://alerts';
 
 /// A schema that accepts [schema] or an explicit null, for nullable fields.
 JsonSchema _nullable(JsonSchema schema) =>
@@ -41,11 +45,13 @@ Map<String, dynamic> quotasSnapshot(
   List<ProviderQuota> providers,
   int now, {
   String? profile,
+  String? accountFilter,
   String? error,
 }) =>
     {
       'schema': 'quotabot.v1',
       if (profile != null) 'profile': profile,
+      if (accountFilter != null) 'account_filter': accountFilter,
       if (error != null) 'error': error,
       'generated_at': now,
       'providers': providers.map((p) => p.toJson()).toList(),
@@ -115,6 +121,18 @@ typedef CachedSnapshotProvider = Future<CachedQuotaSnapshot> Function();
 Future<CachedQuotaSnapshot> emptyCachedSnapshot() async =>
     const CachedQuotaSnapshot.empty();
 
+Map<String, dynamic> alertsSnapshot(
+  List<QuotaAlert> alerts,
+  int now, {
+  int? lastAlertAt,
+}) =>
+    {
+      'schema': 'quotabot.alerts.v1',
+      'generated_at': now,
+      'last_alert_at': lastAlertAt,
+      'alerts': alerts.map((alert) => alert.toJson()).toList(),
+    };
+
 Map<String, dynamic> decideNowResponse(
   CachedQuotaSnapshot cached,
   int now, {
@@ -176,11 +194,22 @@ Map<String, dynamic> availabilityResponse(
   List<ProviderQuota> providers,
   int now,
   String? providerId,
+  String? accountId,
 ) {
   final name = providerId?.toLowerCase();
-  final match = providers.where((q) => q.provider == name);
+  final account = _accountFilter(accountId);
+  final match = providers.where((q) {
+    if (q.provider != name) return false;
+    if (account == null) return true;
+    return q.account == account;
+  });
   if (match.isEmpty) {
-    return {'provider': name, 'error': 'unknown provider'};
+    return {
+      'provider': name,
+      if (account != null) 'account': account,
+      'error':
+          account == null ? 'unknown provider' : 'unknown provider/account',
+    };
   }
   final q = match.first;
   final a = providerAvailability(q, now);
@@ -483,6 +512,10 @@ final _modelFilterInputSchema = JsonSchema.object(
     'profile': JsonSchema.string(
       description: 'Optional local named profile to filter providers/accounts.',
     ),
+    'account': JsonSchema.string(
+      description:
+          'Optional exact account label to route within after profile filtering.',
+    ),
     'task': JsonSchema.string(
       description: 'Coarse profile: "simple", "standard", or "hard".',
     ),
@@ -501,10 +534,14 @@ final _modelFilterInputSchema = JsonSchema.object(
   },
 );
 
-final _profileOnlyInputSchema = JsonSchema.object(
+final _profileAndAccountInputSchema = JsonSchema.object(
   properties: {
     'profile': JsonSchema.string(
       description: 'Optional local named profile to filter providers/accounts.',
+    ),
+    'account': JsonSchema.string(
+      description:
+          'Optional exact account label to route within after profile filtering.',
     ),
   },
 );
@@ -570,6 +607,7 @@ McpServer buildQuotabotMcpServer({
   required BurnProvider burnByProvider,
   CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
   RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
+  bool enableSubscriptionTimers = true,
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
@@ -590,6 +628,7 @@ McpServer buildQuotabotMcpServer({
     burnByProvider: burnByProvider,
     cachedSnapshot: cachedSnapshot,
     leaseStore: leaseStore,
+    enableSubscriptionTimers: enableSubscriptionTimers,
     now: now,
     catalog: catalog,
     profileLoader: profileLoader,
@@ -624,9 +663,30 @@ const _localRelease = ToolAnnotations(
 class _ProfiledSnapshot {
   final List<ProviderQuota> providers;
   final String? profile;
+  final String? accountFilter;
   final String? error;
 
-  const _ProfiledSnapshot({required this.providers, this.profile, this.error});
+  const _ProfiledSnapshot({
+    required this.providers,
+    this.profile,
+    this.accountFilter,
+    this.error,
+  });
+}
+
+String? _accountFilter(Object? value) {
+  if (value is! String) return null;
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return null;
+  return trimmed.length <= 240 ? trimmed : trimmed.substring(0, 240);
+}
+
+List<ProviderQuota> _filterAccount(
+  List<ProviderQuota> providers,
+  String? account,
+) {
+  if (account == null) return providers;
+  return providers.where((provider) => provider.account == account).toList();
 }
 
 Future<_ProfiledSnapshot> _profiledSnapshot(
@@ -634,21 +694,31 @@ Future<_ProfiledSnapshot> _profiledSnapshot(
   SnapshotProvider snapshot,
   ProfileLoader profileLoader,
 ) async {
+  final account = _accountFilter(args['account']);
   final rawProfile = args['profile'];
   final requested = rawProfile is String ? rawProfile.trim() : null;
   if (requested == null || requested.isEmpty) {
-    return _ProfiledSnapshot(providers: await snapshot());
+    return _ProfiledSnapshot(
+      providers: _filterAccount(await snapshot(), account),
+      accountFilter: account,
+    );
   }
   final profile = profileLoader(requested);
   if (profile == null) {
     return _ProfiledSnapshot(
       providers: const [],
       profile: requested,
+      accountFilter: account,
       error: 'unknown profile: $requested',
     );
   }
-  final providers = applyProfile(await snapshot(), profile);
-  return _ProfiledSnapshot(providers: providers, profile: profile.name);
+  final providers =
+      _filterAccount(applyProfile(await snapshot(), profile), account);
+  return _ProfiledSnapshot(
+    providers: providers,
+    profile: profile.name,
+    accountFilter: account,
+  );
 }
 
 Map<String, dynamic> _withProfileMeta(
@@ -656,6 +726,9 @@ Map<String, dynamic> _withProfileMeta(
   _ProfiledSnapshot snapshot,
 ) {
   if (snapshot.profile != null) response['profile'] = snapshot.profile;
+  if (snapshot.accountFilter != null) {
+    response['account_filter'] = snapshot.accountFilter;
+  }
   if (snapshot.error != null) response['error'] = snapshot.error;
   return response;
 }
@@ -693,6 +766,157 @@ Map<String, dynamic> _releaseJson(
       'lease': release.lease?.toJson(),
       'active_leases': _leaseDiscountJson(release.activeLeases),
     };
+
+class QuotaResourceSubscriptionHub {
+  final SnapshotProvider snapshot;
+  final BurnProvider burnByProvider;
+  final int Function() now;
+  final Future<void> Function(String uri) notifyUpdated;
+  final bool autoStart;
+
+  final Set<String> _subscribed = {};
+  var _armed = <String>{};
+  var _lastAlerts = <QuotaAlert>[];
+  int? _lastAlertAt;
+  var _lastSnapshot = <ProviderQuota>[];
+  var _failStreak = 0;
+  Timer? _timer;
+  var _polling = false;
+  var _disposed = false;
+
+  QuotaResourceSubscriptionHub({
+    required this.snapshot,
+    required this.burnByProvider,
+    required this.now,
+    required this.notifyUpdated,
+    this.autoStart = true,
+  });
+
+  Map<String, dynamic> alertsResource() => alertsSnapshot(
+        _lastAlerts,
+        now(),
+        lastAlertAt: _lastAlertAt,
+      );
+
+  Future<void> subscribe(String uri) async {
+    _assertSubscribable(uri);
+    _subscribed.add(uri);
+    if (autoStart) _schedule(Duration.zero);
+  }
+
+  Future<void> unsubscribe(String uri) async {
+    _assertSubscribable(uri);
+    _subscribed.remove(uri);
+    if (_subscribed.isEmpty) _timer?.cancel();
+  }
+
+  Future<void> pollOnce() async {
+    if (_disposed || _subscribed.isEmpty || _polling) return;
+    _polling = true;
+    try {
+      final data = await snapshot();
+      _lastSnapshot = data;
+      final n = now();
+      final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
+      _failStreak = anyLive ? 0 : _failStreak + 1;
+      if (_subscribed.contains(quotasCurrentResourceUri)) {
+        await notifyUpdated(quotasCurrentResourceUri);
+      }
+      final burnStats = burnByProvider(data.map((q) => q.provider), n);
+      final suggestion = suggestRoute(data, n, burnStatsByProvider: burnStats);
+      final alerts = computeAlerts(
+        snapshot: data,
+        suggestion: suggestion,
+        now: n,
+        armed: _armed,
+        alertOn: const {AlertSeverity.amber, AlertSeverity.red},
+      );
+      _armed = alerts.armed;
+      if (alerts.fired.isNotEmpty) {
+        _lastAlerts = alerts.fired;
+        _lastAlertAt = n;
+        if (_subscribed.contains(quotasAlertsResourceUri)) {
+          await notifyUpdated(quotasAlertsResourceUri);
+        }
+      }
+    } catch (_) {
+      _failStreak++;
+    } finally {
+      _polling = false;
+    }
+  }
+
+  void dispose() {
+    _disposed = true;
+    _timer?.cancel();
+    _subscribed.clear();
+  }
+
+  void _schedule(Duration delay) {
+    if (_disposed || _subscribed.isEmpty) return;
+    _timer?.cancel();
+    _timer = Timer(delay, () async {
+      await pollOnce();
+      if (_disposed || _subscribed.isEmpty) return;
+      final seconds = _lastSnapshot.isEmpty
+          ? 60
+          : nextRefreshSeconds(
+              _lastSnapshot,
+              now(),
+              failStreak: _failStreak,
+            );
+      _schedule(Duration(seconds: seconds));
+    });
+  }
+
+  void _assertSubscribable(String uri) {
+    if (uri == quotasCurrentResourceUri || uri == quotasAlertsResourceUri) {
+      return;
+    }
+    throw McpError(
+      ErrorCode.invalidParams.value,
+      'resource is not subscribable: $uri',
+    );
+  }
+}
+
+void _registerQuotaResourceSubscriptions(
+  McpServer server,
+  QuotaResourceSubscriptionHub hub,
+) {
+  server.server.registerCapabilities(
+    const ServerCapabilities(
+      resources: ServerCapabilitiesResources(subscribe: true),
+    ),
+  );
+  server.server.assertCanSetRequestHandler(Method.resourcesSubscribe);
+  server.server.setRequestHandler<JsonRpcSubscribeRequest>(
+    Method.resourcesSubscribe,
+    (request, extra) async {
+      await hub.subscribe(request.subParams.uri);
+      return const EmptyResult();
+    },
+    (id, params, meta) => JsonRpcSubscribeRequest.fromJson({
+      'id': id,
+      'params': params,
+      if (meta != null) '_meta': meta,
+    }),
+  );
+  server.server.assertCanSetRequestHandler(Method.resourcesUnsubscribe);
+  server.server.setRequestHandler<JsonRpcUnsubscribeRequest>(
+    Method.resourcesUnsubscribe,
+    (request, extra) async {
+      await hub.unsubscribe(request.unsubParams.uri);
+      return const EmptyResult();
+    },
+    (id, params, meta) => JsonRpcUnsubscribeRequest.fromJson({
+      'id': id,
+      'params': params,
+      if (meta != null) '_meta': meta,
+    }),
+  );
+  server.server.onclose = hub.dispose;
+}
 
 RouteCandidate? _explicitReserveTarget(
   List<ProviderQuota> providers,
@@ -735,23 +959,42 @@ Map<String, dynamic> _reserveUnavailable(
       'active_leases': _leaseDiscountJson(activeLeases),
     };
 
-/// Registers quotabot's tools and the `quotas://current` resource on [server].
+/// Registers quotabot's tools and quota resources on [server].
 ///
 /// This is the single wiring point shared by `bin/mcp_server.dart` (which feeds
 /// live data) and the tests (which feed fixtures), so there is exactly one
 /// definition of each tool's schema, annotations, and behavior. [snapshot] and
 /// [burnByProvider] are injected; [now] defaults to the wall clock and is
 /// overridden in tests for determinism.
-void registerQuotabotTools(
+QuotaResourceSubscriptionHub registerQuotabotTools(
   McpServer server, {
   required SnapshotProvider snapshot,
   required BurnProvider burnByProvider,
   CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
   RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
+  bool enableSubscriptionTimers = true,
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
   ProfileLoader profileLoader = loadProfile,
 }) {
+  late final QuotaResourceSubscriptionHub subscriptionHub;
+  subscriptionHub = QuotaResourceSubscriptionHub(
+    snapshot: snapshot,
+    burnByProvider: burnByProvider,
+    now: now,
+    autoStart: enableSubscriptionTimers,
+    notifyUpdated: (uri) async {
+      if (!server.isConnected) return;
+      try {
+        await server.server.notification(
+          JsonRpcResourceUpdatedNotification(
+            updatedParams: ResourceUpdatedNotification(uri: uri),
+          ),
+        );
+      } catch (_) {}
+    },
+  );
+
   server.registerTool(
     'list_quotas',
     title: 'List quotas',
@@ -761,7 +1004,7 @@ void registerQuotabotTools(
         'runtime as JSON. Per provider: account, plan, ok/stale, and rolling '
         'windows (label, used_percent or used/limit, resets_at). Longer windows '
         'that are spent are the binding constraint.',
-    inputSchema: _profileOnlyInputSchema,
+    inputSchema: _profileAndAccountInputSchema,
     outputSchema: quotasSnapshotOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
@@ -771,6 +1014,7 @@ void registerQuotabotTools(
           profiled.providers,
           now(),
           profile: profiled.profile,
+          accountFilter: profiled.accountFilter,
           error: profiled.error,
         ),
       );
@@ -787,7 +1031,7 @@ void registerQuotabotTools(
         'account, headroom_percent, resets_at of the binding window, and a stale '
         'flag, or {provider: null, reason} when nothing is usable. A longer '
         'window that is spent blocks use even if shorter windows show headroom.',
-    inputSchema: _profileOnlyInputSchema,
+    inputSchema: _profileAndAccountInputSchema,
     outputSchema: mostHeadroomOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
@@ -813,7 +1057,7 @@ void registerQuotabotTools(
         'recommended provider, a human reason, a using_local_fallback flag, a '
         'guaranteed fallback, and the full ranked candidate list. Local runtimes '
         'never win on headroom; they are fallbacks only.',
-    inputSchema: _profileOnlyInputSchema,
+    inputSchema: _profileAndAccountInputSchema,
     outputSchema: suggestOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
@@ -851,6 +1095,10 @@ void registerQuotabotTools(
         'profile': JsonSchema.string(
           description:
               'Optional local named profile to filter providers/accounts.',
+        ),
+        'account': JsonSchema.string(
+          description:
+              'Optional exact account label to route within after profile filtering.',
         ),
         'max_age_seconds': JsonSchema.integer(
           description:
@@ -1124,6 +1372,10 @@ void registerQuotabotTools(
           description: 'Provider id: codex, claude, grok, antigravity, kiro, '
               'cursor, windsurf, or a local runtime.',
         ),
+        'account': JsonSchema.string(
+          description:
+              'Optional exact account label for providers with multiple accounts.',
+        ),
         'profile': JsonSchema.string(
           description:
               'Optional local named profile to filter providers/accounts.',
@@ -1141,6 +1393,7 @@ void registerQuotabotTools(
             profiled.providers,
             now(),
             args['provider'] as String?,
+            args['account'] as String?,
           ),
           profiled,
         ),
@@ -1150,7 +1403,7 @@ void registerQuotabotTools(
 
   server.registerResource(
     'quotas',
-    'quotas://current',
+    quotasCurrentResourceUri,
     (
       description: 'Full live normalized quota snapshot across all providers. '
           'JSON object with schema, generated_at, and a providers list. Each '
@@ -1170,4 +1423,25 @@ void registerQuotabotTools(
       ],
     ),
   );
+  server.registerResource(
+    'quota_alerts',
+    quotasAlertsResourceUri,
+    (
+      description: 'Last MCP quota alerts fired by the subscription loop. '
+          'JSON object with schema quotabot.alerts.v1 and alert metadata only.',
+      mimeType: 'application/json',
+    ),
+    (uri, extra) async => ReadResourceResult(
+      contents: [
+        TextResourceContents(
+          uri: uri.toString(),
+          mimeType: 'application/json',
+          text: const JsonEncoder.withIndent('  ')
+              .convert(subscriptionHub.alertsResource()),
+        ),
+      ],
+    ),
+  );
+  _registerQuotaResourceSubscriptions(server, subscriptionHub);
+  return subscriptionHub;
 }

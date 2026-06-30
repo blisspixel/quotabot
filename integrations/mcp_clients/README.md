@@ -16,6 +16,9 @@ prompts, code, or model requests.
   bearer auth for long-lived processes.
 - Treat routing as fail-soft. If quotabot is unavailable, keep the caller's
   original provider or model instead of blocking the request.
+- For long-lived routers, subscribe to `quotas://alerts` with standard MCP
+  `resources/subscribe`; read the resource after
+  `notifications/resources/updated` to receive `quotabot.alerts.v1`.
 
 Sources checked: MCP Python SDK v1.x README and client docs, MCP Python SDK v1.x
 `streamable_http.py`, MCP TypeScript SDK v1.x README, client source, and

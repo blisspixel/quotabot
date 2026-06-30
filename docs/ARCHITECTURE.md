@@ -47,7 +47,8 @@ collector/ (Dart package)
                           check, suggest, stats, json, login, logout
                           (stable exit codes 0/64/69)
   bin/mcp_server.dart     MCP server over stdio or opt-in Streamable HTTP
-                          (tools, local leases, quotas://current resource)
+                          (tools, local leases, quotas://current and
+                          quotas://alerts resources)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing
 
@@ -177,18 +178,26 @@ Leases are advisory local metadata with TTLs and idempotency keys; they never
 contact providers and never sit in the prompt or inference data path.
 
 `mcp.dart` builds one MCP server definition: tools, resources, output schemas,
-read-only/idempotent annotations, and capability scope. Most tools read a live
-`collectAll()` snapshot. `decide_now` is deliberately different: it reads the
-in-memory or disk last-known snapshot only, returns `source`, `snapshot_as_of`,
-age, and staleness, and never forces a live collect. `reserve_provider` and
-`release_provider` are the only local-write tools, and their annotations mark
-that distinction for MCP clients. `bin/mcp_server.dart` feeds the shared server
-factory over stdio by default or MCP Streamable HTTP when launched with
-`--http`. `mcp_http.dart` keeps HTTP opt-in and loopback-only, enables
-DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and can
-require a bearer token. `bin/example_routing_agent.dart` shows the same logic
-used for direct Dart routing decisions, while `integrations/mcp_clients/` shows
-Python and TypeScript MCP clients for both stdio and Streamable HTTP.
+read-only/idempotent annotations, capability scope, and standard MCP resource
+subscription handlers. Most tools read a live `collectAll()` snapshot. They can
+also apply exact `account` filters after named profile filters for routers that
+need one provider account without creating a profile. `decide_now` is
+deliberately different: it reads the in-memory or disk last-known snapshot only,
+returns `source`, `snapshot_as_of`, age, and staleness, and never forces a live
+collect. `reserve_provider` and `release_provider` are the only local-write
+tools, and their annotations mark that distinction for MCP clients.
+`quotas://current` remains the unfiltered live snapshot resource.
+`quotas://alerts` stores the last `quotabot.alert.v1` objects fired by the MCP
+subscription loop. Clients subscribe with `resources/subscribe`; on an amber/red
+crossing, the server emits the standard `notifications/resources/updated` event
+for `quotas://alerts`, so clients react by reading the resource instead of
+polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
+by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
+keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
+rejects batch JSON-RPC payloads, and can require a bearer token.
+`bin/example_routing_agent.dart` shows the same logic used for direct Dart
+routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
+MCP clients for both stdio and Streamable HTTP.
 `bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
 consumers. The reasoning behind the routing math (risk-adjusted headroom, strand
 probability, and lease discounts) is written up in
@@ -230,11 +239,12 @@ in `sys.modules`, which breaks dataclass decoration on Python 3.13.
 `alerts.dart` is a pure, edge-triggered alert pass: `computeAlerts` takes the
 current snapshot, the routing suggestion, and the set of providers already
 alerting, and returns the alerts that newly crossed into a triggering severity
-(red by default) plus the updated armed set, so a provider fires once on the
-crossing and re-arms only after it recovers. Each `QuotaAlert` serializes as
-`quotabot.alert.v1` (metadata only, never content). Two thin shells consume it:
-the `quotabot watch` command in `bin/collect.dart` (poll, print, optionally POST)
-and the desktop app's notifier. `webhook.dart` delivers an alert with
+(red by default for CLI/app, amber or red for MCP subscriptions) plus the updated
+armed set, so a provider fires once on the crossing and re-arms only after it
+recovers. Each `QuotaAlert` serializes as `quotabot.alert.v1` (metadata only,
+never content). Three thin shells consume it: the `quotabot watch` command in
+`bin/collect.dart` (poll, print, optionally POST), the desktop app's notifier,
+and the MCP `quotas://alerts` subscription loop. `webhook.dart` delivers an alert with
 `postAlert`, which refuses a non-loopback host unless explicitly allowed and
 never throws, so delivery fails soft. An alert is just the binding-window
 forecast viewed as a threshold crossing, so it shares the same model as `top`.
@@ -289,10 +299,10 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   filtering is pure over the already-normalized `ProviderQuota` list.
 - The CLI loads `--profile=NAME` once, then every quota-reading command consumes
   the same profiled snapshot. Missing profiles fail with usage exit code 64.
-- The MCP tools accept optional `profile` and apply the same pure filter before
-  quota, routing, availability, and model responses. Missing profiles return a
-  structured `error` field and no providers; `quotas://current` remains the
-  unfiltered resource shape for compatibility.
+- The MCP tools accept optional `profile` and exact `account` filters, applying
+  the same pure profile filter before account narrowing for quota, routing,
+  availability, and model responses. Missing profiles return a structured
+  `error` field and no providers; resources remain unfiltered for compatibility.
 - The desktop app loads local profiles at startup and on refresh, lets users
   create/edit/delete non-default profiles, applies the active profile before
   display, notifications, webhook alerts, and analytics, and persists

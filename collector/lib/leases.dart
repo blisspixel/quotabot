@@ -396,8 +396,11 @@ class FileRouteLeaseStore implements RouteLeaseStore {
 
   T _withLock<T>(T Function(Directory dir) run) {
     final dir = dirFactory();
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    final lock = _lockFile(dir).openSync(mode: FileMode.write);
+    restrictOwnerOnlyDirectory(dir);
+    final lockFile = _lockFile(dir);
+    if (!lockFile.existsSync()) lockFile.createSync(recursive: true);
+    restrictOwnerOnlyFile(lockFile);
+    final lock = lockFile.openSync(mode: FileMode.write);
     try {
       lock.lockSync(FileLock.blockingExclusive);
       return run(dir);
@@ -433,9 +436,12 @@ List<RouteLease> _readUnlocked(File file) {
 
 void _writeUnlocked(File file, List<RouteLease> leases) {
   final tmp = File('${file.path}.$pid.tmp');
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictOwnerOnlyFile(tmp);
   tmp.writeAsStringSync(
       jsonEncode(leases.map((lease) => lease.toJson()).toList()));
   tmp.renameSync(file.path);
+  restrictOwnerOnlyFile(file);
 }
 
 List<RouteLease> _activeOnly(List<RouteLease> leases, int now) =>

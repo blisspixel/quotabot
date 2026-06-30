@@ -19,6 +19,50 @@ Directory quotabotDir(String sub) {
   return dir;
 }
 
+/// Best-effort owner-only permissions for local metadata files.
+///
+/// On POSIX this is `chmod 600`. On Windows it removes inherited ACEs and grants
+/// full control only to the current user. Failures are intentionally ignored so
+/// metadata writes stay fail-soft on locked-down enterprise machines.
+void restrictOwnerOnlyFile(File file) {
+  try {
+    if (Platform.isWindows) {
+      final user = _windowsUser();
+      if (user == null || user.isEmpty) return;
+      Process.runSync('icacls', [file.path, '/inheritance:r']);
+      Process.runSync('icacls', [file.path, '/grant:r', '$user:F']);
+    } else {
+      Process.runSync('chmod', ['600', file.path]);
+    }
+  } catch (_) {}
+}
+
+/// Best-effort owner-only permissions for local metadata directories.
+///
+/// On POSIX this is `chmod 700`. On Windows it removes inherited ACEs and grants
+/// recursive full control only to the current user.
+void restrictOwnerOnlyDirectory(Directory dir) {
+  try {
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    if (Platform.isWindows) {
+      final user = _windowsUser();
+      if (user == null || user.isEmpty) return;
+      Process.runSync('icacls', [dir.path, '/inheritance:r']);
+      Process.runSync('icacls', [dir.path, '/grant:r', '${user}:(OI)(CI)F']);
+    } else {
+      Process.runSync('chmod', ['700', dir.path]);
+    }
+  } catch (_) {}
+}
+
+String? _windowsUser() {
+  final username = Platform.environment['USERNAME'];
+  if (username == null || username.isEmpty) return null;
+  final domain = Platform.environment['USERDOMAIN'];
+  if (domain == null || domain.isEmpty) return username;
+  return '$domain\\$username';
+}
+
 /// Recursively find the first value stored under [key] anywhere in a decoded
 /// JSON tree (maps/lists). Returns null if absent.
 dynamic findKey(dynamic node, String key) {

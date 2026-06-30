@@ -28,6 +28,15 @@ ProviderQuota _q(
 
 ProviderQuota _local(String id) => _q(id, const [], kind: 'local');
 
+ProviderQuota _accountQ(String id, String account, double usedPercent) =>
+    ProviderQuota(
+      provider: id,
+      displayName: id,
+      account: account,
+      asOf: _now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: usedPercent)],
+    );
+
 QuotaProfile? _noProfile(String name) => null;
 
 /// A snapshot exercising all builders: a healthy subscription, a nearly spent
@@ -115,7 +124,7 @@ void main() {
     });
 
     test('availabilityResponse answers for a known provider', () {
-      final r = availabilityResponse(_fixture(), _now, 'CLAUDE');
+      final r = availabilityResponse(_fixture(), _now, 'CLAUDE', null);
       expect(r['provider'], 'claude');
       expect(r['available'], isTrue);
       expect(r['headroom_percent'], 80);
@@ -123,11 +132,11 @@ void main() {
 
     test('availabilityResponse flags an unknown provider', () {
       expect(
-        availabilityResponse(_fixture(), _now, 'nope')['error'],
+        availabilityResponse(_fixture(), _now, 'nope', null)['error'],
         'unknown provider',
       );
       expect(
-        availabilityResponse(_fixture(), _now, null)['error'],
+        availabilityResponse(_fixture(), _now, null, null)['error'],
         'unknown provider',
       );
     });
@@ -136,6 +145,7 @@ void main() {
   group('registered server (real round-trip)', () {
     late McpServer server;
     late McpClient client;
+    late QuotaResourceSubscriptionHub subscriptions;
 
     Future<void> connect(
       List<ProviderQuota> snapshot, {
@@ -143,6 +153,7 @@ void main() {
       ProfileLoader profileLoader = _noProfile,
       CachedSnapshotProvider cachedSnapshot = emptyCachedSnapshot,
       RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
+      bool enableSubscriptionTimers = false,
     }) async {
       final serverT = _PairedTransport();
       final clientT = _PairedTransport();
@@ -158,12 +169,13 @@ void main() {
           ),
         ),
       );
-      registerQuotabotTools(
+      subscriptions = registerQuotabotTools(
         server,
         snapshot: snapshotProvider ?? () async => snapshot,
         burnByProvider: (providers, now) => const <String, BurnStat>{},
         cachedSnapshot: cachedSnapshot,
         leaseStore: leaseStore,
+        enableSubscriptionTimers: enableSubscriptionTimers,
         now: () => _now,
         profileLoader: profileLoader,
         catalog: const {
@@ -322,6 +334,52 @@ void main() {
       expect(
         (suggestion.structuredContent?['recommended'] as Map)['provider'],
         'ollama',
+      );
+    });
+
+    test('account arguments scope routing queries after profile filtering',
+        () async {
+      await connect([
+        _accountQ('claude', 'work@example.com', 20),
+        _accountQ('codex', 'home@example.com', 10),
+      ]);
+
+      final quotas = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {'account': 'work@example.com'},
+        ),
+      );
+      expect(quotas.structuredContent?['account_filter'], 'work@example.com');
+      final providers = quotas.structuredContent?['providers'] as List;
+      expect(providers, hasLength(1));
+      expect((providers.single as Map)['provider'], 'claude');
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'account': 'home@example.com'},
+        ),
+      );
+      expect(
+          suggestion.structuredContent?['account_filter'], 'home@example.com');
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+
+      final missingAccount = await client.callTool(
+        const CallToolRequest(
+          name: 'check_provider_availability',
+          arguments: {
+            'provider': 'claude',
+            'account': 'home@example.com',
+          },
+        ),
+      );
+      expect(
+        missingAccount.structuredContent?['error'],
+        'unknown provider/account',
       );
     });
 
@@ -511,6 +569,64 @@ void main() {
       expect(liveCalls, 0);
     });
 
+    test('resource subscriptions notify when a quota alert fires', () async {
+      var snapshotIndex = 0;
+      final snapshots = [
+        [
+          _accountQ('claude', 'work@example.com', 20),
+          _accountQ('codex', 'home@example.com', 30),
+        ],
+        [
+          _accountQ('claude', 'work@example.com', 95),
+          _accountQ('codex', 'home@example.com', 30),
+        ],
+      ];
+      await connect(
+        const [],
+        snapshotProvider: () async => snapshots[snapshotIndex],
+      );
+      final updated = <String>[];
+      client.setNotificationHandler<JsonRpcResourceUpdatedNotification>(
+        Method.notificationsResourcesUpdated,
+        (notification) async {
+          updated.add(notification.updatedParams.uri);
+        },
+        (params, meta) => JsonRpcResourceUpdatedNotification.fromJson({
+          'params': {
+            ...?params,
+            if (meta != null) '_meta': meta,
+          },
+        }),
+      );
+
+      await client.subscribeResource(
+        const SubscribeRequest(uri: 'quotas://alerts'),
+      );
+      await subscriptions.pollOnce();
+      expect(updated, isEmpty);
+
+      snapshotIndex = 1;
+      await subscriptions.pollOnce();
+      expect(updated, ['quotas://alerts']);
+
+      final alerts = await client.readResource(
+        const ReadResourceRequest(uri: 'quotas://alerts'),
+      );
+      final alertJson = jsonDecode(
+        (alerts.contents.first as TextResourceContents).text,
+      ) as Map<String, dynamic>;
+      final fired = alertJson['alerts'] as List;
+      expect(fired, hasLength(1));
+      expect((fired.single as Map)['provider'], 'claude');
+      expect((fired.single as Map)['severity'], 'red');
+
+      await client.unsubscribeResource(
+        const UnsubscribeRequest(uri: 'quotas://alerts'),
+      );
+      await subscriptions.pollOnce();
+      expect(updated, ['quotas://alerts']);
+    });
+
     test('missing profile returns a structured error', () async {
       await connect(_fixture());
 
@@ -550,6 +666,15 @@ void main() {
       final decoded = jsonDecode(text) as Map<String, dynamic>;
       expect(decoded['schema'], 'quotabot.v1');
       expect((decoded['providers'] as List), hasLength(3));
+
+      final alerts = await client.readResource(
+        const ReadResourceRequest(uri: 'quotas://alerts'),
+      );
+      final alertJson = jsonDecode(
+        (alerts.contents.first as TextResourceContents).text,
+      ) as Map<String, dynamic>;
+      expect(alertJson['schema'], 'quotabot.alerts.v1');
+      expect(alertJson['alerts'], isEmpty);
     });
   });
 }

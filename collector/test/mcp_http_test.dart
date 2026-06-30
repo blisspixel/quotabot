@@ -161,6 +161,14 @@ void main() {
       (resource.contents.single as TextResourceContents).text,
     ) as Map<String, dynamic>;
     expect(decoded['schema'], 'quotabot.v1');
+
+    final alerts = await client.readResource(
+      const ReadResourceRequest(uri: 'quotas://alerts'),
+    );
+    final alertJson = jsonDecode(
+      (alerts.contents.single as TextResourceContents).text,
+    ) as Map<String, dynamic>;
+    expect(alertJson['schema'], 'quotabot.alerts.v1');
   });
 
   test('optional bearer token protects Streamable HTTP sessions', () async {
