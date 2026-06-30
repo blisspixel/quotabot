@@ -19,8 +19,9 @@ Notable changes to quotabot. Newest first.
   Flutter desktop scaffold files and Linux tray indicator development package,
   so native CI package builds exercise the same release bundles users build.
 - The 1.0 roadmap final cut is now checked: every roadmap item is marked
-  complete, the Windows local gate is green, and CI is configured to verify the
-  full suite plus macOS/Linux desktop package builds on native runners.
+  complete, the Windows local gate is green, and GitHub Actions run 28426864041
+  passed the full suite plus macOS/Linux desktop package builds on native
+  runners.
 - CI now verifies macOS and Linux desktop release bundle packaging on native
   runners. `tools/package-macos.sh` and `tools/package-linux.sh` build and
   validate the platform bundles, with optional local archives for release work.

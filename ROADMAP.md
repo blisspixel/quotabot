@@ -295,9 +295,9 @@ here is the final one.
     Windows with collector format/analyze/tests/coverage, app
     format/analyze/tests/build, MCP client checks, LiteLLM direct plus real
     proxy tests, collector executable builds, generated README media validation,
-    shell script syntax checks through Git Bash, and hygiene scans. The CI
-    matrix is configured to run the same test suite on Linux, macOS, and
-    Windows, with native macOS/Linux desktop package-build verification.
+    shell script syntax checks through Git Bash, and hygiene scans. GitHub
+    Actions run 28426864041 passed the matrix on Linux, macOS, and Windows,
+    including native macOS/Linux desktop package-build verification.
 
 ### Continuous hardening (runs throughout, not a phase)
 
