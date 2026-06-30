@@ -96,10 +96,7 @@ Future<HttpServer> startLocalQuotabotServer({
               suggestRoute(
                 snap,
                 current,
-                burnStatsByProvider: recentBurnStatsByProvider(
-                  snap.map((q) => q.provider),
-                  current,
-                ),
+                burnStatsByProvider: recentBurnStatsByQuota(snap, current),
                 preferLocal:
                     queryFlag(request.uri, 'local_first', 'local-first'),
               ).toJson(),

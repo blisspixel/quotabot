@@ -137,6 +137,28 @@ void main() {
       expect(c.confidence, closeTo(12 / 16, 1e-9)); // fresh * 12/(12+4)
     });
 
+    test('account-scoped burn stats are preferred over provider fallback', () {
+      final s = suggestRoute(
+        [
+          ProviderQuota(
+            provider: 'claude',
+            displayName: 'Claude',
+            account: 'work',
+            asOf: _now,
+            windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+          ),
+        ],
+        _now,
+        burnStatsByProvider: {
+          'claude': const BurnStat(perHour: 20, samples: 4),
+          quotaIdentityKey('claude', 'work'):
+              const BurnStat(perHour: 2, samples: 4),
+        },
+      );
+
+      expect(s.ranked.single.burnPerHour, 2);
+    });
+
     test('a stale read is trusted less than a fresh one', () {
       final fresh = suggestRoute(
         [_q('a', 70)],

@@ -14,10 +14,18 @@ void main() {
     for (final name in [
       '$id.json',
       'history_$id.jsonl',
+      'history_${id}_acct.jsonl',
+      'history_${id}_home.jsonl',
+      'history_${id}_work.jsonl',
       'buckets_$id.json',
+      'buckets_${id}_acct.json',
+      'buckets_${id}_home.json',
+      'buckets_${id}_work.json',
       '.._escape.json',
       'history_.._escape.jsonl',
+      'history_.._escape_acct.jsonl',
       'buckets_.._escape.json',
+      'buckets_.._escape_acct.json',
       'antigravity_test-account.json',
       'grok_test-account.json',
       'rogue-cache-entry.json',
@@ -65,7 +73,7 @@ void main() {
     );
     saveSnapshot(q1);
     saveSnapshot(q2); // triggers history
-    final hist = loadHistory(id);
+    final hist = loadHistory(id, account: 'acct');
     expect(hist.length, greaterThanOrEqualTo(1));
   });
 
@@ -175,6 +183,34 @@ void main() {
     expect(recentBurnByProvider([id], now)[id], stats[id]!.perHour);
   });
 
+  test('recentBurnStatsByQuota keeps accounts separate', () {
+    final now = 1782000000;
+    recordHeadroomSample(id, 90, now - 3600, account: 'work');
+    recordHeadroomSample(id, 70, now, account: 'work');
+    recordHeadroomSample(id, 40, now - 3600, account: 'home');
+    recordHeadroomSample(id, 38, now, account: 'home');
+
+    final stats = recentBurnStatsByQuota([
+      ProviderQuota(
+        provider: id,
+        displayName: 'Test',
+        account: 'work',
+        asOf: now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 30)],
+      ),
+      ProviderQuota(
+        provider: id,
+        displayName: 'Test',
+        account: 'home',
+        asOf: now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 62)],
+      ),
+    ], now);
+
+    expect(stats[quotaIdentityKey(id, 'work')]?.perHour, closeTo(20, 0.001));
+    expect(stats[quotaIdentityKey(id, 'home')]?.perHour, closeTo(2, 0.001));
+  });
+
   test('provider cache filenames stay inside the cache directory', () {
     final q = ProviderQuota(
       provider: '../escape',
@@ -187,7 +223,7 @@ void main() {
     recordHeadroomSample('../escape', 80, 1782000000);
 
     expect(loadSnapshot('../escape'), isNotNull);
-    expect(loadHistory('../escape'), isNotEmpty);
+    expect(loadHistory('../escape', account: 'acct'), isNotEmpty);
     expect(loadBuckets('../escape'), isNotEmpty);
     expect(File('${cacheDir().path}/../escape.json').existsSync(), isFalse);
   });

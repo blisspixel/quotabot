@@ -200,6 +200,9 @@ once per crossing and re-arms only after the window recovers, so a steady spent
 window never spams. Alerts carry quota metadata only, never prompts or content.
 Add `--waste-threshold=N` to also alert when the recent burn pace projects that
 at least N percent of a paid window will expire unused at reset.
+When a provider exposes account identity, both low-quota and projected-waste
+alerts are keyed and serialized by that provider/account pair, including
+same-provider sibling routes.
 
 ```bash
 quotabot watch                                   # print alerts, adaptive cadence
@@ -257,10 +260,10 @@ For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only
 when at least 35 percent of included quota is projected to expire unused within
-24 hours. Providers with multiple measured accounts are skipped until burn
-history is account-scoped, so one account's reset is not inferred from another
-account's usage. MCP `suggest_model` exposes the same policy as
-`use_expiring_quota: true`.
+24 hours. When a provider exposes account identity, burn history is scoped to
+that provider/account pair; legacy provider-only history is used only for an
+unambiguous single-account snapshot. MCP `suggest_model` exposes the same policy
+as `use_expiring_quota: true`.
 
 For a one-off routing decision, add `--exclude=codex,grok` to `models` or
 `suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and

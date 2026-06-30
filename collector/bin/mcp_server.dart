@@ -81,7 +81,7 @@ Future<void> main(List<String> args) async {
           bearerToken: token,
         ),
         snapshot: snapshot,
-        burnByProvider: recentBurnStatsByProvider,
+        burnByProvider: recentBurnStatsByQuota,
         cachedSnapshot: cachedDecisionSnapshot,
         leaseStore: leaseStore,
       );
@@ -113,7 +113,7 @@ Future<void> main(List<String> args) async {
 
   final server = buildQuotabotMcpServer(
     snapshot: snapshot,
-    burnByProvider: recentBurnStatsByProvider,
+    burnByProvider: recentBurnStatsByQuota,
     cachedSnapshot: cachedDecisionSnapshot,
     leaseStore: leaseStore,
   );

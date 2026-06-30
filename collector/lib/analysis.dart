@@ -475,11 +475,12 @@ double _erf(double x) {
 ///
 /// Ranking and the comfort gate use *effective* headroom: present headroom
 /// discounted by each provider's recent burn over the [leadHours] planning
-/// horizon ([burnByProvider], percent of quota per hour). A provider being drawn
-/// down fast is therefore a less safe pick than its instantaneous headroom
-/// suggests. Availability still reflects present headroom (a provider with quota
-/// now is usable now, just ranked lower). With no burn data the behavior is
-/// identical to ranking on raw headroom.
+/// horizon ([burnByProvider], percent of quota per hour). Account-scoped
+/// [burnStatsByProvider] entries are preferred when present. A provider being
+/// drawn down fast is therefore a less safe pick than its instantaneous
+/// headroom suggests. Availability still reflects present headroom (a provider
+/// with quota now is usable now, just ranked lower). With no burn data the
+/// behavior is identical to ranking on raw headroom.
 ///
 /// Local runtimes never "win" on headroom (they would always read 100%); they
 /// are only chosen when the paid budget is too tight to be comfortable.
@@ -497,7 +498,7 @@ RouteSuggestion suggestRoute(
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
-    final stat = q.isLocal ? null : burnStatsByProvider[q.provider];
+    final stat = q.isLocal ? null : burnStatForQuota(burnStatsByProvider, q);
     final burn =
         q.isLocal ? null : (stat?.perHour ?? burnByProvider[q.provider]);
     final burnSe = stat?.sePerHour;

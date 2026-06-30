@@ -66,9 +66,11 @@ For one provider `i` and one rolling window `w` (e.g. 5h, weekly):
 - Capacity is normalized to 1. Let `u_i(t) in [0,1]` be the fraction used and
   `h_i(t) = 1 - u_i(t)` the remaining headroom (we store percent; here a fraction).
 - The window resets at epoch `r_i`. Time-to-reset `T_i = r_i - t >= 0`.
-- History is compact hourly buckets `{(t_b, h_b)}` retained 90 days. From these
-  `insights.dart` derives mean, p10/p50/p90, reliability, least-squares trend, and
-  the weekday-by-hour profile. We treat the bucket series as samples of a
+- History is compact hourly buckets `{(t_b, h_b)}` retained 90 days. Buckets are
+  keyed by provider/account when account identity is available, with legacy
+  provider-only buckets used only for unambiguous snapshots. From these
+  `insights.dart` derives mean, p10/p50/p90, reliability, least-squares trend,
+  and the weekday-by-hour profile. We treat the bucket series as samples of a
   piecewise-smooth depletion process reset to ~1 at each `r_i`.
 - Usage arrives as a marked point process: requests at times `{tau_k}` each
   consuming `c_k` of capacity. Aggregated, the **burn rate** is the intensity

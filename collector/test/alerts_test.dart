@@ -12,11 +12,12 @@ ProviderQuota _q(
   bool stale = false,
   String kind = 'subscription',
   int? resetsAt,
+  String account = 'default',
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id[0].toUpperCase() + id.substring(1),
-      account: 'default',
+      account: account,
       asOf: _now,
       stale: stale,
       kind: kind,
@@ -53,11 +54,34 @@ void main() {
       expect(r.fired, hasLength(1));
       final a = r.fired.single;
       expect(a.provider, 'codex');
+      expect(a.account, 'default');
       expect(a.severity, AlertSeverity.red);
       expect(a.window, '5h');
       expect(a.routeTo, 'claude');
       expect(a.message, contains('route next to Claude'));
       expect(r.armed, {'codex'});
+    });
+
+    test('keys low-quota crossings by account and can route to a sibling', () {
+      final snap = [
+        _q('claude', 98, account: 'work@example.com'),
+        _q('claude', 60, account: 'home@example.com'),
+      ];
+      final r = computeAlerts(
+        snapshot: snap,
+        suggestion: _suggestion(snap),
+        now: _now,
+      );
+
+      expect(r.fired, hasLength(1));
+      final a = r.fired.single;
+      expect(a.provider, 'claude');
+      expect(a.account, 'work@example.com');
+      expect(a.routeTo, 'claude');
+      expect(a.routeAccount, 'home@example.com');
+      expect(a.message, contains('work@example.com'));
+      expect(a.message, contains('home@example.com'));
+      expect(r.armed, {quotaIdentityKey('claude', 'work@example.com')});
     });
 
     test('does not re-fire while it stays red', () {
@@ -141,8 +165,10 @@ void main() {
       expect(json['schema'], 'quotabot.alert.v1');
       expect(json['kind'], 'low_quota');
       expect(json['provider'], 'codex');
+      expect(json['account'], 'default');
       expect(json['severity'], 'red');
       expect(json['route_to'], 'claude');
+      expect(json['route_account'], 'default');
       expect(json['as_of'], _now);
     });
   });
@@ -167,6 +193,7 @@ void main() {
       final a = r.fired.single;
       expect(a.kind, QuotaAlertKind.projectedWaste);
       expect(a.provider, 'claude');
+      expect(a.account, 'default');
       expect(a.severity, AlertSeverity.amber);
       expect(a.projectedWastePercent, closeTo(70, 0.001));
       expect(a.burnPercentPerHour, closeTo(2, 0.001));
@@ -192,6 +219,41 @@ void main() {
       );
       expect(r.fired, isEmpty);
       expect(r.armed, {'claude'});
+    });
+
+    test('arms projected waste per account when account evidence exists', () {
+      final reset = _now + 10 * 3600;
+      final snap = [
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'work',
+          asOf: _now,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: 10,
+              resetsAt: reset,
+            ),
+          ],
+        ),
+      ];
+      final pace = computePace(
+        headroom: 90,
+        resetsAt: reset,
+        burnPerHour: 2,
+        now: _now,
+      )!;
+      final r = computeProjectedWasteAlerts(
+        snapshot: snap,
+        paceByProvider: {quotaIdentityKey('claude', 'work'): pace},
+        now: _now,
+        thresholdPercent: 50,
+      );
+
+      expect(r.fired, hasLength(1));
+      expect(r.fired.single.account, 'work');
+      expect(r.armed, {quotaIdentityKey('claude', 'work')});
     });
 
     test('re-arms after projected waste falls below threshold', () {
@@ -232,6 +294,7 @@ void main() {
       final json = a.toJson();
       expect(json['schema'], 'quotabot.alert.v1');
       expect(json['kind'], 'projected_waste');
+      expect(json['account'], 'default');
       expect(json['projected_waste_percent'], 70.0);
       expect(json['burn_percent_per_hour'], 2.0);
       expect(json['route_to'], isNull);

@@ -693,7 +693,7 @@ typedef ProfileLoader = QuotaProfile? Function(String name);
 /// Returns recent burn and its uncertainty per provider id. Kept out of the pure
 /// layer because the real implementation reads history from disk.
 typedef BurnProvider = Map<String, BurnStat> Function(
-  Iterable<String> providers,
+  Iterable<ProviderQuota> providers,
   int now,
 );
 
@@ -931,7 +931,7 @@ class QuotaResourceSubscriptionHub {
       if (_subscribed.contains(quotasCurrentResourceUri)) {
         await notifyUpdated(quotasCurrentResourceUri);
       }
-      final burnStats = burnByProvider(data.map((q) => q.provider), n);
+      final burnStats = burnByProvider(data, n);
       final suggestion = suggestRoute(data, n, burnStatsByProvider: burnStats);
       final alerts = computeAlerts(
         snapshot: data,
@@ -1199,8 +1199,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           suggestResponse(
             results,
             n,
-            burnStatsByProvider:
-                burnByProvider(results.map((q) => q.provider), n),
+            burnStatsByProvider: burnByProvider(results, n),
             activeLeases: activeLeases,
             preferLocal: args['local_first'] == true,
           ),
@@ -1268,8 +1267,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             ),
             n,
             maxAgeSeconds: boundedMaxAge,
-            burnStatsByProvider:
-                burnByProvider(profiled.providers.map((q) => q.provider), n),
+            burnStatsByProvider: burnByProvider(profiled.providers, n),
             activeLeases: activeLeases,
             preferLocal: args['local_first'] == true,
           ),
@@ -1337,7 +1335,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       }
 
       final results = profiled.providers;
-      final burnStats = burnByProvider(results.map((q) => q.provider), n);
+      final burnStats = burnByProvider(results, n);
       final explicit = normalizeLeaseText(args['provider']) != null;
       final target = _explicitReserveTarget(
             results,
@@ -1517,10 +1515,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           ),
         );
       }
-      final burnStats = burnByProvider(
-        profiled.providers.map((q) => q.provider),
-        n,
-      );
+      final burnStats = burnByProvider(profiled.providers, n);
       final useExpiringQuota = args['use_expiring_quota'] == true;
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(

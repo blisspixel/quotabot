@@ -242,11 +242,12 @@ Concrete-model suggestions can opt into `use_expiring_quota`, which computes a
 pure `ExpiringQuotaSignal` from existing headroom, reset, and local burn
 statistics. The signal is intentionally narrow: measured quota-backed providers
 only, no manual entries, no local runtimes, no paid API routes, reset within the
-bounded horizon, projected unused quota above the threshold, and exactly one
-measured account for that provider in the current snapshot. That last guard
-keeps provider-scoped burn history from being misread as account-scoped usage.
-When present it lets included quota that would otherwise expire unused outrank
-local capacity, but the hard `budget=local` filter still wins.
+bounded horizon, and projected unused quota above the threshold. Burn history is
+keyed by provider/account when the provider exposes a specific account, so
+multi-account providers can use the signal only from matching account history.
+Legacy provider-only buckets are still a fallback for unambiguous single-account
+snapshots. When present it lets included quota that would otherwise expire
+unused outrank local capacity, but the hard `budget=local` filter still wins.
 `catalog_audit.dart` keeps the
 committed cloud catalog honest without adding runtime network calls: the standalone
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
@@ -298,15 +299,16 @@ data path.
 ## Alerts and `quotabot watch`
 
 `alerts.dart` is a pure, edge-triggered alert pass: `computeAlerts` takes the
-current snapshot, the routing suggestion, and the set of providers already
-alerting, and returns the alerts that newly crossed into a triggering severity
-(red by default for CLI/app, amber or red for MCP subscriptions) plus the updated
-armed set, so a provider fires once on the crossing and re-arms only after it
-recovers. `computeProjectedWasteAlerts` applies the same edge-trigger model to
-pace analytics: when `quotabot watch --waste-threshold=N` is set, the CLI raises
-a `projected_waste` alert if the current burn pace says at least N percent of a
-paid renewing window would expire unused at reset. Each `QuotaAlert` serializes
-as `quotabot.alert.v1` (metadata only, never content). Three thin shells consume
+current snapshot, the routing suggestion, and the set of provider/account
+identities already alerting, and returns the alerts that newly crossed into a
+triggering severity (red by default for CLI/app, amber or red for MCP
+subscriptions) plus the updated armed set, so a quota identity fires once on the
+crossing and re-arms only after it recovers. `computeProjectedWasteAlerts`
+applies the same edge-trigger model to pace analytics: when
+`quotabot watch --waste-threshold=N` is set, the CLI raises a `projected_waste`
+alert if the current burn pace says at least N percent of a paid renewing window
+would expire unused at reset. Each `QuotaAlert` serializes as `quotabot.alert.v1`
+with provider/account metadata only, never content. Three thin shells consume
 low-quota alerts: the `quotabot watch` command in `bin/collect.dart` (poll,
 print, optionally POST), the desktop app's notifier, and the MCP
 `quotas://alerts` subscription loop. `webhook.dart` delivers an alert with

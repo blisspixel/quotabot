@@ -441,6 +441,26 @@ void main() {
 
       expect(signals, isEmpty);
     });
+
+    test('uses account-scoped burn for multi-account providers', () {
+      final reset = _now + 10 * 3600;
+      final signals = expiringQuotaSignals(
+        [
+          _cloud('claude', 10, resetsAt: reset, account: 'a'),
+          _cloud('claude', 40, resetsAt: reset, account: 'b'),
+        ],
+        _now,
+        burnStatsByProvider: {
+          quotaIdentityKey('claude', 'a'):
+              const BurnStat(perHour: 2, samples: 6),
+          quotaIdentityKey('claude', 'b'):
+              const BurnStat(perHour: 10, samples: 6),
+        },
+      );
+
+      expect(signals.values.map((signal) => signal.account).toList(), ['a']);
+      expect(signals.values.single.wastedAtReset, closeTo(70, 0.001));
+    });
   });
 
   test('entry JSON merges the model with its budget', () {

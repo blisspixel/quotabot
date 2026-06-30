@@ -136,9 +136,10 @@ class ExpiringQuotaSignal {
 /// Computes opt-in expiring-quota signals from the live snapshot and already
 /// local burn statistics. A signal means the provider is measured, quota-backed,
 /// available now, close to reset, and on pace to leave at least [thresholdPercent]
-/// of included quota unused. Because burn history is provider-scoped today, a
-/// provider with multiple measured accounts is skipped until account-scoped burn
-/// data exists. Pure, so CLI/MCP callers share the same boundary.
+/// of included quota unused. Multi-account providers require account-scoped burn
+/// evidence; a provider-level burn estimate is allowed only when the current
+/// snapshot has a single measured account for that provider. Pure, so CLI/MCP
+/// callers share the same boundary.
 Map<String, ExpiringQuotaSignal> expiringQuotaSignals(
   List<ProviderQuota> providers,
   int now, {
@@ -159,14 +160,17 @@ Map<String, ExpiringQuotaSignal> expiringQuotaSignals(
     if (q.isLocal || q.source == 'manual' || q.stale || q.windows.isEmpty) {
       continue;
     }
-    if ((measuredProviderCounts[q.provider] ?? 0) != 1) continue;
     final availability = providerAvailability(q, now);
     final headroom = availability.headroom;
     final reset = availability.resetsAt;
     if (!availability.available || headroom == null || reset == null) continue;
     final secondsToReset = reset - now;
     if (secondsToReset <= 0 || secondsToReset > maxSeconds) continue;
-    final burn = burnStatsByProvider[q.provider]?.perHour;
+    final accountBurn = burnStatsByProvider[quotaIdentityKeyFor(q)];
+    final providerBurn = (measuredProviderCounts[q.provider] ?? 0) == 1
+        ? burnStatsByProvider[q.provider]
+        : null;
+    final burn = (accountBurn ?? providerBurn)?.perHour;
     final pace = computePace(
       headroom: headroom,
       resetsAt: reset,

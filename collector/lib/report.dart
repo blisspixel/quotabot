@@ -139,7 +139,8 @@ QuotaHealthReport buildQuotaHealthReport(
         _providerLine(
           provider,
           now,
-          insightsByProvider[provider.provider],
+          insightsByProvider[quotaIdentityKeyFor(provider)] ??
+              insightsByProvider[provider.provider],
         ),
     ],
   );

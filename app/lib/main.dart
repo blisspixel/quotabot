@@ -665,16 +665,13 @@ class _DashboardState extends State<Dashboard>
         final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
         final tz = DateTime.now().timeZoneOffset;
         for (final q in active) {
-          _history[q.provider] = loadHistory(q.provider);
+          final key = quotaDisplayKey(q);
+          _history[key] = loadHistory(q.provider, account: q.account);
           if (!q.isLocal) {
-            final buckets = loadBuckets(q.provider);
-            _buckets[q.provider] = buckets;
-            _insights[q.provider] = Insights.from(
-              buckets,
-              nowSec,
-              tzOffset: tz,
-            );
-            _heatmaps[q.provider] = weekHourHeatmap(buckets, tzOffset: tz);
+            final buckets = loadBuckets(q.provider, account: q.account);
+            _buckets[key] = buckets;
+            _insights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
+            _heatmaps[key] = weekHourHeatmap(buckets, tzOffset: tz);
           }
         }
       });
@@ -692,6 +689,7 @@ class _DashboardState extends State<Dashboard>
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final tz = DateTime.now().timeZoneOffset;
     final buckets = demoBuckets();
+    final demo = demoData();
     setState(() {
       if (_shotsMode) {
         _compact = false;
@@ -699,18 +697,22 @@ class _DashboardState extends State<Dashboard>
         _sort = ProviderSort.defaultOrder;
       }
       _showAccounts = true; // show the (fake) account names in the demo
-      _data = demoData();
+      _data = demo;
       _loading = false;
       _updated = DateTime.now();
       _history = {};
       _insights = {};
       _heatmaps = {};
-      _buckets = buckets;
+      _buckets = {};
       _routeSummary = demoRoutedRequestSummary();
-      buckets.forEach((id, b) {
-        _insights[id] = Insights.from(b, nowSec, tzOffset: tz);
-        _heatmaps[id] = weekHourHeatmap(b, tzOffset: tz);
-      });
+      for (final q in demo) {
+        final b = buckets[q.provider];
+        if (b == null) continue;
+        final key = quotaDisplayKey(q);
+        _buckets[key] = b;
+        _insights[key] = Insights.from(b, nowSec, tzOffset: tz);
+        _heatmaps[key] = weekHourHeatmap(b, tzOffset: tz);
+      }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     _scheduleNext(); // keep the "as of" label current even in demo mode
@@ -765,17 +767,17 @@ class _DashboardState extends State<Dashboard>
         // scrolls, so a small undershoot is caught rather than clipped.
         h = 62; // header row + outer paddings
         for (final q in _displayed) {
+          final key = quotaDisplayKey(q);
           final blocked = providerStatus(q, now).blocked;
           final rows = (q.windows.isEmpty || blocked) ? 1 : q.windows.length;
           var card = 50.0 + rows * 14.0; // card chrome + each window/status row
           if (q.isLocal) card += q.details.length * 14; // detail lines
-          if ((_history[q.provider] ?? const []).isNotEmpty) {
+          if ((_history[key] ?? const []).isNotEmpty) {
             card += 20; // "usually ~X% free" line
           }
           // An expanded insights panel adds a sparkline, a couple of lines, and
           // (when there is enough data) a heatmap grid.
-          if (_expanded.contains(q.provider) &&
-              (_insights[q.provider]?.samples ?? 0) > 0) {
+          if (_expanded.contains(key) && (_insights[key]?.samples ?? 0) > 0) {
             card += 96;
           }
           h += card;
@@ -1066,9 +1068,9 @@ class _DashboardState extends State<Dashboard>
       key: ValueKey(key),
       quota: q,
       cardColor: card,
-      history: _history[q.provider] ?? const [],
-      insights: _insights[q.provider],
-      heatmap: _heatmaps[q.provider],
+      history: _history[key] ?? const [],
+      insights: _insights[key],
+      heatmap: _heatmaps[key],
       expanded: _expanded.contains(key),
       onToggle: () => setState(() {
         if (!_expanded.remove(key)) _expanded.add(key);

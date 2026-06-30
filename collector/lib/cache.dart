@@ -75,8 +75,7 @@ const _historyCap = 200;
 
 void saveHistory(ProviderQuota q) {
   try {
-    final f = File(
-        '${cacheDir().path}/history_${_safeProviderStem(q.provider)}.jsonl');
+    final f = _historyFile(q.provider, account: q.account);
     final line = jsonEncode(q.toJson());
     if (!f.existsSync() || f.lengthSync() > _maxHistoryBytes) {
       _atomicWrite(f, '$line\n');
@@ -93,8 +92,7 @@ void saveHistory(ProviderQuota q) {
 
 /// True when an account string names a specific account worth keying a per-
 /// account cache file by, rather than a placeholder.
-bool _hasAccount(String account) =>
-    account.isNotEmpty && account != 'unknown' && account != 'default';
+bool _hasAccount(String account) => hasSpecificQuotaAccount(account);
 
 const _accountScopedProviders = {'antigravity', 'grok'};
 
@@ -259,14 +257,38 @@ List<ProviderQuota> currentAccountFallbacks({
 // gives the recent fine-grained shape; the buckets give cheap long-range
 // analytics (see insights.dart). Both are fed from one ingestion point.
 
-File _bucketsFile(String provider) =>
-    File('${cacheDir().path}/buckets_${_safeProviderStem(provider)}.json');
+File _historyFile(String provider, {String? account}) {
+  final suffix = account != null && _hasAccount(account)
+      ? '_${_safeProviderStem(account)}'
+      : '';
+  return File(
+    '${cacheDir().path}/history_${_safeProviderStem(provider)}$suffix.jsonl',
+  );
+}
 
-/// Folds one headroom reading into the provider's current hour bucket, pruning
-/// anything older than the retention window. Best-effort and bounded.
-void recordHeadroomSample(String provider, double headroom, int now) {
+File _bucketsFile(String provider, {String? account}) {
+  final suffix = account != null && _hasAccount(account)
+      ? '_${_safeProviderStem(account)}'
+      : '';
+  return File(
+    '${cacheDir().path}/buckets_${_safeProviderStem(provider)}$suffix.json',
+  );
+}
+
+/// Folds one headroom reading into the provider/account current hour bucket,
+/// pruning anything older than the retention window. Best-effort and bounded.
+void recordHeadroomSample(
+  String provider,
+  double headroom,
+  int now, {
+  String? account,
+}) {
   try {
-    final buckets = loadBuckets(provider);
+    final buckets = loadBuckets(
+      provider,
+      account: account,
+      fallbackToProvider: false,
+    );
     final start = bucketStart(now);
     final cutoff = now - kRetentionDays * 86400;
     buckets.removeWhere((b) => b.start < cutoff);
@@ -278,7 +300,7 @@ void recordHeadroomSample(String provider, double headroom, int now) {
     }
     current.add(headroom);
     _atomicWrite(
-      _bucketsFile(provider),
+      _bucketsFile(provider, account: account),
       jsonEncode(buckets.map((b) => b.toJson()).toList()),
     );
   } catch (_) {
@@ -309,10 +331,48 @@ Map<String, BurnStat> recentBurnStatsByProvider(
   return out;
 }
 
-/// Loads a provider's hourly bucket series, oldest first. Empty when absent.
-List<HeadroomBucket> loadBuckets(String provider) {
+/// Recent burn with account precision when the snapshot identifies an account.
+/// Account-specific history is preferred. A provider-level fallback is used only
+/// when this provider has a single account in the current snapshot, preserving
+/// old history without applying one account's burn to another.
+Map<String, BurnStat> recentBurnStatsByQuota(
+  Iterable<ProviderQuota> providers,
+  int now,
+) {
+  final list = providers.where((q) => !q.isLocal).toList();
+  final measuredCounts = <String, int>{};
+  for (final q in list) {
+    if (q.source == 'manual' || !q.hasWindows) continue;
+    measuredCounts[q.provider] = (measuredCounts[q.provider] ?? 0) + 1;
+  }
+  final out = <String, BurnStat>{};
+  for (final q in list) {
+    if (q.source == 'manual' || !q.hasWindows) continue;
+    final key = quotaIdentityKeyFor(q);
+    var buckets = hasSpecificQuotaAccount(q.account)
+        ? loadBuckets(q.provider, account: q.account, fallbackToProvider: false)
+        : loadBuckets(q.provider);
+    if (buckets.isEmpty && (measuredCounts[q.provider] ?? 0) == 1) {
+      buckets = loadBuckets(q.provider);
+    }
+    out[key] = burnRateWithError(buckets, now);
+  }
+  return out;
+}
+
+/// Loads a provider/account hourly bucket series, oldest first. Empty when
+/// absent. When [fallbackToProvider] is true, account reads can fall back to the
+/// legacy provider-only bucket file.
+List<HeadroomBucket> loadBuckets(
+  String provider, {
+  String? account,
+  bool fallbackToProvider = true,
+}) {
   try {
-    final f = _bucketsFile(provider);
+    var f = _bucketsFile(provider, account: account);
+    if (!f.existsSync() && account != null && fallbackToProvider) {
+      f = _bucketsFile(provider);
+    }
     if (!f.existsSync()) return [];
     if (f.lengthSync() > _maxJsonBytes) return [];
     final list = jsonDecode(f.readAsStringSync()) as List;
@@ -326,10 +386,12 @@ List<HeadroomBucket> loadBuckets(String provider) {
   }
 }
 
-List<ProviderQuota> loadHistory(String provider) {
+List<ProviderQuota> loadHistory(String provider, {String? account}) {
   final results = <ProviderQuota>[];
-  final f =
-      File('${cacheDir().path}/history_${_safeProviderStem(provider)}.jsonl');
+  var f = _historyFile(provider, account: account);
+  if (!f.existsSync() && account != null) {
+    f = _historyFile(provider);
+  }
   if (!f.existsSync()) return results;
   if (f.lengthSync() > _maxHistoryBytes) return results;
   try {

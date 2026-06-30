@@ -74,8 +74,8 @@ optional `recommended`, `reason`, and ranked model candidates. When the caller
 opts into expiring-quota routing, the response adds `use_expiring_quota`,
 `expiring_quota_threshold_percent`, `expiring_quota_max_hours`, and, when the
 pick used that signal, `expiring_quota` with provider, account, projected waste
-percent, reset epoch, and burn percent per hour. The signal is omitted for
-multi-account providers while burn history is provider-scoped.
+percent, reset epoch, and burn percent per hour. For providers with specific
+account identity, the burn evidence behind the signal is account-scoped.
 
 `quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
 `recommended_provider`, `recommendation_reason`, `fallback_kind`, and
@@ -90,11 +90,15 @@ with:
 
 - `schema`: always `quotabot.alert.v1`.
 - `kind`: `low_quota` or `projected_waste`.
-- `provider`, `window`, `severity`, `free_percent`, and `as_of`.
+- `provider`, `account`, `window`, `severity`, `free_percent`, and `as_of`.
 - For `low_quota`, optional `route_to`, `route_display_name`,
-  `route_free_percent`, and `route_is_local`.
+  `route_account`, `route_free_percent`, and `route_is_local`.
 - For `projected_waste`, optional `projected_waste_percent` and
   `burn_percent_per_hour`.
+
+Alerts are edge-triggered by provider/account identity when a provider exposes a
+specific account label, so two accounts on the same provider can warn and
+recover independently.
 
 Alert payloads are metadata only. They never contain prompts, generated text, or
 source code. The contract is additive; consumers should ignore unknown fields.

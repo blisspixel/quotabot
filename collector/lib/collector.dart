@@ -41,7 +41,8 @@ export 'cache.dart'
         loadCachedSnapshots,
         loadBuckets,
         recentBurnByProvider,
-        recentBurnStatsByProvider;
+        recentBurnStatsByProvider,
+        recentBurnStatsByQuota;
 
 /// Whether the one-time temp-file sweep has run this process.
 bool _sweptTemp = false;
@@ -97,9 +98,11 @@ void _recordAnalytics(List<ProviderQuota> results) {
   for (final q in results) {
     if (q.isLocal || !q.hasWindows) continue;
     if (q.source == manualQuotaSource) continue;
-    if (!seen.add(q.provider)) continue; // one sample per provider per collect
+    if (!seen.add(quotaIdentityKeyFor(q))) continue;
     final h = providerHeadroom(q, now);
-    if (h != null) recordHeadroomSample(q.provider, h, now);
+    if (h != null) {
+      recordHeadroomSample(q.provider, h, now, account: q.account);
+    }
   }
 }
 

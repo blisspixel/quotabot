@@ -366,7 +366,9 @@ Breadth and depth, once the core is trusted:
   quotas. Profiled `suggest --use-expiring-quota` and MCP `suggest_model` with
   `use_expiring_quota: true` now cover the use-it-or-lose-it branch: a measured
   quota-backed model can outrank local only when local burn analytics project at
-  least 35 percent of included quota would expire unused within 24 hours.
+  least 35 percent of included quota would expire unused within 24 hours. Burn
+  history is account-scoped when account identity is available, so multi-account
+  routing uses the matching account's pace instead of a provider-wide estimate.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation
@@ -385,7 +387,10 @@ Breadth and depth, once the core is trusted:
   streaks and summary stats, plan-tier modeling, and provider status polling.
   Foundation shipped: analytics now compute current sampled-day usable/spent
   streaks from the same compact hourly history buckets and surface them in
-  `quotabot stats`, `quotabot report`, and `quotabot.report.v1`.
+  `quotabot stats`, `quotabot report`, and `quotabot.report.v1`. Provider/account
+  bucket files now preserve per-account burn history for routing, reports, alerts,
+  and the desktop widget, while provider-only files remain a legacy fallback for
+  unambiguous snapshots.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

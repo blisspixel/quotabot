@@ -249,16 +249,22 @@ RouteSuggestion _suggestFor(
 Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
   if (Platform.environment['QUOTABOT_DEMO'] == '1') return demo.demoBurnStats();
   if (_usingSimulation) return const <String, BurnStat>{};
-  return recentBurnStatsByProvider(results.map((q) => q.provider), now);
+  return recentBurnStatsByQuota(results, now);
 }
 
-List<HeadroomBucket> _historyBuckets(String provider) =>
-    _usingSimulation ? const <HeadroomBucket>[] : loadBuckets(provider);
+List<HeadroomBucket> _historyBuckets(String provider, {String? account}) =>
+    _usingSimulation
+        ? const <HeadroomBucket>[]
+        : loadBuckets(provider, account: account);
 
-List<HeadroomBucket> _weeklyHistoryBuckets(String provider, int now) {
+List<HeadroomBucket> _weeklyHistoryBuckets(
+  String provider,
+  int now, {
+  String? account,
+}) {
   final cutoff = now - 7 * 86400;
   return [
-    for (final bucket in _historyBuckets(provider))
+    for (final bucket in _historyBuckets(provider, account: account))
       if (bucket.start >= cutoff) bucket,
   ];
 }
@@ -1055,10 +1061,13 @@ Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
       final paceByProvider = <String, Pace>{};
       final tz = DateTime.now().timeZoneOffset;
       for (final q in data.where((provider) => !provider.isLocal)) {
-        final ins =
-            Insights.from(_historyBuckets(q.provider), now, tzOffset: tz);
+        final ins = Insights.from(
+          _historyBuckets(q.provider, account: q.account),
+          now,
+          tzOffset: tz,
+        );
         final pace = _paceFor(q, ins, now);
-        if (pace != null) paceByProvider[q.provider] = pace;
+        if (pace != null) paceByProvider[quotaIdentityKeyFor(q)] = pace;
       }
       final waste = computeProjectedWasteAlerts(
         snapshot: data,
@@ -1165,8 +1174,12 @@ Future<void> _runReport(
   final tz = DateTime.now().timeZoneOffset;
   final insights = <String, Insights>{};
   for (final provider in results.where((provider) => !provider.isLocal)) {
-    insights[provider.provider] = Insights.from(
-      _weeklyHistoryBuckets(provider.provider, now),
+    insights[quotaIdentityKeyFor(provider)] = Insights.from(
+      _weeklyHistoryBuckets(
+        provider.provider,
+        now,
+        account: provider.account,
+      ),
       now,
       tzOffset: tz,
     );

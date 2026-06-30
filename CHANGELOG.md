@@ -23,6 +23,13 @@ Notable changes to quotabot. Newest first.
   `suggest_model` with `use_expiring_quota: true` can now let a qualifying
   measured quota-backed model outrank local capacity when local analytics project
   at least 35 percent of included quota would expire unused within 24 hours.
+- Burn history is now account-scoped when a provider exposes a specific account.
+  Routing, reports, projected-waste alerts, MCP decisions, loopback HTTP
+  suggestions, and the desktop widget use the matching account's local history;
+  legacy provider-only history is used only when the current snapshot is not
+  ambiguous. Low-quota and projected-waste alert payloads now also include the
+  account and can route from one spent account to a healthier sibling account on
+  the same provider.
 - Model registry entries now expose local runtime readiness as `local_readiness`
   (`loaded` or `cold`), and concrete model suggestions prefer loaded local
   models over installed-but-cold local models when both meet the requested

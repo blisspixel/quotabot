@@ -46,6 +46,7 @@ class QuotaAlert {
   final QuotaAlertKind kind;
   final String provider;
   final String displayName;
+  final String account;
 
   /// Label of the binding window that crossed (for example `5h` or `weekly`).
   final String window;
@@ -57,6 +58,7 @@ class QuotaAlert {
   /// The provider to route to next, when a better one exists; null otherwise.
   final String? routeTo;
   final String? routeDisplayName;
+  final String? routeAccount;
   final double? routeFreePercent;
   final bool routeIsLocal;
   final double? projectedWastePercent;
@@ -67,12 +69,14 @@ class QuotaAlert {
     this.kind = QuotaAlertKind.lowQuota,
     required this.provider,
     required this.displayName,
+    this.account = 'default',
     required this.window,
     required this.severity,
     required this.freePercent,
     required this.asOf,
     this.routeTo,
     this.routeDisplayName,
+    this.routeAccount,
     this.routeFreePercent,
     this.routeIsLocal = false,
     this.projectedWastePercent,
@@ -82,7 +86,8 @@ class QuotaAlert {
   /// A one-line human message, e.g.
   /// "Claude 5h at 8% free - route next to Grok (74% free)".
   String get message {
-    final head = '$displayName $window at ${freePercent.round()}% free';
+    final head =
+        '${_displayLabel(displayName, account)} $window at ${freePercent.round()}% free';
     if (kind == QuotaAlertKind.projectedWaste) {
       final waste = projectedWastePercent == null
           ? 'quota'
@@ -93,7 +98,7 @@ class QuotaAlert {
       return '$head - projected $waste would expire unused$burn; use it before reset';
     }
     if (routeTo == null) return head;
-    final name = routeDisplayName ?? routeTo!;
+    final name = _displayLabel(routeDisplayName ?? routeTo!, routeAccount);
     final detail = routeIsLocal
         ? ' (local)'
         : routeFreePercent != null
@@ -106,11 +111,13 @@ class QuotaAlert {
         'schema': 'quotabot.alert.v1',
         'kind': kind.wireName,
         'provider': provider,
+        'account': account,
         'window': window,
         'severity': severity.label,
         'free_percent': double.parse(freePercent.toStringAsFixed(1)),
         if (routeTo != null) 'route_to': routeTo,
         if (routeDisplayName != null) 'route_display_name': routeDisplayName,
+        if (routeAccount != null) 'route_account': routeAccount,
         if (routeFreePercent != null)
           'route_free_percent':
               double.parse(routeFreePercent!.toStringAsFixed(1)),
@@ -126,13 +133,13 @@ class QuotaAlert {
 }
 
 /// A pure, edge-triggered alert pass. Given the current [snapshot], the routing
-/// [suggestion] for where to send work next, and the set of provider ids already
-/// alerting ([armed]), it returns the alerts that newly crossed into a
-/// triggering severity this cycle and the updated armed set. A provider fires
-/// once on the crossing and re-arms only after it recovers, so a steady spent
-/// window never re-fires. A stale provider holds its prior armed state without
-/// firing (a cached red is not a fresh crossing). Local runtimes are never
-/// alerted on; they have no quota to spend.
+/// [suggestion] for where to send work next, and the set of provider/account
+/// identities already alerting ([armed]), it returns the alerts that newly
+/// crossed into a triggering severity this cycle and the updated armed set. An
+/// identity fires once on the crossing and re-arms only after it recovers, so a
+/// steady spent window never re-fires. A stale identity holds its prior armed
+/// state without firing (a cached red is not a fresh crossing). Local runtimes
+/// are never alerted on; they have no quota to spend.
 ({List<QuotaAlert> fired, Set<String> armed}) computeAlerts({
   required List<ProviderQuota> snapshot,
   required RouteSuggestion suggestion,
@@ -148,25 +155,32 @@ class QuotaAlert {
     final bw = bindingWindow(q, now);
     final free = providerHeadroom(q, now);
     if (bw == null || free == null) continue;
+    final key = quotaIdentityKeyFor(q);
     if (q.stale) {
-      if (armed.contains(q.provider)) next.add(q.provider);
+      if (armed.contains(key)) next.add(key);
       continue;
     }
     final sev = alertSeverity(free);
     if (!alertOn.contains(sev)) continue; // calm or recovered: disarm
-    next.add(q.provider);
-    if (armed.contains(q.provider)) continue; // already alerting: no re-fire
-    final route = (rec != null && rec.provider != q.provider) ? rec : null;
+    next.add(key);
+    if (armed.contains(key)) continue; // already alerting: no re-fire
+    final route =
+        (rec != null && quotaIdentityKey(rec.provider, rec.account) != key)
+            ? rec
+            : null;
     fired.add(QuotaAlert(
       provider: q.provider,
       displayName: q.displayName,
+      account: q.account,
       window: bw.label,
       severity: sev,
       freePercent: free,
       asOf: q.asOf,
       routeTo: route?.provider,
-      routeDisplayName:
-          route == null ? null : _displayNameOf(snapshot, route.provider),
+      routeDisplayName: route == null
+          ? null
+          : _displayNameOf(snapshot, route.provider, route.account),
+      routeAccount: route?.account,
       routeFreePercent: route?.headroom,
       routeIsLocal: route?.isLocal ?? false,
     ));
@@ -195,19 +209,21 @@ class QuotaAlert {
     final bw = bindingWindow(q, now);
     final free = providerHeadroom(q, now);
     if (bw == null || bw.resetsAt == null || free == null) continue;
+    final key = quotaIdentityKeyFor(q);
     if (q.stale) {
-      if (armed.contains(q.provider)) next.add(q.provider);
+      if (armed.contains(key)) next.add(key);
       continue;
     }
-    final pace = paceByProvider[q.provider];
+    final pace = paceByProvider[key] ?? paceByProvider[q.provider];
     final waste = pace?.wastedAtReset;
     if (waste == null || waste < threshold) continue;
-    next.add(q.provider);
-    if (armed.contains(q.provider)) continue;
+    next.add(key);
+    if (armed.contains(key)) continue;
     fired.add(QuotaAlert(
       kind: QuotaAlertKind.projectedWaste,
       provider: q.provider,
       displayName: q.displayName,
+      account: q.account,
       window: bw.label,
       severity: AlertSeverity.amber,
       freePercent: free,
@@ -219,9 +235,23 @@ class QuotaAlert {
   return (fired: fired, armed: next);
 }
 
-String? _displayNameOf(List<ProviderQuota> snapshot, String provider) {
+String? _displayNameOf(
+  List<ProviderQuota> snapshot,
+  String provider, [
+  String? account,
+]) {
+  if (account != null) {
+    for (final q in snapshot) {
+      if (q.provider == provider && q.account == account) return q.displayName;
+    }
+  }
   for (final q in snapshot) {
     if (q.provider == provider) return q.displayName;
   }
   return null;
 }
+
+String _displayLabel(String displayName, String? account) =>
+    account != null && hasSpecificQuotaAccount(account)
+        ? '$displayName ($account)'
+        : displayName;

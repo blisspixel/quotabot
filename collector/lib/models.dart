@@ -212,6 +212,22 @@ class ProviderQuota {
   bool get hasWindows => windows.isNotEmpty;
 }
 
+/// True when an account string names a specific identity rather than a generic
+/// placeholder used by providers that do not expose account metadata.
+bool hasSpecificQuotaAccount(String account) =>
+    account.isNotEmpty && account != 'unknown' && account != 'default';
+
+/// Internal key used when local analytics need account-specific history. Public
+/// JSON keeps provider and account as separate fields; this is only for maps.
+String quotaIdentityKey(String provider, String account) =>
+    hasSpecificQuotaAccount(account) ? '$provider\u0000$account' : provider;
+
+String quotaIdentityKeyFor(ProviderQuota quota) =>
+    quotaIdentityKey(quota.provider, quota.account);
+
+BurnStat? burnStatForQuota(Map<String, BurnStat> stats, ProviderQuota quota) =>
+    stats[quotaIdentityKeyFor(quota)] ?? stats[quota.provider];
+
 /// A recent burn-rate estimate with its uncertainty, the input routing uses to
 /// forecast headroom. [perHour] is percent of quota consumed per hour (negative
 /// when headroom is easing), [sePerHour] the standard error of that estimate
