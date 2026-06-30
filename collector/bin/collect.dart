@@ -75,7 +75,7 @@ Map<String, dynamic> _snapshot(
   QuotaProfile? profile,
 ]) =>
     {
-      'schema': 'quotabot.v1',
+      'schema': quotabotV1SchemaId,
       if (profile != null) 'profile': profile.name,
       'generated_at': nowEpoch(),
       'providers': results.map((r) => r.toJson()).toList(),
@@ -907,7 +907,7 @@ Future<void> _check(
   if (q == null) {
     if (wantsJson) {
       print(_jsonPretty({
-        'schema': 'quotabot.v1',
+        'schema': quotabotV1SchemaId,
         'provider': key,
         'found': false,
       }));
@@ -926,7 +926,7 @@ Future<void> _check(
   final reset = binding?.resetsAt;
   if (wantsJson) {
     print(_jsonPretty({
-      'schema': 'quotabot.v1',
+      'schema': quotabotV1SchemaId,
       'provider': q.provider,
       'account': q.account,
       'available': available,

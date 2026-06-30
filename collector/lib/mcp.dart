@@ -28,6 +28,7 @@ import 'model_catalog.dart';
 import 'models.dart';
 import 'profiles.dart';
 import 'registry.dart';
+import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
@@ -49,7 +50,7 @@ Map<String, dynamic> quotasSnapshot(
   String? error,
 }) =>
     {
-      'schema': 'quotabot.v1',
+      'schema': quotabotV1SchemaId,
       if (profile != null) 'profile': profile,
       if (accountFilter != null) 'account_filter': accountFilter,
       if (error != null) 'error': error,

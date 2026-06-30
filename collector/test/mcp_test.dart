@@ -6,6 +6,7 @@ import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/profiles.dart';
+import 'package:quotabot_collector/schema_contracts.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
@@ -94,6 +95,7 @@ void main() {
       final providers = snap['providers'] as List;
       expect(providers, hasLength(3));
       expect((providers.first as Map)['provider'], 'claude');
+      expect(validateQuotabotV1Snapshot(snap), isEmpty);
     });
 
     test('quotasSnapshot of nothing is still a valid empty snapshot', () {

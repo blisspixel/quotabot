@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../util.dart';
 
 /// Reads Codex (OpenAI) usage from the rate_limits events Codex writes to its
@@ -14,8 +15,8 @@ import '../util.dart';
 /// This reads the latest snapshot of each bucket across recent sessions and
 /// keeps the binding (most-constrained) window per slot.
 class CodexAdapter {
-  static const id = 'codex';
-  static const name = 'Codex';
+  static const id = codexProviderId;
+  static const name = codexProviderName;
   final Directory? _sessionsDir;
 
   CodexAdapter({Directory? sessionsDir}) : _sessionsDir = sessionsDir;

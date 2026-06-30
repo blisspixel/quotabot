@@ -4,6 +4,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../sqlite_loader.dart';
 import '../util.dart';
 import '../vscode_state.dart';
@@ -12,8 +13,8 @@ import '../vscode_state.dart';
 /// Local data in ~/.cursor (SQLite state.vscdb like other forks).
 /// Opportunistic for free/Pro accounts. Parses for usage/credits if present.
 class CursorAdapter {
-  static const id = 'cursor';
-  static const name = 'Cursor';
+  static const id = cursorProviderId;
+  static const name = cursorProviderName;
   static bool _sqliteReady = false;
   final String? _dbPath;
 

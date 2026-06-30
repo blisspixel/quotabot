@@ -5,6 +5,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../sqlite_loader.dart';
 import '../util.dart';
 import '../vscode_state.dart';
@@ -15,8 +16,8 @@ import '../vscode_state.dart';
 /// CLI-only: passive detection via devin config/credentials (no rich local quota cache).
 /// Passive for free tier or no sub.
 class WindsurfAdapter {
-  static const id = 'windsurf';
-  static const name = 'Windsurf';
+  static const id = windsurfProviderId;
+  static const name = windsurfProviderName;
   static bool _sqliteReady = false;
   final String? _dbPath;
   final bool? _hasDevinCli;

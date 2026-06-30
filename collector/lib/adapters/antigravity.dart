@@ -7,6 +7,7 @@ import 'package:sqlite3/sqlite3.dart';
 import '../auth/google_auth.dart';
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../sqlite_loader.dart';
 import '../util.dart';
 
@@ -50,8 +51,8 @@ typedef AntigravityFetchModels = Future<Map<String, dynamic>?> Function(
 /// Primary account from disk; additional accounts come from the cross-platform
 /// profile scan and per-account caches.
 class AntigravityAdapter {
-  static const id = 'antigravity';
-  static const name = 'Antigravity';
+  static const id = antigravityProviderId;
+  static const name = antigravityProviderName;
   static bool _sqliteReady = false;
   final AntigravityAccountSource? _accountSource;
   final AntigravityTokenResolver? _tokenResolver;

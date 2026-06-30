@@ -24,8 +24,11 @@ export 'catalog_audit.dart';
 export 'leases.dart';
 export 'model_catalog.dart';
 export 'palette.dart';
+export 'provider_adapters.dart';
+export 'provider_ids.dart';
 export 'profiles.dart';
 export 'registry.dart';
+export 'schema_contracts.dart';
 export 'simulation.dart';
 export 'cache.dart'
     show

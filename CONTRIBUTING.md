@@ -59,6 +59,30 @@ Guidelines:
   and degrade gracefully (return account/plan with an explanatory note rather
   than throwing) when live data is unavailable.
 
+## Add a provider in 10 minutes
+
+Use this checklist for every provider adapter:
+
+1. Confirm the provider exposes quota or local-runtime metadata only. Do not add
+   model inference, prompt reads, code reads, or token-spending calls.
+2. Add the adapter under `collector/lib/adapters/` as a thin I/O shell over pure
+   parsing helpers. Keep provider ids lowercase and stable.
+3. Add one sanitized provider-shape fixture under
+   `collector/test/fixtures/provider_shapes/`. Remove tokens, emails, prompts,
+   paths, and account identifiers.
+4. Add one compile-time row to `collector/lib/provider_adapters.dart` with the
+   provider id, display name, adapter class, cache behavior, multi-account flag,
+   fixture parser kind, and fixture filename.
+5. Extend the registry-driven parser fixture test when the provider needs a new
+   fixture parser kind.
+6. Wire collection through `collectAll()` only after the pure parser and registry
+   tests are green.
+7. Update `docs/DATA_SOURCES.md`, `docs/ARCHITECTURE.md`, `docs/SCHEMA.md` if
+   the public contract changes, README when user setup changes, ROADMAP when a
+   planned item closes, and CHANGELOG for behavior changes.
+8. Run the collector, app, integration, coverage, and build gates described in
+   this file before opening a pull request.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the

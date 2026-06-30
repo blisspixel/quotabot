@@ -263,9 +263,14 @@ leverage is the quality of the signal it hands a router.
 Last, once every schema-touching feature above has landed, so the contract frozen
 here is the final one.
 
-17. [ ] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
+17. [x] Freeze the `quotabot.v1` JSON schema and add a compile-time adapter plus
     required-fixture registry, with an "add a provider in 10 minutes" checklist in
     CONTRIBUTING.
+    Shipped: `schema_contracts.dart` now defines the additive JSON Schema
+    2020-12 contract and validator for `quotabot.v1`; `provider_adapters.dart`
+    is the compile-time built-in adapter and fixture registry; registry tests
+    require one committed sanitized provider-shape fixture per adapter, including
+    Lemonade; CONTRIBUTING has the provider checklist.
 18. [ ] A recurring security pass and an adversarial bug-hunt round that returns
     empty (see continuous hardening below).
 19. [ ] An animated GIF in the README (the widget collapsing and expanding, `top`

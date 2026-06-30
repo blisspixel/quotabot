@@ -18,6 +18,10 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- `quotabot.v1` is now frozen as an additive JSON Schema 2020-12 contract with a
+  focused validator and tests. Built-in providers are also listed in a
+  compile-time adapter registry, and every adapter now owns a required sanitized
+  provider-shape fixture.
 - MCP routing tools now accept exact `account` filters in addition to named
   `profile` filters, so routers can query one provider account without creating
   a profile. MCP also exposes `quotas://alerts` and standard

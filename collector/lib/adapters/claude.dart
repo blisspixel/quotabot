@@ -5,14 +5,15 @@ import 'package:http/http.dart' as http;
 
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../util.dart';
 
 /// Reads Claude (Anthropic) usage live from the OAuth usage endpoint, reusing
 /// the access token Claude Code already stores in ~/.claude/.credentials.json.
 /// This is the same data shown by the in-CLI `/usage` command.
 class ClaudeAdapter {
-  static const id = 'claude';
-  static const name = 'Claude';
+  static const id = claudeProviderId;
+  static const name = claudeProviderName;
   static const _endpoint = 'https://api.anthropic.com/api/oauth/usage';
 
   Future<ProviderQuota> collect() async {

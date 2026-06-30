@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../auth/xai_auth.dart';
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../util.dart';
 
 typedef GrokUsageFetcher = Future<QuotaWindow?> Function(
@@ -24,8 +25,8 @@ typedef GrokTokenResolver = Future<String?> Function(
 /// usage percent for the current billing cycle and the cycle reset time. This
 /// is a billing metadata call, not a model call, so it costs no tokens.
 class GrokAdapter {
-  static const id = 'grok';
-  static const name = 'Grok';
+  static const id = grokProviderId;
+  static const name = grokProviderName;
   static const _endpoint =
       'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig';
   final File? _authFile;

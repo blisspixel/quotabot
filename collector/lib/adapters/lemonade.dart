@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../models.dart';
+import '../provider_ids.dart';
 import '../util.dart';
 import 'lmstudio.dart' show lmStudioCompatFromJson;
 import 'ollama.dart' show LocalModel, localBaseUrl, localRuntimeQuota;
@@ -16,8 +17,8 @@ import 'ollama.dart' show LocalModel, localBaseUrl, localRuntimeQuota;
 /// 127.0.0.1:8000; honors LEMONADE_HOST. No quota: a local runtime has nothing
 /// to spend, so it acts as an always-available routing fallback.
 class LemonadeAdapter {
-  static const id = 'lemonade';
-  static const name = 'Lemonade';
+  static const id = lemonadeProviderId;
+  static const name = lemonadeProviderName;
 
   final http.Client _http;
   LemonadeAdapter({http.Client? client}) : _http = client ?? http.Client();

@@ -5,6 +5,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import '../models.dart';
 import '../parsing.dart';
+import '../provider_ids.dart';
 import '../sqlite_loader.dart';
 import '../util.dart';
 
@@ -14,8 +15,8 @@ import '../util.dart';
 /// Handles out-of-quota (percentageUsed == 100) and cancelled plans gracefully.
 /// Opportunistic (no login needed for local data).
 class KiroAdapter {
-  static const id = 'kiro';
-  static const name = 'Kiro';
+  static const id = kiroProviderId;
+  static const name = kiroProviderName;
   static bool _sqliteReady = false;
 
   Future<ProviderQuota> collect() async {

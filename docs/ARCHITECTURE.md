@@ -23,6 +23,8 @@ collector/ (Dart package)
   registry.dart      pure: assemble the cross-provider model registry with budget
   model_catalog.dart committed cloud model capability catalog
   catalog_audit.dart pure/provider-owned model-list diffing for catalog currency
+  schema_contracts.dart frozen quotabot.v1 JSON Schema and validator
+  provider_adapters.dart compile-time adapter and fixture registry
   profiles.dart      named local profile schema, storage, and filtering
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
@@ -97,7 +99,9 @@ The parser test layer includes seeded property/fuzz tests over malformed JSON,
 protobuf-like byte streams, gRPC-web frames, and embedded-token blobs, plus
 sanitized provider-shape fixtures loaded from `collector/test/fixtures/` so the
 pure parsers are checked against stable recorded shapes without touching live
-credentials or provider APIs.
+credentials or provider APIs. `provider_adapters.dart` is the compile-time
+registry for all built-in adapters and their required sanitized fixtures; tests
+fail when a new adapter lacks a registry row or fixture.
 
 ## Adapters
 
@@ -202,6 +206,11 @@ MCP clients for both stdio and Streamable HTTP.
 consumers. The reasoning behind the routing math (risk-adjusted headroom, strand
 probability, and lease discounts) is written up in
 [ROUTING-MATH.md](ROUTING-MATH.md).
+
+The public snapshot contract is frozen as `quotabot.v1` in
+`schema_contracts.dart` and documented in [SCHEMA.md](SCHEMA.md). The contract is
+additive: consumers must tolerate unknown fields, while quotabot must keep the
+meaning and type of existing fields stable until a new schema id is introduced.
 
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
