@@ -103,6 +103,7 @@ void main() {
         at: 1782042000,
         requestedModel: 'frontier-coder',
         servedModel: 'codex/gpt-5.2',
+        spend: litellmSpendQuotaPlan,
         promptTokens: 1200,
         completionTokens: 300,
         cost: 0.08,
@@ -111,6 +112,7 @@ void main() {
         at: 1782045600,
         requestedModel: 'frontier-coder',
         servedModel: 'claude/sonnet-4.5',
+        spend: litellmSpendPaidApi,
         promptTokens: 2400,
         completionTokens: 600,
         cost: 0.16,
@@ -119,6 +121,7 @@ void main() {
         at: 1782046500,
         requestedModel: 'codex/gpt-5.2',
         servedModel: 'codex/gpt-5.2',
+        spend: litellmSpendLocal,
         promptTokens: 500,
         completionTokens: 100,
         cost: 0.02,
@@ -139,6 +142,10 @@ void main() {
 
     expect(find.text('ROUTED REQUESTS'), findsOneWidget);
     expect(find.text('2 routed'), findsOneWidget);
+    expect(
+      find.text('spend: 1 local | 1 quota | 1 paid API (\$0.16)'),
+      findsOneWidget,
+    );
     expect(find.textContaining('top served:'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

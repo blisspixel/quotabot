@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -149,6 +150,22 @@ class RouterTests(unittest.TestCase):
         router._availability = availability  # type: ignore[method-assign]
         chosen = asyncio.run(router._route("frontier", {}, None))
         self.assertEqual(chosen, "claude-subscription")
+
+    def test_route_marks_spend_class_for_local_metrics(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "cheap-bulk": [
+                    Candidate(deployment="ollama-qwen", local=True),
+                ]
+            }
+        )
+        data = {}
+
+        chosen = asyncio.run(router._route("cheap-bulk", data, None))
+
+        self.assertEqual(chosen, "ollama-qwen")
+        self.assertEqual(data["metadata"]["quotabot_spend"], "local")
 
     def test_spend_local_marks_candidate_local(self):
         candidate = Candidate(deployment="local-server", spend="local")
@@ -358,6 +375,45 @@ models:
         self.assertTrue(policy.block_unsafe_passthrough)
         self.assertTrue(policy.models["frontier"][0].local)
         self.assertEqual(policy.models["frontier"][0].spend, "local")
+
+    def test_success_metrics_include_spend_class(self):
+        class Usage:
+            prompt_tokens = 10
+            completion_tokens = 2
+
+        class Response:
+            usage = Usage()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metrics.jsonl"
+            router = QuotabotRouter()
+            router.policy = Policy()
+            router.policy.metrics_path = str(path)
+
+            asyncio.run(
+                router.async_log_success_event(
+                    {
+                        "model": "ollama-qwen",
+                        "response_cost": 0,
+                        "litellm_params": {
+                            "metadata": {
+                                "quotabot_original_model": "cheap-bulk",
+                                "quotabot_spend": "local",
+                            }
+                        },
+                    },
+                    Response(),
+                    None,
+                    None,
+                )
+            )
+
+            record = json.loads(path.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(record["requested_model"], "cheap-bulk")
+        self.assertEqual(record["served_model"], "ollama-qwen")
+        self.assertEqual(record["spend"], "local")
+        self.assertEqual(record["prompt_tokens"], 10)
 
 
 if __name__ == "__main__":

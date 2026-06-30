@@ -98,13 +98,16 @@ metrics read from `~/.quotabot/litellm-metrics.jsonl`:
   model.
 - `prompt_tokens`, `completion_tokens`, and `total_tokens`.
 - `cost`: tracked LiteLLM response cost when present, otherwise zero.
+- `local_requests`, `quota_plan_requests`, `paid_api_requests`, and
+  `unknown_spend_requests`: counts grouped by the LiteLLM route's spend class.
+- `paid_api_cost`: tracked cost for records marked `paid_api`.
 - `first_at` and `last_at`: optional Unix epoch seconds from the summarized
   records.
 - `top_served_models`: an array of `{model, count}` entries.
 
 The source JSONL records are local metadata only: timestamp, requested model,
-served model, token counts, and response cost. They never contain prompts,
-responses, or source code.
+served model, selected spend class, token counts, and response cost. They never
+contain prompts, responses, or source code.
 
 ## Provider fixture registry
 

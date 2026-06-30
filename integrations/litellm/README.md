@@ -121,15 +121,15 @@ safe pin, or enable `allow_paid_api: true` intentionally for a paid API pin.
 ## Usage metrics
 
 Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per served
-request (requested model, served model, tokens, cost). The path is constrained to
-`~/.quotabot`; relative paths are placed there. This closes the loop: LiteLLM
-spend plus quotabot subscription headroom in one place.
+request (requested model, served model, selected spend class, tokens, cost). The
+path is constrained to `~/.quotabot`; relative paths are placed there. This
+closes the loop: LiteLLM spend plus quotabot subscription headroom in one place.
 
 Use the default `~/.quotabot/litellm-metrics.jsonl` path when you want the
 desktop Quota Analytics screen to show the routed-request summary. The widget
 reads a bounded tail of that local JSONL file and shows only metadata totals:
-served requests, routed requests, tokens, tracked cost, top served models, and
-last request age.
+served requests, routed requests, tokens, tracked cost, spend-class counts, top
+served models, and last request age.
 
 ## Failure behavior
 

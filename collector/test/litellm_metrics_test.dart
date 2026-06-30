@@ -10,6 +10,7 @@ void main() {
       'at': 1782000000,
       'requested_model': 'frontier-coder',
       'served_model': 'codex-high',
+      'spend': 'quota-plan',
       'prompt_tokens': 1200,
       'completion_tokens': 350,
       'cost': 0.0123,
@@ -17,8 +18,24 @@ void main() {
 
     expect(metric, isNotNull);
     expect(metric!.wasRouted, isTrue);
+    expect(metric.spend, litellmSpendQuotaPlan);
     expect(metric.totalTokens, 1550);
     expect(metric.toJson()['routed'], isTrue);
+    expect(metric.toJson()['spend'], litellmSpendQuotaPlan);
+  });
+
+  test('normalizes absent or malformed LiteLLM spend labels to unknown', () {
+    final metric = parseLiteLlmRouteMetric(jsonEncode({
+      'at': 1782000000,
+      'served_model': 'codex-high',
+      'spend': 'not-a-spend-class',
+    }));
+
+    expect(metric, isNotNull);
+    expect(metric!.spend, litellmSpendUnknown);
+    expect(normalizeLiteLlmSpend('subscription'), litellmSpendQuotaPlan);
+    expect(normalizeLiteLlmSpend('free'), litellmSpendLocal);
+    expect(normalizeLiteLlmSpend('api'), litellmSpendPaidApi);
   });
 
   test('skips malformed or incomplete metric lines', () {
@@ -36,6 +53,7 @@ void main() {
         at: 10,
         requestedModel: 'frontier',
         servedModel: 'codex',
+        spend: litellmSpendQuotaPlan,
         promptTokens: 100,
         completionTokens: 30,
         cost: 0.01,
@@ -44,6 +62,7 @@ void main() {
         at: 20,
         requestedModel: null,
         servedModel: 'codex',
+        spend: litellmSpendPaidApi,
         promptTokens: 50,
         completionTokens: 25,
         cost: 0.02,
@@ -52,6 +71,7 @@ void main() {
         at: 15,
         requestedModel: 'bulk',
         servedModel: 'grok',
+        spend: litellmSpendLocal,
         promptTokens: 10,
         completionTokens: 5,
         cost: 0,
@@ -62,11 +82,18 @@ void main() {
     expect(summary.routedRequests, 2);
     expect(summary.totalTokens, 220);
     expect(summary.cost, closeTo(0.03, 0.000001));
+    expect(summary.localRequests, 1);
+    expect(summary.quotaPlanRequests, 1);
+    expect(summary.paidApiRequests, 1);
+    expect(summary.unknownSpendRequests, 0);
+    expect(summary.paidApiCost, closeTo(0.02, 0.000001));
     expect(summary.firstAt, 10);
     expect(summary.lastAt, 20);
     expect(summary.topServedModels.first.model, 'codex');
     expect(summary.topServedModels.first.count, 2);
     expect(summary.toJson()['schema'], routedRequestSummarySchema);
+    expect(summary.toJson()['paid_api_requests'], 1);
+    expect(summary.toJson()['paid_api_cost'], 0.02);
   });
 
   test('loads only the bounded tail of the metrics file', () {

@@ -379,7 +379,8 @@ Breadth and depth, once the core is trusted:
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL
   tail, and shows served requests, routed requests, tokens, tracked cost, top
-  served models, and last request age.
+  served models, last request age, and spend-class counts for local, quota-plan,
+  paid-API, and legacy unknown records.
 - **Shareable reports:** a "weekly quota health" markdown export worth posting.
   Foundation shipped: `quotabot report` prints markdown and `--json` emits
   `quotabot.report.v1`, covering the current recommendation, headroom, resets,

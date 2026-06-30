@@ -90,6 +90,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+_SPEND_METADATA_KEY = "quotabot_spend"
 
 
 class UnsafeRouteError(RuntimeError):
@@ -307,6 +308,7 @@ class QuotabotRouter(CustomLogger):
         # still must satisfy the spend policy.
         if rule and rule.pin:
             if self._spend_allowed(rule.pin_spend):
+                self._mark_spend(data, rule.pin_spend)
                 return rule.pin
             return self._unsafe_passthrough(requested)
 
@@ -324,6 +326,7 @@ class QuotabotRouter(CustomLogger):
         if avail is None:
             for c in allowed:
                 if c.local:
+                    self._mark_spend(data, c.spend)
                     return c.deployment
             return self._unsafe_passthrough(requested)
 
@@ -335,11 +338,19 @@ class QuotabotRouter(CustomLogger):
         for floor in (self.policy.comfort_threshold, 0.5):
             for c in allowed:
                 if c.local:
+                    self._mark_spend(data, c.spend)
                     return c.deployment
                 info = avail.get(c.provider or "")
                 if info and info.get("available") and _headroom(info) >= floor:
+                    self._mark_spend(data, c.spend)
                     return c.deployment
         return self._unsafe_passthrough(requested)
+
+    @staticmethod
+    def _mark_spend(data: dict, spend: Optional[str]) -> None:
+        if not spend:
+            return
+        data.setdefault("metadata", {})[_SPEND_METADATA_KEY] = _normalize_spend(spend)
 
     def _candidate_allowed(self, candidate: Candidate) -> bool:
         return candidate.local or self._spend_allowed(candidate.spend)
@@ -412,6 +423,7 @@ class QuotabotRouter(CustomLogger):
                 "at": int(time.time()),
                 "requested_model": meta.get("quotabot_original_model"),
                 "served_model": kwargs.get("model"),
+                "spend": meta.get(_SPEND_METADATA_KEY),
                 "prompt_tokens": getattr(usage, "prompt_tokens", None),
                 "completion_tokens": getattr(usage, "completion_tokens", None),
                 "cost": kwargs.get("response_cost"),

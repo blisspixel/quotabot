@@ -19,6 +19,9 @@ Notable changes to quotabot. Newest first.
   (`loaded` or `cold`), and concrete model suggestions prefer loaded local
   models over installed-but-cold local models when both meet the requested
   profile.
+- LiteLLM routed-request metrics now record the selected spend class, and the
+  desktop analytics view summarizes local, quota-plan, paid-API, and legacy
+  unknown records separately.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
   `spend: quota_plan` is reserved for included quota plans with overages

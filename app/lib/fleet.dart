@@ -321,6 +321,7 @@ class _FleetScreenState extends State<FleetScreen> {
     final last = summary.lastAt == null
         ? 'last request unknown'
         : 'last request ${_age(summary.lastAt!, now)} ago';
+    final spend = _spendLine(summary);
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: _card(
@@ -361,6 +362,19 @@ class _FleetScreenState extends State<FleetScreen> {
               ],
             ),
             const SizedBox(height: 8),
+            Text(
+              spend,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppType.caption,
+                height: 1.3,
+                color: summary.paidApiRequests > 0
+                    ? const Color(0xFFD29922)
+                    : c.muted,
+              ),
+            ),
+            const SizedBox(height: 4),
             Text(
               '$top | $last',
               maxLines: 2,
@@ -872,6 +886,18 @@ class _FleetScreenState extends State<FleetScreen> {
     if (value <= 0) return r'$0.00';
     if (value < 0.01) return '<\$0.01';
     return '\$${value.toStringAsFixed(2)}';
+  }
+
+  String _spendLine(RoutedRequestSummary summary) {
+    final parts = [
+      if (summary.localRequests > 0) '${summary.localRequests} local',
+      if (summary.quotaPlanRequests > 0) '${summary.quotaPlanRequests} quota',
+      if (summary.paidApiRequests > 0)
+        '${summary.paidApiRequests} paid API (${_money(summary.paidApiCost)})',
+      if (summary.unknownSpendRequests > 0)
+        '${summary.unknownSpendRequests} unknown',
+    ];
+    return parts.isEmpty ? 'spend: no labels' : 'spend: ${parts.join(' | ')}';
   }
 
   String _age(int then, int now) {

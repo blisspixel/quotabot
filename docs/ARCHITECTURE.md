@@ -277,8 +277,9 @@ decoration on Python 3.13.
 When the plugin writes the default `~/.quotabot/litellm-metrics.jsonl`, the
 desktop analytics screen reads a bounded tail of that local JSONL file through
 `litellm_metrics.dart` and shows request count, routed count, token count,
-tracked cost, top served models, and last-request age. This keeps routed-request
-usage visible without making quotabot a proxy or request data path.
+tracked cost, spend-class counts, top served models, and last-request age. This
+keeps routed-request usage visible without making quotabot a proxy or request
+data path.
 
 ## Alerts and `quotabot watch`
 

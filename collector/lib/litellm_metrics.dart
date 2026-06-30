@@ -6,6 +6,10 @@ import 'util.dart';
 
 const litellmMetricsFileName = 'litellm-metrics.jsonl';
 const routedRequestSummarySchema = 'quotabot.routed_requests.v1';
+const litellmSpendLocal = 'local';
+const litellmSpendQuotaPlan = 'quota_plan';
+const litellmSpendPaidApi = 'paid_api';
+const litellmSpendUnknown = 'unknown';
 
 /// The default JSONL file written by the LiteLLM integration. The Python plugin
 /// constrains metrics paths to `~/.quotabot`, so the reader uses the same root
@@ -20,6 +24,7 @@ class LiteLlmRouteMetric {
   final int promptTokens;
   final int completionTokens;
   final double cost;
+  final String spend;
 
   const LiteLlmRouteMetric({
     required this.at,
@@ -28,6 +33,7 @@ class LiteLlmRouteMetric {
     required this.promptTokens,
     required this.completionTokens,
     required this.cost,
+    this.spend = litellmSpendUnknown,
   });
 
   int get totalTokens => promptTokens + completionTokens;
@@ -37,10 +43,13 @@ class LiteLlmRouteMetric {
       servedModel != null &&
       requestedModel != servedModel;
 
+  String get normalizedSpend => normalizeLiteLlmSpend(spend);
+
   Map<String, dynamic> toJson() => {
         'at': at,
         if (requestedModel != null) 'requested_model': requestedModel,
         if (servedModel != null) 'served_model': servedModel,
+        'spend': normalizedSpend,
         'prompt_tokens': promptTokens,
         'completion_tokens': completionTokens,
         'total_tokens': totalTokens,
@@ -67,6 +76,11 @@ class RoutedRequestSummary {
   final int promptTokens;
   final int completionTokens;
   final double cost;
+  final int localRequests;
+  final int quotaPlanRequests;
+  final int paidApiRequests;
+  final int unknownSpendRequests;
+  final double paidApiCost;
   final int? firstAt;
   final int? lastAt;
   final List<RoutedModelCount> topServedModels;
@@ -77,6 +91,11 @@ class RoutedRequestSummary {
     required this.promptTokens,
     required this.completionTokens,
     required this.cost,
+    this.localRequests = 0,
+    this.quotaPlanRequests = 0,
+    this.paidApiRequests = 0,
+    this.unknownSpendRequests = 0,
+    this.paidApiCost = 0,
     required this.firstAt,
     required this.lastAt,
     required this.topServedModels,
@@ -94,6 +113,11 @@ class RoutedRequestSummary {
         'completion_tokens': completionTokens,
         'total_tokens': totalTokens,
         'cost': double.parse(cost.toStringAsFixed(6)),
+        'local_requests': localRequests,
+        'quota_plan_requests': quotaPlanRequests,
+        'paid_api_requests': paidApiRequests,
+        'unknown_spend_requests': unknownSpendRequests,
+        'paid_api_cost': double.parse(paidApiCost.toStringAsFixed(6)),
         if (firstAt != null) 'first_at': firstAt,
         if (lastAt != null) 'last_at': lastAt,
         'top_served_models':
@@ -159,6 +183,7 @@ LiteLlmRouteMetric? parseLiteLlmRouteMetric(String line) {
       at: at,
       requestedModel: _string(decoded['requested_model']),
       servedModel: served,
+      spend: normalizeLiteLlmSpend(decoded['spend']),
       promptTokens: _nonNegativeInt(decoded['prompt_tokens']) ?? 0,
       completionTokens: _nonNegativeInt(decoded['completion_tokens']) ?? 0,
       cost: _nonNegativeDouble(decoded['cost']) ?? 0,
@@ -177,6 +202,11 @@ RoutedRequestSummary summarizeRoutedRequests(
   var prompt = 0;
   var completion = 0;
   var cost = 0.0;
+  var local = 0;
+  var quotaPlan = 0;
+  var paidApi = 0;
+  var unknownSpend = 0;
+  var paidApiCost = 0.0;
   int? first;
   int? last;
   final byModel = <String, int>{};
@@ -186,6 +216,20 @@ RoutedRequestSummary summarizeRoutedRequests(
     prompt += metric.promptTokens;
     completion += metric.completionTokens;
     cost += metric.cost;
+    switch (metric.normalizedSpend) {
+      case litellmSpendLocal:
+        local++;
+        break;
+      case litellmSpendQuotaPlan:
+        quotaPlan++;
+        break;
+      case litellmSpendPaidApi:
+        paidApi++;
+        paidApiCost += metric.cost;
+        break;
+      default:
+        unknownSpend++;
+    }
     first = first == null ? metric.at : math.min(first, metric.at);
     last = last == null ? metric.at : math.max(last, metric.at);
     final served = metric.servedModel;
@@ -202,6 +246,11 @@ RoutedRequestSummary summarizeRoutedRequests(
     promptTokens: prompt,
     completionTokens: completion,
     cost: cost,
+    localRequests: local,
+    quotaPlanRequests: quotaPlan,
+    paidApiRequests: paidApi,
+    unknownSpendRequests: unknownSpend,
+    paidApiCost: paidApiCost,
     firstAt: first,
     lastAt: last,
     topServedModels: [
@@ -209,6 +258,21 @@ RoutedRequestSummary summarizeRoutedRequests(
         RoutedModelCount(entry.key, entry.value),
     ],
   );
+}
+
+String normalizeLiteLlmSpend(Object? value) {
+  if (value is! String) return litellmSpendUnknown;
+  final normalized = value.trim().toLowerCase().replaceAll('-', '_');
+  return switch (normalized) {
+    'local' || 'free' => litellmSpendLocal,
+    'quota' ||
+    'quota_plan' ||
+    'subscription' ||
+    'subscription_quota' =>
+      litellmSpendQuotaPlan,
+    'paid_api' || 'paid' || 'api' => litellmSpendPaidApi,
+    _ => litellmSpendUnknown,
+  };
 }
 
 String _readTail(File file, int maxBytes) {
