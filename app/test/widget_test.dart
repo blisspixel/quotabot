@@ -1,6 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot_collector/collector.dart';
+
+ProviderQuota _provider(
+  String id,
+  String account, {
+  String kind = 'subscription',
+}) => ProviderQuota(
+  provider: id,
+  displayName: id,
+  account: account,
+  kind: kind,
+  asOf: 1782046566,
+);
 
 void main() {
   test('QuotaWindow derives percent from used/limit', () {
@@ -80,5 +93,56 @@ void main() {
       expect(back.windowX, isNull);
       expect(back.windowY, isNull);
     });
+  });
+
+  group('provider display grouping', () {
+    test('uses provider and account as the stable display key', () {
+      expect(
+        quotaDisplayKey(_provider('grok', 'work@example.com')),
+        'grok|work@example.com',
+      );
+      expect(quotaDisplayKey(_provider('grok', 'default')), 'grok');
+      expect(quotaDisplayKey(_provider('grok', 'unknown')), 'grok');
+    });
+
+    test('keeps a flat group for the common single-account case', () {
+      final groups = groupProvidersForDisplay([
+        _provider('codex', 'you@example.com'),
+        _provider('claude', 'you@example.com'),
+        _provider('ollama', 'installed', kind: 'local'),
+      ]);
+
+      expect(groups, hasLength(1));
+      expect(groups.single.account, isNull);
+      expect(groups.single.quotas.map((q) => q.provider).toList(), [
+        'codex',
+        'claude',
+        'ollama',
+      ]);
+    });
+
+    test(
+      'groups distinct accounts while preserving provider order per group',
+      () {
+        final groups = groupProvidersForDisplay([
+          _provider('codex', 'work@example.com'),
+          _provider('antigravity', 'home@example.com'),
+          _provider('grok', 'work@example.com'),
+          _provider('ollama', 'installed', kind: 'local'),
+        ]);
+
+        expect(groups.map((g) => g.account).toList(), [
+          'work@example.com',
+          'home@example.com',
+          null,
+        ]);
+        expect(groups.first.quotas.map((q) => q.provider).toList(), [
+          'codex',
+          'grok',
+        ]);
+        expect(groups[1].quotas.single.provider, 'antigravity');
+        expect(groups.last.quotas.single.provider, 'ollama');
+      },
+    );
   });
 }

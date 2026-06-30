@@ -114,9 +114,9 @@ stores. Grok and Antigravity can run two ways:
 - Local data primarily ~/.cursor (config + SQLite state like other forks).
 - Usage often shown in-app Settings, but local state allows passive detection
   and opportunistic reads. Free account users benefit from detection.
-- Account shown only if non-default, the provider has more than one account on
-  screen, and "Show account names" enabled (see UI). Single-account providers
-  (e.g. Grok) auto-hide the username regardless of the global toggle.
+- Account shown automatically for duplicate-provider cards so two accounts are
+  never visually ambiguous. The global "Show account names" setting also shows
+  non-default account labels for single-account providers.
 
 ## Windsurf / Devin (Codeium / Cognition)
 

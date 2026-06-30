@@ -13,6 +13,15 @@ ProviderQuota _q(double usedPercent, {int? resetsAt}) => ProviderQuota(
   ],
 );
 
+ProviderQuota _accountQ(String account) => ProviderQuota(
+  provider: 'antigravity',
+  displayName: 'Antigravity',
+  account: account,
+  plan: 'AI Pro',
+  asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+  windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+);
+
 Insights _ins({double? burn, double? burnSe}) => Insights(
   samples: 50,
   spanDays: 7,
@@ -78,6 +87,29 @@ void main() {
 
     expect(find.textContaining('usage left'), findsNothing);
     expect(find.textContaining('run out'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('long account labels stay inside the provider tile header', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(260, 180));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _accountQ(
+            'very.long.account.name.for.routing.validation@example.com',
+          ),
+          cardColor: const Color(0xFF1A1A1A),
+          showAccounts: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('Antigravity'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

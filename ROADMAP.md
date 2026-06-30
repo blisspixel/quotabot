@@ -145,9 +145,11 @@ it stands up serve every phase after it.
    account in its auth file with per-account cache fallback; Antigravity now
    attempts a live quota read for every discovered active profile/account. Codex
    now has adapter fixtures for missing sessions, absent `rate_limits`, stale
-   snapshots, and multi-bucket scans. Remaining: signed-out auto-hide beyond
-   providers with explicit active-account indexes and the UI/profile grouping.
-   (Copilot's per-account read lands post-1.0 with the provider itself.)
+   snapshots, and multi-bucket scans. The desktop widget now groups distinct
+   account identities, scopes expansion by provider/account, and automatically
+   labels duplicate-provider cards. Remaining: signed-out auto-hide beyond
+   providers with explicit active-account indexes and full named profiles from
+   item 8. (Copilot's per-account read lands post-1.0 with the provider itself.)
 7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to

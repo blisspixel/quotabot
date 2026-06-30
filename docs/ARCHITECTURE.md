@@ -196,13 +196,14 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   red when spent; neutral grey when no data). The OS application icon
   (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style
   mark (light/dark friendly) for the desktop icon.
-- Compact and expanded views, plus hide/show per provider. "Show account names"
-  toggle (global, in menu) controls display of usernames (Grok uses email as
-  account; others often default/hidden); on top of the toggle, a username is
-  only shown when the provider has more than one account on screen, so
-  single-account providers auto-hide it. `prefs.dart` persists hidden providers,
-  compact state, cadence, always on top, taskbar visibility, enable notifications,
-  showAccounts, and window position across restarts.
+- Compact and expanded views, plus hide/show per provider. The expanded view
+  groups distinct account identities when work and personal accounts coexist,
+  and expansion state is keyed by provider/account so opening one account's
+  details does not open its sibling. Duplicate-provider cards always show their
+  account to avoid ambiguity; the "Show account names" toggle still exposes
+  usernames for single-account providers. `prefs.dart` persists hidden providers,
+  compact state, cadence, always on top, taskbar visibility, enable
+  notifications, showAccounts, and window position across restarts.
 - A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
   countdowns stay current; actual data refresh is on a separate adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a

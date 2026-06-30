@@ -12,6 +12,10 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- The desktop widget now groups distinct account identities in the expanded
+  view, scopes expansion state by provider/account, automatically disambiguates
+  duplicate-provider cards, and keeps provider visibility menu rows unique when
+  several accounts exist for the same provider.
 - Antigravity now attempts a live read for every discovered active account from
   its cross-platform profile scan, merging duplicate profile records and keeping
   per-account cache fallback limited to accounts still present locally.

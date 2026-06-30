@@ -175,6 +175,52 @@ TextTheme _tabularFigures(TextTheme t) {
   );
 }
 
+const _genericAccountLabels = {'default', 'unknown', 'installed', 'cli'};
+
+@visibleForTesting
+bool quotaHasSpecificAccount(ProviderQuota q) =>
+    q.account.trim().isNotEmpty &&
+    !_genericAccountLabels.contains(q.account.trim().toLowerCase());
+
+@visibleForTesting
+String quotaDisplayKey(ProviderQuota q) =>
+    quotaHasSpecificAccount(q) ? '${q.provider}|${q.account}' : q.provider;
+
+@visibleForTesting
+class ProviderDisplayGroup {
+  final String? account;
+  final List<ProviderQuota> quotas;
+
+  const ProviderDisplayGroup({required this.account, required this.quotas});
+}
+
+@visibleForTesting
+List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
+  final accounts = <String>{};
+  for (final q in data) {
+    if (quotaHasSpecificAccount(q)) accounts.add(q.account);
+  }
+  if (accounts.length < 2) {
+    return [ProviderDisplayGroup(account: null, quotas: List.of(data))];
+  }
+
+  final grouped = <String, List<ProviderQuota>>{};
+  final groupAccounts = <String, String?>{};
+  for (final q in data) {
+    final account = quotaHasSpecificAccount(q) ? q.account : null;
+    final key = account ?? '';
+    grouped.putIfAbsent(key, () => <ProviderQuota>[]).add(q);
+    groupAccounts.putIfAbsent(key, () => account);
+  }
+  return [
+    for (final entry in grouped.entries)
+      ProviderDisplayGroup(
+        account: groupAccounts[entry.key],
+        quotas: List.of(entry.value),
+      ),
+  ];
+}
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   const Dashboard({super.key, required this.prefs});
@@ -252,6 +298,27 @@ class _DashboardState extends State<Dashboard>
     // Local runtimes always sit below the cloud quota services, keeping their
     // relative order from the sort above. Local has no quota to rank against.
     return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
+  }
+
+  Map<String, int> _providerCounts(Iterable<ProviderQuota> data) {
+    final counts = <String, int>{};
+    for (final q in data) {
+      counts[q.provider] = (counts[q.provider] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  bool _shouldShowAccount(ProviderQuota q, Map<String, int> counts) =>
+      (_showAccounts || (counts[q.provider] ?? 0) > 1) &&
+      quotaHasSpecificAccount(q);
+
+  List<ProviderQuota> get _menuProviders {
+    final seen = <String>{};
+    final out = <ProviderQuota>[];
+    for (final q in _data) {
+      if (seen.add(q.provider)) out.add(q);
+    }
+    return out;
   }
 
   @override
@@ -799,13 +866,10 @@ class _DashboardState extends State<Dashboard>
   }
 
   Widget _expandedView(bool dark, Color card) {
-    // Only providers with more than one account on screen need their account
-    // name shown to tell them apart (e.g. multiple Antigravity logins). For a
-    // single-account provider like Grok the username is just noise, so hide it.
-    final counts = <String, int>{};
-    for (final q in _displayed) {
-      counts[q.provider] = (counts[q.provider] ?? 0) + 1;
-    }
+    final displayed = _displayed;
+    final counts = _providerCounts(displayed);
+    final groups = groupProvidersForDisplay(displayed);
+    final showGroupHeaders = groups.length > 1;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -820,27 +884,20 @@ class _DashboardState extends State<Dashboard>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                for (var i = 0; i < _displayed.length; i++) ...[
-                  if (i > 0) const SizedBox(height: 8),
-                  ProviderTile(
-                    quota: _displayed[i],
-                    cardColor: card,
-                    history: _history[_displayed[i].provider] ?? const [],
-                    insights: _insights[_displayed[i].provider],
-                    heatmap: _heatmaps[_displayed[i].provider],
-                    expanded: _expanded.contains(_displayed[i].provider),
-                    onToggle: () => setState(() {
-                      final p = _displayed[i].provider;
-                      if (!_expanded.remove(p)) _expanded.add(p);
-                      WidgetsBinding.instance.addPostFrameCallback(
-                        (_) => _applySize(),
-                      );
-                    }),
-                    onContextMenu: (pos) => _showCardMenu(_displayed[i], pos),
-                    showAccounts:
-                        _showAccounts &&
-                        (counts[_displayed[i].provider] ?? 0) > 1,
-                  ),
+                for (var g = 0; g < groups.length; g++) ...[
+                  if (showGroupHeaders) ...[
+                    if (g > 0) const SizedBox(height: 10),
+                    _AccountGroupHeader(
+                      account: groups[g].account,
+                      count: groups[g].quotas.length,
+                      dark: dark,
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  for (var i = 0; i < groups[g].quotas.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 8),
+                    _providerTile(groups[g].quotas[i], card, counts),
+                  ],
                 ],
               ],
             ),
@@ -850,11 +907,32 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
+  Widget _providerTile(ProviderQuota q, Color card, Map<String, int> counts) {
+    final key = quotaDisplayKey(q);
+    return ProviderTile(
+      key: ValueKey(key),
+      quota: q,
+      cardColor: card,
+      history: _history[q.provider] ?? const [],
+      insights: _insights[q.provider],
+      heatmap: _heatmaps[q.provider],
+      expanded: _expanded.contains(key),
+      onToggle: () => setState(() {
+        if (!_expanded.remove(key)) _expanded.add(key);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+      }),
+      onContextMenu: (pos) => _showCardMenu(q, pos),
+      showAccounts: _shouldShowAccount(q, counts),
+    );
+  }
+
   /// Tiny strip: each visible provider as logo + status dot. Glanceable.
   Widget _compactView(bool dark) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
     final fg = dark ? Colors.white : const Color(0xFF111317);
+    final displayed = _displayed;
+    final counts = _providerCounts(displayed);
     return SizedBox(
       height: 46,
       child: Padding(
@@ -868,21 +946,14 @@ class _DashboardState extends State<Dashboard>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (int i = 0; i < _displayed.length; i++)
+                    for (int i = 0; i < displayed.length; i++)
                       Padding(
                         padding: EdgeInsets.only(
-                          right: i == _displayed.length - 1 ? 0 : 10,
+                          right: i == displayed.length - 1 ? 0 : 10,
                         ),
                         child: Tooltip(
-                          message:
-                              _showAccounts &&
-                                  _displayed[i].account != 'default' &&
-                                  _displayed[i].account != 'unknown'
-                              ? '${_displayed[i].displayName} (${_displayed[i].account})'
-                              : _displayed[i].stale
-                              ? '${_displayed[i].displayName} (cached)'
-                              : _displayed[i].displayName,
-                          child: _compactChip(_displayed[i], now, fg),
+                          message: _compactTooltip(displayed[i], counts),
+                          child: _compactChip(displayed[i], now, fg),
                         ),
                       ),
                   ],
@@ -916,6 +987,13 @@ class _DashboardState extends State<Dashboard>
               ),
       ],
     );
+  }
+
+  String _compactTooltip(ProviderQuota q, Map<String, int> counts) {
+    final base = _shouldShowAccount(q, counts)
+        ? '${q.displayName} (${q.account})'
+        : q.displayName;
+    return q.stale ? '$base (cached)' : base;
   }
 
   /// Average remaining headroom across visible providers that report quota,
@@ -1018,6 +1096,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   Widget _menuButton(Color muted) {
+    final counts = _providerCounts(_data);
     return PopupMenuButton<String>(
       tooltip: 'Providers and refresh',
       padding: EdgeInsets.zero,
@@ -1033,12 +1112,14 @@ class _DashboardState extends State<Dashboard>
             style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
           ),
         ),
-        for (final q in _data)
+        for (final q in _menuProviders)
           CheckedPopupMenuItem(
             value: 'show:${q.provider}',
             checked: !_hidden.contains(q.provider),
             child: Text(
-              _showAccounts && q.account != 'default' && q.account != 'unknown'
+              (counts[q.provider] ?? 0) > 1
+                  ? '${q.displayName} (${counts[q.provider]} accounts)'
+                  : _shouldShowAccount(q, counts)
                   ? '${q.displayName} (${q.account})'
                   : q.displayName,
               style: const TextStyle(fontSize: AppType.subtitle),
@@ -1697,6 +1778,51 @@ class _DashboardState extends State<Dashboard>
   }
 }
 
+class _AccountGroupHeader extends StatelessWidget {
+  final String? account;
+  final int count;
+  final bool dark;
+
+  const _AccountGroupHeader({
+    required this.account,
+    required this.count,
+    required this.dark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
+    final fg = dark ? Colors.white : const Color(0xFF111317);
+    final line = dark ? const Color(0xFF2A2E36) : const Color(0xFFE2E4E8);
+    final label = account ?? 'default and local';
+    return Row(
+      children: [
+        Icon(Icons.account_circle_outlined, size: 14, color: muted),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: AppType.caption,
+              fontWeight: FontWeight.w700,
+              color: fg,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(height: 1, width: 34, color: line),
+        const SizedBox(width: 8),
+        Text(
+          '$count ${count == 1 ? 'provider' : 'providers'}',
+          style: TextStyle(fontSize: AppType.label, color: muted),
+        ),
+      ],
+    );
+  }
+}
+
 class ProviderTile extends StatelessWidget {
   final ProviderQuota quota;
   final Color cardColor;
@@ -1786,23 +1912,33 @@ class ProviderTile extends StatelessWidget {
               children: [
                 ProviderLogo(quota.provider, size: 20, color: fg),
                 const SizedBox(width: 10),
-                Text(
-                  quota.displayName,
-                  style: TextStyle(
-                    fontSize: AppType.subtitle,
-                    fontWeight: FontWeight.w600,
-                    color: fg,
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: quota.displayName,
+                          style: TextStyle(
+                            fontSize: AppType.subtitle,
+                            fontWeight: FontWeight.w600,
+                            color: fg,
+                          ),
+                        ),
+                        if (showAccounts && quotaHasSpecificAccount(quota))
+                          TextSpan(
+                            text: ' (${quota.account})',
+                            style: TextStyle(
+                              fontSize: AppType.caption,
+                              fontWeight: FontWeight.w500,
+                              color: muted,
+                            ),
+                          ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                if (showAccounts &&
-                    quota.account != 'default' &&
-                    quota.account != 'unknown' &&
-                    quota.account != 'installed' &&
-                    quota.account != 'cli')
-                  Text(
-                    ' (${quota.account})',
-                    style: TextStyle(fontSize: AppType.caption, color: muted),
-                  ),
                 const SizedBox(width: 8),
                 if (quota.isLocal)
                   _Dot(
@@ -1812,7 +1948,6 @@ class ProviderTile extends StatelessWidget {
                   ) // running but idle
                 else if (quota.windows.isNotEmpty)
                   _Dot(statusColor),
-                const Spacer(),
                 if (quota.stale) ...[
                   Icon(Icons.history_rounded, size: 12, color: muted),
                   const SizedBox(width: 3),
