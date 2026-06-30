@@ -50,6 +50,9 @@ Notable changes to quotabot. Newest first.
   and returns a JSON 400 error for malformed provider ids.
 
 ### Fixed
+- CI now pins the macOS runner to `macos-15`, avoiding the current
+  `macos-latest` migration warning while keeping the desktop package build on a
+  verified image.
 - CI now uses `actions/setup-python@v6`, removing the Node 20 runtime
   deprecation warning while keeping Python pinned to 3.13 for coverage and
   LiteLLM proxy integration tests.
