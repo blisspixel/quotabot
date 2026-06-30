@@ -43,6 +43,10 @@ the adapters resolve the user home directory cross-platform.
   credit usage percent for the billing cycle and the cycle reset timestamp,
   parsed into a single monthly window. This is a billing metadata call, not a
   model call, so it costs no tokens.
+- Multi-account: every account object in `auth.json` is read. quotabot tries the
+  matching account-scoped grant before the provider-default grant (primary
+  account only) or that account's CLI token, and successful reads are cached per
+  account.
 
 ## Antigravity (Google)
 

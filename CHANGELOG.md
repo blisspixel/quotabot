@@ -12,6 +12,10 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Grok now reads every account present in `~/.grok/auth.json`, tries an
+  account-scoped quotabot grant for each one, and caches successful reads per
+  account so switching accounts does not overwrite the previous account's
+  last-known-good quota.
 - Antigravity OAuth login now resolves the signed-in Google email from userinfo
   after token exchange and stores the grant in the matching account-scoped slot
   as well as the provider-default slot. Userinfo failures fail closed and keep

@@ -88,6 +88,8 @@ void saveHistory(ProviderQuota q) {
 bool _hasAccount(String account) =>
     account.isNotEmpty && account != 'unknown' && account != 'default';
 
+const _accountScopedProviders = {'antigravity', 'grok'};
+
 /// Path of the per-account snapshot file for [provider]/[account], e.g.
 /// `antigravity_work_at_example.com.json`. One machine can hold several logins
 /// for a provider, so each account's last-known-good snapshot is cached apart.
@@ -95,11 +97,7 @@ File _accountedPath(String provider, String account) => File(
     '${cacheDir().path}/${_safeProviderStem(provider)}_${_safeProviderStem(account)}.json');
 
 File _accountedFile(ProviderQuota q) {
-  // Antigravity is the one provider that currently reads several accounts, so
-  // its snapshot is keyed per account. Other providers write the plain file
-  // until they gain multi-account reads; the keying itself is generic
-  // ([_accountedPath]) so opting a provider in is a one-line change.
-  if (q.provider == 'antigravity' && _hasAccount(q.account)) {
+  if (_accountScopedProviders.contains(q.provider) && _hasAccount(q.account)) {
     return _accountedPath(q.provider, q.account);
   }
   return _file(q.provider);
@@ -174,6 +172,11 @@ ProviderQuota? loadAntigravitySnapshot(String account) =>
 /// the generic [loadAccountSnapshots].
 List<ProviderQuota> loadAllAntigravitySnapshots() =>
     loadAccountSnapshots('antigravity');
+
+ProviderQuota? loadGrokSnapshot(String account) =>
+    loadAccountSnapshot('grok', account);
+
+List<ProviderQuota> loadAllGrokSnapshots() => loadAccountSnapshots('grok');
 
 // --- Long-term analytics buckets -------------------------------------------
 //

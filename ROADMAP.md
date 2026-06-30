@@ -141,11 +141,13 @@ it stands up serve every phase after it.
    store now supports independent account-scoped grants; Grok device login and
    Antigravity OAuth login persist an account-scoped grant when the account email
    is available; Grok/Antigravity prefer the matching account grant before
-   falling back to the provider-default grant or host-app token. Codex now has
+   falling back to the provider-default grant or host-app token; Grok reads every
+   account in its auth file with per-account cache fallback. Codex now has
    adapter fixtures for missing sessions, absent `rate_limits`, stale snapshots,
-   and multi-bucket scans. Remaining: live multi-account discovery, signed-out
-   auto-hide beyond Antigravity, and the UI/profile grouping. (Copilot's
-   per-account read lands post-1.0 with the provider itself.)
+   and multi-bucket scans. Remaining: signed-out auto-hide beyond
+   Antigravity/Grok, deeper Antigravity live multi-account reads, and the
+   UI/profile grouping. (Copilot's per-account read lands post-1.0 with the
+   provider itself.)
 7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to

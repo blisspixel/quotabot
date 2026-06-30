@@ -19,6 +19,7 @@ void main() {
       'history_.._escape.jsonl',
       'buckets_.._escape.json',
       'antigravity_test-account.json',
+      'grok_test-account.json',
     ]) {
       final f = File('${cacheDir().path}/$name');
       if (f.existsSync()) f.deleteSync();
@@ -129,6 +130,23 @@ void main() {
       loadAllAntigravitySnapshots().any((s) => s.account == 'test-account'),
       isTrue,
     );
+  });
+
+  test('loadGrokSnapshot round-trips per account', () {
+    final q = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'test-account',
+      asOf: 1,
+      windows: [QuotaWindow(label: 'monthly', usedPercent: 44)],
+    );
+    saveSnapshot(q);
+    final back = loadGrokSnapshot('test-account');
+    expect(back, isNotNull);
+    expect(back!.account, 'test-account');
+    expect(back.windows.single.usedPercent, 44);
+    expect(
+        loadAllGrokSnapshots().map((s) => s.account), contains('test-account'));
   });
 
   group('generic per-account snapshots', () {
