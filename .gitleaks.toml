@@ -1,0 +1,16 @@
+title = "quotabot gitleaks configuration"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Google installed-app OAuth clients are public and non-confidential."
+condition = "AND"
+paths = [
+  '''collector/lib/auth/google_auth\.dart''',
+  '''collector/lib/adapters/antigravity\.dart''',
+]
+regexes = [
+  '''_publicClientSecret\s*=\s*'GOCSPX-[^']+';''',
+  '''_geminiClientSecret\s*=\s*'GOCSPX-[^']+';''',
+]
