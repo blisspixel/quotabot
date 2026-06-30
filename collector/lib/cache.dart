@@ -10,7 +10,11 @@ import 'util.dart';
 /// Successful provider reads are written here; when a later read fails or comes
 /// back empty (rate limit, expired token, logged-out account) the collector
 /// serves the cached snapshot marked stale instead of blanking the provider.
-Directory cacheDir() => quotabotDir('cache');
+Directory cacheDir() {
+  final dir = quotabotDir('cache');
+  restrictOwnerOnlyDirectory(dir);
+  return dir;
+}
 
 String _safeProviderStem(String provider) {
   final safe = provider.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
@@ -27,9 +31,13 @@ const _maxHistoryBytes = 5 * 1024 * 1024;
 /// app and the CLI can run at once) never sees a half-written file, and two
 /// concurrent writers do not share one temp path.
 void _atomicWrite(File f, String contents) {
+  restrictOwnerOnlyDirectory(f.parent);
   final tmp = File('${f.path}.$pid.tmp');
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictOwnerOnlyFile(tmp);
   tmp.writeAsStringSync(contents);
   tmp.renameSync(f.path);
+  restrictOwnerOnlyFile(f);
 }
 
 /// Deletes leftover atomic-write temp files (e.g. from a process killed between
@@ -71,7 +79,7 @@ void saveHistory(ProviderQuota q) {
         '${cacheDir().path}/history_${_safeProviderStem(q.provider)}.jsonl');
     final line = jsonEncode(q.toJson());
     if (!f.existsSync() || f.lengthSync() > _maxHistoryBytes) {
-      f.writeAsStringSync('$line\n');
+      _atomicWrite(f, '$line\n');
       return;
     }
     final lines = f.readAsLinesSync().where((l) => l.trim().isNotEmpty).toList()
@@ -167,10 +175,11 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
 /// touching live providers. This is the cheap routing surface for per-request
 /// routers: it trades freshness for speed, and callers receive explicit age and
 /// stale metadata from the MCP layer.
-List<ProviderQuota> loadCachedSnapshots() {
+List<ProviderQuota> loadCachedSnapshots({int? now}) {
   final dir = cacheDir();
   if (!dir.existsSync()) return const [];
   final byIdentity = <String, ProviderQuota>{};
+  final newestAllowedAsOf = (now ?? nowEpoch()) + 60;
   try {
     for (final entity in dir.listSync()) {
       if (entity is! File) continue;
@@ -181,6 +190,8 @@ List<ProviderQuota> loadCachedSnapshots() {
         final q = ProviderQuota.fromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
+        if (q.asOf > newestAllowedAsOf) continue;
+        if (!_isCanonicalSnapshotFileName(name, q)) continue;
         final key = '${q.provider}\u0000${q.account}';
         final existing = byIdentity[key];
         if (existing == null || q.asOf >= existing.asOf) {
@@ -195,6 +206,15 @@ List<ProviderQuota> loadCachedSnapshots() {
       return byProvider != 0 ? byProvider : a.account.compareTo(b.account);
     });
   return out;
+}
+
+bool _isCanonicalSnapshotFileName(String name, ProviderQuota quota) {
+  if (_accountScopedProviders.contains(quota.provider) &&
+      _hasAccount(quota.account)) {
+    return name ==
+        '${_safeProviderStem(quota.provider)}_${_safeProviderStem(quota.account)}.json';
+  }
+  return name == '${_safeProviderStem(quota.provider)}.json';
 }
 
 /// Antigravity's per-account snapshot, by account. Thin alias over the generic

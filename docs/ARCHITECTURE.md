@@ -163,6 +163,11 @@ profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`
 The cache lives under the platform application-data directory
 (`%LOCALAPPDATA%/quotabot/cache` on Windows). This is what keeps a transient
 rate limit or an expired token from blanking a provider.
+The cache directory and atomic-write files are best-effort owner-only local
+metadata. Cache-only routing reads only canonical snapshot filenames that match
+the parsed provider/account identity and rejects snapshots dated materially in
+the future, so a stray JSON file in the cache directory cannot become a fresh
+routing recommendation.
 For multi-account providers, stale per-account snapshots are appended only when
 the account is still present in that provider's current local account index and
 the live adapter did not already return it. This is the signed-out auto-hide
@@ -233,15 +238,17 @@ model to a concrete LiteLLM deployment. It fails soft: bad policy, unreachable
 quotabot, or malformed response leaves the requested model unchanged.
 
 The integration is covered at two layers. Unit tests import the hook directly to
-check policy precedence, agent identity, local-fallback ordering, and loopback
-URL hardening. CI also installs the current `litellm[proxy]` package and starts
-a real LiteLLM proxy on loopback with a fake quotabot `/suggest` server and a
-fake OpenAI-compatible backend. That test proves the actual proxy
-`async_pre_call_hook` path rewrites a logical model to the provider with budget,
-spends no model tokens, and performs no external network calls. The plugin uses
-plain value classes rather than dataclasses because LiteLLM's current
-config-relative custom-callback loader executes modules before registering them
-in `sys.modules`, which breaks dataclass decoration on Python 3.13.
+check policy precedence, trusted key alias/user_id agent identity, local-fallback
+ordering, loopback URL hardening, no-redirect quotabot fetches, and metrics path
+containment under `~/.quotabot`. CI also installs the current `litellm[proxy]`
+package and starts a real LiteLLM proxy on loopback with a fake quotabot
+`/suggest` server and a fake OpenAI-compatible backend. That test proves the
+actual proxy `async_pre_call_hook` path rewrites a logical model to the provider
+with budget, spends no model tokens, and performs no external network calls. The
+plugin uses plain value classes rather than dataclasses because LiteLLM's
+current config-relative custom-callback loader executes modules before
+registering them in `sys.modules`, which breaks dataclass decoration on Python
+3.13.
 
 ## Alerts and `quotabot watch`
 

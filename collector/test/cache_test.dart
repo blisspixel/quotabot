@@ -20,6 +20,8 @@ void main() {
       'buckets_.._escape.json',
       'antigravity_test-account.json',
       'grok_test-account.json',
+      'rogue-cache-entry.json',
+      'claude_forged.json',
     ]) {
       final f = File('${cacheDir().path}/$name');
       if (f.existsSync()) f.deleteSync();
@@ -71,6 +73,26 @@ void main() {
     expect(loadSnapshot('__nope_does_not_exist__'), isNull);
   });
 
+  test('sweepStaleTempFiles deletes old atomic-write leftovers', () {
+    final stale = File('${cacheDir().path}/old-cache-write.tmp')
+      ..writeAsStringSync('stale');
+    final fresh = File('${cacheDir().path}/fresh-cache-write.tmp')
+      ..writeAsStringSync('fresh');
+    stale.setLastModifiedSync(
+      DateTime.now().subtract(const Duration(minutes: 10)),
+    );
+    fresh.setLastModifiedSync(DateTime.now());
+    addTearDown(() {
+      if (stale.existsSync()) stale.deleteSync();
+      if (fresh.existsSync()) fresh.deleteSync();
+    });
+
+    sweepStaleTempFiles();
+
+    expect(stale.existsSync(), isFalse);
+    expect(fresh.existsSync(), isTrue);
+  });
+
   test('loadCachedSnapshots scans last-known provider files only', () {
     final q = ProviderQuota(
       provider: id,
@@ -88,6 +110,36 @@ void main() {
     expect(cached, hasLength(1));
     expect(cached.single.account, 'acct');
     expect(cached.single.windows.single.usedPercent, 25);
+  });
+
+  test('loadCachedSnapshots rejects noncanonical and future cache entries', () {
+    final forged = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'forged',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 0)],
+    );
+    File('${cacheDir().path}/rogue-cache-entry.json')
+        .writeAsStringSync(jsonEncode(forged.toJson()));
+
+    final future = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782003601,
+      windows: [QuotaWindow(label: '5h', usedPercent: 1)],
+    );
+    File('${cacheDir().path}/$id.json')
+        .writeAsStringSync(jsonEncode(future.toJson()));
+
+    final cached = loadCachedSnapshots(now: 1782000000);
+    expect(
+      cached.any((provider) =>
+          provider.provider == 'claude' && provider.account == 'forged'),
+      isFalse,
+    );
+    expect(cached.any((provider) => provider.provider == id), isFalse);
   });
 
   test('recordHeadroomSample accumulates into one hourly bucket', () {
@@ -111,6 +163,16 @@ void main() {
 
   test('loadBuckets returns empty for an unknown provider', () {
     expect(loadBuckets('__nope_does_not_exist__'), isEmpty);
+  });
+
+  test('recentBurnByProvider reads bucket stats by provider', () {
+    final now = 1782000000;
+    recordHeadroomSample(id, 80, now - 3600);
+    recordHeadroomSample(id, 70, now);
+
+    final stats = recentBurnStatsByProvider([id], now);
+    expect(stats[id], isNotNull);
+    expect(recentBurnByProvider([id], now)[id], stats[id]!.perHour);
   });
 
   test('provider cache filenames stay inside the cache directory', () {

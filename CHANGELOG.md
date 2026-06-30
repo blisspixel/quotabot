@@ -4,6 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Security
+- Completed a repository-wide adversarial security pass and fixed every
+  candidate it found. Cache-only routing now accepts only canonical snapshot
+  filenames with non-future timestamps, local cache directories are
+  owner-restricted, Windows SQLite loading no longer trusts `WINDIR`, Windows
+  ACL grants use the authenticated current-user SID, the LiteLLM router refuses
+  HTTP redirects from the loopback quotabot endpoint, LiteLLM agent rules only
+  trust key alias or user_id identity, LiteLLM metrics writes are contained
+  under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
+
 ### Changed
 - Owner-only local file hardening is now shared across token storage and routing
   lease metadata. Lease directories, lock files, and atomic write files are

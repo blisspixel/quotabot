@@ -27,8 +27,8 @@ Directory quotabotDir(String sub) {
 void restrictOwnerOnlyFile(File file) {
   try {
     if (Platform.isWindows) {
-      final user = _windowsUser();
-      if (user == null || user.isEmpty) return;
+      final user = windowsAclPrincipal();
+      if (user == null) return;
       Process.runSync('icacls', [file.path, '/inheritance:r']);
       Process.runSync('icacls', [file.path, '/grant:r', '$user:F']);
     } else {
@@ -45,8 +45,8 @@ void restrictOwnerOnlyDirectory(Directory dir) {
   try {
     if (!dir.existsSync()) dir.createSync(recursive: true);
     if (Platform.isWindows) {
-      final user = _windowsUser();
-      if (user == null || user.isEmpty) return;
+      final user = windowsAclPrincipal();
+      if (user == null) return;
       Process.runSync('icacls', [dir.path, '/inheritance:r']);
       Process.runSync('icacls', [dir.path, '/grant:r', '${user}:(OI)(CI)F']);
     } else {
@@ -55,12 +55,57 @@ void restrictOwnerOnlyDirectory(Directory dir) {
   } catch (_) {}
 }
 
-String? _windowsUser() {
-  final username = Platform.environment['USERNAME'];
-  if (username == null || username.isEmpty) return null;
-  final domain = Platform.environment['USERDOMAIN'];
-  if (domain == null || domain.isEmpty) return username;
-  return '$domain\\$username';
+typedef WindowsIdentityLookup = ProcessResult Function();
+
+String? windowsAclPrincipal({WindowsIdentityLookup? lookup}) {
+  try {
+    final result = lookup?.call() ??
+        Process.runSync('whoami', const ['/user', '/fo', 'csv']);
+    if (result.exitCode != 0) return null;
+    return parseWhoamiUserSid(result.stdout.toString());
+  } catch (_) {
+    return null;
+  }
+}
+
+String? parseWhoamiUserSid(String output) {
+  for (final line in output.split(RegExp(r'\r?\n'))) {
+    final columns = _parseCsvLine(line);
+    if (columns.length >= 2 && columns[1].startsWith('S-1-')) {
+      return '*${columns[1]}';
+    }
+  }
+  return null;
+}
+
+List<String> _parseCsvLine(String line) {
+  final values = <String>[];
+  final current = StringBuffer();
+  var quoted = false;
+  for (var i = 0; i < line.length; i++) {
+    final char = line[i];
+    if (quoted) {
+      if (char == '"') {
+        if (i + 1 < line.length && line[i + 1] == '"') {
+          current.write('"');
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        current.write(char);
+      }
+    } else if (char == ',') {
+      values.add(current.toString());
+      current.clear();
+    } else if (char == '"') {
+      quoted = true;
+    } else {
+      current.write(char);
+    }
+  }
+  values.add(current.toString());
+  return values;
 }
 
 /// Recursively find the first value stored under [key] anywhere in a decoded
@@ -143,45 +188,53 @@ String? asciiString(List<int> chunk) {
 
 /// Detects installed popular agentic dev coding CLI/IDE tools by common data dirs.
 /// Used for passive robustness even if no active subscription or full adapter data.
-Set<String> detectInstalledAgenticTools() {
+Set<String> detectInstalledAgenticTools({
+  String? homePath,
+  String? appDataPath,
+  String? xdgDataPath,
+  bool Function(String path)? exists,
+}) {
   final detected = <String>{};
-  final h = home();
-  final appData = Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
-  final xdg = Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
+  final h = homePath ?? home();
+  final appData =
+      appDataPath ?? Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
+  final xdg =
+      xdgDataPath ?? Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
+  final pathExists = exists ?? (path) => Directory(path).existsSync();
 
   // Kiro (CLI + IDE, VSCode fork, credits)
-  if (Directory('$h/.kiro').existsSync() ||
-      Directory('$appData/Kiro').existsSync() ||
-      Directory('$h/Library/Application Support/Kiro').existsSync() ||
-      Directory('$xdg/kiro').existsSync()) {
+  if (pathExists('$h/.kiro') ||
+      pathExists('$appData/Kiro') ||
+      pathExists('$h/Library/Application Support/Kiro') ||
+      pathExists('$xdg/kiro')) {
     detected.add('kiro');
   }
 
   // Cursor (popular IDE with agentic, credits on Pro, local usage)
-  if (Directory('$h/.cursor').existsSync() ||
-      Directory('$appData/Cursor').existsSync() ||
-      Directory('$h/Library/Application Support/Cursor').existsSync() ||
-      Directory('$xdg/cursor').existsSync()) {
+  if (pathExists('$h/.cursor') ||
+      pathExists('$appData/Cursor') ||
+      pathExists('$h/Library/Application Support/Cursor') ||
+      pathExists('$xdg/cursor')) {
     detected.add('cursor');
   }
 
   // Windsurf / Devin (now Devin Desktop / Devin CLI; Cascade agentic with daily/weekly quota)
-  if (Directory('$h/.windsurf').existsSync() ||
-      Directory('$appData/Windsurf').existsSync() ||
-      Directory('$h/.codeium/windsurf').existsSync() ||
-      Directory('$appData/.codeium/windsurf').existsSync() ||
-      Directory('$h/.devin').existsSync() ||
-      Directory('$appData/devin').existsSync() ||
-      Directory('$appData/Devin').existsSync() ||
-      Directory('$appData/Local/devin').existsSync()) {
+  if (pathExists('$h/.windsurf') ||
+      pathExists('$appData/Windsurf') ||
+      pathExists('$h/.codeium/windsurf') ||
+      pathExists('$appData/.codeium/windsurf') ||
+      pathExists('$h/.devin') ||
+      pathExists('$appData/devin') ||
+      pathExists('$appData/Devin') ||
+      pathExists('$appData/Local/devin')) {
     detected.add('windsurf');
   }
 
   // Antigravity (Google agentic IDE/CLI)
-  if (Directory('$h/.antigravity').existsSync() ||
-      Directory('$appData/Antigravity').existsSync() ||
-      Directory('$h/Library/Application Support/Antigravity').existsSync() ||
-      Directory('$xdg/antigravity').existsSync()) {
+  if (pathExists('$h/.antigravity') ||
+      pathExists('$appData/Antigravity') ||
+      pathExists('$h/Library/Application Support/Antigravity') ||
+      pathExists('$xdg/antigravity')) {
     detected.add('antigravity');
   }
 

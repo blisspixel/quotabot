@@ -74,7 +74,7 @@ so routing here stays consistent with the desktop widget and the MCP server.
 
 ## Steering specific agents
 
-Set `metadata.agent` on a request (or use a LiteLLM key alias) and add a rule in
+Use a LiteLLM key alias or user_id and add a rule in
 `quotabot-routing.yaml`:
 
 ```yaml
@@ -89,8 +89,9 @@ redirects the agent to a logical model that is then routed normally.
 ## Usage metrics
 
 Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per served
-request (requested model, served model, tokens, cost). This closes the loop:
-LiteLLM spend plus quotabot subscription headroom in one place.
+request (requested model, served model, tokens, cost). The path is constrained to
+`~/.quotabot`; relative paths are placed there. This closes the loop: LiteLLM
+spend plus quotabot subscription headroom in one place.
 
 ## Failure behavior
 

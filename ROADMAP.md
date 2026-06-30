@@ -271,8 +271,15 @@ here is the final one.
     is the compile-time built-in adapter and fixture registry; registry tests
     require one committed sanitized provider-shape fixture per adapter, including
     Lemonade; CONTRIBUTING has the provider checklist.
-18. [ ] A recurring security pass and an adversarial bug-hunt round that returns
+18. [x] A recurring security pass and an adversarial bug-hunt round that returns
     empty (see continuous hardening below).
+    Shipped: a repository-wide adversarial scan reviewed 101 tracked source,
+    integration, installer, and CI files, fixed seven plausible security
+    candidates, pinned each fix with regression tests, and closed with no open
+    reportable findings. Hardened areas include cache snapshot provenance,
+    owner-only local metadata permissions, Windows SQLite library loading,
+    LiteLLM agent identity, LiteLLM loopback fetch redirects, LiteLLM metrics
+    path containment, and least-privilege GitHub Actions token permissions.
 19. [ ] An animated GIF in the README (the widget collapsing and expanding, `top`
     live, the 90-day analytics view), generated from demo mode so it stays
     reproducible, plus verified macOS and Linux packaging.

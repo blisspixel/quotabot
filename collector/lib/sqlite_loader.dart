@@ -13,7 +13,7 @@ bool _configured = false;
 void configureSqliteLibrary() {
   if (_configured) return;
   open.overrideForAll(() {
-    for (final path in _sqliteCandidates()) {
+    for (final path in trustedSqliteCandidates()) {
       try {
         return DynamicLibrary.open(path);
       } catch (_) {}
@@ -23,15 +23,13 @@ void configureSqliteLibrary() {
   _configured = true;
 }
 
-List<String> _sqliteCandidates() {
-  if (Platform.isWindows) {
-    final windir = Platform.environment['WINDIR'] ?? r'C:\Windows';
-    return [
-      '$windir\\System32\\winsqlite3.dll',
-      r'C:\Windows\System32\winsqlite3.dll',
-    ];
+List<String> trustedSqliteCandidates({bool? isWindows, bool? isMacOS}) {
+  final windows = isWindows ?? Platform.isWindows;
+  final macOS = isMacOS ?? Platform.isMacOS;
+  if (windows) {
+    return const [r'C:\Windows\System32\winsqlite3.dll'];
   }
-  if (Platform.isMacOS) {
+  if (macOS) {
     return const [
       '/usr/lib/libsqlite3.dylib',
       '/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib',

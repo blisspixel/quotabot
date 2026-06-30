@@ -43,8 +43,9 @@ models:
       - deployment: claude-sonnet
         provider: claude
 
-# Steer specific agents to specific models. The agent identity is read from the
-# LiteLLM key alias when present, then request metadata.agent or metadata.user.
+# Steer specific agents to specific models. The agent identity is read only from
+# trusted LiteLLM key alias or user_id; client-controlled request metadata cannot
+# select these rules.
 # `pin` forces a concrete deployment; `model` redirects to a logical model that
 # is then routed by headroom.
 agents:

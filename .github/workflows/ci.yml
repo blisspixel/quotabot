@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     # Run the full suite on every claimed platform (Linux, macOS, Windows) so the
