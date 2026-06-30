@@ -11,9 +11,16 @@ Notable changes to quotabot. Newest first.
   ubuntu-latest, macos-latest, and windows-latest), so the cross-platform paths
   are exercised on a real host of every claimed OS instead of assumed. The job
   uses bash on every runner (Git Bash on Windows) for consistent multi-line
-  steps, and Python is pinned for the coverage gate and the LiteLLM tests.
+  steps, and Python is pinned to 3.13 for the coverage gate and current
+  `litellm[proxy]` integration tests.
 
 ### Added
+- The LiteLLM router is now covered by a real proxy integration test. CI
+  installs `litellm[proxy]`, launches a LiteLLM proxy on loopback with the
+  actual quotabot `async_pre_call_hook`, serves a fake quotabot `/suggest`
+  endpoint and a fake OpenAI-compatible backend, and verifies that a logical
+  model is rewritten to the provider with budget. The test is token-free,
+  external-network-free, and catches current LiteLLM loader behavior.
 - Deterministic property/fuzz tests now cover the untrusted JSON, protobuf,
   gRPC-web, embedded-token, and local-runtime parser boundaries. Sanitized
   provider-shape fixtures for Codex, Claude, Antigravity, Cursor, Windsurf/Devin

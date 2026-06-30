@@ -36,7 +36,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -66,7 +65,6 @@ def _is_loopback_url(url: str) -> bool:
         return False
 
 
-@dataclass(frozen=True)
 class Candidate:
     """One deployment a logical model may route to.
 
@@ -76,33 +74,54 @@ class Candidate:
     local runtime that is never gated by headroom.
     """
 
-    deployment: str
-    provider: Optional[str] = None
-    local: bool = False
+    __slots__ = ("deployment", "provider", "local")
+
+    def __init__(
+        self,
+        deployment: str,
+        provider: Optional[str] = None,
+        local: bool = False,
+    ) -> None:
+        self.deployment = deployment
+        self.provider = provider
+        self.local = local
 
 
-@dataclass(frozen=True)
 class AgentRule:
     """How to route a named agent. ``pin`` forces a concrete deployment and
     skips routing entirely; ``model`` redirects the agent to a logical model
     that is then routed normally."""
 
-    pin: Optional[str] = None
-    model: Optional[str] = None
+    __slots__ = ("pin", "model")
+
+    def __init__(self, pin: Optional[str] = None, model: Optional[str] = None) -> None:
+        self.pin = pin
+        self.model = model
 
 
-@dataclass
 class Policy:
-    quotabot_url: str = "http://127.0.0.1:8721"
-    snapshot_ttl_seconds: float = 45.0
-    comfort_threshold: float = 15.0
-    metrics_path: Optional[str] = None
-    models: dict[str, list[Candidate]] = field(default_factory=dict)
-    agents: dict[str, AgentRule] = field(default_factory=dict)
+    default_quotabot_url = "http://127.0.0.1:8721"
+    default_snapshot_ttl_seconds = 45.0
+    default_comfort_threshold = 15.0
 
-    def __post_init__(self) -> None:
+    def __init__(
+        self,
+        quotabot_url: str = default_quotabot_url,
+        snapshot_ttl_seconds: float = default_snapshot_ttl_seconds,
+        comfort_threshold: float = default_comfort_threshold,
+        metrics_path: Optional[str] = None,
+        models: Optional[dict[str, list[Candidate]]] = None,
+        agents: Optional[dict[str, AgentRule]] = None,
+    ) -> None:
+        self.quotabot_url = quotabot_url
+        self.snapshot_ttl_seconds = snapshot_ttl_seconds
+        self.comfort_threshold = comfort_threshold
+        self.metrics_path = metrics_path
+        self.models = models or {}
+        self.agents = agents or {}
+
         if not _is_loopback_url(self.quotabot_url):
-            self.quotabot_url = "http://127.0.0.1:8721"
+            self.quotabot_url = self.default_quotabot_url
         self.snapshot_ttl_seconds = max(1.0, min(float(self.snapshot_ttl_seconds), 3600.0))
         self.comfort_threshold = max(0.0, min(float(self.comfort_threshold), 100.0))
 
@@ -128,12 +147,12 @@ class Policy:
             for name, rule in (raw.get("agents") or {}).items()
         }
         return cls(
-            quotabot_url=raw.get("quotabot_url", cls.quotabot_url),
+            quotabot_url=raw.get("quotabot_url", cls.default_quotabot_url),
             snapshot_ttl_seconds=float(
-                raw.get("snapshot_ttl_seconds", cls.snapshot_ttl_seconds)
+                raw.get("snapshot_ttl_seconds", cls.default_snapshot_ttl_seconds)
             ),
             comfort_threshold=float(
-                raw.get("comfort_threshold", cls.comfort_threshold)
+                raw.get("comfort_threshold", cls.default_comfort_threshold)
             ),
             metrics_path=raw.get("metrics_path"),
             models=models,
@@ -186,7 +205,7 @@ class QuotabotRouter(CustomLogger):
                 data["model"] = chosen
         except Exception:
             # Fail soft: leave the request exactly as it was.
-            pass
+            return data
         return data
 
     async def _route(
@@ -288,7 +307,7 @@ class QuotabotRouter(CustomLogger):
             }
             await asyncio.to_thread(self._append_metric, record)
         except Exception:
-            pass
+            return
 
     def _append_metric(self, record: dict) -> None:
         path = _expand(self.policy.metrics_path)  # type: ignore[arg-type]

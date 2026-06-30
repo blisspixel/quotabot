@@ -199,7 +199,15 @@ it stands up serve every phase after it.
    emitted percentages bounded to 0..100. Sanitized provider-shape fixture files
    cover Codex, Claude, Antigravity, Cursor, Windsurf/Devin Desktop, Kiro, Grok,
    LM Studio, and Ollama through the pure parser paths.
-11. [ ] LiteLLM plugin covered by real-proxy integration tests.
+11. [x] LiteLLM plugin covered by real-proxy integration tests. Shipped: CI now
+    installs current `litellm[proxy]` under Python 3.13 and runs the plugin
+    against a real LiteLLM proxy process, a loopback fake quotabot `/suggest`
+    endpoint, and a loopback fake OpenAI-compatible backend. The test proves the
+    actual `async_pre_call_hook` rewrites a logical model to the provider with
+    budget, spends no model tokens, avoids external network calls, and exercises
+    the current config-relative custom-callback loader. The plugin no longer
+    depends on dataclass decoration so it remains loadable through LiteLLM's
+    Python 3.13 config loader.
 12. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
     catalog against each provider's own model list (capabilities stay curated,
     since `/v1/models` endpoints do not expose context/tools/tier).

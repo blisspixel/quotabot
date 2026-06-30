@@ -170,6 +170,26 @@ The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalize
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
 and the MCP `list_models` tool.
 
+## LiteLLM proxy integration
+
+`integrations/litellm/` is the shipped example of using quotabot as a routing
+signal without putting quotabot in the request data path. The Python
+`quotabot_router.py` plugin registers a LiteLLM `async_pre_call_hook` that reads
+only the local quotabot `/suggest` quota recommendation and rewrites a logical
+model to a concrete LiteLLM deployment. It fails soft: bad policy, unreachable
+quotabot, or malformed response leaves the requested model unchanged.
+
+The integration is covered at two layers. Unit tests import the hook directly to
+check policy precedence, agent identity, local-fallback ordering, and loopback
+URL hardening. CI also installs the current `litellm[proxy]` package and starts
+a real LiteLLM proxy on loopback with a fake quotabot `/suggest` server and a
+fake OpenAI-compatible backend. That test proves the actual proxy
+`async_pre_call_hook` path rewrites a logical model to the provider with budget,
+spends no model tokens, and performs no external network calls. The plugin uses
+plain value classes rather than dataclasses because LiteLLM's current
+config-relative custom-callback loader executes modules before registering them
+in `sys.modules`, which breaks dataclass decoration on Python 3.13.
+
 ## Alerts and `quotabot watch`
 
 `alerts.dart` is a pure, edge-triggered alert pass: `computeAlerts` takes the

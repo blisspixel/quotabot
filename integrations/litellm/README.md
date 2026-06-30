@@ -48,12 +48,14 @@ so routing here stays consistent with the desktop widget and the MCP server.
    cp quotabot-routing.example.yaml quotabot-routing.yaml
    ```
 
-   Edit `config.yaml` so each `model_name` points at a real deployment and key,
-   and edit `quotabot-routing.yaml` so each `deployment` matches one of those
-   `model_name`s. Set `provider` on each candidate to the quotabot provider id
-   that gates it (codex, claude, grok, antigravity).
+   Keep `config.yaml` in the same folder as `quotabot_router.py`; current
+   LiteLLM proxy releases resolve custom callback modules relative to the config
+   file. Edit `config.yaml` so each `model_name` points at a real deployment and
+   key, and edit `quotabot-routing.yaml` so each `deployment` matches one of
+   those `model_name`s. Set `provider` on each candidate to the quotabot provider
+   id that gates it (codex, claude, grok, antigravity).
 
-3. Launch the proxy from this folder so the hook module is importable:
+3. Launch the proxy with that config:
 
    ```
    litellm --config config.yaml
@@ -96,6 +98,15 @@ Routing is an optimization, never a dependency. If quotabot is unreachable, the
 policy file is missing or invalid, or anything else goes wrong, the request
 falls through to the model the client originally asked for. The proxy keeps
 working; you just lose the quota-aware steering until quotabot is back.
+
+## Testing
+
+The unit tests cover policy parsing, precedence, local fallback ordering, and
+loopback URL hardening. CI also runs a real LiteLLM proxy integration test:
+it starts LiteLLM on loopback with the actual `async_pre_call_hook`, a fake
+quotabot `/suggest` endpoint, and a fake OpenAI-compatible backend, then proves
+that a logical model is rewritten to the provider with budget. The test spends
+no model tokens and never leaves the machine.
 
 ## Using it from coding agents
 
