@@ -24,6 +24,7 @@ export 'model_catalog.dart';
 export 'palette.dart';
 export 'profiles.dart';
 export 'registry.dart';
+export 'simulation.dart';
 export 'cache.dart'
     show
         loadHistory,

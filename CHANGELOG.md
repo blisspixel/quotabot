@@ -12,6 +12,11 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- CLI simulation mode for deterministic tests: `--mock-provider NAME --state
+  STATE` now returns a single synthetic provider snapshot without adapter calls,
+  history reads, or burn-history influence. Supported states are `healthy`,
+  `low`, `exhausted`, `blocked`, `signed-out`, and `stale`, with process-level
+  tests covering JSON snapshots, `check`, `suggest`, and usage errors.
 - The desktop app now has full profile controls: create, edit, delete, select,
   provider/account filters, routing policy, theme, and profile-scoped hidden
   providers plus sort. The widget, analytics, notifications, and alert webhooks

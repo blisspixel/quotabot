@@ -32,6 +32,7 @@ collector/ (Dart package)
                      the interactive sort (TopSort + sortProvidersForTop), and the
                      keyboard helpers (moveSelection, osc52Copy clipboard)
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
+  simulation.dart    exact one-provider snapshots for deterministic CLI tests
   mcp.dart           MCP tool shapes, output schemas, and registration
   collector.dart     collectAll(): run adapters, apply cache; package exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
@@ -77,6 +78,10 @@ The bulk of the logic lives in `parsing.dart` and `analysis.dart` with no
 network or disk access, so it is unit tested directly against fixtures. Adapters
 are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate parsing.
 This is why the core has high test coverage even though the adapters do I/O.
+`simulation.dart` follows the same rule: it produces deterministic
+`ProviderQuota` snapshots for CLI tests without adapter calls, history reads, or
+burn-history influence. It is intentionally separate from `demo.dart`, which is a
+believable multi-provider screenshot fleet rather than an exact assertion tool.
 
 ## Adapters
 

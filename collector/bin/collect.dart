@@ -26,6 +26,9 @@ const int _exitUsage = 64;
 const int _exitUnavailable = 69;
 
 late AnsiStyle style;
+List<ProviderQuota>? _simulatedSnapshot;
+
+bool get _usingSimulation => _simulatedSnapshot != null;
 
 /// Honors NO_COLOR and CLICOLOR=0, an explicit --color/--no-color, then falls
 /// back to whether stdout is an interactive terminal.
@@ -63,8 +66,8 @@ Future<List<ProviderQuota>> _read([QuotaProfile? profile]) =>
     _withSpinner('reading quota', () => _collectProfiled(profile));
 
 Future<List<ProviderQuota>> _collectProfiled(QuotaProfile? profile) async {
-  final results = await collectAll();
-  return profile == null ? results : applyProfile(results, profile);
+  final results = _simulatedSnapshot ?? await collectAll();
+  return profile == null ? List.of(results) : applyProfile(results, profile);
 }
 
 Map<String, dynamic> _snapshot(
@@ -78,7 +81,8 @@ Map<String, dynamic> _snapshot(
       'providers': results.map((r) => r.toJson()).toList(),
     };
 
-Future<void> main(List<String> args) async {
+Future<void> main(List<String> rawArgs) async {
+  final args = _normalizeArgs(rawArgs);
   final flags = args.where((a) => a.startsWith('-')).toSet();
   final pos = args.where((a) => !a.startsWith('-')).toList();
   final cmd = pos.isEmpty ? '' : pos.first;
@@ -100,6 +104,12 @@ Future<void> main(List<String> args) async {
     return;
   }
   final profile = profileSelection.profile;
+  final simulationSelection = _simulationFromFlags(flags);
+  if (!simulationSelection.ok) {
+    exitCode = _exitUsage;
+    return;
+  }
+  _simulatedSnapshot = simulationSelection.snapshot;
 
   switch (cmd) {
     case 'login':
@@ -186,9 +196,14 @@ RouteSuggestion _suggestFor(
       now,
       burnStatsByProvider: Platform.environment['QUOTABOT_DEMO'] == '1'
           ? demo.demoBurnStats()
-          : recentBurnStatsByProvider(results.map((q) => q.provider), now),
+          : _usingSimulation
+              ? const <String, BurnStat>{}
+              : recentBurnStatsByProvider(results.map((q) => q.provider), now),
       riskZ: riskZ,
     );
+
+List<HeadroomBucket> _historyBuckets(String provider) =>
+    _usingSimulation ? const <HeadroomBucket>[] : loadBuckets(provider);
 
 /// Reads a `--name=double` option from [flags], or [dflt] when absent or invalid.
 double _doubleOption(Iterable<String> flags, String name, double dflt) {
@@ -283,6 +298,43 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
   return dflt;
 }
 
+const _valueOptions = {
+  'interval',
+  'min-context',
+  'mock-provider',
+  'profile',
+  'risk',
+  'sort',
+  'state',
+  'task',
+  'theme',
+  'tier-ceiling',
+  'tier-floor',
+  'webhook',
+};
+
+List<String> _normalizeArgs(List<String> args) {
+  final normalized = <String>[];
+  for (var i = 0; i < args.length; i++) {
+    final arg = args[i];
+    if (arg == '--') {
+      normalized.addAll(args.skip(i));
+      break;
+    }
+    if (arg.startsWith('--') && !arg.contains('=')) {
+      final name = arg.substring(2);
+      if (_valueOptions.contains(name) &&
+          i + 1 < args.length &&
+          !args[i + 1].startsWith('-')) {
+        normalized.add('$arg=${args[++i]}');
+        continue;
+      }
+    }
+    normalized.add(arg);
+  }
+  return normalized;
+}
+
 ({QuotaProfile? profile, bool ok}) _profileFromFlags(Set<String> flags) {
   final requested = _stringOption(flags, 'profile', null);
   if (requested == null || requested.trim().isEmpty) {
@@ -294,6 +346,41 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
     return (profile: null, ok: false);
   }
   return (profile: profile, ok: true);
+}
+
+({List<ProviderQuota>? snapshot, bool ok}) _simulationFromFlags(
+  Set<String> flags,
+) {
+  final requested = flags
+      .any((f) => f == '--mock-provider' || f.startsWith('--mock-provider='));
+  if (!requested) return (snapshot: null, ok: true);
+
+  final provider = _stringOption(flags, 'mock-provider', null);
+  if (provider == null || provider.trim().isEmpty) {
+    stderr.writeln('quotabot: --mock-provider requires a provider name');
+    return (snapshot: null, ok: false);
+  }
+
+  final state = _stringOption(flags, 'state', 'healthy') ?? 'healthy';
+  final normalizedState = normalizeSimulationState(state);
+  if (normalizedState == null) {
+    stderr.writeln(
+      'quotabot: unknown --state "$state" '
+      '(use ${simulationStates.join(', ')})',
+    );
+    return (snapshot: null, ok: false);
+  }
+
+  final snapshot = simulateFleet(
+    provider: provider,
+    state: normalizedState,
+    now: nowEpoch(),
+  );
+  if (snapshot == null) {
+    stderr.writeln('quotabot: invalid --mock-provider "$provider"');
+    return (snapshot: null, ok: false);
+  }
+  return (snapshot: snapshot, ok: true);
 }
 
 /// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
@@ -630,6 +717,10 @@ void _printHelp() {
     '  --profile=NAME      use a local named profile view',
   );
   stdout.writeln(
+    '  --mock-provider NAME --state NAME  deterministic test snapshot '
+    '(${simulationStates.join(', ')})',
+  );
+  stdout.writeln(
     '  --color, --no-color force or disable color (also honors NO_COLOR)',
   );
   stdout.writeln(
@@ -787,7 +878,7 @@ Future<void> _runStats(
   if (wantsJson) {
     final report = <String, dynamic>{};
     for (final p in providers) {
-      final ins = Insights.from(loadBuckets(p), now, tzOffset: tz);
+      final ins = Insights.from(_historyBuckets(p), now, tzOffset: tz);
       final pace = _paceFor(byProvider[p], ins, now);
       report[p] = {...ins.toJson(), if (pace != null) 'pace': pace.toJson()};
     }
@@ -1001,7 +1092,7 @@ Future<void> _runCalibration(bool wantsJson, QuotaProfile? profile) async {
   final now = nowEpoch();
   final byProvider = <String, List<HeadroomBucket>>{};
   for (final q in results.where((q) => !q.isLocal)) {
-    final b = loadBuckets(q.provider);
+    final b = _historyBuckets(q.provider);
     if (b.isNotEmpty) byProvider[q.provider] = b;
   }
   final overall = calibrationAcross(byProvider, now);
@@ -1181,7 +1272,7 @@ void _printStats(
   // Portfolio view: where you actually spend, and what you barely use.
   final insMap = {
     for (final p in providers)
-      p: Insights.from(loadBuckets(p), now, tzOffset: tz),
+      p: Insights.from(_historyBuckets(p), now, tzOffset: tz),
   };
   final port = portfolioInsight(insMap);
   if (port.mostUsed != null) {
@@ -1206,7 +1297,7 @@ void _printStats(
   }
 
   for (final p in providers) {
-    final ins = Insights.from(loadBuckets(p), now, tzOffset: tz);
+    final ins = Insights.from(_historyBuckets(p), now, tzOffset: tz);
     if (ins.samples == 0) {
       print('  ${p.padRight(12)} no history yet');
       continue;

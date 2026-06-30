@@ -84,6 +84,24 @@ costs no usage tokens; add `--json` to any read command for machine output.
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
 
+### Deterministic simulation
+
+For tests and reproducible integration checks, every quota-reading CLI command
+can use one synthetic provider snapshot instead of real adapters:
+
+```bash
+quotabot --json --mock-provider claude --state exhausted
+quotabot check claude --json --mock-provider=claude --state=blocked
+quotabot suggest --json --mock-provider claude --state healthy
+```
+
+Supported states are `healthy`, `low`, `exhausted`, `blocked`, `signed-out`, and
+`stale`. `blocked` is specifically for the binding-window rule: the short window
+looks healthy, but the longer window is spent, so the provider is unavailable.
+Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
+state for assertions, skips live adapter calls, ignores real burn history, and
+does not read analytics buckets.
+
 ### Live view (`quotabot top`)
 
 `quotabot top` is the htop view of your plans: one bar per rolling window for

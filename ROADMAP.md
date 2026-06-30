@@ -181,8 +181,15 @@ it stands up serve every phase after it.
 
 ### Phase 3 - Deterministic testability, then hard testing
 
-9. [ ] A simulation mode (`--mock-provider claude --state exhausted`) for
+9. [x] A simulation mode (`--mock-provider claude --state exhausted`) for
    deterministic core tests - built first here, since the tests below lean on it.
+   Shipped: CLI simulation flags accept both `--name=value` and separated
+   `--name value` forms, create one exact synthetic provider snapshot, and
+   isolate the run from real adapter calls, analytics history, and burn-history
+   influence. Covered states are `healthy`, `low`, `exhausted`, `blocked`
+   (healthy short window but spent longer binding window), `signed-out`, and
+   `stale`, with pure tests and process-level CLI tests for snapshots, checks,
+   suggestions, and invalid-state usage errors.
 10. [ ] Property/fuzz tests on the untrusted parsers (they ingest external JSON and
    protobuf), plus integration tests against recorded provider fixtures.
 11. [ ] LiteLLM plugin covered by real-proxy integration tests.
