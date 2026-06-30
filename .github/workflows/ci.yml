@@ -30,7 +30,7 @@ jobs:
 
       # Pin Python so `python` resolves on every runner (macOS ships only
       # python3), for the coverage gate and the LiteLLM router tests.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 

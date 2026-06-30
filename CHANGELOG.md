@@ -38,6 +38,9 @@ Notable changes to quotabot. Newest first.
   and returns a JSON 400 error for malformed provider ids.
 
 ### Fixed
+- CI now uses `actions/setup-python@v6`, removing the Node 20 runtime
+  deprecation warning while keeping Python pinned to 3.13 for coverage and
+  LiteLLM proxy integration tests.
 - Grok usage now labels the shared paid-plan pool as a weekly window, matching
   the current Grok Usage tab semantics where Imagine, Chat, and Build are
   category breakdowns inside one shared allowance.
