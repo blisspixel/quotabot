@@ -54,6 +54,8 @@ Pick whichever transport you already speak. All return the same data.
     for "a reasoning model with budget" without quotabot ever seeing the task.
     `budget: "quota"` means measured built-in quota plans plus local runtimes;
     it excludes self-reported manual quota and does not permit paid API spend.
+    Local-runtime model entries include `local_readiness` (`loaded` or `cold`);
+    prefer loaded local models when equivalent candidates are available.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): the cheapest model that meets it and has budget, local-first.
   - Resource `quotas://current` - the same unfiltered live snapshot.

@@ -96,6 +96,21 @@ void main() {
     expect(reg.last.available, isFalse);
   });
 
+  test('loaded local models sort ahead of cold local models', () {
+    final reg = buildModelRegistry(
+      [
+        _local('ollama', const [
+          ModelInfo(id: 'z-cold', local: true),
+          ModelInfo(id: 'a-loaded', local: true, loaded: true),
+        ]),
+      ],
+      _now,
+    );
+    expect(reg.map((e) => e.model.id).toList(), ['a-loaded', 'z-cold']);
+    expect(reg.first.toJson()['local_readiness'], 'loaded');
+    expect(reg.last.toJson()['local_readiness'], 'cold');
+  });
+
   test('a cloud provider absent from the catalog contributes no models', () {
     final reg = buildModelRegistry([_cloud('grok', 30)], _now);
     expect(reg, isEmpty);
@@ -246,6 +261,20 @@ void main() {
     test('the lightest cloud tier wins when several qualify', () {
       final s = sg(const ModelRequirements(requireTools: true));
       expect(s.recommended?.model.id, 'haiku'); // light beats flagship
+    });
+
+    test('a loaded local model beats a cold local model', () {
+      final s = suggestModel(
+        [
+          _local('ollama', const [
+            ModelInfo(id: 'z-cold', local: true),
+            ModelInfo(id: 'a-loaded', local: true, loaded: true),
+          ]),
+        ],
+        _now,
+      );
+      expect(s.recommended?.model.id, 'a-loaded');
+      expect(s.reason, contains('loaded and ready now'));
     });
 
     test('no model with budget yields a null pick and a reason', () {

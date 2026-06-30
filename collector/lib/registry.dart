@@ -52,6 +52,9 @@ class ModelEntry {
     required this.stale,
   });
 
+  String? get localReadiness =>
+      local ? (model.loaded ? 'loaded' : 'cold') : null;
+
   Map<String, dynamic> toJson() => {
         ...model.toJson(),
         'provider': provider,
@@ -60,6 +63,7 @@ class ModelEntry {
         'available': available,
         'stale': stale,
         'quota_backed': quotaBacked,
+        if (localReadiness != null) 'local_readiness': localReadiness,
         if (source != null) 'source': source,
         if (headroomPercent != null) 'headroom_percent': headroomPercent,
         if (resetsAt != null) 'resets_at': resetsAt,
@@ -247,6 +251,9 @@ List<ModelEntry> buildModelRegistry(
   filtered.sort((x, y) {
     if (x.available != y.available) return x.available ? -1 : 1;
     if (x.local != y.local) return x.local ? 1 : -1; // cloud before local
+    if (x.local && y.local && x.model.loaded != y.model.loaded) {
+      return x.model.loaded ? -1 : 1;
+    }
     final hx = x.headroomPercent ?? (x.local ? 100.0 : -1.0);
     final hy = y.headroomPercent ?? (y.local ? 100.0 : -1.0);
     if (hx != hy) return hy.compareTo(hx);
@@ -281,6 +288,9 @@ Map<String, dynamic> modelRegistryJson(
 int _recommendCompare(ModelEntry a, ModelEntry b) {
   if (a.available != b.available) return a.available ? -1 : 1;
   if (a.local != b.local) return a.local ? -1 : 1;
+  if (a.local && b.local && a.model.loaded != b.model.loaded) {
+    return a.model.loaded ? -1 : 1;
+  }
   final tier = _tierRank(a.model.tier).compareTo(_tierRank(b.model.tier));
   if (tier != 0) return tier;
   final ha = a.headroomPercent ?? 100.0;
@@ -290,7 +300,10 @@ int _recommendCompare(ModelEntry a, ModelEntry b) {
 
 String _recommendReason(ModelEntry e) {
   if (e.local) {
-    return '${e.model.id} (local, free) handles this and keeps your paid quota.';
+    final readiness = e.model.loaded
+        ? 'loaded and ready now'
+        : 'installed locally; cold start may be required';
+    return '${e.model.id} (local, free) is $readiness and keeps your paid quota.';
   }
   final h = e.headroomPercent?.round();
   final tier = e.model.tier ?? 'available';

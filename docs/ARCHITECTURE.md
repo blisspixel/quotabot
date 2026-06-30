@@ -232,7 +232,10 @@ cross-provider list of models with per-model budget, surfaced as `quotabot model
 and the MCP `list_models` tool. Model budget filters are applied in the registry:
 `local` admits only local-runtime models, while `quota` admits local runtimes and
 measured built-in quota plans but excludes self-reported manual quotas because
-quotabot cannot verify their overage settings. `catalog_audit.dart` keeps the
+quotabot cannot verify their overage settings. Local-runtime entries surface
+`local_readiness` (`loaded` or `cold`), and model recommendations rank loaded
+local models ahead of cold installed models when both satisfy the same profile.
+`catalog_audit.dart` keeps the
 committed cloud catalog honest without adding runtime network calls: the standalone
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
 OpenAI/Codex, Anthropic/Claude, xAI/Grok, and Gemini/Antigravity, follows

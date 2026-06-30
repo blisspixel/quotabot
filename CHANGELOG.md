@@ -15,6 +15,10 @@ Notable changes to quotabot. Newest first.
   and `suggest_model`. `local` is a hard local-runtime cap; `quota` allows local
   runtimes plus measured built-in quota plans and excludes self-reported manual
   quotas so no-surprise routing stays explicit.
+- Model registry entries now expose local runtime readiness as `local_readiness`
+  (`loaded` or `cold`), and concrete model suggestions prefer loaded local
+  models over installed-but-cold local models when both meet the requested
+  profile.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
   `spend: quota_plan` is reserved for included quota plans with overages

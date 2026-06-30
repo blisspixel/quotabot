@@ -517,6 +517,10 @@ final _modelEntrySchema = JsonSchema.object(
     'local': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),
     'stale': JsonSchema.boolean(),
+    'quota_backed': JsonSchema.boolean(),
+    'local_readiness': JsonSchema.string(
+      description: 'For local-runtime models: loaded or cold.',
+    ),
     'context_tokens': JsonSchema.integer(),
     'max_output_tokens': JsonSchema.integer(),
     'tools': JsonSchema.boolean(),

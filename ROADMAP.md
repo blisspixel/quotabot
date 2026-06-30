@@ -369,6 +369,10 @@ Breadth and depth, once the core is trusted:
 - **First-class local models (the moat):** VRAM/readiness awareness ("can I run
   70B Q4 right now?", loaded vs cold, tokens/sec) and per-model capability tags,
   so "free" never secretly means a two-minute wait or a flubbed refactor.
+  Foundation shipped: model registry entries now surface `local_readiness`
+  (`loaded` or `cold`), and concrete model suggestions prefer loaded local
+  models ahead of installed-but-cold local models when both satisfy the same
+  requirements.
 - **Richer analytics:** hour-by-weekday heatmap polish, a contribution calendar,
   streaks and summary stats, plan-tier modeling, and provider status polling.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
