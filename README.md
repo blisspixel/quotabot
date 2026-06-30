@@ -136,6 +136,7 @@ quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
 quotabot suggest --local-first  # prefer local runtime before subscription quota
 quotabot models           # every model you can route to now, with budget + caps
+quotabot models --budget=local  # hard cap to free local-runtime models
 quotabot watch            # alert when a window goes low, naming where to route
 quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
 quotabot report           # weekly quota-health markdown export
@@ -151,7 +152,7 @@ available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters, one-request `exclude` lists, and
-`local_first` routing, plus
+`local_first` routing, model `budget` filters (`local` or measured `quota`), and
 `quotas://alerts` subscriptions) and a
 plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok` or
 `GET /suggest?local_first=true`). For how an agent should call quotabot and route, see

@@ -8,6 +8,7 @@ ProviderQuota _cloud(
   String id,
   double usedPercent, {
   bool stale = false,
+  String? source,
 }) =>
     ProviderQuota(
       provider: id,
@@ -15,6 +16,7 @@ ProviderQuota _cloud(
       account: 'a',
       asOf: _now,
       stale: stale,
+      source: source,
       windows: [QuotaWindow(label: 'weekly', usedPercent: usedPercent)],
     );
 
@@ -149,6 +151,45 @@ void main() {
           {'opus', 'haiku'});
     });
 
+    test('a local budget keeps only local-runtime models', () {
+      final reg = buildModelRegistry(
+        [
+          _cloud('claude', 20),
+          _local('ollama', const [ModelInfo(id: 'local-m', local: true)]),
+        ],
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.local,
+        ),
+      );
+      expect(reg.map((e) => e.model.id).toList(), ['local-m']);
+    });
+
+    test('a quota budget rejects self-reported manual cloud quotas', () {
+      final reg = buildModelRegistry(
+        [
+          _cloud('claude', 20, source: 'manual'),
+          _cloud('grok', 0),
+          _cloud('codex', 30),
+          _local('ollama', const [ModelInfo(id: 'local-m', local: true)]),
+        ],
+        _now,
+        catalog: {
+          ...catalog,
+          'codex': [const ModelInfo(id: 'codex-x')],
+          'grok': [const ModelInfo(id: 'grok-x')],
+        },
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.quota,
+        ),
+      );
+      expect(
+        reg.map((e) => e.model.id).toList(),
+        ['grok-x', 'codex-x', 'local-m'],
+      );
+    });
+
     test('the hard task profile requires reasoning', () {
       expect(ids(taskProfile('hard')), ['opus']);
     });
@@ -217,6 +258,18 @@ void main() {
       expect(s.recommended, isNull);
       expect(s.reason, isNotEmpty);
     });
+
+    test('the model suggestion JSON names the active budget policy', () {
+      final s = suggestModel(
+        providers,
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.local,
+        ),
+      );
+      expect(s.toJson(_now)['budget_policy'], 'local');
+    });
   });
 
   test('entry JSON merges the model with its budget', () {
@@ -232,5 +285,19 @@ void main() {
     expect(json['provider'], 'claude');
     expect(json['headroom_percent'], 80);
     expect(json['gating_window'], 'weekly');
+    expect(json['quota_backed'], isTrue);
+  });
+
+  test('registry JSON names the active budget policy', () {
+    final json = modelRegistryJson(
+      [
+        _local('ollama', const [ModelInfo(id: 'local-m', local: true)])
+      ],
+      _now,
+      requirements: const ModelRequirements(
+        budgetPolicy: ModelBudgetPolicy.local,
+      ),
+    );
+    expect(json['budget_policy'], 'local');
   });
 }

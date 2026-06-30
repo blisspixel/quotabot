@@ -245,6 +245,11 @@ explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
+Add `--budget=local` for a hard cap to free local-runtime models, or
+`--budget=quota` to allow local runtimes plus measured built-in quota plans while
+excluding self-reported manual quotas. `quota` is not permission to use
+request-metered paid APIs; those remain blocked by the LiteLLM guardrails unless
+explicitly enabled in that integration.
 
 For a one-off routing decision, add `--exclude=codex,grok` to `models` or
 `suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and
@@ -297,8 +302,9 @@ The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
-`--min-context` filters) returns the cheapest model that meets the need and has
-budget, local-first. The MCP `suggest_model` tool does the same for agents.
+`--min-context`/`--budget` filters) returns the cheapest model that meets the need
+and has budget, local-first. The MCP `suggest_model` tool does the same for
+agents.
 
 ## Routing over MCP
 

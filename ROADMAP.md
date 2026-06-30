@@ -344,11 +344,11 @@ Breadth and depth, once the core is trusted:
   `--min-context`, `--require-tools`/`--require-vision`/`--require-reasoning`, tier
   floor/ceiling, cheapest-qualifying-with-budget-wins, local-first, and the
   invariant that quotabot never reads the task). What remains post-1.0 is the rest
-  of the knobs (`--budget`, broader `--exclude` surfaces) and a cohesive
-  aggressive local-first mode that escalates to a paid plan only when the
-  requirements force it or a window is about to reset. Models stay filtered by
-  objective capability and the provider's own tier, never a quotabot quality
-  ranking. Foundation shipped: CLI `suggest` and `models` accept
+  of the knobs (broader `--exclude` surfaces) and a cohesive aggressive
+  local-first mode that escalates to a paid plan only when the requirements force
+  it or a window is about to reset. Models stay filtered by objective capability
+  and the provider's own tier, never a quotabot quality ranking. Foundation
+  shipped: CLI `suggest` and `models` accept
   `--exclude=A,B`, and MCP read/routing/reservation/model tools accept
   `exclude`; local HTTP `GET /suggest` accepts `?exclude=A,B` for the same
   one-off provider exclusion without editing profiles. Provider routing now has
@@ -357,7 +357,10 @@ Breadth and depth, once the core is trusted:
   subscription quota when local capacity is available. The LiteLLM plugin also
   distinguishes `spend: quota_plan` from `spend: paid_api` so included quota
   plans with overages disabled can be used while request-metered API routes are
-  skipped by default.
+  skipped by default. Model routing now has a `budget` envelope too:
+  `--budget=local` is a hard local-only cap, while `--budget=quota` allows local
+  runtimes plus measured built-in quota plans and rejects self-reported manual
+  quotas.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation

@@ -53,10 +53,38 @@ void main() {
     expect(providers, isNot(contains('ollama')));
   });
 
+  test('models budget local returns only local-runtime models', () async {
+    final result = await runCli(['models', '--json', '--budget=local']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['budget_policy'], 'local');
+    final models = json['models'] as List;
+    expect(models, isNotEmpty);
+    expect(models.every((entry) => (entry as Map)['local'] == true), isTrue);
+  });
+
+  test('suggest budget local recommends a concrete local model', () async {
+    final result = await runCli(['suggest', '--json', '--budget=local']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.suggest_model.v1');
+    expect(json['budget_policy'], 'local');
+    expect((json['recommended'] as Map)['local'], isTrue);
+  });
+
   test('suggest rejects malformed exclude providers', () async {
     final result = await runCli(['suggest', '--json', '--exclude=../bad']);
 
     expect(result.exitCode, 64);
     expect(result.stderr as String, contains('invalid --exclude provider'));
+  });
+
+  test('models rejects unknown budget policies', () async {
+    final result = await runCli(['models', '--json', '--budget=overage']);
+
+    expect(result.exitCode, 64);
+    expect(result.stderr as String, contains('unknown --budget value'));
   });
 }

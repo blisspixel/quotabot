@@ -10,6 +10,11 @@ Notable changes to quotabot. Newest first.
   subscription quota for cost-sensitive dispatch. Routing JSON includes
   `routing_policy` so callers can verify `balanced` versus `local_first`
   behavior.
+- `quotabot models` and profiled `quotabot suggest` now accept `--budget=local`
+  or `--budget=quota`, with matching MCP `budget` arguments on `list_models`
+  and `suggest_model`. `local` is a hard local-runtime cap; `quota` allows local
+  runtimes plus measured built-in quota plans and excludes self-reported manual
+  quotas so no-surprise routing stays explicit.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
   `spend: quota_plan` is reserved for included quota plans with overages

@@ -304,12 +304,34 @@ void main() {
       );
       expect(filtered.structuredContent?['models'], isEmpty);
 
+      final localOnly = await client.callTool(
+        const CallToolRequest(
+          name: 'list_models',
+          arguments: {'budget': 'local'},
+        ),
+      );
+      expect(localOnly.structuredContent?['budget_policy'], 'local');
+      expect(localOnly.structuredContent?['models'], isEmpty);
+
       final pick = await client.callTool(
         const CallToolRequest(name: 'suggest_model'),
       );
       expect(pick.structuredContent?['schema'], 'quotabot.suggest_model.v1');
       expect(
           (pick.structuredContent?['recommended'] as Map)['id'], 'claude-test');
+
+      final badBudget = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_model',
+          arguments: {'budget': 'paid_api'},
+        ),
+      );
+      expect(badBudget.isError, isFalse);
+      expect(
+        badBudget.structuredContent?['error'],
+        'unknown budget policy: "paid_api"',
+      );
+      expect(badBudget.structuredContent?['ranked'], isEmpty);
 
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);

@@ -182,8 +182,21 @@ Map<String, dynamic> decideNowResponse(
 }
 
 /// Builds a [ModelRequirements] from `list_models` tool arguments: a coarse
-/// `task` profile overlaid with explicit capability/tier filters.
-ModelRequirements _requirementsFromArgs(Map<String, dynamic> args) {
+/// `task` profile overlaid with explicit capability/tier/budget filters.
+({ModelRequirements requirements, String? error}) _requirementsFromArgs(
+  Map<String, dynamic> args,
+) {
+  final rawBudget = args['budget'];
+  final budget = rawBudget is String || rawBudget == null
+      ? modelBudgetPolicyFromName(rawBudget as String?)
+      : null;
+  if (budget == null) {
+    final label = rawBudget == null ? 'null' : jsonEncode(rawBudget);
+    return (
+      requirements: const ModelRequirements(),
+      error: 'unknown budget policy: $label',
+    );
+  }
   final explicit = ModelRequirements(
     minContextTokens: (args['min_context'] as num?)?.toInt(),
     requireTools: args['require_tools'] == true,
@@ -191,8 +204,12 @@ ModelRequirements _requirementsFromArgs(Map<String, dynamic> args) {
     requireReasoning: args['require_reasoning'] == true,
     tierFloor: args['tier_floor'] as String?,
     tierCeiling: args['tier_ceiling'] as String?,
+    budgetPolicy: budget,
   );
-  return taskProfile(args['task'] as String?).merge(explicit);
+  return (
+    requirements: taskProfile(args['task'] as String?).merge(explicit),
+    error: null,
+  );
 }
 
 /// Whether a single named provider has quota available now, or an
@@ -542,6 +559,10 @@ final _modelFilterInputSchema = JsonSchema.object(
     'tier_ceiling': JsonSchema.string(
       description: 'Maximum provider tier: light, standard, or flagship.',
     ),
+    'budget': JsonSchema.string(
+      description:
+          'Budget envelope: any, quota, or local. quota allows measured built-in quota plans plus local runtimes, but not self-reported manual quota.',
+    ),
     'exclude': JsonSchema.array(
       items: JsonSchema.string(),
       description:
@@ -594,6 +615,7 @@ final suggestModelOutputSchema = JsonSchema.object(
   properties: {
     'schema': JsonSchema.string(),
     'generated_at': JsonSchema.integer(),
+    'budget_policy': JsonSchema.string(),
     'recommended': _nullable(_modelEntrySchema),
     'reason': JsonSchema.string(),
     'ranked': JsonSchema.array(items: _modelEntrySchema),
@@ -610,6 +632,7 @@ final listModelsOutputSchema = JsonSchema.object(
     'catalog_updated': JsonSchema.string(
       description: 'Date the cloud capability catalog was last refreshed.',
     ),
+    'budget_policy': JsonSchema.string(),
     'models': JsonSchema.array(items: _modelEntrySchema),
   },
   required: ['schema', 'generated_at', 'models'],
@@ -1015,6 +1038,25 @@ Map<String, dynamic> _reserveUnavailable(
       'active_leases': _leaseDiscountJson(activeLeases),
     };
 
+Map<String, dynamic> _modelRegistryError(int now, String error) => {
+      'schema': 'quotabot.models.v1',
+      'generated_at': now,
+      'catalog_updated': kCatalogUpdated,
+      'budget_policy': ModelBudgetPolicy.any.wireName,
+      'models': const [],
+      'error': error,
+    };
+
+Map<String, dynamic> _modelSuggestionError(int now, String error) => {
+      'schema': 'quotabot.suggest_model.v1',
+      'generated_at': now,
+      'budget_policy': ModelBudgetPolicy.any.wireName,
+      'recommended': null,
+      'reason': error,
+      'ranked': const [],
+      'error': error,
+    };
+
 /// Registers quotabot's tools and quota resources on [server].
 ///
 /// This is the single wiring point shared by `bin/mcp_server.dart` (which feeds
@@ -1386,19 +1428,31 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'gates it (headroom percent, binding window, reset) and capability hints '
         '(context length, tools, vision) where known. Local-runtime models are '
         'read live; cloud models come from a refreshable capability catalog. Use '
-        'this to pick a concrete model with budget, not just a provider.',
+        'this to pick a concrete model with budget, not just a provider. Add '
+        'budget=local for a hard local-only cap or budget=quota for measured '
+        'quota plans plus local runtimes.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      final requirements = _requirementsFromArgs(args);
+      final n = now();
+      if (requirements.error != null) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(
+            _modelRegistryError(n, requirements.error!),
+            profiled,
+          ),
+        );
+      }
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           modelRegistryJson(
             profiled.providers,
-            now(),
+            n,
             catalog: catalog,
-            requirements: _requirementsFromArgs(args),
+            requirements: requirements.requirements,
           ),
           profiled,
         ),
@@ -1413,18 +1467,28 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'Recommend one concrete model for a task: the cheapest model that meets '
         'the given requirements and has budget, local-first, escalating to a '
         'heavier or paid tier only when the requirements force it. Takes the same '
-        'filter as list_models. quotabot never reads the task; the caller supplies '
-        'the profile, and tiers are the providers own, not a quality ranking.',
+        'filter as list_models, including budget=local or budget=quota. quotabot '
+        'never reads the task; the caller supplies the profile, and tiers are the '
+        'providers own, not a quality ranking.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: suggestModelOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
+      final requirements = _requirementsFromArgs(args);
+      if (requirements.error != null) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(
+            _modelSuggestionError(n, requirements.error!),
+            profiled,
+          ),
+        );
+      }
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           suggestModel(profiled.providers, n,
-                  catalog: catalog, requirements: _requirementsFromArgs(args))
+                  catalog: catalog, requirements: requirements.requirements)
               .toJson(n),
           profiled,
         ),

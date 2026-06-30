@@ -19,6 +19,8 @@ class ModelEntry {
   final String provider;
   final String account;
   final bool local;
+  final String? source;
+  final bool quotaBacked;
 
   /// Remaining headroom percent of the gating provider (null for local runtimes
   /// or when unknown).
@@ -41,6 +43,8 @@ class ModelEntry {
     required this.provider,
     required this.account,
     required this.local,
+    required this.source,
+    required this.quotaBacked,
     required this.headroomPercent,
     required this.resetsAt,
     required this.gatingWindow,
@@ -55,6 +59,8 @@ class ModelEntry {
         'local': local,
         'available': available,
         'stale': stale,
+        'quota_backed': quotaBacked,
+        if (source != null) 'source': source,
         if (headroomPercent != null) 'headroom_percent': headroomPercent,
         if (resetsAt != null) 'resets_at': resetsAt,
         if (gatingWindow != null) 'gating_window': gatingWindow,
@@ -74,6 +80,38 @@ int _tierRank(String? tier) {
   }
 }
 
+/// Caller-selected budget envelope for concrete-model routing.
+///
+/// `any` preserves the historic registry behavior. `local` is a hard local-only
+/// cap. `quota` allows local runtimes and measured built-in quota plans, but
+/// rejects self-reported manual quotas because quotabot cannot verify that those
+/// plans have overages disabled.
+enum ModelBudgetPolicy {
+  any('any'),
+  quota('quota'),
+  local('local');
+
+  final String wireName;
+  const ModelBudgetPolicy(this.wireName);
+}
+
+const String modelBudgetPolicyChoices = 'any, quota, local';
+
+ModelBudgetPolicy? modelBudgetPolicyFromName(String? name) {
+  final normalized = name?.trim().toLowerCase();
+  if (normalized == null || normalized.isEmpty) return ModelBudgetPolicy.any;
+  return switch (normalized) {
+    'any' => ModelBudgetPolicy.any,
+    'quota' ||
+    'subscription' ||
+    'subscriptions' ||
+    'included' =>
+      ModelBudgetPolicy.quota,
+    'local' || 'free' => ModelBudgetPolicy.local,
+    _ => null,
+  };
+}
+
 /// A caller-supplied task profile: the objective capabilities a task needs. It is
 /// never derived from the task itself, because quotabot does not read prompts; the
 /// caller, which legitimately knows the task, supplies it.
@@ -84,6 +122,7 @@ class ModelRequirements {
   final bool requireReasoning;
   final String? tierFloor;
   final String? tierCeiling;
+  final ModelBudgetPolicy budgetPolicy;
 
   const ModelRequirements({
     this.minContextTokens,
@@ -92,6 +131,7 @@ class ModelRequirements {
     this.requireReasoning = false,
     this.tierFloor,
     this.tierCeiling,
+    this.budgetPolicy = ModelBudgetPolicy.any,
   });
 
   bool get isEmpty =>
@@ -100,7 +140,8 @@ class ModelRequirements {
       !requireVision &&
       !requireReasoning &&
       tierFloor == null &&
-      tierCeiling == null;
+      tierCeiling == null &&
+      budgetPolicy == ModelBudgetPolicy.any;
 
   /// Overlays [o] onto this: [o]'s set fields win, booleans OR together. Used to
   /// layer explicit flags on top of a coarse task profile.
@@ -111,6 +152,9 @@ class ModelRequirements {
         requireReasoning: requireReasoning || o.requireReasoning,
         tierFloor: o.tierFloor ?? tierFloor,
         tierCeiling: o.tierCeiling ?? tierCeiling,
+        budgetPolicy: o.budgetPolicy == ModelBudgetPolicy.any
+            ? budgetPolicy
+            : o.budgetPolicy,
       );
 }
 
@@ -136,6 +180,7 @@ ModelRequirements taskProfile(String? task) {
 /// requirement for it: we never assume an unstated capability.
 bool meetsRequirements(ModelEntry e, ModelRequirements r) {
   final m = e.model;
+  if (!meetsBudgetPolicy(e, r.budgetPolicy)) return false;
   if (r.minContextTokens != null &&
       (m.contextTokens == null || m.contextTokens! < r.minContextTokens!)) {
     return false;
@@ -150,6 +195,14 @@ bool meetsRequirements(ModelEntry e, ModelRequirements r) {
     return false;
   }
   return true;
+}
+
+bool meetsBudgetPolicy(ModelEntry e, ModelBudgetPolicy policy) {
+  return switch (policy) {
+    ModelBudgetPolicy.any => true,
+    ModelBudgetPolicy.local => e.local,
+    ModelBudgetPolicy.quota => e.local || e.quotaBacked,
+  };
 }
 
 /// Builds the registry from a snapshot. For each provider, local models come from
@@ -169,12 +222,16 @@ List<ModelEntry> buildModelRegistry(
     if (models.isEmpty) continue;
     final a = providerAvailability(q, now);
     final binding = bindingWindow(q, now);
+    final quotaBacked =
+        !q.isLocal && q.source != 'manual' && q.windows.isNotEmpty;
     for (final m in models) {
       entries.add(ModelEntry(
         model: m,
         provider: q.provider,
         account: q.account,
         local: q.isLocal,
+        source: q.source,
+        quotaBacked: quotaBacked,
         headroomPercent: q.isLocal ? null : a.headroom,
         resetsAt: q.isLocal ? null : a.resetsAt,
         gatingWindow: q.isLocal ? null : binding?.label,
@@ -210,6 +267,7 @@ Map<String, dynamic> modelRegistryJson(
       'schema': 'quotabot.models.v1',
       'generated_at': now,
       'catalog_updated': kCatalogUpdated,
+      'budget_policy': requirements.budgetPolicy.wireName,
       'models': buildModelRegistry(providers, now,
               catalog: catalog, requirements: requirements)
           .map((e) => e.toJson())
@@ -248,14 +306,23 @@ class ModelSuggestion {
   /// All qualifying models in recommendation order (best first).
   final List<ModelEntry> ranked;
 
+  /// Budget envelope applied before ranking.
+  final ModelBudgetPolicy budgetPolicy;
+
   /// One-line human explanation.
   final String reason;
 
-  const ModelSuggestion(this.recommended, this.ranked, this.reason);
+  const ModelSuggestion(
+    this.recommended,
+    this.ranked,
+    this.reason, {
+    this.budgetPolicy = ModelBudgetPolicy.any,
+  });
 
   Map<String, dynamic> toJson(int now) => {
         'schema': 'quotabot.suggest_model.v1',
         'generated_at': now,
+        'budget_policy': budgetPolicy.wireName,
         'recommended': recommended?.toJson(),
         'reason': reason,
         'ranked': ranked.map((e) => e.toJson()).toList(),
@@ -286,5 +353,10 @@ ModelSuggestion suggestModel(
           ? 'No model meets the requirements; relax them or connect a provider.'
           : 'Models match but none has budget right now; wait for a reset.')
       : _recommendReason(pick);
-  return ModelSuggestion(pick, ranked, reason);
+  return ModelSuggestion(
+    pick,
+    ranked,
+    reason,
+    budgetPolicy: requirements.budgetPolicy,
+  );
 }

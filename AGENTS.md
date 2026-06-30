@@ -50,8 +50,10 @@ Pick whichever transport you already speak. All return the same data.
     runtimes, each with its gating provider's live budget, capability hints, and
     tier. Accepts an optional capability filter (`task`, `min_context`,
     `require_tools`/`require_vision`/`require_reasoning`, `tier_floor`/
-    `tier_ceiling`) so you can ask for "a reasoning model with budget" without
-    quotabot ever seeing the task.
+    `tier_ceiling`) plus `budget` (`local`, `quota`, or `any`) so you can ask
+    for "a reasoning model with budget" without quotabot ever seeing the task.
+    `budget: "quota"` means measured built-in quota plans plus local runtimes;
+    it excludes self-reported manual quota and does not permit paid API spend.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): the cheapest model that meets it and has budget, local-first.
   - Resource `quotas://current` - the same unfiltered live snapshot.
@@ -68,7 +70,9 @@ Pick whichever transport you already speak. All return the same data.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics. Add `--local-first` to `suggest` when
-  an agent should use local capacity before subscription quota.
+  you prefer local capacity before spending subscription quota, and
+  `--budget=local` or `--budget=quota` to `models`/profiled `suggest` calls
+  when the model choice must stay inside a no-surprise spend envelope.
 - **Push alerts.** `quotabot watch --json` streams a `quotabot.alert.v1` line
   the moment a provider's binding window goes red, naming where to route next, so
   a long-running agent can react to a crossing instead of polling. Add
@@ -158,3 +162,5 @@ The LiteLLM plugin is no-surprise-billing by default: candidates marked
 `spend: paid_api` are skipped unless `allow_paid_api: true` is set, while
 `spend: quota_plan` should be used only for real included quota plans with
 overages disabled. Managed logical models fail closed when no safe route exists.
+The model-router `budget: "quota"` filter follows the same goal: verified quota
+plans and local runtimes only, never request-metered paid API passthrough.

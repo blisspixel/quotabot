@@ -139,8 +139,13 @@ Future<void> main(List<String> rawArgs) async {
           filterExcludedProviders(await _read(profile), excluded.providers);
       final now = nowEpoch();
       if (_hasModelProfile(flags)) {
+        final reqs = _modelRequirements(flags);
+        if (!reqs.ok) {
+          exitCode = _exitUsage;
+          return;
+        }
         final s = suggestModel(results, now,
-            catalog: kModelCatalog, requirements: _modelRequirements(flags));
+            catalog: kModelCatalog, requirements: reqs.requirements);
         wantsJson ? print(_jsonPretty(s.toJson(now))) : _printSuggestModel(s);
       } else {
         final riskZ =
@@ -176,12 +181,16 @@ Future<void> main(List<String> rawArgs) async {
           filterExcludedProviders(await _read(profile), excluded.providers);
       final now = nowEpoch();
       final reqs = _modelRequirements(flags);
+      if (!reqs.ok) {
+        exitCode = _exitUsage;
+        return;
+      }
       if (wantsJson) {
         print(_jsonPretty(modelRegistryJson(results, now,
-            catalog: kModelCatalog, requirements: reqs)));
+            catalog: kModelCatalog, requirements: reqs.requirements)));
       } else {
         _printModels(buildModelRegistry(results, now,
-            catalog: kModelCatalog, requirements: reqs));
+            catalog: kModelCatalog, requirements: reqs.requirements));
       }
       return;
     case 'calibration':
@@ -266,7 +275,17 @@ int? _parseContext(String? s) {
 /// Builds the model requirement filter from CLI flags: a coarse `--task` profile
 /// overlaid with explicit `--min-context`, `--require-*`, and `--tier-*` flags.
 /// quotabot never sees the task itself, only this profile.
-ModelRequirements _modelRequirements(Set<String> flags) {
+({ModelRequirements requirements, bool ok}) _modelRequirements(
+    Set<String> flags) {
+  final rawBudget = _stringOption(flags, 'budget', null);
+  final budget = modelBudgetPolicyFromName(rawBudget);
+  if (budget == null) {
+    stderr.writeln(
+      'quotabot: unknown --budget value "$rawBudget" '
+      '(use $modelBudgetPolicyChoices)',
+    );
+    return (requirements: const ModelRequirements(), ok: false);
+  }
   final explicit = ModelRequirements(
     minContextTokens: _parseContext(_stringOption(flags, 'min-context', null)),
     requireTools: flags.contains('--require-tools'),
@@ -274,8 +293,13 @@ ModelRequirements _modelRequirements(Set<String> flags) {
     requireReasoning: flags.contains('--require-reasoning'),
     tierFloor: _stringOption(flags, 'tier-floor', null),
     tierCeiling: _stringOption(flags, 'tier-ceiling', null),
+    budgetPolicy: budget,
   );
-  return taskProfile(_stringOption(flags, 'task', null)).merge(explicit);
+  return (
+    requirements:
+        taskProfile(_stringOption(flags, 'task', null)).merge(explicit),
+    ok: true,
+  );
 }
 
 /// True when the user passed any model-capability flag, so `suggest` should
@@ -287,7 +311,8 @@ bool _hasModelProfile(Set<String> flags) {
     '--task=',
     '--min-context=',
     '--tier-floor=',
-    '--tier-ceiling='
+    '--tier-ceiling=',
+    '--budget=',
   ];
   return flags.any((f) => prefixed.any(f.startsWith));
 }
@@ -333,6 +358,7 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
 
 const _valueOptions = {
   'account',
+  'budget',
   'display-name',
   'exclude',
   'interval',
@@ -919,6 +945,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',
+  );
+  stdout.writeln(
+    '  --budget=POLICY     models/suggest: any|quota|local spend envelope',
   );
   stdout.writeln(
     '  --min-context=N --require-tools/vision/reasoning --tier-floor/ceiling=T'
