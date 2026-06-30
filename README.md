@@ -144,10 +144,11 @@ quotabot watch            # alert when a window goes low, naming where to route
 a window is spent or nearly so, naming where to send work next; add `--webhook`
 to POST each alert (loopback unless `--allow-external`) so it can reach a tray
 toast, a shell, or chat. The same recommendation is available over MCP
-(`suggest_provider`, `list_models`) and a loopback HTTP server. For how an agent should call quotabot and route, see
-[AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin in
-[integrations/litellm/](integrations/litellm/), which routes each request to a
-deployment with budget and fails soft when quotabot is unavailable.
+(`suggest_provider`, `list_models`, `suggest_model`, with optional `profile`)
+and a loopback HTTP server. For how an agent should call quotabot and route, see
+[AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
+in [integrations/litellm/](integrations/litellm/), which routes each request to
+a deployment with budget and fails soft when quotabot is unavailable.
 
 ## Project layout
 

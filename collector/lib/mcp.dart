@@ -23,6 +23,7 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'analysis.dart';
 import 'model_catalog.dart';
 import 'models.dart';
+import 'profiles.dart';
 import 'registry.dart';
 import 'util.dart';
 
@@ -32,8 +33,16 @@ JsonSchema _nullable(JsonSchema schema) =>
 
 /// Full normalized quota snapshot. Shared by the `list_quotas` tool and the
 /// `quotas://current` resource so both speak the exact same shape.
-Map<String, dynamic> quotasSnapshot(List<ProviderQuota> providers, int now) => {
+Map<String, dynamic> quotasSnapshot(
+  List<ProviderQuota> providers,
+  int now, {
+  String? profile,
+  String? error,
+}) =>
+    {
       'schema': 'quotabot.v1',
+      if (profile != null) 'profile': profile,
+      if (error != null) 'error': error,
       'generated_at': now,
       'providers': providers.map((p) => p.toJson()).toList(),
     };
@@ -149,6 +158,12 @@ final quotasSnapshotOutputSchema = JsonSchema.object(
         JsonSchema.string(description: 'Schema id, always "quotabot.v1".'),
     'generated_at':
         JsonSchema.integer(description: 'Epoch seconds when produced.'),
+    'profile': JsonSchema.string(
+      description: 'Named local profile applied to this snapshot, when any.',
+    ),
+    'error': JsonSchema.string(
+      description: 'Set when a requested profile could not be loaded.',
+    ),
     'providers': JsonSchema.array(
       description: 'One entry per connected provider.',
       items: _providerSchema,
@@ -271,6 +286,9 @@ final _modelEntrySchema = JsonSchema.object(
 final _modelFilterInputSchema = JsonSchema.object(
   description: 'Optional capability filter; all fields optional.',
   properties: {
+    'profile': JsonSchema.string(
+      description: 'Optional local named profile to filter providers/accounts.',
+    ),
     'task': JsonSchema.string(
       description: 'Coarse profile: "simple", "standard", or "hard".',
     ),
@@ -285,6 +303,14 @@ final _modelFilterInputSchema = JsonSchema.object(
     ),
     'tier_ceiling': JsonSchema.string(
       description: 'Maximum provider tier: light, standard, or flagship.',
+    ),
+  },
+);
+
+final _profileOnlyInputSchema = JsonSchema.object(
+  properties: {
+    'profile': JsonSchema.string(
+      description: 'Optional local named profile to filter providers/accounts.',
     ),
   },
 );
@@ -336,6 +362,8 @@ final availabilityOutputSchema = JsonSchema.object(
 /// share one wiring path while feeding real or fixture data respectively.
 typedef SnapshotProvider = Future<List<ProviderQuota>> Function();
 
+typedef ProfileLoader = QuotaProfile? Function(String name);
+
 /// Returns recent burn and its uncertainty per provider id. Kept out of the pure
 /// layer because the real implementation reads history from disk.
 typedef BurnProvider = Map<String, BurnStat> Function(
@@ -352,6 +380,45 @@ const _readOnly = ToolAnnotations(
   openWorldHint: true,
 );
 
+class _ProfiledSnapshot {
+  final List<ProviderQuota> providers;
+  final String? profile;
+  final String? error;
+
+  const _ProfiledSnapshot({required this.providers, this.profile, this.error});
+}
+
+Future<_ProfiledSnapshot> _profiledSnapshot(
+  Map<String, dynamic> args,
+  SnapshotProvider snapshot,
+  ProfileLoader profileLoader,
+) async {
+  final rawProfile = args['profile'];
+  final requested = rawProfile is String ? rawProfile.trim() : null;
+  if (requested == null || requested.isEmpty) {
+    return _ProfiledSnapshot(providers: await snapshot());
+  }
+  final profile = profileLoader(requested);
+  if (profile == null) {
+    return _ProfiledSnapshot(
+      providers: const [],
+      profile: requested,
+      error: 'unknown profile: $requested',
+    );
+  }
+  final providers = applyProfile(await snapshot(), profile);
+  return _ProfiledSnapshot(providers: providers, profile: profile.name);
+}
+
+Map<String, dynamic> _withProfileMeta(
+  Map<String, dynamic> response,
+  _ProfiledSnapshot snapshot,
+) {
+  if (snapshot.profile != null) response['profile'] = snapshot.profile;
+  if (snapshot.error != null) response['error'] = snapshot.error;
+  return response;
+}
+
 /// Registers quotabot's tools and the `quotas://current` resource on [server].
 ///
 /// This is the single wiring point shared by `bin/mcp_server.dart` (which feeds
@@ -365,6 +432,7 @@ void registerQuotabotTools(
   required BurnProvider burnByProvider,
   int Function() now = nowEpoch,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
+  ProfileLoader profileLoader = loadProfile,
 }) {
   server.registerTool(
     'list_quotas',
@@ -375,12 +443,20 @@ void registerQuotabotTools(
         'runtime as JSON. Per provider: account, plan, ok/stale, and rolling '
         'windows (label, used_percent or used/limit, resets_at). Longer windows '
         'that are spent are the binding constraint.',
-    inputSchema: JsonSchema.object(properties: {}),
+    inputSchema: _profileOnlyInputSchema,
     outputSchema: quotasSnapshotOutputSchema,
     annotations: _readOnly,
-    callback: (args, extra) async => CallToolResult.fromStructuredContent(
-      quotasSnapshot(await snapshot(), now()),
-    ),
+    callback: (args, extra) async {
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      return CallToolResult.fromStructuredContent(
+        quotasSnapshot(
+          profiled.providers,
+          now(),
+          profile: profiled.profile,
+          error: profiled.error,
+        ),
+      );
+    },
   );
 
   server.registerTool(
@@ -393,12 +469,18 @@ void registerQuotabotTools(
         'account, headroom_percent, resets_at of the binding window, and a stale '
         'flag, or {provider: null, reason} when nothing is usable. A longer '
         'window that is spent blocks use even if shorter windows show headroom.',
-    inputSchema: JsonSchema.object(properties: {}),
+    inputSchema: _profileOnlyInputSchema,
     outputSchema: mostHeadroomOutputSchema,
     annotations: _readOnly,
-    callback: (args, extra) async => CallToolResult.fromStructuredContent(
-      mostHeadroomResponse(await snapshot(), now()),
-    ),
+    callback: (args, extra) async {
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      return CallToolResult.fromStructuredContent(
+        _withProfileMeta(
+          mostHeadroomResponse(profiled.providers, now()),
+          profiled,
+        ),
+      );
+    },
   );
 
   server.registerTool(
@@ -412,18 +494,22 @@ void registerQuotabotTools(
         'recommended provider, a human reason, a using_local_fallback flag, a '
         'guaranteed fallback, and the full ranked candidate list. Local runtimes '
         'never win on headroom; they are fallbacks only.',
-    inputSchema: JsonSchema.object(properties: {}),
+    inputSchema: _profileOnlyInputSchema,
     outputSchema: suggestOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
-      final results = await snapshot();
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      final results = profiled.providers;
       final n = now();
       return CallToolResult.fromStructuredContent(
-        suggestResponse(
-          results,
-          n,
-          burnStatsByProvider:
-              burnByProvider(results.map((q) => q.provider), n),
+        _withProfileMeta(
+          suggestResponse(
+            results,
+            n,
+            burnStatsByProvider:
+                burnByProvider(results.map((q) => q.provider), n),
+          ),
+          profiled,
         ),
       );
     },
@@ -442,14 +528,20 @@ void registerQuotabotTools(
     inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,
     annotations: _readOnly,
-    callback: (args, extra) async => CallToolResult.fromStructuredContent(
-      modelRegistryJson(
-        await snapshot(),
-        now(),
-        catalog: catalog,
-        requirements: _requirementsFromArgs(args),
-      ),
-    ),
+    callback: (args, extra) async {
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      return CallToolResult.fromStructuredContent(
+        _withProfileMeta(
+          modelRegistryJson(
+            profiled.providers,
+            now(),
+            catalog: catalog,
+            requirements: _requirementsFromArgs(args),
+          ),
+          profiled,
+        ),
+      );
+    },
   );
 
   server.registerTool(
@@ -465,12 +557,15 @@ void registerQuotabotTools(
     outputSchema: suggestModelOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
-      final snap = await snapshot();
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
       return CallToolResult.fromStructuredContent(
-        suggestModel(snap, n,
-                catalog: catalog, requirements: _requirementsFromArgs(args))
-            .toJson(n),
+        _withProfileMeta(
+          suggestModel(profiled.providers, n,
+                  catalog: catalog, requirements: _requirementsFromArgs(args))
+              .toJson(n),
+          profiled,
+        ),
       );
     },
   );
@@ -488,18 +583,28 @@ void registerQuotabotTools(
           description: 'Provider id: codex, claude, grok, antigravity, kiro, '
               'cursor, windsurf, or a local runtime.',
         ),
+        'profile': JsonSchema.string(
+          description:
+              'Optional local named profile to filter providers/accounts.',
+        ),
       },
       required: ['provider'],
     ),
     outputSchema: availabilityOutputSchema,
     annotations: _readOnly,
-    callback: (args, extra) async => CallToolResult.fromStructuredContent(
-      availabilityResponse(
-        await snapshot(),
-        now(),
-        args['provider'] as String?,
-      ),
-    ),
+    callback: (args, extra) async {
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      return CallToolResult.fromStructuredContent(
+        _withProfileMeta(
+          availabilityResponse(
+            profiled.providers,
+            now(),
+            args['provider'] as String?,
+          ),
+          profiled,
+        ),
+      );
+    },
   );
 
   server.registerResource(

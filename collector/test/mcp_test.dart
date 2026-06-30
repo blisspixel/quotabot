@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/profiles.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
@@ -25,6 +26,8 @@ ProviderQuota _q(
     );
 
 ProviderQuota _local(String id) => _q(id, const [], kind: 'local');
+
+QuotaProfile? _noProfile(String name) => null;
 
 /// A snapshot exercising all builders: a healthy subscription, a nearly spent
 /// one, and a local runtime fallback.
@@ -133,7 +136,10 @@ void main() {
     late McpServer server;
     late McpClient client;
 
-    Future<void> connect(List<ProviderQuota> snapshot) async {
+    Future<void> connect(
+      List<ProviderQuota> snapshot, {
+      ProfileLoader profileLoader = _noProfile,
+    }) async {
       final serverT = _PairedTransport();
       final clientT = _PairedTransport();
       serverT.peer = clientT;
@@ -153,6 +159,7 @@ void main() {
         snapshot: () async => snapshot,
         burnByProvider: (providers, now) => const <String, BurnStat>{},
         now: () => _now,
+        profileLoader: profileLoader,
         catalog: const {
           'claude': [
             ModelInfo(id: 'claude-test', contextTokens: 200000, tools: true),
@@ -254,6 +261,66 @@ void main() {
 
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);
+    });
+
+    test('profile arguments filter tools without changing default calls',
+        () async {
+      await connect(
+        _fixture(),
+        profileLoader: (name) => name == 'local'
+            ? const QuotaProfile(
+                name: 'local',
+                routingPolicy: ProfileRoutingPolicy.localOnly,
+              )
+            : null,
+      );
+
+      final all = await client.callTool(
+        const CallToolRequest(name: 'list_quotas'),
+      );
+      expect(all.structuredContent?['profile'], isNull);
+      expect(all.structuredContent?['providers'] as List, hasLength(3));
+
+      final filtered = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {'profile': 'local'},
+        ),
+      );
+      expect(filtered.isError, isFalse);
+      expect(filtered.structuredContent?['profile'], 'local');
+      final providers = filtered.structuredContent?['providers'] as List;
+      expect(providers, hasLength(1));
+      expect((providers.single as Map)['provider'], 'ollama');
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'profile': 'local'},
+        ),
+      );
+      expect(suggestion.structuredContent?['profile'], 'local');
+      expect(suggestion.structuredContent?['using_local_fallback'], isTrue);
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+    });
+
+    test('missing profile returns a structured error', () async {
+      await connect(_fixture());
+
+      final quotas = await client.callTool(
+        const CallToolRequest(
+          name: 'list_quotas',
+          arguments: {'profile': 'missing'},
+        ),
+      );
+
+      expect(quotas.isError, isFalse);
+      expect(quotas.structuredContent?['profile'], 'missing');
+      expect(quotas.structuredContent?['error'], 'unknown profile: missing');
+      expect(quotas.structuredContent?['providers'], isEmpty);
     });
 
     test('the no-data snapshot still validates against every schema', () async {

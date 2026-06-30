@@ -211,7 +211,7 @@ budget, local-first. The MCP `suggest_model` tool does the same for agents.
 ## Routing over MCP
 
 The collector runs as an MCP server so agents can query quota as a primitive. It
-speaks MCP over stdio and exposes five tools plus a resource:
+speaks MCP over stdio and exposes six tools plus a resource:
 
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.
@@ -220,7 +220,15 @@ speaks MCP over stdio and exposes five tools plus a resource:
 - `check_provider_availability` - whether a named provider is usable now.
 - `list_models` - every model you can route to now (cloud + local), each with its
   gating provider's live budget and capability hints.
+- `suggest_model` - one concrete model that meets the supplied capability filter
+  and has budget.
 - Resource `quotas://current` - the same snapshot.
+
+Each tool accepts an optional `profile` argument to filter the snapshot through a
+local named profile before routing or model selection. Missing profiles fail soft:
+the tool returns a structured `error` field with an empty provider list instead
+of throwing. The `quotas://current` resource remains the unfiltered current
+snapshot for clients that only consume MCP resources.
 
 Run it with `dart run bin/mcp_server.dart`, or compile a binary:
 

@@ -44,6 +44,8 @@ Pick whichever transport you already speak. All return the same data.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): the cheapest model that meets it and has budget, local-first.
   - Resource `quotas://current` - the same snapshot.
+  - All tools accept optional `profile` to route inside a local named profile;
+    the resource stays the unfiltered current snapshot.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics.

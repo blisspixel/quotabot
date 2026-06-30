@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- MCP quota, routing, availability, and model tools now accept optional
+  `profile`, applying the same local named profile filters as the CLI while
+  preserving the unfiltered `quotas://current` resource.
 - CLI quota reads now accept `--profile=NAME`, applying local named profile
   filters before status, JSON snapshots, suggestions, models, checks, stats,
   watch alerts, or top render.
