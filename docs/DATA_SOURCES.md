@@ -87,8 +87,10 @@ stores. Grok and Antigravity can run two ways:
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET` to use your own).
   These grants are independent of the host apps, so they never invalidate the
   CLI's or IDE's credentials. quotabot's tokens live under the per-user config
-  directory, owner-only on POSIX and ACL-restricted on Windows, and rotated
-  refresh tokens are persisted on every refresh.
+  directory, owner-only on POSIX and ACL-restricted on Windows. A grant can be
+  stored as the provider default or in an account-scoped slot; the account slot
+  filename uses a hash rather than the raw email. Rotated refresh tokens are
+  persisted on every refresh.
 
 ## Kiro (agentic CLI + IDE)
 

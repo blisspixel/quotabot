@@ -55,6 +55,7 @@ class GoogleAuth {
   /// exchanges the code for tokens. Saves and returns them.
   Future<Tokens> loginLoopback({
     required void Function(String url) showUrl,
+    String? account,
   }) async {
     if (clientId.isEmpty || clientSecret.isEmpty) {
       throw StateError(
@@ -96,7 +97,7 @@ class GoogleAuth {
     });
     if (json == null) throw StateError('token exchange failed');
     final tokens = Tokens.fromOAuth(json);
-    TokenStore.save(provider, tokens);
+    _saveGrant(tokens, account: account);
     return tokens;
   }
 
@@ -113,15 +114,22 @@ class GoogleAuth {
 
   /// Fresh access token from quotabot's own grant, refreshing and persisting as
   /// needed. Null when there is no stored grant.
-  Future<String?> freshAccessToken() async {
-    final stored = TokenStore.load(provider);
+  Future<String?> freshAccessToken({String? account}) async {
+    final stored = TokenStore.load(provider, account: account);
     if (stored == null) return null;
     if (stored.isFresh) return stored.accessToken;
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
     if (refreshed?.accessToken == null) return null;
-    TokenStore.save(provider, refreshed!);
+    _saveGrant(refreshed!, account: account);
     return refreshed.accessToken;
+  }
+
+  static void _saveGrant(Tokens tokens, {String? account}) {
+    TokenStore.save(provider, tokens);
+    if (account != null) {
+      TokenStore.save(provider, tokens, account: account);
+    }
   }
 
   Future<Map<String, dynamic>?> _post(Map<String, String> form) async {

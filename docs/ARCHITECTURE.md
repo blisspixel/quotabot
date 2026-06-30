@@ -101,8 +101,10 @@ shows that as "no live data" instead of a gap.
 `auth/` holds quotabot's own OAuth, kept separate from the host apps' tokens:
 
 - `tokens.dart`: the `Tokens` model and `TokenStore`, which persists tokens per
-  provider under the config directory, owner-only on POSIX. Rotated refresh
-  tokens are saved on every refresh or the next refresh would fail.
+  provider, and optionally per provider account, under the config directory,
+  owner-only on POSIX. Account-scoped filenames use a hash of the account id
+  rather than the raw email. Rotated refresh tokens are saved on every refresh or
+  the next refresh would fail.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.

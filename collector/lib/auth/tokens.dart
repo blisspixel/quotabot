@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
 import '../util.dart';
 
 /// An OAuth token set for one provider.
@@ -46,9 +48,17 @@ class Tokens {
 /// on every refresh, or the next refresh will fail.
 class TokenStore {
   static final _providerPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
+  static const _accountKey = '_account';
+  static const _maxTokenBytes = 128 * 1024;
 
-  static File _file(String provider) =>
-      File('${quotabotDir('auth').path}/${_providerFileName(provider)}.json');
+  static File _file(String provider, {String? account}) {
+    final providerName = _providerFileName(provider);
+    final accountName = _normalizeAccount(account);
+    final stem = accountName == null
+        ? providerName
+        : '${providerName}_account_${_accountHash(accountName)}';
+    return File('${quotabotDir('auth').path}/$stem.json');
+  }
 
   static String _providerFileName(String provider) {
     if (!_providerPattern.hasMatch(provider)) {
@@ -61,10 +71,29 @@ class TokenStore {
     return provider;
   }
 
-  static Tokens? load(String provider) {
-    final f = _file(provider);
+  static String? _normalizeAccount(String? account) {
+    if (account == null) return null;
+    final trimmed = account.trim();
+    if (trimmed.isEmpty ||
+        trimmed.length > 512 ||
+        trimmed.runes.any((c) => c < 0x20 || c == 0x7f)) {
+      throw ArgumentError.value(
+        account,
+        'account',
+        'must be a non-empty printable account identifier',
+      );
+    }
+    return trimmed;
+  }
+
+  static String _accountHash(String account) =>
+      sha256.convert(utf8.encode(account)).toString();
+
+  static Tokens? load(String provider, {String? account}) {
+    final f = _file(provider, account: account);
     try {
       if (!f.existsSync()) return null;
+      if (f.lengthSync() > _maxTokenBytes) return null;
       return Tokens.fromJson(
         jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
       );
@@ -73,8 +102,9 @@ class TokenStore {
     }
   }
 
-  static void save(String provider, Tokens tokens) {
-    final f = _file(provider);
+  static void save(String provider, Tokens tokens, {String? account}) {
+    final accountName = _normalizeAccount(account);
+    final f = _file(provider, account: accountName);
     // Lock down the directory and pre-create the file with restrictive
     // permissions BEFORE writing the secret, so the token is never briefly
     // world-readable under the default umask.
@@ -83,16 +113,49 @@ class TokenStore {
       f.createSync(recursive: true);
     }
     _restrictPermissions(f);
-    f.writeAsStringSync(jsonEncode(tokens.toJson()));
+    f.writeAsStringSync(jsonEncode({
+      ...tokens.toJson(),
+      if (accountName != null) _accountKey: accountName,
+    }));
     _restrictPermissions(f);
   }
 
-  static void clear(String provider) {
-    final f = _file(provider);
+  static void clear(String provider, {String? account}) {
+    final f = _file(provider, account: account);
     if (f.existsSync()) f.deleteSync();
   }
 
-  static bool exists(String provider) => _file(provider).existsSync();
+  static bool exists(String provider, {String? account}) =>
+      _file(provider, account: account).existsSync();
+
+  static List<String> accounts(String provider) {
+    final prefix = '${_providerFileName(provider)}_account_';
+    final dir = quotabotDir('auth');
+    final found = <String>{};
+    try {
+      for (final entity in dir.listSync()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (!name.startsWith(prefix) || !name.endsWith('.json')) continue;
+        if (entity.lengthSync() > _maxTokenBytes) continue;
+        try {
+          final decoded =
+              jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>;
+          final account = decoded[_accountKey];
+          if (account is String && _normalizeAccount(account) != null) {
+            found.add(account);
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return found.toList()..sort();
+  }
+
+  static void clearAccounts(String provider) {
+    for (final account in accounts(provider)) {
+      clear(provider, account: account);
+    }
+  }
 
   /// Best-effort: restrict the refresh-token file to the current user. On POSIX
   /// this is `chmod 600`; on Windows it resets inheritance and grants only the

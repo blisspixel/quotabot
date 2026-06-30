@@ -137,8 +137,12 @@ it stands up serve every phase after it.
    (provider, account) in independent owner-only slots so work and home accounts
    under different emails coexist and the UI can group or filter by account. One
    primary account per provider stays the zero-config default; multi-account is
-   additive, never forced on the common case. (Copilot's per-account read lands
-   post-1.0 with the provider itself.)
+   additive, never forced on the common case. Foundation shipped: the OAuth token
+   store now supports independent account-scoped grants, and Grok/Antigravity
+   prefer the matching account grant before falling back to the provider-default
+   grant or host-app token. Remaining: live multi-account discovery, signed-out
+   auto-hide beyond Antigravity, and the UI/profile grouping. (Copilot's
+   per-account read lands post-1.0 with the provider itself.)
 7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to

@@ -107,7 +107,9 @@ quotabot logout grok         # or: quotabot logout antigravity
 
 Neither needs any cloud setup. quotabot stores its own refreshing grant for the
 account you pick, separate from the host apps, so it never disturbs their
-credentials. (Advanced: override the Antigravity OAuth client with
+credentials. When an account-specific grant exists, quotabot prefers it for that
+account; otherwise it falls back to the provider-default grant or the host app's
+current token. (Advanced: override the Antigravity OAuth client with
 `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`.)
 
 ## 5. Run the desktop widget (optional)

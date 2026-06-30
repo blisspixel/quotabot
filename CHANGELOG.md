@@ -12,6 +12,12 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- OAuth grants can now be stored in independent account-scoped slots as well as
+  the existing provider-default slot. The auth filenames contain only a provider
+  id plus a hash of the account id, never the raw email, and Grok/Antigravity now
+  prefer the account-scoped grant for the detected account before falling back to
+  the default grant or host-app token. This is foundation work for the Phase 2
+  multi-account edge cases; current zero-config behavior is unchanged.
 - `quotabot top` is now fully interactive: navigate the fleet with `j`/`k` or the
   arrow keys, hide a provider for the session with `x` (`h`) and bring them all
   back with `u`, and copy the recommended route to your clipboard with `c` (via

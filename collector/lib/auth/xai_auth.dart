@@ -26,6 +26,7 @@ class XaiAuth {
   /// then polls until the user authorizes. Saves and returns the tokens.
   Future<Tokens> deviceLogin({
     required void Function(String url, String code) prompt,
+    String? account,
   }) async {
     final init = await _post(_device, {'client_id': clientId, 'scope': _scope});
     if (init == null) throw StateError('device authorization failed');
@@ -55,7 +56,10 @@ class XaiAuth {
       }
       if (resp.statusCode == 200) {
         final tokens = Tokens.fromOAuth(body);
-        TokenStore.save(provider, tokens);
+        _saveGrant(
+          tokens,
+          account: account ?? _emailFromIdToken(body['id_token']?.toString()),
+        );
         return tokens;
       }
       final err = body['error'];
@@ -85,15 +89,37 @@ class XaiAuth {
 
   /// Returns a fresh access token from quotabot's own grant, refreshing and
   /// persisting as needed. Null when there is no stored grant.
-  Future<String?> freshAccessToken() async {
-    final stored = TokenStore.load(provider);
+  Future<String?> freshAccessToken({String? account}) async {
+    final stored = TokenStore.load(provider, account: account);
     if (stored == null) return null;
     if (stored.isFresh) return stored.accessToken;
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
     if (refreshed?.accessToken == null) return null;
-    TokenStore.save(provider, refreshed!);
+    _saveGrant(refreshed!, account: account);
     return refreshed.accessToken;
+  }
+
+  static void _saveGrant(Tokens tokens, {String? account}) {
+    TokenStore.save(provider, tokens);
+    if (account != null) {
+      TokenStore.save(provider, tokens, account: account);
+    }
+  }
+
+  static String? _emailFromIdToken(String? idToken) {
+    if (idToken == null) return null;
+    final parts = idToken.split('.');
+    if (parts.length < 2) return null;
+    try {
+      final payload =
+          utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final decoded = jsonDecode(payload) as Map<String, dynamic>;
+      final email = decoded['email'];
+      return email is String && email.isNotEmpty ? email : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> _post(

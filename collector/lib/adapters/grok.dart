@@ -49,8 +49,10 @@ class GrokAdapter {
 
       // Prefer quotabot's own refreshable grant; fall back to the token the CLI
       // currently holds (live only while the CLI keeps it fresh).
-      final token =
-          await XaiAuth().freshAccessToken() ?? acct['key']?.toString();
+      final xai = XaiAuth();
+      final token = await xai.freshAccessToken(account: email) ??
+          await xai.freshAccessToken() ??
+          acct['key']?.toString();
       if (token == null) return offline('no token - run: quotabot login grok');
 
       final window = await _fetchUsage(token, asOf);

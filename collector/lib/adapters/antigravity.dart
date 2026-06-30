@@ -193,7 +193,9 @@ class AntigravityAdapter {
       // A network or timeout error here must not hard-fail the adapter: fall
       // through to the passive CLI/IDE token instead of throwing.
       try {
-        access = await GoogleAuth().freshAccessToken();
+        final auth = GoogleAuth();
+        access = await auth.freshAccessToken(account: account) ??
+            await auth.freshAccessToken();
       } catch (_) {
         access = null;
       }
