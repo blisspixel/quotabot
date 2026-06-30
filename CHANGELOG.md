@@ -15,6 +15,9 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- CI now verifies macOS and Linux desktop release bundle packaging on native
+  runners. `tools/package-macos.sh` and `tools/package-linux.sh` build and
+  validate the platform bundles, with optional local archives for release work.
 - Owner-only local file hardening is now shared across token storage and routing
   lease metadata. Lease directories, lock files, and atomic write files are
   restricted with the same best-effort permissions used for OAuth tokens.
@@ -28,6 +31,10 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- The README now has a reproducible animated demo GIF generated from Flutter
+  demo screenshot mode. `tools/generate_readme_demo.py` captures the expanded
+  widget, compact strip, 90-day analytics view, and demo `top` frame, refreshes
+  the static screenshot PNGs, and assembles `docs/quotabot-demo.gif`.
 - `quotabot.v1` is now frozen as an additive JSON Schema 2020-12 contract with a
   focused validator and tests. Built-in providers are also listed in a
   compile-time adapter registry, and every adapter now owns a required sanitized

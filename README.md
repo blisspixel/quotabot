@@ -27,18 +27,10 @@ It reads the usage your tools already track locally, so most providers need no
 setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).
 
 <p align="center">
-  <img src="docs/screenshot-widget.png" alt="quotabot widget showing per-provider quota" width="300">
-  &nbsp;&nbsp;
-  <img src="docs/screenshot-analytics.png" alt="quotabot quota analytics over 90 days" width="300">
+  <img src="docs/quotabot-demo.gif" alt="quotabot demo showing the widget, compact strip, 90-day analytics, and top dashboard" width="620">
 </p>
 
-<p align="center"><sub>The widget, and the 90-day analytics view (demo data).</sub></p>
-
-<p align="center">
-  <img src="docs/screenshot-top.png" alt="quotabot top, the live terminal dashboard" width="620">
-</p>
-
-<p align="center"><sub><code>quotabot top</code>, the live terminal dashboard (demo data).</sub></p>
+<p align="center"><sub>Demo mode: the desktop widget, compact strip, 90-day analytics view, and <code>quotabot top</code>.</sub></p>
 
 Highlights:
 

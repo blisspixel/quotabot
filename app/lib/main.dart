@@ -37,6 +37,7 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
 /// images stay pixel-faithful. Shots mode implies demo data; both are no-ops on a
 /// normal run.
 final bool _shotsMode = Platform.environment['QUOTABOT_SHOTS'] == '1';
+final bool _gifFramesMode = Platform.environment['QUOTABOT_GIF_FRAMES'] == '1';
 final bool _demoMode =
     _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
 
@@ -421,6 +422,15 @@ class _DashboardState extends State<Dashboard>
     File('$dir/$filename').writeAsBytesSync(data.buffer.asUint8List());
   }
 
+  Future<void> _setShotCompact(bool value) async {
+    if (_compact != value) {
+      setState(() => _compact = value);
+      _applySize();
+    }
+    await Future.delayed(const Duration(milliseconds: 650));
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
   /// Loads demo data (via [_demoMode]), captures the widget then the analytics
   /// view, and exits. Reuses the real widgets so the README images stay faithful.
   Future<void> _exportShots() async {
@@ -428,15 +438,29 @@ class _DashboardState extends State<Dashboard>
     // out that plus the first real paint before the first capture.
     await Future.delayed(const Duration(seconds: 2));
     await WidgetsBinding.instance.endOfFrame;
+    await _setShotCompact(false);
     await _captureBoundary('screenshot-widget.png');
-    _showFleet();
+    if (_gifFramesMode) {
+      await _captureBoundary('demo-01-widget-expanded.png');
+      await _setShotCompact(true);
+      await _captureBoundary('demo-02-widget-collapsed.png');
+      await _setShotCompact(false);
+      await _captureBoundary('demo-03-widget-expanded.png');
+    }
+    _showFleet(initialRange: FleetRange.quarter);
     await Future.delayed(const Duration(milliseconds: 1400)); // route + charts
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-analytics.png');
+    if (_gifFramesMode) {
+      await _captureBoundary('demo-04-analytics-90d.png');
+    }
     _showTerminal(_demoTopFrame());
     await Future.delayed(const Duration(milliseconds: 700));
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-top.png', _termShotKey);
+    if (_gifFramesMode) {
+      await _captureBoundary('demo-05-top.png', _termShotKey);
+    }
     await Future.delayed(const Duration(milliseconds: 150));
     exit(0);
   }
@@ -664,6 +688,11 @@ class _DashboardState extends State<Dashboard>
     final tz = DateTime.now().timeZoneOffset;
     final buckets = demoBuckets();
     setState(() {
+      if (_shotsMode) {
+        _compact = false;
+        _hidden = {};
+        _sort = ProviderSort.defaultOrder;
+      }
       _showAccounts = true; // show the (fake) account names in the demo
       _data = demoData();
       _loading = false;
@@ -718,8 +747,9 @@ class _DashboardState extends State<Dashboard>
       double w;
       double h;
       if (_compact) {
-        final n = _displayed.length.clamp(1, 8);
-        w = (n * 42 + 70).clamp(140.0, 400.0).toDouble();
+        final n = _displayed.length.clamp(1, _shotsMode ? 16 : 8);
+        final maxCompactWidth = _shotsMode ? 680.0 : 400.0;
+        w = (n * 46 + 96).clamp(140.0, maxCompactWidth).toDouble();
         h = 50;
       } else {
         final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -1032,32 +1062,36 @@ class _DashboardState extends State<Dashboard>
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onPanStart: (_) => windowManager.startDragging(),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (displayed.isEmpty)
-                      Flexible(
-                        child: Text(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: _shotsMode
+                      ? const NeverScrollableScrollPhysics()
+                      : const ClampingScrollPhysics(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (displayed.isEmpty)
+                        Text(
                           'No providers',
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: AppType.caption,
                             color: muted,
                           ),
-                        ),
-                      )
-                    else
-                      for (int i = 0; i < displayed.length; i++)
-                        Padding(
-                          padding: EdgeInsets.only(
-                            right: i == displayed.length - 1 ? 0 : 10,
+                        )
+                      else
+                        for (int i = 0; i < displayed.length; i++)
+                          Padding(
+                            padding: EdgeInsets.only(
+                              right: i == displayed.length - 1 ? 0 : 10,
+                            ),
+                            child: Tooltip(
+                              message: _compactTooltip(displayed[i], counts),
+                              child: _compactChip(displayed[i], now, fg),
+                            ),
                           ),
-                          child: Tooltip(
-                            message: _compactTooltip(displayed[i], counts),
-                            child: _compactChip(displayed[i], now, fg),
-                          ),
-                        ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1705,14 +1739,18 @@ class _DashboardState extends State<Dashboard>
 
   /// Opens the Fleet Analytics dashboard in the same window. It is a mobile-style
   /// vertical scroll, so the window size is left exactly as it is.
-  Future<void> _showFleet() async {
+  Future<void> _showFleet({FleetRange initialRange = FleetRange.now}) async {
     final dark = Theme.of(context).brightness == Brightness.dark;
     // Open analytics in the existing window: no resize, no move, so nothing
     // reflows or appears to change scale. The analytics body scrolls to fit.
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            FleetScreen(data: _visible, buckets: _buckets, dark: dark),
+        builder: (_) => FleetScreen(
+          data: _visible,
+          buckets: _buckets,
+          dark: dark,
+          initialRange: initialRange,
+        ),
       ),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());

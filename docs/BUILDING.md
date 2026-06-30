@@ -51,15 +51,20 @@ Notes:
   `app/build/windows/x64/runner/Release/quotabot.exe`. `tools/package-windows.ps1`
   runs the build. Ship the Release folder as portable, or package with Inno Setup
   or MSIX.
-- **macOS:** `flutter build macos --release`, then codesign and notarize
-  (`codesign --deep --options runtime --sign "Developer ID Application: ..."`,
-  `xcrun notarytool`, staple, ship a DMG or ZIP).
-- **Linux:** `flutter build linux --release`. Package as an AppImage
-  (`appimagetool`) or deb/rpm, including the `.desktop` file (see
-  `tools/package-linux.sh`).
+- **macOS:** `bash tools/package-macos.sh` runs `flutter build macos --release`
+  on a macOS host and verifies the `.app` bundle. Production distribution then
+  needs Developer ID signing, notarization, stapling, and a DMG or ZIP.
+- **Linux:** `bash tools/package-linux.sh` runs `flutter build linux --release`
+  on a Linux host, verifies the executable bundle plus `.desktop` and icon
+  assets, and can create a portable tarball. You can also repackage that bundle
+  as an AppImage (`appimagetool`) or deb/rpm.
 - **CLI release assets** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
   writing the asset plus a `.sha256` sidecar; upload both to the GitHub release.
+
+The CI workflow runs the macOS and Linux desktop package scripts with
+`--no-archive`, so every pull request verifies those platform bundles on their
+native runners without publishing release artifacts.
 
 ## Icon and dev launcher
 
