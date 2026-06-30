@@ -67,6 +67,10 @@ void main() {
     });
     final tokenFile = File('${temp.path}${Platform.pathSeparator}token.txt');
     await tokenFile.writeAsString('  secret-token  \n');
+    if (!Platform.isWindows) {
+      final chmod = await Process.run('chmod', ['600', tokenFile.path]);
+      expect(chmod.exitCode, 0);
+    }
 
     final loaded = await loadMcpBearerToken(
       McpServerCliOptions.parse([
