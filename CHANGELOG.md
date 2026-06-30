@@ -15,6 +15,9 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- macOS/Linux desktop package verification now includes the required tracked
+  Flutter desktop scaffold files and Linux tray indicator development package,
+  so native CI package builds exercise the same release bundles users build.
 - The 1.0 roadmap final cut is now checked: every roadmap item is marked
   complete, the Windows local gate is green, and CI is configured to verify the
   full suite plus macOS/Linux desktop package builds on native runners.

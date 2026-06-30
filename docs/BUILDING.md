@@ -3,7 +3,8 @@
 Prerequisites: the [Flutter SDK](https://docs.flutter.dev/get-started/install)
 (it includes Dart). Per-OS build tools: Visual Studio with "Desktop development
 with C++" (Windows), Xcode and CocoaPods (macOS), or
-`clang cmake ninja-build pkg-config libgtk-3-dev` (Linux).
+`clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev`
+(Linux).
 
 ## One-command setup
 
