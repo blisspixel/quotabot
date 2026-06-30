@@ -221,6 +221,19 @@ never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 
+For catalog maintenance, run the audit tool from the collector package:
+
+```bash
+cd collector
+dart run bin/catalog_audit.dart --json
+```
+
+It calls provider-owned model-list endpoints only when the matching API key is in
+the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, or
+`GEMINI_API_KEY` / `GOOGLE_API_KEY`) and otherwise marks that provider skipped.
+The output is a diff of model ids only; capability fields stay curated. Add
+`--fail-on-drift` or `--fail-on-error` when using it as a maintenance CI gate.
+
 `quotabot calibration` grades quotabot's own strand predictions against your
 recorded history and reports how often they come true, as a calibration
 percentage, a Brier score, and a reliability diagram. It fills in over time, once

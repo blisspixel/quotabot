@@ -21,7 +21,8 @@ collector/ (Dart package)
   webhook.dart       loopback-guarded, fail-soft alert webhook sender (postAlert)
   calibration.dart   pure: grade the strand predictor against recorded history
   registry.dart      pure: assemble the cross-provider model registry with budget
-  model_catalog.dart committed, refreshable cloud model capability catalog
+  model_catalog.dart committed cloud model capability catalog
+  catalog_audit.dart pure/provider-owned model-list diffing for catalog currency
   profiles.dart      named local profile schema, storage, and filtering
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
@@ -168,7 +169,14 @@ headroom, strand probability, and the planned extensions) is written up in
 
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
-and the MCP `list_models` tool.
+and the MCP `list_models` tool. `catalog_audit.dart` keeps the committed cloud
+catalog honest without adding runtime network calls: the standalone
+`bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
+OpenAI/Codex, Anthropic/Claude, xAI/Grok, and Gemini/Antigravity, follows
+pagination tokens, filters obvious non-language modalities, redacts query-string
+secrets, and emits a diff. It does not rewrite the catalog automatically because
+capability fields such as context, tools, vision, reasoning, and tier remain
+curated routing metadata.
 
 ## LiteLLM proxy integration
 

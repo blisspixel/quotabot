@@ -15,6 +15,14 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- A model-catalog audit tool now diffs the committed cloud catalog against
+  provider-owned model-list endpoints. `dart run bin/catalog_audit.dart --json`
+  emits `quotabot.catalog_audit.v1` with per-provider endpoint ids,
+  `missing_from_catalog`, and `catalog_only` sets for OpenAI/Codex,
+  Anthropic/Claude, xAI/Grok, and Gemini/Antigravity. It follows provider
+  pagination tokens, skips missing API keys without failing by default, redacts
+  query-string secrets, filters obvious non-language modalities, and leaves
+  context/tools/vision/reasoning/tier fields curated.
 - The LiteLLM router is now covered by a real proxy integration test. CI
   installs `litellm[proxy]`, launches a LiteLLM proxy on loopback with the
   actual quotabot `async_pre_call_hook`, serves a fake quotabot `/suggest`

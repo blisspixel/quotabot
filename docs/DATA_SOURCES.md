@@ -169,6 +169,30 @@ actually down).
   with the same shared `localRuntimeQuota` helper; only the discovery URL and
   load-state field differ.
 
+## Cloud model catalog audit
+
+The runtime model registry does not call cloud model-list endpoints. It combines
+live provider quota with the committed capability catalog in
+`collector/lib/model_catalog.dart`, keeping normal quota reads local-first and
+zero-extra-network.
+
+For maintenance, `collector/bin/catalog_audit.dart` can diff that committed
+catalog against provider-owned model-list endpoints:
+
+- Codex/OpenAI: `GET https://api.openai.com/v1/models` with `OPENAI_API_KEY`.
+- Claude/Anthropic: `GET https://api.anthropic.com/v1/models` with
+  `ANTHROPIC_API_KEY` and the `anthropic-version` header.
+- Grok/xAI: `GET https://api.x.ai/v1/models` with `XAI_API_KEY`.
+- Antigravity/Gemini: `GET
+  https://generativelanguage.googleapis.com/v1beta/models` with
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+
+The audit follows provider pagination tokens and reports model-id drift only:
+`missing_from_catalog` and `catalog_only`. Context window, tool support, vision,
+reasoning, and tier remain curated because provider list endpoints are
+inconsistent and often account-scoped. Missing API keys are reported as skipped,
+not failures, unless the caller opts into `--fail-on-error`.
+
 ## Google (Antigravity)
 
 Gemini CLI (consumer) and related Code Assist for individuals transitioned to Antigravity CLI around June 18, 2026. Antigravity (the VS Code fork + CLI) is the current Google agentic platform. See the Antigravity section above for local state.vscdb + live Cloud Code quota (already covers the unified offering, including multi-account). Legacy ~/.gemini paths may linger but are no longer primary for consumer quota.

@@ -208,9 +208,16 @@ it stands up serve every phase after it.
     the current config-relative custom-callback loader. The plugin no longer
     depends on dataclass decoration so it remains loadable through LiteLLM's
     Python 3.13 config loader.
-12. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
+12. [x] Model-catalog currency: a refresh/audit tool that diffs the curated
     catalog against each provider's own model list (capabilities stay curated,
-    since `/v1/models` endpoints do not expose context/tools/tier).
+    since `/v1/models` endpoints do not expose context/tools/tier). Shipped:
+    `collector/bin/catalog_audit.dart` reads provider-owned model-list endpoints
+    for OpenAI/Codex, Anthropic/Claude, xAI/Grok, and Gemini/Antigravity,
+    follows provider pagination tokens, filters obvious non-language modalities,
+    redacts query-string secrets, and emits `quotabot.catalog_audit.v1` with
+    `missing_from_catalog` and `catalog_only` diffs. It skips missing API keys
+    without failing by default and offers `--fail-on-drift` / `--fail-on-error`
+    for CI wiring; it never rewrites curated capability metadata automatically.
 
 ### Phase 4 - MCP reference depth and the router-grade signal
 

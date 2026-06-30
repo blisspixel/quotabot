@@ -20,6 +20,7 @@ export 'models.dart';
 export 'insights.dart';
 export 'alerts.dart';
 export 'calibration.dart';
+export 'catalog_audit.dart';
 export 'model_catalog.dart';
 export 'palette.dart';
 export 'profiles.dart';
