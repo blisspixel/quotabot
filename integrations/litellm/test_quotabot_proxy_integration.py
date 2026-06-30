@@ -197,8 +197,10 @@ models:
     candidates:
       - deployment: claude-sonnet
         provider: claude
+        spend: quota_plan
       - deployment: codex-gpt
         provider: codex
+        spend: quota_plan
       - deployment: ollama-qwen
         local: true
 """,

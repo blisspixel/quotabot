@@ -351,7 +351,13 @@ Breadth and depth, once the core is trusted:
   ranking. Foundation shipped: CLI `suggest` and `models` accept
   `--exclude=A,B`, and MCP read/routing/reservation/model tools accept
   `exclude`; local HTTP `GET /suggest` accepts `?exclude=A,B` for the same
-  one-off provider exclusion without editing profiles.
+  one-off provider exclusion without editing profiles. Provider routing now has
+  an explicit local-first policy as well: CLI `suggest --local-first`, MCP
+  `local_first`, and HTTP `?local_first=true` recommend a local runtime before
+  subscription quota when local capacity is available. The LiteLLM plugin also
+  distinguishes `spend: quota_plan` from `spend: paid_api` so included quota
+  plans with overages disabled can be used while request-metered API routes are
+  skipped by default.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation

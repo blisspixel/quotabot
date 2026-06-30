@@ -87,6 +87,7 @@ Map<String, dynamic> suggestResponse(
   int now, {
   Map<String, BurnStat> burnStatsByProvider = const {},
   List<RouteLease> activeLeases = const [],
+  bool preferLocal = false,
 }) {
   final response = suggestRoute(
     providers,
@@ -94,6 +95,7 @@ Map<String, dynamic> suggestResponse(
     burnStatsByProvider: burnStatsByProvider,
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(activeLeases, provider, account),
+    preferLocal: preferLocal,
   ).toJson();
   response['active_leases'] = leaseDiscounts(activeLeases)
       .map((discount) => discount.toJson())
@@ -141,6 +143,7 @@ Map<String, dynamic> decideNowResponse(
   int maxAgeSeconds = 300,
   Map<String, BurnStat> burnStatsByProvider = const {},
   List<RouteLease> activeLeases = const [],
+  bool preferLocal = false,
 }) {
   final age = cached.asOf == null
       ? null
@@ -155,11 +158,13 @@ Map<String, dynamic> decideNowResponse(
     burnStatsByProvider: burnStatsByProvider,
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(activeLeases, provider, account),
+    preferLocal: preferLocal,
   ).toJson();
   return {
     'schema': 'quotabot.decision.v1',
     'as_of': now,
     'risk_z': suggestion['risk_z'],
+    'routing_policy': suggestion['routing_policy'],
     'source': cached.source,
     'snapshot_as_of': cached.asOf,
     'snapshot_age_seconds': age,
@@ -393,6 +398,9 @@ final suggestOutputSchema = JsonSchema.object(
     'as_of':
         JsonSchema.integer(description: 'Epoch seconds the decision was made.'),
     'risk_z': JsonSchema.number(description: 'Risk aversion used (0 = mean).'),
+    'routing_policy': JsonSchema.string(
+      description: '"balanced" or "local_first".',
+    ),
     'recommended': _nullable(_candidateSchema),
     'reason': JsonSchema.string(),
     'using_local_fallback': JsonSchema.boolean(),
@@ -410,6 +418,7 @@ final decideNowOutputSchema = JsonSchema.object(
     'schema': JsonSchema.string(),
     'as_of': JsonSchema.integer(),
     'risk_z': JsonSchema.number(),
+    'routing_policy': JsonSchema.string(),
     'source': JsonSchema.string(
       description: '"memory", "disk", or "empty".',
     ),
@@ -554,6 +563,27 @@ final _profileAndAccountInputSchema = JsonSchema.object(
       items: JsonSchema.string(),
       description:
           'Optional provider ids to ignore for this one request, after profile filtering.',
+    ),
+  },
+);
+
+final _routingInputSchema = JsonSchema.object(
+  properties: {
+    'profile': JsonSchema.string(
+      description: 'Optional local named profile to filter providers/accounts.',
+    ),
+    'account': JsonSchema.string(
+      description:
+          'Optional exact account label to route within after profile filtering.',
+    ),
+    'exclude': JsonSchema.array(
+      items: JsonSchema.string(),
+      description:
+          'Optional provider ids to ignore for this one request, after profile filtering.',
+    ),
+    'local_first': JsonSchema.boolean(
+      description:
+          'Prefer a local runtime before spending subscription quota when one is available.',
     ),
   },
 );
@@ -1079,11 +1109,12 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'metered subscription with the most remaining headroom (above a comfort '
         'threshold, after discounting recent burn and active local leases), and '
         'falls back to a local runtime (e.g. Ollama) when every subscription is '
-        'low. Returns the '
+        'low. Pass local_first=true to choose a local runtime before spending '
+        'subscription quota when one is available. Returns the '
         'recommended provider, a human reason, a using_local_fallback flag, a '
         'guaranteed fallback, and the full ranked candidate list. Local runtimes '
-        'never win on headroom; they are fallbacks only.',
-    inputSchema: _profileAndAccountInputSchema,
+        'never win on headroom unless local_first is explicitly set.',
+    inputSchema: _routingInputSchema,
     outputSchema: suggestOutputSchema,
     annotations: _readOnly,
     callback: (args, extra) async {
@@ -1099,6 +1130,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             burnStatsByProvider:
                 burnByProvider(results.map((q) => q.provider), n),
             activeLeases: activeLeases,
+            preferLocal: args['local_first'] == true,
           ),
           profiled,
         ),
@@ -1135,6 +1167,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           description:
               'Age above which snapshot_stale becomes true. Defaults to 300.',
         ),
+        'local_first': JsonSchema.boolean(
+          description:
+              'Prefer a local runtime before spending subscription quota when one is available.',
+        ),
       },
     ),
     outputSchema: decideNowOutputSchema,
@@ -1163,6 +1199,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             burnStatsByProvider:
                 burnByProvider(profiled.providers.map((q) => q.provider), n),
             activeLeases: activeLeases,
+            preferLocal: args['local_first'] == true,
           ),
           profiled,
         ),

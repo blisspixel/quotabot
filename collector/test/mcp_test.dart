@@ -120,9 +120,17 @@ void main() {
     test('suggestResponse returns the versioned suggestion shape', () {
       final r = suggestResponse(_fixture(), _now);
       expect(r['schema'], 'quotabot.suggest.v1');
+      expect(r['routing_policy'], 'balanced');
       expect((r['recommended'] as Map)['provider'], 'claude');
       expect(r['fallback'], isA<Map>());
       expect(r['ranked'], isA<List>());
+    });
+
+    test('suggestResponse can prefer local runtime explicitly', () {
+      final r = suggestResponse(_fixture(), _now, preferLocal: true);
+      expect(r['routing_policy'], 'local_first');
+      expect((r['recommended'] as Map)['provider'], 'ollama');
+      expect(r['using_local_fallback'], isTrue);
     });
 
     test('availabilityResponse answers for a known provider', () {
@@ -248,6 +256,18 @@ void main() {
         const CallToolRequest(name: 'suggest_provider'),
       );
       expect(suggest.structuredContent?['schema'], 'quotabot.suggest.v1');
+
+      final localFirst = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'local_first': true},
+        ),
+      );
+      expect(localFirst.structuredContent?['routing_policy'], 'local_first');
+      expect(
+        (localFirst.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
 
       final known = await client.callTool(
         const CallToolRequest(
@@ -643,17 +663,18 @@ void main() {
       final decision = await client.callTool(
         const CallToolRequest(
           name: 'decide_now',
-          arguments: {'max_age_seconds': 60},
+          arguments: {'max_age_seconds': 60, 'local_first': true},
         ),
       );
       expect(decision.structuredContent?['schema'], 'quotabot.decision.v1');
+      expect(decision.structuredContent?['routing_policy'], 'local_first');
       expect(decision.structuredContent?['source'], 'disk');
       expect(decision.structuredContent?['snapshot_as_of'], _now - 10);
       expect(decision.structuredContent?['snapshot_age_seconds'], 10);
       expect(decision.structuredContent?['snapshot_stale'], isFalse);
       expect(
         (decision.structuredContent?['recommended'] as Map)['provider'],
-        'claude',
+        'ollama',
       );
       expect(liveCalls, 0);
     });

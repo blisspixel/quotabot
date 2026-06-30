@@ -45,6 +45,21 @@ Future<HttpServer> startLocalQuotabotServer({
       ..write(const JsonEncoder.withIndent('  ').convert(data));
   }
 
+  bool queryFlag(Uri uri, String snakeName, String kebabName) {
+    final values = [
+      ...?uri.queryParametersAll[snakeName],
+      ...?uri.queryParametersAll[kebabName],
+    ];
+    return values.any((value) {
+      final normalized = value.trim().toLowerCase();
+      return normalized.isEmpty ||
+          normalized == '1' ||
+          normalized == 'true' ||
+          normalized == 'yes' ||
+          normalized == 'on';
+    });
+  }
+
   Future<void> serve() async {
     await for (final request in server) {
       final path = request.uri.path;
@@ -85,6 +100,8 @@ Future<HttpServer> startLocalQuotabotServer({
                   snap.map((q) => q.provider),
                   current,
                 ),
+                preferLocal:
+                    queryFlag(request.uri, 'local_first', 'local-first'),
               ).toJson(),
             );
           }

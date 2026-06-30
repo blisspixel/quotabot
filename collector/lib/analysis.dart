@@ -240,6 +240,11 @@ class RouteSuggestion {
   /// uncertain (high burn-error) providers more. Echoed so callers know the mode.
   final double riskZ;
 
+  /// The routing policy used for this decision. `balanced` preserves the normal
+  /// paid-headroom-first behavior; `local_first` is an explicit caller request
+  /// to use a local runtime before spending subscription quota.
+  final String routingPolicy;
+
   const RouteSuggestion({
     required this.recommended,
     required this.ranked,
@@ -248,12 +253,14 @@ class RouteSuggestion {
     required this.fallback,
     required this.asOf,
     required this.riskZ,
+    this.routingPolicy = 'balanced',
   });
 
   Map<String, dynamic> toJson() => {
         'schema': 'quotabot.suggest.v1',
         'as_of': asOf,
         'risk_z': riskZ,
+        'routing_policy': routingPolicy,
         'recommended': recommended?.toJson(),
         'reason': reason,
         'using_local_fallback': usingLocalFallback,
@@ -485,6 +492,7 @@ RouteSuggestion suggestRoute(
   Map<String, BurnStat> burnStatsByProvider = const {},
   double riskZ = 0,
   LeaseDiscountProvider leaseDiscountFor = _noLeaseDiscount,
+  bool preferLocal = false,
 }) {
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
@@ -539,8 +547,9 @@ RouteSuggestion suggestRoute(
     });
   final locals = usable.where((c) => c.isLocal).toList();
 
-  // Ranked view: best subscription first, then locals as the tail fallback.
-  final ranked = [...subs, ...locals];
+  // Ranked view: normal mode leads with subscriptions. Local-first mode is an
+  // explicit cost-safety request, so locals lead when present.
+  final ranked = preferLocal ? [...locals, ...subs] : [...subs, ...locals];
 
   // The fail-soft fallback is always present, so a caller that skips the pick
   // (or gets a null recommendation) still has an actionable next step. The
@@ -559,6 +568,7 @@ RouteSuggestion suggestRoute(
         fallback: fallback,
         asOf: now,
         riskZ: riskZ,
+        routingPolicy: preferLocal ? 'local_first' : 'balanced',
       );
 
   if (usable.isEmpty) {
@@ -566,6 +576,23 @@ RouteSuggestion suggestRoute(
       null,
       'No live quota data. Open a provider app or run a login to refresh.',
     );
+  }
+
+  if (preferLocal) {
+    RouteCandidate? localPick;
+    for (final candidate in locals) {
+      if (candidate.available) {
+        localPick = candidate;
+        break;
+      }
+    }
+    if (localPick != null) {
+      return result(
+        localPick,
+        'Local-first policy: use local ${localPick.provider} and keep subscription quota untouched.',
+        usingLocalFallback: true,
+      );
+    }
   }
 
   final liveSubs = subs.where((c) => !c.stale).toList();

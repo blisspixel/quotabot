@@ -250,6 +250,11 @@ For a one-off routing decision, add `--exclude=codex,grok` to `models` or
 `suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and
 model tools, to ignore those providers without changing your named profiles. The
 loopback HTTP server accepts the same idea as `GET /suggest?exclude=codex,grok`.
+For cost-sensitive dispatch, `quotabot suggest --local-first` keeps the normal
+provider ranking visible but recommends a local runtime before subscription quota
+when one is available. MCP `suggest_provider` and `decide_now` accept
+`local_first: true`; the loopback HTTP equivalent is
+`GET /suggest?local_first=true`.
 
 For catalog maintenance, run the audit tool from the collector package:
 
@@ -279,11 +284,16 @@ The desktop analytics screen also reads optional LiteLLM proxy metrics from
 LiteLLM router. It summarizes served requests, routed requests, tokens, tracked
 cost, top served models, and the last request age. The file is local JSONL only;
 quotabot reads a bounded tail of it and never reads prompts or response content.
+The router treats request-metered API keys as `spend: paid_api` and skips them
+unless `allow_paid_api: true` is set. Use `spend: quota_plan` only for included
+quota plans with overages disabled; managed logical models fail closed when no
+safe route exists.
 
 `quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
 the plain mean): a higher `Z` prefers providers whose recent burn is more certain.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
-`confidence`, and `strand_probability`.
+`confidence`, and `strand_probability`, plus a top-level `routing_policy`
+(`balanced` or `local_first`).
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
@@ -299,10 +309,11 @@ and exposes nine tools plus two resources:
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.
 - `suggest_provider` - the provider to route the next request to, with ranked
-  alternatives and a local fallback when subscriptions are low.
+  alternatives and a local fallback when subscriptions are low. Pass
+  `local_first: true` to prefer a local runtime before subscription quota.
 - `decide_now` - the same routing decision from the cheapest cached snapshot,
   with explicit snapshot source, age, and staleness. It never forces a live
-  collect.
+  collect, and accepts the same `local_first` policy.
 - `reserve_provider` - create a short local quota lease for a cloud provider
   before dispatching parallel work, reducing later effective headroom.
 - `release_provider` - idempotently release a local routing lease when the
@@ -332,6 +343,8 @@ and expose each candidate's `lease_discount_percent` when a concurrent caller ha
 reserved the same provider/account. `reserve_provider` and `release_provider`
 write only local metadata under quotabot's application-data directory. They do
 not contact a model provider, read prompts, or enter the request data path.
+Both routing responses include `routing_policy`, so clients can verify whether a
+decision used the default `balanced` mode or the opt-in `local_first` mode.
 
 MCP clients can subscribe to `quotas://alerts` with standard
 `resources/subscribe`. The server runs the same edge-triggered alert scan as
@@ -377,8 +390,9 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 ```
 
 `GET /` returns the full snapshot as JSON; `GET /suggest` returns the routing
-recommendation, and `GET /suggest?exclude=codex,grok` ignores those providers
-for that recommendation. Local only, zero tokens.
+recommendation, `GET /suggest?exclude=codex,grok` ignores those providers for
+that recommendation, and `GET /suggest?local_first=true` prefers local capacity.
+Local only, zero tokens.
 
 ## Demo mode
 

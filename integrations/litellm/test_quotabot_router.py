@@ -10,6 +10,7 @@ from quotabot_router import (
     Candidate,
     Policy,
     QuotabotRouter,
+    UnsafeRouteError,
     _is_loopback_url,
 )
 
@@ -28,14 +29,50 @@ class RouterTests(unittest.TestCase):
         router = QuotabotRouter()
         router.policy = Policy(
             models={
-                "frontier": [Candidate(deployment="claude-sonnet", provider="claude")]
+                "frontier": [
+                    Candidate(
+                        deployment="claude-sonnet",
+                        provider="claude",
+                        spend="quota_plan",
+                    )
+                ]
             },
             agents={"spoofed-agent": AgentRule(pin="grok-fast")},
+            block_unsafe_passthrough=False,
         )
         chosen = asyncio.run(
             router._route("frontier", {"metadata": {"agent": "spoofed-agent"}}, None)
         )
         self.assertEqual(chosen, "frontier")
+
+    def test_trusted_pin_requires_safe_spend_class(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            agents={
+                "trusted-agent": AgentRule(
+                    pin="claude-subscription",
+                    pin_spend="quota_plan",
+                )
+            }
+        )
+
+        chosen = asyncio.run(router._route("frontier", {}, _Key()))
+
+        self.assertEqual(chosen, "claude-subscription")
+
+    def test_paid_api_pin_fails_closed_by_default(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            agents={
+                "trusted-agent": AgentRule(
+                    pin="xai-api",
+                    pin_spend="paid_api",
+                )
+            }
+        )
+
+        with self.assertRaises(UnsafeRouteError):
+            asyncio.run(router._route("frontier", {}, _Key()))
 
     def test_local_first_policy_stays_local(self):
         router = QuotabotRouter()
@@ -61,12 +98,145 @@ class RouterTests(unittest.TestCase):
         chosen = asyncio.run(router._route("cheap-bulk", {}, None))
         self.assertEqual(chosen, "ollama-qwen")
 
+    def test_paid_api_candidates_are_skipped_by_default(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(deployment="xai-api", provider="grok", spend="paid_api"),
+                    Candidate(deployment="ollama-qwen", local=True),
+                ]
+            }
+        )
+
+        async def availability():
+            return {
+                "grok": {
+                    "provider": "grok",
+                    "available": True,
+                    "headroom_percent": 99,
+                }
+            }
+
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", {}, None))
+        self.assertEqual(chosen, "ollama-qwen")
+
+    def test_quota_plan_candidates_are_allowed_by_default(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                    ),
+                    Candidate(deployment="ollama-qwen", local=True),
+                ]
+            }
+        )
+
+        async def availability():
+            return {
+                "claude": {
+                    "provider": "claude",
+                    "available": True,
+                    "headroom_percent": 99,
+                }
+            }
+
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", {}, None))
+        self.assertEqual(chosen, "claude-subscription")
+
+    def test_spend_local_marks_candidate_local(self):
+        candidate = Candidate(deployment="local-server", spend="local")
+
+        self.assertTrue(candidate.local)
+        self.assertEqual(candidate.spend, "local")
+
+    def test_paid_api_candidates_require_explicit_opt_in(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            allow_paid_api=True,
+            models={
+                "frontier": [
+                    Candidate(deployment="xai-api", provider="grok", spend="paid_api")
+                ]
+            },
+        )
+
+        async def availability():
+            return {
+                "grok": {
+                    "provider": "grok",
+                    "available": True,
+                    "headroom_percent": 99,
+                }
+            }
+
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", {}, None))
+        self.assertEqual(chosen, "xai-api")
+
+    def test_managed_model_fails_closed_without_safe_candidate(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(deployment="xai-api", provider="grok", spend="paid_api")
+                ]
+            }
+        )
+
+        async def availability():
+            return {
+                "grok": {
+                    "provider": "grok",
+                    "available": True,
+                    "headroom_percent": 99,
+                }
+            }
+
+        router._availability = availability  # type: ignore[method-assign]
+        with self.assertRaises(UnsafeRouteError):
+            asyncio.run(router._route("frontier", {}, None))
+
+    def test_quotabot_unreachable_uses_local_fallback(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                    ),
+                    Candidate(deployment="ollama-qwen", local=True),
+                ]
+            }
+        )
+
+        async def availability():
+            return None
+
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", {}, None))
+        self.assertEqual(chosen, "ollama-qwen")
+
     def test_agent_model_redirect_uses_trusted_key_alias(self):
         router = QuotabotRouter()
         router.policy = Policy(
             models={
                 "bulk": [Candidate(deployment="ollama-qwen", local=True)],
-                "frontier": [Candidate(deployment="claude-sonnet", provider="claude")],
+                "frontier": [
+                    Candidate(
+                        deployment="claude-sonnet",
+                        provider="claude",
+                        spend="quota_plan",
+                    )
+                ],
             },
             agents={
                 "trusted-agent": AgentRule(model="bulk"),
@@ -137,6 +307,57 @@ class RouterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             outside = Policy(metrics_path=str(Path(tmp) / "routing.jsonl"))
             self.assertIsNone(outside.metrics_path)
+
+    def test_policy_loads_spend_and_paid_api_controls(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.yaml"
+            path.write_text(
+                """
+allow_paid_api: true
+block_unsafe_passthrough: false
+models:
+  frontier:
+    candidates:
+      - deployment: xai-api
+        provider: grok
+        spend: paid_api
+agents:
+  architect:
+    pin: claude-subscription
+    pin_spend: quota_plan
+""",
+                encoding="utf-8",
+            )
+
+            policy = Policy.load(path)
+
+        self.assertTrue(policy.allow_paid_api)
+        self.assertFalse(policy.block_unsafe_passthrough)
+        self.assertEqual(policy.models["frontier"][0].spend, "paid_api")
+        self.assertEqual(policy.agents["architect"].pin_spend, "quota_plan")
+
+    def test_policy_string_booleans_do_not_enable_paid_api(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.yaml"
+            path.write_text(
+                """
+allow_paid_api: "false"
+block_unsafe_passthrough: "true"
+models:
+  frontier:
+    candidates:
+      - deployment: ollama-qwen
+        local: "true"
+""",
+                encoding="utf-8",
+            )
+
+            policy = Policy.load(path)
+
+        self.assertFalse(policy.allow_paid_api)
+        self.assertTrue(policy.block_unsafe_passthrough)
+        self.assertTrue(policy.models["frontier"][0].local)
+        self.assertEqual(policy.models["frontier"][0].spend, "local")
 
 
 if __name__ == "__main__":

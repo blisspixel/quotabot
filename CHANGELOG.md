@@ -5,6 +5,16 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot suggest --local-first`, MCP `local_first`, and loopback HTTP
+  `GET /suggest?local_first=true` now prefer an available local runtime before
+  subscription quota for cost-sensitive dispatch. Routing JSON includes
+  `routing_policy` so callers can verify `balanced` versus `local_first`
+  behavior.
+- The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
+  marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
+  `spend: quota_plan` is reserved for included quota plans with overages
+  disabled, pinned agent deployments obey the same spend policy, and managed
+  logical models fail closed when no safe route exists.
 - The desktop Quota Analytics Now view now surfaces optional LiteLLM
   routed-request metrics from the default `~/.quotabot/litellm-metrics.jsonl`
   file, including served requests, routed requests, tokens, tracked cost, top

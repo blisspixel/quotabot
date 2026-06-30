@@ -8,8 +8,8 @@ import 'package:quotabot_collector/local_server.dart';
 ///
 /// Run: dart run bin/local_server.dart [port]
 /// Default port 8721. Visit http://localhost:8721/ for snapshot.
-/// Also: /suggest (routing recommendation, optional ?exclude=a,b), /health,
-/// /providers/<name>
+/// Also: /suggest (routing recommendation, optional ?exclude=a,b and
+/// ?local_first=true), /health, /providers/<name>
 /// Complements MCP (stdio primary; Streamable HTTP for remote possible per
 /// 2026 research). Useful for external consumers (e.g. ESP32, dashboards).
 /// Zero token metadata reads only. Use Ctrl-C to stop. Not for production (no

@@ -134,6 +134,7 @@ quotabot stores its own refresh token under your per-user config directory
 ```bash
 quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
+quotabot suggest --local-first  # prefer local runtime before subscription quota
 quotabot models           # every model you can route to now, with budget + caps
 quotabot watch            # alert when a window goes low, naming where to route
 quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
@@ -149,16 +150,19 @@ so it can reach a tray toast, a shell, or chat. The same recommendation is
 available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
-with optional `profile`/`account` filters and one-request `exclude` lists, plus
+with optional `profile`/`account` filters, one-request `exclude` lists, and
+`local_first` routing, plus
 `quotas://alerts` subscriptions) and a
-plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok`). For how an
-agent should call quotabot and route, see
+plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok` or
+`GET /suggest?local_first=true`). For how an agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/), which routes each request to
 a deployment with budget, writes optional local routed-request metrics, and
-fails soft when quotabot is unavailable. The analytics view surfaces those
-metrics when the plugin writes the default `~/.quotabot/litellm-metrics.jsonl`
-file. For
+defaults to no-surprise-billing guardrails: normal API-key deployments are
+treated as paid API spend and skipped unless explicitly enabled, while true
+included quota-plan deployments must be labeled separately. The analytics view
+surfaces those metrics when the plugin writes the default
+`~/.quotabot/litellm-metrics.jsonl` file. For
 language-client adoption, see the Python and TypeScript MCP snippets in
 [integrations/mcp_clients/](integrations/mcp_clients/).
 

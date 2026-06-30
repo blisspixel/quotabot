@@ -6,6 +6,12 @@
 # are what quotabot-routing.yaml refers to as `deployment`. Clients call the
 # logical names (e.g. "frontier-coder"); the quotabot hook rewrites the request
 # to whichever concrete deployment currently has budget.
+#
+# The cloud entries below are normal API-key deployments and can create
+# pay-as-you-go bills. The companion quotabot-routing.example.yaml marks them
+# `spend: paid_api`, so the router skips them unless you explicitly set
+# `allow_paid_api: true`. Mark a deployment `spend: quota_plan` only when it is
+# backed by a real included quota plan with overages disabled.
 
 model_list:
   - model_name: claude-sonnet

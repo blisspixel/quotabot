@@ -26,6 +26,16 @@ void main() {
     expect(json['recommended']['provider'], isNot('codex'));
   });
 
+  test('suggest local-first prefers a local runtime in demo mode', () async {
+    final result = await runCli(['suggest', '--json', '--local-first']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['routing_policy'], 'local_first');
+    expect(json['recommended']['local'], isTrue);
+    expect(json['using_local_fallback'], isTrue);
+  });
+
   test('models excludes named providers from the registry', () async {
     final result = await runCli([
       'models',

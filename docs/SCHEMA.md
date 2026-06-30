@@ -39,6 +39,25 @@ The contract is additive. Unknown fields are allowed at the root, provider,
 window, and model levels. Existing field meanings and types must not change
 inside `quotabot.v1`; incompatible changes require a new schema id.
 
+## Routing outputs
+
+`quotabot suggest --json`, MCP `suggest_provider`, and local HTTP `/suggest`
+emit `quotabot.suggest.v1` with:
+
+- `schema`, `as_of`, and `risk_z`.
+- `routing_policy`: `balanced` by default, or `local_first` when the caller
+  explicitly requested local capacity before subscription quota.
+- `recommended`: optional provider candidate.
+- `reason`, `using_local_fallback`, `fallback`, and `ranked`.
+- Per-candidate budget fields such as `headroom_percent`,
+  `effective_headroom_percent`, optional `lease_discount_percent`,
+  `burn_percent_per_hour`, `burn_se_percent_per_hour`, `strand_probability`,
+  `confidence`, `resets_at`, `stale`, and `available`.
+
+MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
+same routing fields plus `source`, `snapshot_as_of`, `snapshot_age_seconds`,
+`snapshot_stale`, and `max_age_seconds`. It never forces a live provider collect.
+
 ## `quotabot.alert.v1`
 
 `quotabot watch --json`, alert webhooks, and `quotas://alerts` emit alert objects

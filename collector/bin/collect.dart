@@ -145,7 +145,12 @@ Future<void> main(List<String> rawArgs) async {
       } else {
         final riskZ =
             _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
-        final s = _suggestFor(results, now, riskZ: riskZ);
+        final s = _suggestFor(
+          results,
+          now,
+          riskZ: riskZ,
+          preferLocal: flags.contains('--local-first'),
+        );
         wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       }
       return;
@@ -208,6 +213,7 @@ RouteSuggestion _suggestFor(
   List<ProviderQuota> results,
   int now, {
   double riskZ = 0,
+  bool preferLocal = false,
 }) =>
     suggestRoute(
       results,
@@ -218,6 +224,7 @@ RouteSuggestion _suggestFor(
               ? const <String, BurnStat>{}
               : recentBurnStatsByProvider(results.map((q) => q.provider), now),
       riskZ: riskZ,
+      preferLocal: preferLocal,
     );
 
 List<HeadroomBucket> _historyBuckets(String provider) =>
@@ -903,6 +910,9 @@ void _printHelp() {
   stdout.writeln(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
     'uncertain caps)',
+  );
+  stdout.writeln(
+    '  --local-first       suggest: prefer local runtime before subscription quota',
   );
   stdout.writeln(
     '  --exclude=A,B       suggest/models: ignore these providers',

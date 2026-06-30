@@ -148,8 +148,10 @@ quotabot suggest --json   # the same decision as JSON, for scripts and agents
 To route a whole fleet of coding agents automatically, use the LiteLLM proxy
 plugin in [../integrations/litellm/](../integrations/litellm/). It reads this
 recommendation in a pre-call hook and sends each request to whichever deployment
-has budget, falling back to a local model when your subscriptions are low. It
-runs the same on all three platforms.
+has safe budget, falling back to a local model when your subscriptions are low.
+By default, request-metered API-key deployments are skipped unless explicitly
+enabled; use `spend: quota_plan` only for included quota plans with overages
+disabled. It runs the same on all three platforms.
 
 ---
 

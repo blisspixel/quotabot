@@ -173,6 +173,40 @@ void main() {
       },
     );
 
+    test('local-first policy recommends local before comfortable cloud', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 10)]),
+          _local('ollama'),
+        ],
+        _now,
+        preferLocal: true,
+      );
+
+      expect(s.recommended?.provider, 'ollama');
+      expect(s.recommended?.isLocal, isTrue);
+      expect(s.usingLocalFallback, isTrue);
+      expect(s.routingPolicy, 'local_first');
+      expect(s.toJson()['routing_policy'], 'local_first');
+      expect(s.ranked.first.provider, 'ollama');
+      expect(s.reason, contains('Local-first policy'));
+    });
+
+    test('local-first policy falls back to cloud when no local runtime exists',
+        () {
+      final s = suggestRoute(
+        [
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 10)]),
+        ],
+        _now,
+        preferLocal: true,
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.usingLocalFallback, isFalse);
+      expect(s.routingPolicy, 'local_first');
+    });
+
     test('without a local fallback, recommends the least-bad subscription', () {
       final s = suggestRoute([
         _q('codex', [QuotaWindow(label: 'w', usedPercent: 95)]), // 5% free

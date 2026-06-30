@@ -1,9 +1,9 @@
 # quotabot routing policy for the LiteLLM proxy.
 #
 # Copy to quotabot-routing.yaml (same folder as quotabot_router.py) or point the
-# QUOTABOT_ROUTING env var at it. Every field has a safe default; the plugin
-# falls through to the originally requested model whenever a rule does not match
-# or quotabot is unreachable.
+# QUOTABOT_ROUTING env var at it. Every field has a safe default; unmanaged
+# model names pass through unchanged, and managed logical models fail closed
+# when no quota-plan or local route is available.
 
 # Where the quotabot local HTTP server is listening.
 # Start it with:  dart run bin/local_server.dart   (defaults to port 8721)
@@ -18,6 +18,17 @@ snapshot_ttl_seconds: 45
 # candidate (or a local fallback) is preferred.
 comfort_threshold: 15
 
+# No-surprise-billing default. Candidates marked `spend: paid_api` are skipped
+# unless this is set to true. Mark a cloud candidate `spend: quota_plan` only
+# when it is backed by a real included quota plan with overages disabled. API
+# keys billed per request are `paid_api`, even if quotabot can read that
+# provider's separate subscription quota.
+allow_paid_api: false
+
+# For managed logical models, fail closed instead of passing through to a
+# possibly expensive original deployment when no safe candidate exists.
+block_unsafe_passthrough: true
+
 # Optional: append one JSON line per served request here, for usage reporting.
 metrics_path: "~/.quotabot/litellm-metrics.jsonl"
 
@@ -27,12 +38,15 @@ metrics_path: "~/.quotabot/litellm-metrics.jsonl"
 models:
   frontier-coder:
     candidates:
-      - deployment: claude-sonnet   # preferred while Claude has headroom
+      - deployment: claude-sonnet   # API-key deployments are skipped by default
         provider: claude
+        spend: paid_api
       - deployment: codex-gpt
         provider: codex
+        spend: paid_api
       - deployment: grok-code
         provider: grok
+        spend: paid_api             # skipped unless allow_paid_api: true
       - deployment: ollama-qwen     # always-available local fallback
         local: true
 
@@ -42,14 +56,16 @@ models:
         local: true
       - deployment: claude-sonnet
         provider: claude
+        spend: paid_api
 
 # Steer specific agents to specific models. The agent identity is read only from
 # trusted LiteLLM key alias or user_id; client-controlled request metadata cannot
 # select these rules.
-# `pin` forces a concrete deployment; `model` redirects to a logical model that
-# is then routed by headroom.
+# `pin` forces a concrete deployment after spend-policy checks; `model`
+# redirects to a logical model that is then routed by headroom.
 agents:
   architect:
-    pin: claude-sonnet      # always use the strong model, never downgrade
+    pin: claude-sonnet      # use the strong model only when paid APIs are opted in
+    pin_spend: paid_api     # skipped unless allow_paid_api: true
   bulk-summarizer:
     model: cheap-bulk       # prefer local, spill to Claude if needed

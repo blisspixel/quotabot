@@ -14,9 +14,9 @@ It plugs into two LiteLLM extension points (see https://docs.litellm.ai):
 
 Design goals, in priority order:
 
-  1. Never break the proxy. Any failure (quotabot down, bad policy, network
-     blip) falls through to the originally requested model. Routing is an
-     optimization, not a dependency.
+  1. Avoid surprise paid API spend. Managed logical models fail closed when no
+     allowed quota-plan or local route exists, while unmanaged model names still
+     pass through unchanged.
   2. Reuse quotabot's decision logic. Availability and headroom come from
      quotabot's ``/suggest`` endpoint, so the binding-window rules live in one
      place (the Dart collector) rather than being reimplemented here.
@@ -92,50 +92,92 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
 
 
+class UnsafeRouteError(RuntimeError):
+    """Raised when a managed logical model has no no-surprise-billing route."""
+
+
 class Candidate:
     """One deployment a logical model may route to.
 
     ``deployment`` is a ``model_name`` defined in the LiteLLM proxy config.
     ``provider`` is the quotabot provider id whose headroom gates this candidate
     (codex, claude, grok, antigravity, ...). ``local`` marks an always-available
-    local runtime that is never gated by headroom.
+    local runtime that is never gated by headroom. ``spend`` is a safety label:
+    ``quota_plan`` means an included quota plan with overages disabled; ``paid_api``
+    means request-metered API spend that must be explicitly enabled.
     """
 
-    __slots__ = ("deployment", "provider", "local")
+    __slots__ = ("deployment", "provider", "local", "spend")
 
     def __init__(
         self,
         deployment: str,
         provider: Optional[str] = None,
         local: bool = False,
+        spend: Optional[str] = None,
     ) -> None:
         self.deployment = deployment
         self.provider = provider
-        self.local = local
+        normalized_spend = "local" if local else _normalize_spend(spend)
+        self.local = local or normalized_spend == "local"
+        self.spend = "local" if self.local else normalized_spend
+
+
+def _normalize_spend(value: Optional[str]) -> str:
+    normalized = (value or "paid_api").strip().lower().replace("-", "_")
+    if normalized in {"quota", "quota_plan", "subscription", "subscription_quota"}:
+        return "quota_plan"
+    if normalized in {"local", "free"}:
+        return "local"
+    return "paid_api"
+
+
+def _bool_value(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
 
 
 class AgentRule:
     """How to route a named agent. ``pin`` forces a concrete deployment and
-    skips routing entirely; ``model`` redirects the agent to a logical model
-    that is then routed normally."""
+    skips headroom routing after spend-policy checks; ``model`` redirects the
+    agent to a logical model that is then routed normally."""
 
-    __slots__ = ("pin", "model")
+    __slots__ = ("pin", "model", "pin_spend")
 
-    def __init__(self, pin: Optional[str] = None, model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        pin: Optional[str] = None,
+        model: Optional[str] = None,
+        pin_spend: Optional[str] = None,
+    ) -> None:
         self.pin = pin
         self.model = model
+        self.pin_spend = _normalize_spend(pin_spend) if pin else None
 
 
 class Policy:
     default_quotabot_url = "http://127.0.0.1:8721"
     default_snapshot_ttl_seconds = 45.0
     default_comfort_threshold = 15.0
+    default_allow_paid_api = False
+    default_block_unsafe_passthrough = True
 
     def __init__(
         self,
         quotabot_url: str = default_quotabot_url,
         snapshot_ttl_seconds: float = default_snapshot_ttl_seconds,
         comfort_threshold: float = default_comfort_threshold,
+        allow_paid_api: bool = default_allow_paid_api,
+        block_unsafe_passthrough: bool = default_block_unsafe_passthrough,
         metrics_path: Optional[str] = None,
         models: Optional[dict[str, list[Candidate]]] = None,
         agents: Optional[dict[str, AgentRule]] = None,
@@ -143,6 +185,11 @@ class Policy:
         self.quotabot_url = quotabot_url
         self.snapshot_ttl_seconds = snapshot_ttl_seconds
         self.comfort_threshold = comfort_threshold
+        self.allow_paid_api = _bool_value(allow_paid_api, self.default_allow_paid_api)
+        self.block_unsafe_passthrough = _bool_value(
+            block_unsafe_passthrough,
+            self.default_block_unsafe_passthrough,
+        )
         self.metrics_path = _safe_metrics_path(metrics_path)
         self.models = models or {}
         self.agents = agents or {}
@@ -165,12 +212,17 @@ class Policy:
                     Candidate(
                         deployment=c["deployment"],
                         provider=c.get("provider"),
-                        local=bool(c.get("local", False)),
+                        local=_bool_value(c.get("local"), False),
+                        spend=c.get("spend"),
                     )
                 )
             models[name] = cands
         agents = {
-            name: AgentRule(pin=rule.get("pin"), model=rule.get("model"))
+            name: AgentRule(
+                pin=rule.get("pin"),
+                model=rule.get("model"),
+                pin_spend=rule.get("pin_spend"),
+            )
             for name, rule in (raw.get("agents") or {}).items()
         }
         return cls(
@@ -180,6 +232,14 @@ class Policy:
             ),
             comfort_threshold=float(
                 raw.get("comfort_threshold", cls.default_comfort_threshold)
+            ),
+            allow_paid_api=_bool_value(
+                raw.get("allow_paid_api"),
+                cls.default_allow_paid_api,
+            ),
+            block_unsafe_passthrough=_bool_value(
+                raw.get("block_unsafe_passthrough"),
+                cls.default_block_unsafe_passthrough,
             ),
             metrics_path=raw.get("metrics_path"),
             models=models,
@@ -230,6 +290,8 @@ class QuotabotRouter(CustomLogger):
             if chosen and chosen != requested:
                 data.setdefault("metadata", {})["quotabot_original_model"] = requested
                 data["model"] = chosen
+        except UnsafeRouteError:
+            raise
         except Exception:
             # Fail soft: leave the request exactly as it was.
             return data
@@ -241,9 +303,12 @@ class QuotabotRouter(CustomLogger):
         agent = self._agent_id(data, key)
         rule = self.policy.agents.get(agent) if agent else None
 
-        # An agent pinned to a concrete deployment skips headroom routing.
+        # An agent pinned to a concrete deployment skips headroom routing, but
+        # still must satisfy the spend policy.
         if rule and rule.pin:
-            return rule.pin
+            if self._spend_allowed(rule.pin_spend):
+                return rule.pin
+            return self._unsafe_passthrough(requested)
 
         # An agent may redirect to a different logical model, then route it.
         logical = (rule.model if rule and rule.model else requested) or ""
@@ -251,9 +316,16 @@ class QuotabotRouter(CustomLogger):
         if not candidates:
             return requested  # not a managed model; pass through unchanged
 
+        allowed = [c for c in candidates if self._candidate_allowed(c)]
+        if not allowed:
+            return self._unsafe_passthrough(requested)
+
         avail = await self._availability()
         if avail is None:
-            return requested  # quotabot unreachable; pass through
+            for c in allowed:
+                if c.local:
+                    return c.deployment
+            return self._unsafe_passthrough(requested)
 
         # First pass: honor the comfort threshold. Second pass: accept any
         # provider with a sliver left. Preference order is the policy order.
@@ -261,12 +333,29 @@ class QuotabotRouter(CustomLogger):
         # local-first logical model stays local while frontier models can keep
         # local candidates last as the fallback.
         for floor in (self.policy.comfort_threshold, 0.5):
-            for c in candidates:
+            for c in allowed:
                 if c.local:
                     return c.deployment
                 info = avail.get(c.provider or "")
                 if info and info.get("available") and _headroom(info) >= floor:
                     return c.deployment
+        return self._unsafe_passthrough(requested)
+
+    def _candidate_allowed(self, candidate: Candidate) -> bool:
+        return candidate.local or self._spend_allowed(candidate.spend)
+
+    def _spend_allowed(self, spend: Optional[str]) -> bool:
+        if spend == "local":
+            return True
+        if spend == "quota_plan":
+            return True
+        return self.policy.allow_paid_api
+
+    def _unsafe_passthrough(self, requested: Optional[str]) -> Optional[str]:
+        if self.policy.block_unsafe_passthrough:
+            raise UnsafeRouteError(
+                f'quotabot has no safe no-surprise-billing route for "{requested}"'
+            )
         return requested
 
     @staticmethod

@@ -188,6 +188,11 @@ reserved. `leases.dart` owns those reservations: production uses a small
 file-backed store protected by a lock file, while tests use an in-memory store.
 Leases are advisory local metadata with TTLs and idempotency keys; they never
 contact providers and never sit in the prompt or inference data path.
+`suggestRoute` also accepts an explicit local-first policy. The default remains
+balanced, where a comfortable metered subscription wins and local runtimes are
+fallbacks. Local-first mode recommends an available local runtime before
+subscription quota and records `routing_policy: "local_first"` in the JSON
+response.
 
 `mcp.dart` builds one MCP server definition: tools, resources, output schemas,
 read-only/idempotent annotations, capability scope, and standard MCP resource
@@ -196,8 +201,9 @@ also apply exact `account` filters after named profile filters for routers that
 need one provider account without creating a profile. `decide_now` is
 deliberately different: it reads the in-memory or disk last-known snapshot only,
 returns `source`, `snapshot_as_of`, age, and staleness, and never forces a live
-collect. `reserve_provider` and `release_provider` are the only local-write
-tools, and their annotations mark that distinction for MCP clients.
+collect. `suggest_provider` and `decide_now` both accept `local_first` for
+cost-sensitive dispatch. `reserve_provider` and `release_provider` are the only
+local-write tools, and their annotations mark that distinction for MCP clients.
 `quotas://current` remains the unfiltered live snapshot resource.
 `quotas://alerts` stores the last `quotabot.alert.v1` objects fired by the MCP
 subscription loop. Clients subscribe with `resources/subscribe`; on an amber/red
@@ -211,8 +217,9 @@ rejects batch JSON-RPC payloads, and can require a bearer token.
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
 `bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
-consumers. The reasoning behind the routing math (risk-adjusted headroom, strand
-probability, and lease discounts) is written up in
+consumers, including `GET /suggest?local_first=true` for the same opt-in local
+first routing policy. The reasoning behind the routing math (risk-adjusted
+headroom, strand probability, and lease discounts) is written up in
 [ROUTING-MATH.md](ROUTING-MATH.md).
 
 The public snapshot contract is frozen as `quotabot.v1` in
@@ -237,21 +244,29 @@ curated routing metadata.
 signal without putting quotabot in the request data path. The Python
 `quotabot_router.py` plugin registers a LiteLLM `async_pre_call_hook` that reads
 only the local quotabot `/suggest` quota recommendation and rewrites a logical
-model to a concrete LiteLLM deployment. It fails soft: bad policy, unreachable
-quotabot, or malformed response leaves the requested model unchanged.
+model to a concrete LiteLLM deployment. Unmanaged model names still pass through
+unchanged so the proxy can serve ordinary LiteLLM traffic.
+For managed logical models, the plugin now has a stricter billing guardrail:
+normal API-key deployments are `spend: paid_api` and skipped unless
+`allow_paid_api` is explicitly true; included quota-plan deployments must be
+marked `spend: quota_plan`; local candidates are always allowed. Agent pins skip
+headroom ranking but still require a safe `pin_spend` class or paid API opt-in.
+If a managed logical model has no safe route and `block_unsafe_passthrough` is
+true, the request fails closed before any provider call instead of falling
+through to surprise API spend.
 
 The integration is covered at two layers. Unit tests import the hook directly to
-check policy precedence, trusted key alias/user_id agent identity, local-fallback
-ordering, loopback URL hardening, no-redirect quotabot fetches, and metrics path
-containment under `~/.quotabot`. CI also installs the current `litellm[proxy]`
-package and starts a real LiteLLM proxy on loopback with a fake quotabot
-`/suggest` server and a fake OpenAI-compatible backend. That test proves the
-actual proxy `async_pre_call_hook` path rewrites a logical model to the provider
-with budget, spends no model tokens, and performs no external network calls. The
-plugin uses plain value classes rather than dataclasses because LiteLLM's
-current config-relative custom-callback loader executes modules before
-registering them in `sys.modules`, which breaks dataclass decoration on Python
-3.13.
+check policy precedence, trusted key alias/user_id agent identity, spend-class
+guardrails, local-fallback ordering, loopback URL hardening, no-redirect quotabot
+fetches, and metrics path containment under `~/.quotabot`. CI also installs the
+current `litellm[proxy]` package and starts a real LiteLLM proxy on loopback with
+a fake quotabot `/suggest` server and a fake OpenAI-compatible backend. That test
+proves the actual proxy `async_pre_call_hook` path rewrites a logical model to
+the provider with budget, spends no model tokens, and performs no external
+network calls. The plugin uses plain value classes rather than dataclasses
+because LiteLLM's current config-relative custom-callback loader executes
+modules before registering them in `sys.modules`, which breaks dataclass
+decoration on Python 3.13.
 
 When the plugin writes the default `~/.quotabot/litellm-metrics.jsonl`, the
 desktop analytics screen reads a bounded tail of that local JSONL file through

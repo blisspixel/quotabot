@@ -5,6 +5,12 @@ back to a local model (Ollama, LM Studio) when your paid caps run low. The
 routing decision is a zero-token local read from a running quotabot; it never
 calls a model to decide.
 
+The router is no-surprise-billing by default. Normal API-key deployments
+(`openai/*`, `anthropic/*`, `xai/*`, and similar) are request-metered paid APIs;
+mark them `spend: paid_api` and they are skipped unless you deliberately set
+`allow_paid_api: true`. Mark `spend: quota_plan` only for a deployment backed by
+a real included quota plan with overages disabled.
+
 This works the same on Windows, macOS, and Linux.
 
 ## How it works
@@ -50,10 +56,12 @@ so routing here stays consistent with the desktop widget and the MCP server.
 
    Keep `config.yaml` in the same folder as `quotabot_router.py`; current
    LiteLLM proxy releases resolve custom callback modules relative to the config
-   file. Edit `config.yaml` so each `model_name` points at a real deployment and
-   key, and edit `quotabot-routing.yaml` so each `deployment` matches one of
-   those `model_name`s. Set `provider` on each candidate to the quotabot provider
-   id that gates it (codex, claude, grok, antigravity).
+   file. Edit `config.yaml` so each `model_name` points at a real deployment,
+   and edit `quotabot-routing.yaml` so each `deployment` matches one of those
+   `model_name`s. Set `provider` on each candidate to the quotabot provider id
+   that gates it (codex, claude, grok, antigravity), and set `spend` honestly:
+   `quota_plan` for included quota with overages disabled, `paid_api` for
+   request-metered API keys.
 
 3. Launch the proxy with that config:
 
@@ -70,7 +78,29 @@ so routing here stays consistent with the desktop widget and the MCP server.
    ```
 
    The hook rewrites `frontier-coder` to whichever candidate currently has
-   budget. When all subscriptions are low it uses the `local: true` candidate.
+   budget and is allowed by the spend policy. When all safe subscription
+   candidates are low or unavailable it uses the `local: true` candidate.
+
+## Spend policy
+
+The policy file has two billing guardrails:
+
+```yaml
+allow_paid_api: false
+block_unsafe_passthrough: true
+```
+
+With these defaults, `spend: paid_api` candidates are ignored even if their
+provider has headroom in quotabot, because API-key billing is separate from the
+subscription quota quotabot tracks. If a managed logical model has no
+`quota_plan` or `local` route, the hook fails closed instead of silently passing
+through to a potentially expensive deployment. Unmanaged model names still pass
+through unchanged.
+
+Use `allow_paid_api: true` only when you intentionally want request-metered API
+spend. To use a provider subscription quota safely, route to a deployment whose
+cost is bounded by that quota plan and has overages disabled, then mark that
+candidate `spend: quota_plan`.
 
 ## Steering specific agents
 
@@ -79,12 +109,14 @@ Use a LiteLLM key alias or user_id and add a rule in
 
 ```yaml
 agents:
-  architect:        { pin: claude-sonnet }   # always the strong model
+  architect:        { pin: claude-sonnet, pin_spend: quota_plan }
   bulk-summarizer:  { model: cheap-bulk }    # prefer local, spill to Claude
 ```
 
-`pin` forces a concrete deployment and skips headroom routing; `model`
-redirects the agent to a logical model that is then routed normally.
+`pin` forces a concrete deployment and skips headroom routing, but it does not
+skip the spend policy. Set `pin_spend: quota_plan` or `pin_spend: local` for a
+safe pin, or enable `allow_paid_api: true` intentionally for a paid API pin.
+`model` redirects the agent to a logical model that is then routed normally.
 
 ## Usage metrics
 
@@ -101,10 +133,12 @@ last request age.
 
 ## Failure behavior
 
-Routing is an optimization, never a dependency. If quotabot is unreachable, the
-policy file is missing or invalid, or anything else goes wrong, the request
-falls through to the model the client originally asked for. The proxy keeps
-working; you just lose the quota-aware steering until quotabot is back.
+Routing is an optimization for unmanaged model names. For managed logical models,
+the default no-surprise-billing policy is stricter: if quotabot is unreachable
+and no local fallback is configured, or every configured route is `paid_api`
+while `allow_paid_api` is false, the hook fails closed before a provider call.
+The proxy keeps working for other routes, but that managed request is rejected
+rather than silently spending API money.
 
 ## Testing
 

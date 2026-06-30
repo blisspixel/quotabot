@@ -22,6 +22,14 @@ ProviderQuota _q(String id, double usedPercent) => ProviderQuota(
       ],
     );
 
+ProviderQuota _local(String id) => ProviderQuota(
+      provider: id,
+      displayName: id,
+      account: 'local',
+      asOf: _now,
+      kind: 'local',
+    );
+
 Future<({int status, Map<String, dynamic> body})> _requestJson(
   Uri uri, {
   String method = 'GET',
@@ -123,6 +131,30 @@ void main() {
         ranked.map((entry) => (entry as Map)['provider']),
         isNot(contains('claude')),
       );
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('local /suggest honors local-first query policy', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 20),
+        _local('ollama'),
+      ],
+      now: () => _now,
+    );
+    try {
+      final json = await _getJson(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/suggest?local_first=true',
+        ),
+      );
+
+      expect(json['routing_policy'], 'local_first');
+      expect((json['recommended'] as Map)['provider'], 'ollama');
+      expect(json['using_local_fallback'], isTrue);
     } finally {
       await server.close(force: true);
     }
