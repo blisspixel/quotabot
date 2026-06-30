@@ -49,6 +49,11 @@ collector/ (Dart package)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing
 
+integrations/mcp_clients/
+  Python and TypeScript MCP client snippets for stdio and Streamable HTTP,
+  plus smoke tests that compile Python, typecheck TypeScript, and verify current
+  SDK transport use.
+
 app/ (Flutter desktop)
   main.dart   imports collectAll(), renders cards, adaptive refresh
   fleet.dart  the Quota Analytics screen (Now/7d/90d, charts, the oracle glyph)
@@ -168,10 +173,12 @@ feeds it live `collectAll()` snapshots over stdio by default or MCP Streamable
 HTTP when launched with `--http`. `mcp_http.dart` keeps HTTP opt-in and
 loopback-only, enables DNS-rebinding host/origin checks, rejects batch JSON-RPC
 payloads, and can require a bearer token. `bin/example_routing_agent.dart` shows
-the same logic used for routing decisions. `bin/local_server.dart` provides a
-plain HTTP JSON alternative for non-MCP consumers. The reasoning behind the
-routing math (risk-adjusted headroom, strand probability, and the planned
-extensions) is written up in [ROUTING-MATH.md](ROUTING-MATH.md).
+the same logic used for direct Dart routing decisions, while
+`integrations/mcp_clients/` shows Python and TypeScript MCP clients for both
+stdio and Streamable HTTP. `bin/local_server.dart` provides a plain HTTP JSON
+alternative for non-MCP consumers. The reasoning behind the routing math
+(risk-adjusted headroom, strand probability, and the planned extensions) is
+written up in [ROUTING-MATH.md](ROUTING-MATH.md).
 
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`

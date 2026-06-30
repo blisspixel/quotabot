@@ -78,6 +78,13 @@ jobs:
         working-directory: app
         run: flutter test
 
+      - name: MCP client snippet tests
+        working-directory: integrations/mcp_clients
+        run: |
+          npm ci
+          npm run typecheck
+          python -m unittest test_mcp_client_snippets.py
+
       - name: LiteLLM router tests
         working-directory: integrations/litellm
         env:

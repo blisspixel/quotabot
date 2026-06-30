@@ -113,5 +113,7 @@ left. The shapes:
 - It stays local: no account, no cloud, nothing leaves the machine.
 
 A turnkey example of routing a fleet through quotabot is the LiteLLM proxy plugin
-in [integrations/litellm/](integrations/litellm/); a minimal Dart example is in
-`collector/bin/example_routing_agent.dart`.
+in [integrations/litellm/](integrations/litellm/). Minimal clients are in
+`collector/bin/example_routing_agent.dart` for Dart and
+[integrations/mcp_clients/](integrations/mcp_clients/) for Python and
+TypeScript MCP transports.

@@ -149,7 +149,9 @@ with optional `profile`) and a plain loopback HTTP JSON server. For how an agent
 should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/), which routes each request to
-a deployment with budget and fails soft when quotabot is unavailable.
+a deployment with budget and fails soft when quotabot is unavailable. For
+language-client adoption, see the Python and TypeScript MCP snippets in
+[integrations/mcp_clients/](integrations/mcp_clients/).
 
 ## Project layout
 
@@ -157,7 +159,7 @@ a deployment with budget and fails soft when quotabot is unavailable.
 quotabot/
   app/           Flutter desktop application (Windows, macOS, Linux)
   collector/     Dart package: adapters, normalized model, auth, CLI, MCP server
-  integrations/  LiteLLM proxy plugin for quota-aware request routing
+  integrations/  LiteLLM proxy plugin and MCP client snippets
   docs/          Setup, usage, building, architecture, routing math, data sources
   tools/         Packaging, icon, and developer helper scripts
 ```

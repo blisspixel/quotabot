@@ -15,6 +15,12 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- Python and TypeScript MCP client snippets now cover quotabot over both stdio
+  and Streamable HTTP. The snippets pin Python consumers to the stable MCP SDK
+  v1 line, use the current TypeScript SDK transport imports, keep bearer tokens
+  in headers only, print a compact routing decision, and are smoke-tested in CI
+  with Python compilation plus strict TypeScript typechecking against the MCP
+  TypeScript SDK.
 - The MCP server now supports opt-in Streamable HTTP alongside stdio:
   `dart run bin/mcp_server.dart --http` serves the same six tools and
   `quotas://current` resource on a loopback-only `/mcp` endpoint with

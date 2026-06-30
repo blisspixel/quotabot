@@ -294,7 +294,9 @@ owner-only token file for normal use. The endpoint is MCP Streamable HTTP, not
 the plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
-and `collector/bin/example_routing_agent.dart` for a runnable example.
+`collector/bin/example_routing_agent.dart` for a Dart routing example, and
+[../integrations/mcp_clients/](../integrations/mcp_clients/) for Python and
+TypeScript MCP client snippets covering stdio and Streamable HTTP.
 
 ## Local HTTP endpoint
 

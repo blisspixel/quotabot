@@ -232,7 +232,12 @@ leverage is the quality of the signal it hands a router.
     loopback host only, with DNS-rebinding host/origin checks, batch rejection,
     optional bearer-token auth, and the same shared server factory, schemas,
     read-only annotations, resources, and tool metadata as stdio.
-14. [ ] Client snippets (Python/TS) so the contract is trivial to adopt.
+14. [x] Client snippets (Python/TS) so the contract is trivial to adopt.
+    Shipped: `integrations/mcp_clients/` now contains Python and TypeScript MCP
+    clients for both stdio and Streamable HTTP, shared summary helpers, stable
+    SDK guidance checked on June 29, 2026, bearer-token support for HTTP, and CI
+    smoke tests that compile Python snippets, typecheck TypeScript snippets
+    against the current SDK, and assert current SDK transport imports.
 15. [ ] Concurrency leases (`reserve` / `release`) so parallel agents do not
     dogpile the same pick and the next caller sees the reduced effective headroom,
     paired with a cheap cached "decide now" read that always states its
