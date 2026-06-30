@@ -83,9 +83,10 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
   prefer quotabot's own OAuth grant (see Authentication) and fall back to the
   token the host CLI or IDE currently holds. Grok reads every account in the CLI
-  auth file and caches them separately. Antigravity additionally refreshes the
-  Gemini CLI token from disk and runs the Cloud Code onboarding step before
-  reading per-model quota.
+  auth file and caches them separately. Antigravity scans the active account and
+  profile databases, attempts live reads for each discovered account, refreshes
+  the Gemini CLI token from disk when it is the active token source, and runs the
+  Cloud Code onboarding step before reading per-model quota.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
 - Ollama, LM Studio, and Lemonade are local-runtime adapters: they report

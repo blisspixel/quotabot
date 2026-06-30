@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Antigravity now attempts a live read for every discovered active account from
+  its cross-platform profile scan, merging duplicate profile records and keeping
+  per-account cache fallback limited to accounts still present locally.
 - Grok now reads every account present in `~/.grok/auth.json`, tries an
   account-scoped quotabot grant for each one, and caches successful reads per
   account so switching accounts does not overwrite the previous account's

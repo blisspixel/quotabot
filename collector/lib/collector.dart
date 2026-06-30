@@ -105,24 +105,19 @@ Future<List<ProviderQuota>> _collectGrokMulti() async {
 }
 
 Future<List<ProviderQuota>> _collectAntigravityMulti() async {
-  final primary = await _withCache(
-    () => AntigravityAdapter().collect(),
-  );
-  final results = <ProviderQuota>[primary];
-  // include other known accounts from per-account caches ONLY if still active/detected
-  // in current Antigravity profiles (to auto-hide previous accounts after switch).
+  final collected = await AntigravityAdapter().collectAccounts();
+  final results = <ProviderQuota>[];
+  for (final q in collected) {
+    results.add(_cacheResult(q));
+  }
   final currentAccts = AntigravityAdapter.currentAccounts;
-  final others = loadAllAntigravitySnapshots();
-  for (final other in others) {
-    if (other.account != primary.account &&
-        other.hasWindows &&
-        currentAccts.contains(other.account)) {
-      results.add(other.asStale(other.error ?? 'cached account'));
+  for (final cached in loadAllAntigravitySnapshots()) {
+    if (cached.hasWindows &&
+        currentAccts.contains(cached.account) &&
+        !results.any((q) => q.account == cached.account)) {
+      results.add(cached.asStale(cached.error ?? 'cached account'));
     }
   }
-  // Full multi: discovered profiles now scanned cross-platform in adapter.
-  // Additional live attempts for non-primary accounts are best-effort via cache
-  // fallback; direct multi live collect can be expanded using per-db token extraction.
   return results;
 }
 

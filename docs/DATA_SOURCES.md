@@ -74,8 +74,10 @@ State lives in the Antigravity globalStorage SQLite database at
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
-  Library, Linux XDG) and scans Antigravity profile directories; per-account
-  cache files support showing multiple accounts when switching.
+  Library, Linux XDG) and scans Antigravity profile directories. Each active
+  account gets its own live read when a matching account grant, active CLI token,
+  or IDE token is available; per-account cache files are used only while the
+  account remains present in the active local profile set.
 
 ## Authentication
 
