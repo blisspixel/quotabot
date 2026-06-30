@@ -129,6 +129,11 @@ profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`
 The cache lives under the platform application-data directory
 (`%LOCALAPPDATA%/quotabot/cache` on Windows). This is what keeps a transient
 rate limit or an expired token from blanking a provider.
+For multi-account providers, stale per-account snapshots are appended only when
+the account is still present in that provider's current local account index and
+the live adapter did not already return it. This is the signed-out auto-hide
+rule: a cached work account disappears once the provider's own local account
+state no longer lists it.
 
 ## Routing helpers and the MCP server
 

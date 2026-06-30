@@ -129,7 +129,7 @@ it stands up serve every phase after it.
    (`ProviderQuota.error`, e.g. "no ~/.claude/.credentials.json", "token expired
    (re-run claude)") and `collectAll` falls back to the last-known snapshot
    rather than blanking. (Deeper hardware/manual passes continue as needed.)
-6. [ ] Token-refresh and onboarding edge cases handled and tested (Antigravity,
+6. [x] Token-refresh and onboarding edge cases handled and tested (Antigravity,
    Grok, Codex): expiry, multi-account, and signed-out states. Generalize the
    per-account model Antigravity already has (cross-platform profile scan, one
    card per active account, per-account caches keyed by email, auto-hide of
@@ -147,9 +147,12 @@ it stands up serve every phase after it.
    now has adapter fixtures for missing sessions, absent `rate_limits`, stale
    snapshots, and multi-bucket scans. The desktop widget now groups distinct
    account identities, scopes expansion by provider/account, and automatically
-   labels duplicate-provider cards. Remaining: signed-out auto-hide beyond
-   providers with explicit active-account indexes and full named profiles from
-   item 8. (Copilot's per-account read lands post-1.0 with the provider itself.)
+   labels duplicate-provider cards. The shared active-account cache rule is
+   tested and suppresses stale account snapshots once the provider's current
+   local account index no longer contains that account. No additional pre-1.0
+   provider exposes a reliable inactive-account index here; full named profiles
+   remain item 8. (Copilot's per-account read lands post-1.0 with the provider
+   itself.)
 7. [ ] Cursor and Windsurf first-class reads (both keep rich local state), and
    each provider's plan tier surfaced (e.g. Grok Free vs SuperGrok vs SuperGrok
    Heavy), so the value of the higher tier is visible. Two moving targets to

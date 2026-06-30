@@ -12,6 +12,9 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Multi-account cache fallback now uses a shared tested active-account rule: a
+  cached account is shown only while that account is still present in the
+  provider's current local account index.
 - The desktop widget now groups distinct account identities in the expanded
   view, scopes expansion state by provider/account, automatically disambiguates
   duplicate-provider cards, and keeps provider visibility menu rows unique when

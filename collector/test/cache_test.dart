@@ -186,5 +186,28 @@ void main() {
       final all = loadAccountSnapshots(ap);
       expect(all.map((q) => q.account).toSet(), {'work', 'home'});
     });
+
+    test('currentAccountFallbacks hides signed-out account caches', () {
+      final fallbacks = currentAccountFallbacks(
+        liveResults: [aq('work', 20)],
+        cachedSnapshots: [
+          aq('work', 25),
+          aq('home', 40),
+          aq('old', 60),
+          ProviderQuota(
+            provider: ap,
+            displayName: 'AcctTest',
+            account: 'empty',
+            asOf: 1782000000,
+            windows: const [],
+          ),
+        ],
+        currentAccounts: {'work', 'home'},
+      );
+
+      expect(fallbacks.map((q) => q.account).toList(), ['home']);
+      expect(fallbacks.single.stale, isTrue);
+      expect(fallbacks.single.error, 'cached account');
+    });
   });
 }

@@ -93,14 +93,11 @@ Future<List<ProviderQuota>> _collectGrokMulti() async {
   for (final q in collected) {
     results.add(_cacheResult(q));
   }
-  final currentAccts = GrokAdapter.currentAccounts;
-  for (final cached in loadAllGrokSnapshots()) {
-    if (cached.hasWindows &&
-        currentAccts.contains(cached.account) &&
-        !results.any((q) => q.account == cached.account)) {
-      results.add(cached.asStale(cached.error ?? 'cached account'));
-    }
-  }
+  results.addAll(currentAccountFallbacks(
+    liveResults: results,
+    cachedSnapshots: loadAllGrokSnapshots(),
+    currentAccounts: GrokAdapter.currentAccounts,
+  ));
   return results;
 }
 
@@ -110,14 +107,11 @@ Future<List<ProviderQuota>> _collectAntigravityMulti() async {
   for (final q in collected) {
     results.add(_cacheResult(q));
   }
-  final currentAccts = AntigravityAdapter.currentAccounts;
-  for (final cached in loadAllAntigravitySnapshots()) {
-    if (cached.hasWindows &&
-        currentAccts.contains(cached.account) &&
-        !results.any((q) => q.account == cached.account)) {
-      results.add(cached.asStale(cached.error ?? 'cached account'));
-    }
-  }
+  results.addAll(currentAccountFallbacks(
+    liveResults: results,
+    cachedSnapshots: loadAllAntigravitySnapshots(),
+    currentAccounts: AntigravityAdapter.currentAccounts,
+  ));
   return results;
 }
 

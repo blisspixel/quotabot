@@ -178,6 +178,26 @@ ProviderQuota? loadGrokSnapshot(String account) =>
 
 List<ProviderQuota> loadAllGrokSnapshots() => loadAccountSnapshots('grok');
 
+/// Returns stale cache fallbacks only for accounts still present in the live
+/// account index and not already returned by the adapter. This is the
+/// signed-out auto-hide rule for multi-account providers.
+List<ProviderQuota> currentAccountFallbacks({
+  required Iterable<ProviderQuota> liveResults,
+  required Iterable<ProviderQuota> cachedSnapshots,
+  required Set<String> currentAccounts,
+}) {
+  final liveAccounts = {for (final q in liveResults) q.account};
+  final out = <ProviderQuota>[];
+  for (final cached in cachedSnapshots) {
+    if (cached.hasWindows &&
+        currentAccounts.contains(cached.account) &&
+        !liveAccounts.contains(cached.account)) {
+      out.add(cached.asStale(cached.error ?? 'cached account'));
+    }
+  }
+  return out;
+}
+
 // --- Long-term analytics buckets -------------------------------------------
 //
 // A second, coarser history tier sits alongside the raw buffer above: headroom
