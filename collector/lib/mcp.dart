@@ -27,6 +27,7 @@ import 'leases.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'profiles.dart';
+import 'provider_filters.dart';
 import 'registry.dart';
 import 'schema_contracts.dart';
 import 'util.dart';
@@ -700,55 +701,13 @@ List<ProviderQuota> _filterAccount(
   return providers.where((provider) => provider.account == account).toList();
 }
 
-({Set<String> providers, String? error}) _excludeFilter(Object? value) {
-  if (value == null) return (providers: const {}, error: null);
-  final Iterable<Object?> raw;
-  if (value is String) {
-    raw = value.split(',');
-  } else if (value is List) {
-    raw = value;
-  } else {
-    return (
-      providers: const {},
-      error: 'exclude must be a string or list of provider ids',
-    );
-  }
-  final providers = <String>{};
-  for (final item in raw) {
-    if (item is! String || item.trim().isEmpty) continue;
-    final provider = normalizeProviderId(item);
-    if (provider == null) {
-      return (
-        providers: const {},
-        error: 'invalid exclude provider: $item',
-      );
-    }
-    providers.add(provider);
-  }
-  return (providers: providers, error: null);
-}
-
-List<ProviderQuota> _filterExcluded(
-  List<ProviderQuota> providers,
-  Set<String> excluded,
-) {
-  if (excluded.isEmpty) return providers;
-  return [
-    for (final provider in providers)
-      if (!excluded.contains(
-        normalizeProviderId(provider.provider) ?? provider.provider,
-      ))
-        provider,
-  ];
-}
-
 Future<_ProfiledSnapshot> _profiledSnapshot(
   Map<String, dynamic> args,
   SnapshotProvider snapshot,
   ProfileLoader profileLoader,
 ) async {
   final account = _accountFilter(args['account']);
-  final exclude = _excludeFilter(args['exclude']);
+  final exclude = parseProviderExclusions(args['exclude']);
   final rawProfile = args['profile'];
   final requested = rawProfile is String ? rawProfile.trim() : null;
   if (exclude.error != null) {
@@ -761,7 +720,7 @@ Future<_ProfiledSnapshot> _profiledSnapshot(
   }
   if (requested == null || requested.isEmpty) {
     return _ProfiledSnapshot(
-      providers: _filterExcluded(
+      providers: filterExcludedProviders(
         _filterAccount(await snapshot(), account),
         exclude.providers,
       ),
@@ -777,7 +736,7 @@ Future<_ProfiledSnapshot> _profiledSnapshot(
       error: 'unknown profile: $requested',
     );
   }
-  final providers = _filterExcluded(
+  final providers = filterExcludedProviders(
     _filterAccount(applyProfile(await snapshot(), profile), account),
     exclude.providers,
   );

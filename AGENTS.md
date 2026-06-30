@@ -72,7 +72,8 @@ Pick whichever transport you already speak. All return the same data.
   `--webhook URL` to have each alert POSTed for you (loopback unless
   `--allow-external`).
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
-  with `dart run bin/local_server.dart`).
+  with `dart run bin/local_server.dart`). Add `?exclude=codex,grok` to ignore
+  providers for one recommendation.
 
 ## The routing contract
 

@@ -146,8 +146,8 @@ opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters and one-request `exclude` lists, plus
 `quotas://alerts` subscriptions) and a
-plain loopback HTTP JSON server. For how an agent should call quotabot and route,
-see
+plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok`). For how an
+agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/), which routes each request to
 a deployment with budget and fails soft when quotabot is unavailable. For

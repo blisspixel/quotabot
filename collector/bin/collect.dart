@@ -136,7 +136,7 @@ Future<void> main(List<String> rawArgs) async {
         return;
       }
       final results =
-          _applyExclusions(await _read(profile), excluded.providers);
+          filterExcludedProviders(await _read(profile), excluded.providers);
       final now = nowEpoch();
       if (_hasModelProfile(flags)) {
         final s = suggestModel(results, now,
@@ -165,7 +165,7 @@ Future<void> main(List<String> rawArgs) async {
         return;
       }
       final results =
-          _applyExclusions(await _read(profile), excluded.providers);
+          filterExcludedProviders(await _read(profile), excluded.providers);
       final now = nowEpoch();
       final reqs = _modelRequirements(flags);
       if (wantsJson) {
@@ -358,36 +358,18 @@ List<String> _normalizeArgs(List<String> args) {
   return normalized;
 }
 
-List<ProviderQuota> _applyExclusions(
-  List<ProviderQuota> results,
-  Set<String> excluded,
-) {
-  if (excluded.isEmpty) return results;
-  return [
-    for (final quota in results)
-      if (!excluded.contains(
-        normalizeProviderId(quota.provider) ?? quota.provider,
-      ))
-        quota,
-  ];
-}
-
-({Set<String> providers, bool ok}) _excludedProviders(Set<String> flags) {
+ProviderExclusionParseResult _excludedProviders(Set<String> flags) {
   final raw = _stringOption(flags, 'exclude', null);
-  if (raw == null || raw.trim().isEmpty) {
-    return (providers: const {}, ok: true);
-  }
-  final providers = <String>{};
-  for (final part in raw.split(',')) {
-    if (part.trim().isEmpty) continue;
-    final provider = normalizeProviderId(part);
-    if (provider == null) {
-      stderr.writeln('quotabot: invalid --exclude provider "$part"');
-      return (providers: const {}, ok: false);
+  final parsed = parseProviderExclusions(raw);
+  if (!parsed.ok) {
+    final invalid = parsed.invalidProvider;
+    if (invalid == null) {
+      stderr.writeln('quotabot: ${parsed.error}');
+    } else {
+      stderr.writeln('quotabot: invalid --exclude provider "$invalid"');
     }
-    providers.add(provider);
   }
-  return (providers: providers, ok: true);
+  return parsed;
 }
 
 ({QuotaProfile? profile, bool ok}) _profileFromFlags(Set<String> flags) {

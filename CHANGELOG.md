@@ -14,6 +14,8 @@ Notable changes to quotabot. Newest first.
 - MCP read/routing/reservation/model tools now accept an `exclude` provider-id
   list, giving agents the same one-request provider avoidance available from the
   CLI.
+- The loopback HTTP `GET /suggest` endpoint now accepts `?exclude=codex,grok`
+  and returns a JSON 400 error for malformed provider ids.
 
 ### Fixed
 - Grok usage now labels the shared paid-plan pool as a weekly window, matching

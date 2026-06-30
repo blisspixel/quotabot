@@ -242,7 +242,8 @@ tool. Tiers are the providers' own product tiers, not a quotabot quality ranking
 
 For a one-off routing decision, add `--exclude=codex,grok` to `models` or
 `suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and
-model tools, to ignore those providers without changing your named profiles.
+model tools, to ignore those providers without changing your named profiles. The
+loopback HTTP server accepts the same idea as `GET /suggest?exclude=codex,grok`.
 
 For catalog maintenance, run the audit tool from the collector package:
 
@@ -359,7 +360,8 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 ```
 
 `GET /` returns the full snapshot as JSON; `GET /suggest` returns the routing
-recommendation. Local only, zero tokens.
+recommendation, and `GET /suggest?exclude=codex,grok` ignores those providers
+for that recommendation. Local only, zero tokens.
 
 ## Demo mode
 

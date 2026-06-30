@@ -27,6 +27,7 @@ export 'manual_quota.dart';
 export 'model_catalog.dart';
 export 'palette.dart';
 export 'provider_adapters.dart';
+export 'provider_filters.dart';
 export 'provider_ids.dart';
 export 'profiles.dart';
 export 'registry.dart';
