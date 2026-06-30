@@ -150,6 +150,15 @@ void saveProfile(QuotaProfile profile, {Directory? dir}) {
   tmp.renameSync(file.path);
 }
 
+void deleteProfile(String name, {Directory? dir}) {
+  final normalized = normalizeProfileName(name);
+  if (normalized == null || normalized == defaultProfileName) return;
+  try {
+    final file = profileFile(normalized, dir: dir);
+    if (file.existsSync()) file.deleteSync();
+  } catch (_) {}
+}
+
 QuotaProfile? loadProfile(String name, {Directory? dir}) {
   final normalized = normalizeProfileName(name);
   if (normalized == null) return null;

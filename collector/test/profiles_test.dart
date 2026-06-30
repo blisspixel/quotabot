@@ -141,5 +141,12 @@ void main() {
       'default',
       'work',
     ]);
+
+    deleteProfile('default', dir: temp);
+    expect(loadProfile('default', dir: temp)!.name, defaultProfileName);
+
+    deleteProfile('work', dir: temp);
+    expect(loadProfile('work', dir: temp), isNull);
+    expect(listProfiles(dir: temp).map((p) => p.name), ['default']);
   });
 }

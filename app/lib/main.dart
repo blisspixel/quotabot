@@ -23,6 +23,7 @@ import 'demo.dart';
 import 'fleet.dart';
 import 'logos.dart';
 import 'prefs.dart';
+import 'profile_editor.dart';
 import 'profile_ui.dart';
 import 'termshot.dart';
 import 'typography.dart';
@@ -48,6 +49,11 @@ final GlobalKey _termShotKey = GlobalKey();
 /// Global text-scale, applied to every route (strip and analytics) via the
 /// MaterialApp builder. Driven by the TextSize preference.
 final ValueNotifier<double> textScale = ValueNotifier<double>(1.0);
+
+/// Driven by the active profile. The default profile follows the OS theme.
+final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier<ThemeMode>(
+  ThemeMode.system,
+);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -114,24 +120,27 @@ class QuotaBotApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      themeMode: ThemeMode.system, // follow OS light/dark
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
-      builder: (context, child) => RepaintBoundary(
-        key: _shotBoundaryKey,
-        child: ValueListenableBuilder<double>(
-          valueListenable: textScale,
-          builder: (context, scale, _) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: TextScaler.linear(scale)),
-            child: child!,
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeMode,
+      builder: (context, mode, _) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        themeMode: mode,
+        theme: _theme(Brightness.light),
+        darkTheme: _theme(Brightness.dark),
+        builder: (context, child) => RepaintBoundary(
+          key: _shotBoundaryKey,
+          child: ValueListenableBuilder<double>(
+            valueListenable: textScale,
+            builder: (context, scale, _) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: TextScaler.linear(scale)),
+              child: child!,
+            ),
           ),
         ),
+        home: Dashboard(prefs: prefs),
       ),
-      home: Dashboard(prefs: prefs),
     );
   }
 
@@ -175,17 +184,6 @@ TextTheme _tabularFigures(TextTheme t) {
     labelSmall: f(t.labelSmall),
   );
 }
-
-const _genericAccountLabels = {'default', 'unknown', 'installed', 'cli'};
-
-@visibleForTesting
-bool quotaHasSpecificAccount(ProviderQuota q) =>
-    q.account.trim().isNotEmpty &&
-    !_genericAccountLabels.contains(q.account.trim().toLowerCase());
-
-@visibleForTesting
-String quotaDisplayKey(ProviderQuota q) =>
-    quotaHasSpecificAccount(q) ? '${q.provider}|${q.account}' : q.provider;
 
 @visibleForTesting
 class ProviderDisplayGroup {
@@ -346,6 +344,11 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _applyProfileUiState(QuotaProfile profile) {
+    appThemeMode.value = switch (profile.theme) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
     if (profile.name == defaultProfileName) {
       _hidden = {..._defaultHidden};
       _sort = _defaultSort;
@@ -1234,6 +1237,13 @@ class _DashboardState extends State<Dashboard>
               style: const TextStyle(fontSize: AppType.subtitle),
             ),
           ),
+        PopupMenuItem(
+          value: 'profiles:manage',
+          child: Text(
+            'Manage profiles...',
+            style: const TextStyle(fontSize: AppType.subtitle),
+          ),
+        ),
         const PopupMenuDivider(),
         const PopupMenuItem(
           enabled: false,
@@ -1369,6 +1379,8 @@ class _DashboardState extends State<Dashboard>
   void _onMenu(String value) {
     if (value.startsWith('profile:')) {
       _setActiveProfile(value.substring(8));
+    } else if (value == 'profiles:manage') {
+      _showProfileEditor();
     } else if (value.startsWith('show:')) {
       _toggleHidden(value.substring(5));
     } else if (value == 'cad:smart') {
@@ -1417,6 +1429,58 @@ class _DashboardState extends State<Dashboard>
     });
     _applySize();
     _persistPrefs();
+  }
+
+  Future<void> _showProfileEditor() async {
+    _saveActiveProfileUiState();
+    final result = await showDialog<ProfileEditorResult>(
+      context: context,
+      builder: (_) => ProfileEditorDialog(
+        profiles: _loadProfiles(),
+        providers: _data,
+        activeProfile: _activeProfile.name,
+        currentSort: _sort,
+        currentHidden: _hidden,
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (result.action == ProfileEditorAction.delete) {
+      final name = result.deleteName;
+      if (name == null) return;
+      deleteProfile(name);
+      final next = name == _activeProfile.name
+          ? defaultProfileName
+          : _activeProfile.name;
+      _profiles = _loadProfiles();
+      final profile = _profileByName(next);
+      setState(() {
+        _activeProfile = profile;
+        _applyProfileUiState(profile);
+        _armed = {};
+      });
+      _persistPrefs();
+      _applySize();
+      return;
+    }
+    final profile = result.profile;
+    if (profile == null) return;
+    try {
+      saveProfile(profile);
+    } catch (_) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not save profile.')));
+      return;
+    }
+    _profiles = _loadProfiles();
+    final saved = _profileByName(profile.name);
+    setState(() {
+      _activeProfile = saved;
+      _applyProfileUiState(saved);
+      _armed = {};
+    });
+    _persistPrefs();
+    _applySize();
   }
 
   void _setShowAccounts(bool value) {

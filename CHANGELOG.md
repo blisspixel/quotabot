@@ -12,9 +12,10 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
-- The desktop app now has a profile selector. It filters the widget, analytics,
-  notifications, and alert webhooks through the active profile, and stores
-  hidden-provider plus sort preferences in non-default profile files.
+- The desktop app now has full profile controls: create, edit, delete, select,
+  provider/account filters, routing policy, theme, and profile-scoped hidden
+  providers plus sort. The widget, analytics, notifications, and alert webhooks
+  all follow the active profile.
 - MCP quota, routing, availability, and model tools now accept optional
   `profile`, applying the same local named profile filters as the CLI while
   preserving the unfiltered `quotas://current` resource.

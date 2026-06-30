@@ -14,10 +14,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   each; expand to restore the full view.
 - **Menu:** hide or show individual providers, set the refresh cadence (smart,
   every 15 minutes, or every hour), choose the icon sort (default, alphabetical,
-  most available, most used), choose a named profile, and toggle always-on-top,
-  taskbar visibility, notifications, and "Show account names". Account names
-  auto-hide for single-account providers and show only when a provider has more
-  than one account on screen.
+  most available, most used), choose or manage a named profile, and toggle
+  always-on-top, taskbar visibility, notifications, and "Show account names".
+  Account names auto-hide for single-account providers and show only when a
+  provider has more than one account on screen.
 - **Smart schedule:** refreshes more often as a reset nears or a cap fills, and
   relaxes to as little as twice a day when everything is healthy.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
@@ -29,8 +29,8 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   distribution, how often it is usable, any trend, and the tightest hour of day.
 - Your hidden providers, compact/expanded state, cadence, always-on-top, taskbar,
   notifications, account-names, active profile, and window position persist
-  across restarts. Non-default profiles keep their own hidden-provider and sort
-  preferences.
+  across restarts. Non-default profiles keep their own hidden-provider, sort,
+  and theme preferences.
 
 The header shows a radial "pool gauge" next to the "Quota" wordmark: it fills to
 the average remaining headroom across visible providers, colored green (>=50%
@@ -143,9 +143,11 @@ provider, account, hidden providers, and routing policy before status, JSON,
 `suggest`, `models`, `check`, `stats`, `watch`, or `top` render anything. The
 implicit `default` profile keeps the zero-config fleet unchanged.
 
-The desktop widget can select the same profiles from its menu. Profile selection
-changes the displayed providers, low-quota notifications, webhook alerts, and
-analytics view. Hiding providers and choosing sort order are scoped to the active
+The desktop widget can create, edit, delete, and select the same profiles from
+its menu. A profile can choose providers, specific accounts where quotabot has
+account evidence, routing policy, and theme. Profile selection changes the
+displayed providers, low-quota notifications, webhook alerts, and analytics
+view. Hiding providers and choosing sort order are scoped to the active
 non-default profile; the default profile keeps the app's legacy global
 preferences.
 

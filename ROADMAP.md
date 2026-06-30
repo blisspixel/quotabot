@@ -167,18 +167,17 @@ it stands up serve every phase after it.
    local state database. Both adapters surface account and plan labels when
    local metadata provides them; CLI-only Devin installs remain truthful
    detection-only results rather than fabricated quota windows.
-8. [ ] Profiles: named bundles (work / personal / per-project) that select which
+8. [x] Profiles: named bundles (work / personal / per-project) that select which
    accounts and providers are in view, carry their own UI preferences (theme,
    sort, hidden providers), and pin a routing policy (local-only here,
    paid-tier-first there). Built on the per-(provider, account) plumbing from
    item 6, this is the polished way the multi-account case is handled: toggle in
    the app, or pass `--profile NAME` to the CLI and MCP so a router routes within
-   the right identity. One default profile stays the zero-config path. The
-   profile model, JSON schema, safe-name validation, local profile persistence,
-   provider/account filtering core, CLI `--profile` filtering, and MCP profile
-   filtering now exist. The desktop app can switch existing profiles and scopes
-   hidden providers, sort, alerts, and analytics to the active profile. Remaining:
-   add first-class desktop profile creation/editing and theme scoping.
+   the right identity. Shipped: `quotabot.profile.v1` storage, safe names,
+   provider/account filters, routing policy, CLI `--profile`, MCP `profile`,
+   desktop switching, desktop create/edit/delete, profile-scoped hidden
+   providers, sort, theme, notifications, alert webhooks, and analytics. The
+   `default` profile remains file-free and keeps the zero-config path.
 
 ### Phase 3 - Deterministic testability, then hard testing
 

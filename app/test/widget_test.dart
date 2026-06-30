@@ -148,6 +148,80 @@ void main() {
         expect(routing.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
       },
     );
+
+    test(
+      'builds provider options from live data and saved profile filters',
+      () {
+        final options = profileProviderOptions(
+          [
+            _provider('codex', 'default'),
+            _provider('grok', 'work@example.com'),
+          ],
+          profiles: [
+            const QuotaProfile(
+              name: 'archived',
+              providers: {'cursor'},
+              accounts: {
+                'cursor': {'old@example.com'},
+              },
+            ),
+          ],
+        );
+
+        expect(options.map((o) => o.provider), ['codex', 'cursor', 'grok']);
+        expect(options[0].accounts, isEmpty);
+        expect(options[1].accounts, ['old@example.com']);
+        expect(options[2].accounts, ['work@example.com']);
+      },
+    );
+
+    test('builds compact profile filters from editor selection', () {
+      final options = [
+        const ProfileProviderOption(
+          provider: 'codex',
+          displayName: 'Codex',
+          accounts: [],
+        ),
+        const ProfileProviderOption(
+          provider: 'grok',
+          displayName: 'Grok',
+          accounts: ['home@example.com', 'work@example.com'],
+        ),
+      ];
+
+      final all = profileFromSelection(
+        name: 'all',
+        options: options,
+        selectedProviders: {'codex', 'grok'},
+        selectedAccounts: {
+          'grok': {'home@example.com', 'work@example.com'},
+        },
+        hiddenProviders: const {},
+        routingPolicy: ProfileRoutingPolicy.balanced,
+        sort: ProviderSort.defaultOrder,
+      );
+      expect(all.providers, isEmpty);
+      expect(all.accounts, isEmpty);
+
+      final work = profileFromSelection(
+        name: 'work',
+        options: options,
+        selectedProviders: {'grok'},
+        selectedAccounts: {
+          'grok': {'work@example.com'},
+        },
+        hiddenProviders: {'cursor'},
+        routingPolicy: ProfileRoutingPolicy.subscriptionsFirst,
+        sort: ProviderSort.mostAvailable,
+        theme: 'dark',
+      );
+      expect(work.providers, {'grok'});
+      expect(work.accounts['grok'], {'work@example.com'});
+      expect(work.hiddenProviders, {'cursor'});
+      expect(work.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+      expect(work.sort, ProviderSort.mostAvailable.name);
+      expect(work.theme, 'dark');
+    });
   });
 
   group('provider display grouping', () {
