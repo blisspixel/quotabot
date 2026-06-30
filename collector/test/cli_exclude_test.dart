@@ -53,6 +53,68 @@ void main() {
     expect(providers, isNot(contains('ollama')));
   });
 
+  test('status json excludes named providers from the snapshot', () async {
+    final result = await runCli(['--json', '--exclude=codex,ollama']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    final providers = (json['providers'] as List)
+        .map((entry) => (entry as Map)['provider'] as String)
+        .toSet();
+    expect(providers, isNot(contains('codex')));
+    expect(providers, isNot(contains('ollama')));
+  });
+
+  test('top snapshot excludes named providers', () async {
+    final result = await runCli(['top', '--exclude=codex']);
+
+    expect(result.exitCode, 0);
+    expect(result.stdout as String, isNot(contains('Codex')));
+  });
+
+  test('report json excludes named providers', () async {
+    final result = await runCli(['report', '--json', '--exclude=codex']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    final providers = (json['providers'] as List)
+        .map((entry) => (entry as Map)['provider'] as String)
+        .toSet();
+    expect(providers, isNot(contains('codex')));
+  });
+
+  test('stats json excludes named providers', () async {
+    final result = await runCli(['stats', '--json', '--exclude=codex']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json.keys, isNot(contains('codex')));
+  });
+
+  test('check treats excluded providers as out of view', () async {
+    final result =
+        await runCli(['check', 'codex', '--json', '--exclude=codex']);
+
+    expect(result.exitCode, 64);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['provider'], 'codex');
+    expect(json['found'], isFalse);
+  });
+
+  test('watch once excludes named providers before alerting', () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--json',
+      '--mock-provider=claude',
+      '--state=exhausted',
+      '--exclude=claude',
+    ]);
+
+    expect(result.exitCode, 0);
+    expect((result.stdout as String).trim(), isEmpty);
+  });
+
   test('models budget local returns only local-runtime models', () async {
     final result = await runCli(['models', '--json', '--budget=local']);
 

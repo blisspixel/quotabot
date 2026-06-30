@@ -58,8 +58,10 @@ Notable changes to quotabot. Newest first.
   `quotabot manual list`, and removed with `quotabot manual remove`. They are
   stored locally, appear in normal quota views and JSON as `source: "manual"`,
   and are excluded from measured analytics history.
-- `quotabot suggest` and `quotabot models` now accept `--exclude=A,B` to ignore
-  specific providers for one routing decision without editing profiles.
+- Quota-reading CLI commands now accept `--exclude=A,B` after profile filtering
+  to ignore specific providers for one run without editing profiles, including
+  `status`, `doctor`, `json`, `check`, `top`, `watch`, `stats`, `report`,
+  `calibration`, `models`, and `suggest`.
 - MCP read/routing/reservation/model tools now accept an `exclude` provider-id
   list, giving agents the same one-request provider avoidance available from the
   CLI.

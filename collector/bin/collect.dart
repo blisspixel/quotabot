@@ -62,12 +62,23 @@ Future<T> _withSpinner<T>(String label, Future<T> Function() task) async {
 
 /// Collects every provider's quota behind the spinner, then applies an optional
 /// local profile view.
-Future<List<ProviderQuota>> _read([QuotaProfile? profile]) =>
-    _withSpinner('reading quota', () => _collectProfiled(profile));
+Future<List<ProviderQuota>> _read([
+  QuotaProfile? profile,
+  Set<String> excludedProviders = const {},
+]) =>
+    _withSpinner(
+      'reading quota',
+      () => _collectProfiled(profile, excludedProviders: excludedProviders),
+    );
 
-Future<List<ProviderQuota>> _collectProfiled(QuotaProfile? profile) async {
+Future<List<ProviderQuota>> _collectProfiled(
+  QuotaProfile? profile, {
+  Set<String> excludedProviders = const {},
+}) async {
   final results = _simulatedSnapshot ?? await collectAll();
-  return profile == null ? List.of(results) : applyProfile(results, profile);
+  final profiled =
+      profile == null ? List.of(results) : applyProfile(results, profile);
+  return filterExcludedProviders(profiled, excludedProviders);
 }
 
 Map<String, dynamic> _snapshot(
@@ -110,6 +121,15 @@ Future<void> main(List<String> rawArgs) async {
     return;
   }
   _simulatedSnapshot = simulationSelection.snapshot;
+  var excludedProviders = const <String>{};
+  if (_usesQuotaRead(cmd)) {
+    final exclusionSelection = _excludedProviders(flags);
+    if (!exclusionSelection.ok) {
+      exitCode = _exitUsage;
+      return;
+    }
+    excludedProviders = exclusionSelection.providers;
+  }
 
   switch (cmd) {
     case 'login':
@@ -127,16 +147,10 @@ Future<void> main(List<String> rawArgs) async {
         exitCode = 64;
         return;
       }
-      await _check(pos[1], wantsJson, profile);
+      await _check(pos[1], wantsJson, profile, excludedProviders);
       return;
     case 'suggest':
-      final excluded = _excludedProviders(flags);
-      if (!excluded.ok) {
-        exitCode = _exitUsage;
-        return;
-      }
-      final results =
-          filterExcludedProviders(await _read(profile), excluded.providers);
+      final results = await _read(profile, excludedProviders);
       final now = nowEpoch();
       if (_hasModelProfile(flags)) {
         final reqs = _modelRequirements(flags);
@@ -174,25 +188,20 @@ Future<void> main(List<String> rawArgs) async {
       }
       return;
     case 'stats':
-      await _runStats(pos.skip(1).toList(), wantsJson, profile);
+      await _runStats(
+          pos.skip(1).toList(), wantsJson, profile, excludedProviders);
       return;
     case 'report':
-      await _runReport(wantsJson, profile);
+      await _runReport(wantsJson, profile, excludedProviders);
       return;
     case 'top':
-      await _runTop(flags, profile);
+      await _runTop(flags, profile, excludedProviders);
       return;
     case 'watch':
-      await _runWatch(flags, profile);
+      await _runWatch(flags, profile, excludedProviders);
       return;
     case 'models':
-      final excluded = _excludedProviders(flags);
-      if (!excluded.ok) {
-        exitCode = _exitUsage;
-        return;
-      }
-      final results =
-          filterExcludedProviders(await _read(profile), excluded.providers);
+      final results = await _read(profile, excludedProviders);
       final now = nowEpoch();
       final reqs = _modelRequirements(flags);
       if (!reqs.ok) {
@@ -208,12 +217,12 @@ Future<void> main(List<String> rawArgs) async {
       }
       return;
     case 'calibration':
-      await _runCalibration(wantsJson, profile);
+      await _runCalibration(wantsJson, profile, excludedProviders);
       return;
   }
 
   // Snapshot and the default status table share one collect.
-  final results = await _read(profile);
+  final results = await _read(profile, excludedProviders);
   if (cmd == 'json' || (cmd.isEmpty && wantsJson)) {
     print(_jsonPretty(_snapshot(results, profile)));
     return;
@@ -229,6 +238,23 @@ Future<void> main(List<String> rawArgs) async {
   stderr.writeln('run "quotabot help" for the command list');
   exitCode = 64;
 }
+
+bool _usesQuotaRead(String cmd) =>
+    cmd.isEmpty || _quotaReadCommands.contains(cmd);
+
+const _quotaReadCommands = {
+  'calibration',
+  'check',
+  'doctor',
+  'json',
+  'models',
+  'report',
+  'stats',
+  'status',
+  'suggest',
+  'top',
+  'watch',
+};
 
 /// The routing recommendation for [results], discounted by recent burn. Shared
 /// by `suggest`, `doctor`, and the live `top` view so they never diverge.
@@ -638,7 +664,11 @@ String _agoLabel(int lastCollect, int now) {
 /// or a tight cap, relaxed when healthy). `--interval=N` forces a fixed cadence;
 /// `--truecolor` forces 24-bit gradients. When stdout is not a terminal it prints
 /// one plain frame and exits, so `quotabot top | cat` still yields a snapshot.
-Future<void> _runTop(Set<String> flags, QuotaProfile? profile) async {
+Future<void> _runTop(
+  Set<String> flags,
+  QuotaProfile? profile,
+  Set<String> excludedProviders,
+) async {
   final color = _useColor(flags);
   final depth = flags.contains('--truecolor')
       ? ColorDepth.truecolor
@@ -667,7 +697,8 @@ Future<void> _runTop(Set<String> flags, QuotaProfile? profile) async {
   }
 
   if (!stdout.hasTerminal) {
-    final data = await _collectProfiled(profile);
+    final data =
+        await _collectProfiled(profile, excludedProviders: excludedProviders);
     final now = nowEpoch();
     final suggestion = _suggestFor(data, now);
     final lines = renderTopFrame(
@@ -764,7 +795,8 @@ Future<void> _runTop(Set<String> flags, QuotaProfile? profile) async {
   // on the adaptive cadence.
   reload = () async {
     try {
-      final fresh = await _collectProfiled(profile);
+      final fresh =
+          await _collectProfiled(profile, excludedProviders: excludedProviders);
       data = fresh;
       lastCollect = nowEpoch();
       loading = false;
@@ -968,7 +1000,7 @@ void _printHelp() {
     '  --local-first       suggest: prefer local runtime before subscription quota',
   );
   stdout.writeln(
-    '  --exclude=A,B       suggest/models: ignore these providers',
+    '  --exclude=A,B       quota reads: ignore these providers after profile filtering',
   );
   stdout.writeln(
     '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',
@@ -1010,7 +1042,11 @@ void _printHelp() {
 /// unless --allow-external). --json prints alerts as JSON lines; --once runs a
 /// single pass (for cron or tests); --interval=N pins the poll rate, otherwise
 /// the adaptive cadence is used.
-Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
+Future<void> _runWatch(
+  Set<String> flags,
+  QuotaProfile? profile,
+  Set<String> excludedProviders,
+) async {
   final webhook = _stringOption(flags, 'webhook', null);
   final allowExternal = flags.contains('--allow-external');
   final wantsJson = flags.contains('--json');
@@ -1048,7 +1084,8 @@ Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
   var data = <ProviderQuota>[];
 
   Future<void> pass() async {
-    data = await _collectProfiled(profile);
+    data =
+        await _collectProfiled(profile, excludedProviders: excludedProviders);
     final now = nowEpoch();
     final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
     failStreak = anyLive ? 0 : failStreak + 1;
@@ -1142,10 +1179,11 @@ Future<void> _runStats(
   List<String> rest,
   bool wantsJson,
   QuotaProfile? profile,
+  Set<String> excludedProviders,
 ) async {
   final only = rest.isEmpty ? null : rest.first.toLowerCase();
   final now = nowEpoch();
-  final results = await _read(profile);
+  final results = await _read(profile, excludedProviders);
   final providers = {
     ...results.where((q) => !q.isLocal).map((q) => q.provider),
   }.where((p) => only == null || p == only).toList()
@@ -1168,9 +1206,10 @@ Future<void> _runStats(
 Future<void> _runReport(
   bool wantsJson,
   QuotaProfile? profile,
+  Set<String> excludedProviders,
 ) async {
   final now = nowEpoch();
-  final results = await _read(profile);
+  final results = await _read(profile, excludedProviders);
   final tz = DateTime.now().timeZoneOffset;
   final insights = <String, Insights>{};
   for (final provider in results.where((provider) => !provider.isLocal)) {
@@ -1200,8 +1239,9 @@ Future<void> _check(
   String name,
   bool wantsJson,
   QuotaProfile? profile,
+  Set<String> excludedProviders,
 ) async {
-  final results = await _read(profile);
+  final results = await _read(profile, excludedProviders);
   final now = nowEpoch();
   final key = name.toLowerCase();
   ProviderQuota? q;
@@ -1394,8 +1434,12 @@ void _printDoctor(List<ProviderQuota> results) {
 
 /// `calibration`: grade quotabot's own strand predictions against the user's
 /// recorded history, so "how often is it right" is a measured number, not a claim.
-Future<void> _runCalibration(bool wantsJson, QuotaProfile? profile) async {
-  final results = await _read(profile);
+Future<void> _runCalibration(
+  bool wantsJson,
+  QuotaProfile? profile,
+  Set<String> excludedProviders,
+) async {
+  final results = await _read(profile, excludedProviders);
   final now = nowEpoch();
   final byProvider = <String, List<HeadroomBucket>>{};
   for (final q in results.where((q) => !q.isLocal)) {

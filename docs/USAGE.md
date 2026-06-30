@@ -265,10 +265,13 @@ that provider/account pair; legacy provider-only history is used only for an
 unambiguous single-account snapshot. MCP `suggest_model` exposes the same policy
 as `use_expiring_quota: true`.
 
-For a one-off routing decision, add `--exclude=codex,grok` to `models` or
-`suggest`, or pass `exclude: ["codex", "grok"]` to the matching MCP routing and
-model tools, to ignore those providers without changing your named profiles. The
-loopback HTTP server accepts the same idea as `GET /suggest?exclude=codex,grok`.
+For one-off provider avoidance, add `--exclude=codex,grok` to quota-reading CLI
+commands (`status`, `doctor`, `json`, `check`, `top`, `watch`, `stats`,
+`report`, `calibration`, `models`, or `suggest`). The filter applies after
+`--profile`, so you can temporarily ignore a provider without changing named
+profiles. MCP routing and model tools accept the same idea as
+`exclude: ["codex", "grok"]`, and the loopback HTTP server supports
+`GET /suggest?exclude=codex,grok`.
 For cost-sensitive dispatch, `quotabot suggest --local-first` keeps the normal
 provider ranking visible but recommends a local runtime before subscription quota
 when one is available. MCP `suggest_provider` and `decide_now` accept

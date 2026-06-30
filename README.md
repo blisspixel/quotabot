@@ -139,6 +139,7 @@ quotabot models           # every model you can route to now, with budget + caps
 quotabot models --budget=local  # hard cap to free local-runtime models
 quotabot watch            # alert when a window goes low, naming where to route
 quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
+quotabot top --exclude=codex  # hide a provider from this quota read only
 quotabot suggest --use-expiring-quota  # model pick may use included quota before reset
 quotabot report           # weekly quota-health markdown export
 ```
@@ -148,8 +149,9 @@ a window is spent or nearly so, naming where to send work next. Add
 `--waste-threshold=N` to also raise a `projected_waste` alert when the current
 burn pace would leave at least N percent of a renewing paid window unused at
 reset. Add `--webhook` to POST each alert (loopback unless `--allow-external`)
-so it can reach a tray toast, a shell, or chat. The same recommendation is
-available over MCP stdio or
+so it can reach a tray toast, a shell, or chat. Quota-reading CLI commands accept
+`--exclude=A,B` after `--profile` for one-off provider avoidance without changing
+saved profiles. The same recommendation is available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters, one-request `exclude` lists, and

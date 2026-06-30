@@ -78,8 +78,10 @@ Pick whichever transport you already speak. All return the same data.
   you prefer local capacity before spending subscription quota, and
   `--budget=local` or `--budget=quota` to `models`/profiled `suggest` calls
   when the model choice must stay inside a no-surprise spend envelope. Add
-  `--use-expiring-quota` to a profiled `suggest` call only when you want
-  soon-resetting included quota to outrank local capacity.
+  `--exclude=A,B` to quota-reading commands after `--profile` when one request
+  should avoid specific providers. Add `--use-expiring-quota` to a profiled
+  `suggest` call only when you want soon-resetting included quota to outrank
+  local capacity.
 - **Push alerts.** `quotabot watch --json` streams a `quotabot.alert.v1` line
   the moment a provider's binding window goes red, naming where to route next, so
   a long-running agent can react to a crossing instead of polling. Add

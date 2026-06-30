@@ -350,11 +350,11 @@ Breadth and depth, once the core is trusted:
   local-first mode that escalates to a paid plan only when the requirements force
   it or a window is about to reset. Models stay filtered by objective capability
   and the provider's own tier, never a quotabot quality ranking. Foundation
-  shipped: CLI `suggest` and `models` accept
-  `--exclude=A,B`, and MCP read/routing/reservation/model tools accept
-  `exclude`; local HTTP `GET /suggest` accepts `?exclude=A,B` for the same
-  one-off provider exclusion without editing profiles. Provider routing now has
-  an explicit local-first policy as well: CLI `suggest --local-first`, MCP
+  shipped: all quota-reading CLI commands accept `--exclude=A,B` after profile
+  filtering, MCP read/routing/reservation/model tools accept `exclude`, and
+  local HTTP `GET /suggest` accepts `?exclude=A,B` for the same one-off provider
+  exclusion without editing profiles. Provider routing now has an explicit
+  local-first policy as well: CLI `suggest --local-first`, MCP
   `local_first`, and HTTP `?local_first=true` recommend a local runtime before
   subscription quota when local capacity is available. The LiteLLM plugin also
   distinguishes `spend: quota_plan` from `spend: paid_api` so included quota
