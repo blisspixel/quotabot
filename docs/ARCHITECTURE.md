@@ -82,6 +82,11 @@ This is why the core has high test coverage even though the adapters do I/O.
 `ProviderQuota` snapshots for CLI tests without adapter calls, history reads, or
 burn-history influence. It is intentionally separate from `demo.dart`, which is a
 believable multi-provider screenshot fleet rather than an exact assertion tool.
+The parser test layer includes seeded property/fuzz tests over malformed JSON,
+protobuf-like byte streams, gRPC-web frames, and embedded-token blobs, plus
+sanitized provider-shape fixtures loaded from `collector/test/fixtures/` so the
+pure parsers are checked against stable recorded shapes without touching live
+credentials or provider APIs.
 
 ## Adapters
 

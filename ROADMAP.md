@@ -190,8 +190,15 @@ it stands up serve every phase after it.
    (healthy short window but spent longer binding window), `signed-out`, and
    `stale`, with pure tests and process-level CLI tests for snapshots, checks,
    suggestions, and invalid-state usage errors.
-10. [ ] Property/fuzz tests on the untrusted parsers (they ingest external JSON and
-   protobuf), plus integration tests against recorded provider fixtures.
+10. [x] Property/fuzz tests on the untrusted parsers (they ingest external JSON
+   and protobuf), plus integration tests against recorded provider fixtures.
+   Shipped: seeded deterministic property/fuzz tests now exercise the JSON quota
+   parsers, local-runtime JSON parsers, gRPC-web frame extraction, schema-less
+   protobuf scanner, Grok billing window parser, Antigravity plan scanner, and
+   embedded-token recovery. Parser boundaries reject non-finite numbers and keep
+   emitted percentages bounded to 0..100. Sanitized provider-shape fixture files
+   cover Codex, Claude, Antigravity, Cursor, Windsurf/Devin Desktop, Kiro, Grok,
+   LM Studio, and Ollama through the pure parser paths.
 11. [ ] LiteLLM plugin covered by real-proxy integration tests.
 12. [ ] Model-catalog currency: a refresh/audit tool that diffs the curated
     catalog against each provider's own model list (capabilities stay curated,

@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "id": "llama-3.1-8b",
+      "state": "loaded",
+      "arch": "llama",
+      "quantization": "Q4_K_M",
+      "loaded_context_length": 16384
+    },
+    {
+      "id": "mistral-7b",
+      "state": "not-loaded"
+    }
+  ]
+}

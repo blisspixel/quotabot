@@ -1,0 +1,16 @@
+{
+  "models": {
+    "gemini-2.5-pro": {
+      "quotaInfo": {
+        "remainingFraction": 0.42,
+        "resetTime": 1782090000
+      }
+    },
+    "gemini-2.5-flash": {
+      "quotaInfo": {
+        "remainingFraction": 0.81,
+        "resetTime": 1782432000
+      }
+    }
+  }
+}

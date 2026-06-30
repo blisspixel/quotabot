@@ -5,6 +5,8 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Parser boundaries now reject non-finite numeric values and clamp direct
+  provider percentages to 0..100 before they can reach routing or UI code.
 - CI now runs the full suite on Linux, macOS, and Windows (a matrix of
   ubuntu-latest, macos-latest, and windows-latest), so the cross-platform paths
   are exercised on a real host of every claimed OS instead of assumed. The job
@@ -12,6 +14,11 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Deterministic property/fuzz tests now cover the untrusted JSON, protobuf,
+  gRPC-web, embedded-token, and local-runtime parser boundaries. Sanitized
+  provider-shape fixtures for Codex, Claude, Antigravity, Cursor, Windsurf/Devin
+  Desktop, Kiro, Grok, LM Studio, and Ollama are loaded from disk as integration
+  fixtures.
 - CLI simulation mode for deterministic tests: `--mock-provider NAME --state
   STATE` now returns a single synthetic provider snapshot without adapter calls,
   history reads, or burn-history influence. Supported states are `healthy`,
