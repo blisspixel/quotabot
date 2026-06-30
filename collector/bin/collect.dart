@@ -343,6 +343,7 @@ const _valueOptions = {
   'tier-floor',
   'reset',
   'used',
+  'waste-threshold',
   'webhook',
   'window',
 };
@@ -830,7 +831,7 @@ void _printHelp() {
   );
   stdout.writeln(
     '  watch               alert when a window goes red, naming where to route'
-    ' (--webhook URL, --json, --once)',
+    ' (--webhook URL, --json, --once, --waste-threshold N)',
   );
   stdout.writeln(
     '  check <provider>    whether one provider is usable now, and its reset',
@@ -934,18 +935,33 @@ void _printHelp() {
 
 /// `quotabot watch`: poll quota on the adaptive cadence and emit a low-quota
 /// alert the first time a provider's binding window crosses into red (spent or
-/// nearly so), naming where to route next. With --webhook each alert is POSTed
-/// as quotabot.alert.v1 JSON (loopback only unless --allow-external). --json
-/// prints alerts as JSON lines; --once runs a single pass (for cron or tests);
-/// --interval=N pins the poll rate, otherwise the adaptive cadence is used.
+/// nearly so), naming where to route next. With --waste-threshold=N it also
+/// emits projected-waste alerts when quota is on pace to expire unused at reset.
+/// With --webhook each alert is POSTed as quotabot.alert.v1 JSON (loopback only
+/// unless --allow-external). --json prints alerts as JSON lines; --once runs a
+/// single pass (for cron or tests); --interval=N pins the poll rate, otherwise
+/// the adaptive cadence is used.
 Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
   final webhook = _stringOption(flags, 'webhook', null);
   final allowExternal = flags.contains('--allow-external');
   final wantsJson = flags.contains('--json');
   final once = flags.contains('--once');
+  final wasteThresholdRaw = _stringOption(flags, 'waste-threshold', null);
+  final wasteThreshold =
+      wasteThresholdRaw == null ? null : double.tryParse(wasteThresholdRaw);
   final fixedInterval = flags.any((f) => f.startsWith('--interval='))
       ? _intOption(flags, 'interval', 60).clamp(2, 86400)
       : null;
+
+  if (wasteThresholdRaw != null &&
+      (wasteThreshold == null ||
+          !wasteThreshold.isFinite ||
+          wasteThreshold < 0 ||
+          wasteThreshold > 100)) {
+    stderr.writeln('quotabot: --waste-threshold must be between 0 and 100');
+    exitCode = _exitUsage;
+    return;
+  }
 
   // Fail loudly on an external webhook host that was not explicitly allowed,
   // rather than silently dropping every POST later.
@@ -958,6 +974,7 @@ Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
 
   final client = http.Client();
   var armed = <String>{};
+  var wasteArmed = <String>{};
   var failStreak = 0;
   var data = <ProviderQuota>[];
 
@@ -970,7 +987,27 @@ Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
     final result = computeAlerts(
         snapshot: data, suggestion: suggestion, now: now, armed: armed);
     armed = result.armed;
-    for (final a in result.fired) {
+    final fired = <QuotaAlert>[...result.fired];
+    if (wasteThreshold != null) {
+      final paceByProvider = <String, Pace>{};
+      final tz = DateTime.now().timeZoneOffset;
+      for (final q in data.where((provider) => !provider.isLocal)) {
+        final ins =
+            Insights.from(_historyBuckets(q.provider), now, tzOffset: tz);
+        final pace = _paceFor(q, ins, now);
+        if (pace != null) paceByProvider[q.provider] = pace;
+      }
+      final waste = computeProjectedWasteAlerts(
+        snapshot: data,
+        paceByProvider: paceByProvider,
+        now: now,
+        thresholdPercent: wasteThreshold,
+        armed: wasteArmed,
+      );
+      wasteArmed = waste.armed;
+      fired.addAll(waste.fired);
+    }
+    for (final a in fired) {
       if (wantsJson) {
         stdout.writeln(jsonEncode(a.toJson()));
       } else {
@@ -997,7 +1034,10 @@ Future<void> _runWatch(Set<String> flags, QuotaProfile? profile) async {
   }
 
   if (!wantsJson) {
-    stderr.writeln('quotabot watch: alerting on red crossings'
+    final wasteText = wasteThreshold == null
+        ? ''
+        : ' and projected waste >= ${wasteThreshold.toStringAsFixed(1)}%';
+    stderr.writeln('quotabot watch: alerting on red crossings$wasteText'
         '${webhook != null ? ' -> $webhook' : ''}. Ctrl-C to stop.');
   }
 

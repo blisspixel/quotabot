@@ -706,6 +706,7 @@ void main() {
       ) as Map<String, dynamic>;
       final fired = alertJson['alerts'] as List;
       expect(fired, hasLength(1));
+      expect((fired.single as Map)['kind'], 'low_quota');
       expect((fired.single as Map)['provider'], 'claude');
       expect((fired.single as Map)['severity'], 'red');
 

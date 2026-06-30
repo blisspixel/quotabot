@@ -136,13 +136,17 @@ quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
 quotabot models           # every model you can route to now, with budget + caps
 quotabot watch            # alert when a window goes low, naming where to route
+quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
 quotabot report           # weekly quota-health markdown export
 ```
 
 `quotabot watch` polls in the background and raises a low-quota alert the moment
-a window is spent or nearly so, naming where to send work next; add `--webhook`
-to POST each alert (loopback unless `--allow-external`) so it can reach a tray
-toast, a shell, or chat. The same recommendation is available over MCP stdio or
+a window is spent or nearly so, naming where to send work next. Add
+`--waste-threshold=N` to also raise a `projected_waste` alert when the current
+burn pace would leave at least N percent of a renewing paid window unused at
+reset. Add `--webhook` to POST each alert (loopback unless `--allow-external`)
+so it can reach a tray toast, a shell, or chat. The same recommendation is
+available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters and one-request `exclude` lists, plus

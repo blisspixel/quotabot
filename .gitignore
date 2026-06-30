@@ -47,7 +47,6 @@ QUALITY-RUBRIC.md
 docs/dev/
 
 # Agent loop-engineering workspace and runtime logs (local only)
-docs/.agent/
 .agent/
 logs/
 

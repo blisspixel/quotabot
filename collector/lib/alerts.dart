@@ -1,4 +1,5 @@
 import 'analysis.dart';
+import 'insights.dart';
 import 'models.dart';
 
 /// Free-headroom thresholds (percent of quota remaining) that grade a window's
@@ -28,10 +29,21 @@ AlertSeverity alertSeverity(double freePercent) {
 /// is spent or nearly so, the point at which routing elsewhere actually matters.
 const Set<AlertSeverity> kDefaultAlertOn = {AlertSeverity.red};
 
-/// A single low-quota alert: a provider's binding window has crossed into a
-/// triggering severity, with where to route next instead. Metadata only; it
-/// never carries prompts, code, or content. Serializes as `quotabot.alert.v1`.
+/// What condition raised a quota alert.
+enum QuotaAlertKind {
+  lowQuota('low_quota'),
+  projectedWaste('projected_waste');
+
+  final String wireName;
+
+  const QuotaAlertKind(this.wireName);
+}
+
+/// A single quota alert: a provider's binding window has crossed a threshold
+/// worth acting on. Metadata only; it never carries prompts, code, or content.
+/// Serializes as `quotabot.alert.v1`.
 class QuotaAlert {
+  final QuotaAlertKind kind;
   final String provider;
   final String displayName;
 
@@ -47,9 +59,12 @@ class QuotaAlert {
   final String? routeDisplayName;
   final double? routeFreePercent;
   final bool routeIsLocal;
+  final double? projectedWastePercent;
+  final double? burnPercentPerHour;
   final int asOf;
 
   const QuotaAlert({
+    this.kind = QuotaAlertKind.lowQuota,
     required this.provider,
     required this.displayName,
     required this.window,
@@ -60,12 +75,23 @@ class QuotaAlert {
     this.routeDisplayName,
     this.routeFreePercent,
     this.routeIsLocal = false,
+    this.projectedWastePercent,
+    this.burnPercentPerHour,
   });
 
   /// A one-line human message, e.g.
   /// "Claude 5h at 8% free - route next to Grok (74% free)".
   String get message {
     final head = '$displayName $window at ${freePercent.round()}% free';
+    if (kind == QuotaAlertKind.projectedWaste) {
+      final waste = projectedWastePercent == null
+          ? 'quota'
+          : '${projectedWastePercent!.round()}%';
+      final burn = burnPercentPerHour == null
+          ? ''
+          : ' at ${burnPercentPerHour!.toStringAsFixed(1)}%/h';
+      return '$head - projected $waste would expire unused$burn; use it before reset';
+    }
     if (routeTo == null) return head;
     final name = routeDisplayName ?? routeTo!;
     final detail = routeIsLocal
@@ -78,6 +104,7 @@ class QuotaAlert {
 
   Map<String, dynamic> toJson() => {
         'schema': 'quotabot.alert.v1',
+        'kind': kind.wireName,
         'provider': provider,
         'window': window,
         'severity': severity.label,
@@ -88,6 +115,12 @@ class QuotaAlert {
           'route_free_percent':
               double.parse(routeFreePercent!.toStringAsFixed(1)),
         'route_is_local': routeIsLocal,
+        if (projectedWastePercent != null)
+          'projected_waste_percent':
+              double.parse(projectedWastePercent!.toStringAsFixed(1)),
+        if (burnPercentPerHour != null)
+          'burn_percent_per_hour':
+              double.parse(burnPercentPerHour!.toStringAsFixed(2)),
         'as_of': asOf,
       };
 }
@@ -136,6 +169,51 @@ class QuotaAlert {
           route == null ? null : _displayNameOf(snapshot, route.provider),
       routeFreePercent: route?.headroom,
       routeIsLocal: route?.isLocal ?? false,
+    ));
+  }
+  return (fired: fired, armed: next);
+}
+
+/// A pure, edge-triggered projected-waste alert pass. A provider fires when its
+/// projected unused quota at reset is at or above [thresholdPercent], then stays
+/// armed until the projection falls below the threshold. Stale providers hold
+/// their prior state without firing because an old projection is not a fresh
+/// crossing. Local runtimes are never alerted on; they have no paid quota to
+/// lose at reset.
+({List<QuotaAlert> fired, Set<String> armed}) computeProjectedWasteAlerts({
+  required List<ProviderQuota> snapshot,
+  required Map<String, Pace> paceByProvider,
+  required int now,
+  required double thresholdPercent,
+  Set<String> armed = const {},
+}) {
+  final threshold = thresholdPercent.clamp(0.0, 100.0).toDouble();
+  final fired = <QuotaAlert>[];
+  final next = <String>{};
+  for (final q in snapshot) {
+    if (q.isLocal) continue;
+    final bw = bindingWindow(q, now);
+    final free = providerHeadroom(q, now);
+    if (bw == null || bw.resetsAt == null || free == null) continue;
+    if (q.stale) {
+      if (armed.contains(q.provider)) next.add(q.provider);
+      continue;
+    }
+    final pace = paceByProvider[q.provider];
+    final waste = pace?.wastedAtReset;
+    if (waste == null || waste < threshold) continue;
+    next.add(q.provider);
+    if (armed.contains(q.provider)) continue;
+    fired.add(QuotaAlert(
+      kind: QuotaAlertKind.projectedWaste,
+      provider: q.provider,
+      displayName: q.displayName,
+      window: bw.label,
+      severity: AlertSeverity.amber,
+      freePercent: free,
+      projectedWastePercent: waste,
+      burnPercentPerHour: pace!.burnPerHour,
+      asOf: q.asOf,
     ));
   }
   return (fired: fired, armed: next);

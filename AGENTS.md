@@ -69,8 +69,9 @@ Pick whichever transport you already speak. All return the same data.
 - **Push alerts.** `quotabot watch --json` streams a `quotabot.alert.v1` line
   the moment a provider's binding window goes red, naming where to route next, so
   a long-running agent can react to a crossing instead of polling. Add
-  `--webhook URL` to have each alert POSTed for you (loopback unless
-  `--allow-external`).
+  `--waste-threshold=N` to also alert when at least N percent of paid quota is
+  projected to expire unused at reset. Add `--webhook URL` to have each alert
+  POSTed for you (loopback unless `--allow-external`).
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`). Add `?exclude=codex,grok` to ignore
   providers for one recommendation.
@@ -126,9 +127,11 @@ left. The shapes:
   for a lease id.
 - `list_models` is `quotabot.models.v1`: every routable model with its gating
   provider's budget and capability hints.
-- `quotabot watch` emits `quotabot.alert.v1`: `provider`, `window`, `severity`
-  (`amber`/`red`), `free_percent`, `as_of`, and, when a better option exists,
-  `route_to` with `route_free_percent`/`route_is_local`. Metadata only.
+- `quotabot watch` emits `quotabot.alert.v1`: `kind` (`low_quota` or
+  `projected_waste`), `provider`, `window`, `severity` (`amber`/`red`),
+  `free_percent`, `as_of`, and, when a better route exists, `route_to` with
+  `route_free_percent`/`route_is_local`. Projected-waste alerts add
+  `projected_waste_percent` and `burn_percent_per_hour`. Metadata only.
 - `quotas://alerts` is `quotabot.alerts.v1`: `generated_at`, `last_alert_at`,
   and the last fired `quotabot.alert.v1` objects. Subscribe to it to react to
   amber/red crossings without polling.

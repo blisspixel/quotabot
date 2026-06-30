@@ -197,21 +197,24 @@ low-quota alert the first time a provider's binding window crosses into red
 (spent or nearly so), naming where to route next. It is edge-triggered: it fires
 once per crossing and re-arms only after the window recovers, so a steady spent
 window never spams. Alerts carry quota metadata only, never prompts or content.
+Add `--waste-threshold=N` to also alert when the recent burn pace projects that
+at least N percent of a paid window will expire unused at reset.
 
 ```bash
 quotabot watch                                   # print alerts, adaptive cadence
 quotabot watch --once                            # a single pass (cron-friendly)
 quotabot watch --json                            # one quotabot.alert.v1 per line
 quotabot watch --interval=120                    # pin the poll rate (seconds)
+quotabot watch --waste-threshold=35              # use paid quota before it expires
 quotabot watch --webhook http://127.0.0.1:9000/quota   # POST each alert
 ```
 
 The `--webhook` URL must be loopback unless you add `--allow-external`, so an
 alert can never reach an external service (Slack, Discord, a remote box) by
 accident; a stray or stale URL is refused rather than silently sent. The desktop
-widget raises the same alerts (as a notification) and can POST to the same kind
-of webhook, set from its menu under "Alert webhook"; loopback is the default
-there too, with an explicit "allow external host" checkbox.
+widget raises the same low-quota alerts (as a notification) and can POST to the
+same kind of webhook, set from its menu under "Alert webhook"; loopback is the
+default there too, with an explicit "allow external host" checkbox.
 
 ## Exit codes
 

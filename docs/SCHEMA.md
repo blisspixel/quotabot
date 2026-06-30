@@ -39,6 +39,22 @@ The contract is additive. Unknown fields are allowed at the root, provider,
 window, and model levels. Existing field meanings and types must not change
 inside `quotabot.v1`; incompatible changes require a new schema id.
 
+## `quotabot.alert.v1`
+
+`quotabot watch --json`, alert webhooks, and `quotas://alerts` emit alert objects
+with:
+
+- `schema`: always `quotabot.alert.v1`.
+- `kind`: `low_quota` or `projected_waste`.
+- `provider`, `window`, `severity`, `free_percent`, and `as_of`.
+- For `low_quota`, optional `route_to`, `route_display_name`,
+  `route_free_percent`, and `route_is_local`.
+- For `projected_waste`, optional `projected_waste_percent` and
+  `burn_percent_per_hour`.
+
+Alert payloads are metadata only. They never contain prompts, generated text, or
+source code. The contract is additive; consumers should ignore unknown fields.
+
 ## Provider fixture registry
 
 Every built-in adapter has one compile-time row in

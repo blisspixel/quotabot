@@ -1,5 +1,6 @@
 import 'package:quotabot_collector/alerts.dart';
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
@@ -138,10 +139,102 @@ void main() {
       ).fired.single;
       final json = a.toJson();
       expect(json['schema'], 'quotabot.alert.v1');
+      expect(json['kind'], 'low_quota');
       expect(json['provider'], 'codex');
       expect(json['severity'], 'red');
       expect(json['route_to'], 'claude');
       expect(json['as_of'], _now);
+    });
+  });
+
+  group('computeProjectedWasteAlerts', () {
+    test('fires once when projected waste crosses the threshold', () {
+      final reset = _now + 10 * 3600;
+      final snap = [_q('claude', 10, resetsAt: reset)];
+      final pace = computePace(
+        headroom: 90,
+        resetsAt: reset,
+        burnPerHour: 2,
+        now: _now,
+      )!;
+      final r = computeProjectedWasteAlerts(
+        snapshot: snap,
+        paceByProvider: {'claude': pace},
+        now: _now,
+        thresholdPercent: 50,
+      );
+      expect(r.fired, hasLength(1));
+      final a = r.fired.single;
+      expect(a.kind, QuotaAlertKind.projectedWaste);
+      expect(a.provider, 'claude');
+      expect(a.severity, AlertSeverity.amber);
+      expect(a.projectedWastePercent, closeTo(70, 0.001));
+      expect(a.burnPercentPerHour, closeTo(2, 0.001));
+      expect(a.message, contains('would expire unused'));
+      expect(r.armed, {'claude'});
+    });
+
+    test('does not re-fire while projected waste stays above threshold', () {
+      final reset = _now + 10 * 3600;
+      final snap = [_q('claude', 10, resetsAt: reset)];
+      final pace = computePace(
+        headroom: 90,
+        resetsAt: reset,
+        burnPerHour: 2,
+        now: _now,
+      )!;
+      final r = computeProjectedWasteAlerts(
+        snapshot: snap,
+        paceByProvider: {'claude': pace},
+        now: _now,
+        thresholdPercent: 50,
+        armed: const {'claude'},
+      );
+      expect(r.fired, isEmpty);
+      expect(r.armed, {'claude'});
+    });
+
+    test('re-arms after projected waste falls below threshold', () {
+      final reset = _now + 10 * 3600;
+      final snap = [_q('claude', 50, resetsAt: reset)];
+      final pace = computePace(
+        headroom: 50,
+        resetsAt: reset,
+        burnPerHour: 5,
+        now: _now,
+      )!;
+      final r = computeProjectedWasteAlerts(
+        snapshot: snap,
+        paceByProvider: {'claude': pace},
+        now: _now,
+        thresholdPercent: 10,
+        armed: const {'claude'},
+      );
+      expect(r.fired, isEmpty);
+      expect(r.armed, isEmpty);
+    });
+
+    test('serializes projected waste as additive alert metadata', () {
+      final reset = _now + 10 * 3600;
+      final snap = [_q('claude', 10, resetsAt: reset)];
+      final pace = computePace(
+        headroom: 90,
+        resetsAt: reset,
+        burnPerHour: 2,
+        now: _now,
+      )!;
+      final a = computeProjectedWasteAlerts(
+        snapshot: snap,
+        paceByProvider: {'claude': pace},
+        now: _now,
+        thresholdPercent: 50,
+      ).fired.single;
+      final json = a.toJson();
+      expect(json['schema'], 'quotabot.alert.v1');
+      expect(json['kind'], 'projected_waste');
+      expect(json['projected_waste_percent'], 70.0);
+      expect(json['burn_percent_per_hour'], 2.0);
+      expect(json['route_to'], isNull);
     });
   });
 }

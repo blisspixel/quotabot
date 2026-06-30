@@ -354,7 +354,9 @@ Breadth and depth, once the core is trusted:
   one-off provider exclusion without editing profiles.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
-  $/mo saved and breach probability); reset-anchored scheduling.
+  $/mo saved and breach probability); reset-anchored scheduling. Foundation
+  shipped: `quotabot watch --waste-threshold=N` emits opt-in
+  `projected_waste` alerts from current pace analytics.
 - **First-class local models (the moat):** VRAM/readiness awareness ("can I run
   70B Q4 right now?", loaded vs cold, tokens/sec) and per-model capability tags,
   so "free" never secretly means a two-minute wait or a flubbed refactor.

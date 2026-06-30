@@ -16,8 +16,8 @@ collector/ (Dart package)
                      (nextRefreshSeconds, shared by top and the app)
   insights.dart      pure analytics: buckets, percentiles, trend, pace, heatmap,
                      burn rate with uncertainty
-  alerts.dart        pure: low-quota alert severity + edge-triggered computeAlerts
-                     (quotabot.alert.v1), shared by quotabot watch and the widget
+  alerts.dart        pure low-quota alerts shared by watch/app/MCP, plus
+                     watch-only projected-waste thresholding
   webhook.dart       loopback-guarded, fail-soft alert webhook sender (postAlert)
   calibration.dart   pure: grade the strand predictor against recorded history
   registry.dart      pure: assemble the cross-provider model registry with budget
@@ -257,10 +257,14 @@ current snapshot, the routing suggestion, and the set of providers already
 alerting, and returns the alerts that newly crossed into a triggering severity
 (red by default for CLI/app, amber or red for MCP subscriptions) plus the updated
 armed set, so a provider fires once on the crossing and re-arms only after it
-recovers. Each `QuotaAlert` serializes as `quotabot.alert.v1` (metadata only,
-never content). Three thin shells consume it: the `quotabot watch` command in
-`bin/collect.dart` (poll, print, optionally POST), the desktop app's notifier,
-and the MCP `quotas://alerts` subscription loop. `webhook.dart` delivers an alert with
+recovers. `computeProjectedWasteAlerts` applies the same edge-trigger model to
+pace analytics: when `quotabot watch --waste-threshold=N` is set, the CLI raises
+a `projected_waste` alert if the current burn pace says at least N percent of a
+paid renewing window would expire unused at reset. Each `QuotaAlert` serializes
+as `quotabot.alert.v1` (metadata only, never content). Three thin shells consume
+low-quota alerts: the `quotabot watch` command in `bin/collect.dart` (poll,
+print, optionally POST), the desktop app's notifier, and the MCP
+`quotas://alerts` subscription loop. `webhook.dart` delivers an alert with
 `postAlert`, which refuses a non-loopback host unless explicitly allowed and
 never throws, so delivery fails soft. An alert is just the binding-window
 forecast viewed as a threshold crossing, so it shares the same model as `top`.

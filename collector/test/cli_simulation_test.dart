@@ -95,4 +95,20 @@ void main() {
     expect(result.exitCode, 64);
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
+
+  test('watch rejects invalid projected-waste thresholds', () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--waste-threshold=bad',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expect(result.exitCode, 64);
+    expect(
+      result.stderr as String,
+      contains('--waste-threshold must be between 0 and 100'),
+    );
+  });
 }

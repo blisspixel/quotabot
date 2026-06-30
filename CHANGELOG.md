@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot watch --waste-threshold=N` now raises opt-in `projected_waste`
+  alerts when current burn pace shows paid quota is likely to expire unused at
+  reset. The additive `quotabot.alert.v1` fields include `kind`,
+  `projected_waste_percent`, and `burn_percent_per_hour`.
 - `quotabot report` now prints a weekly quota-health markdown export, with
   structured `quotabot.report.v1` output behind `--json`.
 - Manual quota entries can now be added with `quotabot manual set`, listed with
