@@ -89,7 +89,9 @@ stores. Grok and Antigravity can run two ways:
   CLI's or IDE's credentials. quotabot's tokens live under the per-user config
   directory, owner-only on POSIX and ACL-restricted on Windows. A grant can be
   stored as the provider default or in an account-scoped slot; the account slot
-  filename uses a hash rather than the raw email. Rotated refresh tokens are
+  filename uses a hash rather than the raw email. Grok derives the account slot
+  from the device-login id token when present; Antigravity resolves it from
+  Google's userinfo endpoint after OAuth exchange. Rotated refresh tokens are
   persisted on every refresh.
 
 ## Kiro (agentic CLI + IDE)

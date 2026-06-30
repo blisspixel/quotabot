@@ -12,6 +12,10 @@ Notable changes to quotabot. Newest first.
   steps, and Python is pinned for the coverage gate and the LiteLLM tests.
 
 ### Added
+- Antigravity OAuth login now resolves the signed-in Google email from userinfo
+  after token exchange and stores the grant in the matching account-scoped slot
+  as well as the provider-default slot. Userinfo failures fail closed and keep
+  the default grant path.
 - Codex adapter edge-case tests now cover missing session directories, rollout
   files with no `rate_limits`, stale snapshots whose file mtime is fresh, and
   multi-bucket scans that must keep only the newest snapshot per limit bucket.

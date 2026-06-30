@@ -188,6 +188,58 @@ void main() {
       expect(t.refreshToken, 'R1');
     });
 
+    test('GoogleAuth.freshAccessToken returns a fresh account grant', () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.save(
+        provider,
+        Tokens(
+            accessToken: 'GA',
+            refreshToken: 'GR',
+            expiresAt: nowEpoch() + 3600),
+        account: account,
+      );
+      final auth = GoogleAuth(
+        client: MockClient((_) async => throw StateError('unexpected network')),
+      );
+
+      expect(await auth.freshAccessToken(account: account), 'GA');
+    });
+
+    test('GoogleAuth.freshAccessToken refreshes an account grant', () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'GR', expiresAt: 1),
+        account: account,
+      );
+      final auth = GoogleAuth(
+        client: MockClient((req) async {
+          expect(req.body, contains('refresh_token=GR'));
+          return http.Response(
+            jsonEncode({'access_token': 'fresh', 'expires_in': 3600}),
+            200,
+          );
+        }),
+      );
+
+      expect(await auth.freshAccessToken(account: account), 'fresh');
+      expect(TokenStore.load(provider)!.accessToken, 'fresh');
+      expect(
+        TokenStore.load(provider, account: account)!.accessToken,
+        'fresh',
+      );
+    });
+
     test('XaiAuth.refresh returns null on a non-200', () async {
       final mock = MockClient((req) async => http.Response('no', 400));
       expect(await XaiAuth(client: mock).refresh('R'), isNull);
@@ -237,6 +289,36 @@ void main() {
       final g = GoogleAuth(clientId: 'X', clientSecret: 'Y');
       expect(g.clientId, 'X');
       expect(g.clientSecret, 'Y');
+    });
+
+    test('emailForAccessToken reads a plain userinfo email', () async {
+      final mock = MockClient((req) async {
+        expect(req.url.toString(), contains('/oauth2/v2/userinfo'));
+        expect(req.headers['Authorization'], 'Bearer GA');
+        return http.Response(jsonEncode({'email': 'work@example.com'}), 200);
+      });
+
+      expect(
+        await GoogleAuth(client: mock).emailForAccessToken('GA'),
+        'work@example.com',
+      );
+    });
+
+    test('emailForAccessToken fails closed on bad userinfo', () async {
+      final badStatus = GoogleAuth(
+        client: MockClient((_) async => http.Response('no', 401)),
+      );
+      expect(await badStatus.emailForAccessToken('GA'), isNull);
+
+      final badJson = GoogleAuth(
+        client: MockClient((_) async => http.Response('{', 200)),
+      );
+      expect(await badJson.emailForAccessToken('GA'), isNull);
+
+      final noEmail = GoogleAuth(
+        client: MockClient((_) async => http.Response('{}', 200)),
+      );
+      expect(await noEmail.emailForAccessToken('GA'), isNull);
     });
   });
 

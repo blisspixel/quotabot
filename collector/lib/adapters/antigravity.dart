@@ -232,9 +232,9 @@ class AntigravityAdapter {
         }
       } else {
         try {
-          final userInfo = await _getUserInfo(access);
-          if (userInfo != null && userInfo['email'] != null) {
-            account = userInfo['email'].toString();
+          final userEmail = await GoogleAuth().emailForAccessToken(access);
+          if (userEmail != null) {
+            account = userEmail;
           }
         } catch (_) {}
       }
@@ -366,15 +366,6 @@ class AntigravityAdapter {
       await Future.delayed(const Duration(seconds: 2));
     }
     return null;
-  }
-
-  static Future<Map<String, dynamic>?> _getUserInfo(String access) async {
-    final resp = await http.get(
-      Uri.parse('https://www.googleapis.com/oauth2/v2/userinfo'),
-      headers: {'Authorization': 'Bearer $access'},
-    ).timeout(const Duration(seconds: 5));
-    if (resp.statusCode != 200) return null;
-    return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 
   static Future<Map<String, dynamic>?> _post(
@@ -542,11 +533,7 @@ class AntigravityAdapter {
       }
     } catch (_) {}
     // Fallback: ask Google with the token.
-    try {
-      final ui = await _getUserInfo(access);
-      if (ui != null && ui['email'] != null) return ui['email'].toString();
-    } catch (_) {}
-    return null;
+    return GoogleAuth().emailForAccessToken(access);
   }
 
   static String? _readActiveAccount() {
