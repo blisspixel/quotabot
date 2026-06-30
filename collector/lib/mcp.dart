@@ -27,6 +27,9 @@ import 'profiles.dart';
 import 'registry.dart';
 import 'util.dart';
 
+const quotabotMcpName = 'quotabot';
+const quotabotMcpVersion = '0.5.0';
+
 /// A schema that accepts [schema] or an explicit null, for nullable fields.
 JsonSchema _nullable(JsonSchema schema) =>
     JsonSchema.union([schema, JsonSchema.nullValue()]);
@@ -370,6 +373,35 @@ typedef BurnProvider = Map<String, BurnStat> Function(
   Iterable<String> providers,
   int now,
 );
+
+McpServer buildQuotabotMcpServer({
+  required SnapshotProvider snapshot,
+  required BurnProvider burnByProvider,
+  int Function() now = nowEpoch,
+  Map<String, List<ModelInfo>> catalog = kModelCatalog,
+  ProfileLoader profileLoader = loadProfile,
+}) {
+  final server = McpServer(
+    const Implementation(name: quotabotMcpName, version: quotabotMcpVersion),
+    options: McpServerOptions(
+      capabilities: ServerCapabilities(
+        tools: ServerCapabilitiesTools(),
+        resources: ServerCapabilitiesResources(),
+      ),
+    ),
+  );
+
+  registerQuotabotTools(
+    server,
+    snapshot: snapshot,
+    burnByProvider: burnByProvider,
+    now: now,
+    catalog: catalog,
+    profileLoader: profileLoader,
+  );
+
+  return server;
+}
 
 /// Shared read-only annotations for every quotabot tool: each reads provider
 /// metadata, modifies nothing, is safe to repeat, and reaches external services.

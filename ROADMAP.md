@@ -226,8 +226,12 @@ shared by the CLI, MCP, and the LiteLLM plugin - including the primitives a real
 router or meta-router leans on. quotabot advises, it is never the data path; the
 leverage is the quality of the signal it hands a router.
 
-13. [ ] Streamable HTTP transport alongside stdio, tested, with capability scoping
-    and complete tool-discovery metadata.
+13. [x] Streamable HTTP transport alongside stdio, tested, with capability scoping
+    and complete tool-discovery metadata. Shipped: stdio remains the default;
+    `bin/mcp_server.dart --http` starts an MCP Streamable HTTP endpoint on a
+    loopback host only, with DNS-rebinding host/origin checks, batch rejection,
+    optional bearer-token auth, and the same shared server factory, schemas,
+    read-only annotations, resources, and tool metadata as stdio.
 14. [ ] Client snippets (Python/TS) so the contract is trivial to adopt.
 15. [ ] Concurrency leases (`reserve` / `release`) so parallel agents do not
     dogpile the same pick and the next caller sees the reduced effective headroom,

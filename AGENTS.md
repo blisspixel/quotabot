@@ -28,7 +28,9 @@ details and prerequisites: [docs/BUILDING.md](docs/BUILDING.md).
 Pick whichever transport you already speak. All return the same data.
 
 - **MCP (preferred for agents).** Point an MCP client at `dart run
-  bin/mcp_server.dart` (or a compiled `quotabot-mcp`). Tools:
+  bin/mcp_server.dart` (or a compiled `quotabot-mcp`) for stdio. For clients
+  that need MCP Streamable HTTP, run `dart run bin/mcp_server.dart --http`
+  (loopback only, optional bearer token flags). Tools:
   - `list_quotas` - full normalized snapshot for every provider.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low.

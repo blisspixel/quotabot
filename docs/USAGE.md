@@ -252,7 +252,8 @@ budget, local-first. The MCP `suggest_model` tool does the same for agents.
 ## Routing over MCP
 
 The collector runs as an MCP server so agents can query quota as a primitive. It
-speaks MCP over stdio and exposes six tools plus a resource:
+speaks MCP over stdio by default, can opt into MCP Streamable HTTP on loopback,
+and exposes six tools plus a resource:
 
 - `list_quotas` - the full normalized snapshot for every provider.
 - `provider_with_most_headroom` - the account with the most remaining budget.
@@ -271,12 +272,26 @@ the tool returns a structured `error` field with an empty provider list instead
 of throwing. The `quotas://current` resource remains the unfiltered current
 snapshot for clients that only consume MCP resources.
 
-Run it with `dart run bin/mcp_server.dart`, or compile a binary:
+Run stdio with `dart run bin/mcp_server.dart`, or compile a binary:
 
 ```bash
 cd collector
 dart compile exe bin/mcp_server.dart -o build/quotabot-mcp.exe
 ```
+
+Run MCP Streamable HTTP only when a client cannot use stdio:
+
+```bash
+cd collector
+dart run bin/mcp_server.dart --http --port 8722 --path /mcp
+```
+
+The HTTP transport binds only to `localhost`, `127.0.0.1`, or `::1`, enables
+DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and uses the
+same tool/resource factory as stdio. Add `--token-file PATH`, `--token-env NAME`,
+or `--token TOKEN` to require `Authorization: Bearer ...`; prefer a local
+owner-only token file for normal use. The endpoint is MCP Streamable HTTP, not
+the plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
 and `collector/bin/example_routing_agent.dart` for a runnable example.

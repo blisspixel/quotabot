@@ -15,6 +15,11 @@ Notable changes to quotabot. Newest first.
   `litellm[proxy]` integration tests.
 
 ### Added
+- The MCP server now supports opt-in Streamable HTTP alongside stdio:
+  `dart run bin/mcp_server.dart --http` serves the same six tools and
+  `quotas://current` resource on a loopback-only `/mcp` endpoint with
+  DNS-rebinding host/origin checks, batch JSON-RPC rejection, optional bearer
+  token auth, and integration tests through the package's Streamable HTTP client.
 - A model-catalog audit tool now diffs the committed cloud catalog against
   provider-owned model-list endpoints. `dart run bin/catalog_audit.dart --json`
   emits `quotabot.catalog_audit.v1` with per-provider endpoint ids,

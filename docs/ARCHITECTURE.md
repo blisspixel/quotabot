@@ -34,7 +34,8 @@ collector/ (Dart package)
                      keyboard helpers (moveSelection, osc52Copy clipboard)
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
   simulation.dart    exact one-provider snapshots for deterministic CLI tests
-  mcp.dart           MCP tool shapes, output schemas, and registration
+  mcp.dart           MCP tool shapes, output schemas, shared server factory
+  mcp_http.dart      Opt-in Streamable HTTP MCP wrapper with loopback guards
   collector.dart     collectAll(): run adapters, apply cache; package exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      ollama, lmstudio, lemonade (thin I/O shells)
@@ -43,7 +44,8 @@ collector/ (Dart package)
   bin/collect.dart        CLI: status/doctor, top, watch, models, calibration,
                           check, suggest, stats, json, login, logout
                           (stable exit codes 0/64/69)
-  bin/mcp_server.dart     MCP server over stdio (tools + quotas://current resource)
+  bin/mcp_server.dart     MCP server over stdio or opt-in Streamable HTTP
+                          (tools + quotas://current resource)
   bin/local_server.dart   Optional plain HTTP JSON snapshot server
   bin/example_routing_agent.dart  Worked example using collect + analysis for routing
 
@@ -160,12 +162,16 @@ state no longer lists it.
 `analysis.dart` exposes `providerHeadroom`, `providerWithMostHeadroom`,
 `providerAvailability`, `bindingWindow`, `averageRecentHeadroom`, and the
 forecast helpers `riskAdjustedHeadroom`, `strandProbability`, and `suggestRoute`.
-`bin/mcp_server.dart` wraps `collectAll()` plus helpers as MCP tools and a
-`quotas://current` resource over stdio. `bin/example_routing_agent.dart` shows
+`mcp.dart` builds one MCP server definition: tools, resources, output schemas,
+read-only/idempotent annotations, and capability scope. `bin/mcp_server.dart`
+feeds it live `collectAll()` snapshots over stdio by default or MCP Streamable
+HTTP when launched with `--http`. `mcp_http.dart` keeps HTTP opt-in and
+loopback-only, enables DNS-rebinding host/origin checks, rejects batch JSON-RPC
+payloads, and can require a bearer token. `bin/example_routing_agent.dart` shows
 the same logic used for routing decisions. `bin/local_server.dart` provides a
-simple HTTP alternative. The reasoning behind the routing math (risk-adjusted
-headroom, strand probability, and the planned extensions) is written up in
-[ROUTING-MATH.md](ROUTING-MATH.md).
+plain HTTP JSON alternative for non-MCP consumers. The reasoning behind the
+routing math (risk-adjusted headroom, strand probability, and the planned
+extensions) is written up in [ROUTING-MATH.md](ROUTING-MATH.md).
 
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
