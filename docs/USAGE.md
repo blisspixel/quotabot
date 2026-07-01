@@ -329,8 +329,10 @@ models fail closed when no safe route exists.
 `quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
 the plain mean): a higher `Z` prefers providers whose recent burn is more certain.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
-`confidence`, and `strand_probability`, plus a top-level `routing_policy`
-(`balanced` or `local_first`).
+`routing_score`, `confidence`, and `strand_probability`, plus a top-level
+`routing_policy` (`balanced` or `local_first`). The score is a
+confidence-weighted runway index, so a slower-burning provider can rank ahead of
+one with more instantaneous headroom but a much shorter projected runway.
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/

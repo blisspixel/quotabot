@@ -19,9 +19,9 @@ quotabot does two things:
    Grok (xAI). It also surfaces what your **local LLM runtimes** (Ollama, LM
    Studio, Lemonade) have loaded, so a free local model is always in view.
 2. **Recommends where to send the next request.** `quotabot suggest` (and the
-   same logic over MCP) ranks your subscriptions by remaining headroom and falls
-   back to a local model when they are low, so AI tools and agents can route
-   across your accounts instead of stalling on a spent cap.
+   same logic over MCP) ranks your subscriptions by confidence-weighted runway
+   and falls back to a local model when they are low, so AI tools and agents can
+   route across your accounts instead of stalling on a spent cap.
 
 It reads the usage your tools already track locally, so most providers need no
 setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).

@@ -146,6 +146,12 @@ class RouteCandidate {
   /// (cached reads count less) and burn-estimate sample adequacy.
   final double? confidence;
 
+  /// Confidence-weighted runway score used to rank metered subscriptions. Higher
+  /// means a better risk-adjusted candidate. Null for local runtimes, which are
+  /// handled by the explicit fallback and local-first policy instead of this
+  /// subscription score.
+  final double? routingScore;
+
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
@@ -169,6 +175,7 @@ class RouteCandidate {
     this.burnSe,
     this.strandProbability,
     this.confidence,
+    this.routingScore,
   });
 
   Map<String, dynamic> toJson() => {
@@ -183,6 +190,7 @@ class RouteCandidate {
         if (burnSe != null) 'burn_se_percent_per_hour': burnSe,
         if (strandProbability != null) 'strand_probability': strandProbability,
         if (confidence != null) 'confidence': confidence,
+        if (routingScore != null) 'routing_score': routingScore,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -322,6 +330,10 @@ String _burnNote(RouteCandidate c) {
   return ', ~${e.round()}% after $cause';
 }
 
+/// Floor burn, in percent of quota per hour, used to convert headroom into a
+/// finite runway score when burn is unknown or effectively flat.
+const double _burnFloorPercentPerHour = 1.0;
+
 /// Headroom discounted by the expected burn over [leadHours] and, when [z] > 0
 /// and a burn standard error [burnSe] is known, by [z] standard deviations of
 /// forecast uncertainty (`z * burnSe * leadHours`). At `z = 0` this is exactly
@@ -337,6 +349,30 @@ double riskAdjustedHeadroom(
   final b = (burn != null && burn > 0) ? burn : 0.0;
   final risk = (z > 0 && burnSe != null) ? z * burnSe * leadHours : 0.0;
   return (headroom - b * leadHours - risk).clamp(0.0, 100.0);
+}
+
+/// Confidence-weighted runway score for ranking metered subscriptions.
+///
+/// The numerator is already the risk-adjusted effective headroom after burn,
+/// forecast uncertainty, and active local lease discounts. The denominator is
+/// recent burn, floored so calm or unknown burn stays finite and comparable.
+/// The confidence factor folds in stale reads, manual entries, and thin burn
+/// estimates. Local runtimes return null because balanced routing treats them
+/// as a fallback, not as metered subscriptions competing on quota runway.
+double? routingScore({
+  required bool isLocal,
+  required double? effectiveHeadroom,
+  required double? burnPerHour,
+  required double? confidence,
+}) {
+  if (isLocal || effectiveHeadroom == null) return null;
+  final headroom = effectiveHeadroom.clamp(0.0, 100.0).toDouble();
+  final burn = burnPerHour != null && burnPerHour > 0
+      ? burnPerHour
+      : _burnFloorPercentPerHour;
+  final runwayHours = headroom / math.max(burn, _burnFloorPercentPerHour);
+  final trust = (confidence ?? 0.6).clamp(0.0, 1.0).toDouble();
+  return runwayHours * trust;
 }
 
 /// Probability the binding window is spent before it resets, from a Gaussian
@@ -472,23 +508,38 @@ double _erf(double x) {
   return sign * y;
 }
 
+int _compareSubscriptionCandidates(RouteCandidate a, RouteCandidate b) {
+  if (a.stale != b.stale) return a.stale ? 1 : -1;
+  final score = (b.routingScore ?? -1).compareTo(a.routingScore ?? -1);
+  if (score != 0) return score;
+  final effective =
+      (b.effectiveHeadroom ?? -1).compareTo(a.effectiveHeadroom ?? -1);
+  if (effective != 0) return effective;
+  final raw = (b.headroom ?? -1).compareTo(a.headroom ?? -1);
+  if (raw != 0) return raw;
+  final provider = a.provider.compareTo(b.provider);
+  if (provider != 0) return provider;
+  return a.account.compareTo(b.account);
+}
+
 /// Recommends where to route the next request.
 ///
-/// Policy: prefer the metered subscription with the most remaining headroom,
-/// as long as it clears [comfortThreshold] percent (so we don't burn the last
-/// sliver of a cap). If no subscription clears the threshold, recommend any
-/// available local runtime (Ollama/LM Studio) as a free, always-on fallback.
-/// If there is no local fallback either, recommend the least-bad subscription
-/// that still has *some* headroom; otherwise the one that resets soonest.
+/// Policy: prefer the metered subscription with the strongest risk-adjusted
+/// runway score, as long as it clears [comfortThreshold] percent after burn and
+/// leases (so we don't burn the last sliver of a cap). If no subscription clears
+/// the threshold, recommend any available local runtime as a free, always-on
+/// fallback. If there is no local fallback either, recommend the least-bad
+/// subscription that still has *some* headroom; otherwise the one that resets
+/// soonest.
 ///
-/// Ranking and the comfort gate use *effective* headroom: present headroom
+/// The comfort gate uses *effective* headroom: present headroom
 /// discounted by each provider's recent burn over the [leadHours] planning
 /// horizon ([burnByProvider], percent of quota per hour). Account-scoped
 /// [burnStatsByProvider] entries are preferred when present. A provider being
-/// drawn down fast is therefore a less safe pick than its instantaneous
-/// headroom suggests. Availability still reflects present headroom (a provider
-/// with quota now is usable now, just ranked lower). With no burn data the
-/// behavior is identical to ranking on raw headroom.
+/// drawn down fast is therefore a less safe pick than its instantaneous headroom
+/// suggests. Ranking uses [routingScore], a confidence-weighted runway derived
+/// from that same effective headroom. Availability still reflects present
+/// headroom: a provider with quota now is usable now, just ranked lower.
 ///
 /// Local runtimes never "win" on headroom (they would always read 100%); they
 /// are only chosen when the paid budget is too tight to be comfortable.
@@ -523,6 +574,7 @@ RouteSuggestion suggestRoute(
     final strand = headroom == null
         ? null
         : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
+    final confidence = _confidence(q, burnSe, samples);
     return RouteCandidate(
       provider: q.provider,
       account: q.account,
@@ -533,7 +585,13 @@ RouteSuggestion suggestRoute(
       burnPerHour: burn,
       burnSe: burnSe,
       strandProbability: strand,
-      confidence: _confidence(q, burnSe, samples),
+      confidence: confidence,
+      routingScore: routingScore(
+        isLocal: q.isLocal,
+        effectiveHeadroom: effective,
+        burnPerHour: burn,
+        confidence: confidence,
+      ),
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,
@@ -547,13 +605,11 @@ RouteSuggestion suggestRoute(
       .map(toCandidate)
       .toList();
 
-  // Live snapshots rank ahead of stale ones; within each, more headroom first.
-  // This stops an hours-old 99% cache from being recommended over a live 80%.
+  // Live snapshots rank ahead of stale ones; within each, the unified runway
+  // score wins. This stops an hours-old 99% cache from being recommended over a
+  // live 80%, while letting a slow-burn provider beat a fast-draining one.
   final subs = usable.where((c) => !c.isLocal).toList()
-    ..sort((a, b) {
-      if (a.stale != b.stale) return a.stale ? 1 : -1;
-      return (b.effectiveHeadroom ?? -1).compareTo(a.effectiveHeadroom ?? -1);
-    });
+    ..sort(_compareSubscriptionCandidates);
   final locals = usable.where((c) => c.isLocal).toList();
 
   // Ranked view: normal mode leads with subscriptions. Local-first mode is an
@@ -614,7 +670,7 @@ RouteSuggestion suggestRoute(
     final burnNote = _burnNote(best);
     return result(
       best,
-      'Use ${best.provider}$note - most headroom (${best.headroom!.round()}% free$burnNote).',
+      'Use ${best.provider}$note - best risk-adjusted runway (${best.headroom!.round()}% free$burnNote).',
     );
   }
 
@@ -638,7 +694,7 @@ RouteSuggestion suggestRoute(
     final best = withAny.first;
     return result(
       best,
-      'All subscriptions are low; ${best.provider} has the most left (${best.headroom!.round()}% free).',
+      'All subscriptions are low; ${best.provider} has the best runway (${best.headroom!.round()}% free).',
     );
   }
 

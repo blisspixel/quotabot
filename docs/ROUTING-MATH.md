@@ -369,8 +369,9 @@ fallback      = local runtime, else soonest reset, else passthrough   # shipped
 
 Properties we can state and defend:
 - **Reduces to today.** Set `z=0`, `W_reset=0`, `C_money=0`, `reliability=freshness=1`:
-  `score_i = h_i / beta_i`, monotone in headroom and inverse burn - i.e. rank by
-  effective headroom, which is exactly `suggestRoute`. Nothing regresses.
+  `score_i = h_i / beta_i`, monotone in headroom and inverse burn. The current
+  `suggestRoute` implementation uses effective headroom as the numerator and
+  recent burn as the denominator, with confidence as a trust multiplier.
 - **Risk-monotone.** `dscore/dz <= 0`: more caution never increases a pick's score.
 - **Fail-soft.** Missing data -> `freshness -> 0` -> the provider sinks below the
   guaranteed fallback, never above it. The invariant holds by construction.
@@ -410,17 +411,17 @@ the measurable improvement over the shipped heuristic.
 | confidence + provenance | `RouteCandidate.confidence`, `as_of`/`risk_z` | shipped (suggest, top, widget route signal) |
 | `p_strand` surfaced in `top` | `top.dart` `_forecast` (strand % / time-to-empty) | shipped |
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
-| unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | next |
+| unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
 | shrinkage | `insights.dart` (cross-provider pool) | next |
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing and reset-aware hint shipped |
 
-Build order honors the roadmap: ship `se` + `h_risk` + the unified score with
-neutral weights first (zero behavior change, full machinery in place), then turn on
-risk (`z`), then leases (Dev), then shrinkage (Pip), then the optimizer (Maya) and
-scheduler. Each step is a one-knob, reduces-to-previous change with its own tests.
+Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, and the
+unified confidence-weighted runway score are shipped. Shrinkage (Pip) is next,
+then the optimizer (Maya) and scheduler. Each step is a one-knob,
+reduces-to-previous change with its own tests.
 
 ---
 

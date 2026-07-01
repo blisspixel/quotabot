@@ -138,6 +138,10 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Provider suggestions now rank metered subscriptions by a
+  confidence-weighted `routing_score` based on risk-adjusted runway, while
+  keeping local runtimes governed by the explicit fallback and local-first
+  policies. The score is included additively in suggestion JSON and MCP output.
 - Collector SQLite reads now use `sqlite3` 3.x's hook-managed bundled native
   library and the current `Database.close()` API. The obsolete manual
   `open.dart` override path was removed, and CLI subprocess tests now avoid
