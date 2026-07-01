@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot stats` now accepts explicit tier-fit inputs such as
+  `--tier-plan=Lite:50:10,Current:100:20 --current-price=20`. The JSON output
+  includes `tier_fit` with observed breach probability, recommended explicit
+  tier, and optional monthly delta, without inferring provider prices or caps.
 - The desktop widget header now shows a compact "Next" route signal using the
   same burn-aware `suggestRoute` provenance as the CLI/MCP path: current free
   headroom, burn-discounted headroom when material, and confidence. Single

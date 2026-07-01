@@ -145,6 +145,7 @@ quotabot watch            # alert when a window goes low, naming where to route
 quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
 quotabot top --exclude=codex  # hide a provider from this quota read only
 quotabot suggest --use-expiring-quota  # model pick may use included quota before reset
+quotabot stats --tier-plan=Lite:50:10,Current:100:20 --current-price=20  # explicit tier fit
 quotabot report           # weekly quota-health markdown export
 ```
 

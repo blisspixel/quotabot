@@ -276,6 +276,12 @@ enough" flag is the `q_90 << K` special case; this generalizes it to a costed,
 risk-bounded recommendation. (Strictly post-1.0, and optional/secondary per the
 roadmap's no-cost-ledger stance - it informs, it does not become the main view.)
 
+Shipped first slice: `quotabot stats --tier-plan=NAME:CAP[:PRICE]` accepts
+explicit caller-supplied tier caps, where `CAP` is a percent of the current plan,
+and optional monthly prices. It estimates breach probability from the existing
+compact headroom histogram and reports an optional monthly delta only when the
+caller also supplies `--current-price`. No plan cap or price is inferred.
+
 ---
 
 ## 9. Reliability and concurrency leases (queueing)
@@ -449,7 +455,7 @@ the measurable improvement over the shipped heuristic.
 | heatmap beta-binomial shrinkage | `insights.dart` `WeekHourWindow` usable rates -> scheduling score | shipped |
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
-| tier ROI | `stats` / optimizer view | post-1.0, secondary |
+| tier ROI | `stats` / optimizer view | explicit-plan stats advisory shipped |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing and reset-aware hint shipped |
 
 Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, the unified
@@ -459,8 +465,9 @@ heatmap beta-binomial shrinkage are shipped. The first optimizer hook now expose
 hook applies `waste_boost = 1 + W_reset * waste_fraction` when measured burn says
 included quota would otherwise expire unused. Explicit cost weighting is now
 shipped as `cost_discount = 1 / (1 + C_money * cost_penalty)`, only when a caller
-supplies the cost penalties. Each step is a one-knob, reduces-to-previous change
-with its own tests.
+supplies the cost penalties. The first tier ROI slice is now an explicit-plan
+`stats` advisory over local history, not a provider price catalog. Each step is a
+one-knob, reduces-to-previous change with its own tests.
 
 ---
 

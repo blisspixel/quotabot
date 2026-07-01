@@ -72,6 +72,17 @@ buckets retained 90 days (the analytics, sampled-day streaks, and contribution
 calendar, best-time windows, and reset-aware schedule hints). No raw points are
 kept long term, and only quota metadata is ever stored, never prompts or code.
 
+For an explicit tier-fit check, pass candidate plan caps as percentages of your
+current plan. Prices are optional and caller-supplied:
+
+```bash
+quotabot stats --tier-plan=Lite:50:10,Current:100:20 --current-price=20
+```
+
+The result estimates observed breach probability from local history and, when
+prices are supplied, the monthly delta. quotabot does not infer provider prices,
+write a spend ledger, or change routing from this advisory.
+
 ## CLI reference
 
 Run `quotabot help` for the live list. Every command is a local metadata read and

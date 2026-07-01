@@ -91,7 +91,14 @@ account identity, the burn evidence behind the signal is account-scoped.
 `quotabot stats --json` emits a provider-keyed object of local history insight
 fields. Each provider insight includes distribution fields, sampled-day streaks,
 `contribution_calendar`, `best_time_windows`, optional `schedule_hint`, and
-optional pace. Calendar entries use the same sampled-day shape described below.
+optional pace. When the caller supplies explicit tier-plan candidates to
+`quotabot stats`, each provider can also include optional `tier_fit` with
+`max_breach_probability`, `sample_count`, nullable `recommended`, and `options`.
+Each tier option contains `name`, `cap_percent_of_current`,
+`breach_probability`, `sample_count`, `meets_risk_tolerance`, and optional
+caller-supplied `monthly_price` plus `monthly_delta`. quotabot never infers plan
+prices or caps for this object. Calendar entries use the same sampled-day shape
+described below.
 
 `quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
 `recommended_provider`, `recommendation_reason`, `fallback_kind`, and

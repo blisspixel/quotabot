@@ -265,6 +265,13 @@ secrets, and emits a diff. It does not rewrite the catalog automatically because
 capability fields such as context, tools, vision, reasoning, and tier remain
 curated routing metadata.
 
+`insights.dart` also owns the explicit tier-fit advisory used by
+`quotabot stats --tier-plan=...`. It compares caller-supplied plan caps against
+the compact local headroom histogram and reports breach probability plus optional
+monthly delta only when prices are supplied on the command line. The result is
+analytics-only: it is not persisted, does not affect routing, and does not infer
+provider price catalogs.
+
 ## LiteLLM proxy integration
 
 `integrations/litellm/` is the shipped example of using quotabot as a routing

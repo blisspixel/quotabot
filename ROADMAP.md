@@ -393,7 +393,11 @@ Breadth and depth, once the core is trusted:
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation
   shipped: `quotabot watch --waste-threshold=N` emits opt-in
-  `projected_waste` alerts from current pace analytics.
+  `projected_waste` alerts from current pace analytics. The first tier ROI slice
+  is now an explicit `quotabot stats --tier-plan=NAME:CAP[:PRICE]` advisory:
+  callers supply candidate caps and prices, quotabot estimates breach
+  probability from local history, and optional monthly deltas are shown only from
+  caller-supplied prices.
 - **First-class local models (the moat):** VRAM/readiness awareness ("can I run
   70B Q4 right now?", loaded vs cold, tokens/sec) and per-model capability tags,
   so "free" never secretly means a two-minute wait or a flubbed refactor.
@@ -430,9 +434,9 @@ Breadth and depth, once the core is trusted:
   gets a modest use-it-or-lose-it boost when local burn projects meaningful
   unused included quota at reset, while manual, stale, local, and ambiguous
   multi-account signals are excluded. Explicit provider cost weighting is now
-  shipped as an opt-in caller policy; tier ROI remains secondary because it
-  needs plan-price evidence and must not turn the primary product into a spend
-  ledger.
+  shipped as an opt-in caller policy. Tier ROI has its first safe slice through
+  explicit plan inputs in `stats`; broader plan-price modeling remains secondary
+  and must not turn the primary product into a spend ledger.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

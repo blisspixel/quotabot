@@ -239,6 +239,60 @@ void main() {
     });
   });
 
+  group('tierFitAnalysis', () {
+    test('recommends the cheapest explicit plan under breach risk', () {
+      final bucket = HeadroomBucket(start: 0);
+      for (var i = 0; i < 18; i++) {
+        bucket.add(60); // 40% used fits a half-size plan.
+      }
+      for (var i = 0; i < 2; i++) {
+        bucket.add(30); // 70% used breaches a half-size plan.
+      }
+
+      final fit = tierFitAnalysis(
+        [bucket],
+        const [
+          TierPlanOption(
+            name: 'Starter',
+            capPercentOfCurrent: 30,
+            monthlyPrice: 5,
+          ),
+          TierPlanOption(
+            name: 'Lite',
+            capPercentOfCurrent: 50,
+            monthlyPrice: 10,
+          ),
+          TierPlanOption(
+            name: 'Current',
+            capPercentOfCurrent: 100,
+            monthlyPrice: 20,
+          ),
+        ],
+        currentMonthlyPrice: 20,
+        maxBreachProbability: 0.15,
+      );
+
+      expect(fit.sampleCount, 20);
+      expect(fit.recommended?.name, 'Lite');
+      expect(fit.recommended?.breachProbability, closeTo(0.1, 0.001));
+      expect(fit.recommended?.monthlyDelta, -10);
+      final starter =
+          fit.options.firstWhere((option) => option.name == 'Starter');
+      expect(starter.meetsRiskTolerance, isFalse);
+    });
+
+    test('does not recommend a tier without history', () {
+      final fit = tierFitAnalysis(
+        const [],
+        const [TierPlanOption(name: 'Lite', capPercentOfCurrent: 50)],
+      );
+
+      expect(fit.sampleCount, 0);
+      expect(fit.recommended, isNull);
+      expect(fit.options.single.meetsRiskTolerance, isFalse);
+    });
+  });
+
   group('weekHourHeatmap', () {
     test('places samples in the right weekday and hour cells', () {
       // 1970-01-01 00:00 UTC is a Thursday (row index 3), hour 0.

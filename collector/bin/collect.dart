@@ -203,8 +203,18 @@ Future<void> main(List<String> rawArgs) async {
       }
       return;
     case 'stats':
+      final tierFitPolicy = _tierFitPolicy(flags);
+      if (!tierFitPolicy.ok) {
+        exitCode = _exitUsage;
+        return;
+      }
       await _runStats(
-          pos.skip(1).toList(), wantsJson, profile, excludedProviders);
+        pos.skip(1).toList(),
+        wantsJson,
+        profile,
+        excludedProviders,
+        tierFitPolicy,
+      );
       return;
     case 'report':
       await _runReport(wantsJson, profile, excludedProviders);
@@ -417,6 +427,131 @@ bool _hasRouteCostPolicy(Set<String> flags) => flags.any(
   return (penalties: parsed.penalties, weight: weight, ok: true);
 }
 
+typedef _TierFitPolicy = ({
+  List<TierPlanOption> plans,
+  double maxBreachProbability,
+  double? currentMonthlyPrice,
+  bool ok,
+});
+
+_TierFitPolicy _tierFitPolicy(Set<String> flags) {
+  final rawPlans = _stringOption(flags, 'tier-plan', null);
+  final rawRisk = _stringOption(flags, 'tier-risk', null);
+  final rawPrice = _stringOption(flags, 'current-price', null);
+  if (rawPlans == null) {
+    if (rawRisk != null || rawPrice != null) {
+      stderr.writeln(
+        'quotabot: --tier-risk and --current-price require --tier-plan',
+      );
+      return (
+        plans: const [],
+        maxBreachProbability: 0.05,
+        currentMonthlyPrice: null,
+        ok: false,
+      );
+    }
+    return (
+      plans: const [],
+      maxBreachProbability: 0.05,
+      currentMonthlyPrice: null,
+      ok: true,
+    );
+  }
+
+  final plans = _parseTierPlans(rawPlans);
+  if (plans == null) {
+    return (
+      plans: const [],
+      maxBreachProbability: 0.05,
+      currentMonthlyPrice: null,
+      ok: false,
+    );
+  }
+  var risk = 0.05;
+  if (rawRisk != null) {
+    final parsed = double.tryParse(rawRisk.trim());
+    if (parsed == null || !parsed.isFinite || parsed < 0 || parsed > 1) {
+      stderr.writeln('quotabot: --tier-risk must be between 0 and 1');
+      return (
+        plans: const [],
+        maxBreachProbability: 0.05,
+        currentMonthlyPrice: null,
+        ok: false,
+      );
+    }
+    risk = parsed;
+  }
+
+  double? currentPrice;
+  if (rawPrice != null) {
+    final parsed = double.tryParse(rawPrice.trim());
+    if (parsed == null || !parsed.isFinite || parsed < 0) {
+      stderr.writeln('quotabot: --current-price must be a non-negative number');
+      return (
+        plans: const [],
+        maxBreachProbability: risk,
+        currentMonthlyPrice: null,
+        ok: false,
+      );
+    }
+    currentPrice = parsed;
+  }
+
+  return (
+    plans: plans,
+    maxBreachProbability: risk,
+    currentMonthlyPrice: currentPrice,
+    ok: true,
+  );
+}
+
+List<TierPlanOption>? _parseTierPlans(String raw) {
+  final plans = <TierPlanOption>[];
+  for (final part in raw.split(',')) {
+    final trimmed = part.trim();
+    if (trimmed.isEmpty) continue;
+    final fields = trimmed.split(':');
+    if (fields.length < 2 || fields.length > 3) {
+      stderr.writeln(
+        'quotabot: --tier-plan entries must be name:cap[:monthly_price]',
+      );
+      return null;
+    }
+    final name = fields[0].trim();
+    if (!RegExp(r'^[A-Za-z0-9 ._-]{1,64}$').hasMatch(name)) {
+      stderr.writeln('quotabot: invalid tier plan name: $name');
+      return null;
+    }
+    final cap = double.tryParse(fields[1].trim());
+    if (cap == null || !cap.isFinite || cap <= 0 || cap > 1000) {
+      stderr.writeln(
+        'quotabot: tier plan cap must be > 0 and <= 1000 percent',
+      );
+      return null;
+    }
+    double? price;
+    if (fields.length == 3 && fields[2].trim().isNotEmpty) {
+      price = double.tryParse(fields[2].trim());
+      if (price == null || !price.isFinite || price < 0) {
+        stderr.writeln(
+          'quotabot: tier plan monthly price must be non-negative',
+        );
+        return null;
+      }
+    }
+    plans.add(TierPlanOption(
+      name: name,
+      capPercentOfCurrent: cap,
+      monthlyPrice: price,
+    ));
+  }
+  if (plans.isEmpty) {
+    stderr.writeln('quotabot: --tier-plan must include at least one plan');
+    return null;
+  }
+  return plans;
+}
+
 /// Prints a concrete-model recommendation for a task profile.
 void _printSuggestModel(ModelSuggestion s) {
   print('quotabot suggest  (best model for your task, 0 usage tokens)\n');
@@ -461,6 +596,7 @@ const _valueOptions = {
   'budget',
   'cost-penalty',
   'cost-weight',
+  'current-price',
   'display-name',
   'exclude',
   'interval',
@@ -476,6 +612,8 @@ const _valueOptions = {
   'theme',
   'tier-ceiling',
   'tier-floor',
+  'tier-plan',
+  'tier-risk',
   'reset',
   'used',
   'waste-threshold',
@@ -1055,6 +1193,12 @@ void _printHelp() {
     '  --cost-weight=N     suggest: scale explicit cost penalties (default 1 when set)',
   );
   stdout.writeln(
+    '  --tier-plan=A:N[:P] stats: explicit plan cap percent and optional price',
+  );
+  stdout.writeln(
+    '  --current-price=N --tier-risk=P  stats: tier-fit price/risk inputs',
+  );
+  stdout.writeln(
     '  --exclude=A,B       quota reads: ignore these providers after profile filtering',
   );
   stdout.writeln(
@@ -1235,6 +1379,7 @@ Future<void> _runStats(
   bool wantsJson,
   QuotaProfile? profile,
   Set<String> excludedProviders,
+  _TierFitPolicy tierFitPolicy,
 ) async {
   final only = rest.isEmpty ? null : rest.first.toLowerCase();
   final now = nowEpoch();
@@ -1245,9 +1390,12 @@ Future<void> _runStats(
     ..sort();
   final tz = DateTime.now().timeZoneOffset;
   final byProvider = {for (final q in results) q.provider: q};
+  final bucketsByProvider = {
+    for (final p in providers) p: _historyBuckets(p),
+  };
   final insights = shrinkInsightsReliability({
     for (final p in providers)
-      p: Insights.from(_historyBuckets(p), now, tzOffset: tz),
+      p: Insights.from(bucketsByProvider[p]!, now, tzOffset: tz),
   });
   if (wantsJson) {
     final report = <String, dynamic>{};
@@ -1255,15 +1403,25 @@ Future<void> _runStats(
       final ins = insights[p]!;
       final pace = _paceFor(byProvider[p], ins, now);
       final schedule = _scheduleFor(byProvider[p], ins, now, tz);
+      final tierFit = _tierFitFor(bucketsByProvider[p]!, tierFitPolicy);
       report[p] = {
         ...ins.toJson(),
         if (pace != null) 'pace': pace.toJson(),
         if (schedule != null) 'schedule_hint': schedule.toJson(),
+        if (tierFit != null) 'tier_fit': tierFit.toJson(),
       };
     }
     print(_jsonPretty(report));
   } else {
-    _printStats(providers, byProvider, now, tz, insights);
+    _printStats(
+      providers,
+      byProvider,
+      now,
+      tz,
+      insights,
+      bucketsByProvider,
+      tierFitPolicy,
+    );
   }
 }
 
@@ -1693,6 +1851,8 @@ void _printStats(
   int now,
   Duration tz,
   Map<String, Insights> insights,
+  Map<String, List<HeadroomBucket>> bucketsByProvider,
+  _TierFitPolicy tierFitPolicy,
 ) {
   print(
     'quotabot stats  (90-day analytics from local history, 0 usage tokens)\n',
@@ -1726,8 +1886,8 @@ void _printStats(
   }
 
   for (final p in providers) {
-    final ins =
-        insights[p] ?? Insights.from(_historyBuckets(p), now, tzOffset: tz);
+    final buckets = bucketsByProvider[p] ?? _historyBuckets(p);
+    final ins = insights[p] ?? Insights.from(buckets, now, tzOffset: tz);
     if (ins.samples == 0) {
       print('  ${p.padRight(12)} no history yet');
       continue;
@@ -1745,6 +1905,10 @@ void _printStats(
         '  ${' '.padRight(12)} typically peaks ~${ins.typicalPeakUsed!.round()}% used,'
         ' leaves ~${ins.typicalUnused!.round()}% on the table',
       );
+    }
+    final tierFit = _tierFitFor(buckets, tierFitPolicy);
+    if (tierFit != null) {
+      print('  ${' '.padRight(12)} ${_tierFitSummary(tierFit)}');
     }
     final extras = <String>[];
     if (_meaningfulTrend(ins)) {
@@ -1783,6 +1947,50 @@ void _printStats(
       print('  ${' '.padRight(12)} pace: ${pace.verdict}');
     }
   }
+}
+
+TierFitAnalysis? _tierFitFor(
+  List<HeadroomBucket> buckets,
+  _TierFitPolicy policy,
+) {
+  if (policy.plans.isEmpty) return null;
+  return tierFitAnalysis(
+    buckets,
+    policy.plans,
+    maxBreachProbability: policy.maxBreachProbability,
+    currentMonthlyPrice: policy.currentMonthlyPrice,
+  );
+}
+
+String _tierFitSummary(TierFitAnalysis analysis) {
+  final risk = _probPct(analysis.maxBreachProbability);
+  final rec = analysis.recommended;
+  if (analysis.sampleCount == 0) {
+    return 'tier fit: no history yet for explicit plan analysis';
+  }
+  if (rec == null) {
+    return 'tier fit: no supplied plan stays under $risk breach risk';
+  }
+  return 'tier fit: ${rec.name} cap ${_num(rec.capPercentOfCurrent)}% '
+      'of current, breach ${_probPct(rec.breachProbability)}'
+      '${_monthlyDelta(rec.monthlyDelta)}';
+}
+
+String _monthlyDelta(double? delta) {
+  if (delta == null) return '';
+  if (delta.abs() < 0.005) return ', same monthly price';
+  final amount = delta.abs().toStringAsFixed(2);
+  return delta < 0 ? ', saves ~\$$amount/mo' : ', costs +\$$amount/mo';
+}
+
+String _probPct(double probability) =>
+    '${(probability * 100).toStringAsFixed(1)}%';
+
+String _num(double value) {
+  final rounded = value.roundToDouble();
+  return (value - rounded).abs() < 0.001
+      ? rounded.toInt().toString()
+      : value.toStringAsFixed(1);
 }
 
 /// True when a trend is both confident and large enough to be worth showing.
