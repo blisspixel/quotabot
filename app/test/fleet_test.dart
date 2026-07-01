@@ -74,6 +74,7 @@ void main() {
     expect(find.text('DISTRIBUTION'), findsOneWidget);
     expect(find.text('CALENDAR'), findsOneWidget);
     expect(find.text('BEST TIME TO RUN'), findsOneWidget);
+    expect(find.textContaining('Best:'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

@@ -79,17 +79,20 @@ account identity, the burn evidence behind the signal is account-scoped.
 
 `quotabot stats --json` emits a provider-keyed object of local history insight
 fields. Each provider insight includes distribution fields, sampled-day streaks,
-`contribution_calendar`, and optional pace. Calendar entries use the same
-sampled-day shape described below.
+`contribution_calendar`, `best_time_windows`, and optional pace. Calendar entries
+use the same sampled-day shape described below.
 
 `quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
 `recommended_provider`, `recommendation_reason`, `fallback_kind`, and
 `providers`. Provider rows include state, headroom/reset metadata, weekly p50
 free percent, weekly reliability, weekly sampled-day counts, current
-usable/spent day streaks, `weekly_contribution_calendar`, and pace when history
-is available. Calendar entries are sampled local days with `day_start`,
+usable/spent day streaks, `weekly_contribution_calendar`,
+`weekly_best_time_windows`, and pace when history is available. Calendar entries
+are sampled local days with `day_start`,
 `samples`, `mean_free_percent`, `spent_samples`, `state` (`usable`, `mixed`, or
-`spent`), and `intensity` (0..4).
+`spent`), and `intensity` (0..4). Best-time entries are sampled local
+weekday/hour cells with `day_of_week` (0 = Monday), `day_label`, `hour_local`,
+`samples`, `mean_free_percent`, and a display `label`.
 
 ## `quotabot.alert.v1`
 

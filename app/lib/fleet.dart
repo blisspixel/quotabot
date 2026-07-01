@@ -428,6 +428,7 @@ class _FleetScreenState extends State<FleetScreen> {
 
     final stats = <_Node>[];
     final grids = <List<List<double?>>>[];
+    final fleetBuckets = <HeadroomBucket>[];
     var maxSamples = 0;
     var maxSpan = 0;
     for (final q in widget.data) {
@@ -438,6 +439,7 @@ class _FleetScreenState extends State<FleetScreen> {
           if (b.start >= cutoff) b,
       ];
       if (win.isEmpty) continue;
+      fleetBuckets.addAll(win);
       final ins = Insights.from(win, now, tzOffset: tz);
       if (ins.samples == 0) continue;
       final node = _Node(q.displayName, ins.p50 ?? 0, null)..insights = ins;
@@ -460,6 +462,11 @@ class _FleetScreenState extends State<FleetScreen> {
     }
 
     final grid = _mergeGrids(grids);
+    final bestWindows = bestWeekHourWindows(
+      fleetBuckets,
+      tzOffset: tz,
+      limit: 3,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -520,6 +527,20 @@ class _FleetScreenState extends State<FleetScreen> {
                         painter: _HeatmapPainter(grid, dark, c.muted),
                       ),
               ),
+              if (bestWindows.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _bestTimeLine(bestWindows),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.caption,
+                    height: 1.25,
+                    color: c.fg,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               _legend(c.muted),
             ],
@@ -623,6 +644,9 @@ class _FleetScreenState extends State<FleetScreen> {
       ),
     );
   }
+
+  String _bestTimeLine(List<WeekHourWindow> windows) =>
+      'Best: ${windows.map((window) => window.summary).join(' | ')}';
 
   // ---- chrome ----------------------------------------------------------
 

@@ -48,7 +48,8 @@ time range:
   live data are listed so they do not silently disappear.
 - **7d / 90d:** the free-% distribution (p10-p90 with a median tick), reliability
   and per-day trend, sampled-day streaks, a contribution calendar, and a
-  best-time-to-run weekday-by-hour heatmap.
+  best-time-to-run weekday-by-hour heatmap with a short best-sampled-window
+  summary.
 
 (There is also one small easter egg in the header, derived from the fleet's own
 numbers. Hover it.)
@@ -64,8 +65,8 @@ quotabot report         # weekly quota-health markdown for sharing
 quotabot keeps two tiers of local history, both zero-token: a short raw buffer of
 recent checks (the "usually ~X% free" line and sparkline) and compact hourly
 buckets retained 90 days (the analytics, sampled-day streaks, and contribution
-calendar). No raw points are kept long term, and only quota metadata is ever
-stored, never prompts or code.
+calendar, and best-time windows). No raw points are kept long term, and only
+quota metadata is ever stored, never prompts or code.
 
 ## CLI reference
 
@@ -81,7 +82,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `manual`               | List, set, or remove self-reported quota entries.     |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
 | `suggest`              | Which subscription to use next, ranked.               |
-| `stats [provider]`     | 90-day analytics: distribution, calendar, pace.       |
+| `stats [provider]`     | 90-day analytics: distribution, best windows, pace.   |
 | `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect grok or antigravity so it stays live.         |
@@ -304,7 +305,8 @@ current recommendation, provider headroom, reset times, seven-day history
 metrics, current sampled-day usable/spent streaks, and a compact sampled-day
 calendar where enough local history exists. Calendar markers are ASCII: `#`
 heavy use, `*` moderate-high, `+` moderate, `.` light, `!` mixed, and `x`
-spent. Add `--json` for the structured `quotabot.report.v1` shape. It is still
+spent. It also lists the best sampled local weekday/hour windows with sample
+counts. Add `--json` for the structured `quotabot.report.v1` shape. It is still
 local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from

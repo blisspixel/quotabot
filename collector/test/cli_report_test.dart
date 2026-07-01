@@ -60,6 +60,13 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      providers.any(
+        (provider) => (provider as Map<String, dynamic>)
+            .containsKey('weekly_best_time_windows'),
+      ),
+      isTrue,
+    );
   });
 
   test('stats prints sampled-day streaks', () async {
@@ -80,6 +87,8 @@ void main() {
     expect(output, contains('sampled days'));
     expect(output, contains('usable streak'));
     expect(output, contains('calendar .++'));
+    expect(output, contains('best '));
+    expect(output, contains('free, n='));
   });
 }
 

@@ -460,6 +460,105 @@ List<List<double?>> weekHourHeatmap(
   );
 }
 
+const _weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/// One populated local weekday/hour cell from the sampled history heatmap.
+class WeekHourWindow {
+  /// 0 = Monday .. 6 = Sunday.
+  final int dayOfWeek;
+
+  /// Local hour of day, 0..23.
+  final int hour;
+
+  final int samples;
+  final double meanFreePercent;
+
+  const WeekHourWindow({
+    required this.dayOfWeek,
+    required this.hour,
+    required this.samples,
+    required this.meanFreePercent,
+  });
+
+  String get dayLabel => _weekdayLabels[dayOfWeek % 7];
+
+  String get timeLabel => '$dayLabel ${hour.toString().padLeft(2, '0')}:00';
+
+  String get summary =>
+      '$timeLabel (${meanFreePercent.round()}% free, n=$samples)';
+
+  Map<String, dynamic> toJson() => {
+        'day_of_week': dayOfWeek,
+        'day_label': dayLabel,
+        'hour_local': hour,
+        'samples': samples,
+        'mean_free_percent': double.parse(meanFreePercent.toStringAsFixed(2)),
+        'label': timeLabel,
+      };
+}
+
+/// Populated local weekday/hour cells, sorted Monday..Sunday then 00..23.
+List<WeekHourWindow> weekHourWindows(
+  Iterable<HeadroomBucket> buckets, {
+  Duration tzOffset = Duration.zero,
+}) {
+  final sum = List.generate(7, (_) => List<double>.filled(24, 0));
+  final cnt = List.generate(7, (_) => List<int>.filled(24, 0));
+  final off = tzOffset.inSeconds;
+  for (final b in buckets) {
+    if (b.count == 0) continue;
+    final local = b.start + off;
+    final day = (((local ~/ 86400) + 3) % 7);
+    final hour = (local % 86400) ~/ 3600;
+    sum[day][hour] += b.sum;
+    cnt[day][hour] += b.count;
+  }
+  final out = <WeekHourWindow>[];
+  for (var day = 0; day < 7; day++) {
+    for (var hour = 0; hour < 24; hour++) {
+      final samples = cnt[day][hour];
+      if (samples == 0) continue;
+      out.add(
+        WeekHourWindow(
+          dayOfWeek: day,
+          hour: hour,
+          samples: samples,
+          meanFreePercent: sum[day][hour] / samples,
+        ),
+      );
+    }
+  }
+  return out;
+}
+
+/// Highest-headroom sampled local weekday/hour windows.
+///
+/// Cells with at least [minSamples] win when any exist; otherwise sparse history
+/// falls back to ranking every populated cell so the caller can still show the
+/// best available evidence with its sample count.
+List<WeekHourWindow> bestWeekHourWindows(
+  Iterable<HeadroomBucket> buckets, {
+  Duration tzOffset = Duration.zero,
+  int limit = 3,
+  int minSamples = 2,
+}) {
+  if (limit <= 0) return const [];
+  final all = weekHourWindows(buckets, tzOffset: tzOffset);
+  if (all.isEmpty) return const [];
+  final eligible = all.where((cell) => cell.samples >= minSamples).toList();
+  final ranked = (eligible.isEmpty ? all : eligible).toList()
+    ..sort((a, b) {
+      final mean = b.meanFreePercent.compareTo(a.meanFreePercent);
+      if (mean != 0) return mean;
+      final samples = b.samples.compareTo(a.samples);
+      if (samples != 0) return samples;
+      final day = a.dayOfWeek.compareTo(b.dayOfWeek);
+      if (day != 0) return day;
+      return a.hour.compareTo(b.hour);
+    });
+  return ranked.take(limit).toList();
+}
+
 /// A forward-looking pace read for the current rolling window: how fast quota is
 /// being spent and whether the user is on track to exhaust it early or leave it
 /// unused before the reset. Pure result of [computePace].
@@ -663,6 +762,9 @@ class Insights {
   /// Oldest-first sampled local days for compact contribution-calendar views.
   final List<ContributionDay> contributionCalendar;
 
+  /// Highest-headroom sampled local weekday/hour windows for scheduling.
+  final List<WeekHourWindow> bestTimeWindows;
+
   /// Recent burn rate in percent of quota per hour (>= 0), null when unknown.
   final double? burnPerHour;
 
@@ -696,6 +798,7 @@ class Insights {
     this.usableDayStreak = 0,
     this.spentDayStreak = 0,
     this.contributionCalendar = const [],
+    this.bestTimeWindows = const [],
     this.burnPerHour,
     this.burnSePerHour,
   });
@@ -719,6 +822,7 @@ class Insights {
     final tightestDay = _argMin(dayOfWeekProfile(used, tzOffset: tzOffset));
     final streaks = currentDayStreaks(used, tzOffset: tzOffset);
     final calendar = contributionCalendarDays(used, tzOffset: tzOffset);
+    final bestTime = bestWeekHourWindows(used, tzOffset: tzOffset);
     final burn = burnRateWithError(used, now);
     return Insights(
       samples: agg.count,
@@ -737,6 +841,7 @@ class Insights {
       usableDayStreak: streaks.usableDays,
       spentDayStreak: streaks.spentDays,
       contributionCalendar: calendar,
+      bestTimeWindows: bestTime,
       burnPerHour: burn.perHour,
       burnSePerHour: burn.sePerHour,
     );
@@ -774,6 +879,8 @@ class Insights {
         'spent_day_streak': spentDayStreak,
         'contribution_calendar':
             contributionCalendar.map((day) => day.toJson()).toList(),
+        'best_time_windows':
+            bestTimeWindows.map((window) => window.toJson()).toList(),
         'burn_percent_per_hour': burnPerHour,
         'burn_se_percent_per_hour': burnSePerHour,
         'typical_peak_used': typicalPeakUsed,

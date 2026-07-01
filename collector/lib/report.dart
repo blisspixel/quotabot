@@ -19,6 +19,7 @@ class QuotaHealthProviderLine {
   final int? usableDayStreak;
   final int? spentDayStreak;
   final List<ContributionDay> contributionCalendar;
+  final List<WeekHourWindow> bestTimeWindows;
   final String? pace;
 
   const QuotaHealthProviderLine({
@@ -36,6 +37,7 @@ class QuotaHealthProviderLine {
     required this.usableDayStreak,
     required this.spentDayStreak,
     this.contributionCalendar = const [],
+    this.bestTimeWindows = const [],
     required this.pace,
   });
 
@@ -55,6 +57,8 @@ class QuotaHealthProviderLine {
         'weekly_spent_day_streak': spentDayStreak,
         'weekly_contribution_calendar':
             contributionCalendar.map((day) => day.toJson()).toList(),
+        'weekly_best_time_windows':
+            bestTimeWindows.map((window) => window.toJson()).toList(),
         'pace': pace,
       };
 }
@@ -138,6 +142,23 @@ class QuotaHealthReport {
         );
       }
     }
+    final bestTimes =
+        providers.where((provider) => provider.bestTimeWindows.isNotEmpty);
+    if (bestTimes.isNotEmpty) {
+      lines
+        ..add('')
+        ..add('## Best sampled windows')
+        ..add('')
+        ..add(
+          'Mean free percent by local weekday and hour from existing history buckets.',
+        );
+      for (final provider in bestTimes) {
+        lines.add(
+          '- ${_cell(provider.displayName)} (${_cell(provider.account)}): '
+          '${_cell(_bestWindows(provider.bestTimeWindows))}',
+        );
+      }
+    }
     return '${lines.join('\n')}\n';
   }
 }
@@ -202,6 +223,7 @@ QuotaHealthProviderLine _providerLine(
     usableDayStreak: insights?.usableDayStreak,
     spentDayStreak: insights?.spentDayStreak,
     contributionCalendar: insights?.contributionCalendar ?? const [],
+    bestTimeWindows: insights?.bestTimeWindows ?? const [],
     pace: pace,
   );
 }
@@ -236,6 +258,9 @@ String _streak(QuotaHealthProviderLine provider) {
   if (usable > 0) return '${usable}d usable';
   return '${sampled}d sampled';
 }
+
+String _bestWindows(List<WeekHourWindow> windows) =>
+    windows.map((window) => window.summary).join('; ');
 
 String _cell(String value) =>
     value.replaceAll('|', '\\|').replaceAll('\n', ' ');

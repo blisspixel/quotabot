@@ -406,7 +406,7 @@ the measurable improvement over the shipped heuristic.
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
-| heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | post-1.0 |
+| heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | first best-window hint shipped; smoothing next |
 
 Build order honors the roadmap: ship `se` + `h_risk` + the unified score with
 neutral weights first (zero behavior change, full machinery in place), then turn on

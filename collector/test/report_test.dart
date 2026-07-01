@@ -59,6 +59,9 @@ void main() {
     final calendar = claude['weekly_contribution_calendar'] as List;
     expect(calendar, hasLength(3));
     expect(calendar.last['state'], 'usable');
+    final best = claude['weekly_best_time_windows'] as List;
+    expect(best, isNotEmpty);
+    expect((best.first as Map<String, dynamic>)['label'], isA<String>());
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {
@@ -83,6 +86,8 @@ void main() {
     expect(markdown, contains('Local runtimes are fallback capacity'));
     expect(markdown, contains('## Weekly calendar'));
     expect(markdown, contains('claude (work):'));
+    expect(markdown, contains('## Best sampled windows'));
+    expect(markdown, contains('free, n='));
   });
 
   test('markdown escapes table cell separators', () {

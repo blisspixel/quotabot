@@ -938,7 +938,7 @@ void _printHelp() {
     '  manual              list, set, or remove self-reported quota entries',
   );
   stdout.writeln(
-    '  stats [provider]    90-day analytics: distribution, reliability, pace',
+    '  stats [provider]    90-day analytics: distribution, best windows, pace',
   );
   stdout.writeln(
     '  report              weekly quota health markdown export',
@@ -1677,6 +1677,9 @@ void _printStats(
         'tightest ${_hourLabel(ins.tightestHour!)}'
         '${ins.tightestDay != null ? ' ${_dayLabel(ins.tightestDay!)}' : ''}',
       );
+    }
+    if (ins.bestTimeWindows.isNotEmpty) {
+      extras.add('best ${ins.bestTimeWindows.first.summary}');
     }
     if (ins.spentDayStreak > 0) {
       extras.add('${ins.spentDayStreak}d spent streak');

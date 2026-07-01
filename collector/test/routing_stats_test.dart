@@ -98,6 +98,43 @@ void main() {
     });
   });
 
+  group('bestWeekHourWindows', () {
+    test('prefers the freest supported local weekday-hour cells', () {
+      final supported = HeadroomBucket(start: 0)
+        ..add(80)
+        ..add(70);
+      final sparseHigh = HeadroomBucket(start: 13 * Duration.secondsPerHour)
+        ..add(95);
+      final supportedLow = HeadroomBucket(start: Duration.secondsPerHour)
+        ..add(40)
+        ..add(50);
+
+      final best = bestWeekHourWindows([
+        sparseHigh,
+        supportedLow,
+        supported,
+      ]);
+
+      expect(best, hasLength(2));
+      expect(best.first.dayLabel, 'Thu');
+      expect(best.first.hour, 0);
+      expect(best.first.samples, 2);
+      expect(best.first.meanFreePercent, closeTo(75, 0.001));
+      expect(best.first.summary, 'Thu 00:00 (75% free, n=2)');
+      expect(best.first.toJson()['label'], 'Thu 00:00');
+    });
+
+    test('falls back to sparse cells when no cell meets the sample floor', () {
+      final best = bestWeekHourWindows([
+        _bucket(13 * Duration.secondsPerHour, 95),
+      ]);
+
+      expect(best, hasLength(1));
+      expect(best.single.hour, 13);
+      expect(best.single.meanFreePercent, closeTo(95, 0.001));
+    });
+  });
+
   group('riskAdjustedHeadroom', () {
     test('z=0 is the risk-neutral mean (today behavior)', () {
       expect(riskAdjustedHeadroom(100, 10, 2, 1, 0), 90);
