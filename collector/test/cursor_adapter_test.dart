@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/adapters/cursor.dart';
-import 'package:quotabot_collector/sqlite_loader.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
 
@@ -18,7 +17,6 @@ void main() {
   });
 
   File writeDb(Map<String, Object> rows) {
-    configureSqliteLibrary();
     final file = File('${temp.path}/state.vscdb');
     final db = sqlite3.open(file.path);
     try {
@@ -30,7 +28,7 @@ void main() {
         );
       }
     } finally {
-      db.dispose();
+      db.close();
     }
     return file;
   }

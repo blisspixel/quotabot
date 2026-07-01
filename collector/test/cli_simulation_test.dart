@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import 'support/cli_process.dart';
+
 void main() {
   late Directory temp;
 
@@ -15,15 +17,7 @@ void main() {
   });
 
   Future<ProcessResult> runCli(List<String> args) {
-    final env = Map<String, String>.from(Platform.environment)
-      ..['LOCALAPPDATA'] = temp.path
-      ..['NO_COLOR'] = '1';
-    return Process.run(
-      Platform.resolvedExecutable,
-      ['run', 'bin/collect.dart', ...args],
-      workingDirectory: Directory.current.path,
-      environment: env,
-    );
+    return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
 
   test('json snapshot accepts separated simulation flag values', () async {
@@ -35,7 +29,7 @@ void main() {
       'exhausted',
     ]);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.v1');
     final providers = json['providers'] as List;
@@ -63,7 +57,7 @@ void main() {
       '--state=exhausted',
     ]);
 
-    expect(result.exitCode, 69);
+    expectExitCode(result, 69);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['provider'], 'claude');
     expect(json['available'], isFalse);
@@ -78,7 +72,7 @@ void main() {
       '--state=healthy',
     ]);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.suggest.v1');
     expect((json['recommended'] as Map)['provider'], 'claude');
@@ -92,7 +86,7 @@ void main() {
       '--state=missing',
     ]);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
 
@@ -105,7 +99,7 @@ void main() {
       '--state=healthy',
     ]);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     expect(
       result.stderr as String,
       contains('--waste-threshold must be between 0 and 100'),

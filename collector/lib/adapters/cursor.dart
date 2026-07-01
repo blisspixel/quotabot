@@ -5,7 +5,6 @@ import 'package:sqlite3/sqlite3.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
-import '../sqlite_loader.dart';
 import '../util.dart';
 import '../vscode_state.dart';
 
@@ -15,7 +14,6 @@ import '../vscode_state.dart';
 class CursorAdapter {
   static const id = cursorProviderId;
   static const name = cursorProviderName;
-  static bool _sqliteReady = false;
   final String? _dbPath;
 
   CursorAdapter({String? dbPath}) : _dbPath = dbPath;
@@ -66,7 +64,6 @@ class CursorAdapter {
   }
 
   _CursorState _readCursorState(String dbPath) {
-    _ensureSqlite();
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
       final rows = db.select(
@@ -100,7 +97,7 @@ class CursorAdapter {
     } catch (_) {
       return const _CursorState();
     } finally {
-      db.dispose();
+      db.close();
     }
   }
 
@@ -133,12 +130,6 @@ class CursorAdapter {
     }
   }
   // coverage:ignore-end
-
-  void _ensureSqlite() {
-    if (_sqliteReady) return;
-    configureSqliteLibrary();
-    _sqliteReady = true;
-  }
 }
 
 class _CursorState {

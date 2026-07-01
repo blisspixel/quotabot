@@ -39,7 +39,8 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 $collector = Join-Path $root 'collector'
 $app = Join-Path $root 'app'
-$installDir = Join-Path $env:LOCALAPPDATA 'quotabot\bin'
+$installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
+$installDir = Join-Path $installRoot 'bin'
 
 # Resolve the Flutter/Dart bin directory from PATH, falling back to common
 # install locations, so this works on any machine.
@@ -69,11 +70,30 @@ try {
   & (Join-Path $scriptDir 'package-cli.ps1')
 } finally { Pop-Location }
 
-$asset = Join-Path $root 'release\quotabot-windows-x64.exe'
+$asset = Join-Path $root 'release\quotabot-windows-x64.zip'
 if (-not (Test-Path $asset)) { throw "CLI build did not produce $asset" }
 
-Write-Step "Installing the CLI to $installDir"
-New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+Write-Step "Installing the CLI to $installRoot"
+New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+$extractPath = Join-Path ([IO.Path]::GetTempPath()) "quotabot-setup-$([guid]::NewGuid())"
+$null = New-Item -ItemType Directory -Force -Path $extractPath
+try {
+  Expand-Archive -LiteralPath $asset -DestinationPath $extractPath -Force
+  $downloadedExe = Join-Path $extractPath 'bin\quotabot.exe'
+  $downloadedSqlite = Join-Path $extractPath 'lib\sqlite3.dll'
+  if (-not (Test-Path -LiteralPath $downloadedExe)) {
+    throw "CLI archive did not contain bin\quotabot.exe"
+  }
+  if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
+    throw "CLI archive did not contain lib\sqlite3.dll"
+  }
+  Remove-Item -LiteralPath (Join-Path $installRoot 'bin') -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path $installRoot 'lib') -Recurse -Force -ErrorAction SilentlyContinue
+  Copy-Item -LiteralPath (Join-Path $extractPath 'bin') -Destination $installRoot -Recurse
+  Copy-Item -LiteralPath (Join-Path $extractPath 'lib') -Destination $installRoot -Recurse
+} finally {
+  Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+}
 $exe = Join-Path $installDir 'quotabot.exe'
 foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
   $legacyPath = Join-Path $installDir $legacy
@@ -82,7 +102,6 @@ foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
     Write-Ok "Removed legacy shim $legacy"
   }
 }
-Copy-Item $asset $exe -Force
 Write-Ok "Installed quotabot.exe"
 
 # Add the install dir to the user PATH if it is not already there.

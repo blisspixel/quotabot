@@ -7,7 +7,6 @@ import '../analysis.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
-import '../sqlite_loader.dart';
 import '../util.dart';
 
 /// Kiro (agentic CLI + IDE) adapter.
@@ -18,7 +17,6 @@ import '../util.dart';
 class KiroAdapter {
   static const id = kiroProviderId;
   static const name = kiroProviderName;
-  static bool _sqliteReady = false;
 
   KiroAdapter({String? dbPath}) : _dbPath = dbPath;
 
@@ -71,7 +69,6 @@ class KiroAdapter {
   }
 
   Map<String, dynamic>? _readUsageState(String dbPath) {
-    _ensureSqlite();
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
       final rows = db.select(
@@ -91,7 +88,7 @@ class KiroAdapter {
     } catch (_) {
       return null;
     } finally {
-      db.dispose();
+      db.close();
     }
   }
 
@@ -107,12 +104,6 @@ class KiroAdapter {
           Platform.environment['XDG_DATA_HOME'] ?? '${home()}/.local/share';
       return '$dataHome/Kiro/User/globalStorage/state.vscdb';
     }
-  }
-
-  void _ensureSqlite() {
-    if (_sqliteReady) return;
-    configureSqliteLibrary();
-    _sqliteReady = true;
   }
 }
 

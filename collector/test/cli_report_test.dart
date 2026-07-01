@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import 'support/cli_process.dart';
+
 void main() {
   late Directory temp;
 
@@ -15,22 +17,19 @@ void main() {
   });
 
   Future<ProcessResult> runCli(List<String> args) {
-    final env = Map<String, String>.from(Platform.environment)
-      ..['QUOTABOT_DEMO'] = '1'
-      ..['LOCALAPPDATA'] = temp.path
-      ..['NO_COLOR'] = '1';
-    return Process.run(
-      Platform.resolvedExecutable,
-      ['bin/collect.dart', ...args],
-      workingDirectory: Directory.current.path,
-      environment: env,
+    return runCollectCli(
+      args,
+      environment: {
+        'LOCALAPPDATA': temp.path,
+        'QUOTABOT_DEMO': '1',
+      },
     );
   }
 
   test('report prints markdown by default', () async {
     final result = await runCli(['report']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final output = result.stdout as String;
     expect(output, startsWith('# quotabot weekly quota health'));
     expect(output, contains('Recommendation:'));
@@ -41,7 +40,7 @@ void main() {
   test('report --json prints the structured report', () async {
     final result = await runCli(['report', '--json']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.report.v1');
     expect(json['providers'], isNotEmpty);
@@ -82,7 +81,7 @@ void main() {
 
     final result = await runCli(['stats']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final output = result.stdout as String;
     expect(output, contains('sampled days'));
     expect(output, contains('usable streak'));
@@ -105,7 +104,7 @@ void main() {
 
     final result = await runCli(['stats', '--json']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final codex = json['codex'] as Map<String, dynamic>;
     final hint = codex['schedule_hint'] as Map<String, dynamic>;

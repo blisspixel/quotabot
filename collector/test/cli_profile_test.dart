@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:quotabot_collector/profiles.dart';
 import 'package:test/test.dart';
 
+import 'support/cli_process.dart';
+
 void main() {
   late Directory temp;
 
@@ -16,15 +18,12 @@ void main() {
   });
 
   Future<ProcessResult> runCli(List<String> args) {
-    final env = Map<String, String>.from(Platform.environment)
-      ..['LOCALAPPDATA'] = temp.path
-      ..['QUOTABOT_DEMO'] = '1'
-      ..['NO_COLOR'] = '1';
-    return Process.run(
-      Platform.resolvedExecutable,
-      ['run', 'bin/collect.dart', ...args],
-      workingDirectory: Directory.current.path,
-      environment: env,
+    return runCollectCli(
+      args,
+      environment: {
+        'LOCALAPPDATA': temp.path,
+        'QUOTABOT_DEMO': '1',
+      },
     );
   }
 
@@ -39,7 +38,7 @@ void main() {
 
     final result = await runCli(['--json', '--profile=local']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.v1');
     expect(json['profile'], 'local');
@@ -52,7 +51,7 @@ void main() {
   test('missing profile is a usage error', () async {
     final result = await runCli(['--json', '--profile=missing']);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     expect(result.stderr as String, contains('no profile named "missing"'));
   });
 }

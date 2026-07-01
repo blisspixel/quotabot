@@ -138,6 +138,13 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Collector SQLite reads now use `sqlite3` 3.x's hook-managed bundled native
+  library and the current `Database.close()` API. The obsolete manual
+  `open.dart` override path was removed, and CLI subprocess tests now avoid
+  rebundling a locked `sqlite3.dll` during Windows test runs.
+- CLI release packaging now uses `dart build cli` bundle archives so the
+  `sqlite3` native library ships with the installed executable on every
+  platform.
 - macOS/Linux desktop package verification now includes the required tracked
   Flutter desktop scaffold files and Linux tray indicator development package,
   so native CI package builds exercise the same release bundles users build.

@@ -65,7 +65,7 @@ the adapters resolve the user home directory cross-platform.
 
 State lives in the Antigravity globalStorage SQLite database at
 `~/AppData/Roaming/Antigravity/User/globalStorage/state.vscdb`, read with the
-`sqlite3` package (falling back to the Windows system `winsqlite3.dll`).
+`sqlite3` package's hook-managed bundled native library.
 
 - Account and plan: the `antigravityAuthStatus` key holds JSON with the email
   and a base64 `userStatus` protobuf; the adapter decodes the plan tier from it.

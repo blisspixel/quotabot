@@ -6,7 +6,6 @@ import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/antigravity.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
-import 'package:quotabot_collector/sqlite_loader.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
@@ -36,7 +35,6 @@ void main() {
       );
 
   File writeDb(String name, {String? email, String? token}) {
-    configureSqliteLibrary();
     final file = File('${temp.path}/$name.vscdb');
     final db = sqlite3.open(file.path);
     try {
@@ -60,7 +58,7 @@ void main() {
         );
       }
     } finally {
-      db.dispose();
+      db.close();
     }
     return file;
   }

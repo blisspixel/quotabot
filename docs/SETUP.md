@@ -61,9 +61,10 @@ curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh
 irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 ```
 
-The installer downloads a prebuilt binary to `~/.local/bin` (macOS/Linux) or
-`%LOCALAPPDATA%\quotabot\bin` (Windows) and verifies its checksum. To install
-from a fork, set `QUOTABOT_REPO=owner/quotabot` first.
+The installer downloads a prebuilt CLI bundle, verifies its checksum, and exposes
+`quotabot` on your PATH from `~/.local/bin` (macOS/Linux) or
+`%LOCALAPPDATA%\quotabot\bin` (Windows). To install from a fork, set
+`QUOTABOT_REPO=owner/quotabot` first.
 
 > No prebuilt binary for your platform yet, or you would rather not run one? Skip
 > to [Run everything from source](#run-everything-from-source) at the bottom.

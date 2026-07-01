@@ -1,5 +1,5 @@
 # Builds the quotabot CLI release asset for the current Windows machine.
-# Produces release/quotabot-windows-<arch>.exe and a matching .sha256 sidecar.
+# Produces release/quotabot-windows-<arch>.zip and a matching .sha256 sidecar.
 
 $ErrorActionPreference = 'Stop'
 
@@ -7,6 +7,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 $collectorDir = Join-Path $root 'collector'
 $releaseDir = Join-Path $root 'release'
+$buildDir = Join-Path $collectorDir 'build\quotabot_cli_release'
 
 $dart = (Get-Command dart -ErrorAction SilentlyContinue).Source
 if (-not $dart) {
@@ -29,22 +30,38 @@ $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitect
 }
 
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$asset = "quotabot-windows-$arch.exe"
+$asset = "quotabot-windows-$arch.zip"
 $out = Join-Path $releaseDir $asset
+$sidecar = "$out.sha256"
 
 Push-Location $collectorDir
 try {
-  & $dart compile exe bin\collect.dart -o $out
+  if (Test-Path -LiteralPath $buildDir) {
+    Remove-Item -LiteralPath $buildDir -Recurse -Force
+  }
+  & $dart build cli --target=bin\collect.dart --output=$buildDir
   if ($LASTEXITCODE -ne 0) {
-    throw "dart compile failed with exit code $LASTEXITCODE"
+    throw "dart build cli failed with exit code $LASTEXITCODE"
   }
 } finally {
   Pop-Location
 }
 
+$bundle = Join-Path $buildDir 'bundle'
+$builtExe = Join-Path $bundle 'bin\collect.exe'
+$packagedExe = Join-Path $bundle 'bin\quotabot.exe'
+if (-not (Test-Path -LiteralPath $builtExe)) {
+  throw "CLI build did not produce $builtExe"
+}
+Move-Item -LiteralPath $builtExe -Destination $packagedExe -Force
+
+Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $sidecar -Force -ErrorAction SilentlyContinue
+Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $out -Force
+
 $hash = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLowerInvariant()
-Set-Content -LiteralPath "$out.sha256" -Value "$hash  $asset" -NoNewline
+Set-Content -LiteralPath $sidecar -Value "$hash  $asset" -NoNewline
 
 Write-Host "CLI asset ready: $out"
-Write-Host "Checksum: $out.sha256"
+Write-Host "Checksum: $sidecar"
 Write-Host "SHA256: $hash"
