@@ -52,7 +52,10 @@ emit `quotabot.suggest.v1` with:
 - Per-candidate budget fields such as `headroom_percent`,
   `effective_headroom_percent`, optional `lease_discount_percent`,
   `burn_percent_per_hour`, `burn_se_percent_per_hour`, `strand_probability`,
-  `confidence`, `resets_at`, `stale`, and `available`.
+  `confidence`, `routing_score`, `resets_at`, `stale`, and `available`.
+  `routing_score` is the additive confidence-weighted runway score used to rank
+  metered subscriptions; local runtimes may omit it because their placement is
+  governed by the explicit fallback or local-first policy.
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields plus `source`, `snapshot_as_of`, `snapshot_age_seconds`,

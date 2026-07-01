@@ -351,6 +351,10 @@ final _candidateSchema = JsonSchema.object(
       description:
           'Trust in this candidate (0..1): freshness x sample adequacy.',
     ),
+    'routing_score': JsonSchema.number(
+      description:
+          'Confidence-weighted risk-adjusted runway score used to rank metered subscriptions.',
+    ),
     'resets_at': JsonSchema.integer(),
     'stale': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),

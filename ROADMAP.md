@@ -377,7 +377,10 @@ Breadth and depth, once the core is trusted:
   routing uses the matching account's pace instead of a provider-wide estimate.
   The desktop widget header now surfaces the same burn-aware route provenance in
   a compact next-route line with confidence, while keeping single-account labels
-  out of the main view.
+  out of the main view. Provider suggestions now rank metered subscriptions by
+  an additive `routing_score`: confidence-weighted risk-adjusted runway, so a
+  slower-burning provider can beat one with more instantaneous headroom but a
+  shorter runway.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation

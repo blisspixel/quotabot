@@ -389,6 +389,40 @@ void main() {
       expect(c.effectiveHeadroom, c.headroom);
       expect(c.toJson().containsKey('burn_percent_per_hour'), isFalse);
     });
+
+    test('routing score can prefer slower burn over higher raw headroom', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 10)]), // 90 free
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 60)]), // 40 free
+        ],
+        _now,
+        burnByProvider: {'codex': 10, 'claude': 1},
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.ranked.first.provider, 'claude');
+      expect(
+        s.ranked.first.routingScore!,
+        greaterThan(s.ranked.last.routingScore!),
+      );
+      expect(
+        s.ranked.first.effectiveHeadroom!,
+        lessThan(s.ranked.last.effectiveHeadroom!),
+      );
+    });
+
+    test('routing score is additive JSON provenance', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 35)]),
+        ],
+        _now,
+      );
+      final c = s.recommended!;
+      expect(c.routingScore, isNotNull);
+      expect(c.toJson()['routing_score'], c.routingScore);
+    });
   });
 
   group('suggestRoute fail-soft fallback and schema', () {
