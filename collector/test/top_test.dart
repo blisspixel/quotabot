@@ -328,6 +328,163 @@ void main() {
     });
   });
 
+  group('width degradation', () {
+    List<ProviderQuota> burning() => [
+          _q('codex', [
+            QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600),
+          ]),
+        ];
+    RouteSuggestion sug(List<ProviderQuota> ps) =>
+        suggestRoute(ps, _now, burnStatsByProvider: {
+          'codex': const BurnStat(perHour: 40, sePerHour: 5, samples: 10),
+        });
+    List<String> at(int width) {
+      final ps = burning();
+      return renderTopFrame(
+        providers: ps,
+        suggestion: sug(ps),
+        now: _now,
+        width: width,
+        color: false,
+        clock: '12:00:00',
+      );
+    }
+
+    String rowAt(int width) =>
+        _plain(at(width).firstWhere((l) => _plain(l).contains('codex')));
+
+    test('a wide frame shows bar, reset, and forecast', () {
+      final row = rowAt(100);
+      expect(row, contains('resets'));
+      expect(row, contains('strand'));
+    });
+
+    test('a narrow frame drops the forecast column before the reset', () {
+      final row = rowAt(64);
+      expect(row, contains('resets'));
+      expect(row, isNot(contains('strand')));
+      expect(row, isNot(contains('stra')), reason: 'no mid-word clipping');
+    });
+
+    test('a very narrow frame drops the reset countdown too', () {
+      final row = rowAt(50);
+      expect(row, isNot(contains('resets')));
+      expect(row, contains('% free'));
+    });
+
+    test('the footer yields whole key hints, never clipped ones', () {
+      final ps = burning();
+      final footer = _plain(renderTopFrame(
+        providers: ps,
+        suggestion: sug(ps),
+        now: _now,
+        width: 46,
+        color: false,
+        clock: '12:00:00',
+        updated: 'updated 3s ago',
+        sort: 'default',
+        hidden: 2,
+        copied: 'claude',
+      ).last);
+      expect(footer, contains('q quit'));
+      expect(footer, contains('r refresh'));
+      // Dropped segments disappear entirely; nothing is cut mid-hint.
+      expect(footer, isNot(contains('updated')));
+      expect(footer, isNot(contains('usage tokens')));
+      expect(_plain(footer).length, 46);
+    });
+  });
+
+  test('a stale snapshot is tagged with the age of its cache', () {
+    final q = ProviderQuota(
+      provider: 'codex',
+      displayName: 'codex',
+      account: 'a',
+      asOf: _now - 8 * 3600,
+      stale: true,
+      windows: [QuotaWindow(label: '5h', usedPercent: 44)],
+    );
+    final lines = _frame([q], width: 90);
+    expect(lines.any((l) => _plain(l).contains('(cached 8h)')), isTrue);
+  });
+
+  test('the route line drops the reason\'s redundant "Use <provider>"', () {
+    final lines = _frame([
+      _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+    ], width: 100);
+    final route = _plain(lines.firstWhere((l) => _plain(l).contains('route')));
+    expect(route, contains('-> claude'));
+    expect(route, isNot(contains('Use claude')));
+  });
+
+  test('a long route reason yields at a word boundary with an ellipsis', () {
+    final providers = [
+      _q('ollama', const [], kind: 'local', status: 'ready'),
+      _q('codex', [QuotaWindow(label: '5h', usedPercent: 99)]),
+    ];
+    final lines = _frame(providers, width: 56);
+    final route = _plain(lines.firstWhere((l) => _plain(l).contains('route')));
+    expect(route.trimRight(), endsWith('...'));
+    expect(route.length, 56);
+  });
+
+  test('duplicate-provider rows are labeled with their accounts', () {
+    ProviderQuota grok(String account, double used) => ProviderQuota(
+          provider: 'grok',
+          displayName: 'Grok',
+          account: account,
+          asOf: _now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final lines = _frame(
+      [grok('work@example.com', 57), grok('home@example.com', 22)],
+      width: 110,
+    );
+    expect(lines.any((l) => _plain(l).contains('@work@example.com')), isTrue);
+    expect(lines.any((l) => _plain(l).contains('@home@example.com')), isTrue);
+    // A single-account provider stays unlabeled.
+    final single = _frame([grok('work@example.com', 57)], width: 110);
+    expect(single.any((l) => _plain(l).contains('@work@example.com')), isFalse);
+  });
+
+  test('selection in a multi-account fleet marks only the matching account',
+      () {
+    ProviderQuota grok(String account) => ProviderQuota(
+          provider: 'grok',
+          displayName: 'Grok',
+          account: account,
+          asOf: _now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
+        );
+    final providers = [grok('work@example.com'), grok('home@example.com')];
+    final lines = renderTopFrame(
+      providers: providers,
+      suggestion: suggestRoute(providers, _now),
+      now: _now,
+      width: 110,
+      color: false,
+      clock: '12:00:00',
+      selected: 'grok',
+      selectedAccount: 'home@example.com',
+    );
+    final cursors = lines.where((l) => _plain(l).startsWith('> ')).toList();
+    expect(cursors, hasLength(1));
+    expect(_plain(cursors.single), contains('@home@example.com'));
+  });
+
+  test('the always-on tag yields before a long local status clips', () {
+    final q = _q('ollama', const [],
+        kind: 'local', status: 'qwen2.5-coder 7B Q4_K_M loaded', active: true);
+    final wide = _frame([q], width: 90);
+    final narrow = _frame([q], width: 60);
+    expect(wide.any((l) => _plain(l).contains('[always on]')), isTrue);
+    final row =
+        _plain(narrow.firstWhere((l) => _plain(l).contains('qwen2.5-coder')));
+    expect(row, isNot(contains('[always on]')));
+    expect(row, isNot(contains('[alway')), reason: 'no clipped tag');
+    expect(row, contains('loaded'));
+  });
+
   test('an empty fleet still renders a usable frame', () {
     final lines = _frame(const [], width: 60);
     expect(
