@@ -67,10 +67,17 @@ Map<String, dynamic> mostHeadroomResponse(
 ) {
   final best = providerWithMostHeadroom(providers, now);
   if (best == null) {
-    return {'provider': null, 'reason': 'no live quota available'};
+    return {
+      'schema': quotabotHeadroomV1SchemaId,
+      'as_of': now,
+      'provider': null,
+      'reason': 'no live quota available',
+    };
   }
   final a = providerAvailability(best, now);
   return {
+    'schema': quotabotHeadroomV1SchemaId,
+    'as_of': now,
     'provider': best.provider,
     'account': best.account,
     'headroom_percent': a.headroom,
@@ -241,6 +248,8 @@ Map<String, dynamic> availabilityResponse(
   });
   if (match.isEmpty) {
     return {
+      'schema': quotabotCheckV1SchemaId,
+      'as_of': now,
       'provider': name,
       if (account != null) 'account': account,
       'error':
@@ -250,6 +259,8 @@ Map<String, dynamic> availabilityResponse(
   final q = match.first;
   final a = providerAvailability(q, now);
   return {
+    'schema': quotabotCheckV1SchemaId,
+    'as_of': now,
     'provider': q.provider,
     'account': q.account,
     'available': a.available,
@@ -304,6 +315,9 @@ final quotasSnapshotOutputSchema = JsonSchema.object(
     'profile': JsonSchema.string(
       description: 'Named local profile applied to this snapshot, when any.',
     ),
+    'account_filter': JsonSchema.string(
+      description: 'Exact account filter applied to this snapshot, when any.',
+    ),
     'error': JsonSchema.string(
       description: 'Set when a requested profile could not be loaded.',
     ),
@@ -316,9 +330,29 @@ final quotasSnapshotOutputSchema = JsonSchema.object(
 );
 
 /// Output schema for `provider_with_most_headroom`.
+/// Fields `_withProfileMeta` injects into every profile-aware tool response,
+/// declared once so each output schema lists them instead of relying on
+/// additive permissiveness.
+final Map<String, JsonSchema> _profileMetaProperties = {
+  'profile': JsonSchema.string(
+    description: 'Named local profile applied to this response, when any.',
+  ),
+  'account_filter': JsonSchema.string(
+    description: 'Exact account filter applied to this response, when any.',
+  ),
+  'error': JsonSchema.string(
+    description: 'Profile, filter, or argument error note, when any.',
+  ),
+};
+
 final mostHeadroomOutputSchema = JsonSchema.object(
   description: 'The connected provider with the most remaining headroom now.',
   properties: {
+    ..._profileMetaProperties,
+    'schema': JsonSchema.string(
+      description: 'Schema id, always "quotabot.headroom.v1".',
+    ),
+    'as_of': JsonSchema.integer(description: 'Epoch seconds when produced.'),
     'provider': _nullable(JsonSchema.string(
       description: 'Provider id, or null when none is usable.',
     )),
@@ -334,7 +368,7 @@ final mostHeadroomOutputSchema = JsonSchema.object(
       description: 'Why there is no pick (only when provider is null).',
     ),
   },
-  required: ['provider'],
+  required: ['schema', 'as_of', 'provider'],
 );
 
 /// One ranked candidate inside a routing suggestion.
@@ -444,6 +478,7 @@ final suggestOutputSchema = JsonSchema.object(
   description: 'A routing recommendation with ranked alternatives and a '
       'guaranteed fallback.',
   properties: {
+    ..._profileMetaProperties,
     'schema': JsonSchema.string(),
     'as_of':
         JsonSchema.integer(description: 'Epoch seconds the decision was made.'),
@@ -477,6 +512,7 @@ final decideNowOutputSchema = JsonSchema.object(
   description:
       'A cache-only routing decision that never forces live collection.',
   properties: {
+    ..._profileMetaProperties,
     'schema': JsonSchema.string(),
     'as_of': JsonSchema.integer(),
     'risk_z': JsonSchema.number(),
@@ -515,6 +551,7 @@ final decideNowOutputSchema = JsonSchema.object(
 final reserveProviderOutputSchema = JsonSchema.object(
   description: 'Result of creating a temporary local routing reservation.',
   properties: {
+    ..._profileMetaProperties,
     'schema': JsonSchema.string(),
     'as_of': JsonSchema.integer(),
     'reserved': JsonSchema.boolean(),
@@ -590,6 +627,13 @@ final _modelEntrySchema = JsonSchema.object(
     ),
     'quant': JsonSchema.string(
       description: 'For local-runtime models: quantization label when known.',
+    ),
+    'loaded': JsonSchema.boolean(
+      description: 'For local-runtime models: currently loaded in memory.',
+    ),
+    'source': JsonSchema.string(
+      description: 'Data source of the gating provider, e.g. "manual" for '
+          'self-reported entries. Absent for built-in adapters.',
     ),
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': JsonSchema.integer(),
@@ -691,6 +735,7 @@ final _routingInputSchema = JsonSchema.object(
 final suggestModelOutputSchema = JsonSchema.object(
   description: 'One concrete model recommended for a task profile.',
   properties: {
+    ..._profileMetaProperties,
     'schema': JsonSchema.string(),
     'generated_at': JsonSchema.integer(),
     'budget_policy': JsonSchema.string(),
@@ -718,6 +763,7 @@ final suggestModelOutputSchema = JsonSchema.object(
 final listModelsOutputSchema = JsonSchema.object(
   description: 'Every model the user can route to now, with per-model budget.',
   properties: {
+    ..._profileMetaProperties,
     'schema': JsonSchema.string(),
     'generated_at': JsonSchema.integer(),
     'catalog_updated': JsonSchema.string(
@@ -733,16 +779,19 @@ final listModelsOutputSchema = JsonSchema.object(
 final availabilityOutputSchema = JsonSchema.object(
   description: 'Whether one named provider has quota available now.',
   properties: {
+    ..._profileMetaProperties,
+    'schema': JsonSchema.string(
+      description: 'Schema id, always "quotabot.check.v1".',
+    ),
+    'as_of': JsonSchema.integer(description: 'Epoch seconds when produced.'),
     'provider': _nullable(JsonSchema.string()),
     'account': JsonSchema.string(),
     'available': JsonSchema.boolean(),
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': _nullable(JsonSchema.integer()),
     'stale': JsonSchema.boolean(),
-    'error':
-        JsonSchema.string(description: 'Set when the provider is unknown.'),
   },
-  required: ['provider'],
+  required: ['schema', 'as_of', 'provider'],
 );
 
 /// Returns the current quota snapshot. Injected so the server and its tests

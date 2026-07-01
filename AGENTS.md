@@ -121,9 +121,10 @@ else:
 
 ## Output schema
 
-JSON outputs carry a versioned `schema` and a timestamp; treat unknown fields as
-additive. Headroom is a remaining-percent value (0..100); higher means more budget
-left. The shapes:
+Snapshot, routing, and availability JSON outputs carry a versioned `schema` id
+and a timestamp (`stats --json` is the one exception: a provider-keyed insight
+map with no envelope); treat unknown fields as additive. Headroom is a
+remaining-percent value (0..100); higher means more budget left. The shapes:
 
 - The snapshot is `quotabot.v1` (`generated_at`, `providers`, each provider's
   `windows` and, when known, `models`).
