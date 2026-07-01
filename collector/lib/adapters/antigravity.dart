@@ -8,7 +8,6 @@ import '../auth/google_auth.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
-import '../sqlite_loader.dart';
 import '../util.dart';
 
 typedef AntigravityAccountCandidate = ({
@@ -53,7 +52,6 @@ typedef AntigravityFetchModels = Future<Map<String, dynamic>?> Function(
 class AntigravityAdapter {
   static const id = antigravityProviderId;
   static const name = antigravityProviderName;
-  static bool _sqliteReady = false;
   final AntigravityAccountSource? _accountSource;
   final AntigravityTokenResolver? _tokenResolver;
   final AntigravityEmailResolver? _emailResolver;
@@ -564,7 +562,6 @@ class AntigravityAdapter {
   /// Returns (email, plan, ideAccessToken) from the SQLite DB. The IDE access
   /// token is a fallback used only when quotabot has no grant of its own.
   static (String?, String?, String?) _readLocalState(String dbPath) {
-    _ensureSqlite();
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
       String? authRaw = _value(db, 'antigravityAuthStatus');
@@ -582,7 +579,7 @@ class AntigravityAdapter {
           : findEmbeddedToken(tokenRaw, r'ya29\.[A-Za-z0-9._\-]{30,}');
       return (email, plan, access);
     } finally {
-      db.dispose();
+      db.close();
     }
   }
 
@@ -590,12 +587,6 @@ class AntigravityAdapter {
     final rows = db.select('SELECT value FROM ItemTable WHERE key=?', [key]);
     if (rows.isEmpty) return null;
     return _asString(rows.first['value']);
-  }
-
-  static void _ensureSqlite() {
-    if (_sqliteReady) return;
-    configureSqliteLibrary();
-    _sqliteReady = true;
   }
 
   static String? _asString(Object? v) {
