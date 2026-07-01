@@ -111,6 +111,51 @@ void main() {
     expect(hint['summary'], contains('before reset'));
     expect(hint['window'], isA<Map<String, dynamic>>());
   });
+
+  test('stats json includes explicit tier fit analysis', () async {
+    final cache = Directory('${temp.path}/quotabot/cache')
+      ..createSync(recursive: true);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    File('${cache.path}/buckets_codex.json').writeAsStringSync(jsonEncode([
+      _bucketSamplesAt(now - Duration.secondsPerDay, 60, 18),
+      _bucketSamplesAt(now, 30, 2),
+    ]));
+
+    final result = await runCli([
+      'stats',
+      '--json',
+      '--tier-plan=Starter:30:5,Lite:50:10,Current:100:20',
+      '--current-price=20',
+      '--tier-risk=0.15',
+    ]);
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    final fit = (json['codex'] as Map<String, dynamic>)['tier_fit']
+        as Map<String, dynamic>;
+    expect(fit['sample_count'], 20);
+    expect((fit['recommended'] as Map<String, dynamic>)['name'], 'Lite');
+    expect(
+      (fit['recommended'] as Map<String, dynamic>)['monthly_delta'],
+      -10,
+    );
+    final options = (fit['options'] as List).cast<Map<String, dynamic>>();
+    expect(
+      options.firstWhere(
+          (option) => option['name'] == 'Starter')['meets_risk_tolerance'],
+      isFalse,
+    );
+  });
+
+  test('stats rejects malformed tier fit policy', () async {
+    final result = await runCli(['stats', '--tier-plan=codex']);
+
+    expectExitCode(result, 64);
+    expect(
+      result.stderr as String,
+      contains('--tier-plan entries must be name:cap[:monthly_price]'),
+    );
+  });
 }
 
 Map<String, dynamic> _bucket(int start, double headroom) => {
@@ -135,3 +180,23 @@ Map<String, dynamic> _bucketSamples(int start, double headroom, int samples) =>
       'x': 0,
       'h': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, samples, 0, 0, 0, 0, 0],
     };
+
+Map<String, dynamic> _bucketSamplesAt(
+  int start,
+  double headroom,
+  int samples,
+) {
+  final hist = List<int>.filled(20, 0);
+  final bin = (headroom / 5).floor().clamp(0, 19);
+  hist[bin] = samples;
+  return {
+    's': start - (start % Duration.secondsPerHour),
+    'n': samples,
+    'sum': headroom * samples,
+    'sq': headroom * headroom * samples,
+    'min': headroom,
+    'max': headroom,
+    'x': headroom <= 0.5 ? samples : 0,
+    'h': hist,
+  };
+}

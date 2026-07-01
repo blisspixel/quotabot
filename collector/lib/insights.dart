@@ -1213,6 +1213,182 @@ PortfolioInsight portfolioInsight(
   return PortfolioInsight(ranked: entries, underused: underused);
 }
 
+/// Caller-supplied candidate plan tier for explicit tier-fit analysis.
+///
+/// [capPercentOfCurrent] is the candidate quota cap as a percent of the
+/// currently observed plan capacity. A lower tier might be 50, the current
+/// tier is usually 100, and an upgrade might be 200. Prices are optional and
+/// never inferred by quotabot.
+class TierPlanOption {
+  final String name;
+  final double capPercentOfCurrent;
+  final double? monthlyPrice;
+
+  const TierPlanOption({
+    required this.name,
+    required this.capPercentOfCurrent,
+    this.monthlyPrice,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'cap_percent_of_current': capPercentOfCurrent,
+        if (monthlyPrice != null) 'monthly_price': monthlyPrice,
+      };
+}
+
+/// Observed fit for one explicit plan tier against local quota history.
+class TierFit {
+  final String name;
+  final double capPercentOfCurrent;
+  final double breachProbability;
+  final int sampleCount;
+  final bool meetsRiskTolerance;
+  final double? monthlyPrice;
+  final double? monthlyDelta;
+
+  const TierFit({
+    required this.name,
+    required this.capPercentOfCurrent,
+    required this.breachProbability,
+    required this.sampleCount,
+    required this.meetsRiskTolerance,
+    this.monthlyPrice,
+    this.monthlyDelta,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'cap_percent_of_current': capPercentOfCurrent,
+        'breach_probability': breachProbability,
+        'sample_count': sampleCount,
+        'meets_risk_tolerance': meetsRiskTolerance,
+        if (monthlyPrice != null) 'monthly_price': monthlyPrice,
+        if (monthlyDelta != null) 'monthly_delta': monthlyDelta,
+      };
+}
+
+/// Tier-fit result for one provider/account history.
+class TierFitAnalysis {
+  final double maxBreachProbability;
+  final int sampleCount;
+  final List<TierFit> options;
+  final TierFit? recommended;
+
+  const TierFitAnalysis({
+    required this.maxBreachProbability,
+    required this.sampleCount,
+    required this.options,
+    required this.recommended,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'max_breach_probability': maxBreachProbability,
+        'sample_count': sampleCount,
+        'recommended': recommended?.toJson(),
+        'options': options.map((option) => option.toJson()).toList(),
+      };
+}
+
+/// Fits explicit plan-tier candidates to local headroom history.
+///
+/// This is a secondary FinOps-style advisory, not routing input. It never
+/// guesses provider prices or plan caps; callers must provide those values.
+TierFitAnalysis tierFitAnalysis(
+  List<HeadroomBucket> buckets,
+  List<TierPlanOption> plans, {
+  double maxBreachProbability = 0.05,
+  double? currentMonthlyPrice,
+}) {
+  final used = buckets.where((bucket) => bucket.count > 0).toList();
+  final agg = mergeBuckets(used);
+  final risk = maxBreachProbability.isFinite
+      ? maxBreachProbability.clamp(0.0, 1.0).toDouble()
+      : 0.05;
+  final fits = [
+    for (final plan in plans)
+      _fitTierPlan(
+        agg,
+        plan,
+        maxBreachProbability: risk,
+        currentMonthlyPrice: currentMonthlyPrice,
+      ),
+  ];
+  final eligible =
+      fits.where((fit) => fit.meetsRiskTolerance).toList(growable: false);
+  final recommended = _recommendedTier(eligible);
+  return TierFitAnalysis(
+    maxBreachProbability: risk,
+    sampleCount: agg.count,
+    options: fits,
+    recommended: recommended,
+  );
+}
+
+TierFit _fitTierPlan(
+  HeadroomBucket agg,
+  TierPlanOption plan, {
+  required double maxBreachProbability,
+  double? currentMonthlyPrice,
+}) {
+  final cap = plan.capPercentOfCurrent.isFinite
+      ? plan.capPercentOfCurrent.clamp(0.0, 1000.0).toDouble()
+      : 0.0;
+  final breach = _usageBreachProbability(agg, cap);
+  final delta = plan.monthlyPrice == null || currentMonthlyPrice == null
+      ? null
+      : plan.monthlyPrice! - currentMonthlyPrice;
+  return TierFit(
+    name: plan.name,
+    capPercentOfCurrent: cap,
+    breachProbability: breach,
+    sampleCount: agg.count,
+    meetsRiskTolerance: agg.count > 0 && breach <= maxBreachProbability,
+    monthlyPrice: plan.monthlyPrice,
+    monthlyDelta: delta,
+  );
+}
+
+TierFit? _recommendedTier(List<TierFit> eligible) {
+  if (eligible.isEmpty) return null;
+  final priced = eligible.every((fit) => fit.monthlyPrice != null);
+  final ranked = List<TierFit>.of(eligible)
+    ..sort((a, b) {
+      if (priced) {
+        final byPrice = a.monthlyPrice!.compareTo(b.monthlyPrice!);
+        if (byPrice != 0) return byPrice;
+      }
+      final byCap = a.capPercentOfCurrent.compareTo(b.capPercentOfCurrent);
+      if (byCap != 0) return byCap;
+      return a.name.compareTo(b.name);
+    });
+  return ranked.first;
+}
+
+double _usageBreachProbability(HeadroomBucket agg, double capPercent) {
+  if (agg.count == 0) return 0;
+  final headroomThreshold = 100 - capPercent;
+  if (headroomThreshold <= 0) return 0;
+  if (headroomThreshold >= 100) return 1;
+  const binWidth = 100 / kHistBins;
+  var below = 0.0;
+  for (var i = 0; i < kHistBins && i < agg.hist.length; i++) {
+    final count = agg.hist[i];
+    if (count == 0) continue;
+    final start = i * binWidth;
+    final end = start + binWidth;
+    if (headroomThreshold >= end) {
+      below += count;
+    } else if (headroomThreshold > start) {
+      below += count * ((headroomThreshold - start) / binWidth);
+      break;
+    } else {
+      break;
+    }
+  }
+  return (below / agg.count).clamp(0.0, 1.0).toDouble();
+}
+
 /// A computed analytics summary for one provider over a window of buckets.
 class Insights {
   final int samples;
