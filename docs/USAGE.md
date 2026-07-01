@@ -274,7 +274,10 @@ Add `--budget=local` for a hard cap to free local-runtime models, or
 `--budget=quota` to allow local runtimes plus measured built-in quota plans while
 excluding self-reported manual quotas. `quota` is not permission to use
 request-metered paid APIs; those remain blocked by the LiteLLM guardrails unless
-explicitly enabled in that integration.
+explicitly enabled in that integration. If a provider model is only temporarily
+included in a plan, quotabot marks it quota-backed only until the documented
+cutoff; after that point `--budget=quota` excludes it rather than drifting into
+credit-backed usage.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only

@@ -276,6 +276,11 @@ class ModelInfo {
   /// cheap-to-capable, never a quotabot quality judgement. Null when unknown.
   final String? tier;
 
+  /// Last epoch second when this model is known to be included in the
+  /// provider's subscription quota. Null means it follows the provider's normal
+  /// quota semantics.
+  final int? quotaIncludedUntil;
+
   /// True for a local-runtime model (Ollama/LM Studio/Lemonade).
   final bool local;
 
@@ -300,6 +305,7 @@ class ModelInfo {
     this.vision,
     this.reasoning,
     this.tier,
+    this.quotaIncludedUntil,
     this.local = false,
     this.loaded = false,
     this.sizeBytes,
@@ -316,6 +322,8 @@ class ModelInfo {
         if (vision != null) 'vision': vision,
         if (reasoning != null) 'reasoning': reasoning,
         if (tier != null) 'tier': tier,
+        if (quotaIncludedUntil != null)
+          'quota_included_until': quotaIncludedUntil,
         if (local) 'local': local,
         if (loaded) 'loaded': loaded,
         if (sizeBytes != null) 'size_bytes': sizeBytes,
@@ -332,6 +340,7 @@ class ModelInfo {
         vision: j['vision'] as bool?,
         reasoning: j['reasoning'] as String?,
         tier: j['tier'] as String?,
+        quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),
         local: j['local'] as bool? ?? false,
         loaded: j['loaded'] as bool? ?? false,
         sizeBytes: (j['size_bytes'] as num?)?.toInt(),
