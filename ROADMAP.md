@@ -418,7 +418,10 @@ Breadth and depth, once the core is trusted:
   usable rate without changing raw stored history. Best-time windows now also
   carry shrunk weekday/hour usable rates and a reliability-weighted scheduling
   score, so sparse quiet cells with spent samples cannot outrank consistently
-  usable windows on raw free percent alone.
+  usable windows on raw free percent alone. The first optimizer provenance hook
+  now exposes per-candidate `runway_hours` separately from the confidence
+  multiplier, making the public route score auditable before explicit waste and
+  cost weights are added.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

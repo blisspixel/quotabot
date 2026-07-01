@@ -337,10 +337,11 @@ Before ranking, recent burn estimates from thin local histories are conservative
 shrunk toward the current fleet burn mean so a two-sample spike does not dominate
 the route.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
-`routing_score`, `confidence`, and `strand_probability`, plus a top-level
-`routing_policy` (`balanced` or `local_first`). The score is a
-confidence-weighted runway index, so a slower-burning provider can rank ahead of
-one with more instantaneous headroom but a much shorter projected runway.
+`runway_hours`, `routing_score`, `confidence`, and `strand_probability`, plus a
+top-level `routing_policy` (`balanced` or `local_first`). The score is a
+confidence-weighted runway index (`runway_hours * confidence`), so a
+slower-burning provider can rank ahead of one with more instantaneous headroom
+but a much shorter projected runway.
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/

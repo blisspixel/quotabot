@@ -355,6 +355,9 @@ final _candidateSchema = JsonSchema.object(
       description:
           'Confidence-weighted risk-adjusted runway score used to rank metered subscriptions.',
     ),
+    'runway_hours': JsonSchema.number(
+      description: 'Risk-adjusted runway hours before confidence is applied.',
+    ),
     'resets_at': JsonSchema.integer(),
     'stale': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),

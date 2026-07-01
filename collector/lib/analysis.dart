@@ -152,6 +152,11 @@ class RouteCandidate {
   /// subscription score.
   final double? routingScore;
 
+  /// Risk-adjusted runway in hours before confidence is applied. This is the
+  /// direct optimizer quantity behind [routingScore]; exposing it keeps the
+  /// public score auditable instead of opaque.
+  final double? runwayHours;
+
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
@@ -176,6 +181,7 @@ class RouteCandidate {
     this.strandProbability,
     this.confidence,
     this.routingScore,
+    this.runwayHours,
   });
 
   Map<String, dynamic> toJson() => {
@@ -191,6 +197,7 @@ class RouteCandidate {
         if (strandProbability != null) 'strand_probability': strandProbability,
         if (confidence != null) 'confidence': confidence,
         if (routingScore != null) 'routing_score': routingScore,
+        if (runwayHours != null) 'runway_hours': runwayHours,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -334,6 +341,24 @@ String _burnNote(RouteCandidate c) {
 /// finite runway score when burn is unknown or effectively flat.
 const double _burnFloorPercentPerHour = 1.0;
 
+/// The optimizer provenance behind a metered subscription's route score.
+class RoutingScoreBreakdown {
+  /// Risk-adjusted runway before trust is applied.
+  final double runwayHours;
+
+  /// Trust multiplier applied to [runwayHours].
+  final double confidence;
+
+  /// Final score used for subscription ranking.
+  final double score;
+
+  const RoutingScoreBreakdown({
+    required this.runwayHours,
+    required this.confidence,
+    required this.score,
+  });
+}
+
 /// Headroom discounted by the expected burn over [leadHours] and, when [z] > 0
 /// and a burn standard error [burnSe] is known, by [z] standard deviations of
 /// forecast uncertainty (`z * burnSe * leadHours`). At `z = 0` this is exactly
@@ -364,6 +389,22 @@ double? routingScore({
   required double? effectiveHeadroom,
   required double? burnPerHour,
   required double? confidence,
+}) =>
+    routingScoreBreakdown(
+      isLocal: isLocal,
+      effectiveHeadroom: effectiveHeadroom,
+      burnPerHour: burnPerHour,
+      confidence: confidence,
+    )?.score;
+
+/// Returns the route score and its first optimizer components for metered
+/// subscriptions. Local runtimes return null because they are handled by the
+/// explicit fallback or local-first policy, not the subscription index.
+RoutingScoreBreakdown? routingScoreBreakdown({
+  required bool isLocal,
+  required double? effectiveHeadroom,
+  required double? burnPerHour,
+  required double? confidence,
 }) {
   if (isLocal || effectiveHeadroom == null) return null;
   final headroom = effectiveHeadroom.clamp(0.0, 100.0).toDouble();
@@ -372,7 +413,11 @@ double? routingScore({
       : _burnFloorPercentPerHour;
   final runwayHours = headroom / math.max(burn, _burnFloorPercentPerHour);
   final trust = (confidence ?? 0.6).clamp(0.0, 1.0).toDouble();
-  return runwayHours * trust;
+  return RoutingScoreBreakdown(
+    runwayHours: runwayHours,
+    confidence: trust,
+    score: runwayHours * trust,
+  );
 }
 
 /// Probability the binding window is spent before it resets, from a Gaussian
@@ -575,6 +620,12 @@ RouteSuggestion suggestRoute(
         ? null
         : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
     final confidence = _confidence(q, burnSe, samples);
+    final score = routingScoreBreakdown(
+      isLocal: q.isLocal,
+      effectiveHeadroom: effective,
+      burnPerHour: burn,
+      confidence: confidence,
+    );
     return RouteCandidate(
       provider: q.provider,
       account: q.account,
@@ -586,12 +637,8 @@ RouteSuggestion suggestRoute(
       burnSe: burnSe,
       strandProbability: strand,
       confidence: confidence,
-      routingScore: routingScore(
-        isLocal: q.isLocal,
-        effectiveHeadroom: effective,
-        burnPerHour: burn,
-        confidence: confidence,
-      ),
+      routingScore: score?.score,
+      runwayHours: score?.runwayHours,
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,

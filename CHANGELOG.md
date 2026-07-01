@@ -138,6 +138,9 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Routing suggestions now expose additive `runway_hours` provenance for metered
+  subscriptions, making `routing_score = runway_hours * confidence` auditable
+  before later optimizer weights are added.
 - Best-time-to-run windows now carry beta-binomial usable-rate shrinkage and a
   reliability-weighted `scheduling_score`. A sparse quiet hour with spent
   samples no longer outranks a slightly lower-free window that is consistently
