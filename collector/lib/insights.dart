@@ -15,6 +15,7 @@ const int kHistBins = 20; // 5 percent per bin across 0..100
 const int kRetentionDays = 90;
 const int kBurnShrinkagePriorSamples = 4;
 const int kReliabilityShrinkagePriorSamples = 4;
+const int kHeatmapShrinkagePriorSamples = 4;
 
 /// Aligns an epoch second to the start of its hour bucket.
 int bucketStart(int epoch) => epoch - (epoch % kBucketSpan);
@@ -642,6 +643,8 @@ class WeekHourWindow {
   final int samples;
   final double meanFreePercent;
   final double? smoothedFreePercent;
+  final double? usableRate;
+  final double? shrunkUsableRate;
   final int supportSamples;
   final int supportCells;
 
@@ -651,6 +654,8 @@ class WeekHourWindow {
     required this.samples,
     required this.meanFreePercent,
     this.smoothedFreePercent,
+    this.usableRate,
+    this.shrunkUsableRate,
     this.supportSamples = 0,
     this.supportCells = 0,
   });
@@ -661,13 +666,24 @@ class WeekHourWindow {
 
   double get scoreFreePercent => smoothedFreePercent ?? meanFreePercent;
 
+  double get schedulingScore {
+    final usable = (shrunkUsableRate ?? usableRate ?? 1).clamp(0.0, 1.0);
+    return scoreFreePercent * usable;
+  }
+
   String get summary {
     final smooth = smoothedFreePercent;
+    final usable = shrunkUsableRate;
+    final usableText = usable == null || usable >= 0.995
+        ? ''
+        : ', usable ~${(usable * 100).round()}%';
     if (smooth == null) {
-      return '$timeLabel (${meanFreePercent.round()}% free, n=$samples)';
+      return '$timeLabel (${meanFreePercent.round()}% free, n=$samples'
+          '$usableText)';
     }
     return '$timeLabel (~${smooth.round()}% free, '
-        'raw ${meanFreePercent.round()}%, n=$samples, support=$supportSamples)';
+        'raw ${meanFreePercent.round()}%, n=$samples, '
+        'support=$supportSamples$usableText)';
   }
 
   Map<String, dynamic> toJson() => {
@@ -679,6 +695,12 @@ class WeekHourWindow {
         if (smoothedFreePercent != null)
           'smoothed_free_percent':
               double.parse(smoothedFreePercent!.toStringAsFixed(2)),
+        if (usableRate != null)
+          'usable_rate': double.parse(usableRate!.toStringAsFixed(4)),
+        if (shrunkUsableRate != null)
+          'shrunk_usable_rate':
+              double.parse(shrunkUsableRate!.toStringAsFixed(4)),
+        'scheduling_score': double.parse(schedulingScore.toStringAsFixed(2)),
         if (supportSamples > 0) 'support_samples': supportSamples,
         if (supportCells > 0) 'support_cells': supportCells,
         'label': timeLabel,
@@ -760,11 +782,14 @@ List<WeekHourWindow> _weekHourWindowsFromAggregates(
   _SmoothedWeekHourCell? Function(int day, int hour)? smoothed,
 }) {
   final out = <WeekHourWindow>[];
+  final usablePoolRate = _weekHourUsablePoolRate(agg);
   for (var day = 0; day < 7; day++) {
     for (var hour = 0; hour < 24; hour++) {
       final samples = agg.count[day][hour];
       if (samples == 0) continue;
       final score = smoothed?.call(day, hour);
+      final usable = agg.usable[day][hour];
+      final usableRate = usable / samples;
       out.add(
         WeekHourWindow(
           dayOfWeek: day,
@@ -772,6 +797,12 @@ List<WeekHourWindow> _weekHourWindowsFromAggregates(
           samples: samples,
           meanFreePercent: agg.sum[day][hour] / samples,
           smoothedFreePercent: score?.meanFreePercent,
+          usableRate: usableRate,
+          shrunkUsableRate: _shrunkWeekHourUsableRate(
+            usable,
+            samples,
+            usablePoolRate,
+          ),
           supportSamples: score?.supportSamples ?? 0,
           supportCells: score?.supportCells ?? 0,
         ),
@@ -808,8 +839,10 @@ List<WeekHourWindow> bestWeekHourWindows(
       : all.where((cell) => cell.samples >= minSamples).toList();
   final ranked = (eligible.isEmpty ? all : eligible).toList()
     ..sort((a, b) {
-      final mean = b.scoreFreePercent.compareTo(a.scoreFreePercent);
-      if (mean != 0) return mean;
+      final score = b.schedulingScore.compareTo(a.schedulingScore);
+      if (score != 0) return score;
+      final free = b.scoreFreePercent.compareTo(a.scoreFreePercent);
+      if (free != 0) return free;
       final samples = b.samples.compareTo(a.samples);
       if (samples != 0) return samples;
       final support = b.supportSamples.compareTo(a.supportSamples);
@@ -856,8 +889,7 @@ WeekHourScheduleHint? weekHourScheduleHint(
   candidates.sort((a, b) {
     final wait = a.scheduledAt.compareTo(b.scheduledAt);
     if (wait != 0) return wait;
-    final score =
-        b.window.scoreFreePercent.compareTo(a.window.scoreFreePercent);
+    final score = b.window.schedulingScore.compareTo(a.window.schedulingScore);
     if (score != 0) return score;
     return b.window.samples.compareTo(a.window.samples);
   });
@@ -867,8 +899,9 @@ WeekHourScheduleHint? weekHourScheduleHint(
 class _WeekHourAggregates {
   final List<List<double>> sum;
   final List<List<int>> count;
+  final List<List<int>> usable;
 
-  const _WeekHourAggregates(this.sum, this.count);
+  const _WeekHourAggregates(this.sum, this.count, this.usable);
 }
 
 class _SmoothedWeekHourCell {
@@ -889,6 +922,7 @@ _WeekHourAggregates _weekHourAggregates(
 ) {
   final sum = List.generate(7, (_) => List<double>.filled(24, 0));
   final cnt = List.generate(7, (_) => List<int>.filled(24, 0));
+  final usable = List.generate(7, (_) => List<int>.filled(24, 0));
   final off = tzOffset.inSeconds;
   for (final b in buckets) {
     if (b.count == 0) continue;
@@ -897,8 +931,37 @@ _WeekHourAggregates _weekHourAggregates(
     final hour = (local % 86400) ~/ 3600;
     sum[day][hour] += b.sum;
     cnt[day][hour] += b.count;
+    usable[day][hour] += (b.count - b.exhausted).clamp(0, b.count).toInt();
   }
-  return _WeekHourAggregates(sum, cnt);
+  return _WeekHourAggregates(sum, cnt, usable);
+}
+
+double? _weekHourUsablePoolRate(_WeekHourAggregates agg) {
+  var cells = 0;
+  var samples = 0;
+  var usable = 0;
+  for (var day = 0; day < 7; day++) {
+    for (var hour = 0; hour < 24; hour++) {
+      final count = agg.count[day][hour];
+      if (count == 0) continue;
+      cells++;
+      samples += count;
+      usable += agg.usable[day][hour];
+    }
+  }
+  if (cells < 3 || samples == 0) return null;
+  return usable / samples;
+}
+
+double? _shrunkWeekHourUsableRate(
+  int usable,
+  int samples,
+  double? poolRate, {
+  int priorSamples = kHeatmapShrinkagePriorSamples,
+}) {
+  if (samples <= 0 || poolRate == null || priorSamples <= 0) return null;
+  final priorSuccesses = poolRate.clamp(0.0, 1.0) * priorSamples;
+  return (usable + priorSuccesses) / (samples + priorSamples);
 }
 
 _SmoothedWeekHourCell? _smoothedCell(

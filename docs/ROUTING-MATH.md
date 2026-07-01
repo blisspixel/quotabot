@@ -322,6 +322,13 @@ than pretending the smoothed estimate is strong. `weekHourScheduleHint` now uses
 those ranked windows plus the active reset to return the nearest strong slot
 that starts before reset, preserving the same raw and support evidence.
 
+Shipped beta-binomial hook: best-time entries now also treat each weekday/hour
+cell as a usable/not-usable rate. `usable_rate` is the direct cell observation,
+`shrunk_usable_rate` partially pools sparse cells toward the current heatmap's
+usable rate, and `scheduling_score` multiplies the smoothed free-percent score
+by that shrunk usable rate. Raw free-percent evidence remains visible, but a
+sparse quiet cell with spent samples no longer wins on raw free percent alone.
+
 ---
 
 ## 11. Doing it well with almost no data (Pip's problem)
@@ -355,6 +362,10 @@ shrinkage for reliability rates. Stats, reports, and desktop analytics compute
 each provider/account usable rate from local buckets, then partially pool thin
 rates toward the current fleet usable rate. Unknown reliability stays unknown,
 and raw history buckets are not rewritten.
+
+Shipped third hook: weekday/hour heatmap rates now use the same beta-binomial
+shape at the bin level. The heatmap keeps raw and smoothed free-percent evidence
+for auditability, then uses the shrunk usable rate only as scheduling evidence.
 
 **Confidence as a first-class output.** Every routed number carries
 `n_eff`/`freshness`/credible-interval width, surfaced as a confidence tag
@@ -426,17 +437,16 @@ the measurable improvement over the shipped heuristic.
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
 | burn shrinkage | `insights.dart` `shrinkBurnStats` -> cache boundary | first hook shipped |
 | reliability shrinkage | `insights.dart` `shrinkInsightsReliability` -> stats/report/app analytics | shipped |
-| heatmap beta-binomial shrinkage | `insights.dart` (cross-provider/bin pool) | next |
+| heatmap beta-binomial shrinkage | `insights.dart` `WeekHourWindow` usable rates -> scheduling score | shipped |
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing and reset-aware hint shipped |
 
 Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, the unified
-confidence-weighted runway score, burn shrinkage, and reliability shrinkage are
-shipped. Heatmap beta-binomial shrinkage (Pip) is next, then the optimizer
-(Maya) and scheduler. Each step is a one-knob, reduces-to-previous change with
-its own tests.
+confidence-weighted runway score, burn shrinkage, reliability shrinkage, and
+heatmap beta-binomial shrinkage are shipped. The optimizer (Maya) is next. Each
+step is a one-knob, reduces-to-previous change with its own tests.
 
 ---
 
