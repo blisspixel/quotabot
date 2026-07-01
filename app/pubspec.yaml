@@ -10,11 +10,11 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  window_manager: ^0.4.3
+  window_manager: ^0.5.1
   quotabot_collector:
     path: ../collector
-  flutter_local_notifications: ^17.2.2
-  timezone: ^0.9.0
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.10.1
   tray_manager: ^0.5.3
 
 dev_dependencies:
