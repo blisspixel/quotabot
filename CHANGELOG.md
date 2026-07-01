@@ -2,6 +2,40 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Security
+- Provider-sourced strings (window labels, accounts, plans, statuses, error
+  notes, model ids) are now stripped of terminal control bytes when snapshots
+  are collected, and the `top` renderer strips them again at the draw
+  boundary. Previously a malicious provider response or rogue local-runtime
+  endpoint could embed ANSI/OSC escape sequences into `top`, `doctor`,
+  `check`, or `verify` output and rewrite the terminal or write the clipboard
+  via OSC 52.
+
+### Fixed
+- One hung provider can no longer wedge the whole fleet: every adapter collect
+  now runs under a hard 20s deadline and degrades to a truthful per-provider
+  "timed out" error while the rest of the snapshot proceeds. The desktop
+  refresh loop adds its own 45s ceiling and always reschedules the next poll,
+  so a thrown or hung refresh cannot silently stop auto-polling.
+- `--budget=quota` now enforces an explicit quota-plan provider allowlist, so
+  a future catalog entry for a credit-pool provider (Cursor, Kiro,
+  Windsurf/Devin) can never silently widen the no-surprise spend envelope.
+  Previously the exclusion relied on those providers having no catalog models.
+
+### Changed
+- `quotabot check --json` and MCP `check_provider_availability` now emit their
+  own `quotabot.check.v1` schema id with an `as_of` timestamp. They previously
+  claimed `quotabot.v1` while not conforming to it (no `providers` array).
+  MCP `provider_with_most_headroom` gains `quotabot.headroom.v1` plus `as_of`
+  the same way.
+- MCP output schemas now declare the `profile`, `account_filter`, and `error`
+  fields that profile-aware tools inject, plus model-entry `source` and
+  `loaded`; SCHEMA.md documents `active_leases`, the single-provider answer
+  shapes, `quotabot.calibration.v1`, `quotabot.catalog_audit.v1`, and other
+  emitted-but-undocumented fields found by the 1.0 contract audit.
+
 ## 0.5.5 - 2026-07-01
 
 ### Added
