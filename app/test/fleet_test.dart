@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
-import 'package:quotabot/logos.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _q(String id, String name, double usedPercent, {int? resetsAt}) {
@@ -75,7 +74,6 @@ void main() {
     await tester.pump();
 
     // Now view by default.
-    expect(find.text('Quota Analytics'), findsOneWidget);
     expect(find.text('HEADROOM'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
@@ -98,14 +96,16 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Quota Analytics'), findsOneWidget);
+    expect(find.text('Now'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('7d'));
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('FleetScreen uses compact main-view chrome', (tester) async {
+  testWidgets('FleetScreen is a body under the dashboard chrome', (
+    tester,
+  ) async {
     await tester.binding.setSurfaceSize(const Size(520, 820));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -120,10 +120,40 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(AppGauge), findsOneWidget);
-    expect(find.byTooltip('Back to quotas'), findsOneWidget);
-    expect(find.byTooltip('Close'), findsOneWidget);
-    expect(find.widgetWithText(TextButton, 'Back'), findsNothing);
+    // The header, back button, and close button belong to the dashboard; the
+    // analytics body brings only its range tabs and cards.
+    expect(find.text('Quota Analytics'), findsNothing);
+    expect(find.byTooltip('Back to quotas'), findsNothing);
+    expect(find.byTooltip('Close'), findsNothing);
+    expect(find.text('Now'), findsOneWidget);
+    expect(find.text('7d'), findsOneWidget);
+    expect(find.text('90d'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('FleetScreen finds history stored under account-scoped keys', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(820, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    // The dashboard stores buckets as provider|account when the account is
+    // specific; the history views must find them there, not only under the
+    // plain provider id.
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('codex', 'Codex', 20, resetsAt: 1782050000)],
+          buckets: {'codex|codex@example.com': _buckets(40)},
+          dark: true,
+          initialRange: FleetRange.quarter,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('DISTRIBUTION'), findsOneWidget);
+    expect(find.textContaining('history is still warming up'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

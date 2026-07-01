@@ -93,34 +93,94 @@ List<TextSpan> _parseLine(String line, _Sgr sgr) {
   return spans;
 }
 
-/// A dark terminal panel rendering [ansiLines] in a monospace font, sized to its
-/// content so a RepaintBoundary capture is tight.
+/// A terminal window rendering [ansiLines] in a monospace font, sized to its
+/// content so a RepaintBoundary capture is tight. Drawn as a real terminal
+/// would look: a rounded window with a title bar, then a shell prompt invoking
+/// the command, then the command's output.
 class TerminalShot extends StatelessWidget {
   final List<String> ansiLines;
   const TerminalShot({super.key, required this.ansiLines});
 
+  static const _titleBar = Color(0xFF161B22);
+  static const _border = Color(0xFF30363D);
+
+  Widget _dot(Color c) => Container(
+    width: 11,
+    height: 11,
+    margin: const EdgeInsets.only(right: 7),
+    decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+  );
+
   @override
   Widget build(BuildContext context) {
     final sgr = _Sgr();
+    const mono = TextStyle(fontFamily: 'Consolas', fontSize: 14, height: 1.45);
     return Container(
-      color: const Color(0xFF0D1117),
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1117),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (final line in ansiLines)
-            RichText(
-              softWrap: false,
-              text: TextSpan(
-                style: const TextStyle(
-                  fontFamily: 'Consolas',
-                  fontSize: 14,
-                  height: 1.45,
+          Container(
+            color: _titleBar,
+            padding: const EdgeInsets.fromLTRB(14, 9, 14, 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _dot(const Color(0xFF5A5F68)),
+                _dot(const Color(0xFF5A5F68)),
+                _dot(const Color(0xFF5A5F68)),
+                const SizedBox(width: 14),
+                const Text(
+                  'quotabot top',
+                  style: TextStyle(
+                    fontFamily: 'Consolas',
+                    fontSize: 12.5,
+                    color: _dim,
+                  ),
                 ),
-                children: _parseLine(line, sgr),
-              ),
+              ],
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RichText(
+                  softWrap: false,
+                  text: const TextSpan(
+                    style: mono,
+                    children: [
+                      TextSpan(
+                        text: r'$ ',
+                        style: TextStyle(color: _dim),
+                      ),
+                      TextSpan(
+                        text: 'quotabot top',
+                        style: TextStyle(color: _defaultFg),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                for (final line in ansiLines)
+                  RichText(
+                    softWrap: false,
+                    text: TextSpan(
+                      style: mono,
+                      children: _parseLine(line, sgr),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
