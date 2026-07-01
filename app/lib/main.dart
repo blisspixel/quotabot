@@ -325,8 +325,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   bool _shouldShowAccount(ProviderQuota q, Map<String, int> counts) =>
-      (_showAccounts || (counts[q.provider] ?? 0) > 1) &&
-      quotaHasSpecificAccount(q);
+      _showAccounts && quotaShouldShowAccountLabel(q, counts);
 
   List<ProviderQuota> get _menuProviders {
     final seen = <String>{};
@@ -2507,10 +2506,8 @@ class WinView {
 }
 
 WinView _view(QuotaWindow w, int now) {
-  final rolled = w.resetsAt != null && w.resetsAt! < now;
-  final rem = rolled
-      ? 100.0
-      : (100.0 - (w.percent ?? 0)).clamp(0, 100).toDouble();
+  final rolled = windowHasRolledOver(w, now);
+  final rem = windowHeadroom(w, now);
   return WinView(w.label, rem, rolled, w.resetsAt);
 }
 

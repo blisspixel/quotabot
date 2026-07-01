@@ -90,6 +90,25 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('renders reset-past exhausted snapshots as ready', (
+    tester,
+  ) async {
+    final past = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 60;
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(100, resetsAt: past),
+          cardColor: const Color(0xFF1A1A1A),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('ready'), findsOneWidget);
+    expect(find.textContaining('spent'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('long account labels stay inside the provider tile header', (
     tester,
   ) async {

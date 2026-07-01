@@ -1385,11 +1385,11 @@ void _printDoctor(List<ProviderQuota> results) {
         : q.windows.isEmpty
             ? (q.error ?? '')
             : q.windows.map((w) {
-                final pct = w.percent?.round();
+                final pct = windowUsedPercent(w, now).round();
                 final reset = w.resetsAt == null
                     ? ''
                     : ' (resets ${_in(w.resetsAt!, now)})';
-                return '${w.label} ${pct ?? '?'}%used$reset';
+                return '${w.label} ${pct}%used$reset';
               }).join(', ');
     final acct = (q.account != 'default' &&
             q.account != 'unknown' &&

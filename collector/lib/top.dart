@@ -316,8 +316,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   final lines = <String>[];
   var first = true;
   for (final w in q.windows) {
-    final rolled = w.resetsAt != null && w.resetsAt! < now;
-    final used = rolled ? 0.0 : (w.percent ?? 0).clamp(0, 100).toDouble();
+    final used = windowUsedPercent(w, now);
     final remaining = 100 - used;
     final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
     final showForecast = forecast != null && w.label == binding?.label;

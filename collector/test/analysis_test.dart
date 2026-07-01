@@ -45,11 +45,21 @@ void main() {
     expect(anyProviderUsable([spent, _local('ollama')], _now), isTrue);
   });
 
-  test('providerHeadroom treats a passed reset as fresh', () {
+  test('window helpers treat reached resets as fresh', () {
+    final w = QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now);
+    expect(windowHasRolledOver(w, _now), isTrue);
+    expect(windowUsedPercent(w, _now), 0);
+    expect(windowHeadroom(w, _now), 100);
+  });
+
+  test('providerHeadroom treats a passed or reached reset as fresh', () {
     final q = _q('codex', [
-      QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now - 10),
+      QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now),
     ]);
     expect(providerHeadroom(q, _now), 100);
+    final availability = providerAvailability(q, _now);
+    expect(availability.available, isTrue);
+    expect(bindingWindow(q, _now), isNull);
   });
 
   test('providerHeadroom is null without windows', () {

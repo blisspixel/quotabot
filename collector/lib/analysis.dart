@@ -4,6 +4,20 @@ import 'models.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
 
+/// Whether a quota window has reached its reset boundary.
+bool windowHasRolledOver(QuotaWindow w, int now) =>
+    w.resetsAt != null && w.resetsAt! <= now;
+
+/// Effective used percent for display and routing. A window whose reset boundary
+/// has passed is fresh, even if the last provider snapshot still says 100% used.
+double windowUsedPercent(QuotaWindow w, int now) => windowHasRolledOver(w, now)
+    ? 0.0
+    : (w.percent ?? 0).clamp(0, 100).toDouble();
+
+/// Effective remaining percent for a single quota window.
+double windowHeadroom(QuotaWindow w, int now) =>
+    100.0 - windowUsedPercent(w, now);
+
 /// Returns the currently active reservation discount for a provider account.
 typedef LeaseDiscountProvider = double Function(
     String provider, String account);
@@ -17,9 +31,7 @@ double? providerHeadroom(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return null;
   double minRemaining = 100;
   for (final w in q.windows) {
-    final rolledOver = w.resetsAt != null && w.resetsAt! < now;
-    final remaining =
-        rolledOver ? 100.0 : (100 - (w.percent ?? 0)).clamp(0, 100).toDouble();
+    final remaining = windowHeadroom(w, now);
     if (remaining < minRemaining) minRemaining = remaining;
   }
   return minRemaining;
@@ -58,9 +70,7 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   int? bindingReset;
   double minRemaining = 100;
   for (final w in q.windows) {
-    final rolledOver = w.resetsAt != null && w.resetsAt! < now;
-    final remaining =
-        rolledOver ? 100.0 : (100 - (w.percent ?? 0)).clamp(0, 100).toDouble();
+    final remaining = windowHeadroom(w, now);
     if (remaining < minRemaining) {
       minRemaining = remaining;
       bindingReset = w.resetsAt;
@@ -90,9 +100,7 @@ QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   QuotaWindow? worst;
   double minRem = 100;
   for (final w in q.windows) {
-    final rolledOver = w.resetsAt != null && w.resetsAt! < now;
-    final remaining =
-        rolledOver ? 100.0 : (100 - (w.percent ?? 0)).clamp(0, 100).toDouble();
+    final remaining = windowHeadroom(w, now);
     if (remaining < minRem) {
       minRem = remaining;
       worst = w;

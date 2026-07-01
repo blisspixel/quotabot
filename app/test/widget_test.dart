@@ -278,6 +278,18 @@ void main() {
       expect(hiddenTargetsQuota({'antigravity'}, home), isTrue);
     });
 
+    test('hides single-account labels from the main display', () {
+      final quota = _provider('codex', 'you@example.com');
+
+      expect(quotaShouldShowAccountLabel(quota, {'codex': 1}), isFalse);
+    });
+
+    test('shows account labels when a provider has multiple accounts', () {
+      final quota = _provider('antigravity', 'work@example.com');
+
+      expect(quotaShouldShowAccountLabel(quota, {'antigravity': 2}), isTrue);
+    });
+
     test('keeps a flat group for the common single-account case', () {
       final groups = groupProvidersForDisplay([
         _provider('codex', 'you@example.com'),

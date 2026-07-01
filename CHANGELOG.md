@@ -91,6 +91,13 @@ Notable changes to quotabot. Newest first.
   being treated as safe.
 
 ### Fixed
+- Quota windows whose reset timestamp is at or before the current time now use
+  one effective fresh-window calculation across routing, `doctor`, `top`, and
+  Kiro out-of-quota messaging. A stale local snapshot that still says 100% used
+  after reset no longer makes the CLI display disagree with `suggest`.
+- The desktop dashboard no longer shows a single account email in the main
+  provider card view. Account labels remain available only when a provider has
+  multiple account snapshots and the user has opted to show account names.
 - CI now pins the macOS runner to `macos-15`, avoiding the current
   `macos-latest` migration warning while keeping the desktop package build on a
   verified image.

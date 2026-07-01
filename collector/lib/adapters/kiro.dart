@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
 
+import '../analysis.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -19,10 +20,14 @@ class KiroAdapter {
   static const name = kiroProviderName;
   static bool _sqliteReady = false;
 
+  KiroAdapter({String? dbPath}) : _dbPath = dbPath;
+
+  final String? _dbPath;
+
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
-      final dbPath = _kiroDbPath();
+      final dbPath = _dbPath ?? _kiroDbPath();
       if (!File(dbPath).existsSync()) {
         // Passive detection for installed but no (or expired) data
         return ProviderQuota(
@@ -46,7 +51,7 @@ class KiroAdapter {
         err = 'no quota data found in local state';
       } else {
         final main = windows.first;
-        if ((main.percent ?? 0) >= 99.5) {
+        if (windowHeadroom(main, asOf) <= 0.5) {
           err = 'out of quota (resets ${_resetLabel(main.resetsAt, asOf)})';
         }
       }
