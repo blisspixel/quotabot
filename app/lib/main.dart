@@ -208,9 +208,12 @@ class ProviderDisplayGroup {
 
 @visibleForTesting
 List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
+  // A local runtime's account field is a model summary ("3 models"), not an
+  // identity; locals never define an account group and always land in the
+  // account-less bucket ("default and local").
   final accounts = <String>{};
   for (final q in data) {
-    if (quotaHasSpecificAccount(q)) accounts.add(q.account);
+    if (!q.isLocal && quotaHasSpecificAccount(q)) accounts.add(q.account);
   }
   if (accounts.length < 2) {
     return [ProviderDisplayGroup(account: null, quotas: List.of(data))];
@@ -219,7 +222,7 @@ List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
   final grouped = <String, List<ProviderQuota>>{};
   final groupAccounts = <String, String?>{};
   for (final q in data) {
-    final account = quotaHasSpecificAccount(q) ? q.account : null;
+    final account = !q.isLocal && quotaHasSpecificAccount(q) ? q.account : null;
     final key = account ?? '';
     grouped.putIfAbsent(key, () => <ProviderQuota>[]).add(q);
     groupAccounts.putIfAbsent(key, () => account);
@@ -466,6 +469,10 @@ class _DashboardState extends State<Dashboard>
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
+  // Analytics renders as a body inside this dashboard (same header, same
+  // menu), never as a separate route, so the chrome stays consistent.
+  bool _showingAnalytics = false;
+  FleetRange _analyticsRange = FleetRange.now;
   final Map<String, DateTime> _lastNotified =
       {}; // debounce key -> time for notif spam reduction
   Offset? _windowPos;
@@ -956,6 +963,9 @@ class _DashboardState extends State<Dashboard>
   void _applySize() {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      // Analytics keeps whatever size the window has (its body scrolls); the
+      // quota view's content-hugging resize resumes when it closes.
+      if (_showingAnalytics) return;
       final maxH = _maxWindowHeight();
       double w;
       double h;
@@ -1033,7 +1043,12 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _toggleCompact() {
-    setState(() => _compact = !_compact);
+    setState(() {
+      _compact = !_compact;
+      // The compact strip is the quota view; leaving analytics keeps the
+      // header's collapse button honest in both directions.
+      if (_compact) _showingAnalytics = false;
+    });
     _applySize();
     _persistPrefs();
   }
@@ -1158,6 +1173,37 @@ class _DashboardState extends State<Dashboard>
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
 
+    if (_showingAnalytics && !_compact && !_loading) {
+      // Analytics fills the window under the same header as the quota view
+      // and scrolls internally, so the chrome never changes between views.
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: chrome.scaffold,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: chrome.border),
+          ),
+          child: Column(
+            children: [
+              _header(),
+              const SizedBox(height: 2),
+              Expanded(
+                child: FleetScreen(
+                  key: ValueKey(_analyticsRange),
+                  data: _visible,
+                  buckets: _buckets,
+                  dark: Theme.of(context).brightness == Brightness.dark,
+                  routedRequests: _routeSummary,
+                  initialRange: _analyticsRange,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: Colors.transparent,
       // The scroll view is the body directly (not wrapped in Align) so it
@@ -1425,7 +1471,7 @@ class _DashboardState extends State<Dashboard>
                       }(),
                       const SizedBox(width: 7),
                       Text(
-                        'Quota',
+                        _showingAnalytics ? 'Analytics' : 'Quota',
                         style: TextStyle(
                           fontSize: AppType.title,
                           fontWeight: FontWeight.w700,
@@ -1434,11 +1480,15 @@ class _DashboardState extends State<Dashboard>
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        _ago(_updated),
-                        style: TextStyle(
-                          fontSize: AppType.caption,
-                          color: muted,
+                      Flexible(
+                        child: Text(
+                          _ago(_updated),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppType.caption,
+                            color: muted,
+                          ),
                         ),
                       ),
                       if (_activeProfile.name != defaultProfileName) ...[
@@ -1467,10 +1517,14 @@ class _DashboardState extends State<Dashboard>
                   tooltip: 'Refresh now',
                 ),
                 _iconButton(
-                  Icons.bar_chart_rounded,
+                  _showingAnalytics
+                      ? Icons.arrow_back_rounded
+                      : Icons.bar_chart_rounded,
                   muted,
-                  _showFleet,
-                  tooltip: 'Quota analytics',
+                  _showingAnalytics ? _closeFleet : _showFleet,
+                  tooltip: _showingAnalytics
+                      ? 'Back to quotas'
+                      : 'Quota analytics',
                 ),
                 _iconButton(
                   Icons.close_fullscreen_rounded,
@@ -2025,23 +2079,18 @@ class _DashboardState extends State<Dashboard>
 
   void _showHelp() => _showSetup();
 
-  /// Opens the Fleet Analytics dashboard in the same window. It is a mobile-style
-  /// vertical scroll, so the window size is left exactly as it is.
-  Future<void> _showFleet({FleetRange initialRange = FleetRange.now}) async {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    // Open analytics in the existing window: no resize, no move, so nothing
-    // reflows or appears to change scale. The analytics body scrolls to fit.
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => FleetScreen(
-          data: _visible,
-          buckets: _buckets,
-          dark: dark,
-          routedRequests: _routeSummary,
-          initialRange: initialRange,
-        ),
-      ),
-    );
+  /// Shows the analytics body in this window, under the same header and menu
+  /// as the quota view. No resize, no move, no route push: only the body under
+  /// the header changes, and it scrolls to fit whatever size the window has.
+  void _showFleet({FleetRange initialRange = FleetRange.now}) {
+    setState(() {
+      _showingAnalytics = true;
+      _analyticsRange = initialRange;
+    });
+  }
+
+  void _closeFleet() {
+    setState(() => _showingAnalytics = false);
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 

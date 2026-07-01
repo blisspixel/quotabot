@@ -52,13 +52,13 @@ QuotaWindow _w(String label, double used, int resetInSecs) => QuotaWindow(
   resetsAt: _now() + resetInSecs,
 );
 
-/// Every supported service at a made-up point in its cycle, including two
-/// Antigravity accounts to show multi-account display. All numbers and the
-/// account names are invented for the demo and do not mirror any real account
-/// or machine.
+/// A readable demo fleet: five metered plans at distinct points in their
+/// cycles plus two local runtimes, so the display shows what quotabot does
+/// without crowding the screenshot. All numbers and account names are invented
+/// and do not mirror any real account or machine.
 List<ProviderQuota> demoData() => [
-  // A power user leaning hard on Claude (5h nearly tapped), with Kiro getting
-  // low and Antigravity flush, so routing has an obvious place to send work.
+  // A power user leaning hard on Claude (5h nearly tapped) with Antigravity
+  // flush, so routing has an obvious place to send work.
   _p('claude', 'Claude', 'Max', 'you@example.com', [
     _w('5h', 81, 4500),
     _w('weekly', 52, 388800),
@@ -71,19 +71,10 @@ List<ProviderQuota> demoData() => [
     _w('5h', 9, 9600),
     _w('weekly', 21, 469800),
   ]),
-  _p('antigravity', 'Antigravity', 'AI Pro', 'work@example.com', [
-    _w('5h', 34, 14400),
-    _w('weekly', 46, 381600),
-  ]),
   _p('grok', 'Grok', 'SuperGrok', 'you@example.com', [
     _w('weekly', 57, 540000),
   ]),
   _p('cursor', 'Cursor', 'Pro', 'you@example.com', [_w('monthly', 38, 745200)]),
-  _p('windsurf', 'Windsurf', 'Pro', 'you@example.com', [
-    _w('daily', 66, 48600),
-    _w('weekly', 55, 360000),
-  ]),
-  _p('kiro', 'Kiro', 'Pro', 'you@example.com', [_w('credit', 78, 280800)]),
   _local('ollama', 'Ollama', '3 models', 'qwen2.5-coder 7B Q4 loaded', const [
     '4.4 GB VRAM . 32K ctx',
     '3 installed . 18.6 GB on disk',
@@ -92,9 +83,6 @@ List<ProviderQuota> demoData() => [
     '5.1 GB VRAM . 16K ctx',
     '2 installed . 12.0 GB on disk',
   ], active: true),
-  _local('lemonade', 'Lemonade', '1 model', '1 installed, idle', const [
-    '1 installed . 4.7 GB on disk',
-  ]),
 ];
 
 /// About 40 days of hourly buckets per metered provider so the analytics views
@@ -110,18 +98,24 @@ Map<String, List<HeadroomBucket>> demoBuckets() {
     'antigravity': 84.0,
     'grok': 47.0,
     'cursor': 60.0,
-    'windsurf': 41.0,
-    'kiro': 28.0,
   };
+  // The busiest plans hit an occasional spent afternoon, so reliability,
+  // calendar, and trend show believable texture instead of a uniform 100%.
+  const crunchEvery = {'claude': 9, 'grok': 11};
   bases.forEach((id, base) {
     final buckets = <HeadroomBucket>[];
     for (var h = 0; h < 24 * 40; h++) {
       final t = now - h * 3600;
       final hour = (t ~/ 3600) % 24;
+      final day = h ~/ 24;
       final dip = (hour >= 9 && hour <= 18) ? -22.0 : 6.0; // work hours tighter
       final drift = (h / (24 * 40)) * 14.0; // a little easing over time
       final noise = rng.nextDouble() * 16 - 8;
-      final free = (base + dip + drift + noise).clamp(0.0, 100.0);
+      var free = (base + dip + drift + noise).clamp(0.0, 100.0);
+      final crunch = crunchEvery[id];
+      if (crunch != null && day % crunch == 2 && hour >= 12 && hour <= 17) {
+        free = 0; // the cap is spent for the afternoon
+      }
       buckets.add(HeadroomBucket(start: t - (t % 3600))..add(free));
     }
     out[id] = buckets;

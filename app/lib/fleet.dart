@@ -5,10 +5,8 @@ import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
-import 'package:window_manager/window_manager.dart';
 
-import 'chrome_controls.dart';
-import 'logos.dart';
+import 'profile_ui.dart' show quotaDisplayKey;
 import 'theme_spec.dart';
 import 'typography.dart';
 
@@ -41,9 +39,11 @@ class _Node {
   double get used => (100 - free).clamp(0, 100);
 }
 
-/// Analytics over the whole fleet, switchable by time range. Lives in the same
-/// window as the strip and scrolls like a phone. The Now view is a live read;
-/// the 7d/90d views recompute from the raw history buckets.
+/// Analytics over the whole fleet, switchable by time range. Rendered as a
+/// body inside the main dashboard, under the same header and menu as the
+/// quota view, so switching views never changes the window chrome. The Now
+/// view is a live read; the 7d/90d views recompute from the raw history
+/// buckets.
 class FleetScreen extends StatefulWidget {
   final List<ProviderQuota> data;
   final Map<String, List<HeadroomBucket>> buckets;
@@ -69,15 +69,23 @@ class _FleetScreenState extends State<FleetScreen> {
 
   bool get dark => widget.dark;
 
+  /// The history buckets for [q], keyed the way the dashboard stores them
+  /// (provider|account when the account is specific), with a plain provider-id
+  /// fallback for callers that key by provider only.
+  List<HeadroomBucket> _bucketsFor(ProviderQuota q) =>
+      widget.buckets[quotaDisplayKey(q)] ??
+      widget.buckets[q.provider] ??
+      const <HeadroomBucket>[];
+
   @override
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
-    final bg = chrome.scaffold;
-    final panel = chrome.card;
-    final fg = chrome.foreground;
-    final muted = chrome.muted;
-    final line = chrome.tileBorder;
-    final c = (panel: panel, fg: fg, muted: muted, line: line);
+    final c = (
+      panel: chrome.card,
+      fg: chrome.foreground,
+      muted: chrome.muted,
+      line: chrome.tileBorder,
+    );
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final nodes = <_Node>[];
@@ -88,34 +96,19 @@ class _FleetScreenState extends State<FleetScreen> {
       nodes.add(_Node(q.displayName, h, bindingWindow(q, now)?.resetsAt));
     }
     nodes.sort((a, b) => a.free.compareTo(b.free)); // tightest first
-    final poolHeadroom = _averageHeadroom(nodes);
 
-    return Scaffold(
-      // Transparent so the rounded card shows on the frameless window, matching
-      // the main quota view's corners instead of filling square to the edges.
-      backgroundColor: Colors.transparent,
-      body: Container(
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: chrome.border),
+    return Column(
+      children: [
+        _tabs(c),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+            child: _range == FleetRange.now
+                ? _liveView(nodes, now, c)
+                : _historyView(now, c),
+          ),
         ),
-        child: Column(
-          children: [
-            _bar(context, c, poolHeadroom),
-            _tabs(c),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-                child: _range == FleetRange.now
-                    ? _liveView(nodes, now, c)
-                    : _historyView(now, c),
-              ),
-            ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -325,7 +318,7 @@ class _FleetScreenState extends State<FleetScreen> {
     var maxSpan = 0;
     for (final q in widget.data) {
       if (q.isLocal) continue;
-      final all = widget.buckets[q.provider] ?? const <HeadroomBucket>[];
+      final all = _bucketsFor(q);
       final win = [
         for (final b in all)
           if (b.start >= cutoff) b,
@@ -575,65 +568,6 @@ class _FleetScreenState extends State<FleetScreen> {
       'Best: ${windows.map((window) => window.summary).join(' | ')}';
 
   // ---- chrome ----------------------------------------------------------
-
-  Widget _bar(
-    BuildContext context,
-    ({Color panel, Color fg, Color muted, Color line}) c,
-    double? poolHeadroom,
-  ) {
-    final chrome = AppChromeTheme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: c.panel,
-        border: Border(bottom: BorderSide(color: c.line)),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 12, 6, 6),
-      child: Row(
-        children: [
-          AppGauge(
-            size: 17,
-            value: (poolHeadroom ?? 0) / 100.0,
-            fillColor: poolHeadroom == null
-                ? chrome.gaugeTrack
-                : fleetColor(poolHeadroom),
-            trackColor: chrome.gaugeTrack,
-          ),
-          const SizedBox(width: 7),
-          // Only the title area drags the window.
-          Expanded(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onPanStart: (_) => windowManager.startDragging(),
-              child: Row(
-                children: [
-                  Text(
-                    'Quota Analytics',
-                    style: TextStyle(
-                      fontSize: AppType.title,
-                      fontWeight: FontWeight.w700,
-                      color: c.fg,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          AppChromeIconButton(
-            icon: Icons.arrow_back_rounded,
-            color: c.muted,
-            onTap: () => Navigator.of(context).maybePop(),
-            tooltip: 'Back to quotas',
-          ),
-          AppChromeIconButton(
-            icon: Icons.close_rounded,
-            color: c.muted,
-            onTap: windowManager.close,
-            tooltip: 'Close',
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _tabs(({Color panel, Color fg, Color muted, Color line}) c) {
     return Container(
