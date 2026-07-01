@@ -61,8 +61,9 @@ Notes:
   as an AppImage (`appimagetool`) or deb/rpm.
 - **CLI release archives** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
-  writing a `dart build cli` bundle archive plus a `.sha256` sidecar; upload both
-  to the GitHub release.
+  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. The
+  GitHub `Release` workflow runs those helpers on `v*` tags and uploads the
+  installer assets automatically.
 
 The CI workflow runs the macOS and Linux desktop package scripts with
 `--no-archive`, so every pull request verifies those platform bundles on their

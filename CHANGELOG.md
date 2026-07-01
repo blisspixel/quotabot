@@ -4,6 +4,10 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+No entries yet.
+
+## 0.5.2 - 2026-07-01
+
 ### Added
 - `quotabot stats` now accepts explicit tier-fit inputs such as
   `--tier-plan=Lite:50:10,Current:100:20 --current-price=20`. The JSON output
