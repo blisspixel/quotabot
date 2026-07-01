@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Best-time analytics now use a conservative wrapped weekday/hour smoother when
+  neighboring history supports it. Reports, stats JSON, and desktop analytics
+  keep the raw sampled mean and sample count, then add the smoothed score and
+  support counts so a single isolated quiet hour does not dominate best-time
+  recommendations.
 - Analytics now compute current sampled-day usable/spent streaks from the
   existing compact hourly history buckets. `quotabot stats`, `quotabot report`,
   and `quotabot.report.v1` surface the streaks without adding provider calls or

@@ -150,7 +150,8 @@ class QuotaHealthReport {
         ..add('## Best sampled windows')
         ..add('')
         ..add(
-          'Mean free percent by local weekday and hour from existing history buckets.',
+          'Best local weekday/hour windows from existing history buckets, '
+          'smoothed when nearby samples support it.',
         );
       for (final provider in bestTimes) {
         lines.add(

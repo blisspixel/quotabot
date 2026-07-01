@@ -88,7 +88,8 @@ void main() {
     expect(output, contains('usable streak'));
     expect(output, contains('calendar .++'));
     expect(output, contains('best '));
-    expect(output, contains('free, n='));
+    expect(output, contains('raw '));
+    expect(output, contains('support='));
   });
 }
 

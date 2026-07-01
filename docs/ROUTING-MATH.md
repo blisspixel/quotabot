@@ -313,6 +313,13 @@ bins (a 2-D circular smoother on the (day, hour) torus) so a single quiet Tuesda
 recommends the nearest low-contention bin before the relevant reset - capacity
 planning, exactly as Dev would do it for a datacenter, scaled to one developer.
 
+Shipped subset: `smoothedWeekHourHeatmap` and `smoothedWeekHourWindows` now use
+a conservative wrapped Gaussian neighborhood on the 7x24 local weekday/hour
+torus. Best-time entries keep the observed `mean_free_percent` and sample count,
+and add `smoothed_free_percent` plus support counts only when enough neighboring
+evidence exists. Sparse history still falls back to raw sampled cells rather
+than pretending the smoothed estimate is strong.
+
 ---
 
 ## 11. Doing it well with almost no data (Pip's problem)
@@ -406,7 +413,7 @@ the measurable improvement over the shipped heuristic.
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
-| heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | first best-window hint shipped; smoothing next |
+| heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing shipped; scheduler hint next |
 
 Build order honors the roadmap: ship `se` + `h_risk` + the unified score with
 neutral weights first (zero behavior change, full machinery in place), then turn on

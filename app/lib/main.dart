@@ -674,7 +674,7 @@ class _DashboardState extends State<Dashboard>
             final buckets = loadBuckets(q.provider, account: q.account);
             _buckets[key] = buckets;
             _insights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
-            _heatmaps[key] = weekHourHeatmap(buckets, tzOffset: tz);
+            _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
           }
         }
       });
@@ -714,7 +714,7 @@ class _DashboardState extends State<Dashboard>
         final key = quotaDisplayKey(q);
         _buckets[key] = b;
         _insights[key] = Insights.from(b, nowSec, tzOffset: tz);
-        _heatmaps[key] = weekHourHeatmap(b, tzOffset: tz);
+        _heatmaps[key] = smoothedWeekHourHeatmap(b, tzOffset: tz);
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());

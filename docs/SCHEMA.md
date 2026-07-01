@@ -92,7 +92,9 @@ are sampled local days with `day_start`,
 `samples`, `mean_free_percent`, `spent_samples`, `state` (`usable`, `mixed`, or
 `spent`), and `intensity` (0..4). Best-time entries are sampled local
 weekday/hour cells with `day_of_week` (0 = Monday), `day_label`, `hour_local`,
-`samples`, `mean_free_percent`, and a display `label`.
+`samples`, `mean_free_percent`, and a display `label`. When enough neighboring
+weekday/hour cells exist, best-time entries also include additive smoothing
+evidence: `smoothed_free_percent`, `support_samples`, and `support_cells`.
 
 ## `quotabot.alert.v1`
 

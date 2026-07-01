@@ -253,6 +253,24 @@ void main() {
       expect(grid[3][5], isNull);
       expect(grid[0][0], isNull); // Monday untouched
     });
+
+    test('smoothed heatmap wraps weekday and hour neighbors', () {
+      // Sunday 23:00 and Monday 00:00 are adjacent on the local week/hour torus.
+      final sunday23 = 3 * 86400 + 23 * 3600;
+      final monday00 = 4 * 86400;
+      final grid = smoothedWeekHourHeatmap([
+        HeadroomBucket(start: sunday23)
+          ..add(90)
+          ..add(90),
+        HeadroomBucket(start: monday00)
+          ..add(70)
+          ..add(70),
+      ]);
+
+      expect(grid[6][23], closeTo(85, 1));
+      expect(grid[0][0], closeTo(75, 1));
+      expect(grid[3][12], isNull);
+    });
   });
 
   group('Insights.from', () {

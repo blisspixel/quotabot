@@ -40,8 +40,8 @@ Highlights:
   mode, pins always-on-top or to the taskbar, and collapses to a tiny status
   strip.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
-  (distribution, reliability, trend, best time to run). Only quota metadata is
-  ever read, never prompts, code, or other content.
+  (distribution, reliability, trend, smoothed best times to run). Only quota
+  metadata is ever read, never prompts, code, or other content.
 - **Zero usage tokens.** Only quota metadata is ever read, never a model or
   inference call, so quotabot never spends a usage token.
 - **Local-first, your data is yours.** No account, no cloud, no telemetry; your

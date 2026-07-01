@@ -399,7 +399,9 @@ Breadth and depth, once the core is trusted:
   unambiguous snapshots. Stats and reports now also include a compact sampled-day
   contribution calendar derived from those same local buckets. Heatmap polish has
   started: stats, reports, JSON, and the desktop heatmap now surface the best
-  sampled weekday/hour windows with sample counts.
+  sampled weekday/hour windows with sample counts, and those best-window
+  rankings now use conservative wrapped smoothing when neighboring evidence
+  exists so one isolated quiet hour cannot dominate the recommendation.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

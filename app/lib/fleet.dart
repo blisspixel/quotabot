@@ -444,7 +444,7 @@ class _FleetScreenState extends State<FleetScreen> {
       if (ins.samples == 0) continue;
       final node = _Node(q.displayName, ins.p50 ?? 0, null)..insights = ins;
       stats.add(node);
-      grids.add(weekHourHeatmap(win, tzOffset: tz));
+      grids.add(smoothedWeekHourHeatmap(win, tzOffset: tz));
       maxSamples = math.max(maxSamples, ins.samples);
       maxSpan = math.max(maxSpan, ins.spanDays);
     }
@@ -515,7 +515,7 @@ class _FleetScreenState extends State<FleetScreen> {
         _card(
           c,
           'BEST TIME TO RUN',
-          'mean free % by weekday x hour, local',
+          'smoothed mean free % by weekday x hour, local',
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

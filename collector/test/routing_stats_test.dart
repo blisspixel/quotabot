@@ -120,8 +120,14 @@ void main() {
       expect(best.first.hour, 0);
       expect(best.first.samples, 2);
       expect(best.first.meanFreePercent, closeTo(75, 0.001));
-      expect(best.first.summary, 'Thu 00:00 (75% free, n=2)');
+      expect(best.first.smoothedFreePercent, isNotNull);
+      expect(best.first.supportSamples, 4);
+      expect(
+        best.first.summary,
+        startsWith('Thu 00:00 (~'),
+      );
       expect(best.first.toJson()['label'], 'Thu 00:00');
+      expect(best.first.toJson()['smoothed_free_percent'], isA<double>());
     });
 
     test('falls back to sparse cells when no cell meets the sample floor', () {
@@ -132,6 +138,29 @@ void main() {
       expect(best, hasLength(1));
       expect(best.single.hour, 13);
       expect(best.single.meanFreePercent, closeTo(95, 0.001));
+      expect(best.single.smoothedFreePercent, isNull);
+    });
+
+    test('ranks smoothed supported neighborhoods before isolated highs', () {
+      final isolatedHigh = HeadroomBucket(start: 13 * Duration.secondsPerHour)
+        ..add(99)
+        ..add(99);
+      final clusterLate = HeadroomBucket(start: 23 * Duration.secondsPerHour)
+        ..add(80)
+        ..add(80);
+      final clusterNextDay = HeadroomBucket(start: 24 * Duration.secondsPerHour)
+        ..add(70)
+        ..add(70);
+
+      final best = bestWeekHourWindows([
+        isolatedHigh,
+        clusterNextDay,
+        clusterLate,
+      ], limit: 1);
+
+      expect(best.single.timeLabel, 'Thu 23:00');
+      expect(best.single.smoothedFreePercent, closeTo(78, 1));
+      expect(best.single.supportSamples, 4);
     });
   });
 

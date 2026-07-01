@@ -440,22 +440,46 @@ List<List<double?>> weekHourHeatmap(
   Iterable<HeadroomBucket> buckets, {
   Duration tzOffset = Duration.zero,
 }) {
-  final sum = List.generate(7, (_) => List<double>.filled(24, 0));
-  final cnt = List.generate(7, (_) => List<int>.filled(24, 0));
-  final off = tzOffset.inSeconds;
-  for (final b in buckets) {
-    if (b.count == 0) continue;
-    final local = b.start + off;
-    final day = (((local ~/ 86400) + 3) % 7); // 1970-01-01 was a Thursday
-    final hour = (local % 86400) ~/ 3600;
-    sum[day][hour] += b.sum;
-    cnt[day][hour] += b.count;
-  }
+  final agg = _weekHourAggregates(buckets, tzOffset);
   return List.generate(
     7,
     (d) => List<double?>.generate(
       24,
-      (h) => cnt[d][h] == 0 ? null : sum[d][h] / cnt[d][h],
+      (h) => agg.count[d][h] == 0 ? null : agg.sum[d][h] / agg.count[d][h],
+    ),
+  );
+}
+
+/// A smoothed weekday/hour heatmap over the same 7x24 torus as
+/// [weekHourHeatmap]. The smoothing is conservative: a target cell is populated
+/// only when nearby sampled cells provide enough support, so sparse history does
+/// not masquerade as a precise weekly pattern.
+List<List<double?>> smoothedWeekHourHeatmap(
+  Iterable<HeadroomBucket> buckets, {
+  Duration tzOffset = Duration.zero,
+  int dayRadius = 1,
+  int hourRadius = 2,
+  double daySigma = 0.75,
+  double hourSigma = 1.25,
+  int minSupportSamples = 2,
+  int minSupportCells = 2,
+}) {
+  final agg = _weekHourAggregates(buckets, tzOffset);
+  return List.generate(
+    7,
+    (day) => List<double?>.generate(
+      24,
+      (hour) => _smoothedCell(
+        agg,
+        day,
+        hour,
+        dayRadius: dayRadius,
+        hourRadius: hourRadius,
+        daySigma: daySigma,
+        hourSigma: hourSigma,
+        minSupportSamples: minSupportSamples,
+        minSupportCells: minSupportCells,
+      )?.meanFreePercent,
     ),
   );
 }
@@ -472,20 +496,34 @@ class WeekHourWindow {
 
   final int samples;
   final double meanFreePercent;
+  final double? smoothedFreePercent;
+  final int supportSamples;
+  final int supportCells;
 
   const WeekHourWindow({
     required this.dayOfWeek,
     required this.hour,
     required this.samples,
     required this.meanFreePercent,
+    this.smoothedFreePercent,
+    this.supportSamples = 0,
+    this.supportCells = 0,
   });
 
   String get dayLabel => _weekdayLabels[dayOfWeek % 7];
 
   String get timeLabel => '$dayLabel ${hour.toString().padLeft(2, '0')}:00';
 
-  String get summary =>
-      '$timeLabel (${meanFreePercent.round()}% free, n=$samples)';
+  double get scoreFreePercent => smoothedFreePercent ?? meanFreePercent;
+
+  String get summary {
+    final smooth = smoothedFreePercent;
+    if (smooth == null) {
+      return '$timeLabel (${meanFreePercent.round()}% free, n=$samples)';
+    }
+    return '$timeLabel (~${smooth.round()}% free, '
+        'raw ${meanFreePercent.round()}%, n=$samples, support=$supportSamples)';
+  }
 
   Map<String, dynamic> toJson() => {
         'day_of_week': dayOfWeek,
@@ -493,6 +531,11 @@ class WeekHourWindow {
         'hour_local': hour,
         'samples': samples,
         'mean_free_percent': double.parse(meanFreePercent.toStringAsFixed(2)),
+        if (smoothedFreePercent != null)
+          'smoothed_free_percent':
+              double.parse(smoothedFreePercent!.toStringAsFixed(2)),
+        if (supportSamples > 0) 'support_samples': supportSamples,
+        if (supportCells > 0) 'support_cells': supportCells,
         'label': timeLabel,
       };
 }
@@ -502,28 +545,59 @@ List<WeekHourWindow> weekHourWindows(
   Iterable<HeadroomBucket> buckets, {
   Duration tzOffset = Duration.zero,
 }) {
-  final sum = List.generate(7, (_) => List<double>.filled(24, 0));
-  final cnt = List.generate(7, (_) => List<int>.filled(24, 0));
-  final off = tzOffset.inSeconds;
-  for (final b in buckets) {
-    if (b.count == 0) continue;
-    final local = b.start + off;
-    final day = (((local ~/ 86400) + 3) % 7);
-    final hour = (local % 86400) ~/ 3600;
-    sum[day][hour] += b.sum;
-    cnt[day][hour] += b.count;
-  }
+  final agg = _weekHourAggregates(buckets, tzOffset);
+  return _weekHourWindowsFromAggregates(agg);
+}
+
+/// Populated local weekday/hour cells with a neighborhood-smoothed score when
+/// enough nearby samples exist. Raw `meanFreePercent` remains the observed
+/// evidence; `smoothedFreePercent` is the scheduling score.
+List<WeekHourWindow> smoothedWeekHourWindows(
+  Iterable<HeadroomBucket> buckets, {
+  Duration tzOffset = Duration.zero,
+  int dayRadius = 1,
+  int hourRadius = 2,
+  double daySigma = 0.75,
+  double hourSigma = 1.25,
+  int minSupportSamples = 2,
+  int minSupportCells = 2,
+}) {
+  final agg = _weekHourAggregates(buckets, tzOffset);
+  return _weekHourWindowsFromAggregates(
+    agg,
+    smoothed: (day, hour) => _smoothedCell(
+      agg,
+      day,
+      hour,
+      dayRadius: dayRadius,
+      hourRadius: hourRadius,
+      daySigma: daySigma,
+      hourSigma: hourSigma,
+      minSupportSamples: minSupportSamples,
+      minSupportCells: minSupportCells,
+    ),
+  );
+}
+
+List<WeekHourWindow> _weekHourWindowsFromAggregates(
+  _WeekHourAggregates agg, {
+  _SmoothedWeekHourCell? Function(int day, int hour)? smoothed,
+}) {
   final out = <WeekHourWindow>[];
   for (var day = 0; day < 7; day++) {
     for (var hour = 0; hour < 24; hour++) {
-      final samples = cnt[day][hour];
+      final samples = agg.count[day][hour];
       if (samples == 0) continue;
+      final score = smoothed?.call(day, hour);
       out.add(
         WeekHourWindow(
           dayOfWeek: day,
           hour: hour,
           samples: samples,
-          meanFreePercent: sum[day][hour] / samples,
+          meanFreePercent: agg.sum[day][hour] / samples,
+          smoothedFreePercent: score?.meanFreePercent,
+          supportSamples: score?.supportSamples ?? 0,
+          supportCells: score?.supportCells ?? 0,
         ),
       );
     }
@@ -543,20 +617,117 @@ List<WeekHourWindow> bestWeekHourWindows(
   int minSamples = 2,
 }) {
   if (limit <= 0) return const [];
-  final all = weekHourWindows(buckets, tzOffset: tzOffset);
+  final all = smoothedWeekHourWindows(
+    buckets,
+    tzOffset: tzOffset,
+    minSupportSamples: minSamples,
+  );
   if (all.isEmpty) return const [];
-  final eligible = all.where((cell) => cell.samples >= minSamples).toList();
+  final smoothedEligible = all
+      .where((cell) =>
+          cell.samples >= minSamples && cell.smoothedFreePercent != null)
+      .toList();
+  final eligible = smoothedEligible.isNotEmpty
+      ? smoothedEligible
+      : all.where((cell) => cell.samples >= minSamples).toList();
   final ranked = (eligible.isEmpty ? all : eligible).toList()
     ..sort((a, b) {
-      final mean = b.meanFreePercent.compareTo(a.meanFreePercent);
+      final mean = b.scoreFreePercent.compareTo(a.scoreFreePercent);
       if (mean != 0) return mean;
       final samples = b.samples.compareTo(a.samples);
       if (samples != 0) return samples;
+      final support = b.supportSamples.compareTo(a.supportSamples);
+      if (support != 0) return support;
       final day = a.dayOfWeek.compareTo(b.dayOfWeek);
       if (day != 0) return day;
       return a.hour.compareTo(b.hour);
     });
   return ranked.take(limit).toList();
+}
+
+class _WeekHourAggregates {
+  final List<List<double>> sum;
+  final List<List<int>> count;
+
+  const _WeekHourAggregates(this.sum, this.count);
+}
+
+class _SmoothedWeekHourCell {
+  final double meanFreePercent;
+  final int supportSamples;
+  final int supportCells;
+
+  const _SmoothedWeekHourCell({
+    required this.meanFreePercent,
+    required this.supportSamples,
+    required this.supportCells,
+  });
+}
+
+_WeekHourAggregates _weekHourAggregates(
+  Iterable<HeadroomBucket> buckets,
+  Duration tzOffset,
+) {
+  final sum = List.generate(7, (_) => List<double>.filled(24, 0));
+  final cnt = List.generate(7, (_) => List<int>.filled(24, 0));
+  final off = tzOffset.inSeconds;
+  for (final b in buckets) {
+    if (b.count == 0) continue;
+    final local = b.start + off;
+    final day = (((local ~/ 86400) + 3) % 7);
+    final hour = (local % 86400) ~/ 3600;
+    sum[day][hour] += b.sum;
+    cnt[day][hour] += b.count;
+  }
+  return _WeekHourAggregates(sum, cnt);
+}
+
+_SmoothedWeekHourCell? _smoothedCell(
+  _WeekHourAggregates agg,
+  int targetDay,
+  int targetHour, {
+  required int dayRadius,
+  required int hourRadius,
+  required double daySigma,
+  required double hourSigma,
+  required int minSupportSamples,
+  required int minSupportCells,
+}) {
+  var weightedSum = 0.0;
+  var weightTotal = 0.0;
+  var supportSamples = 0;
+  var supportCells = 0;
+
+  for (var dd = -dayRadius; dd <= dayRadius; dd++) {
+    final day = (targetDay + dd) % 7;
+    final wrappedDay = day < 0 ? day + 7 : day;
+    for (var dh = -hourRadius; dh <= hourRadius; dh++) {
+      final hour = (targetHour + dh) % 24;
+      final wrappedHour = hour < 0 ? hour + 24 : hour;
+      final samples = agg.count[wrappedDay][wrappedHour];
+      if (samples == 0) continue;
+      final weight = math.exp(
+        -0.5 *
+            ((dd.abs() / daySigma) * (dd.abs() / daySigma) +
+                (dh.abs() / hourSigma) * (dh.abs() / hourSigma)),
+      );
+      weightedSum += agg.sum[wrappedDay][wrappedHour] * weight;
+      weightTotal += samples * weight;
+      supportSamples += samples;
+      supportCells++;
+    }
+  }
+
+  if (weightTotal == 0 ||
+      supportSamples < minSupportSamples ||
+      supportCells < minSupportCells) {
+    return null;
+  }
+  return _SmoothedWeekHourCell(
+    meanFreePercent: weightedSum / weightTotal,
+    supportSamples: supportSamples,
+    supportCells: supportCells,
+  );
 }
 
 /// A forward-looking pace read for the current rolling window: how fast quota is

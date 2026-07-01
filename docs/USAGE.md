@@ -305,9 +305,10 @@ current recommendation, provider headroom, reset times, seven-day history
 metrics, current sampled-day usable/spent streaks, and a compact sampled-day
 calendar where enough local history exists. Calendar markers are ASCII: `#`
 heavy use, `*` moderate-high, `+` moderate, `.` light, `!` mixed, and `x`
-spent. It also lists the best sampled local weekday/hour windows with sample
-counts. Add `--json` for the structured `quotabot.report.v1` shape. It is still
-local metadata only.
+spent. It also lists the best local weekday/hour windows with sample counts and,
+when enough neighboring history exists, a smoothed free-percent score so a lone
+quiet hour does not outrank a supported quiet pattern. Add `--json` for the
+structured `quotabot.report.v1` shape. It is still local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from
 `~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped

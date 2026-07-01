@@ -61,7 +61,10 @@ void main() {
     expect(calendar.last['state'], 'usable');
     final best = claude['weekly_best_time_windows'] as List;
     expect(best, isNotEmpty);
-    expect((best.first as Map<String, dynamic>)['label'], isA<String>());
+    final firstBest = best.first as Map<String, dynamic>;
+    expect(firstBest['label'], isA<String>());
+    expect(firstBest['smoothed_free_percent'], isA<double>());
+    expect(firstBest['support_samples'], greaterThanOrEqualTo(2));
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {
@@ -87,7 +90,8 @@ void main() {
     expect(markdown, contains('## Weekly calendar'));
     expect(markdown, contains('claude (work):'));
     expect(markdown, contains('## Best sampled windows'));
-    expect(markdown, contains('free, n='));
+    expect(markdown, contains('raw '));
+    expect(markdown, contains('support='));
   });
 
   test('markdown escapes table cell separators', () {
