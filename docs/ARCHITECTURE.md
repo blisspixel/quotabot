@@ -221,8 +221,9 @@ MCP clients for both stdio and Streamable HTTP.
 `bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
 consumers, including `GET /suggest?local_first=true` for the same opt-in local
 first routing policy. The reasoning behind the routing math (risk-adjusted
-headroom, strand probability, burn-stat shrinkage, routing score, and lease
-discounts) is written up in [ROUTING-MATH.md](ROUTING-MATH.md).
+headroom, strand probability, burn-stat shrinkage, reliability shrinkage,
+routing score, and lease discounts) is written up in
+[ROUTING-MATH.md](ROUTING-MATH.md).
 
 The public snapshot contract is frozen as `quotabot.v1` in
 `schema_contracts.dart` and documented in [SCHEMA.md](SCHEMA.md). The contract is

@@ -14,6 +14,7 @@ const int kBucketSpan = 3600; // one hour
 const int kHistBins = 20; // 5 percent per bin across 0..100
 const int kRetentionDays = 90;
 const int kBurnShrinkagePriorSamples = 4;
+const int kReliabilityShrinkagePriorSamples = 4;
 
 /// Aligns an epoch second to the start of its hour bucket.
 int bucketStart(int epoch) => epoch - (epoch % kBucketSpan);
@@ -477,6 +478,85 @@ BurnStat _shrinkBurnStat(
           : null);
   return BurnStat(perHour: shrunk, sePerHour: se, samples: stat.samples);
 }
+
+/// Beta-binomial shrinkage for provider/account reliability rates.
+///
+/// Reliability is a success rate: samples with any headroom left over total
+/// samples. Thin histories are partially pooled toward the current fleet rate,
+/// while mature histories mostly keep their direct observation. Unknown
+/// reliability stays unknown, and the helper waits for a real pool before it
+/// changes anything.
+Map<String, Insights> shrinkInsightsReliability(
+  Map<String, Insights> insights, {
+  int priorSamples = kReliabilityShrinkagePriorSamples,
+}) {
+  if (priorSamples <= 0) return Map<String, Insights>.of(insights);
+  final usable = insights.entries.where((entry) {
+    final reliability = entry.value.reliability;
+    return reliability != null &&
+        reliability.isFinite &&
+        entry.value.samples > 0;
+  }).toList();
+  if (usable.length < 3) return Map<String, Insights>.of(insights);
+
+  var totalSamples = 0;
+  var successes = 0.0;
+  for (final entry in usable) {
+    final samples = entry.value.samples;
+    final reliability = entry.value.reliability!.clamp(0.0, 1.0).toDouble();
+    totalSamples += samples;
+    successes += reliability * samples;
+  }
+  if (totalSamples <= 0) return Map<String, Insights>.of(insights);
+  final poolRate = successes / totalSamples;
+
+  return {
+    for (final entry in insights.entries)
+      entry.key: _shrinkInsightsReliability(
+        entry.value,
+        poolRate,
+        priorSamples,
+      ),
+  };
+}
+
+Insights _shrinkInsightsReliability(
+  Insights insights,
+  double poolRate,
+  int priorSamples,
+) {
+  final reliability = insights.reliability;
+  if (reliability == null || !reliability.isFinite || insights.samples <= 0) {
+    return insights;
+  }
+  final observed = reliability.clamp(0.0, 1.0).toDouble();
+  final shrunk = (observed * insights.samples + poolRate * priorSamples) /
+      (insights.samples + priorSamples);
+  return _insightsWithReliability(insights, shrunk);
+}
+
+Insights _insightsWithReliability(Insights insights, double reliability) =>
+    Insights(
+      samples: insights.samples,
+      spanDays: insights.spanDays,
+      sampledDays: insights.sampledDays,
+      mean: insights.mean,
+      stddev: insights.stddev,
+      p10: insights.p10,
+      p50: insights.p50,
+      p90: insights.p90,
+      reliability: reliability,
+      trendPerDay: insights.trendPerDay,
+      trendConfidence: insights.trendConfidence,
+      tightestHour: insights.tightestHour,
+      tightestDay: insights.tightestDay,
+      usableDayStreak: insights.usableDayStreak,
+      spentDayStreak: insights.spentDayStreak,
+      contributionCalendar: insights.contributionCalendar,
+      bestTimeWindows: insights.bestTimeWindows,
+      burnPerHour: insights.burnPerHour,
+      burnSePerHour: insights.burnSePerHour,
+    );
 
 /// Mean headroom by local day of week (0 = Monday .. 6 = Sunday), null where no
 /// data. Surfaces which days a provider runs tightest.

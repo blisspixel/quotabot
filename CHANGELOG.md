@@ -138,6 +138,10 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Provider analytics now apply conservative beta-binomial shrinkage to
+  reliability rates before rendering stats, reports, and desktop analytics.
+  Thin provider/account histories are pulled toward the current fleet usable
+  rate, while mature histories remain close to their direct observed rate.
 - Recent burn estimates used by routing now apply conservative empirical-Bayes
   shrinkage at the cache boundary. Thin provider/account histories are pulled
   toward the current fleet burn mean, while mature histories stay close to their

@@ -1190,10 +1190,14 @@ Future<void> _runStats(
     ..sort();
   final tz = DateTime.now().timeZoneOffset;
   final byProvider = {for (final q in results) q.provider: q};
+  final insights = shrinkInsightsReliability({
+    for (final p in providers)
+      p: Insights.from(_historyBuckets(p), now, tzOffset: tz),
+  });
   if (wantsJson) {
     final report = <String, dynamic>{};
     for (final p in providers) {
-      final ins = Insights.from(_historyBuckets(p), now, tzOffset: tz);
+      final ins = insights[p]!;
       final pace = _paceFor(byProvider[p], ins, now);
       final schedule = _scheduleFor(byProvider[p], ins, now, tz);
       report[p] = {
@@ -1204,7 +1208,7 @@ Future<void> _runStats(
     }
     print(_jsonPretty(report));
   } else {
-    _printStats(providers, byProvider, now, tz);
+    _printStats(providers, byProvider, now, tz, insights);
   }
 }
 
@@ -1228,11 +1232,12 @@ Future<void> _runReport(
       tzOffset: tz,
     );
   }
+  final shrunkInsights = shrinkInsightsReliability(insights);
   final report = buildQuotaHealthReport(
     results,
     now,
     _suggestFor(results, now),
-    insightsByProvider: insights,
+    insightsByProvider: shrunkInsights,
     tzOffset: tz,
   );
   wantsJson
@@ -1632,6 +1637,7 @@ void _printStats(
   Map<String, ProviderQuota> live,
   int now,
   Duration tz,
+  Map<String, Insights> insights,
 ) {
   print(
     'quotabot stats  (90-day analytics from local history, 0 usage tokens)\n',
@@ -1642,11 +1648,7 @@ void _printStats(
   }
 
   // Portfolio view: where you actually spend, and what you barely use.
-  final insMap = {
-    for (final p in providers)
-      p: Insights.from(_historyBuckets(p), now, tzOffset: tz),
-  };
-  final port = portfolioInsight(insMap);
+  final port = portfolioInsight(insights);
   if (port.mostUsed != null) {
     print(
       '  Most used: ${port.mostUsed!.provider} '
@@ -1669,7 +1671,8 @@ void _printStats(
   }
 
   for (final p in providers) {
-    final ins = Insights.from(_historyBuckets(p), now, tzOffset: tz);
+    final ins =
+        insights[p] ?? Insights.from(_historyBuckets(p), now, tzOffset: tz);
     if (ins.samples == 0) {
       print('  ${p.padRight(12)} no history yet');
       continue;
