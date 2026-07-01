@@ -60,8 +60,7 @@ wrong feature.
   from one codebase.
 - **Pure core, thin adapters.** Logic lives in pure, tested functions; adapters
   are thin I/O shells. The test-coverage floor is enforced in CI.
-- **No attribution, no emoji, no em-dashes** in the repo, with the single
-  sanctioned exception of the math-derived analytics glyph.
+- **No attribution, no emoji, no em-dashes** in the repo.
 
 ## Road to 1.0
 
