@@ -7,6 +7,8 @@ import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'chrome_controls.dart';
+import 'logos.dart';
 import 'theme_spec.dart';
 import 'typography.dart';
 
@@ -17,120 +19,6 @@ Color fleetColor(num freePct) {
   if (freePct > 0) return const Color(0xFFDB6D28);
   return const Color(0xFFF85149);
 }
-
-/// The Oracle of Pythagoras.
-///
-/// The cult permits exactly one emoji in this entire program, and refuses to let
-/// a mere human choose it. The glyph is derived, from the fleet's own numbers,
-/// through a deliberately overwrought chain of number theory. That ceremony is
-/// the joke. [free] and [used] are parallel per-provider percent lists.
-///
-/// Returns the single sanctioned glyph and a terse, smug proof of why.
-({String glyph, String proof}) pythagorasOracle(
-  List<double> free,
-  List<double> used,
-) {
-  if (free.isEmpty) {
-    return (
-      glyph: '\u{1F311}',
-      proof: 'the void before counting (no live providers)',
-    );
-  }
-  final n = free.length;
-  final pool = free.reduce((a, b) => a + b) / n;
-
-  if (pool <= 0.5) {
-    return (
-      glyph: '\u{1FAA6}',
-      proof: 'Sigma(free) -> 0; the quota gods are sated',
-    );
-  }
-
-  const phi = 1.6180339887498949;
-  if ((pool - 100 * (phi - 1)).abs() <= 1.5) {
-    return (
-      glyph: '\u{1F41A}',
-      proof: 'pool ~= 100(phi-1) = 61.8%; the logarithmic spiral approves',
-    );
-  }
-
-  final r = free.map((f) => f.round()).where((v) => v > 0).toSet().toList()
-    ..sort();
-  for (var i = 0; i < r.length; i++) {
-    for (var j = i + 1; j < r.length; j++) {
-      for (var k = j + 1; k < r.length; k++) {
-        if (r[i] * r[i] + r[j] * r[j] == r[k] * r[k]) {
-          return (
-            glyph: '\u{1F4D0}',
-            proof:
-                'a^2+b^2=c^2 walks among your quotas (${r[i]},${r[j]},${r[k]})',
-          );
-        }
-      }
-    }
-  }
-
-  final spenders = used.where((u) => u > 0.5).toList();
-  if (spenders.isEmpty) {
-    return (
-      glyph: '\u{1F315}',
-      proof: 'every window full; the monad is undisturbed',
-    );
-  }
-
-  final tot = spenders.reduce((a, b) => a + b);
-  var h = 0.0;
-  for (final u in spenders) {
-    final p = u / tot;
-    h -= p * math.log(p);
-  }
-  final evenness = spenders.length < 2 ? 0.0 : h / math.log(spenders.length);
-
-  if (_isPrime(n) && evenness >= 0.9) {
-    return (
-      glyph: '\u{1F3BC}',
-      proof:
-          'prime fleet ($n) in near-uniform burn (H=${evenness.toStringAsFixed(2)}): musica universalis',
-    );
-  }
-
-  if (evenness <= 0.34) {
-    return (
-      glyph: '\u{1F5FF}',
-      proof:
-          'consumption entropy collapses (H=${evenness.toStringAsFixed(2)}); one node bears the load',
-    );
-  }
-
-  final dr = _digitalRoot(pool.round());
-  const wheel = [
-    '\u{1F312}',
-    '\u{1F313}',
-    '\u{1F314}',
-    '\u{1F316}',
-    '\u{1F317}',
-    '\u{1F318}',
-    '\u{1F31B}',
-    '\u{1F31D}',
-    '\u{1F9EE}', // the abacus: 9, the indestructible digital root
-  ];
-  return (
-    glyph: wheel[dr - 1],
-    proof:
-        'digital root of ${pool.round()}% is $dr; the abacus turns the wheel',
-  );
-}
-
-bool _isPrime(int n) {
-  if (n < 2) return false;
-  for (var i = 2; i * i <= n; i++) {
-    if (n % i == 0) return false;
-  }
-  return true;
-}
-
-/// Repeated digit sum, 1..9 (the indestructible residue mod 9).
-int _digitalRoot(int n) => n <= 0 ? 9 : 1 + (n - 1) % 9;
 
 /// The time window the dashboard is showing.
 enum FleetRange {
@@ -200,11 +88,7 @@ class _FleetScreenState extends State<FleetScreen> {
       nodes.add(_Node(q.displayName, h, bindingWindow(q, now)?.resetsAt));
     }
     nodes.sort((a, b) => a.free.compareTo(b.free)); // tightest first
-
-    final oracle = pythagorasOracle(
-      [for (final n in nodes) n.free],
-      [for (final n in nodes) n.used],
-    );
+    final poolHeadroom = _averageHeadroom(nodes);
 
     return Scaffold(
       // Transparent so the rounded card shows on the frameless window, matching
@@ -219,7 +103,7 @@ class _FleetScreenState extends State<FleetScreen> {
         ),
         child: Column(
           children: [
-            _bar(context, c, oracle),
+            _bar(context, c, poolHeadroom),
             _tabs(c),
             Expanded(
               child: SingleChildScrollView(
@@ -237,6 +121,11 @@ class _FleetScreenState extends State<FleetScreen> {
 
   // ---- live (Now) ------------------------------------------------------
 
+  double? _averageHeadroom(List<_Node> nodes) {
+    if (nodes.isEmpty) return null;
+    return nodes.map((n) => n.free).reduce((a, b) => a + b) / nodes.length;
+  }
+
   Widget _liveView(
     List<_Node> nodes,
     int now,
@@ -251,8 +140,7 @@ class _FleetScreenState extends State<FleetScreen> {
         ],
       );
     }
-    final pool =
-        nodes.map((n) => n.free).reduce((a, b) => a + b) / nodes.length;
+    final pool = _averageHeadroom(nodes)!;
     final freest = nodes.last;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -691,36 +579,26 @@ class _FleetScreenState extends State<FleetScreen> {
   Widget _bar(
     BuildContext context,
     ({Color panel, Color fg, Color muted, Color line}) c,
-    ({String glyph, String proof}) oracle,
+    double? poolHeadroom,
   ) {
+    final chrome = AppChromeTheme.of(context);
     return Container(
       decoration: BoxDecoration(
         color: c.panel,
         border: Border(bottom: BorderSide(color: c.line)),
       ),
-      padding: const EdgeInsets.fromLTRB(4, 8, 12, 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 6, 6),
       child: Row(
         children: [
-          // Back is a normal tap target (not inside the window-drag area, which
-          // would otherwise swallow the click as a drag).
-          TextButton.icon(
-            onPressed: () => Navigator.of(context).maybePop(),
-            icon: Icon(Icons.arrow_back_rounded, size: 18, color: c.fg),
-            label: Text(
-              'Back',
-              style: TextStyle(
-                fontSize: AppType.subtitle,
-                fontWeight: FontWeight.w600,
-                color: c.fg,
-              ),
-            ),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: const Size(0, 36),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+          AppGauge(
+            size: 17,
+            value: (poolHeadroom ?? 0) / 100.0,
+            fillColor: poolHeadroom == null
+                ? chrome.gaugeTrack
+                : fleetColor(poolHeadroom),
+            trackColor: chrome.gaugeTrack,
           ),
-          const SizedBox(width: 2),
+          const SizedBox(width: 7),
           // Only the title area drags the window.
           Expanded(
             child: GestureDetector(
@@ -736,25 +614,21 @@ class _FleetScreenState extends State<FleetScreen> {
                       color: c.fg,
                     ),
                   ),
-                  const Spacer(),
                 ],
               ),
             ),
           ),
-          // One math-derived glyph. No label; the curious can hover.
-          Tooltip(
-            message: oracle.proof,
-            waitDuration: const Duration(milliseconds: 400),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Opacity(
-                opacity: 0.85,
-                child: Text(
-                  oracle.glyph,
-                  style: const TextStyle(fontSize: AppType.glyph),
-                ),
-              ),
-            ),
+          AppChromeIconButton(
+            icon: Icons.arrow_back_rounded,
+            color: c.muted,
+            onTap: () => Navigator.of(context).maybePop(),
+            tooltip: 'Back to quotas',
+          ),
+          AppChromeIconButton(
+            icon: Icons.close_rounded,
+            color: c.muted,
+            onTap: windowManager.close,
+            tooltip: 'Close',
           ),
         ],
       ),
@@ -782,16 +656,14 @@ class _FleetScreenState extends State<FleetScreen> {
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: _range == r
-                          ? (dark
-                                ? const Color(0xFF24303B)
-                                : const Color(0xFFE7EBF0))
+                          ? c.line.withValues(alpha: dark ? 0.82 : 0.58)
                           : Colors.transparent,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       r.label,
                       style: TextStyle(
-                        fontSize: AppType.subtitle,
+                        fontSize: AppType.bodySmall,
                         fontWeight: FontWeight.w700,
                         color: _range == r ? c.fg : c.muted,
                       ),
@@ -812,10 +684,10 @@ class _FleetScreenState extends State<FleetScreen> {
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: BoxDecoration(
         color: c.panel,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(11),
         border: Border.all(color: c.line),
       ),
       child: Column(
@@ -827,7 +699,7 @@ class _FleetScreenState extends State<FleetScreen> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: AppType.stat,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w700,
               color: accent,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
@@ -859,7 +731,7 @@ class _FleetScreenState extends State<FleetScreen> {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: AppType.stat,
-            fontWeight: FontWeight.w800,
+            fontWeight: FontWeight.w700,
             color: accent,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
@@ -882,10 +754,10 @@ class _FleetScreenState extends State<FleetScreen> {
     Widget child,
   ) {
     return Container(
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: BoxDecoration(
         color: c.panel,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(11),
         border: Border.all(color: c.line),
       ),
       child: Column(

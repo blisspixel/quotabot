@@ -20,6 +20,7 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'chrome_controls.dart';
 import 'demo.dart';
 import 'fleet.dart';
 import 'logos.dart';
@@ -2300,22 +2301,12 @@ class _DashboardState extends State<Dashboard>
     Color color,
     VoidCallback? onTap, {
     String? tooltip,
-  }) {
-    final button = InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: Icon(icon, size: 15, color: color),
-      ),
-    );
-    if (tooltip == null) return button;
-    return Tooltip(
-      message: tooltip,
-      waitDuration: const Duration(milliseconds: 500),
-      child: button,
-    );
-  }
+  }) => AppChromeIconButton(
+    icon: icon,
+    color: color,
+    onTap: onTap,
+    tooltip: tooltip,
+  );
 }
 
 class _AccountGroupHeader extends StatelessWidget {

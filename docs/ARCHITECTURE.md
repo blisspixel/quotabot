@@ -66,7 +66,7 @@ integrations/mcp_clients/
 app/ (Flutter desktop)
   main.dart   imports collectAll(), renders cards, adaptive refresh
   fleet.dart  the Quota Analytics screen (Now/7d/90d, charts, optional LiteLLM
-              routed-request metrics, the oracle glyph)
+              routed-request metrics)
   demo.dart   synthetic data for QUOTABOT_DEMO previews/screenshots
   logos.dart  vector provider logos (CustomPainter)
   prefs.dart  persisted UI preferences
@@ -356,8 +356,8 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   a route over the strip (the window resizes to a steady portrait and restores on
   Back). It is a range switch (Now / 7d / 90d): the live view ranks headroom and
   shows a consumption donut; the historical views recompute `Insights` and the
-  heatmap from the raw buckets. It carries the one sanctioned emoji, a glyph
-  derived from the fleet's numbers (`pythagorasOracle`).
+  heatmap from the raw buckets. Its header reuses the same compact quota gauge
+  and window controls as the main quota view.
 - Provider logos are vector `CustomPainter`s (`logos.dart`) so they stay sharp
   at any size and recolor for light or dark. The in-app header shows a small
   dynamic radial "pool gauge" (`AppGauge` in `logos.dart`) next to the "Quota"

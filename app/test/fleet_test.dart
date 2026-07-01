@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
+import 'package:quotabot/logos.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _q(String id, String name, double usedPercent, {int? resetsAt}) {
@@ -101,6 +102,28 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('7d'));
     await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('FleetScreen uses compact main-view chrome', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('codex', 'Codex', 20, resetsAt: 1782050000)],
+          buckets: const {},
+          dark: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(AppGauge), findsOneWidget);
+    expect(find.byTooltip('Back to quotas'), findsOneWidget);
+    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Back'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

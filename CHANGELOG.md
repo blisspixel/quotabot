@@ -4,7 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-No entries yet.
+### Changed
+- Quota Analytics now uses the main quota view's compact gauge header, icon-only
+  window controls, card radius, and tighter metric typography to reduce the
+  visual jump between the two screens, and removes the decorative analytics
+  glyph.
 
 ## 0.5.4 - 2026-07-01
 
