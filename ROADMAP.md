@@ -375,6 +375,9 @@ Breadth and depth, once the core is trusted:
   least 35 percent of included quota would expire unused within 24 hours. Burn
   history is account-scoped when account identity is available, so multi-account
   routing uses the matching account's pace instead of a provider-wide estimate.
+  The desktop widget header now surfaces the same burn-aware route provenance in
+  a compact next-route line with confidence, while keeping single-account labels
+  out of the main view.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation

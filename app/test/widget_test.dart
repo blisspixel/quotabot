@@ -4,6 +4,7 @@ import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/profile_ui.dart';
 import 'package:quotabot/theme_spec.dart';
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _provider(
@@ -16,6 +17,19 @@ ProviderQuota _provider(
   account: account,
   kind: kind,
   asOf: 1782046566,
+);
+
+ProviderQuota _quota(
+  String id,
+  String name,
+  String account, {
+  double used = 20,
+}) => ProviderQuota(
+  provider: id,
+  displayName: name,
+  account: account,
+  asOf: 1782046566,
+  windows: [QuotaWindow(label: '5h', usedPercent: used)],
 );
 
 void main() {
@@ -329,5 +343,52 @@ void main() {
         expect(groups.last.quotas.single.provider, 'ollama');
       },
     );
+  });
+
+  group('desktop route signal', () {
+    test('shows burn-aware confidence without a lone account label', () {
+      const now = 1782046566;
+      final claude = _quota('claude', 'Claude', 'solo@example.com');
+      final suggestion = suggestRoute(
+        [claude],
+        now,
+        burnStatsByProvider: {
+          quotaIdentityKey('claude', 'solo@example.com'): const BurnStat(
+            perHour: 20,
+            sePerHour: 4,
+            samples: 8,
+          ),
+        },
+      );
+
+      final line = desktopRouteSignalLine(
+        suggestion,
+        [claude],
+        now,
+        showAccounts: true,
+      );
+
+      expect(line, contains('Next: Claude'));
+      expect(line, contains('80% free'));
+      expect(line, contains('60% after burn'));
+      expect(line, contains('67% thin data'));
+      expect(line, isNot(contains('solo@example.com')));
+    });
+
+    test('uses account labels only to disambiguate duplicate providers', () {
+      const now = 1782046566;
+      final work = _quota('codex', 'Codex', 'work@example.com');
+      final home = _quota('codex', 'Codex', 'home@example.com', used: 60);
+      final suggestion = suggestRoute([work, home], now);
+
+      final line = desktopRouteSignalLine(
+        suggestion,
+        [work, home],
+        now,
+        showAccounts: true,
+      );
+
+      expect(line, contains('Next: Codex (work@example.com)'));
+    });
   });
 }

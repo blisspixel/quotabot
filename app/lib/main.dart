@@ -229,6 +229,64 @@ List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
   ];
 }
 
+@visibleForTesting
+String? desktopRouteSignalLine(
+  RouteSuggestion suggestion,
+  List<ProviderQuota> snapshot,
+  int now, {
+  bool showAccounts = false,
+}) {
+  final candidate = suggestion.recommended;
+  if (candidate == null) return null;
+  ProviderQuota? quota;
+  for (final q in snapshot) {
+    if (q.provider == candidate.provider && q.account == candidate.account) {
+      quota = q;
+      break;
+    }
+  }
+  final display = quota?.displayName ?? candidate.provider;
+  final counts = <String, int>{};
+  for (final q in snapshot) {
+    counts[q.provider] = (counts[q.provider] ?? 0) + 1;
+  }
+  final accountLabel =
+      quota != null &&
+          showAccounts &&
+          quotaShouldShowAccountLabel(quota, counts)
+      ? ' (${quota.account})'
+      : '';
+  final parts = <String>['Next: $display$accountLabel'];
+  if (candidate.isLocal) {
+    parts.add('local fallback');
+  } else if (candidate.headroom != null) {
+    final prefix = candidate.stale ? 'cached ' : '';
+    parts.add('$prefix${candidate.headroom!.round()}% free');
+    final effective = candidate.effectiveHeadroom;
+    if (effective != null && candidate.headroom! - effective >= 1) {
+      final cause = candidate.leaseDiscount > 0
+          ? 'after burn/leases'
+          : 'after burn';
+      parts.add('${effective.round()}% $cause');
+    }
+  }
+  final confidence = candidate.confidence;
+  if (confidence != null) {
+    final pct = (confidence * 100).round().clamp(0, 100);
+    final label = confidence >= 0.8
+        ? 'high confidence'
+        : confidence >= 0.55
+        ? 'thin data'
+        : 'low confidence';
+    parts.add('$pct% $label');
+  }
+  final ageSeconds = now - suggestion.asOf;
+  if (ageSeconds >= 60) {
+    parts.add('as of ${_ageLabel(suggestion.asOf, now)} ago');
+  }
+  return parts.join(' | ');
+}
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   const Dashboard({super.key, required this.prefs});
@@ -266,6 +324,7 @@ class _DashboardState extends State<Dashboard>
   Map<String, Insights> _insights = {};
   Map<String, List<List<double?>>> _heatmaps = {};
   Map<String, List<HeadroomBucket>> _buckets = {};
+  Map<String, BurnStat> _burnStats = {};
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
@@ -648,6 +707,8 @@ class _DashboardState extends State<Dashboard>
       }).toList();
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final burnStats = recentBurnStatsByQuota(active, nowSec);
       // Track systemic failure...
       final anyLive = active.any(
         (q) => q.ok && q.windows.isNotEmpty && !q.stale,
@@ -664,8 +725,8 @@ class _DashboardState extends State<Dashboard>
         _insights = {};
         _heatmaps = {};
         _buckets = {};
+        _burnStats = burnStats;
         _routeSummary = routeSummary;
-        final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
         final tz = DateTime.now().timeZoneOffset;
         for (final q in active) {
           final key = quotaDisplayKey(q);
@@ -707,6 +768,7 @@ class _DashboardState extends State<Dashboard>
       _insights = {};
       _heatmaps = {};
       _buckets = {};
+      _burnStats = cli_demo.demoBurnStats();
       _routeSummary = demoRoutedRequestSummary();
       for (final q in demo) {
         final b = buckets[q.provider];
@@ -1167,6 +1229,9 @@ class _DashboardState extends State<Dashboard>
     return q.stale ? '$base (cached)' : base;
   }
 
+  RouteSuggestion _routeSuggestion(int now) =>
+      suggestRoute(_visible, now, burnStatsByProvider: _burnStats);
+
   /// Average remaining headroom across visible providers that report quota,
   /// as a percent (0..100), or null when nothing has data. This is the "pool"
   /// the header gauge fills to.
@@ -1187,92 +1252,129 @@ class _DashboardState extends State<Dashboard>
   Widget _header() {
     final chrome = AppChromeTheme.of(context);
     final muted = chrome.muted;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final routeLine = desktopRouteSignalLine(
+      _routeSuggestion(now),
+      _visible,
+      now,
+      showAccounts: _showAccounts,
+    );
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: (_) => windowManager.startDragging(),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 6, 6),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  () {
-                    final pool = _poolHeadroom();
-                    final track = chrome.gaugeTrack;
-                    return AppGauge(
-                      size: 17,
-                      value: (pool ?? 0) / 100.0,
-                      fillColor: pool == null ? track : _availColor(pool),
-                      trackColor: track,
-                    );
-                  }(),
-                  const SizedBox(width: 7),
-                  Text(
-                    'Quota',
-                    style: TextStyle(
-                      fontSize: AppType.title,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.2,
-                      color: chrome.foreground,
-                    ),
+            Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      () {
+                        final pool = _poolHeadroom();
+                        final track = chrome.gaugeTrack;
+                        return AppGauge(
+                          size: 17,
+                          value: (pool ?? 0) / 100.0,
+                          fillColor: pool == null ? track : _availColor(pool),
+                          trackColor: track,
+                        );
+                      }(),
+                      const SizedBox(width: 7),
+                      Text(
+                        'Quota',
+                        style: TextStyle(
+                          fontSize: AppType.title,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
+                          color: chrome.foreground,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _ago(_updated),
+                        style: TextStyle(
+                          fontSize: AppType.caption,
+                          color: muted,
+                        ),
+                      ),
+                      if (_activeProfile.name != defaultProfileName) ...[
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: Text(
+                            profileLabel(_activeProfile),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppType.label,
+                              fontWeight: FontWeight.w600,
+                              color: muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _ago(_updated),
-                    style: TextStyle(fontSize: AppType.caption, color: muted),
-                  ),
-                  if (_activeProfile.name != defaultProfileName) ...[
-                    const SizedBox(width: 7),
-                    Flexible(
+                ),
+                // Order: the two things you actively do (refresh, open analytics),
+                // then the view toggle, then settings and help, then close last.
+                _iconButton(
+                  _isRefreshing ? Icons.sync : Icons.refresh_rounded,
+                  muted,
+                  _refresh,
+                  tooltip: 'Refresh now',
+                ),
+                _iconButton(
+                  Icons.bar_chart_rounded,
+                  muted,
+                  _showFleet,
+                  tooltip: 'Quota analytics',
+                ),
+                _iconButton(
+                  Icons.close_fullscreen_rounded,
+                  muted,
+                  _toggleCompact,
+                  tooltip: 'Collapse',
+                ),
+                _menuButton(muted),
+                _iconButton(
+                  Icons.help_outline_rounded,
+                  muted,
+                  _showHelp,
+                  tooltip: 'Setup and help',
+                ),
+                _iconButton(
+                  Icons.close_rounded,
+                  muted,
+                  windowManager.close,
+                  tooltip: 'Close',
+                ),
+              ],
+            ),
+            if (routeLine != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, right: 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.alt_route_rounded, size: 12, color: muted),
+                    const SizedBox(width: 5),
+                    Expanded(
                       child: Text(
-                        profileLabel(_activeProfile),
+                        routeLine,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: AppType.label,
-                          fontWeight: FontWeight.w600,
+                          fontSize: AppType.caption,
+                          fontWeight: FontWeight.w500,
                           color: muted,
                         ),
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-            // Order: the two things you actively do (refresh, open analytics),
-            // then the view toggle, then settings and help, then close last.
-            _iconButton(
-              _isRefreshing ? Icons.sync : Icons.refresh_rounded,
-              muted,
-              _refresh,
-              tooltip: 'Refresh now',
-            ),
-            _iconButton(
-              Icons.bar_chart_rounded,
-              muted,
-              _showFleet,
-              tooltip: 'Quota analytics',
-            ),
-            _iconButton(
-              Icons.close_fullscreen_rounded,
-              muted,
-              _toggleCompact,
-              tooltip: 'Collapse',
-            ),
-            _menuButton(muted),
-            _iconButton(
-              Icons.help_outline_rounded,
-              muted,
-              _showHelp,
-              tooltip: 'Setup and help',
-            ),
-            _iconButton(
-              Icons.close_rounded,
-              muted,
-              windowManager.close,
-              tooltip: 'Close',
-            ),
           ],
         ),
       ),
@@ -1687,7 +1789,7 @@ class _DashboardState extends State<Dashboard>
       final snapshot = _visible;
       // Compute the routing recommendation once so a low-quota alert can point
       // the user at where to send work instead.
-      final suggestion = suggestRoute(snapshot, nowSec);
+      final suggestion = _routeSuggestion(nowSec);
 
       // Proactive low-quota alerts: fire once when a provider's binding window
       // crosses into red, naming where to route next, using the same

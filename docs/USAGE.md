@@ -20,6 +20,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   provider has more than one account on screen.
 - **Smart schedule:** refreshes more often as a reset nears or a cap fills, and
   relaxes to as little as twice a day when everything is healthy.
+- **Route signal:** the expanded header shows the next recommended route, its
+  current free headroom, any material burn discount, and confidence. Account
+  names still appear only when needed to distinguish multiple accounts.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
 - **Forecast at a glance:** when a provider is visibly burning, the card adds a
   plain-language line on the binding window ("about an hour of usage left", or

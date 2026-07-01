@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- The desktop widget header now shows a compact "Next" route signal using the
+  same burn-aware `suggestRoute` provenance as the CLI/MCP path: current free
+  headroom, burn-discounted headroom when material, and confidence. Single
+  account emails remain hidden in the main view.
 - Reset-aware best-time hints now pick the nearest strong weekday/hour slot
   that starts before the active quota reset, using only existing local history.
   `quotabot stats`, `quotabot report`, report JSON, and the desktop analytics
