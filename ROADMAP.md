@@ -375,25 +375,49 @@ here is the final one.
     names each provider's own usage surface for the human cross-check. The
     matrix itself is filled from date-stamped verify records per OS; the first
     Windows column is recorded, macOS and Linux remain.
-23. [ ] Re-audit no-surprise billing end to end. Confirm runtime sources still
+23. [x] Re-audit no-surprise billing end to end. Confirm runtime sources still
     avoid paid model, chat, image, and content-generation APIs; confirm LiteLLM
     paid API routes stay opt-in; confirm `--budget=quota` excludes manual,
     credit-backed, request-metered, and expired temporary quota routes.
+    Re-audited 2026-07-01: every outbound call site classified (quota
+    metadata, auth, or local runtime reads only), LiteLLM gating and the
+    manual/cutoff exclusions confirmed with their pinned tests, and the one
+    gap found was closed: `--budget=quota` now enforces an explicit
+    quota-plan provider allowlist instead of relying on catalog omission,
+    pinned with a test.
 24. [ ] Polish user-facing trust surfaces. The desktop widget, `top`, `doctor`,
     `suggest`, `models`, alerts, and docs should make quota age, staleness,
     account identity, fallback behavior, and spend class clear without noisy
-    caveats.
+    caveats. In progress: `top` now shows cache age, account identity on
+    duplicate providers, and column-stable narrow rendering; analytics shares
+    the dashboard chrome; `verify` states each provider's honesty plainly.
 25. [ ] Smoke test install and update paths on clean Windows, macOS, and Linux
     hosts: one-line installers, source setup scripts, desktop shortcut/tray
     setup, CLI-only setup, release archives, checksums, `quotabot doctor`, and
-    upgrade from the latest 0.x release.
-26. [ ] Final contract audit. Review `quotabot.v1`, model JSON, report JSON,
+    upgrade from the latest 0.x release. Progress 2026-07-01: Windows
+    `install.ps1` verified against the live v0.5.5 artifacts (checksum,
+    upgrade over a source install, correct version, verify passes) and
+    `install.sh` verified in WSL Ubuntu with a truthful signed-out `verify`.
+    Native macOS and Linux hosts remain.
+26. [x] Final contract audit. Review `quotabot.v1`, model JSON, report JSON,
     MCP tools/resources, profile storage, leases, cache files, exit codes, and
     docs for accidental churn before declaring the surface stable.
+    Audited 2026-07-01 across every schema id, MCP tool, storage file, and
+    documented flag. Fixed: `check --json` no longer mislabels its shape as
+    `quotabot.v1` (now `quotabot.check.v1` with `as_of`), MCP
+    `provider_with_most_headroom` gained `quotabot.headroom.v1` plus `as_of`,
+    MCP output schemas declare their injected profile/account/error fields,
+    and SCHEMA.md now documents every emitted field including
+    `quotabot.calibration.v1` and `quotabot.catalog_audit.v1`.
 27. [ ] Final security and reliability pass. Run secret scanning, CodeQL,
     dependency review, installer/script review, credential-handling review,
     local-file permission review, webhook/HTTP host validation review, and an
-    adversarial bug hunt. Fix and pin anything real with tests.
+    adversarial bug hunt. Fix and pin anything real with tests. First
+    post-freeze round completed 2026-07-01: credential handling, webhook/HTTP
+    validation, file permissions, and installers came back clean; two real
+    findings (terminal escape injection via provider strings; a hung provider
+    wedging the fleet and the desktop poll loop) were fixed and pinned with
+    tests. The item closes when a repeat round comes back empty.
 28. [ ] 1.0 release candidate dry run. Build artifacts from a tag candidate,
     verify release notes and checksums, install from artifacts, run smoke tests,
     verify GitHub alerts are clear, and confirm the working tree has one clean
