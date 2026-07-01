@@ -420,8 +420,11 @@ Breadth and depth, once the core is trusted:
   score, so sparse quiet cells with spent samples cannot outrank consistently
   usable windows on raw free percent alone. The first optimizer provenance hook
   now exposes per-candidate `runway_hours` separately from the confidence
-  multiplier, making the public route score auditable before explicit waste and
-  cost weights are added.
+  multiplier, making the public route score auditable. Provider routing now also
+  applies the first explicit waste weight: measured, available quota near reset
+  gets a modest use-it-or-lose-it boost when local burn projects meaningful
+  unused included quota at reset, while manual, stale, local, and ambiguous
+  multi-account signals are excluded. Explicit cost weighting remains next.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

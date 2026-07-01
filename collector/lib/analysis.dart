@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'insights.dart';
 import 'models.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
@@ -157,6 +158,14 @@ class RouteCandidate {
   /// public score auditable instead of opaque.
   final double? runwayHours;
 
+  /// Projected included quota percent that would expire unused at reset, when
+  /// recent burn and a future reset make that measurable.
+  final double? projectedWastePercent;
+
+  /// Multiplier applied to the runway score to lean into measured quota that is
+  /// likely to expire unused. Omitted when no boost applies.
+  final double? wasteBoost;
+
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
@@ -182,6 +191,8 @@ class RouteCandidate {
     this.confidence,
     this.routingScore,
     this.runwayHours,
+    this.projectedWastePercent,
+    this.wasteBoost,
   });
 
   Map<String, dynamic> toJson() => {
@@ -198,6 +209,11 @@ class RouteCandidate {
         if (confidence != null) 'confidence': confidence,
         if (routingScore != null) 'routing_score': routingScore,
         if (runwayHours != null) 'runway_hours': runwayHours,
+        if (projectedWastePercent != null)
+          'projected_waste_percent':
+              double.parse(projectedWastePercent!.toStringAsFixed(1)),
+        if (wasteBoost != null)
+          'waste_boost': double.parse(wasteBoost!.toStringAsFixed(4)),
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -268,6 +284,15 @@ class RouteSuggestion {
   /// to use a local runtime before spending subscription quota.
   final String routingPolicy;
 
+  /// Weight applied to the projected-waste multiplier in the routing score.
+  final double wasteWeight;
+
+  /// Projected-waste floor required before a route gets a waste boost.
+  final double wasteThresholdPercent;
+
+  /// Reset horizon, in hours, for projected-waste route boosting.
+  final int wasteMaxHours;
+
   const RouteSuggestion({
     required this.recommended,
     required this.ranked,
@@ -277,6 +302,9 @@ class RouteSuggestion {
     required this.asOf,
     required this.riskZ,
     this.routingPolicy = 'balanced',
+    this.wasteWeight = kDefaultRoutingWasteWeight,
+    this.wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
+    this.wasteMaxHours = kDefaultExpiringQuotaMaxHours,
   });
 
   Map<String, dynamic> toJson() => {
@@ -284,6 +312,9 @@ class RouteSuggestion {
         'as_of': asOf,
         'risk_z': riskZ,
         'routing_policy': routingPolicy,
+        'waste_weight': wasteWeight,
+        'waste_threshold_percent': wasteThresholdPercent,
+        'waste_max_hours': wasteMaxHours,
         'recommended': recommended?.toJson(),
         'reason': reason,
         'using_local_fallback': usingLocalFallback,
@@ -341,6 +372,10 @@ String _burnNote(RouteCandidate c) {
 /// finite runway score when burn is unknown or effectively flat.
 const double _burnFloorPercentPerHour = 1.0;
 
+/// Default use-it-or-lose-it route boost. A full projected-waste fraction raises
+/// the score by 25%, enough to break ties without overriding safety gates.
+const double kDefaultRoutingWasteWeight = 0.25;
+
 /// The optimizer provenance behind a metered subscription's route score.
 class RoutingScoreBreakdown {
   /// Risk-adjusted runway before trust is applied.
@@ -349,12 +384,20 @@ class RoutingScoreBreakdown {
   /// Trust multiplier applied to [runwayHours].
   final double confidence;
 
+  /// Projected-waste fraction of remaining headroom, 0..1.
+  final double wasteFraction;
+
+  /// Use-it-or-lose-it multiplier applied after confidence.
+  final double wasteBoost;
+
   /// Final score used for subscription ranking.
   final double score;
 
   const RoutingScoreBreakdown({
     required this.runwayHours,
     required this.confidence,
+    required this.wasteFraction,
+    required this.wasteBoost,
     required this.score,
   });
 }
@@ -386,15 +429,21 @@ double riskAdjustedHeadroom(
 /// as a fallback, not as metered subscriptions competing on quota runway.
 double? routingScore({
   required bool isLocal,
+  double? headroom,
   required double? effectiveHeadroom,
   required double? burnPerHour,
   required double? confidence,
+  double? projectedWastePercent,
+  double wasteWeight = kDefaultRoutingWasteWeight,
 }) =>
     routingScoreBreakdown(
       isLocal: isLocal,
+      headroom: headroom,
       effectiveHeadroom: effectiveHeadroom,
       burnPerHour: burnPerHour,
       confidence: confidence,
+      projectedWastePercent: projectedWastePercent,
+      wasteWeight: wasteWeight,
     )?.score;
 
 /// Returns the route score and its first optimizer components for metered
@@ -402,21 +451,31 @@ double? routingScore({
 /// explicit fallback or local-first policy, not the subscription index.
 RoutingScoreBreakdown? routingScoreBreakdown({
   required bool isLocal,
+  double? headroom,
   required double? effectiveHeadroom,
   required double? burnPerHour,
   required double? confidence,
+  double? projectedWastePercent,
+  double wasteWeight = kDefaultRoutingWasteWeight,
 }) {
   if (isLocal || effectiveHeadroom == null) return null;
-  final headroom = effectiveHeadroom.clamp(0.0, 100.0).toDouble();
+  final effective = effectiveHeadroom.clamp(0.0, 100.0).toDouble();
+  final rawHeadroom = (headroom ?? effectiveHeadroom).clamp(0.0, 100.0);
   final burn = burnPerHour != null && burnPerHour > 0
       ? burnPerHour
       : _burnFloorPercentPerHour;
-  final runwayHours = headroom / math.max(burn, _burnFloorPercentPerHour);
+  final runwayHours = effective / math.max(burn, _burnFloorPercentPerHour);
   final trust = (confidence ?? 0.6).clamp(0.0, 1.0).toDouble();
+  final waste = (projectedWastePercent ?? 0).clamp(0.0, 100.0).toDouble();
+  final wasteFraction =
+      rawHeadroom <= 0 ? 0.0 : (waste / rawHeadroom).clamp(0.0, 1.0).toDouble();
+  final wasteBoost = 1 + math.max(0.0, wasteWeight) * wasteFraction;
   return RoutingScoreBreakdown(
     runwayHours: runwayHours,
     confidence: trust,
-    score: runwayHours * trust,
+    wasteFraction: wasteFraction,
+    wasteBoost: wasteBoost,
+    score: runwayHours * trust * wasteBoost,
   );
 }
 
@@ -583,8 +642,10 @@ int _compareSubscriptionCandidates(RouteCandidate a, RouteCandidate b) {
 /// [burnStatsByProvider] entries are preferred when present. A provider being
 /// drawn down fast is therefore a less safe pick than its instantaneous headroom
 /// suggests. Ranking uses [routingScore], a confidence-weighted runway derived
-/// from that same effective headroom. Availability still reflects present
-/// headroom: a provider with quota now is usable now, just ranked lower.
+/// from that same effective headroom, with a modest projected-waste multiplier
+/// when local burn evidence says included quota would otherwise expire unused.
+/// Availability still reflects present headroom: a provider with quota now is
+/// usable now, just ranked lower.
 ///
 /// Local runtimes never "win" on headroom (they would always read 100%); they
 /// are only chosen when the paid budget is too tight to be comfortable.
@@ -598,11 +659,24 @@ RouteSuggestion suggestRoute(
   double riskZ = 0,
   LeaseDiscountProvider leaseDiscountFor = _noLeaseDiscount,
   bool preferLocal = false,
+  double wasteWeight = kDefaultRoutingWasteWeight,
+  double wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
+  int wasteMaxHours = kDefaultExpiringQuotaMaxHours,
 }) {
+  final measuredProviderCounts = <String, int>{};
+  for (final q in quotas) {
+    if (q.isLocal || q.source == 'manual' || q.windows.isEmpty) continue;
+    measuredProviderCounts[q.provider] =
+        (measuredProviderCounts[q.provider] ?? 0) + 1;
+  }
+
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
-    final stat = q.isLocal ? null : burnStatForQuota(burnStatsByProvider, q);
+    final accountStat =
+        q.isLocal ? null : burnStatsByProvider[quotaIdentityKeyFor(q)];
+    final providerStat = q.isLocal ? null : burnStatsByProvider[q.provider];
+    final stat = q.isLocal ? null : (accountStat ?? providerStat);
     final burn =
         q.isLocal ? null : (stat?.perHour ?? burnByProvider[q.provider]);
     final burnSe = stat?.sePerHour;
@@ -620,11 +694,25 @@ RouteSuggestion suggestRoute(
         ? null
         : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
     final confidence = _confidence(q, burnSe, samples);
+    final wasteBurn = accountStat ??
+        ((measuredProviderCounts[q.provider] ?? 0) == 1 ? providerStat : null);
+    final projectedWaste = _projectedWastePercent(
+      q,
+      a,
+      headroom,
+      wasteBurn?.perHour,
+      now,
+      thresholdPercent: wasteThresholdPercent,
+      maxHoursToReset: wasteMaxHours,
+    );
     final score = routingScoreBreakdown(
       isLocal: q.isLocal,
+      headroom: headroom,
       effectiveHeadroom: effective,
       burnPerHour: burn,
       confidence: confidence,
+      projectedWastePercent: projectedWaste,
+      wasteWeight: wasteWeight,
     );
     return RouteCandidate(
       provider: q.provider,
@@ -639,6 +727,9 @@ RouteSuggestion suggestRoute(
       confidence: confidence,
       routingScore: score?.score,
       runwayHours: score?.runwayHours,
+      projectedWastePercent: projectedWaste,
+      wasteBoost:
+          score == null || score.wasteBoost <= 1 ? null : score.wasteBoost,
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,
@@ -681,6 +772,10 @@ RouteSuggestion suggestRoute(
         asOf: now,
         riskZ: riskZ,
         routingPolicy: preferLocal ? 'local_first' : 'balanced',
+        wasteWeight: wasteWeight,
+        wasteThresholdPercent:
+            wasteThresholdPercent.clamp(0.0, 100.0).toDouble(),
+        wasteMaxHours: wasteMaxHours.clamp(0, 24 * 14).toInt(),
       );
 
   if (usable.isEmpty) {
@@ -767,6 +862,37 @@ RouteSuggestion suggestRoute(
   }
 
   return result(null, 'Everything is spent and no reset time is known.');
+}
+
+double? _projectedWastePercent(
+  ProviderQuota q,
+  ({bool available, double? headroom, int? resetsAt}) availability,
+  double? headroom,
+  double? burnPerHour,
+  int now, {
+  required double thresholdPercent,
+  required int maxHoursToReset,
+}) {
+  if (q.isLocal || q.source == 'manual' || q.stale || q.windows.isEmpty) {
+    return null;
+  }
+  final reset = availability.resetsAt;
+  if (!availability.available || headroom == null || reset == null) {
+    return null;
+  }
+  final maxSeconds = maxHoursToReset.clamp(0, 24 * 14).toInt() * 3600;
+  final secondsToReset = reset - now;
+  if (secondsToReset <= 0 || secondsToReset > maxSeconds) return null;
+  final pace = computePace(
+    headroom: headroom,
+    resetsAt: reset,
+    burnPerHour: burnPerHour,
+    now: now,
+  );
+  final waste = pace?.wastedAtReset;
+  final threshold = thresholdPercent.clamp(0.0, 100.0).toDouble();
+  if (waste == null || waste < threshold) return null;
+  return waste;
 }
 
 /// The adaptive refresh delay in seconds for a snapshot: fast when a reset is

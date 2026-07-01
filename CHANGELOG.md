@@ -138,6 +138,10 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Provider routing now applies a modest use-it-or-lose-it boost when measured
+  burn and a near reset show included quota would otherwise expire unused. The
+  signal skips local runtimes, manual quota, stale reads, and ambiguous
+  multi-account provider-level burn.
 - Routing suggestions now expose additive `runway_hours` provenance for metered
   subscriptions, making `routing_score = runway_hours * confidence` auditable
   before later optimizer weights are added.

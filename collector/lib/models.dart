@@ -1,6 +1,12 @@
 /// Normalized quota model shared by every provider adapter and the UI.
 library;
 
+/// Conservative defaults for use-it-or-lose-it quota signals. These defaults
+/// are shared by provider routing and concrete-model routing so both surfaces
+/// agree on what counts as meaningful projected waste.
+const double kDefaultExpiringQuotaWasteThreshold = 35.0;
+const int kDefaultExpiringQuotaMaxHours = 24;
+
 /// A single rolling limit window for a provider (e.g. a 5-hour or weekly cap).
 class QuotaWindow {
   /// Short human label, e.g. "5h", "weekly", "daily".

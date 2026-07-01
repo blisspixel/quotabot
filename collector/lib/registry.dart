@@ -15,10 +15,6 @@ import 'model_catalog.dart';
 import 'models.dart';
 import 'util.dart';
 
-/// Conservative defaults for opt-in use-it-or-lose-it model routing.
-const double kDefaultExpiringQuotaWasteThreshold = 35.0;
-const int kDefaultExpiringQuotaMaxHours = 24;
-
 /// One routable model plus the live budget of the provider that gates it.
 class ModelEntry {
   final ModelInfo model;

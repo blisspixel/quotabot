@@ -165,6 +165,9 @@ Map<String, dynamic> decideNowResponse(
     'as_of': now,
     'risk_z': suggestion['risk_z'],
     'routing_policy': suggestion['routing_policy'],
+    'waste_weight': suggestion['waste_weight'],
+    'waste_threshold_percent': suggestion['waste_threshold_percent'],
+    'waste_max_hours': suggestion['waste_max_hours'],
     'source': cached.source,
     'snapshot_as_of': cached.asOf,
     'snapshot_age_seconds': age,
@@ -358,6 +361,13 @@ final _candidateSchema = JsonSchema.object(
     'runway_hours': JsonSchema.number(
       description: 'Risk-adjusted runway hours before confidence is applied.',
     ),
+    'projected_waste_percent': JsonSchema.number(
+      description:
+          'Included quota percent projected to expire unused at reset.',
+    ),
+    'waste_boost': JsonSchema.number(
+      description: 'Use-it-or-lose-it multiplier applied to routing_score.',
+    ),
     'resets_at': JsonSchema.integer(),
     'stale': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),
@@ -425,6 +435,15 @@ final suggestOutputSchema = JsonSchema.object(
     'routing_policy': JsonSchema.string(
       description: '"balanced" or "local_first".',
     ),
+    'waste_weight': JsonSchema.number(
+      description: 'Projected-waste multiplier weight used for ranking.',
+    ),
+    'waste_threshold_percent': JsonSchema.number(
+      description: 'Projected-waste floor required before a route is boosted.',
+    ),
+    'waste_max_hours': JsonSchema.integer(
+      description: 'Maximum reset horizon for projected-waste boosting.',
+    ),
     'recommended': _nullable(_candidateSchema),
     'reason': JsonSchema.string(),
     'using_local_fallback': JsonSchema.boolean(),
@@ -443,6 +462,9 @@ final decideNowOutputSchema = JsonSchema.object(
     'as_of': JsonSchema.integer(),
     'risk_z': JsonSchema.number(),
     'routing_policy': JsonSchema.string(),
+    'waste_weight': JsonSchema.number(),
+    'waste_threshold_percent': JsonSchema.number(),
+    'waste_max_hours': JsonSchema.integer(),
     'source': JsonSchema.string(
       description: '"memory", "disk", or "empty".',
     ),

@@ -395,7 +395,7 @@ Properties we can state and defend:
   `score_i = h_i / beta_i`, monotone in headroom and inverse burn. The current
   `suggestRoute` implementation uses effective headroom as the numerator and
   recent burn as the denominator, exposes that quotient as `runway_hours`, and
-  applies confidence as the first trust multiplier.
+  applies confidence plus the first `W_reset` projected-waste multiplier.
 - **Risk-monotone.** `dscore/dz <= 0`: more caution never increases a pick's score.
 - **Fail-soft.** Missing data -> `freshness -> 0` -> the provider sinks below the
   guaranteed fallback, never above it. The invariant holds by construction.
@@ -437,6 +437,7 @@ the measurable improvement over the shipped heuristic.
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
 | score component provenance | `analysis.dart` `RoutingScoreBreakdown` -> `runway_hours` | first optimizer hook shipped |
+| projected-waste route boost | `analysis.dart` `RoutingScoreBreakdown` -> `waste_boost` | first waste-weight hook shipped |
 | burn shrinkage | `insights.dart` `shrinkBurnStats` -> cache boundary | first hook shipped |
 | reliability shrinkage | `insights.dart` `shrinkInsightsReliability` -> stats/report/app analytics | shipped |
 | heatmap beta-binomial shrinkage | `insights.dart` `WeekHourWindow` usable rates -> scheduling score | shipped |
@@ -448,9 +449,11 @@ the measurable improvement over the shipped heuristic.
 Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, the unified
 confidence-weighted runway score, burn shrinkage, reliability shrinkage, and
 heatmap beta-binomial shrinkage are shipped. The first optimizer hook now exposes
-`runway_hours` separately from the confidence multiplier; the remaining optimizer
-work adds explicit waste and cost weights. Each step is a one-knob,
-reduces-to-previous change with its own tests.
+`runway_hours` separately from the confidence multiplier, and the first waste
+hook applies `waste_boost = 1 + W_reset * waste_fraction` when measured burn says
+included quota would otherwise expire unused. The remaining optimizer work adds
+explicit cost weights. Each step is a one-knob, reduces-to-previous change with
+its own tests.
 
 ---
 

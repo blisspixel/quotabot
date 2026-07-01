@@ -44,7 +44,8 @@ inside `quotabot.v1`; incompatible changes require a new schema id.
 `quotabot suggest --json`, MCP `suggest_provider`, and local HTTP `/suggest`
 emit `quotabot.suggest.v1` with:
 
-- `schema`, `as_of`, and `risk_z`.
+- `schema`, `as_of`, `risk_z`, `waste_weight`,
+  `waste_threshold_percent`, and `waste_max_hours`.
 - `routing_policy`: `balanced` by default, or `local_first` when the caller
   explicitly requested local capacity before subscription quota.
 - `recommended`: optional provider candidate.
@@ -52,11 +53,14 @@ emit `quotabot.suggest.v1` with:
 - Per-candidate budget fields such as `headroom_percent`,
   `effective_headroom_percent`, optional `lease_discount_percent`,
   `burn_percent_per_hour`, `burn_se_percent_per_hour`, `strand_probability`,
-  `confidence`, `runway_hours`, `routing_score`, `resets_at`, `stale`, and
-  `available`. `runway_hours` is the risk-adjusted runway before confidence is
-  applied; `routing_score` is the additive confidence-weighted runway score used
-  to rank metered subscriptions. Local runtimes may omit both because their
-  placement is governed by the explicit fallback or local-first policy.
+  `confidence`, `runway_hours`, optional `projected_waste_percent`, optional
+  `waste_boost`, `routing_score`, `resets_at`, `stale`, and `available`.
+  `runway_hours` is the risk-adjusted runway before confidence is applied;
+  `projected_waste_percent` is included only when measured burn and a near reset
+  show included quota would otherwise expire unused; `routing_score` is the
+  additive runway score after confidence and any waste boost. Local runtimes may
+  omit these score fields because their placement is governed by the explicit
+  fallback or local-first policy.
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields plus `source`, `snapshot_as_of`, `snapshot_age_seconds`,
