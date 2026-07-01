@@ -11,6 +11,7 @@ ProviderQuota _quota(
   double usedPercent, {
   String kind = 'subscription',
   String? source,
+  int resetInSeconds = 8 * Duration.secondsPerDay,
 }) =>
     ProviderQuota(
       provider: provider,
@@ -25,7 +26,7 @@ ProviderQuota _quota(
               QuotaWindow(
                 label: 'weekly',
                 usedPercent: usedPercent,
-                resetsAt: _now + 3600,
+                resetsAt: _now + resetInSeconds,
               ),
             ],
     );
@@ -65,6 +66,9 @@ void main() {
     expect(firstBest['label'], isA<String>());
     expect(firstBest['smoothed_free_percent'], isA<double>());
     expect(firstBest['support_samples'], greaterThanOrEqualTo(2));
+    final schedule = claude['weekly_schedule_hint'] as Map<String, dynamic>;
+    expect(schedule['summary'], contains('before reset'));
+    expect(schedule['window'], isA<Map<String, dynamic>>());
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {
@@ -92,6 +96,8 @@ void main() {
     expect(markdown, contains('## Best sampled windows'));
     expect(markdown, contains('raw '));
     expect(markdown, contains('support='));
+    expect(markdown, contains('## Reset-aware schedule hints'));
+    expect(markdown, contains('before reset'));
   });
 
   test('markdown escapes table cell separators', () {

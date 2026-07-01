@@ -162,6 +162,61 @@ void main() {
       expect(best.single.smoothedFreePercent, closeTo(78, 1));
       expect(best.single.supportSamples, 4);
     });
+
+    test('schedules the next strong slot before reset', () {
+      const windows = [
+        WeekHourWindow(
+          dayOfWeek: 3,
+          hour: 2,
+          samples: 3,
+          meanFreePercent: 80,
+          smoothedFreePercent: 78,
+          supportSamples: 5,
+          supportCells: 2,
+        ),
+        WeekHourWindow(
+          dayOfWeek: 3,
+          hour: 5,
+          samples: 3,
+          meanFreePercent: 90,
+          smoothedFreePercent: 88,
+          supportSamples: 5,
+          supportCells: 2,
+        ),
+      ];
+
+      final hint = weekHourScheduleHint(
+        windows,
+        0,
+        resetsAt: 3 * Duration.secondsPerHour,
+      );
+
+      expect(hint, isNotNull);
+      expect(hint!.scheduledAt, 2 * Duration.secondsPerHour);
+      expect(hint.waitSeconds, 2 * Duration.secondsPerHour);
+      expect(hint.summary, contains('Thu 02:00 in 2h0m'));
+      expect(hint.toJson()['window'], isA<Map<String, dynamic>>());
+    });
+
+    test('does not schedule at or after the reset boundary', () {
+      const windows = [
+        WeekHourWindow(
+          dayOfWeek: 3,
+          hour: 2,
+          samples: 3,
+          meanFreePercent: 80,
+        ),
+      ];
+
+      expect(
+        weekHourScheduleHint(
+          windows,
+          0,
+          resetsAt: 2 * Duration.secondsPerHour,
+        ),
+        isNull,
+      );
+    });
   });
 
   group('riskAdjustedHeadroom', () {

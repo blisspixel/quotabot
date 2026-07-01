@@ -49,7 +49,8 @@ time range:
 - **7d / 90d:** the free-% distribution (p10-p90 with a median tick), reliability
   and per-day trend, sampled-day streaks, a contribution calendar, and a
   best-time-to-run weekday-by-hour heatmap with a short best-sampled-window
-  summary.
+  summary plus a reset-aware next-slot hint when one of the strong historical
+  windows starts before the active reset.
 
 (There is also one small easter egg in the header, derived from the fleet's own
 numbers. Hover it.)
@@ -65,8 +66,8 @@ quotabot report         # weekly quota-health markdown for sharing
 quotabot keeps two tiers of local history, both zero-token: a short raw buffer of
 recent checks (the "usually ~X% free" line and sparkline) and compact hourly
 buckets retained 90 days (the analytics, sampled-day streaks, and contribution
-calendar, and best-time windows). No raw points are kept long term, and only
-quota metadata is ever stored, never prompts or code.
+calendar, best-time windows, and reset-aware schedule hints). No raw points are
+kept long term, and only quota metadata is ever stored, never prompts or code.
 
 ## CLI reference
 

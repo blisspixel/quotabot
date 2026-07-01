@@ -467,6 +467,19 @@ class _FleetScreenState extends State<FleetScreen> {
       tzOffset: tz,
       limit: 3,
     );
+    int? nextReset;
+    for (final quota in widget.data) {
+      if (quota.isLocal) continue;
+      final reset = bindingWindow(quota, now)?.resetsAt;
+      if (reset == null || reset <= now) continue;
+      if (nextReset == null || reset < nextReset) nextReset = reset;
+    }
+    final scheduleHint = weekHourScheduleHint(
+      bestWindows,
+      now,
+      resetsAt: nextReset,
+      tzOffset: tz,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -531,6 +544,20 @@ class _FleetScreenState extends State<FleetScreen> {
                 const SizedBox(height: 6),
                 Text(
                   _bestTimeLine(bestWindows),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.caption,
+                    height: 1.25,
+                    color: c.fg,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+              if (scheduleHint != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'next strong slot ${scheduleHint.summary}',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(

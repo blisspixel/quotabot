@@ -91,6 +91,27 @@ void main() {
     expect(output, contains('raw '));
     expect(output, contains('support='));
   });
+
+  test('stats json includes a reset-aware schedule hint when supported',
+      () async {
+    final cache = Directory('${temp.path}/quotabot/cache')
+      ..createSync(recursive: true);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final nextHour =
+        now - (now % Duration.secondsPerHour) + Duration.secondsPerHour;
+    File('${cache.path}/buckets_codex.json').writeAsStringSync(jsonEncode([
+      _bucketSamples(nextHour - Duration.secondsPerDay * 7, 92, 2),
+    ]));
+
+    final result = await runCli(['stats', '--json']);
+
+    expect(result.exitCode, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    final codex = json['codex'] as Map<String, dynamic>;
+    final hint = codex['schedule_hint'] as Map<String, dynamic>;
+    expect(hint['summary'], contains('before reset'));
+    expect(hint['window'], isA<Map<String, dynamic>>());
+  });
 }
 
 Map<String, dynamic> _bucket(int start, double headroom) => {
@@ -102,4 +123,16 @@ Map<String, dynamic> _bucket(int start, double headroom) => {
       'max': headroom,
       'x': 0,
       'h': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+    };
+
+Map<String, dynamic> _bucketSamples(int start, double headroom, int samples) =>
+    {
+      's': start - (start % Duration.secondsPerHour),
+      'n': samples,
+      'sum': headroom * samples,
+      'sq': headroom * headroom * samples,
+      'min': headroom,
+      'max': headroom,
+      'x': 0,
+      'h': [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, samples, 0, 0, 0, 0, 0],
     };

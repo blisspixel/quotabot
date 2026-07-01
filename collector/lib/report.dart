@@ -20,6 +20,7 @@ class QuotaHealthProviderLine {
   final int? spentDayStreak;
   final List<ContributionDay> contributionCalendar;
   final List<WeekHourWindow> bestTimeWindows;
+  final WeekHourScheduleHint? scheduleHint;
   final String? pace;
 
   const QuotaHealthProviderLine({
@@ -38,6 +39,7 @@ class QuotaHealthProviderLine {
     required this.spentDayStreak,
     this.contributionCalendar = const [],
     this.bestTimeWindows = const [],
+    this.scheduleHint,
     required this.pace,
   });
 
@@ -59,6 +61,8 @@ class QuotaHealthProviderLine {
             contributionCalendar.map((day) => day.toJson()).toList(),
         'weekly_best_time_windows':
             bestTimeWindows.map((window) => window.toJson()).toList(),
+        if (scheduleHint != null)
+          'weekly_schedule_hint': scheduleHint!.toJson(),
         'pace': pace,
       };
 }
@@ -160,6 +164,23 @@ class QuotaHealthReport {
         );
       }
     }
+    final scheduleHints =
+        providers.where((provider) => provider.scheduleHint != null);
+    if (scheduleHints.isNotEmpty) {
+      lines
+        ..add('')
+        ..add('## Reset-aware schedule hints')
+        ..add('')
+        ..add(
+          'Nearest strong weekday/hour slot from existing history that starts before the active reset.',
+        );
+      for (final provider in scheduleHints) {
+        lines.add(
+          '- ${_cell(provider.displayName)} (${_cell(provider.account)}): '
+          '${_cell(provider.scheduleHint!.summary)}',
+        );
+      }
+    }
     return '${lines.join('\n')}\n';
   }
 }
@@ -169,6 +190,7 @@ QuotaHealthReport buildQuotaHealthReport(
   int now,
   RouteSuggestion suggestion, {
   Map<String, Insights> insightsByProvider = const {},
+  Duration tzOffset = Duration.zero,
 }) {
   final recommended = suggestion.recommended;
   final fallbackKind = switch (suggestion.fallback.kind) {
@@ -188,6 +210,7 @@ QuotaHealthReport buildQuotaHealthReport(
           now,
           insightsByProvider[quotaIdentityKeyFor(provider)] ??
               insightsByProvider[provider.provider],
+          tzOffset,
         ),
     ],
   );
@@ -197,10 +220,19 @@ QuotaHealthProviderLine _providerLine(
   ProviderQuota provider,
   int now,
   Insights? insights,
+  Duration tzOffset,
 ) {
   final headroom = provider.isLocal ? null : providerHeadroom(provider, now);
   final binding = provider.isLocal ? null : bindingWindow(provider, now);
   final state = _state(provider, headroom);
+  final scheduleHint = provider.isLocal || insights == null
+      ? null
+      : weekHourScheduleHint(
+          insights.bestTimeWindows,
+          now,
+          resetsAt: binding?.resetsAt,
+          tzOffset: tzOffset,
+        );
   final pace = provider.isLocal || insights == null
       ? null
       : computePace(
@@ -225,6 +257,7 @@ QuotaHealthProviderLine _providerLine(
     spentDayStreak: insights?.spentDayStreak,
     contributionCalendar: insights?.contributionCalendar ?? const [],
     bestTimeWindows: insights?.bestTimeWindows ?? const [],
+    scheduleHint: scheduleHint,
     pace: pace,
   );
 }

@@ -318,7 +318,9 @@ a conservative wrapped Gaussian neighborhood on the 7x24 local weekday/hour
 torus. Best-time entries keep the observed `mean_free_percent` and sample count,
 and add `smoothed_free_percent` plus support counts only when enough neighboring
 evidence exists. Sparse history still falls back to raw sampled cells rather
-than pretending the smoothed estimate is strong.
+than pretending the smoothed estimate is strong. `weekHourScheduleHint` now uses
+those ranked windows plus the active reset to return the nearest strong slot
+that starts before reset, preserving the same raw and support evidence.
 
 ---
 
@@ -413,7 +415,7 @@ the measurable improvement over the shipped heuristic.
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
-| heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing shipped; scheduler hint next |
+| heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing and reset-aware hint shipped |
 
 Build order honors the roadmap: ship `se` + `h_risk` + the unified score with
 neutral weights first (zero behavior change, full machinery in place), then turn on

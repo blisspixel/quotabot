@@ -1195,7 +1195,12 @@ Future<void> _runStats(
     for (final p in providers) {
       final ins = Insights.from(_historyBuckets(p), now, tzOffset: tz);
       final pace = _paceFor(byProvider[p], ins, now);
-      report[p] = {...ins.toJson(), if (pace != null) 'pace': pace.toJson()};
+      final schedule = _scheduleFor(byProvider[p], ins, now, tz);
+      report[p] = {
+        ...ins.toJson(),
+        if (pace != null) 'pace': pace.toJson(),
+        if (schedule != null) 'schedule_hint': schedule.toJson(),
+      };
     }
     print(_jsonPretty(report));
   } else {
@@ -1228,6 +1233,7 @@ Future<void> _runReport(
     now,
     _suggestFor(results, now),
     insightsByProvider: insights,
+    tzOffset: tz,
   );
   wantsJson
       ? print(_jsonPretty(report.toJson()))
@@ -1592,7 +1598,7 @@ void _printSuggest(RouteSuggestion s) {
 
 /// Pace for a provider from its live binding window plus the recent burn rate.
 Pace? _paceFor(ProviderQuota? q, Insights ins, int now) {
-  if (q == null) return null;
+  if (q == null || q.isLocal) return null;
   final binding = bindingWindow(q, now);
   final headroom = providerHeadroom(q, now);
   if (headroom == null) return null;
@@ -1601,6 +1607,21 @@ Pace? _paceFor(ProviderQuota? q, Insights ins, int now) {
     resetsAt: binding?.resetsAt,
     burnPerHour: ins.burnPerHour,
     now: now,
+  );
+}
+
+WeekHourScheduleHint? _scheduleFor(
+  ProviderQuota? q,
+  Insights ins,
+  int now,
+  Duration tz,
+) {
+  if (q == null || q.isLocal) return null;
+  return weekHourScheduleHint(
+    ins.bestTimeWindows,
+    now,
+    resetsAt: bindingWindow(q, now)?.resetsAt,
+    tzOffset: tz,
   );
 }
 
@@ -1680,6 +1701,10 @@ void _printStats(
     }
     if (ins.bestTimeWindows.isNotEmpty) {
       extras.add('best ${ins.bestTimeWindows.first.summary}');
+    }
+    final schedule = _scheduleFor(live[p], ins, now, tz);
+    if (schedule != null) {
+      extras.add('schedule ${schedule.summary}');
     }
     if (ins.spentDayStreak > 0) {
       extras.add('${ins.spentDayStreak}d spent streak');

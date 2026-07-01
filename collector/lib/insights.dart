@@ -540,6 +540,37 @@ class WeekHourWindow {
       };
 }
 
+class WeekHourScheduleHint {
+  final WeekHourWindow window;
+  final int scheduledAt;
+  final int waitSeconds;
+  final int resetsAt;
+
+  const WeekHourScheduleHint({
+    required this.window,
+    required this.scheduledAt,
+    required this.waitSeconds,
+    required this.resetsAt,
+  });
+
+  String get summary {
+    final score = window.smoothedFreePercent == null
+        ? '${window.meanFreePercent.round()}%'
+        : '~${window.smoothedFreePercent!.round()}%';
+    return '${window.timeLabel} in ${_compactWait(waitSeconds)} '
+        '($score free before reset)';
+  }
+
+  Map<String, dynamic> toJson() => {
+        'scheduled_at': scheduledAt,
+        'wait_seconds': waitSeconds,
+        'resets_at': resetsAt,
+        'window': window.toJson(),
+        'label': window.timeLabel,
+        'summary': summary,
+      };
+}
+
 /// Populated local weekday/hour cells, sorted Monday..Sunday then 00..23.
 List<WeekHourWindow> weekHourWindows(
   Iterable<HeadroomBucket> buckets, {
@@ -645,6 +676,49 @@ List<WeekHourWindow> bestWeekHourWindows(
   return ranked.take(limit).toList();
 }
 
+/// Nearest high-headroom weekly slot before the active reset boundary.
+///
+/// The input [windows] must already be ranked by scheduling quality, typically
+/// from [bestWeekHourWindows]. The returned slot is the next occurrence of one
+/// of those high-quality weekly cells that starts before [resetsAt].
+WeekHourScheduleHint? weekHourScheduleHint(
+  List<WeekHourWindow> windows,
+  int now, {
+  required int? resetsAt,
+  Duration tzOffset = Duration.zero,
+  int candidateLimit = 6,
+}) {
+  if (windows.isEmpty || resetsAt == null || resetsAt <= now) return null;
+  final candidates = <WeekHourScheduleHint>[];
+  final limit = candidateLimit < 0 ? 0 : candidateLimit;
+  for (final window in windows.take(limit)) {
+    final scheduledAt = _nextWeekHourOccurrence(
+      window,
+      now,
+      tzOffset: tzOffset,
+    );
+    if (scheduledAt >= resetsAt) continue;
+    candidates.add(
+      WeekHourScheduleHint(
+        window: window,
+        scheduledAt: scheduledAt,
+        waitSeconds: scheduledAt - now,
+        resetsAt: resetsAt,
+      ),
+    );
+  }
+  if (candidates.isEmpty) return null;
+  candidates.sort((a, b) {
+    final wait = a.scheduledAt.compareTo(b.scheduledAt);
+    if (wait != 0) return wait;
+    final score =
+        b.window.scoreFreePercent.compareTo(a.window.scoreFreePercent);
+    if (score != 0) return score;
+    return b.window.samples.compareTo(a.window.samples);
+  });
+  return candidates.first;
+}
+
 class _WeekHourAggregates {
   final List<List<double>> sum;
   final List<List<int>> count;
@@ -728,6 +802,40 @@ _SmoothedWeekHourCell? _smoothedCell(
     supportSamples: supportSamples,
     supportCells: supportCells,
   );
+}
+
+int _nextWeekHourOccurrence(
+  WeekHourWindow window,
+  int now, {
+  required Duration tzOffset,
+}) {
+  const weekSeconds = 7 * 86400;
+  final offset = tzOffset.inSeconds;
+  final localNow = now + offset;
+  final currentHourStart = localNow - (localNow % 3600);
+  final currentDay = (((currentHourStart ~/ 86400) + 3) % 7);
+  final currentHour = (currentHourStart % 86400) ~/ 3600;
+  final currentWeekHour = currentDay * 24 + currentHour;
+  final targetWeekHour = (window.dayOfWeek % 7) * 24 + window.hour;
+  var hoursAhead = targetWeekHour - currentWeekHour;
+  if (hoursAhead < 0) hoursAhead += 7 * 24;
+  var localTarget = currentHourStart + hoursAhead * 3600;
+  var utcTarget = localTarget - offset;
+  if (utcTarget < now) {
+    localTarget += weekSeconds;
+    utcTarget = localTarget - offset;
+  }
+  return utcTarget;
+}
+
+String _compactWait(int seconds) {
+  if (seconds <= 0) return 'now';
+  final days = seconds ~/ 86400;
+  final hours = (seconds % 86400) ~/ 3600;
+  final minutes = (seconds % 3600) ~/ 60;
+  if (days > 0) return '${days}d${hours}h';
+  if (hours > 0) return '${hours}h${minutes}m';
+  return '${math.max(1, minutes)}m';
 }
 
 /// A forward-looking pace read for the current rolling window: how fast quota is

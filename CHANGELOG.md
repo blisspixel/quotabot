@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Reset-aware best-time hints now pick the nearest strong weekday/hour slot
+  that starts before the active quota reset, using only existing local history.
+  `quotabot stats`, `quotabot report`, report JSON, and the desktop analytics
+  card expose the hint when enough timing evidence exists.
 - Best-time analytics now use a conservative wrapped weekday/hour smoother when
   neighboring history supports it. Reports, stats JSON, and desktop analytics
   keep the raw sampled mean and sample count, then add the smoothed score and

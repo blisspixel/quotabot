@@ -28,6 +28,16 @@ List<HeadroomBucket> _buckets(double base) {
   return out;
 }
 
+List<HeadroomBucket> _scheduleBuckets() {
+  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final nextHour =
+      now - (now % Duration.secondsPerHour) + Duration.secondsPerHour;
+  final bucket = HeadroomBucket(start: nextHour - Duration.secondsPerDay * 7)
+    ..add(92)
+    ..add(90);
+  return [bucket];
+}
+
 Widget _wrap(Widget child) => MaterialApp(home: child);
 
 void main() {
@@ -91,6 +101,28 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('7d'));
     await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('FleetScreen shows a reset-aware best slot', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('codex', 'Codex', 20, resetsAt: now + 3 * 3600)],
+          buckets: {'codex': _scheduleBuckets()},
+          dark: true,
+          initialRange: FleetRange.week,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('BEST TIME TO RUN'), findsOneWidget);
+    expect(find.textContaining('next strong slot'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
