@@ -60,6 +60,40 @@ void main() {
     });
   });
 
+  group('shrinkBurnStats', () {
+    test('pulls thin burn estimates toward the fleet mean', () {
+      final shrunk = shrinkBurnStats(const {
+        'thin': BurnStat(perHour: 30, samples: 2),
+        'steady-a': BurnStat(perHour: 10, sePerHour: 0.5, samples: 20),
+        'steady-b': BurnStat(perHour: 12, sePerHour: 0.5, samples: 20),
+      });
+
+      expect(shrunk['thin']!.perHour, lessThan(30));
+      expect(shrunk['thin']!.perHour, greaterThan(10));
+      expect(shrunk['thin']!.sePerHour, isNotNull);
+      expect(shrunk['steady-a']!.perHour, closeTo(10.32, 0.05));
+      expect(shrunk['steady-a']!.sePerHour, 0.5);
+      expect(shrunk['steady-a']!.samples, 20);
+    });
+
+    test('does not invent burn without a fitted slope or pool', () {
+      final noPool = shrinkBurnStats(const {
+        'a': BurnStat(perHour: 30, samples: 2),
+        'b': BurnStat(perHour: 10, samples: 20),
+      });
+      expect(noPool['a']!.perHour, 30);
+
+      final withNull = shrinkBurnStats(const {
+        'none': BurnStat(samples: 1),
+        'a': BurnStat(perHour: 30, samples: 2),
+        'b': BurnStat(perHour: 10, samples: 20),
+        'c': BurnStat(perHour: 12, samples: 20),
+      });
+      expect(withNull['none']!.perHour, isNull);
+      expect(withNull['none']!.samples, 1);
+    });
+  });
+
   group('contributionCalendarDays', () {
     test('groups sampled local days oldest first with compact markers', () {
       final days = contributionCalendarDays([

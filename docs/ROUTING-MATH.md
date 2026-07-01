@@ -344,6 +344,12 @@ provider speaks for itself. The same Beta-Binomial shrinkage stabilizes reliabil
 `A_i` and the heatmap rates. The practical payoff for Pip: quotabot is sensible on
 day one and sharpens automatically, never demanding a month of data to be useful.
 
+Shipped first hook: routing burn estimates now use a conservative version of this
+idea at the cache boundary. A provider/account with a fitted but thin recent burn
+history is partially pooled toward the current fleet burn mean; providers with no
+fitted slope stay unknown, and high-sample histories remain close to their own
+direct estimate. Raw history buckets are not rewritten.
+
 **Confidence as a first-class output.** Every routed number carries
 `n_eff`/`freshness`/credible-interval width, surfaced as a confidence tag
 (`fresh` / `thin` / `stale`). Routing already prefers live over stale; this makes
@@ -412,16 +418,17 @@ the measurable improvement over the shipped heuristic.
 | `p_strand` surfaced in `top` | `top.dart` `_forecast` (strand % / time-to-empty) | shipped |
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
-| shrinkage | `insights.dart` (cross-provider pool) | next |
+| burn shrinkage | `insights.dart` `shrinkBurnStats` -> cache boundary | first hook shipped |
+| reliability/heatmap shrinkage | `insights.dart` (cross-provider pool) | next |
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing and reset-aware hint shipped |
 
-Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, and the
-unified confidence-weighted runway score are shipped. Shrinkage (Pip) is next,
-then the optimizer (Maya) and scheduler. Each step is a one-knob,
-reduces-to-previous change with its own tests.
+Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, the unified
+confidence-weighted runway score, and the first burn-shrinkage hook are shipped.
+Reliability/heatmap shrinkage (Pip) is next, then the optimizer (Maya) and
+scheduler. Each step is a one-knob, reduces-to-previous change with its own tests.
 
 ---
 

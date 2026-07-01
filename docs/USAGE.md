@@ -328,6 +328,9 @@ models fail closed when no safe route exists.
 
 `quotabot suggest --risk=Z` opts into risk-adjusted ranking (the default `Z=0` is
 the plain mean): a higher `Z` prefers providers whose recent burn is more certain.
+Before ranking, recent burn estimates from thin local histories are conservatively
+shrunk toward the current fleet burn mean so a two-sample spike does not dominate
+the route.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 `routing_score`, `confidence`, and `strand_probability`, plus a top-level
 `routing_policy` (`balanced` or `local_first`). The score is a

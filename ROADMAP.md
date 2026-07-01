@@ -380,7 +380,10 @@ Breadth and depth, once the core is trusted:
   out of the main view. Provider suggestions now rank metered subscriptions by
   an additive `routing_score`: confidence-weighted risk-adjusted runway, so a
   slower-burning provider can beat one with more instantaneous headroom but a
-  shorter runway.
+  shorter runway. Recent burn estimates now use conservative empirical-Bayes
+  shrinkage at the routing input boundary, pulling thin provider/account
+  histories toward the current fleet burn mean without changing account
+  identity or raw stored history.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation

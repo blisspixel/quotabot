@@ -328,7 +328,7 @@ Map<String, BurnStat> recentBurnStatsByProvider(
   for (final provider in providers) {
     out[provider] = burnRateWithError(loadBuckets(provider), now);
   }
-  return out;
+  return shrinkBurnStats(out);
 }
 
 /// Recent burn with account precision when the snapshot identifies an account.
@@ -357,7 +357,7 @@ Map<String, BurnStat> recentBurnStatsByQuota(
     }
     out[key] = burnRateWithError(buckets, now);
   }
-  return out;
+  return shrinkBurnStats(out);
 }
 
 /// Loads a provider/account hourly bucket series, oldest first. Empty when

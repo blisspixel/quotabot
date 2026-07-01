@@ -13,6 +13,7 @@ import 'models.dart';
 const int kBucketSpan = 3600; // one hour
 const int kHistBins = 20; // 5 percent per bin across 0..100
 const int kRetentionDays = 90;
+const int kBurnShrinkagePriorSamples = 4;
 
 /// Aligns an epoch second to the start of its hour bucket.
 int bucketStart(int epoch) => epoch - (epoch % kBucketSpan);
@@ -411,6 +412,70 @@ BurnStat burnRateWithError(
     se = math.sqrt(ssr / (n - 2) / sxxC);
   }
   return BurnStat(perHour: -slope, sePerHour: se, samples: n);
+}
+
+/// Empirical-Bayes shrinkage for recent burn estimates.
+///
+/// Each fitted provider/account burn is partially pooled toward the
+/// sample-weighted fleet mean. Thin histories move more; large histories mostly
+/// speak for themselves. The function is intentionally conservative: it needs a
+/// real cross-provider/account pool, never invents a burn estimate for a stat
+/// with no fitted slope, and keeps the original sample count so routing
+/// confidence still reflects how much direct history the candidate has.
+Map<String, BurnStat> shrinkBurnStats(
+  Map<String, BurnStat> stats, {
+  int priorSamples = kBurnShrinkagePriorSamples,
+}) {
+  if (priorSamples <= 0) return Map<String, BurnStat>.of(stats);
+  final usable = stats.entries.where((entry) {
+    final burn = entry.value.perHour;
+    return burn != null && burn.isFinite && entry.value.samples > 0;
+  }).toList();
+  if (usable.length < 3) return Map<String, BurnStat>.of(stats);
+
+  var totalWeight = 0.0;
+  var weightedBurn = 0.0;
+  for (final entry in usable) {
+    final weight = entry.value.samples.toDouble();
+    totalWeight += weight;
+    weightedBurn += entry.value.perHour! * weight;
+  }
+  if (totalWeight <= 0) return Map<String, BurnStat>.of(stats);
+  final poolMean = weightedBurn / totalWeight;
+
+  var between = 0.0;
+  for (final entry in usable) {
+    final diff = entry.value.perHour! - poolMean;
+    between += entry.value.samples * diff * diff;
+  }
+  final betweenStd = math.sqrt(between / totalWeight);
+
+  return {
+    for (final entry in stats.entries)
+      entry.key: _shrinkBurnStat(
+        entry.value,
+        poolMean,
+        betweenStd,
+        priorSamples,
+      ),
+  };
+}
+
+BurnStat _shrinkBurnStat(
+  BurnStat stat,
+  double poolMean,
+  double betweenStd,
+  int priorSamples,
+) {
+  final burn = stat.perHour;
+  if (burn == null || !burn.isFinite || stat.samples <= 0) return stat;
+  final directWeight = stat.samples / (stat.samples + priorSamples);
+  final shrunk = directWeight * burn + (1 - directWeight) * poolMean;
+  final se = stat.sePerHour ??
+      (betweenStd > 0
+          ? betweenStd / math.sqrt(stat.samples + priorSamples)
+          : null);
+  return BurnStat(perHour: shrunk, sePerHour: se, samples: stat.samples);
 }
 
 /// Mean headroom by local day of week (0 = Monday .. 6 = Sunday), null where no

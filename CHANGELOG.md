@@ -138,6 +138,10 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Recent burn estimates used by routing now apply conservative empirical-Bayes
+  shrinkage at the cache boundary. Thin provider/account histories are pulled
+  toward the current fleet burn mean, while mature histories stay close to their
+  direct measured slope.
 - Provider suggestions now rank metered subscriptions by a
   confidence-weighted `routing_score` based on risk-adjusted runway, while
   keeping local runtimes governed by the explicit fallback and local-first
