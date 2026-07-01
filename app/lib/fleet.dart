@@ -489,6 +489,24 @@ class _FleetScreenState extends State<FleetScreen> {
         const SizedBox(height: 10),
         _card(
           c,
+          'CALENDAR',
+          'sampled days, oldest to newest',
+          SizedBox(
+            height: stats.length * 18.0,
+            child: CustomPaint(
+              painter: _CalendarPainter(
+                stats,
+                dark,
+                c.fg,
+                c.muted,
+                math.min(days, kRetentionDays),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        _card(
+          c,
           'BEST TIME TO RUN',
           'mean free % by weekday x hour, local',
           Column(
@@ -1176,6 +1194,82 @@ class _DistPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_DistPainter old) => old.nodes != nodes;
+}
+
+/// Compact sampled-day contribution calendar, one row per provider.
+class _CalendarPainter extends CustomPainter {
+  final List<_Node> nodes;
+  final bool dark;
+  final Color fg;
+  final Color muted;
+  final int maxDays;
+
+  _CalendarPainter(this.nodes, this.dark, this.fg, this.muted, this.maxDays);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (nodes.isEmpty) return;
+    final rowH = size.height / nodes.length;
+    const labelW = 70.0;
+    final availableW = math.max(1.0, size.width - labelW - 8);
+    for (var i = 0; i < nodes.length; i++) {
+      final cy = i * rowH + rowH / 2;
+      _label(canvas, nodes[i].label, cy, labelW);
+      final days = nodes[i].insights!.contributionCalendar;
+      if (days.isEmpty) continue;
+      final count = math.min(math.max(1, maxDays), days.length);
+      final visible = days.sublist(days.length - count);
+      final gap = count > 45 ? 0.8 : 1.2;
+      final cellW = ((availableW - gap * (count - 1)) / count).clamp(2.0, 8.0);
+      final cellH = math.min(10.0, math.max(3.0, rowH - 6));
+      final startX = labelW + 6;
+      for (var d = 0; d < visible.length; d++) {
+        final day = visible[d];
+        final rect = Rect.fromLTWH(
+          startX + d * (cellW + gap),
+          cy - cellH / 2,
+          cellW,
+          cellH,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(2)),
+          Paint()..color = _dayColor(day),
+        );
+      }
+    }
+  }
+
+  Color _dayColor(ContributionDay day) {
+    if (day.spent) return const Color(0xFFF85149);
+    if (day.mixed) return const Color(0xFFDB6D28);
+    final alpha = day.intensity <= 1 ? (dark ? 0.55 : 0.65) : 0.9;
+    return fleetColor(day.meanFreePercent).withValues(alpha: alpha);
+  }
+
+  void _label(Canvas canvas, String s, double cy, double width) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: s,
+        style: TextStyle(
+          fontSize: AppType.bodySmall,
+          fontWeight: FontWeight.w600,
+          color: fg,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+      ellipsis: '...',
+    )..layout(maxWidth: width);
+    tp.paint(canvas, Offset(0, cy - tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(_CalendarPainter old) =>
+      old.nodes != nodes ||
+      old.dark != dark ||
+      old.fg != fg ||
+      old.muted != muted ||
+      old.maxDays != maxDays;
 }
 
 /// Fleet 7x24 heatmap with weekday labels: aggregate best-time-to-run.

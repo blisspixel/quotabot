@@ -18,6 +18,7 @@ class QuotaHealthProviderLine {
   final int? sampledDays;
   final int? usableDayStreak;
   final int? spentDayStreak;
+  final List<ContributionDay> contributionCalendar;
   final String? pace;
 
   const QuotaHealthProviderLine({
@@ -34,6 +35,7 @@ class QuotaHealthProviderLine {
     required this.sampledDays,
     required this.usableDayStreak,
     required this.spentDayStreak,
+    this.contributionCalendar = const [],
     required this.pace,
   });
 
@@ -51,6 +53,8 @@ class QuotaHealthProviderLine {
         'weekly_sampled_days': sampledDays,
         'weekly_usable_day_streak': usableDayStreak,
         'weekly_spent_day_streak': spentDayStreak,
+        'weekly_contribution_calendar':
+            contributionCalendar.map((day) => day.toJson()).toList(),
         'pace': pace,
       };
 }
@@ -112,6 +116,27 @@ class QuotaHealthReport {
         ..add(
           'Local runtimes are fallback capacity and do not spend subscription quota.',
         );
+    }
+    final calendars = providers
+        .where((provider) => provider.contributionCalendar.isNotEmpty)
+        .toList();
+    if (calendars.isNotEmpty) {
+      lines
+        ..add('')
+        ..add('## Weekly calendar')
+        ..add('')
+        ..add(
+          '`#` heavy use, `*` moderate-high, `+` moderate, `.` light, `!` mixed, `x` spent. Oldest to newest.',
+        );
+      for (final provider in calendars) {
+        lines.add(
+          '- ${_cell(provider.displayName)} (${_cell(provider.account)}): '
+          '`${contributionCalendarMarkers(
+            provider.contributionCalendar,
+            maxDays: 7,
+          )}`',
+        );
+      }
     }
     return '${lines.join('\n')}\n';
   }
@@ -176,6 +201,7 @@ QuotaHealthProviderLine _providerLine(
     sampledDays: insights?.sampledDays,
     usableDayStreak: insights?.usableDayStreak,
     spentDayStreak: insights?.spentDayStreak,
+    contributionCalendar: insights?.contributionCalendar ?? const [],
     pace: pace,
   );
 }

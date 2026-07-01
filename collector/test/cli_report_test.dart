@@ -53,6 +53,13 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      providers.any(
+        (provider) => (provider as Map<String, dynamic>)
+            .containsKey('weekly_contribution_calendar'),
+      ),
+      isTrue,
+    );
   });
 
   test('stats prints sampled-day streaks', () async {
@@ -72,6 +79,7 @@ void main() {
     final output = result.stdout as String;
     expect(output, contains('sampled days'));
     expect(output, contains('usable streak'));
+    expect(output, contains('calendar .++'));
   });
 }
 

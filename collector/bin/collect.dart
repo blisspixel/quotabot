@@ -1683,6 +1683,13 @@ void _printStats(
     } else if (ins.usableDayStreak > 0) {
       extras.add('${ins.usableDayStreak}d usable streak');
     }
+    final calendar = contributionCalendarMarkers(
+      ins.contributionCalendar,
+      maxDays: 28,
+    );
+    if (calendar.isNotEmpty) {
+      extras.add('calendar $calendar');
+    }
     extras.add('${ins.samples} samples / ${ins.sampledDays} sampled days');
     print('  ${' '.padRight(12)} ${extras.join('   ')}');
     final pace = _paceFor(live[p], ins, now);

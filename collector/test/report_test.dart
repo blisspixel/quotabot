@@ -56,6 +56,9 @@ void main() {
     final claude = (json['providers'] as List).first as Map<String, dynamic>;
     expect(claude['weekly_sampled_days'], 3);
     expect(claude['weekly_usable_day_streak'], 3);
+    final calendar = claude['weekly_contribution_calendar'] as List;
+    expect(calendar, hasLength(3));
+    expect(calendar.last['state'], 'usable');
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {
@@ -78,6 +81,8 @@ void main() {
     expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
     expect(markdown, contains('Local runtimes are fallback capacity'));
+    expect(markdown, contains('## Weekly calendar'));
+    expect(markdown, contains('claude (work):'));
   });
 
   test('markdown escapes table cell separators', () {

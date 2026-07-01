@@ -207,6 +207,113 @@ List<({int day, double mean})> dailyMeans(Iterable<HeadroomBucket> buckets) {
   return (sampledDays: byDay.length, usableDays: usable, spentDays: spent);
 }
 
+/// One sampled local day for the contribution calendar.
+///
+/// The day start is the UTC epoch second corresponding to local midnight under
+/// the supplied fixed [tzOffset]. The calendar is intentionally based on the
+/// existing hourly aggregate buckets, not raw logs.
+class ContributionDay {
+  final int dayStart;
+  final int samples;
+  final double meanFreePercent;
+  final int spentSamples;
+
+  const ContributionDay({
+    required this.dayStart,
+    required this.samples,
+    required this.meanFreePercent,
+    required this.spentSamples,
+  });
+
+  double get usedPercent => (100 - meanFreePercent).clamp(0.0, 100.0);
+
+  bool get spent => samples > 0 && spentSamples == samples;
+
+  bool get mixed => spentSamples > 0 && spentSamples < samples;
+
+  String get state {
+    if (spent) return 'spent';
+    if (mixed) return 'mixed';
+    return 'usable';
+  }
+
+  /// ASCII intensity marker for compact terminal and markdown calendars.
+  String get marker {
+    if (spent) return 'x';
+    if (mixed) return '!';
+    final used = usedPercent;
+    if (used >= 75) return '#';
+    if (used >= 50) return '*';
+    if (used >= 25) return '+';
+    return '.';
+  }
+
+  int get intensity {
+    if (spent) return 4;
+    if (mixed) return 3;
+    final used = usedPercent;
+    if (used >= 75) return 4;
+    if (used >= 50) return 3;
+    if (used >= 25) return 2;
+    if (used > 0) return 1;
+    return 0;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'day_start': dayStart,
+        'samples': samples,
+        'mean_free_percent': double.parse(meanFreePercent.toStringAsFixed(2)),
+        'spent_samples': spentSamples,
+        'state': state,
+        'intensity': intensity,
+      };
+}
+
+/// Sampled local-day calendar, oldest first, capped to [maxDays].
+List<ContributionDay> contributionCalendarDays(
+  Iterable<HeadroomBucket> buckets, {
+  Duration tzOffset = Duration.zero,
+  int maxDays = kRetentionDays,
+}) {
+  final byDay = <int, ({int count, double sum, int exhausted})>{};
+  final offset = tzOffset.inSeconds;
+  for (final b in buckets) {
+    if (b.count == 0) continue;
+    final day = (b.start + offset) ~/ 86400;
+    final existing = byDay[day];
+    byDay[day] = (
+      count: (existing?.count ?? 0) + b.count,
+      sum: (existing?.sum ?? 0) + b.sum,
+      exhausted: (existing?.exhausted ?? 0) + b.exhausted,
+    );
+  }
+  final entries = byDay.entries.toList()
+    ..sort((a, b) => a.key.compareTo(b.key));
+  final capped = maxDays <= 0 || entries.length <= maxDays
+      ? entries
+      : entries.sublist(entries.length - maxDays);
+  return [
+    for (final entry in capped)
+      ContributionDay(
+        dayStart: entry.key * 86400 - offset,
+        samples: entry.value.count,
+        meanFreePercent: entry.value.sum / entry.value.count,
+        spentSamples: entry.value.exhausted,
+      ),
+  ];
+}
+
+String contributionCalendarMarkers(
+  List<ContributionDay> days, {
+  int maxDays = kRetentionDays,
+}) {
+  if (days.isEmpty) return '';
+  final visible = maxDays <= 0 || days.length <= maxDays
+      ? days
+      : days.sublist(days.length - maxDays);
+  return visible.map((day) => day.marker).join();
+}
+
 /// Ordinary least squares fit of headroom against day index. Returns the slope
 /// in percent-per-day, the intercept, and the coefficient of determination
 /// (R squared, 0..1) as a confidence in the trend. Null with fewer than two
@@ -553,6 +660,9 @@ class Insights {
   /// reading was spent. Gaps or mixed days break the streak.
   final int spentDayStreak;
 
+  /// Oldest-first sampled local days for compact contribution-calendar views.
+  final List<ContributionDay> contributionCalendar;
+
   /// Recent burn rate in percent of quota per hour (>= 0), null when unknown.
   final double? burnPerHour;
 
@@ -585,6 +695,7 @@ class Insights {
     this.tightestDay,
     this.usableDayStreak = 0,
     this.spentDayStreak = 0,
+    this.contributionCalendar = const [],
     this.burnPerHour,
     this.burnSePerHour,
   });
@@ -607,6 +718,7 @@ class Insights {
     final tightest = _argMin(hourOfDayProfile(used, tzOffset: tzOffset));
     final tightestDay = _argMin(dayOfWeekProfile(used, tzOffset: tzOffset));
     final streaks = currentDayStreaks(used, tzOffset: tzOffset);
+    final calendar = contributionCalendarDays(used, tzOffset: tzOffset);
     final burn = burnRateWithError(used, now);
     return Insights(
       samples: agg.count,
@@ -624,6 +736,7 @@ class Insights {
       tightestDay: tightestDay,
       usableDayStreak: streaks.usableDays,
       spentDayStreak: streaks.spentDays,
+      contributionCalendar: calendar,
       burnPerHour: burn.perHour,
       burnSePerHour: burn.sePerHour,
     );
@@ -659,6 +772,8 @@ class Insights {
         'tightest_day_local': tightestDay,
         'usable_day_streak': usableDayStreak,
         'spent_day_streak': spentDayStreak,
+        'contribution_calendar':
+            contributionCalendar.map((day) => day.toJson()).toList(),
         'burn_percent_per_hour': burnPerHour,
         'burn_se_percent_per_hour': burnSePerHour,
         'typical_peak_used': typicalPeakUsed,

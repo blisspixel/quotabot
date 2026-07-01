@@ -390,7 +390,8 @@ Breadth and depth, once the core is trusted:
   `quotabot stats`, `quotabot report`, and `quotabot.report.v1`. Provider/account
   bucket files now preserve per-account burn history for routing, reports, alerts,
   and the desktop widget, while provider-only files remain a legacy fallback for
-  unambiguous snapshots.
+  unambiguous snapshots. Stats and reports now also include a compact sampled-day
+  contribution calendar derived from those same local buckets.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

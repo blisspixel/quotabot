@@ -42,6 +42,10 @@ Notable changes to quotabot. Newest first.
 - Desktop profiles now include a high-contrast Hacker theme, preserving the
   existing System, Light, and Dark choices while giving the widget a green
   terminal-style palette that still runs through Flutter's theme system.
+- Stats and weekly quota-health reports now include a compact contribution
+  calendar derived from existing hourly history buckets, showing light,
+  moderate, heavy, mixed, and spent sampled days without adding any new provider
+  reads.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
   `spend: quota_plan` is reserved for included quota plans with explicit

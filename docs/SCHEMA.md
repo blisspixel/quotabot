@@ -77,11 +77,19 @@ pick used that signal, `expiring_quota` with provider, account, projected waste
 percent, reset epoch, and burn percent per hour. For providers with specific
 account identity, the burn evidence behind the signal is account-scoped.
 
+`quotabot stats --json` emits a provider-keyed object of local history insight
+fields. Each provider insight includes distribution fields, sampled-day streaks,
+`contribution_calendar`, and optional pace. Calendar entries use the same
+sampled-day shape described below.
+
 `quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
 `recommended_provider`, `recommendation_reason`, `fallback_kind`, and
 `providers`. Provider rows include state, headroom/reset metadata, weekly p50
 free percent, weekly reliability, weekly sampled-day counts, current
-usable/spent day streaks, and pace when history is available.
+usable/spent day streaks, `weekly_contribution_calendar`, and pace when history
+is available. Calendar entries are sampled local days with `day_start`,
+`samples`, `mean_free_percent`, `spent_samples`, `state` (`usable`, `mixed`, or
+`spent`), and `intensity` (0..4).
 
 ## `quotabot.alert.v1`
 

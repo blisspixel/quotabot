@@ -60,6 +60,44 @@ void main() {
     });
   });
 
+  group('contributionCalendarDays', () {
+    test('groups sampled local days oldest first with compact markers', () {
+      final days = contributionCalendarDays([
+        _bucket(_now - 2 * Duration.secondsPerDay, 95),
+        _bucket(_now - Duration.secondsPerDay, 60),
+        _bucket(_now, 0),
+      ]);
+
+      expect(days, hasLength(3));
+      expect(days.map((day) => day.state).toList(), [
+        'usable',
+        'usable',
+        'spent',
+      ]);
+      expect(contributionCalendarMarkers(days), '.+x');
+      expect(days.last.toJson()['intensity'], 4);
+    });
+
+    test('marks mixed days and caps to the requested recent window', () {
+      final mixed = HeadroomBucket(start: _now - Duration.secondsPerDay)
+        ..add(0)
+        ..add(80);
+      final days = contributionCalendarDays(
+        [
+          _bucket(_now - 2 * Duration.secondsPerDay, 90),
+          mixed,
+          _bucket(_now, 40),
+        ],
+        maxDays: 2,
+      );
+
+      expect(days, hasLength(2));
+      expect(days.first.state, 'mixed');
+      expect(contributionCalendarMarkers(days), '!*');
+      expect(contributionCalendarMarkers(days, maxDays: 1), '*');
+    });
+  });
+
   group('riskAdjustedHeadroom', () {
     test('z=0 is the risk-neutral mean (today behavior)', () {
       expect(riskAdjustedHeadroom(100, 10, 2, 1, 0), 90);

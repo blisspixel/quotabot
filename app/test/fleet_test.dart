@@ -72,6 +72,7 @@ void main() {
     await tester.tap(find.text('90d'));
     await tester.pump();
     expect(find.text('DISTRIBUTION'), findsOneWidget);
+    expect(find.text('CALENDAR'), findsOneWidget);
     expect(find.text('BEST TIME TO RUN'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
