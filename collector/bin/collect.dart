@@ -1490,7 +1490,8 @@ Future<void> _check(
   if (q == null) {
     if (wantsJson) {
       print(_jsonPretty({
-        'schema': quotabotV1SchemaId,
+        'schema': quotabotCheckV1SchemaId,
+        'as_of': now,
         'provider': key,
         'found': false,
       }));
@@ -1509,7 +1510,8 @@ Future<void> _check(
   final reset = binding?.resetsAt;
   if (wantsJson) {
     print(_jsonPretty({
-      'schema': quotabotV1SchemaId,
+      'schema': quotabotCheckV1SchemaId,
+      'as_of': now,
       'provider': q.provider,
       'account': q.account,
       'available': available,

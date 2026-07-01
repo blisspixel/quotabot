@@ -59,6 +59,8 @@ void main() {
 
     expectExitCode(result, 69);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.check.v1');
+    expect(json['as_of'], isA<int>());
     expect(json['provider'], 'claude');
     expect(json['available'], isFalse);
     expect(json['headroom_percent'], 0);

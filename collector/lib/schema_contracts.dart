@@ -11,6 +11,14 @@ const quotabotV1SchemaId = 'quotabot.v1';
 const quotabotV1SchemaUri =
     'https://quotabot.local/schemas/quotabot.v1.schema.json';
 
+/// Single-provider availability answer (`quotabot check --json` and the MCP
+/// `check_provider_availability` tool). Not a `quotabot.v1` snapshot: it has
+/// no `providers` array, so it carries its own id.
+const quotabotCheckV1SchemaId = 'quotabot.check.v1';
+
+/// The `provider_with_most_headroom` pick shape.
+const quotabotHeadroomV1SchemaId = 'quotabot.headroom.v1';
+
 const _rootRequired = ['schema', 'generated_at', 'providers'];
 const _providerRequired = [
   'provider',

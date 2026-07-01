@@ -48,9 +48,14 @@ emit `quotabot.suggest.v1` with:
   `waste_threshold_percent`, `waste_max_hours`, and `cost_weight`.
 - `routing_policy`: `balanced` by default, or `local_first` when the caller
   explicitly requested local capacity before subscription quota.
-- `recommended`: optional provider candidate.
+- `recommended`: the picked provider candidate, or an explicit `null` when
+  nothing is usable.
 - `reason`, `using_local_fallback`, `fallback`, and `ranked`.
-- Per-candidate budget fields such as `headroom_percent`,
+- Over MCP only, `active_leases`: the reservation discounts currently applied
+  to ranked candidates. The CLI and loopback HTTP forms of the same schema id
+  omit it (the lease ledger is local to the MCP server).
+- Each candidate carries identity (`provider`, `account`, optional `plan`,
+  `local`) and budget fields such as `headroom_percent`,
   `effective_headroom_percent`, optional `lease_discount_percent`,
   `burn_percent_per_hour`, `burn_se_percent_per_hour`, `strand_probability`,
   `confidence`, `runway_hours`, optional `projected_waste_percent`, optional
@@ -66,14 +71,34 @@ emit `quotabot.suggest.v1` with:
   or local-first policy.
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
-same routing fields plus `source`, `snapshot_as_of`, `snapshot_age_seconds`,
-`snapshot_stale`, and `max_age_seconds`. It never forces a live provider collect.
+same routing fields (including `active_leases`) plus `source`,
+`snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`, and
+`max_age_seconds`. It never forces a live provider collect.
+
+## Single-provider answers
+
+`quotabot check <provider> --json` and MCP `check_provider_availability` emit
+`quotabot.check.v1`: `schema`, `as_of`, `provider`, then either `found: false`
+(CLI, unknown name), an `error` note (MCP, unknown provider/account), or
+`account`, `available`, `headroom_percent`, `resets_at`, and `stale`. This is
+deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
+no `providers` array.
+
+MCP `provider_with_most_headroom` emits `quotabot.headroom.v1`: `schema`,
+`as_of`, then `provider` (null with a `reason` when nothing is usable) plus
+`account`, `headroom_percent`, `resets_at`, and `stale` for a pick.
+
+Profile-aware MCP tools also echo `profile` and `account_filter` when the
+caller supplied them, and set `error` for profile, filter, or argument
+problems.
 
 `quotabot models --json` and MCP `list_models` emit `quotabot.models.v1` with
 `schema`, `generated_at`, `catalog_updated`, `budget_policy`, and `models`.
 Each model entry includes provider/account, `local`, `available`, `stale`,
-`quota_backed`, capability hints where known, and the gating quota headroom/reset
-when the model is remote. Some provider models with temporary included-quota
+`quota_backed`, capability hints where known, and the gating quota budget when
+the model is remote: `headroom_percent`, `resets_at`, and the binding
+`gating_window` label. Entries gated by a self-reported manual quota carry
+`source: "manual"`. Some provider models with temporary included-quota
 terms can include `quota_included_until`; after that epoch, quotabot no longer
 marks the model `quota_backed` for `--budget=quota` routing unless the provider
 exposes a normal quota-backed path for it. Local-runtime entries also include
@@ -103,9 +128,9 @@ caller-supplied `monthly_price` plus `monthly_delta`. quotabot never infers plan
 prices or caps for this object. Calendar entries use the same sampled-day shape
 described below.
 
-`quotabot report --json` emits `quotabot.report.v1` with `generated_at`,
-`recommended_provider`, `recommendation_reason`, `fallback_kind`, and
-`providers`. Provider rows include state, headroom/reset metadata, weekly p50
+`quotabot report --json` emits `quotabot.report.v1` with `schema`,
+`generated_at`, `recommended_provider`, `recommendation_reason`,
+`fallback_kind`, and `providers`. Provider rows include state, headroom/reset metadata, weekly p50
 free percent, weekly reliability, weekly sampled-day counts, current
 usable/spent day streaks, `weekly_contribution_calendar`,
 `weekly_best_time_windows`, optional `weekly_schedule_hint`, and pace when
@@ -118,6 +143,25 @@ weekday/hour cells exist, best-time entries also include additive smoothing
 evidence: `smoothed_free_percent`, `support_samples`, and `support_cells`.
 Schedule hints include `scheduled_at`, `wait_seconds`, `resets_at`, `label`,
 `summary`, and the selected `window` object.
+
+## `quotabot.calibration.v1`
+
+`quotabot calibration --json` emits `schema`, `generated_at`, `overall`, and
+`by_provider`. Each calibration report carries `samples`, `brier_score`,
+`expected_calibration_error`, `calibration`, `span_days`, `horizon_hours`, and
+`bins` (each bin: `mean_predicted`, `observed_frequency`, `count`). Computed
+entirely from local history; empty history yields zero samples, never an
+invented score.
+
+## `quotabot.catalog_audit.v1`
+
+The maintenance tool `dart run bin/catalog_audit.dart` (not the `quotabot`
+binary) emits `schema`, `generated_at`, `catalog_updated`, and `providers`.
+Each provider row carries `provider`, `endpoint`, `auth_env`, `ok`, `skipped`,
+optional `error`, `catalog_models`, `endpoint_models`,
+`missing_from_catalog`, and `catalog_only`. Its process exit codes (0/1 with
+`--fail-on-drift`/`--fail-on-error`) are the tool's own, outside the
+`quotabot` CLI's documented exit-code contract.
 
 ## `quotabot.verify.v1`
 
@@ -136,7 +180,8 @@ Schedule hints include `scheduled_at`, `wait_seconds`, `resets_at`, `label`,
   plain-language `detail`. Provider check ids are `identity`,
   `read_or_reason`, `percent_bounds`, `as_of_sane`, `stale_honesty`, and
   `reset_sanity`; fleet check ids are `schema_contract`, `unique_accounts`,
-  `manual_entries`, and `claimed_coverage`.
+  `manual_entries`, and `claimed_coverage`. An undetected claimed provider
+  carries `claimed_coverage` as its single provider-level check as well.
 - `fleet_checks`: run-level checks, including validation of the live snapshot
   against the frozen `quotabot.v1` contract above.
 
@@ -152,9 +197,10 @@ with:
 
 - `schema`: always `quotabot.alert.v1`.
 - `kind`: `low_quota` or `projected_waste`.
-- `provider`, `account`, `window`, `severity`, `free_percent`, and `as_of`.
+- `provider`, `account`, `window`, `severity`, `free_percent`, `as_of`, and
+  `route_is_local`.
 - For `low_quota`, optional `route_to`, `route_display_name`,
-  `route_account`, `route_free_percent`, and `route_is_local`.
+  `route_account`, and `route_free_percent`.
 - For `projected_waste`, optional `projected_waste_percent` and
   `burn_percent_per_hour`.
 
