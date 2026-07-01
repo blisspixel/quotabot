@@ -153,6 +153,14 @@ Future<void> main(List<String> rawArgs) async {
       final results = await _read(profile, excludedProviders);
       final now = nowEpoch();
       if (_hasModelProfile(flags)) {
+        if (_hasRouteCostPolicy(flags)) {
+          stderr.writeln(
+            'quotabot: --cost-penalty and --cost-weight apply to provider '
+            'suggestions only; remove model filters to use them',
+          );
+          exitCode = _exitUsage;
+          return;
+        }
         final reqs = _modelRequirements(flags);
         if (!reqs.ok) {
           exitCode = _exitUsage;
@@ -178,11 +186,18 @@ Future<void> main(List<String> rawArgs) async {
       } else {
         final riskZ =
             _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
+        final costPolicy = _routeCostPolicy(flags);
+        if (!costPolicy.ok) {
+          exitCode = _exitUsage;
+          return;
+        }
         final s = _suggestFor(
           results,
           now,
           riskZ: riskZ,
           preferLocal: flags.contains('--local-first'),
+          costPenaltyByProvider: costPolicy.penalties,
+          costWeight: costPolicy.weight,
         );
         wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       }
@@ -263,6 +278,8 @@ RouteSuggestion _suggestFor(
   int now, {
   double riskZ = 0,
   bool preferLocal = false,
+  Map<String, double> costPenaltyByProvider = const {},
+  double costWeight = kDefaultRoutingCostWeight,
 }) =>
     suggestRoute(
       results,
@@ -270,6 +287,8 @@ RouteSuggestion _suggestFor(
       burnStatsByProvider: _burnStatsFor(results, now),
       riskZ: riskZ,
       preferLocal: preferLocal,
+      costPenaltyByProvider: costPenaltyByProvider,
+      costWeight: costWeight,
     );
 
 Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
@@ -370,6 +389,34 @@ bool _hasModelProfile(Set<String> flags) {
   return flags.any((f) => prefixed.any(f.startsWith));
 }
 
+bool _hasRouteCostPolicy(Set<String> flags) => flags.any(
+    (f) => f.startsWith('--cost-penalty=') || f.startsWith('--cost-weight='));
+
+({Map<String, double> penalties, double weight, bool ok}) _routeCostPolicy(
+  Set<String> flags,
+) {
+  final rawPenalties = _stringOption(flags, 'cost-penalty', null);
+  final parsed = parseProviderCostPenalties(rawPenalties);
+  if (!parsed.ok) {
+    stderr.writeln('quotabot: ${parsed.error}');
+    return (penalties: const {}, weight: 0, ok: false);
+  }
+  final rawWeight = _stringOption(flags, 'cost-weight', null);
+  var weight = parsed.penalties.isEmpty ? 0.0 : 1.0;
+  if (rawWeight != null) {
+    final parsedWeight = double.tryParse(rawWeight.trim());
+    if (parsedWeight == null ||
+        !parsedWeight.isFinite ||
+        parsedWeight < 0 ||
+        parsedWeight > kMaxRoutingCostWeight) {
+      stderr.writeln('quotabot: --cost-weight must be between 0 and 10');
+      return (penalties: const {}, weight: 0, ok: false);
+    }
+    weight = parsedWeight;
+  }
+  return (penalties: parsed.penalties, weight: weight, ok: true);
+}
+
 /// Prints a concrete-model recommendation for a task profile.
 void _printSuggestModel(ModelSuggestion s) {
   print('quotabot suggest  (best model for your task, 0 usage tokens)\n');
@@ -412,6 +459,8 @@ String? _stringOption(Iterable<String> flags, String name, String? dflt) {
 const _valueOptions = {
   'account',
   'budget',
+  'cost-penalty',
+  'cost-weight',
   'display-name',
   'exclude',
   'interval',
@@ -998,6 +1047,12 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --local-first       suggest: prefer local runtime before subscription quota',
+  );
+  stdout.writeln(
+    '  --cost-penalty=A:N  suggest: explicit relative cost penalty for provider A',
+  );
+  stdout.writeln(
+    '  --cost-weight=N     suggest: scale explicit cost penalties (default 1 when set)',
   );
   stdout.writeln(
     '  --exclude=A,B       quota reads: ignore these providers after profile filtering',

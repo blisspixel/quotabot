@@ -450,6 +450,8 @@ void main() {
       expect(score.confidence, 0.75);
       expect(score.wasteFraction, 0);
       expect(score.wasteBoost, 1);
+      expect(score.costPenalty, 0);
+      expect(score.costDiscount, 1);
       expect(score.score, 18);
     });
 
@@ -468,6 +470,22 @@ void main() {
       expect(score.wasteBoost,
           closeTo(1 + kDefaultRoutingWasteWeight * 5 / 6, 1e-9));
       expect(score.score, closeTo(43.5, 1e-9));
+    });
+
+    test('routing score breakdown applies explicit cost discount', () {
+      final score = routingScoreBreakdown(
+        isLocal: false,
+        effectiveHeadroom: 80,
+        burnPerHour: 1,
+        confidence: 1,
+        costPenalty: 3,
+        costWeight: 0.5,
+      )!;
+
+      expect(score.runwayHours, 80);
+      expect(score.costPenalty, 3);
+      expect(score.costDiscount, closeTo(0.4, 1e-9));
+      expect(score.score, closeTo(32, 1e-9));
     });
 
     test('projected waste can break a close subscription tie', () {
@@ -543,6 +561,28 @@ void main() {
         s.ranked.map((candidate) => candidate.wasteBoost),
         everyElement(isNull),
       );
+    });
+
+    test('explicit cost penalty can break a close subscription tie', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 30)]),
+        ],
+        _now,
+        costPenaltyByProvider: const {'codex': 1},
+        costWeight: 1,
+      );
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      final json = s.toJson();
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.costWeight, 1);
+      expect(codex.costPenalty, 1);
+      expect(codex.costDiscount, closeTo(0.5, 1e-9));
+      expect(json['cost_weight'], 1.0);
+      expect((codex.toJson())['cost_penalty'], 1.0);
+      expect((codex.toJson())['cost_discount'], 0.5);
     });
   });
 

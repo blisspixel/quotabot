@@ -166,6 +166,15 @@ class RouteCandidate {
   /// likely to expire unused. Omitted when no boost applies.
   final double? wasteBoost;
 
+  /// Caller-supplied relative cost penalty for this metered subscription. This
+  /// is not inferred by quotabot and is omitted unless an explicit caller policy
+  /// provides it.
+  final double? costPenalty;
+
+  /// Multiplier applied to discount costly routes when an explicit cost policy
+  /// is active. Omitted when no discount applies.
+  final double? costDiscount;
+
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
@@ -193,6 +202,8 @@ class RouteCandidate {
     this.runwayHours,
     this.projectedWastePercent,
     this.wasteBoost,
+    this.costPenalty,
+    this.costDiscount,
   });
 
   Map<String, dynamic> toJson() => {
@@ -214,6 +225,10 @@ class RouteCandidate {
               double.parse(projectedWastePercent!.toStringAsFixed(1)),
         if (wasteBoost != null)
           'waste_boost': double.parse(wasteBoost!.toStringAsFixed(4)),
+        if (costPenalty != null)
+          'cost_penalty': double.parse(costPenalty!.toStringAsFixed(4)),
+        if (costDiscount != null)
+          'cost_discount': double.parse(costDiscount!.toStringAsFixed(4)),
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -293,6 +308,9 @@ class RouteSuggestion {
   /// Reset horizon, in hours, for projected-waste route boosting.
   final int wasteMaxHours;
 
+  /// Weight applied to caller-supplied cost penalties in the routing score.
+  final double costWeight;
+
   const RouteSuggestion({
     required this.recommended,
     required this.ranked,
@@ -305,6 +323,7 @@ class RouteSuggestion {
     this.wasteWeight = kDefaultRoutingWasteWeight,
     this.wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
     this.wasteMaxHours = kDefaultExpiringQuotaMaxHours,
+    this.costWeight = kDefaultRoutingCostWeight,
   });
 
   Map<String, dynamic> toJson() => {
@@ -315,6 +334,7 @@ class RouteSuggestion {
         'waste_weight': wasteWeight,
         'waste_threshold_percent': wasteThresholdPercent,
         'waste_max_hours': wasteMaxHours,
+        'cost_weight': costWeight,
         'recommended': recommended?.toJson(),
         'reason': reason,
         'using_local_fallback': usingLocalFallback,
@@ -376,6 +396,13 @@ const double _burnFloorPercentPerHour = 1.0;
 /// the score by 25%, enough to break ties without overriding safety gates.
 const double kDefaultRoutingWasteWeight = 0.25;
 
+/// Default caller-supplied cost penalty weight. Zero means quotabot never
+/// invents cost preferences; callers must opt into cost-aware ranking.
+const double kDefaultRoutingCostWeight = 0.0;
+
+/// Maximum accepted caller-supplied cost penalty weight.
+const double kMaxRoutingCostWeight = 10.0;
+
 /// The optimizer provenance behind a metered subscription's route score.
 class RoutingScoreBreakdown {
   /// Risk-adjusted runway before trust is applied.
@@ -390,6 +417,13 @@ class RoutingScoreBreakdown {
   /// Use-it-or-lose-it multiplier applied after confidence.
   final double wasteBoost;
 
+  /// Caller-supplied relative cost penalty.
+  final double costPenalty;
+
+  /// Discount multiplier applied after waste when an explicit cost policy is
+  /// active. 1 means no cost discount.
+  final double costDiscount;
+
   /// Final score used for subscription ranking.
   final double score;
 
@@ -398,6 +432,8 @@ class RoutingScoreBreakdown {
     required this.confidence,
     required this.wasteFraction,
     required this.wasteBoost,
+    required this.costPenalty,
+    required this.costDiscount,
     required this.score,
   });
 }
@@ -435,6 +471,8 @@ double? routingScore({
   required double? confidence,
   double? projectedWastePercent,
   double wasteWeight = kDefaultRoutingWasteWeight,
+  double costPenalty = 0,
+  double costWeight = kDefaultRoutingCostWeight,
 }) =>
     routingScoreBreakdown(
       isLocal: isLocal,
@@ -444,6 +482,8 @@ double? routingScore({
       confidence: confidence,
       projectedWastePercent: projectedWastePercent,
       wasteWeight: wasteWeight,
+      costPenalty: costPenalty,
+      costWeight: costWeight,
     )?.score;
 
 /// Returns the route score and its first optimizer components for metered
@@ -457,6 +497,8 @@ RoutingScoreBreakdown? routingScoreBreakdown({
   required double? confidence,
   double? projectedWastePercent,
   double wasteWeight = kDefaultRoutingWasteWeight,
+  double costPenalty = 0,
+  double costWeight = kDefaultRoutingCostWeight,
 }) {
   if (isLocal || effectiveHeadroom == null) return null;
   final effective = effectiveHeadroom.clamp(0.0, 100.0).toDouble();
@@ -470,12 +512,20 @@ RoutingScoreBreakdown? routingScoreBreakdown({
   final wasteFraction =
       rawHeadroom <= 0 ? 0.0 : (waste / rawHeadroom).clamp(0.0, 1.0).toDouble();
   final wasteBoost = 1 + math.max(0.0, wasteWeight) * wasteFraction;
+  final penalty =
+      costPenalty.isFinite ? costPenalty.clamp(0.0, 100.0).toDouble() : 0.0;
+  final weight = costWeight.isFinite
+      ? costWeight.clamp(0.0, kMaxRoutingCostWeight).toDouble()
+      : 0.0;
+  final costDiscount = 1 / (1 + weight * penalty);
   return RoutingScoreBreakdown(
     runwayHours: runwayHours,
     confidence: trust,
     wasteFraction: wasteFraction,
     wasteBoost: wasteBoost,
-    score: runwayHours * trust * wasteBoost,
+    costPenalty: penalty,
+    costDiscount: costDiscount,
+    score: runwayHours * trust * wasteBoost * costDiscount,
   );
 }
 
@@ -662,6 +712,8 @@ RouteSuggestion suggestRoute(
   double wasteWeight = kDefaultRoutingWasteWeight,
   double wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
   int wasteMaxHours = kDefaultExpiringQuotaMaxHours,
+  Map<String, double> costPenaltyByProvider = const {},
+  double costWeight = kDefaultRoutingCostWeight,
 }) {
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
@@ -705,6 +757,14 @@ RouteSuggestion suggestRoute(
       thresholdPercent: wasteThresholdPercent,
       maxHoursToReset: wasteMaxHours,
     );
+    final rawCostPenalty = q.isLocal
+        ? 0.0
+        : (costPenaltyByProvider[quotaIdentityKeyFor(q)] ??
+            costPenaltyByProvider[q.provider] ??
+            0.0);
+    final costPenalty = rawCostPenalty.isFinite
+        ? rawCostPenalty.clamp(0.0, 100.0).toDouble()
+        : 0.0;
     final score = routingScoreBreakdown(
       isLocal: q.isLocal,
       headroom: headroom,
@@ -713,6 +773,8 @@ RouteSuggestion suggestRoute(
       confidence: confidence,
       projectedWastePercent: projectedWaste,
       wasteWeight: wasteWeight,
+      costPenalty: costPenalty,
+      costWeight: costWeight,
     );
     return RouteCandidate(
       provider: q.provider,
@@ -730,6 +792,9 @@ RouteSuggestion suggestRoute(
       projectedWastePercent: projectedWaste,
       wasteBoost:
           score == null || score.wasteBoost <= 1 ? null : score.wasteBoost,
+      costPenalty: costPenalty > 0 ? costPenalty : null,
+      costDiscount:
+          score == null || score.costDiscount >= 1 ? null : score.costDiscount,
       resetsAt: a.resetsAt,
       stale: q.stale,
       available: q.isLocal || a.available,
@@ -776,6 +841,9 @@ RouteSuggestion suggestRoute(
         wasteThresholdPercent:
             wasteThresholdPercent.clamp(0.0, 100.0).toDouble(),
         wasteMaxHours: wasteMaxHours.clamp(0, 24 * 14).toInt(),
+        costWeight: costWeight.isFinite
+            ? costWeight.clamp(0.0, kMaxRoutingCostWeight).toDouble()
+            : 0.0,
       );
 
   if (usable.isEmpty) {

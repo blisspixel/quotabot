@@ -60,6 +60,34 @@ Future<HttpServer> startLocalQuotabotServer({
     });
   }
 
+  List<String>? queryValues(Uri uri, String snakeName, String kebabName) {
+    final values = [
+      ...?uri.queryParametersAll[snakeName],
+      ...?uri.queryParametersAll[kebabName],
+    ];
+    return values.isEmpty ? null : values;
+  }
+
+  ({double weight, String? error}) queryCostWeight(
+    Uri uri,
+    bool hasPenalties,
+  ) {
+    final values = queryValues(uri, 'cost_weight', 'cost-weight');
+    if (values == null) return (weight: hasPenalties ? 1.0 : 0.0, error: null);
+    final raw = values.last.trim();
+    final weight = double.tryParse(raw);
+    if (weight == null ||
+        !weight.isFinite ||
+        weight < 0 ||
+        weight > kMaxRoutingCostWeight) {
+      return (
+        weight: 0.0,
+        error: 'cost_weight must be between 0 and 10',
+      );
+    }
+    return (weight: weight, error: null);
+  }
+
   Future<void> serve() async {
     await for (final request in server) {
       final path = request.uri.path;
@@ -88,6 +116,31 @@ Future<HttpServer> startLocalQuotabotServer({
               HttpStatus.badRequest,
             );
           } else {
+            final costPenalties = parseProviderCostPenalties(
+              queryValues(request.uri, 'cost_penalty', 'cost-penalty'),
+            );
+            if (!costPenalties.ok) {
+              writeJson(
+                request,
+                {'error': costPenalties.error},
+                HttpStatus.badRequest,
+              );
+              await request.response.close();
+              continue;
+            }
+            final costWeight = queryCostWeight(
+              request.uri,
+              costPenalties.penalties.isNotEmpty,
+            );
+            if (costWeight.error != null) {
+              writeJson(
+                request,
+                {'error': costWeight.error},
+                HttpStatus.badRequest,
+              );
+              await request.response.close();
+              continue;
+            }
             final snap =
                 filterExcludedProviders(await snapshot(), exclusions.providers);
             final current = now();
@@ -99,6 +152,8 @@ Future<HttpServer> startLocalQuotabotServer({
                 burnStatsByProvider: recentBurnStatsByQuota(snap, current),
                 preferLocal:
                     queryFlag(request.uri, 'local_first', 'local-first'),
+                costPenaltyByProvider: costPenalties.penalties,
+                costWeight: costWeight.weight,
               ).toJson(),
             );
           }

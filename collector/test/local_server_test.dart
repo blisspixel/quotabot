@@ -160,6 +160,34 @@ void main() {
     }
   });
 
+  test('local /suggest honors explicit cost policy', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 20),
+        _q('codex', 30),
+      ],
+      now: () => _now,
+    );
+    try {
+      final json = await _getJson(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/suggest?cost_penalty=claude:1',
+        ),
+      );
+
+      expect(json['cost_weight'], 1.0);
+      expect((json['recommended'] as Map)['provider'], 'codex');
+      final claude = (json['ranked'] as List).cast<Map>().firstWhere(
+            (entry) => entry['provider'] == 'claude',
+          );
+      expect(claude['cost_penalty'], 1.0);
+      expect(claude['cost_discount'], 0.5);
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('local /suggest rejects malformed exclude providers', () async {
     final server = await startLocalQuotabotServer(
       port: 0,
@@ -173,6 +201,26 @@ void main() {
       );
 
       expect(json['error'], 'invalid exclude provider: ../bad');
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('local /suggest rejects malformed cost policy', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      now: () => _now,
+    );
+    try {
+      final json = await _getJson(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/suggest?cost_penalty=../bad:1',
+        ),
+        expectedStatus: 400,
+      );
+
+      expect(json['error'], 'invalid cost-penalty provider: ../bad');
     } finally {
       await server.close(force: true);
     }

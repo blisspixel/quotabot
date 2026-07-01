@@ -194,7 +194,9 @@ contact providers and never sit in the prompt or inference data path.
 balanced, where a comfortable metered subscription wins and local runtimes are
 fallbacks. Local-first mode recommends an available local runtime before
 subscription quota and records `routing_policy: "local_first"` in the JSON
-response.
+response. It can also accept explicit caller-supplied cost penalties; these are
+relative policy inputs, not prices inferred by quotabot, and they only discount
+the shared routing score when the caller provides them.
 
 `mcp.dart` builds one MCP server definition: tools, resources, output schemas,
 read-only/idempotent annotations, capability scope, and standard MCP resource
@@ -204,8 +206,9 @@ need one provider account without creating a profile. `decide_now` is
 deliberately different: it reads the in-memory or disk last-known snapshot only,
 returns `source`, `snapshot_as_of`, age, and staleness, and never forces a live
 collect. `suggest_provider` and `decide_now` both accept `local_first` for
-cost-sensitive dispatch. `reserve_provider` and `release_provider` are the only
-local-write tools, and their annotations mark that distinction for MCP clients.
+cost-sensitive dispatch plus explicit `cost_penalties` for caller-owned cost
+policy. `reserve_provider` and `release_provider` are the only local-write tools,
+and their annotations mark that distinction for MCP clients.
 `quotas://current` remains the unfiltered live snapshot resource.
 `quotas://alerts` stores the last `quotabot.alert.v1` objects fired by the MCP
 subscription loop. Clients subscribe with `resources/subscribe`; on an amber/red
@@ -220,10 +223,11 @@ routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
 `bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
 consumers, including `GET /suggest?local_first=true` for the same opt-in local
-first routing policy. The reasoning behind the routing math (risk-adjusted
+first routing policy and `GET /suggest?cost_penalty=codex:2` for explicit
+caller-owned cost discounting. The reasoning behind the routing math (risk-adjusted
 headroom, strand probability, burn-stat shrinkage, reliability shrinkage,
 heatmap usable-rate shrinkage, routing score, projected-waste route boosts, and
-lease discounts) is written up in
+cost/lease discounts) is written up in
 [ROUTING-MATH.md](ROUTING-MATH.md).
 
 The public snapshot contract is frozen as `quotabot.v1` in
