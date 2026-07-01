@@ -350,6 +350,12 @@ history is partially pooled toward the current fleet burn mean; providers with n
 fitted slope stay unknown, and high-sample histories remain close to their own
 direct estimate. Raw history buckets are not rewritten.
 
+Shipped second hook: provider analytics now use conservative beta-binomial
+shrinkage for reliability rates. Stats, reports, and desktop analytics compute
+each provider/account usable rate from local buckets, then partially pool thin
+rates toward the current fleet usable rate. Unknown reliability stays unknown,
+and raw history buckets are not rewritten.
+
 **Confidence as a first-class output.** Every routed number carries
 `n_eff`/`freshness`/credible-interval width, surfaced as a confidence tag
 (`fresh` / `thin` / `stale`). Routing already prefers live over stale; this makes
@@ -419,16 +425,18 @@ the measurable improvement over the shipped heuristic.
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
 | burn shrinkage | `insights.dart` `shrinkBurnStats` -> cache boundary | first hook shipped |
-| reliability/heatmap shrinkage | `insights.dart` (cross-provider pool) | next |
+| reliability shrinkage | `insights.dart` `shrinkInsightsReliability` -> stats/report/app analytics | shipped |
+| heatmap beta-binomial shrinkage | `insights.dart` (cross-provider/bin pool) | next |
 | pacing controller | `computePace` -> opt-in model expiring-quota weight | first hook shipped |
 | leases reserve/release | `leases.dart` + MCP `reserve_provider`/`release_provider` | shipped |
 | tier ROI | `stats` / optimizer view | post-1.0, secondary |
 | heatmap intensity | `weekHourHeatmap` smoothing + scheduler hint | wrapped smoothing and reset-aware hint shipped |
 
 Build order honors the roadmap: `se`, `h_risk`, risk (`z`), leases, the unified
-confidence-weighted runway score, and the first burn-shrinkage hook are shipped.
-Reliability/heatmap shrinkage (Pip) is next, then the optimizer (Maya) and
-scheduler. Each step is a one-knob, reduces-to-previous change with its own tests.
+confidence-weighted runway score, burn shrinkage, and reliability shrinkage are
+shipped. Heatmap beta-binomial shrinkage (Pip) is next, then the optimizer
+(Maya) and scheduler. Each step is a one-knob, reduces-to-previous change with
+its own tests.
 
 ---
 

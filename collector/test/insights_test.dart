@@ -273,6 +273,38 @@ void main() {
     });
   });
 
+  group('shrinkInsightsReliability', () {
+    test('pulls thin reliability rates toward the fleet rate', () {
+      final shrunk = shrinkInsightsReliability(const {
+        'thin': Insights(samples: 2, spanDays: 1, reliability: 0),
+        'steady-a': Insights(samples: 20, spanDays: 10, reliability: 0.8),
+        'steady-b': Insights(samples: 20, spanDays: 10, reliability: 0.9),
+      });
+
+      expect(shrunk['thin']!.reliability, greaterThan(0.5));
+      expect(shrunk['thin']!.reliability, lessThan(0.6));
+      expect(shrunk['steady-a']!.reliability, closeTo(0.802, 0.002));
+      expect(shrunk['steady-a']!.samples, 20);
+    });
+
+    test('does not invent reliability without a rate or pool', () {
+      final noPool = shrinkInsightsReliability(const {
+        'a': Insights(samples: 2, spanDays: 1, reliability: 0),
+        'b': Insights(samples: 20, spanDays: 10, reliability: 0.8),
+      });
+      expect(noPool['a']!.reliability, 0);
+
+      final withNull = shrinkInsightsReliability(const {
+        'none': Insights(samples: 1, spanDays: 1),
+        'a': Insights(samples: 2, spanDays: 1, reliability: 0),
+        'b': Insights(samples: 20, spanDays: 10, reliability: 0.8),
+        'c': Insights(samples: 20, spanDays: 10, reliability: 0.9),
+      });
+      expect(withNull['none']!.reliability, isNull);
+      expect(withNull['none']!.samples, 1);
+    });
+  });
+
   group('Insights.from', () {
     test('summarizes a multi-day declining series', () {
       final now = 4 * 86400;

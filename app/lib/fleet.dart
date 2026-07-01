@@ -429,6 +429,8 @@ class _FleetScreenState extends State<FleetScreen> {
     final stats = <_Node>[];
     final grids = <List<List<double?>>>[];
     final fleetBuckets = <HeadroomBucket>[];
+    final rawInsights = <String, Insights>{};
+    final insightKeys = <_Node, String>{};
     var maxSamples = 0;
     var maxSpan = 0;
     for (final q in widget.data) {
@@ -443,10 +445,17 @@ class _FleetScreenState extends State<FleetScreen> {
       final ins = Insights.from(win, now, tzOffset: tz);
       if (ins.samples == 0) continue;
       final node = _Node(q.displayName, ins.p50 ?? 0, null)..insights = ins;
+      final insightKey = rawInsights.length.toString();
+      rawInsights[insightKey] = ins;
+      insightKeys[node] = insightKey;
       stats.add(node);
       grids.add(smoothedWeekHourHeatmap(win, tzOffset: tz));
       maxSamples = math.max(maxSamples, ins.samples);
       maxSpan = math.max(maxSpan, ins.spanDays);
+    }
+    final shrunkInsights = shrinkInsightsReliability(rawInsights);
+    for (final node in stats) {
+      node.insights = shrunkInsights[insightKeys[node]] ?? node.insights;
     }
     stats.sort(
       (a, b) => (a.insights!.p50 ?? 0).compareTo(b.insights!.p50 ?? 0),

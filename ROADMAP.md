@@ -412,7 +412,10 @@ Breadth and depth, once the core is trusted:
   rankings now use conservative wrapped smoothing when neighboring evidence
   exists so one isolated quiet hour cannot dominate the recommendation. The same
   local history now produces a reset-aware schedule hint: the nearest strong
-  weekday/hour slot that starts before the active reset.
+  weekday/hour slot that starts before the active reset. Reliability rates in
+  stats, reports, and desktop analytics now use conservative beta-binomial
+  shrinkage, pulling thin provider/account histories toward the current fleet
+  usable rate without changing raw stored history.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

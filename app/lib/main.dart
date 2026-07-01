@@ -722,22 +722,23 @@ class _DashboardState extends State<Dashboard>
         _loading = false;
         _updated = DateTime.now();
         _history = {};
-        _insights = {};
         _heatmaps = {};
         _buckets = {};
         _burnStats = burnStats;
         _routeSummary = routeSummary;
         final tz = DateTime.now().timeZoneOffset;
+        final rawInsights = <String, Insights>{};
         for (final q in active) {
           final key = quotaDisplayKey(q);
           _history[key] = loadHistory(q.provider, account: q.account);
           if (!q.isLocal) {
             final buckets = loadBuckets(q.provider, account: q.account);
             _buckets[key] = buckets;
-            _insights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
+            rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
             _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
           }
         }
+        _insights = shrinkInsightsReliability(rawInsights);
       });
       _scheduleNext();
       _checkAndNotify();
@@ -765,19 +766,20 @@ class _DashboardState extends State<Dashboard>
       _loading = false;
       _updated = DateTime.now();
       _history = {};
-      _insights = {};
       _heatmaps = {};
       _buckets = {};
       _burnStats = cli_demo.demoBurnStats();
       _routeSummary = demoRoutedRequestSummary();
+      final rawInsights = <String, Insights>{};
       for (final q in demo) {
         final b = buckets[q.provider];
         if (b == null) continue;
         final key = quotaDisplayKey(q);
         _buckets[key] = b;
-        _insights[key] = Insights.from(b, nowSec, tzOffset: tz);
+        rawInsights[key] = Insights.from(b, nowSec, tzOffset: tz);
         _heatmaps[key] = smoothedWeekHourHeatmap(b, tzOffset: tz);
       }
+      _insights = shrinkInsightsReliability(rawInsights);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     _scheduleNext(); // keep the "as of" label current even in demo mode
