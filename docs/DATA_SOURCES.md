@@ -206,6 +206,11 @@ reasoning, and tier remain curated because provider list endpoints are
 inconsistent and often account-scoped. Missing API keys are reported as skipped,
 not failures, unless the caller opts into `--fail-on-error`.
 
+The runtime cost boundary is intentionally narrow: authenticated catalog audits
+may call only model-list endpoints such as `https://api.x.ai/v1/models`. Runtime
+sources are covered by a no-surprise-cost contract test that rejects direct
+model, chat, image, and content-generation endpoints, including xAI image APIs.
+
 ## Google (Antigravity)
 
 Gemini CLI (consumer) and related Code Assist for individuals transitioned to Antigravity CLI around June 18, 2026. Antigravity (the VS Code fork + CLI) is the current Google agentic platform. See the Antigravity section above for local state.vscdb + live Cloud Code quota (already covers the unified offering, including multi-account). Legacy ~/.gemini paths may linger but are no longer primary for consumer quota.

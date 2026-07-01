@@ -49,6 +49,10 @@ Notable changes to quotabot. Newest first.
 - Stats, reports, JSON, and the desktop heatmap now surface best sampled
   weekday/hour windows from the same local history buckets, including sample
   counts so sparse evidence stays visible.
+- A no-surprise-cost contract test now scans runtime sources for direct paid
+  model, chat, image, and content-generation endpoints. Catalog auditing remains
+  limited to provider model-list endpoints, so xAI image APIs and other
+  request-metered inference surfaces cannot be added quietly.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
   `spend: quota_plan` is reserved for included quota plans with explicit

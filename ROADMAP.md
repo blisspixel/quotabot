@@ -44,6 +44,10 @@ wrong feature.
 - **Never touches user content.** quotabot handles quota and usage figures only.
   It never reads or transmits your prompts, code, or other content; if a feature
   ever talks to a model, it sends only quotabot's own synthetic probe.
+- **No surprise bills.** Runtime code must not call paid model, chat, image, or
+  content-generation APIs. True included-quota plans are allowed only when the
+  caller can prove overages are disabled; request-metered API keys remain
+  explicit opt-in surfaces outside quotabot's default routing envelope.
 - **Credential-careful.** Tokens are stored locked-down (owner-only on POSIX,
   ACL-restricted on Windows), never logged, and never written to JSON output.
 - **Never disturb host credentials.** quotabot's own grants are independent;
@@ -82,6 +86,8 @@ binding-window SEE rule with honest staleness; self-explaining, risk-aware
 `--risk`); the per-model registry with capability and tier filters across CLI and
 MCP; concrete model recommendation (`suggest --task`); MCP 2025-11-25 output
 schemas and read-only annotations; calibration that grades the predictor;
+the no-surprise-cost guardrail that rejects direct paid inference and image API
+surfaces in runtime sources;
 `quotabot top` with gradient meters, palettes, adaptive refresh, the
 forward-looking forecast on the binding window, and full keyboard interaction
 (sort, navigate, hide, copy-route) with stable exit codes; the same forecast in

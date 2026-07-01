@@ -23,6 +23,9 @@ reads and writes helps scope any report:
 - It reuses those existing tokens only to make the same authenticated metadata
   requests the provider's own tools already make. Tokens are never logged; only
   the resulting usage numbers are written to the local snapshot cache.
+- Runtime code is covered by a no-surprise-cost contract test that rejects direct
+  paid model, chat, image, and content-generation endpoints. Authenticated
+  catalog maintenance is limited to model-list endpoints.
 - Any OAuth grant you create with `quotabot login` is stored separately from the
   host application credentials, under your per-user config directory, owner-only
   on POSIX and ACL-restricted on Windows.

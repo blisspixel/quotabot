@@ -160,6 +160,8 @@ left. The shapes:
 - It makes no model/inference calls and spends no usage tokens.
 - It reads only quota/usage metadata, never prompts, code, or other content.
 - It stays local: no account, no cloud, nothing leaves the machine.
+- Runtime code is guarded against direct paid model, chat, image, and
+  content-generation endpoints; model-list catalog audits are maintenance-only.
 
 A turnkey example of routing a fleet through quotabot is the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/). Minimal clients are in
