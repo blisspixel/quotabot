@@ -66,7 +66,7 @@ List<ProviderQuota> _stressFleet(int now) {
     ProviderQuota(
       provider: 'grok2',
       displayName: 'Grok',
-      account: 'work@pueo.io',
+      account: 'work@example.com',
       plan: 'supergrok',
       asOf: now,
       windows: [w('weekly', 57, 6 * 86400)],
