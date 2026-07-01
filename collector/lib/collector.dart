@@ -35,6 +35,7 @@ export 'report.dart';
 export 'registry.dart';
 export 'schema_contracts.dart';
 export 'simulation.dart';
+export 'verification.dart';
 export 'cache.dart'
     show
         loadHistory,

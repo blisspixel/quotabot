@@ -356,15 +356,25 @@ here is the final one.
 
 ### Release-candidate hardening to 1.0
 
-21. [ ] Freeze 1.0 scope. Only allow fixes, provider-drift corrections, docs
+21. [x] Freeze 1.0 scope. Only allow fixes, provider-drift corrections, docs
     corrections, release-blocking polish, and validation improvements. Defer new
     providers and broad feature ideas to After 1.0 unless they are required to
     protect an invariant.
+    Declared with the 0.5.x line: the scope freeze is in effect. New work from
+    here to 1.0 is limited to the categories above; everything else moves to
+    After 1.0.
 22. [ ] Run a live provider verification matrix on real machines and accounts:
     Claude, Codex, Antigravity/Gemini, Grok, Cursor, Windsurf/Devin Desktop,
     Kiro, Ollama, LM Studio, Lemonade, and manual entries. Cover healthy,
     exhausted, signed-out, stale, multi-account, and reset-edge states wherever
     the provider exposes them.
+    Tooling shipped: `quotabot verify` runs the mechanical honesty checks over
+    one live read (bounds, capture times, staleness labels, reset plausibility,
+    account uniqueness, and frozen `quotabot.v1` conformance), emits a
+    `quotabot.verify.v1` record with `--json`, exits 65 on any failure, and
+    names each provider's own usage surface for the human cross-check. The
+    matrix itself is filled from date-stamped verify records per OS; the first
+    Windows column is recorded, macOS and Linux remain.
 23. [ ] Re-audit no-surprise billing end to end. Confirm runtime sources still
     avoid paid model, chat, image, and content-generation APIs; confirm LiteLLM
     paid API routes stay opt-in; confirm `--budget=quota` excludes manual,

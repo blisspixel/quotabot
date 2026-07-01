@@ -148,6 +148,7 @@ quotabot top --exclude=codex  # hide a provider from this quota read only
 quotabot suggest --use-expiring-quota  # model pick may use included quota before reset
 quotabot stats --tier-plan=Lite:50:10,Current:100:20 --current-price=20  # explicit tier fit
 quotabot report           # weekly quota-health markdown export
+quotabot verify           # honesty checks over one live read (exit 65 on failure)
 ```
 
 `quotabot watch` polls in the background and raises a low-quota alert the moment
