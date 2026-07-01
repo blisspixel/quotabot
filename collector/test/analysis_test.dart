@@ -421,7 +421,34 @@ void main() {
       );
       final c = s.recommended!;
       expect(c.routingScore, isNotNull);
+      expect(c.runwayHours, closeTo(65, 1e-9));
+      expect(c.routingScore, closeTo(c.runwayHours! * c.confidence!, 1e-9));
       expect(c.toJson()['routing_score'], c.routingScore);
+      expect(c.toJson()['runway_hours'], c.runwayHours);
+    });
+
+    test('routing score breakdown is null for local runtimes', () {
+      final score = routingScoreBreakdown(
+        isLocal: true,
+        effectiveHeadroom: 100,
+        burnPerHour: null,
+        confidence: 1,
+      );
+
+      expect(score, isNull);
+    });
+
+    test('routing score breakdown separates runway from confidence', () {
+      final score = routingScoreBreakdown(
+        isLocal: false,
+        effectiveHeadroom: 48,
+        burnPerHour: 2,
+        confidence: 0.75,
+      )!;
+
+      expect(score.runwayHours, 24);
+      expect(score.confidence, 0.75);
+      expect(score.score, 18);
     });
   });
 
