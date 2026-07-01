@@ -138,6 +138,7 @@ quotabot stores its own refresh token under your per-user config directory
 quotabot suggest          # recommended provider + ranked alternatives
 quotabot suggest --json   # the same decision for scripts and agents
 quotabot suggest --local-first  # prefer local runtime before subscription quota
+quotabot suggest --cost-penalty=codex:2  # explicit caller cost penalty
 quotabot models           # every model you can route to now, with budget + caps
 quotabot models --budget=local  # hard cap to free local-runtime models
 quotabot watch            # alert when a window goes low, naming where to route
@@ -158,11 +159,13 @@ saved profiles. The same recommendation is available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters, one-request `exclude` lists, and
-`local_first` routing, model `budget` filters (`local` or measured `quota`), and
+`local_first` routing, explicit `cost_penalties`, model `budget` filters
+(`local` or measured `quota`), and
 model `use_expiring_quota`, local model readiness (`loaded` versus `cold`), and
 `quotas://alerts` subscriptions) and a
 plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok` or
-`GET /suggest?local_first=true`). For how an agent should call quotabot and route, see
+`GET /suggest?local_first=true`, plus `cost_penalty=codex:2` when the caller
+explicitly wants cost-aware ranking). For how an agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/), which routes each request to
 a deployment with budget, writes optional local routed-request metrics, and

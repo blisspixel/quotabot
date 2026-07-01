@@ -164,16 +164,17 @@ request to provider `i`, an expected utility (all terms in comparable units of
 ```
 U_i = V_served * (1 - p_strand_i)          # got the work done
       - C_stall  * p_strand_i              # stalled mid-flow (asymmetric, large)
-      - C_money  * price_i                 # paid-tier cost (Pip's term; 0 for free/local)
+      - C_money  * cost_penalty_i          # caller-supplied cost policy
       + W_reset  * waste_relief_i          # spending quota that would otherwise be wasted
       - C_risk   * z_penalty_i.            # variance aversion (Dev's z)
 ```
 
-- `price_i = 0` for local runtimes and for plans already paid as flat-rate within
-  the window (the marginal request is free until the cap). This is why Pip's
-  "free-first" is not a special case bolted on - it falls out of `C_money * price_i`.
+- `cost_penalty_i = 0` unless a caller supplies an explicit relative penalty.
+  quotabot does not infer prices from provider names or plan labels, so Pip's
+  "free-first" still comes from local-first and budget policy instead of a hidden
+  spend ledger.
 - `waste_relief_i` rewards consuming quota that the forecast says will be unused at
-  reset (S7). For a flat-rate plan with projected wa- waste, the marginal request
+  reset (S7). For a flat-rate plan with projected waste, the marginal request
   has negative effective cost near reset: use-it-or-lose-it, derived, not hacked.
 
 The policy is `argmax_i U_i` subject to the binding-window feasibility
@@ -205,15 +206,17 @@ per-arm subsidy-for-passivity). The quotabot index per provider:
 I_i = ( h_risk_i / max(beta_i, beta_floor) )    # hours of runway, risk-adjusted
       * freshness_i                             # decay stale data toward 0
       * (1 + W_reset * waste_fraction_i)        # boost near-wasted flat-rate quota
-      / (1 + C_money * price_i).                # discount paid tiers
+      / (1 + C_money * cost_penalty_i).         # explicit caller cost discount
 ```
 
 Route to `argmax_i I_i`; for streaming work, split rate proportionally to a
 softmax of `I_i` (a smooth water-filling). `I_i` has units of risk-adjusted
 runway-hours, is comparable across providers, degrades gracefully as data thins
 (via `freshness_i` and the shrinkage of S11), and reduces to "most headroom first"
-when burn, price, and waste terms are neutral. This single index is the
-mathematical heart of "routing as a primitive."
+when burn, caller cost penalties, and waste terms are neutral. `cost_penalty_i`
+is explicit caller policy rather than a price quotabot infers, preserving the
+no-cost-ledger boundary. This single index is the mathematical heart of
+"routing as a primitive."
 
 **Knapsack with deadlines.** Over a horizon spanning multiple resets, choosing
 which requests to place where to maximize served-before-deadline is a
@@ -385,7 +388,7 @@ score_i       = runway_i
                 * reliability_i                               # S9, shrunk (S11)
                 * freshness_i                                 # S11
                 * (1 + W_reset * waste_fraction_i)            # S7
-                / (1 + C_money * price_i)                     # S5, S8
+                / (1 + C_money * cost_penalty_i)              # S5, explicit policy
 route         = argmax_i feasible(i) ? score_i : -inf         # binding-window floor
 fallback      = local runtime, else soonest reset, else passthrough   # shipped
 ```
@@ -395,12 +398,14 @@ Properties we can state and defend:
   `score_i = h_i / beta_i`, monotone in headroom and inverse burn. The current
   `suggestRoute` implementation uses effective headroom as the numerator and
   recent burn as the denominator, exposes that quotient as `runway_hours`, and
-  applies confidence plus the first `W_reset` projected-waste multiplier.
+  applies confidence, the first `W_reset` projected-waste multiplier, and an
+  optional caller-supplied cost discount.
 - **Risk-monotone.** `dscore/dz <= 0`: more caution never increases a pick's score.
 - **Fail-soft.** Missing data -> `freshness -> 0` -> the provider sinks below the
   guaranteed fallback, never above it. The invariant holds by construction.
-- **Units.** `score` is risk-adjusted, reliability-weighted runway-hours per dollar:
-  a quantity a board can interrogate, not an arbitrary index.
+- **Units.** `score` is risk-adjusted, reliability-weighted runway-hours after
+  explicit waste and cost-policy multipliers: a quantity a board can interrogate,
+  not an arbitrary index.
 
 ---
 
@@ -438,6 +443,7 @@ the measurable improvement over the shipped heuristic.
 | unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
 | score component provenance | `analysis.dart` `RoutingScoreBreakdown` -> `runway_hours` | first optimizer hook shipped |
 | projected-waste route boost | `analysis.dart` `RoutingScoreBreakdown` -> `waste_boost` | first waste-weight hook shipped |
+| explicit cost discount | `analysis.dart` `RoutingScoreBreakdown` -> `cost_discount` | opt-in caller policy shipped |
 | burn shrinkage | `insights.dart` `shrinkBurnStats` -> cache boundary | first hook shipped |
 | reliability shrinkage | `insights.dart` `shrinkInsightsReliability` -> stats/report/app analytics | shipped |
 | heatmap beta-binomial shrinkage | `insights.dart` `WeekHourWindow` usable rates -> scheduling score | shipped |
@@ -451,9 +457,10 @@ confidence-weighted runway score, burn shrinkage, reliability shrinkage, and
 heatmap beta-binomial shrinkage are shipped. The first optimizer hook now exposes
 `runway_hours` separately from the confidence multiplier, and the first waste
 hook applies `waste_boost = 1 + W_reset * waste_fraction` when measured burn says
-included quota would otherwise expire unused. The remaining optimizer work adds
-explicit cost weights. Each step is a one-knob, reduces-to-previous change with
-its own tests.
+included quota would otherwise expire unused. Explicit cost weighting is now
+shipped as `cost_discount = 1 / (1 + C_money * cost_penalty)`, only when a caller
+supplies the cost penalties. Each step is a one-knob, reduces-to-previous change
+with its own tests.
 
 ---
 

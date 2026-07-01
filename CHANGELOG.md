@@ -27,6 +27,11 @@ Notable changes to quotabot. Newest first.
   subscription quota for cost-sensitive dispatch. Routing JSON includes
   `routing_policy` so callers can verify `balanced` versus `local_first`
   behavior.
+- Provider suggestions now accept explicit caller-supplied cost penalties:
+  `quotabot suggest --cost-penalty=codex:2`, MCP `cost_penalties`, and loopback
+  HTTP `GET /suggest?cost_penalty=codex:2`. The default cost weight is zero
+  unless a caller supplies penalties, and quotabot never infers prices or enables
+  paid API routes from this signal.
 - `quotabot models` and profiled `quotabot suggest` now accept `--budget=local`
   or `--budget=quota`, with matching MCP `budget` arguments on `list_models`
   and `suggest_model`. `local` is a hard local-runtime cap; `quota` allows local

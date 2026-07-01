@@ -29,6 +29,24 @@ void main() {
     expect(json['using_local_fallback'], isTrue);
   });
 
+  test('suggest exposes explicit provider cost policy', () async {
+    final result = await runCli([
+      'suggest',
+      '--json',
+      '--cost-penalty=codex:2',
+    ]);
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.suggest.v1');
+    expect(json['cost_weight'], 1.0);
+    final codex = (json['ranked'] as List).cast<Map>().firstWhere(
+          (entry) => entry['provider'] == 'codex',
+        );
+    expect(codex['cost_penalty'], 2.0);
+    expect(codex['cost_discount'], closeTo(1 / 3, 0.0001));
+  });
+
   test('models excludes named providers from the registry', () async {
     final result = await runCli([
       'models',
@@ -145,6 +163,33 @@ void main() {
 
     expectExitCode(result, 64);
     expect(result.stderr as String, contains('invalid --exclude provider'));
+  });
+
+  test('suggest rejects malformed cost policy', () async {
+    final result = await runCli([
+      'suggest',
+      '--json',
+      '--cost-penalty=../bad:1',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('invalid cost-penalty provider'));
+  });
+
+  test('suggest cost policy is not silently ignored for model routing',
+      () async {
+    final result = await runCli([
+      'suggest',
+      '--json',
+      '--task=hard',
+      '--cost-penalty=codex:1',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(
+      result.stderr as String,
+      contains('apply to provider suggestions only'),
+    );
   });
 
   test('models rejects unknown budget policies', () async {

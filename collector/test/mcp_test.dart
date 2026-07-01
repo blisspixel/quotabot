@@ -250,6 +250,17 @@ void main() {
         suggestModelProperties.keys,
         containsAll(['use_expiring_quota', 'expiring_quota']),
       );
+      final suggestProviderInput = byName['suggest_provider']!
+          .inputSchema
+          .toJson()['properties'] as Map<String, dynamic>;
+      expect(
+        suggestProviderInput.keys,
+        containsAll(['cost_penalties', 'cost_weight']),
+      );
+      final suggestProviderOutput = byName['suggest_provider']!
+          .outputSchema!
+          .toJson()['properties'] as Map<String, dynamic>;
+      expect(suggestProviderOutput.keys, contains('cost_weight'));
     });
 
     // A schema/payload mismatch makes the server (and the client) raise, so a
@@ -351,6 +362,38 @@ void main() {
 
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);
+    });
+
+    test('suggest_provider applies explicit cost policy', () async {
+      await connect([
+        _q('claude', [
+          QuotaWindow(label: 'weekly', usedPercent: 20),
+        ]),
+        _q('codex', [
+          QuotaWindow(label: 'weekly', usedPercent: 30),
+        ]),
+      ]);
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {
+            'cost_penalties': {'claude': 1},
+          },
+        ),
+      );
+
+      expect(suggestion.structuredContent?['cost_weight'], 1.0);
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+      final ranked = suggestion.structuredContent?['ranked'] as List;
+      final claude = ranked.cast<Map>().firstWhere(
+            (entry) => entry['provider'] == 'claude',
+          );
+      expect(claude['cost_penalty'], 1.0);
+      expect(claude['cost_discount'], 0.5);
     });
 
     test('suggest_model can prefer expiring included quota when requested',
@@ -760,6 +803,40 @@ void main() {
         'ollama',
       );
       expect(liveCalls, 0);
+    });
+
+    test('decide_now applies explicit cost policy from cache', () async {
+      await connect(
+        const [],
+        snapshotProvider: () async => throw StateError('live collection'),
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: [
+            _q('claude', [
+              QuotaWindow(label: 'weekly', usedPercent: 20),
+            ]),
+            _q('codex', [
+              QuotaWindow(label: 'weekly', usedPercent: 30),
+            ]),
+          ],
+          asOf: _now,
+          source: 'memory',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {
+            'cost_penalties': {'claude': 1},
+          },
+        ),
+      );
+
+      expect(decision.structuredContent?['cost_weight'], 1.0);
+      expect(
+        (decision.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
     });
 
     test('resource subscriptions notify when a quota alert fires', () async {

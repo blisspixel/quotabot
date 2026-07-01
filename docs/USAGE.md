@@ -285,6 +285,12 @@ provider ranking visible but recommends a local runtime before subscription quot
 when one is available. MCP `suggest_provider` and `decide_now` accept
 `local_first: true`; the loopback HTTP equivalent is
 `GET /suggest?local_first=true`.
+When a caller has its own relative cost policy, provider suggestions also accept
+explicit cost penalties such as `quotabot suggest --cost-penalty=codex:2`.
+MCP uses `cost_penalties: {"codex": 2}` and optional `cost_weight`, while
+loopback HTTP uses `GET /suggest?cost_penalty=codex:2`. These numbers are
+caller-supplied penalty units, not prices inferred by quotabot; they never enable
+request-metered paid API routes.
 
 For catalog maintenance, run the audit tool from the collector package:
 
@@ -338,13 +344,16 @@ shrunk toward the current fleet burn mean so a two-sample spike does not dominat
 the route.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 `runway_hours`, `routing_score`, `confidence`, `strand_probability`, and, when
-measurable, `projected_waste_percent` plus `waste_boost`. Top-level provenance
+measurable, `projected_waste_percent` plus `waste_boost`, and, when the caller
+supplies a cost policy, `cost_penalty` plus `cost_discount`. Top-level provenance
 includes `routing_policy` (`balanced` or `local_first`), `waste_weight`,
-`waste_threshold_percent`, and `waste_max_hours`. The score is a
-confidence-weighted runway index with a modest use-it-or-lose-it multiplier, so
-a slower-burning provider can rank ahead of one with more instantaneous headroom
-but a much shorter projected runway, and measured included quota near reset can
-win a close tie before it expires unused.
+`waste_threshold_percent`, `waste_max_hours`, and `cost_weight`. The score is a
+confidence-weighted runway index with a modest use-it-or-lose-it multiplier and
+an opt-in caller cost discount, so a slower-burning provider can rank ahead of
+one with more instantaneous headroom but a much shorter projected runway,
+measured included quota near reset can win a close tie before it expires unused,
+and a caller can down-rank a provider it knows is more expensive without turning
+quotabot into a spend ledger.
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
@@ -364,10 +373,11 @@ and exposes nine tools plus two resources:
 - `provider_with_most_headroom` - the account with the most remaining budget.
 - `suggest_provider` - the provider to route the next request to, with ranked
   alternatives and a local fallback when subscriptions are low. Pass
-  `local_first: true` to prefer a local runtime before subscription quota.
+  `local_first: true` to prefer a local runtime before subscription quota. Pass
+  `cost_penalties` only when the caller already has an explicit cost policy.
 - `decide_now` - the same routing decision from the cheapest cached snapshot,
   with explicit snapshot source, age, and staleness. It never forces a live
-  collect, and accepts the same `local_first` policy.
+  collect, and accepts the same `local_first` and explicit cost policies.
 - `reserve_provider` - create a short local quota lease for a cloud provider
   before dispatching parallel work, reducing later effective headroom.
 - `release_provider` - idempotently release a local routing lease when the
@@ -446,7 +456,8 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 
 `GET /` returns the full snapshot as JSON; `GET /suggest` returns the routing
 recommendation, `GET /suggest?exclude=codex,grok` ignores those providers for
-that recommendation, and `GET /suggest?local_first=true` prefers local capacity.
+that recommendation, `GET /suggest?local_first=true` prefers local capacity, and
+`GET /suggest?cost_penalty=codex:2` applies an explicit caller cost penalty.
 Local only, zero tokens.
 
 ## Demo mode

@@ -88,6 +88,8 @@ Map<String, dynamic> suggestResponse(
   Map<String, BurnStat> burnStatsByProvider = const {},
   List<RouteLease> activeLeases = const [],
   bool preferLocal = false,
+  Map<String, double> costPenaltyByProvider = const {},
+  double costWeight = kDefaultRoutingCostWeight,
 }) {
   final response = suggestRoute(
     providers,
@@ -96,6 +98,8 @@ Map<String, dynamic> suggestResponse(
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(activeLeases, provider, account),
     preferLocal: preferLocal,
+    costPenaltyByProvider: costPenaltyByProvider,
+    costWeight: costWeight,
   ).toJson();
   response['active_leases'] = leaseDiscounts(activeLeases)
       .map((discount) => discount.toJson())
@@ -144,6 +148,8 @@ Map<String, dynamic> decideNowResponse(
   Map<String, BurnStat> burnStatsByProvider = const {},
   List<RouteLease> activeLeases = const [],
   bool preferLocal = false,
+  Map<String, double> costPenaltyByProvider = const {},
+  double costWeight = kDefaultRoutingCostWeight,
 }) {
   final age = cached.asOf == null
       ? null
@@ -159,6 +165,8 @@ Map<String, dynamic> decideNowResponse(
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(activeLeases, provider, account),
     preferLocal: preferLocal,
+    costPenaltyByProvider: costPenaltyByProvider,
+    costWeight: costWeight,
   ).toJson();
   return {
     'schema': 'quotabot.decision.v1',
@@ -168,6 +176,7 @@ Map<String, dynamic> decideNowResponse(
     'waste_weight': suggestion['waste_weight'],
     'waste_threshold_percent': suggestion['waste_threshold_percent'],
     'waste_max_hours': suggestion['waste_max_hours'],
+    'cost_weight': suggestion['cost_weight'],
     'source': cached.source,
     'snapshot_as_of': cached.asOf,
     'snapshot_age_seconds': age,
@@ -368,6 +377,13 @@ final _candidateSchema = JsonSchema.object(
     'waste_boost': JsonSchema.number(
       description: 'Use-it-or-lose-it multiplier applied to routing_score.',
     ),
+    'cost_penalty': JsonSchema.number(
+      description: 'Caller-supplied relative cost penalty for this provider.',
+    ),
+    'cost_discount': JsonSchema.number(
+      description:
+          'Multiplier applied to routing_score for explicit cost penalties.',
+    ),
     'resets_at': JsonSchema.integer(),
     'stale': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),
@@ -444,6 +460,9 @@ final suggestOutputSchema = JsonSchema.object(
     'waste_max_hours': JsonSchema.integer(
       description: 'Maximum reset horizon for projected-waste boosting.',
     ),
+    'cost_weight': JsonSchema.number(
+      description: 'Explicit cost-penalty weight used for ranking.',
+    ),
     'recommended': _nullable(_candidateSchema),
     'reason': JsonSchema.string(),
     'using_local_fallback': JsonSchema.boolean(),
@@ -465,6 +484,7 @@ final decideNowOutputSchema = JsonSchema.object(
     'waste_weight': JsonSchema.number(),
     'waste_threshold_percent': JsonSchema.number(),
     'waste_max_hours': JsonSchema.integer(),
+    'cost_weight': JsonSchema.number(),
     'source': JsonSchema.string(
       description: '"memory", "disk", or "empty".',
     ),
@@ -652,6 +672,14 @@ final _routingInputSchema = JsonSchema.object(
       description:
           'Prefer a local runtime before spending subscription quota when one is available.',
     ),
+    'cost_penalties': JsonSchema.object(
+      description:
+          'Optional provider-id to relative cost-penalty map. Values are explicit caller policy, not inferred prices.',
+    ),
+    'cost_weight': JsonSchema.number(
+      description:
+          'Optional cost penalty weight, 0..10. Defaults to 1 when cost_penalties is provided.',
+    ),
   },
 );
 
@@ -803,6 +831,31 @@ String? _accountFilter(Object? value) {
   final trimmed = value.trim();
   if (trimmed.isEmpty) return null;
   return trimmed.length <= 240 ? trimmed : trimmed.substring(0, 240);
+}
+
+({Map<String, double> penalties, double weight, String? error})
+    _routingCostPolicy(Map<String, dynamic> args) {
+  final parsed = parseProviderCostPenalties(args['cost_penalties']);
+  if (!parsed.ok) {
+    return (penalties: const {}, weight: 0.0, error: parsed.error);
+  }
+  final rawWeight = args['cost_weight'];
+  var weight = parsed.penalties.isEmpty ? 0.0 : 1.0;
+  if (rawWeight != null) {
+    final parsedWeight = rawWeight is num ? rawWeight.toDouble() : null;
+    if (parsedWeight == null ||
+        !parsedWeight.isFinite ||
+        parsedWeight < 0 ||
+        parsedWeight > kMaxRoutingCostWeight) {
+      return (
+        penalties: const {},
+        weight: 0.0,
+        error: 'cost_weight must be between 0 and 10',
+      );
+    }
+    weight = parsedWeight;
+  }
+  return (penalties: parsed.penalties, weight: weight, error: null);
 }
 
 List<ProviderQuota> _filterAccount(
@@ -1211,10 +1264,12 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'threshold, after discounting recent burn and active local leases), and '
         'falls back to a local runtime (e.g. Ollama) when every subscription is '
         'low. Pass local_first=true to choose a local runtime before spending '
-        'subscription quota when one is available. Returns the '
-        'recommended provider, a human reason, a using_local_fallback flag, a '
-        'guaranteed fallback, and the full ranked candidate list. Local runtimes '
-        'never win on headroom unless local_first is explicitly set.',
+        'subscription quota when one is available. Pass cost_penalties only '
+        'when the caller has an explicit relative cost policy; quotabot never '
+        'infers prices from provider names. Returns the recommended provider, '
+        'a human reason, a using_local_fallback flag, a guaranteed fallback, '
+        'and the full ranked candidate list. Local runtimes never win on '
+        'headroom unless local_first is explicitly set.',
     inputSchema: _routingInputSchema,
     outputSchema: suggestOutputSchema,
     annotations: _readOnly,
@@ -1223,6 +1278,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final results = profiled.providers;
       final n = now();
       final activeLeases = leaseStore.active(n);
+      final costPolicy = _routingCostPolicy(args);
+      if (costPolicy.error != null) {
+        final response = suggestRoute(const [], n).toJson();
+        response['error'] = costPolicy.error;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           suggestResponse(
@@ -1231,6 +1294,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             burnStatsByProvider: burnByProvider(results, n),
             activeLeases: activeLeases,
             preferLocal: args['local_first'] == true,
+            costPenaltyByProvider: costPolicy.penalties,
+            costWeight: costPolicy.weight,
           ),
           profiled,
         ),
@@ -1247,7 +1312,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'cache source, snapshot_as_of, snapshot_age_seconds, and snapshot_stale '
         'so a router can decide whether the answer is fresh enough for a '
         'per-request path. Active temporary leases are applied to effective '
-        'headroom.',
+        'headroom. Accepts the same local_first and explicit cost_penalties '
+        'routing policy as suggest_provider.',
     inputSchema: JsonSchema.object(
       properties: {
         'profile': JsonSchema.string(
@@ -1271,6 +1337,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           description:
               'Prefer a local runtime before spending subscription quota when one is available.',
         ),
+        'cost_penalties': JsonSchema.object(
+          description:
+              'Optional provider-id to relative cost-penalty map. Values are explicit caller policy, not inferred prices.',
+        ),
+        'cost_weight': JsonSchema.number(
+          description:
+              'Optional cost penalty weight, 0..10. Defaults to 1 when cost_penalties is provided.',
+        ),
       },
     ),
     outputSchema: decideNowOutputSchema,
@@ -1286,6 +1360,18 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final activeLeases = leaseStore.active(n);
       final maxAge = (args['max_age_seconds'] as num?)?.toInt() ?? 300;
       final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
+      final costPolicy = _routingCostPolicy(args);
+      if (costPolicy.error != null) {
+        final response = decideNowResponse(
+          const CachedQuotaSnapshot.empty(),
+          n,
+          maxAgeSeconds: boundedMaxAge,
+        );
+        response['error'] = costPolicy.error;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           decideNowResponse(
@@ -1299,6 +1385,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             burnStatsByProvider: burnByProvider(profiled.providers, n),
             activeLeases: activeLeases,
             preferLocal: args['local_first'] == true,
+            costPenaltyByProvider: costPolicy.penalties,
+            costWeight: costPolicy.weight,
           ),
           profiled,
         ),

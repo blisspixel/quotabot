@@ -383,7 +383,12 @@ Breadth and depth, once the core is trusted:
   shorter runway. Recent burn estimates now use conservative empirical-Bayes
   shrinkage at the routing input boundary, pulling thin provider/account
   histories toward the current fleet burn mean without changing account
-  identity or raw stored history.
+  identity or raw stored history. Provider suggestions now also accept explicit
+  caller-supplied cost penalties: CLI `--cost-penalty=provider:N`, MCP
+  `cost_penalties`, and loopback HTTP `cost_penalty=provider:N` apply a
+  default-one cost weight only when the caller supplies the policy, exposing
+  `cost_penalty`, `cost_discount`, and `cost_weight` provenance without
+  inferring prices or enabling paid API routes.
 - **Optimizer features:** use-it-or-lose-it alerts when projected waste at reset
   crosses a threshold; downgrade/upgrade ROI (rolling p90 vs each tier's cap, with
   $/mo saved and breach probability); reset-anchored scheduling. Foundation
@@ -424,7 +429,10 @@ Breadth and depth, once the core is trusted:
   applies the first explicit waste weight: measured, available quota near reset
   gets a modest use-it-or-lose-it boost when local burn projects meaningful
   unused included quota at reset, while manual, stale, local, and ambiguous
-  multi-account signals are excluded. Explicit cost weighting remains next.
+  multi-account signals are excluded. Explicit provider cost weighting is now
+  shipped as an opt-in caller policy; tier ROI remains secondary because it
+  needs plan-price evidence and must not turn the primary product into a spend
+  ledger.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL
