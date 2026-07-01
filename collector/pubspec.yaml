@@ -6,10 +6,7 @@ environment:
 
 dependencies:
   http: ^1.2.0
-  # Pinned to the 2.x line: sqlite3 3.x changes the FFI open-override API used by
-  # the hardened cross-platform loader (sqlite_loader.dart) and needs retesting
-  # on Windows, macOS, and Linux before adopting.
-  sqlite3: ">=2.9.0 <4.0.0"
+  sqlite3: ^3.3.3
   mcp_dart: ^2.2.1
   crypto: ^3.0.0
 

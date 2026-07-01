@@ -11,6 +11,7 @@ set -euo pipefail
 
 REPO="${QUOTABOT_REPO:-blisspixel/quotabot}"
 INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_ROOT="${HOME}/.local/share/quotabot"
 BINARY_NAME="quotabot"
 if [[ ! "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   echo "Invalid QUOTABOT_REPO value. Expected owner/repo." >&2
@@ -48,15 +49,17 @@ if [[ "$OS" == "darwin" && "$ARCH" == "x64" ]]; then
   exit 1
 fi
 
-ASSET="quotabot-${OS}-${ARCH}"
+ASSET="quotabot-${OS}-${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 echo "Downloading ${ASSET}..."
 
 tmpfile=$(mktemp)
 checksum_file=$(mktemp)
+extract_dir=$(mktemp -d)
 cleanup() {
   rm -f "$tmpfile" "$checksum_file"
+  rm -rf "$extract_dir"
 }
 trap cleanup EXIT
 
@@ -79,8 +82,23 @@ if curl -fsSL "${URL}.sha256" -o "$checksum_file"; then
 else
   echo "No checksum asset found at ${URL}.sha256; continuing with HTTPS verification only."
 fi
-chmod +x "$tmpfile"
-mv "$tmpfile" "$INSTALL_DIR/$BINARY_NAME"
+tar -xzf "$tmpfile" -C "$extract_dir"
+if [[ ! -x "$extract_dir/bin/quotabot" ]]; then
+  echo "Downloaded archive did not contain executable bin/quotabot" >&2
+  exit 1
+fi
+if [[ ! -d "$extract_dir/lib" ]]; then
+  echo "Downloaded archive did not contain lib/" >&2
+  exit 1
+fi
+rm -rf "$INSTALL_ROOT"
+mkdir -p "$INSTALL_ROOT"
+cp -R "$extract_dir/bin" "$extract_dir/lib" "$INSTALL_ROOT/"
+cat > "$INSTALL_DIR/$BINARY_NAME" <<EOF
+#!/usr/bin/env bash
+exec "$INSTALL_ROOT/bin/quotabot" "\$@"
+EOF
+chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
 # PATH check
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
@@ -95,7 +113,7 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
 fi
 
 echo ""
-echo "quotabot installed to $INSTALL_DIR/$BINARY_NAME"
+echo "quotabot installed to $INSTALL_ROOT"
 echo ""
 echo "Next steps:"
 echo "  quotabot doctor"

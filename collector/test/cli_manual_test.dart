@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import 'support/cli_process.dart';
+
 void main() {
   late Directory temp;
 
@@ -15,15 +17,7 @@ void main() {
   });
 
   Future<ProcessResult> runCli(List<String> args) {
-    final env = Map<String, String>.from(Platform.environment)
-      ..['LOCALAPPDATA'] = temp.path
-      ..['NO_COLOR'] = '1';
-    return Process.run(
-      Platform.resolvedExecutable,
-      ['bin/collect.dart', ...args],
-      workingDirectory: Directory.current.path,
-      environment: env,
-    );
+    return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
 
   test('manual set list and remove round-trip through the CLI', () async {
@@ -46,13 +40,13 @@ void main() {
       '--json',
     ]);
 
-    expect(set.exitCode, 0);
+    expectExitCode(set, 0);
     final saved = jsonDecode(set.stdout as String) as Map<String, dynamic>;
     expect(saved['schema'], 'quotabot.manual.v1');
     expect(saved['entry']['provider'], 'custom-ai');
 
     final list = await runCli(['manual', 'list', '--json']);
-    expect(list.exitCode, 0);
+    expectExitCode(list, 0);
     final listed = jsonDecode(list.stdout as String) as Map<String, dynamic>;
     expect(listed['entries'], hasLength(1));
     expect(listed['entries'][0]['used'], 3);
@@ -65,13 +59,14 @@ void main() {
       'work',
       '--json',
     ]);
-    expect(removed.exitCode, 0);
+    expectExitCode(removed, 0);
     expect(
       jsonDecode(removed.stdout as String) as Map<String, dynamic>,
       containsPair('removed', true),
     );
 
     final empty = await runCli(['manual', 'list', '--json']);
+    expectExitCode(empty, 0);
     expect(
       (jsonDecode(empty.stdout as String) as Map<String, dynamic>)['entries'],
       isEmpty,
@@ -81,7 +76,7 @@ void main() {
   test('manual set rejects missing required quota fields', () async {
     final result = await runCli(['manual', 'set', 'custom-ai', '--used', '3']);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     expect(result.stderr as String, contains('usage: quotabot manual set'));
   });
 }

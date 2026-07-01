@@ -3,23 +3,16 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import 'support/cli_process.dart';
+
 void main() {
-  Future<ProcessResult> runCli(List<String> args) {
-    final env = Map<String, String>.from(Platform.environment)
-      ..['QUOTABOT_DEMO'] = '1'
-      ..['NO_COLOR'] = '1';
-    return Process.run(
-      Platform.resolvedExecutable,
-      ['bin/collect.dart', ...args],
-      workingDirectory: Directory.current.path,
-      environment: env,
-    );
-  }
+  Future<ProcessResult> runCli(List<String> args) =>
+      runCollectCli(args, environment: {'QUOTABOT_DEMO': '1'});
 
   test('suggest excludes named providers from ranking', () async {
     final result = await runCli(['suggest', '--json', '--exclude=codex']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final ranked = json['ranked'] as List;
     expect(ranked.map((entry) => entry['provider']), isNot(contains('codex')));
@@ -29,7 +22,7 @@ void main() {
   test('suggest local-first prefers a local runtime in demo mode', () async {
     final result = await runCli(['suggest', '--json', '--local-first']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['routing_policy'], 'local_first');
     expect(json['recommended']['local'], isTrue);
@@ -44,7 +37,7 @@ void main() {
       'codex,ollama',
     ]);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final providers = (json['models'] as List)
         .map((entry) => entry['provider'] as String)
@@ -56,7 +49,7 @@ void main() {
   test('status json excludes named providers from the snapshot', () async {
     final result = await runCli(['--json', '--exclude=codex,ollama']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final providers = (json['providers'] as List)
         .map((entry) => (entry as Map)['provider'] as String)
@@ -68,14 +61,14 @@ void main() {
   test('top snapshot excludes named providers', () async {
     final result = await runCli(['top', '--exclude=codex']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     expect(result.stdout as String, isNot(contains('Codex')));
   });
 
   test('report json excludes named providers', () async {
     final result = await runCli(['report', '--json', '--exclude=codex']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final providers = (json['providers'] as List)
         .map((entry) => (entry as Map)['provider'] as String)
@@ -86,7 +79,7 @@ void main() {
   test('stats json excludes named providers', () async {
     final result = await runCli(['stats', '--json', '--exclude=codex']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json.keys, isNot(contains('codex')));
   });
@@ -95,7 +88,7 @@ void main() {
     final result =
         await runCli(['check', 'codex', '--json', '--exclude=codex']);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['provider'], 'codex');
     expect(json['found'], isFalse);
@@ -111,14 +104,14 @@ void main() {
       '--exclude=claude',
     ]);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     expect((result.stdout as String).trim(), isEmpty);
   });
 
   test('models budget local returns only local-runtime models', () async {
     final result = await runCli(['models', '--json', '--budget=local']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['budget_policy'], 'local');
     final models = json['models'] as List;
@@ -129,7 +122,7 @@ void main() {
   test('suggest budget local recommends a concrete local model', () async {
     final result = await runCli(['suggest', '--json', '--budget=local']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.suggest_model.v1');
     expect(json['budget_policy'], 'local');
@@ -139,7 +132,7 @@ void main() {
   test('suggest can opt into expiring-quota model routing', () async {
     final result = await runCli(['suggest', '--json', '--use-expiring-quota']);
 
-    expect(result.exitCode, 0);
+    expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.suggest_model.v1');
     expect(json['use_expiring_quota'], isTrue);
@@ -150,14 +143,14 @@ void main() {
   test('suggest rejects malformed exclude providers', () async {
     final result = await runCli(['suggest', '--json', '--exclude=../bad']);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     expect(result.stderr as String, contains('invalid --exclude provider'));
   });
 
   test('models rejects unknown budget policies', () async {
     final result = await runCli(['models', '--json', '--budget=overage']);
 
-    expect(result.exitCode, 64);
+    expectExitCode(result, 64);
     expect(result.stderr as String, contains('unknown --budget value'));
   });
 }

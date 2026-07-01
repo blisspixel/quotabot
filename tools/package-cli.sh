@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the quotabot CLI release asset for the current macOS or Linux machine.
-# Produces release/quotabot-<os>-<arch> and a matching .sha256 sidecar.
+# Produces release/quotabot-<os>-<arch>.tar.gz and a matching .sha256 sidecar.
 
 set -euo pipefail
 
@@ -8,6 +8,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$script_dir/.." && pwd)"
 collector_dir="$root/collector"
 release_dir="$root/release"
+build_dir="$collector_dir/build/quotabot_cli_release"
 
 if ! command -v dart >/dev/null 2>&1; then
   echo "dart not found on PATH. Install Flutter or Dart and add it to PATH." >&2
@@ -30,10 +31,19 @@ case "$arch" in
 esac
 
 mkdir -p "$release_dir"
-asset="quotabot-${os}-${arch}"
+asset="quotabot-${os}-${arch}.tar.gz"
 out="$release_dir/$asset"
 
-(cd "$collector_dir" && dart compile exe bin/collect.dart -o "$out")
+rm -rf "$build_dir"
+(cd "$collector_dir" && dart build cli --target=bin/collect.dart --output="$build_dir")
+bundle="$build_dir/bundle"
+if [ ! -f "$bundle/bin/collect" ]; then
+  echo "CLI build did not produce $bundle/bin/collect" >&2
+  exit 1
+fi
+mv "$bundle/bin/collect" "$bundle/bin/quotabot"
+rm -f "$out" "$out.sha256"
+tar -C "$bundle" -czf "$out" .
 
 if command -v sha256sum >/dev/null 2>&1; then
   hash="$(sha256sum "$out" | awk '{print tolower($1)}')"

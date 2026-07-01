@@ -6,7 +6,6 @@ import 'package:sqlite3/sqlite3.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
-import '../sqlite_loader.dart';
 import '../util.dart';
 import '../vscode_state.dart';
 
@@ -18,7 +17,6 @@ import '../vscode_state.dart';
 class WindsurfAdapter {
   static const id = windsurfProviderId;
   static const name = windsurfProviderName;
-  static bool _sqliteReady = false;
   final String? _dbPath;
   final bool? _hasDevinCli;
   final String? _devinConfigPath;
@@ -103,7 +101,6 @@ class WindsurfAdapter {
   }
 
   _WindsurfState _readWindsurfState(String dbPath) {
-    _ensureSqlite();
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
       final rows = db.select(
@@ -144,7 +141,7 @@ class WindsurfAdapter {
     } catch (_) {
       return const _WindsurfState();
     } finally {
-      db.dispose();
+      db.close();
     }
   }
 
@@ -244,12 +241,6 @@ class WindsurfAdapter {
     return null;
   }
   // coverage:ignore-end
-
-  void _ensureSqlite() {
-    if (_sqliteReady) return;
-    configureSqliteLibrary();
-    _sqliteReady = true;
-  }
 }
 
 class _WindsurfState {

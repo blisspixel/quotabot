@@ -59,9 +59,10 @@ Notes:
   on a Linux host, verifies the executable bundle plus `.desktop` and icon
   assets, and can create a portable tarball. You can also repackage that bundle
   as an AppImage (`appimagetool`) or deb/rpm.
-- **CLI release assets** for the one-command installers are built with
+- **CLI release archives** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
-  writing the asset plus a `.sha256` sidecar; upload both to the GitHub release.
+  writing a `dart build cli` bundle archive plus a `.sha256` sidecar; upload both
+  to the GitHub release.
 
 The CI workflow runs the macOS and Linux desktop package scripts with
 `--no-archive`, so every pull request verifies those platform bundles on their

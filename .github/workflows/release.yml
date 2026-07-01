@@ -1,8 +1,9 @@
 name: Release
 
 # Cuts a GitHub release when a v* tag is pushed, building the CLI asset that the
-# one-line installers download (quotabot-<os>-<arch>[.exe] plus a .sha256 sidecar)
-# natively on each platform so every OS gets a real, checksummed binary.
+# one-line installers download (quotabot-<os>-<arch> archive plus a .sha256
+# sidecar) natively on each platform so every OS gets a real, checksummed
+# bundle with its native assets.
 
 on:
   push:
