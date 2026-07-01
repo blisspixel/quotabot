@@ -66,19 +66,25 @@ wrong feature.
 ## Road to 1.0
 
 1.0 is a promise that the **core works exceptionally** and the public surface is
-**stable**, not a feature count. Everything below is depth on what already exists:
-the SEE and ROUTE jobs done flawlessly on every platform, for the providers
-quotabot already claims. Adding a new provider does not get us to 1.0; Antigravity
-never lying about quota on any OS does.
+**stable**, not a feature count. quotabot can be a small utility and still be held
+to a high bar: it should do its narrow job clearly, safely, and repeatedly across
+the machines and accounts people actually use. 1.0 is not a claim that the
+product is finished forever. It is a claim that the SEE and ROUTE core is trusted,
+the public contract is steady, the installation and update paths are boring, and
+known failure modes are honest instead of surprising.
 
-"Done flawlessly" is meant strictly, so 1.0 is the excellent, polished product,
-not a minimal core. That is why two things that round out the core are 1.0 gates
-rather than later breadth: **profiles** (so the multi-account user sees work and
-personal cleanly in one place, item 8) and the **router-grade signal** a real
-meta-router leans on - leases, a cheap cached decision, scoped queries, and a
-subscribe path (items 15-16). Both deepen SEE and ROUTE for the providers already
-claimed; neither is a new provider. Sheer breadth (more providers, optimizer math,
-ecosystem) stays After 1.0.
+The current release, **0.5.3**, is best understood as feature-complete for the
+original 1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist:
+desktop, CLI, MCP, HTTP, LiteLLM integration, profiles, leases, model routing,
+analytics, no-surprise cost guardrails, release automation, and cross-platform CI.
+What remains before 1.0 is not random feature work. It is release-candidate
+hardening, real-world provider verification, docs accuracy, installer/update
+polish, and a final security/reliability pass.
+
+Adding a new provider does not get us to 1.0; an existing provider never lying
+about quota on any claimed OS does. Sheer breadth, optimizer depth, package
+manager distribution, and ecosystem work stay After 1.0 unless they are needed to
+fix a 1.0 trust issue.
 
 **Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
 binding-window SEE rule with honest staleness; self-explaining, risk-aware
@@ -95,10 +101,54 @@ the desktop widget; proactive low-quota alerts as `quotabot watch` and in the
 widget, with an optional loopback webhook; the cross-platform release pipeline;
 and CI green on an 85% coverage floor across Linux, macOS, and Windows.
 
-What is left is the ordered plan below. The phases are sequenced deliberately -
-each unblocks or de-risks the next - so this is the order to build in, not a menu
-to pick from. 1.0 is cut when every box is checked and the suite is green on
-Windows, macOS, and Linux.
+The original feature foundation is recorded below. The release-candidate plan
+after it is the path from 0.5.3 to 1.0. These are ordered as operations, not
+time estimates.
+
+### Version plan
+
+- **0.5.x - foundation complete, small corrective patches.** Keep the current
+  core stable, patch provider drift such as Fable 5 catalog changes, fix bugs,
+  and avoid new breadth unless it protects the no-surprise routing promise.
+- **0.6.x - release-candidate hardening.** Verify real provider behavior across
+  supported operating systems and account states, tighten failure messages, and
+  close any reliability or security defects found by daily use.
+- **0.7.x - product polish and operator confidence.** Refine desktop, CLI, MCP,
+  docs, logging, diagnostics, and accessibility so the utility feels quiet,
+  predictable, and trustworthy instead of merely functional.
+- **0.8.x - install, update, and packaging confidence.** Smoke test clean
+  installs, upgrades, setup scripts, release artifacts, checksums, and rollback
+  paths. The goal is a boring install and a boring update.
+- **0.9.x - final release candidates.** Freeze scope, allow only fixes,
+  documentation corrections, provider-drift patches, and release-blocker polish.
+  There should be no planned breaking CLI, JSON, MCP, or profile-storage changes.
+- **1.0 - stable utility release.** Cut only when the acceptance criteria below
+  are true on the shipped artifacts, not only on a developer machine.
+- **1.x - breadth after trust.** Add providers, package-manager distribution,
+  deeper optimizer features, ecosystem integrations, and richer local-runtime
+  capability work without weakening the local-first and no-surprise invariants.
+
+### 1.0 acceptance criteria
+
+1. Every claimed provider either reads correctly or fails with a plain, truthful
+   reason across supported operating systems and common account states.
+2. No runtime path calls paid model, chat, image, or content-generation APIs.
+   Included quota is used only through explicit quota-plan routes, and
+   request-metered paid APIs remain opt-in outside the default envelope.
+3. The CLI, MCP server, HTTP endpoint, LiteLLM plugin, desktop widget, docs, and
+   release notes tell the same routing story.
+4. Public JSON, CLI, MCP, profile, and cache contracts are stable enough for
+   users and agents to build around without churn.
+5. Installers, source setup scripts, release artifacts, and checksum files pass
+   clean install and upgrade smoke tests on Windows, macOS, and Linux.
+6. CI, CodeQL, secret scanning, dependency review, linting, tests, and the
+   coverage floor are green on the final commit and tag.
+7. The README, ROADMAP, setup docs, usage docs, schema docs, architecture docs,
+   and changelog describe what the product actually does, without overclaiming.
+8. No known release-blocking security, billing, data-loss, credential-handling,
+   installation, or provider-correctness issue remains open.
+
+### Original foundation checklist
 
 ### Phase 1 - Parity across the surfaces
 
@@ -294,15 +344,54 @@ here is the final one.
     analytics frame, and the demo `top` frame. CI now verifies macOS and Linux
     desktop release bundle builds on native runners through dedicated package
     scripts.
-20. [x] Final cut: every box above checked, suite green on Windows, macOS, and
+20. [x] Original feature foundation complete, suite green on Windows, macOS, and
     Linux.
-    Shipped: all 1.0 roadmap boxes are checked. The final local gate passed on
-    Windows with collector format/analyze/tests/coverage, app
+    Shipped: all original 1.0 foundation boxes are checked. The local gate
+    passed on Windows with collector format/analyze/tests/coverage, app
     format/analyze/tests/build, MCP client checks, LiteLLM direct plus real
     proxy tests, collector executable builds, generated README media validation,
     shell script syntax checks through Git Bash, and hygiene scans. GitHub
     Actions passed the matrix on Linux, macOS, and Windows, including native
-    macOS/Linux desktop package-build verification.
+    macOS/Linux desktop package-build verification. This makes 0.5.3 a strong
+    release-candidate foundation, not an automatic 1.0.
+
+### Release-candidate hardening to 1.0
+
+21. [ ] Freeze 1.0 scope. Only allow fixes, provider-drift corrections, docs
+    corrections, release-blocking polish, and validation improvements. Defer new
+    providers and broad feature ideas to After 1.0 unless they are required to
+    protect an invariant.
+22. [ ] Run a live provider verification matrix on real machines and accounts:
+    Claude, Codex, Antigravity/Gemini, Grok, Cursor, Windsurf/Devin Desktop,
+    Kiro, Ollama, LM Studio, Lemonade, and manual entries. Cover healthy,
+    exhausted, signed-out, stale, multi-account, and reset-edge states wherever
+    the provider exposes them.
+23. [ ] Re-audit no-surprise billing end to end. Confirm runtime sources still
+    avoid paid model, chat, image, and content-generation APIs; confirm LiteLLM
+    paid API routes stay opt-in; confirm `--budget=quota` excludes manual,
+    credit-backed, request-metered, and expired temporary quota routes.
+24. [ ] Polish user-facing trust surfaces. The desktop widget, `top`, `doctor`,
+    `suggest`, `models`, alerts, and docs should make quota age, staleness,
+    account identity, fallback behavior, and spend class clear without noisy
+    caveats.
+25. [ ] Smoke test install and update paths on clean Windows, macOS, and Linux
+    hosts: one-line installers, source setup scripts, desktop shortcut/tray
+    setup, CLI-only setup, release archives, checksums, `quotabot doctor`, and
+    upgrade from the latest 0.x release.
+26. [ ] Final contract audit. Review `quotabot.v1`, model JSON, report JSON,
+    MCP tools/resources, profile storage, leases, cache files, exit codes, and
+    docs for accidental churn before declaring the surface stable.
+27. [ ] Final security and reliability pass. Run secret scanning, CodeQL,
+    dependency review, installer/script review, credential-handling review,
+    local-file permission review, webhook/HTTP host validation review, and an
+    adversarial bug hunt. Fix and pin anything real with tests.
+28. [ ] 1.0 release candidate dry run. Build artifacts from a tag candidate,
+    verify release notes and checksums, install from artifacts, run smoke tests,
+    verify GitHub alerts are clear, and confirm the working tree has one clean
+    main branch.
+29. [ ] Cut 1.0 only after the dry run is boring. The final release should feel
+    like publishing a utility that has already been used, installed, updated,
+    and audited, not like discovering whether it works.
 
 ### Continuous hardening (runs throughout, not a phase)
 
