@@ -15,6 +15,7 @@ import 'cache.dart';
 import 'demo.dart';
 import 'manual_quota.dart';
 import 'models.dart';
+import 'provider_ids.dart';
 import 'util.dart';
 
 export 'models.dart';
@@ -48,6 +49,44 @@ export 'cache.dart'
 /// Whether the one-time temp-file sweep has run this process.
 bool _sweptTemp = false;
 
+/// Hard deadline for one adapter's full collect, beyond its own per-request
+/// HTTP timeouts. A hung provider (accepted TCP, no bytes; stacked retries)
+/// degrades to a truthful timeout error for that provider instead of wedging
+/// the whole fleet, the desktop refresh loop, and MCP snapshot calls.
+const Duration kAdapterDeadline = Duration(seconds: 20);
+
+Future<ProviderQuota> _withDeadline(
+  String id,
+  String displayName,
+  Future<ProviderQuota> Function() run,
+) =>
+    run().timeout(
+      kAdapterDeadline,
+      onTimeout: () => ProviderQuota.error(
+        id,
+        displayName,
+        'timed out after ${kAdapterDeadline.inSeconds}s',
+        nowEpoch(),
+      ),
+    );
+
+Future<List<ProviderQuota>> _listWithDeadline(
+  String id,
+  String displayName,
+  Future<List<ProviderQuota>> Function() run,
+) =>
+    run().timeout(
+      kAdapterDeadline,
+      onTimeout: () => [
+        ProviderQuota.error(
+          id,
+          displayName,
+          'timed out after ${kAdapterDeadline.inSeconds}s',
+          nowEpoch(),
+        ),
+      ],
+    );
+
 /// Runs every provider adapter concurrently and returns their snapshots.
 /// Shared by the CLI (bin/collect.dart) and the desktop app.
 Future<List<ProviderQuota>> collectAll() async {
@@ -64,28 +103,38 @@ Future<List<ProviderQuota>> collectAll() async {
   // Multi-account providers are appended after this list so each account gets
   // its own cache fallback.
   final others = await Future.wait<ProviderQuota>([
-    _withCache(() => ClaudeAdapter().collect()),
-    _withCache(() => CodexAdapter().collect()),
-    _withCache(() => CursorAdapter().collect()),
-    _withCache(() => WindsurfAdapter().collect()),
-    _withCache(() => KiroAdapter().collect()),
+    _withCache(() => _withDeadline(
+        claudeProviderId, claudeProviderName, () => ClaudeAdapter().collect())),
+    _withCache(() => _withDeadline(
+        codexProviderId, codexProviderName, () => CodexAdapter().collect())),
+    _withCache(() => _withDeadline(
+        cursorProviderId, cursorProviderName, () => CursorAdapter().collect())),
+    _withCache(() => _withDeadline(windsurfProviderId, windsurfProviderName,
+        () => WindsurfAdapter().collect())),
+    _withCache(() => _withDeadline(
+        kiroProviderId, kiroProviderName, () => KiroAdapter().collect())),
     // Local runtimes are live probes: never serve a cached "available" when the
     // daemon is actually off, so they are collected without the cache fallback.
-    OllamaAdapter().collect(),
-    LmStudioAdapter().collect(),
-    LemonadeAdapter().collect(),
+    _withDeadline(
+        ollamaProviderId, ollamaProviderName, () => OllamaAdapter().collect()),
+    _withDeadline(lmStudioProviderId, lmStudioProviderName,
+        () => LmStudioAdapter().collect()),
+    _withDeadline(lemonadeProviderId, lemonadeProviderName,
+        () => LemonadeAdapter().collect()),
   ]);
   final groks = await _collectGrokMulti();
   final antis = await _collectAntigravityMulti();
   final manual = loadManualProviderQuotas();
   // A local runtime that is not running is not ok; drop it so users who do not
   // run one never see an empty card. Cloud providers stay even when empty.
+  // Every snapshot is sanitized last, so no provider-sourced string can carry
+  // terminal control bytes to any display surface.
   final results = [
     ...others,
     ...groks,
     ...antis,
     ...manual,
-  ].where((q) => !(q.isLocal && !q.ok)).toList();
+  ].where((q) => !(q.isLocal && !q.ok)).map(sanitizeProviderQuota).toList();
   _recordAnalytics(results);
   return results;
 }
@@ -108,7 +157,8 @@ void _recordAnalytics(List<ProviderQuota> results) {
 }
 
 Future<List<ProviderQuota>> _collectGrokMulti() async {
-  final collected = await GrokAdapter().collectAccounts();
+  final collected = await _listWithDeadline(
+      grokProviderId, grokProviderName, () => GrokAdapter().collectAccounts());
   final results = <ProviderQuota>[];
   for (final q in collected) {
     results.add(_cacheResult(q));
@@ -122,7 +172,8 @@ Future<List<ProviderQuota>> _collectGrokMulti() async {
 }
 
 Future<List<ProviderQuota>> _collectAntigravityMulti() async {
-  final collected = await AntigravityAdapter().collectAccounts();
+  final collected = await _listWithDeadline(antigravityProviderId,
+      antigravityProviderName, () => AntigravityAdapter().collectAccounts());
   final results = <ProviderQuota>[];
   for (final q in collected) {
     results.add(_cacheResult(q));

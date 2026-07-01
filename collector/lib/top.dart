@@ -139,7 +139,10 @@ String _line(List<_Cell> cells, int width, AnsiStyle s) {
   var used = 0;
   for (final c in cells) {
     if (used >= width) break;
-    var t = c.text;
+    // Defense in depth: cell text must never carry raw control bytes, so a
+    // provider-sourced string cannot inject escape sequences or skew the
+    // width math. quotabot's own styling is applied by paint(), never here.
+    var t = stripTerminalControl(c.text);
     if (used + t.length > width) t = t.substring(0, width - used);
     if (t.isEmpty) continue;
     used += t.length;

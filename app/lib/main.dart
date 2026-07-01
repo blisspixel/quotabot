@@ -830,7 +830,10 @@ class _DashboardState extends State<Dashboard>
     }
     setState(() => _isRefreshing = true);
     try {
-      final results = await collectAll();
+      // A hard deadline over the whole collect: adapters carry their own
+      // per-provider deadlines, but if anything ever hangs past them, the
+      // refresh loop must recover rather than freeze all future refreshes.
+      final results = await collectAll().timeout(const Duration(seconds: 45));
       final routeSummary = loadRoutedRequestSummary();
       if (!mounted) return;
       final det = detectInstalledAgenticTools();
@@ -885,11 +888,18 @@ class _DashboardState extends State<Dashboard>
         }
         _insights = shrinkInsightsReliability(rawInsights);
       });
-      _scheduleNext();
       _checkAndNotify();
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    } on Exception {
+      // A failed or timed-out refresh keeps the last data on screen; the next
+      // poll (scheduled in finally) retries.
+      _failStreak += 1;
     } finally {
-      if (mounted) setState(() => _isRefreshing = false);
+      // Always reschedule, so one thrown refresh can never stop auto-polling.
+      if (mounted) {
+        _scheduleNext();
+        setState(() => _isRefreshing = false);
+      }
     }
   }
 
