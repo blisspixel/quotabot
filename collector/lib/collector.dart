@@ -167,7 +167,7 @@ ProviderQuota _cacheResult(ProviderQuota result) {
         !GrokAdapter.currentAccounts.contains(cached.account)) {
       return result;
     }
-    return cached.asStale(result.error ?? 'cached');
+    return cached.asStale(result.error ?? 'cached', metadataFrom: result);
   }
   return result;
 }

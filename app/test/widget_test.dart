@@ -33,6 +33,23 @@ ProviderQuota _quota(
 );
 
 void main() {
+  testWidgets('startup loader uses the quota gauge instead of stock spinner', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: QuotaLoadingIndicator(
+          color: Color(0xFF3FB950),
+          trackColor: Color(0xFF12391F),
+        ),
+      ),
+    );
+
+    expect(find.byType(QuotaLoadingIndicator), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.bySemanticsLabel('Loading quota data'), findsOneWidget);
+  });
+
   test('QuotaWindow derives percent from used/limit', () {
     final w = QuotaWindow(label: '5h', used: 25, limit: 100);
     expect(w.percent, 25);

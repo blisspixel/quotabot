@@ -24,6 +24,23 @@ Uint8List _grokMessage(double percent, int timestamp) {
   return Uint8List.fromList(out);
 }
 
+List<int> _fieldString(String value) {
+  final bytes = utf8.encode(value);
+  final out = <int>[0x0a];
+  var len = bytes.length;
+  while (true) {
+    final b = len & 0x7f;
+    len >>= 7;
+    if (len == 0) {
+      out.add(b);
+      break;
+    }
+    out.add(b | 0x80);
+  }
+  out.addAll(bytes);
+  return out;
+}
+
 void main() {
   group('codex', () {
     test('builds 5h and weekly windows', () {
@@ -196,6 +213,41 @@ void main() {
       final bytes = [0x0a, 3, ...utf8.encode('Pro')];
       expect(planFromProto(bytes), 'Pro');
       expect(planFromProto([0x0a, 2, ...utf8.encode('xx')]), isNull);
+    });
+
+    test('userStatus parser extracts account, plan, model, and local note', () {
+      final nested = _fieldString(
+        'Nick Seal blisspixel@gmail.com Gemini 3.1 Pro (High) '
+        'Google AI Pro subscribers get higher rate limits',
+      );
+      final outer = _fieldString(base64Url.encode(nested));
+
+      final parsed = antigravityUserStatusFromProto(outer);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.email, 'blisspixel@gmail.com');
+      expect(parsed.plan, 'Google AI Pro');
+      expect(parsed.model, 'Gemini 3.1 Pro (High)');
+      expect(
+        parsed.note,
+        'Local Antigravity status reports higher rate limits',
+      );
+    });
+
+    test('userStatus parser recovers prefixed nested status payloads', () {
+      final nested = _fieldString(
+        'blisspixel@gmail.com Gemini 3.5 Flash (Medium) '
+        'Gemini 3.1 Pro (Low) Gemini 3.1 Pro (High) '
+        'Google AI Pro subscribers get higher rate limits Google AI Ultra',
+      );
+      final outer = _fieldString('0${base64Encode(nested)}');
+
+      final parsed = antigravityUserStatusFromProto(outer);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.email, 'blisspixel@gmail.com');
+      expect(parsed.plan, 'Google AI Pro');
+      expect(parsed.model, 'Gemini 3.1 Pro (High)');
     });
   });
 

@@ -4,7 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-No entries yet.
+### Changed
+- The desktop startup loader now uses the branded green quota-gauge animation
+  instead of the stock blue spinner.
+- The Quota Analytics screen now shares the main dashboard chrome and typography
+  scale more closely, reducing the visual jump between screens.
+
+### Fixed
+- Antigravity reporting now reads the newer `Antigravity IDE` local status
+  store, prefers the current account over legacy app data, and preserves current
+  plan/model labels when falling back to cached quota windows.
 
 ## 0.5.3 - 2026-07-01
 

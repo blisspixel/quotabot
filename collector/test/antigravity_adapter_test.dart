@@ -25,16 +25,53 @@ void main() {
     String account, {
     String? plan,
     String? ideAccessToken,
+    String? localModel,
+    String? localNote,
     bool useCliToken = false,
   }) =>
       (
         account: account,
         plan: plan,
         ideAccessToken: ideAccessToken,
+        localModel: localModel,
+        localNote: localNote,
         useCliToken: useCliToken,
       );
 
-  File writeDb(String name, {String? email, String? token}) {
+  List<int> fieldString(String value) {
+    final bytes = utf8.encode(value);
+    final out = <int>[0x0a];
+    var len = bytes.length;
+    while (true) {
+      final b = len & 0x7f;
+      len >>= 7;
+      if (len == 0) {
+        out.add(b);
+        break;
+      }
+      out.add(b | 0x80);
+    }
+    out.addAll(bytes);
+    return out;
+  }
+
+  String localStatus({
+    required String email,
+    required String plan,
+    required String model,
+  }) {
+    final nested = fieldString(
+      '$email $model $plan subscribers get higher rate limits',
+    );
+    return base64Encode(fieldString(base64Encode(nested)));
+  }
+
+  File writeDb(
+    String name, {
+    String? email,
+    String? token,
+    String? userStatus,
+  }) {
     final file = File('${temp.path}/$name.vscdb');
     final db = sqlite3.open(file.path);
     try {
@@ -54,6 +91,15 @@ void main() {
           [
             'antigravityUnifiedStateSync.oauthToken',
             base64Encode(utf8.encode('wrapped $token')),
+          ],
+        );
+      }
+      if (userStatus != null) {
+        db.execute(
+          'INSERT INTO ItemTable (key, value) VALUES (?, ?)',
+          [
+            'antigravityUnifiedStateSync.userStatus',
+            userStatus,
           ],
         );
       }
@@ -227,10 +273,93 @@ void main() {
       'home@example.com',
     ]);
     expect(tokenCalls, [
-      'active@example.com:true',
+      'active@example.com:false',
       'work@example.com:false',
       'home@example.com:false',
     ]);
+  });
+
+  test('active CLI account is not replaced by a default grant', () async {
+    final loaded = <String>[];
+
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate(
+          'active-cli@example.com',
+          ideAccessToken: 'cli-session-token',
+          useCliToken: true,
+        ),
+      ],
+      tokenResolver: (_, allowDefault) async =>
+          allowDefault ? 'wrong-default-grant' : null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (access) async {
+        loaded.add(access);
+        return load();
+      },
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.7),
+    ).collectAccounts();
+
+    expect(loaded, ['cli-session-token']);
+    expect(q.single.account, 'active-cli@example.com');
+    expect(q.single.windows.single.usedPercent, closeTo(30, 0.001));
+  });
+
+  test('discovers Antigravity IDE local status without authStatus', () async {
+    final db = writeDb(
+      'antigravity-ide',
+      userStatus: localStatus(
+        email: 'blisspixel@gmail.com',
+        plan: 'Google AI Pro',
+        model: 'Gemini 3.1 Pro (High)',
+      ),
+    );
+
+    final q = await AntigravityAdapter(
+      dbPathSource: () => [db.path],
+      activeAccountSource: () => null,
+      hasGeminiCreds: () => false,
+      tokenResolver: (_, __) async => null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+    ).collectAccounts();
+
+    expect(q.single.account, 'blisspixel@gmail.com');
+    expect(q.single.plan, 'Google AI Pro');
+    expect(q.single.status, 'Gemini 3.1 Pro (High)');
+    expect(q.single.details,
+        contains('Local Antigravity status reports higher rate limits'));
+    expect(
+      q.single.error,
+      'no live quota - run: quotabot login antigravity (then sign in with this account)',
+    );
+  });
+
+  test('explicit local status is not overwritten by a mismatched token',
+      () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate(
+          'blisspixel@gmail.com',
+          plan: 'Google AI Pro',
+          localModel: 'Gemini 3.1 Pro (High)',
+        ),
+      ],
+      tokenResolver: (_, allowDefault) async =>
+          allowDefault ? 'stale-default-token' : null,
+      emailResolver: (_, __, ___) async => 'other@example.com',
+      loadCodeAssist: (_) async => load(),
+    ).collectAccounts();
+
+    expect(q.single.account, 'blisspixel@gmail.com');
+    expect(q.single.plan, 'Google AI Pro');
+    expect(q.single.status, 'Gemini 3.1 Pro (High)');
+    expect(
+      q.single.error,
+      'local Antigravity status found; live quota token is signed in to another account',
+    );
+    expect(q.single.windows, isEmpty);
   });
 
   test('discovery keeps a default database account when no email exists',

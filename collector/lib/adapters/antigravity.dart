@@ -14,7 +14,17 @@ typedef AntigravityAccountCandidate = ({
   String account,
   String? plan,
   String? ideAccessToken,
+  String? localModel,
+  String? localNote,
   bool useCliToken,
+});
+
+typedef AntigravityLocalState = ({
+  String? email,
+  String? plan,
+  String? ideAccessToken,
+  String? localModel,
+  String? localNote,
 });
 
 typedef AntigravityAccountSource = List<AntigravityAccountCandidate> Function();
@@ -116,48 +126,87 @@ class AntigravityAdapter {
   // Default path discovery uses real per-user application directories; tests
   // exercise the same account-discovery logic through injected paths.
   // coverage:ignore-start
-  /// Platform-aware path to the Antigravity globalStorage SQLite. Falls back
-  /// gracefully if the file is absent (no install or different platform layout).
-  static String _antigravityDbPath() {
+  /// Platform-aware paths to Antigravity globalStorage SQLite databases. Recent
+  /// builds use "Antigravity IDE"; older installs used "Antigravity".
+  static List<String> _antigravityDbPaths() {
     if (Platform.isWindows) {
       final appData =
           Platform.environment['APPDATA'] ?? '${home()}/AppData/Roaming';
-      return '$appData/Antigravity/User/globalStorage/state.vscdb';
+      return [
+        '$appData/Antigravity IDE/User/globalStorage/state.vscdb',
+        '$appData/Antigravity/User/globalStorage/state.vscdb',
+      ];
     } else if (Platform.isMacOS) {
-      return '${home()}/Library/Application Support/Antigravity/User/globalStorage/state.vscdb';
+      final base = '${home()}/Library/Application Support';
+      return [
+        '$base/Antigravity IDE/User/globalStorage/state.vscdb',
+        '$base/Antigravity/User/globalStorage/state.vscdb',
+      ];
     } else {
       final dataHome =
           Platform.environment['XDG_DATA_HOME'] ?? '${home()}/.local/share';
-      return '$dataHome/Antigravity/User/globalStorage/state.vscdb';
+      return [
+        '$dataHome/Antigravity IDE/User/globalStorage/state.vscdb',
+        '$dataHome/Antigravity/User/globalStorage/state.vscdb',
+      ];
+    }
+  }
+
+  static List<String> _profileBases() {
+    if (Platform.isWindows) {
+      final appData =
+          Platform.environment['APPDATA'] ?? '${home()}/AppData/Roaming';
+      return [
+        '$appData/Antigravity IDE/Profiles',
+        '$appData/Antigravity/Profiles',
+      ];
+    } else if (Platform.isMacOS) {
+      final base = '${home()}/Library/Application Support';
+      return [
+        '$base/Antigravity IDE/Profiles',
+        '$base/Antigravity/Profiles',
+      ];
+    } else {
+      final dataHome =
+          Platform.environment['XDG_DATA_HOME'] ?? '${home()}/.local/share';
+      return [
+        '$dataHome/Antigravity IDE/Profiles',
+        '$dataHome/Antigravity/Profiles',
+      ];
     }
   }
 
   static List<String> _findAllDbPaths() {
-    final paths = <String>[_antigravityDbPath()];
-    String profilesBase;
-    if (Platform.isWindows) {
-      final appData =
-          Platform.environment['APPDATA'] ?? '${home()}/AppData/Roaming';
-      profilesBase = '$appData/Antigravity/Profiles';
-    } else if (Platform.isMacOS) {
-      profilesBase =
-          '${home()}/Library/Application Support/Antigravity/Profiles';
-    } else {
-      final dataHome =
-          Platform.environment['XDG_DATA_HOME'] ?? '${home()}/.local/share';
-      profilesBase = '$dataHome/Antigravity/Profiles';
-    }
-    final profilesDir = Directory(profilesBase);
-    if (profilesDir.existsSync()) {
-      for (final e in profilesDir.listSync()) {
-        if (e is Directory) {
-          final p = '${e.path}/globalStorage/state.vscdb';
-          if (File(p).existsSync()) paths.add(p);
-          final p2 = '${e.path}/User/globalStorage/state.vscdb';
-          if (File(p2).existsSync()) paths.add(p2);
+    final rootPaths = _antigravityDbPaths();
+    final hasModernRoot = rootPaths.any(
+      (p) => p.contains('Antigravity IDE') && File(p).existsSync(),
+    );
+    final paths = <String>[
+      for (final p in rootPaths)
+        if (!hasModernRoot || p.contains('Antigravity IDE')) p,
+    ];
+    final profileBases = _profileBases();
+    final hasModernProfiles = profileBases.any(
+      (p) => p.contains('Antigravity IDE') && Directory(p).existsSync(),
+    );
+    for (final profilesBase in profileBases) {
+      if (hasModernProfiles && !profilesBase.contains('Antigravity IDE')) {
+        continue;
+      }
+      final profilesDir = Directory(profilesBase);
+      if (profilesDir.existsSync()) {
+        for (final e in profilesDir.listSync()) {
+          if (e is Directory) {
+            final p = '${e.path}/globalStorage/state.vscdb';
+            if (File(p).existsSync()) paths.add(p);
+            final p2 = '${e.path}/User/globalStorage/state.vscdb';
+            if (File(p2).existsSync()) paths.add(p2);
+          }
         }
       }
     }
+    final seen = <String>{};
+    paths.retainWhere(seen.add);
     // Sort by last modified time descending so the most recently used profile
     // (e.g. after signing in with a different account) is tried first as primary.
     paths.sort((a, b) {
@@ -185,6 +234,8 @@ class AntigravityAdapter {
         account: account,
         plan: candidate.plan,
         ideAccessToken: candidate.ideAccessToken,
+        localModel: candidate.localModel,
+        localNote: candidate.localNote,
         useCliToken: candidate.useCliToken,
       );
       final existing = byAccount[account];
@@ -197,17 +248,27 @@ class AntigravityAdapter {
         account: account,
         plan: existing.plan ?? normalized.plan,
         ideAccessToken: existing.ideAccessToken ?? normalized.ideAccessToken,
+        localModel: existing.localModel ?? normalized.localModel,
+        localNote: existing.localNote ?? normalized.localNote,
         useCliToken: existing.useCliToken || normalized.useCliToken,
       );
     }
 
-    final active = (_activeAccountSource ?? _readActiveGeminiAccount)();
+    AntigravityLocalState? activeLocalState;
+    final active = _activeAccountSource != null
+        ? _activeAccountSource()
+        : () {
+            activeLocalState = _readActiveAntigravityState();
+            return activeLocalState?.email ?? _readActiveGeminiAccount();
+          }();
     if (active != null) {
       add((
         account: active,
-        plan: null,
-        ideAccessToken: null,
-        useCliToken: true,
+        plan: activeLocalState?.plan,
+        ideAccessToken: activeLocalState?.ideAccessToken,
+        localModel: activeLocalState?.localModel,
+        localNote: activeLocalState?.localNote,
+        useCliToken: activeLocalState == null,
       ));
     }
 
@@ -215,19 +276,24 @@ class AntigravityAdapter {
       final f = File(dbPath);
       if (!f.existsSync()) continue;
       try {
-        final (email, plan, ideAccessToken) = _readLocalState(dbPath);
+        final state = _readLocalState(dbPath);
+        final email = state.email;
         if (email != null && email.isNotEmpty) {
           add((
             account: email,
-            plan: plan,
-            ideAccessToken: ideAccessToken,
+            plan: state.plan,
+            ideAccessToken: state.ideAccessToken,
+            localModel: state.localModel,
+            localNote: state.localNote,
             useCliToken: false,
           ));
         } else {
           defaultDb ??= (
             account: 'default',
-            plan: plan,
-            ideAccessToken: ideAccessToken,
+            plan: state.plan,
+            ideAccessToken: state.ideAccessToken,
+            localModel: state.localModel,
+            localNote: state.localNote,
             useCliToken: false,
           );
         }
@@ -240,6 +306,8 @@ class AntigravityAdapter {
         account: 'default',
         plan: null,
         ideAccessToken: null,
+        localModel: null,
+        localNote: null,
         useCliToken: true,
       ));
     }
@@ -261,12 +329,16 @@ class AntigravityAdapter {
               account: key,
               plan: account.plan,
               ideAccessToken: account.ideAccessToken,
+              localModel: account.localModel,
+              localNote: account.localNote,
               useCliToken: account.useCliToken,
             )
           : (
               account: key,
               plan: existing.plan ?? account.plan,
               ideAccessToken: existing.ideAccessToken ?? account.ideAccessToken,
+              localModel: existing.localModel ?? account.localModel,
+              localNote: existing.localNote ?? account.localNote,
               useCliToken: existing.useCliToken || account.useCliToken,
             );
     }
@@ -335,6 +407,10 @@ class AntigravityAdapter {
           asOf: asOf,
           ok: true,
           error: note,
+          status: source.localModel,
+          details: [
+            if (source.localNote != null) source.localNote!,
+          ],
           windows: const [],
         );
 
@@ -343,16 +419,25 @@ class AntigravityAdapter {
       var usingQuotabot = false;
       var usingCli = false;
 
-      access = await _resolveGrant(account, allowDefaultGrant);
+      access = await _resolveGrant(
+        account,
+        source.useCliToken ? false : allowDefaultGrant,
+      );
       if (access != null) {
         usingQuotabot = true;
       }
 
       if (access == null && source.useCliToken) {
-        access = await _getCliAccess();
+        access = source.ideAccessToken ?? await _getCliAccess();
         usingCli = access != null;
       }
-      access ??= source.ideAccessToken;
+      if (access == null && source.useCliToken && account == 'default') {
+        access = await _resolveGrant(account, allowDefaultGrant);
+        usingQuotabot = access != null;
+      }
+      if (!source.useCliToken) {
+        access ??= source.ideAccessToken;
+      }
 
       final load = access == null
           ? null
@@ -369,6 +454,12 @@ class AntigravityAdapter {
         usingQuotabot: usingQuotabot,
       );
       if (tokenEmail != null) {
+        if (account != 'default' &&
+            tokenEmail.toLowerCase() != account.toLowerCase()) {
+          return offline(
+            'local Antigravity status found; live quota token is signed in to another account',
+          );
+        }
         account = tokenEmail;
       }
 
@@ -413,8 +504,9 @@ class AntigravityAdapter {
       final tierName = tierObj is Map ? tierObj['name']?.toString() : null;
 
       if (windows.isEmpty) {
-        return offline(
-            'connected; Antigravity is not returning live quota here yet');
+        return offline(source.localModel != null
+            ? 'connected; Antigravity local status is available, but live quota windows are not exposed here yet'
+            : 'connected; Antigravity is not returning live quota here yet');
       }
 
       return ProviderQuota(
@@ -423,6 +515,10 @@ class AntigravityAdapter {
         account: account,
         plan: plan ?? tierName,
         asOf: asOf,
+        status: source.localModel,
+        details: [
+          if (source.localNote != null) source.localNote!,
+        ],
         windows: windows,
       );
     } catch (_) {
@@ -559,28 +655,75 @@ class AntigravityAdapter {
 
   // --- Local state ------------------------------------------------------------
 
-  /// Returns (email, plan, ideAccessToken) from the SQLite DB. The IDE access
-  /// token is a fallback used only when quotabot has no grant of its own.
-  static (String?, String?, String?) _readLocalState(String dbPath) {
+  /// Returns account metadata from the SQLite DB. The IDE access token is a
+  /// fallback used only when quotabot has no grant of its own.
+  static AntigravityLocalState _readLocalState(String dbPath) {
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
       String? authRaw = _value(db, 'antigravityAuthStatus');
       String? tokenRaw = _value(db, 'antigravityUnifiedStateSync.oauthToken');
+      String? userStatusRaw =
+          _value(db, 'antigravityUnifiedStateSync.userStatus');
 
-      String? email, plan;
+      String? email, plan, localModel, localNote;
       if (authRaw != null) {
         final status = jsonDecode(authRaw) as Map<String, dynamic>;
         email = status['email']?.toString();
         final b64 = status['userStatusProtoBinaryBase64'];
-        if (b64 is String) plan = planFromProto(base64.decode(b64));
+        if (b64 is String) {
+          final bytes = _decodeBase64Bytes(b64);
+          if (bytes != null) {
+            final parsed = antigravityUserStatusFromProto(bytes);
+            plan = planFromProto(bytes) ?? parsed?.plan;
+            localModel = parsed?.model;
+            localNote = parsed?.note;
+          }
+        }
+      }
+      final localStatus = userStatusRaw == null
+          ? null
+          : _userStatusFromStoredValue(userStatusRaw);
+      if (localStatus != null) {
+        email ??= localStatus.email;
+        plan ??= localStatus.plan;
+        localModel ??= localStatus.model;
+        localNote ??= localStatus.note;
       }
       final access = tokenRaw == null
           ? null
           : findEmbeddedToken(tokenRaw, r'ya29\.[A-Za-z0-9._\-]{30,}');
-      return (email, plan, access);
+      return (
+        email: email,
+        plan: plan,
+        ideAccessToken: access,
+        localModel: localModel,
+        localNote: localNote,
+      );
     } finally {
       db.close();
     }
+  }
+
+  static ({String? email, String? plan, String? model, String? note})?
+      _userStatusFromStoredValue(String raw) {
+    final bytes = _decodeBase64Bytes(raw);
+    if (bytes == null) return null;
+    return antigravityUserStatusFromProto(bytes);
+  }
+
+  static List<int>? _decodeBase64Bytes(String raw) {
+    final compact = raw.trim().replaceAll(RegExp(r'\s+'), '');
+    if (compact.isEmpty) return null;
+    for (final candidate in [
+      compact,
+      compact.replaceAll('-', '+').replaceAll('_', '/'),
+    ]) {
+      try {
+        final padded = candidate + '=' * ((4 - candidate.length % 4) % 4);
+        return base64Decode(padded);
+      } catch (_) {}
+    }
+    return null;
   }
 
   static String? _value(Database db, String key) {
@@ -662,7 +805,11 @@ class AntigravityAdapter {
   }
 
   static Future<String?> _getGeminiEmail(String access) async {
-    // Active from accounts file is authoritative for the current CLI session.
+    // The current Antigravity CLI can update oauth_creds.json without updating
+    // the legacy google_accounts.json active pointer. Prefer the signed id-token
+    // claim when present, then fall back to the older account file.
+    final fromIdToken = _emailFromGeminiOauthIdToken();
+    if (fromIdToken != null) return fromIdToken;
     try {
       final af = File(_geminiAccountsPath());
       if (af.existsSync()) {
@@ -676,12 +823,53 @@ class AntigravityAdapter {
   }
 
   static String? _readActiveGeminiAccount() {
+    final fromIdToken = _emailFromGeminiOauthIdToken();
+    if (fromIdToken != null) return fromIdToken;
     try {
       final af = File(_geminiAccountsPath());
       if (!af.existsSync()) return null;
       final aj = jsonDecode(af.readAsStringSync()) as Map<String, dynamic>;
       final act = aj['active']?.toString();
       return act != null && act.isNotEmpty ? act : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static AntigravityLocalState? _readActiveAntigravityState() {
+    for (final dbPath in _findAllDbPaths()) {
+      final f = File(dbPath);
+      if (!f.existsSync()) continue;
+      try {
+        final state = _readLocalState(dbPath);
+        if (state.email != null && state.email!.isNotEmpty) return state;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  static String? _emailFromGeminiOauthIdToken() {
+    try {
+      final f = File(_geminiOauthPath());
+      if (!f.existsSync()) return null;
+      final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+      final idToken = j['id_token']?.toString();
+      return _emailFromJwt(idToken);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _emailFromJwt(String? token) {
+    if (token == null || token.isEmpty) return null;
+    final parts = token.split('.');
+    if (parts.length < 2) return null;
+    try {
+      final payload =
+          utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final decoded = jsonDecode(payload) as Map<String, dynamic>;
+      final email = decoded['email'];
+      return email is String && email.isNotEmpty ? email : null;
     } catch (_) {
       return null;
     }
