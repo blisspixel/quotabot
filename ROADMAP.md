@@ -415,7 +415,10 @@ Breadth and depth, once the core is trusted:
   weekday/hour slot that starts before the active reset. Reliability rates in
   stats, reports, and desktop analytics now use conservative beta-binomial
   shrinkage, pulling thin provider/account histories toward the current fleet
-  usable rate without changing raw stored history.
+  usable rate without changing raw stored history. Best-time windows now also
+  carry shrunk weekday/hour usable rates and a reliability-weighted scheduling
+  score, so sparse quiet cells with spent samples cannot outrank consistently
+  usable windows on raw free percent alone.
 - **Surface routed-request metrics** from the LiteLLM plugin back in the widget.
   Foundation shipped: the desktop Quota Analytics Now view reads the default
   `~/.quotabot/litellm-metrics.jsonl` file, summarizes a bounded local JSONL

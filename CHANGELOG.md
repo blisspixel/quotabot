@@ -138,6 +138,10 @@ Notable changes to quotabot. Newest first.
   under `~/.quotabot`, and CI constrains `GITHUB_TOKEN` to read-only contents.
 
 ### Changed
+- Best-time-to-run windows now carry beta-binomial usable-rate shrinkage and a
+  reliability-weighted `scheduling_score`. A sparse quiet hour with spent
+  samples no longer outranks a slightly lower-free window that is consistently
+  usable.
 - Provider analytics now apply conservative beta-binomial shrinkage to
   reliability rates before rendering stats, reports, and desktop analytics.
   Thin provider/account histories are pulled toward the current fleet usable

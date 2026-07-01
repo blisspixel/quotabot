@@ -313,8 +313,11 @@ spent. Reliability rates are conservatively shrunk toward the current fleet
 usable rate when a provider/account has thin local history. It also lists the
 best local weekday/hour windows with sample counts and, when enough neighboring
 history exists, a smoothed free-percent score so a lone quiet hour does not
-outrank a supported quiet pattern. Add `--json` for the structured
-`quotabot.report.v1` shape. It is still local metadata only.
+outrank a supported quiet pattern. Best-time window JSON also includes
+`usable_rate`, shrunk `shrunk_usable_rate`, and a reliability-weighted
+`scheduling_score`, so sparse quiet cells with spent samples are ranked below
+consistently usable windows. Add `--json` for the structured `quotabot.report.v1`
+shape. It is still local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from
 `~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped

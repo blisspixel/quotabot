@@ -271,6 +271,32 @@ void main() {
       expect(grid[0][0], closeTo(75, 1));
       expect(grid[3][12], isNull);
     });
+
+    test('weekday-hour windows carry beta-binomial usable-rate shrinkage', () {
+      final thinSpent = HeadroomBucket(start: 0)
+        ..add(0)
+        ..add(100);
+      final steadyA = HeadroomBucket(start: 3600)
+        ..add(80)
+        ..add(80)
+        ..add(80)
+        ..add(80);
+      final steadyB = HeadroomBucket(start: 7200)
+        ..add(70)
+        ..add(70)
+        ..add(70)
+        ..add(70);
+
+      final windows = weekHourWindows([thinSpent, steadyA, steadyB]);
+      final thin = windows.firstWhere((window) => window.hour == 0);
+      final steady = windows.firstWhere((window) => window.hour == 1);
+
+      expect(thin.usableRate, 0.5);
+      expect(thin.shrunkUsableRate, closeTo(0.767, 0.001));
+      expect(steady.usableRate, 1);
+      expect(steady.shrunkUsableRate, closeTo(0.95, 0.01));
+      expect(thin.toJson()['shrunk_usable_rate'], isA<double>());
+    });
   });
 
   group('shrinkInsightsReliability', () {

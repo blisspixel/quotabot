@@ -162,6 +162,9 @@ void main() {
       );
       expect(best.first.toJson()['label'], 'Thu 00:00');
       expect(best.first.toJson()['smoothed_free_percent'], isA<double>());
+      expect(best.first.toJson()['usable_rate'], 1);
+      expect(best.first.toJson()['shrunk_usable_rate'], 1);
+      expect(best.first.toJson()['scheduling_score'], isA<double>());
     });
 
     test('falls back to sparse cells when no cell meets the sample floor', () {
@@ -195,6 +198,34 @@ void main() {
       expect(best.single.timeLabel, 'Thu 23:00');
       expect(best.single.smoothedFreePercent, closeTo(78, 1));
       expect(best.single.supportSamples, 4);
+    });
+
+    test('uses shrunk usable rate to demote risky quiet cells', () {
+      final riskyHigh = HeadroomBucket(start: 0)
+        ..add(100)
+        ..add(100)
+        ..add(40)
+        ..add(0);
+      final steady = HeadroomBucket(start: Duration.secondsPerHour)
+        ..add(58)
+        ..add(58)
+        ..add(58)
+        ..add(58);
+      final steadyNeighbor = HeadroomBucket(start: 2 * Duration.secondsPerHour)
+        ..add(58)
+        ..add(58)
+        ..add(58)
+        ..add(58);
+
+      final best = bestWeekHourWindows([
+        riskyHigh,
+        steady,
+        steadyNeighbor,
+      ], limit: 1);
+
+      expect(best.single.timeLabel, 'Thu 01:00');
+      expect(best.single.shrunkUsableRate, greaterThan(0.9));
+      expect(best.single.schedulingScore, greaterThan(54));
     });
 
     test('schedules the next strong slot before reset', () {
