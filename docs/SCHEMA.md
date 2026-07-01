@@ -119,6 +119,32 @@ evidence: `smoothed_free_percent`, `support_samples`, and `support_cells`.
 Schedule hints include `scheduled_at`, `wait_seconds`, `resets_at`, `label`,
 `summary`, and the selected `window` object.
 
+## `quotabot.verify.v1`
+
+`quotabot verify --json` emits the record of one honesty-check run:
+
+- `schema`: always `quotabot.verify.v1`.
+- `generated_at`, `os`, and the run-level `passed` verdict.
+- `providers`: one record per provider account, with `provider`,
+  `display_name`, `account`, `state` (`live`, `cached`, `out_of_quota`,
+  `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`,
+  `as_of`, and `staleness_seconds`, `stale`, a window summary (label, used
+  percent, effective used percent, reset time, and seconds to reset), a
+  `passed` verdict, `checks`, and an optional `cross_check` naming the
+  provider's own usage surface to confirm the numbers against.
+- `checks` entries carry `id`, `status` (`pass`, `fail`, or `info`), and a
+  plain-language `detail`. Provider check ids are `identity`,
+  `read_or_reason`, `percent_bounds`, `as_of_sane`, `stale_honesty`, and
+  `reset_sanity`; fleet check ids are `schema_contract`, `unique_accounts`,
+  `manual_entries`, and `claimed_coverage`.
+- `fleet_checks`: run-level checks, including validation of the live snapshot
+  against the frozen `quotabot.v1` contract above.
+
+The record is quota metadata only and follows the same additive rule as every
+other contract here. A truthful absence (a signed-out account or a local
+runtime that is not running) passes; the failing states are lying numbers,
+silent failures, and contract drift. The CLI exits 65 when any check fails.
+
 ## `quotabot.alert.v1`
 
 `quotabot watch --json`, alert webhooks, and `quotas://alerts` emit alert objects

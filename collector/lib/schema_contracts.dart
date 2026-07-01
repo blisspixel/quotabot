@@ -102,6 +102,7 @@ const quotabotV1JsonSchema = <String, Object?>{
         'vision': {'type': 'boolean'},
         'reasoning': {'type': 'string'},
         'tier': {'type': 'string'},
+        'quota_included_until': {'type': 'integer', 'minimum': 0},
         'local': {'type': 'boolean'},
         'loaded': {'type': 'boolean'},
         'size_bytes': {'type': 'integer', 'minimum': 0},
@@ -237,6 +238,8 @@ void _validateModel(
   _checkOptionalString(model, 'reasoning', path, errors);
   _checkOptionalString(model, 'tier', path, errors);
   _checkOptionalString(model, 'quant', path, errors);
+  _checkNonNegativeInt(model, 'quota_included_until', path, errors,
+      required: false);
   _checkBool(model, 'local', path, errors, required: false);
   _checkBool(model, 'loaded', path, errors, required: false);
   _checkNonNegativeInt(model, 'size_bytes', path, errors, required: false);

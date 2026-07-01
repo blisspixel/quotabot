@@ -20,9 +20,11 @@ import 'package:quotabot_collector/webhook.dart';
 const _version = '0.5.4';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
-/// 0 success; 64 usage error (bad arguments or an unknown provider); 69 the
+/// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
+/// `verify` run found at least one snapshot failing its honesty checks; 69 the
 /// requested provider, or the whole fleet, has no usable quota right now.
 const int _exitUsage = 64;
+const int _exitVerifyFailed = 65;
 const int _exitUnavailable = 69;
 
 late AnsiStyle style;
@@ -244,6 +246,9 @@ Future<void> main(List<String> rawArgs) async {
     case 'calibration':
       await _runCalibration(wantsJson, profile, excludedProviders);
       return;
+    case 'verify':
+      await _runVerify(wantsJson, profile, excludedProviders);
+      return;
   }
 
   // Snapshot and the default status table share one collect.
@@ -278,6 +283,7 @@ const _quotaReadCommands = {
   'status',
   'suggest',
   'top',
+  'verify',
   'watch',
 };
 
@@ -949,6 +955,9 @@ Future<void> _runTop(
         selected: (selected >= 0 && selected < visible.length)
             ? visible[selected].provider
             : null,
+        selectedAccount: (selected >= 0 && selected < visible.length)
+            ? visible[selected].account
+            : null,
         hidden: hidden.length,
         copied: copied,
       );
@@ -1129,6 +1138,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  report              weekly quota health markdown export',
+  );
+  stdout.writeln(
+    '  verify              honesty checks over one live read (exit 65 on any failure)',
   );
   stdout.writeln('');
   stdout.writeln(head('ROUTE'));
@@ -1654,6 +1666,102 @@ void _printDoctor(List<ProviderQuota> results) {
       '  (Aider/Cline etc often use underlying provider quotas already tracked above.)',
     );
   }
+}
+
+/// `verify`: mechanical honesty checks over one live read, for the 1.0
+/// release-candidate provider verification matrix. Exit code 0 when every
+/// snapshot passes, 65 when any check fails, so a matrix script can branch.
+Future<void> _runVerify(
+  bool wantsJson,
+  QuotaProfile? profile,
+  Set<String> excludedProviders,
+) async {
+  final results = await _read(profile, excludedProviders);
+  final report = buildVerificationReport(
+    results,
+    nowEpoch(),
+    os: Platform.operatingSystem,
+    filtered:
+        profile != null || excludedProviders.isNotEmpty || _usingSimulation,
+  );
+  if (wantsJson) {
+    print(_jsonPretty(report.toJson()));
+  } else {
+    _printVerify(report);
+  }
+  if (!report.passed) exitCode = _exitVerifyFailed;
+}
+
+String _verifyStateLabel(String state) => switch (state) {
+      'out_of_quota' => 'OUT OF QUOTA',
+      'error' => 'ERROR',
+      'no_data' => 'no live data',
+      _ => state,
+    };
+
+void _printVerify(VerificationReport report) {
+  print(
+    '${style.bold('quotabot verify')}  ${style.dim('mechanical honesty checks over one live read, 0 usage tokens')}\n',
+  );
+  for (final p in report.providers) {
+    final acct = (p.account != 'default' &&
+            p.account != 'unknown' &&
+            p.account != 'none' &&
+            p.account != 'installed' &&
+            p.account != 'cli')
+        ? ' (${p.account})'
+        : '';
+    final verdict = p.passed ? style.green('PASS') : style.red('FAIL');
+    final age = p.stalenessSeconds == null
+        ? ''
+        : '  ${style.dim('captured ${_ago(p.stalenessSeconds!)}')}';
+    print(
+      '  ${'${p.displayName}$acct'.padRight(28)} '
+      '${_stateStyled(_verifyStateLabel(p.state))} $verdict$age',
+    );
+    for (final c in p.checks.where((c) => c.status != VerifyStatus.pass)) {
+      final tag =
+          c.status == VerifyStatus.fail ? style.red(c.id) : style.dim(c.id);
+      print('  ${' '.padRight(28)} ${' '.padRight(12)} -> $tag: ${c.detail}');
+    }
+  }
+  print('');
+  for (final c in report.fleetChecks) {
+    final verdict = switch (c.status) {
+      VerifyStatus.pass => style.green('PASS'),
+      VerifyStatus.fail => style.red('FAIL'),
+      VerifyStatus.info => style.dim('info'),
+    };
+    print('  fleet ${c.id.padRight(22)} $verdict  ${style.dim(c.detail)}');
+  }
+  final failed = report.failCount;
+  print('');
+  print(failed == 0
+      ? style.green(
+          '  every snapshot is reading correctly or failing with a plain reason')
+      : style.red('  $failed check(s) failed; see details above'));
+  final crossChecks = [
+    for (final p in report.providers)
+      if (p.crossCheck != null && p.state != 'undetected')
+        '  ${p.displayName}: ${p.crossCheck}',
+  ];
+  if (crossChecks.isNotEmpty) {
+    print(
+        '\n${style.dim('Confirm the numbers against each provider\'s own view:')}');
+    crossChecks.toSet().forEach(print);
+  }
+  print(
+    '\n${style.dim('Record this run for the verification matrix:')} '
+    '${style.bold('quotabot verify --json')}',
+  );
+}
+
+/// A compact "Ns/Nm/Nh ago" age label.
+String _ago(int seconds) {
+  if (seconds < 90) return '${seconds}s ago';
+  if (seconds < 5400) return '${(seconds / 60).round()}m ago';
+  if (seconds < 129600) return '${(seconds / 3600).round()}h ago';
+  return '${(seconds / 86400).round()}d ago';
 }
 
 /// `calibration`: grade quotabot's own strand predictions against the user's

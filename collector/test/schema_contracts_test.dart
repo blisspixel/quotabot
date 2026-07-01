@@ -54,6 +54,18 @@ void main() {
               ModelInfo(id: 'qwen2.5-coder:7b', local: true),
             ],
           ).toJson(),
+          ProviderQuota(
+            provider: 'antigravity',
+            displayName: 'Antigravity',
+            account: 'work@example.com',
+            asOf: 1782000000,
+            windows: [
+              QuotaWindow(label: '5h', usedPercent: 10),
+            ],
+            models: const [
+              ModelInfo(id: 'temp-promo', quotaIncludedUntil: 1785000000),
+            ],
+          ).toJson(),
         ],
       };
 
@@ -140,6 +152,7 @@ void main() {
                 'reasoning': false,
                 'tier': 2,
                 'quant': 3,
+                'quota_included_until': -5,
                 'local': 'true',
                 'loaded': 'false',
                 'size_bytes': -1,
@@ -172,6 +185,7 @@ void main() {
           r'$.providers[2].models[1].reasoning must be a string',
           r'$.providers[2].models[1].tier must be a string',
           r'$.providers[2].models[1].quant must be a string',
+          r'$.providers[2].models[1].quota_included_until must be a non-negative integer',
           r'$.providers[2].models[1].local must be a boolean',
           r'$.providers[2].models[1].loaded must be a boolean',
           r'$.providers[2].models[1].size_bytes must be a non-negative integer',

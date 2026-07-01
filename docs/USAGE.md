@@ -99,6 +99,7 @@ costs no usage tokens; add `--json` to any read command for machine output.
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, best windows, pace.   |
 | `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
+| `verify`               | Honesty checks over one live read (exit 65 on any failure). |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect grok or antigravity so it stays live.         |
 | `logout <provider>`    | Disconnect a provider.                                |
@@ -124,6 +125,32 @@ looks healthy, but the longer window is spent, so the provider is unavailable.
 Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
 state for assertions, skips live adapter calls, ignores real burn history, and
 does not read analytics buckets.
+
+### Verification (`quotabot verify`)
+
+`quotabot verify` runs the honesty checks quotabot holds itself to over one
+live read: every window percentage finite and in bounds, every snapshot
+carrying a sane capture time, every failure carrying a plain reason, cached
+data labeled stale with a note, reset times plausible, provider/account pairs
+unique, and the emitted snapshot conforming to the frozen `quotabot.v1`
+contract. A provider that is out of quota, signed out, or not running still
+passes when it says so truthfully; the failure mode `verify` hunts is a lying
+or silent number, not an empty one.
+
+```bash
+quotabot verify           # human summary, one line per provider
+quotabot verify --json    # quotabot.verify.v1 record for scripts and archives
+```
+
+Exit code is `0` when every snapshot is reading correctly or failing with a
+plain reason, and `65` when any check fails, so a script or CI job can branch
+on it. Each record also names the provider's own usage surface (for example
+`/usage` in Claude Code) so you can confirm the numbers by hand; the mechanical
+checks cannot know the provider's side of the conversation. Undetected local
+runtimes are reported as truthful absences, not failures. `--profile`,
+`--exclude`, and simulation flags narrow the read as usual; the
+claimed-provider coverage check then reports itself skipped instead of
+misreading the filter.
 
 ### Manual quota entries
 
@@ -247,6 +274,8 @@ output:
 - `0` success: the command ran, and (for `check` and a piped `top`) at least one
   provider is usable right now.
 - `64` usage error: a bad argument or an unknown provider name.
+- `65` verification failure: a `verify` run found at least one snapshot failing
+  its honesty checks (a lying number, a silent failure, or contract drift).
 - `69` unavailable: the named provider (`check`), or the whole fleet (piped
   `top`), has no usable quota at the moment.
 
@@ -289,7 +318,7 @@ as `use_expiring_quota: true`.
 
 For one-off provider avoidance, add `--exclude=codex,grok` to quota-reading CLI
 commands (`status`, `doctor`, `json`, `check`, `top`, `watch`, `stats`,
-`report`, `calibration`, `models`, or `suggest`). The filter applies after
+`report`, `calibration`, `models`, `verify`, or `suggest`). The filter applies after
 `--profile`, so you can temporarily ignore a provider without changing named
 profiles. MCP routing and model tools accept the same idea as
 `exclude: ["codex", "grok"]`, and the loopback HTTP server supports
