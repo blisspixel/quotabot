@@ -313,9 +313,11 @@ List<ModelEntry> buildModelRegistry(
     if (models.isEmpty) continue;
     final a = providerAvailability(q, now);
     final binding = bindingWindow(q, now);
-    final quotaBacked =
+    final providerQuotaBacked =
         !q.isLocal && q.source != 'manual' && q.windows.isNotEmpty;
     for (final m in models) {
+      final quotaBacked = providerQuotaBacked &&
+          (m.quotaIncludedUntil == null || now < m.quotaIncludedUntil!);
       entries.add(ModelEntry(
         model: m,
         provider: q.provider,

@@ -140,6 +140,7 @@ quotabot suggest --json   # the same decision for scripts and agents
 quotabot suggest --local-first  # prefer local runtime before subscription quota
 quotabot suggest --cost-penalty=codex:2  # explicit caller cost penalty
 quotabot models           # every model you can route to now, with budget + caps
+quotabot models --budget=quota  # no-surprise routing: local + measured included quota
 quotabot models --budget=local  # hard cap to free local-runtime models
 quotabot watch            # alert when a window goes low, naming where to route
 quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
@@ -166,7 +167,9 @@ model `use_expiring_quota`, local model readiness (`loaded` versus `cold`), and
 `quotas://alerts` subscriptions) and a
 plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok` or
 `GET /suggest?local_first=true`, plus `cost_penalty=codex:2` when the caller
-explicitly wants cost-aware ranking). For how an agent should call quotabot and route, see
+explicitly wants cost-aware ranking). Use model `budget=quota` when a caller
+must avoid credit-backed or request-metered spend; temporary included-quota
+models stop qualifying for that policy after their documented cutoff. For how an agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
 in [integrations/litellm/](integrations/litellm/), which routes each request to
 a deployment with budget, writes optional local routed-request metrics, and

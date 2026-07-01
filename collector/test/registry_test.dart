@@ -1,3 +1,4 @@
+import 'package:quotabot_collector/model_catalog.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/registry.dart';
 import 'package:test/test.dart';
@@ -56,6 +57,39 @@ void main() {
     expect(e.gatingWindow, 'weekly');
     expect(e.available, isTrue);
     expect(e.model.contextTokens, 200000);
+  });
+
+  test('Claude catalog exposes Fable 5 with temporary quota backing', () {
+    final beforeCutoff = buildModelRegistry(
+      [_cloud('claude', 20)],
+      1783468800,
+      catalog: kModelCatalog,
+    );
+    final fable = beforeCutoff.singleWhere(
+      (entry) => entry.model.id == 'claude-fable-5',
+    );
+    expect(fable.model.displayName, 'Claude Fable 5');
+    expect(fable.model.contextTokens, 1000000);
+    expect(fable.model.maxOutputTokens, 128000);
+    expect(fable.model.toJson()['quota_included_until'], 1783494000);
+    expect(fable.quotaBacked, isTrue);
+
+    final afterCutoff = buildModelRegistry(
+      [_cloud('claude', 20)],
+      1783494000,
+      catalog: kModelCatalog,
+      requirements: const ModelRequirements(
+        budgetPolicy: ModelBudgetPolicy.quota,
+      ),
+    );
+    expect(
+      afterCutoff.map((entry) => entry.model.id),
+      isNot(contains('claude-fable-5')),
+    );
+    expect(
+      afterCutoff.map((entry) => entry.model.id),
+      contains('claude-sonnet-5'),
+    );
   });
 
   test('local models come from the snapshot, no catalog needed', () {

@@ -33,7 +33,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.5.2';
+const quotabotMcpVersion = '0.5.3';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -577,6 +577,10 @@ final _modelEntrySchema = JsonSchema.object(
     'reasoning': JsonSchema.string(),
     'tier': JsonSchema.string(
       description: "The provider's own tier: light, standard, or flagship.",
+    ),
+    'quota_included_until': JsonSchema.integer(
+      description:
+          'Epoch second when a temporary included-quota model stops being quota-backed.',
     ),
     'size_bytes': JsonSchema.integer(
       description: 'For local-runtime models: installed model size in bytes.',

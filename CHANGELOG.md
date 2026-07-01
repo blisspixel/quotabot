@@ -6,6 +6,14 @@ Notable changes to quotabot. Newest first.
 
 No entries yet.
 
+## 0.5.3 - 2026-07-01
+
+### Added
+- The cloud model catalog now includes Claude Fable 5 and Claude Sonnet 5 from
+  Anthropic's July 2026 model docs. Fable 5 carries a temporary
+  `quota_included_until` cutoff so `--budget=quota` stops treating it as
+  quota-backed after its documented included weekly-usage window.
+
 ## 0.5.2 - 2026-07-01
 
 ### Added
