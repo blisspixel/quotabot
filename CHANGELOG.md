@@ -4,6 +4,10 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+No entries yet.
+
+## 0.5.4 - 2026-07-01
+
 ### Changed
 - The desktop startup loader now uses the branded green quota-gauge animation
   instead of the stock blue spinner.

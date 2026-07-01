@@ -73,8 +73,8 @@ product is finished forever. It is a claim that the SEE and ROUTE core is truste
 the public contract is steady, the installation and update paths are boring, and
 known failure modes are honest instead of surprising.
 
-The current release, **0.5.3**, is best understood as feature-complete for the
-original 1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist:
+The current release, **0.5.4**, is best understood as a corrective patch on the
+feature-complete original 1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist:
 desktop, CLI, MCP, HTTP, LiteLLM integration, profiles, leases, model routing,
 analytics, no-surprise cost guardrails, release automation, and cross-platform CI.
 What remains before 1.0 is not random feature work. It is release-candidate
@@ -102,7 +102,7 @@ widget, with an optional loopback webhook; the cross-platform release pipeline;
 and CI green on an 85% coverage floor across Linux, macOS, and Windows.
 
 The original feature foundation is recorded below. The release-candidate plan
-after it is the path from 0.5.3 to 1.0. These are ordered as operations, not
+after it is the path from 0.5.4 to 1.0. These are ordered as operations, not
 time estimates.
 
 ### Version plan
@@ -352,7 +352,7 @@ here is the final one.
     proxy tests, collector executable builds, generated README media validation,
     shell script syntax checks through Git Bash, and hygiene scans. GitHub
     Actions passed the matrix on Linux, macOS, and Windows, including native
-    macOS/Linux desktop package-build verification. This makes 0.5.3 a strong
+    macOS/Linux desktop package-build verification. The 0.5.x line is a strong
     release-candidate foundation, not an automatic 1.0.
 
 ### Release-candidate hardening to 1.0
