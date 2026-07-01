@@ -20,8 +20,10 @@ quotabot does two things:
    Studio, Lemonade) have loaded, so a free local model is always in view.
 2. **Recommends where to send the next request.** `quotabot suggest` (and the
    same logic over MCP) ranks your subscriptions by confidence-weighted runway
-   and falls back to a local model when they are low, so AI tools and agents can
-   route across your accounts instead of stalling on a spent cap.
+   with a small use-it-or-lose-it boost for measured quota that would otherwise
+   expire unused, and falls back to a local model when subscriptions are low, so
+   AI tools and agents can route across your accounts instead of stalling on a
+   spent cap.
 
 It reads the usage your tools already track locally, so most providers need no
 setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).

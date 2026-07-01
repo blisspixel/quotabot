@@ -448,7 +448,101 @@ void main() {
 
       expect(score.runwayHours, 24);
       expect(score.confidence, 0.75);
+      expect(score.wasteFraction, 0);
+      expect(score.wasteBoost, 1);
       expect(score.score, 18);
+    });
+
+    test('routing score breakdown applies projected-waste boost', () {
+      final score = routingScoreBreakdown(
+        isLocal: false,
+        headroom: 60,
+        effectiveHeadroom: 60,
+        burnPerHour: 1,
+        confidence: 0.6,
+        projectedWastePercent: 50,
+      )!;
+
+      expect(score.runwayHours, 60);
+      expect(score.wasteFraction, closeTo(5 / 6, 1e-9));
+      expect(score.wasteBoost,
+          closeTo(1 + kDefaultRoutingWasteWeight * 5 / 6, 1e-9));
+      expect(score.score, closeTo(43.5, 1e-9));
+    });
+
+    test('projected waste can break a close subscription tie', () {
+      final reset = _now + 10 * 3600;
+      final s = suggestRoute(
+        [
+          _q('codex', [
+            QuotaWindow(label: 'weekly', usedPercent: 40, resetsAt: reset),
+          ]),
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 30)]),
+        ],
+        _now,
+        burnStatsByProvider: const {
+          'codex': BurnStat(perHour: 1, samples: 6),
+          'claude': BurnStat(perHour: 1, samples: 6),
+        },
+      );
+      final json = s.toJson();
+
+      expect(s.recommended?.provider, 'codex');
+      expect(s.recommended?.projectedWastePercent, closeTo(50, 1e-9));
+      expect(s.recommended?.wasteBoost, greaterThan(1));
+      expect(json['waste_weight'], kDefaultRoutingWasteWeight);
+      expect((json['recommended'] as Map)['projected_waste_percent'], 50.0);
+    });
+
+    test('projected waste boost skips unverifiable quota sources', () {
+      final reset = _now + 10 * 3600;
+      final manual = suggestRoute(
+        [
+          _q(
+            'manual',
+            [QuotaWindow(label: 'weekly', usedPercent: 40, resetsAt: reset)],
+            source: 'manual',
+          ),
+        ],
+        _now,
+        burnStatsByProvider: const {
+          'manual': BurnStat(perHour: 1, samples: 6),
+        },
+      ).recommended!;
+
+      expect(manual.projectedWastePercent, isNull);
+      expect(manual.wasteBoost, isNull);
+    });
+
+    test('projected waste requires account burn for multi-account providers',
+        () {
+      final reset = _now + 10 * 3600;
+      ProviderQuota account(String name) => ProviderQuota(
+            provider: 'claude',
+            displayName: 'Claude',
+            account: name,
+            asOf: _now,
+            windows: [
+              QuotaWindow(label: 'weekly', usedPercent: 40, resetsAt: reset),
+            ],
+          );
+
+      final s = suggestRoute(
+        [account('work'), account('home')],
+        _now,
+        burnStatsByProvider: const {
+          'claude': BurnStat(perHour: 1, samples: 6),
+        },
+      );
+
+      expect(
+        s.ranked.map((candidate) => candidate.projectedWastePercent),
+        everyElement(isNull),
+      );
+      expect(
+        s.ranked.map((candidate) => candidate.wasteBoost),
+        everyElement(isNull),
+      );
     });
   });
 
