@@ -39,6 +39,9 @@ Notable changes to quotabot. Newest first.
 - LiteLLM routed-request metrics now record the selected spend class, and the
   desktop analytics view summarizes local, quota-plan, paid-API, and legacy
   unknown records separately.
+- Desktop profiles now include a high-contrast Hacker theme, preserving the
+  existing System, Light, and Dark choices while giving the widget a green
+  terminal-style palette that still runs through Flutter's theme system.
 - The LiteLLM router now defaults to no-surprise-billing guardrails. Candidates
   marked `spend: paid_api` are skipped unless `allow_paid_api: true` is set,
   `spend: quota_plan` is reserved for included quota plans with explicit

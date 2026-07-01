@@ -185,7 +185,8 @@ implicit `default` profile keeps the zero-config fleet unchanged.
 
 The desktop widget can create, edit, delete, and select the same profiles from
 its menu. A profile can choose providers, specific accounts where quotabot has
-account evidence, routing policy, and theme. Profile selection changes the
+account evidence, routing policy, and theme (`System`, `Light`, `Dark`, or the
+high-contrast `Hacker` theme). Profile selection changes the
 displayed providers, low-quota notifications, webhook alerts, and analytics
 view. Hiding providers and choosing sort order are scoped to the active
 non-default profile; the default profile keeps the app's legacy global

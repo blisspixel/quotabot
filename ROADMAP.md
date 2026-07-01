@@ -404,6 +404,9 @@ Breadth and depth, once the core is trusted:
   streaks.
 - **Themes for the widget:** selectable color themes (the `top` palettes already
   shipped), including a high-contrast "hacker" mode, still honoring light/dark.
+  Foundation shipped: desktop profiles now offer System, Light, Dark, and
+  Hacker themes, with Hacker mapped through the normal Flutter theme system as a
+  high-contrast dark green widget palette.
 - **Ecosystem and packaging:** a plugin model, OS package managers (winget/MSIX,
   Homebrew, AppImage/flatpak), a docs site, and a reusable passive-reader adapter
   taxonomy to widen coverage cheaply.

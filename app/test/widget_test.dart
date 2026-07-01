@@ -1,7 +1,9 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/profile_ui.dart';
+import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _provider(
@@ -100,6 +102,19 @@ void main() {
   });
 
   group('profile UI preferences', () {
+    test('normalizes app theme preferences safely', () {
+      expect(normalizeAppTheme(' Hacker '), appThemeHacker);
+      expect(normalizeAppTheme('dark'), appThemeDark);
+      expect(normalizeAppTheme('unknown'), appThemeSystem);
+      expect(storedAppTheme(appThemeSystem), isNull);
+      expect(storedAppTheme(appThemeHacker), appThemeHacker);
+      expect(themeModeForAppTheme(appThemeHacker), ThemeMode.dark);
+      expect(
+        AppChromeTheme.forSpec(Brightness.dark, appThemeHacker).accent,
+        const Color(0xFF39FF14),
+      );
+    });
+
     test('labels default and named profiles for compact UI', () {
       expect(profileLabel(QuotaProfile.defaultProfile()), 'Default');
       expect(
@@ -221,6 +236,18 @@ void main() {
       expect(work.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
       expect(work.sort, ProviderSort.mostAvailable.name);
       expect(work.theme, 'dark');
+
+      final hacker = profileFromSelection(
+        name: 'hacker',
+        options: options,
+        selectedProviders: {'codex', 'grok'},
+        selectedAccounts: const {},
+        hiddenProviders: const {},
+        routingPolicy: ProfileRoutingPolicy.balanced,
+        sort: ProviderSort.defaultOrder,
+        theme: 'hacker',
+      );
+      expect(hacker.theme, appThemeHacker);
     });
   });
 

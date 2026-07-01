@@ -26,6 +26,7 @@ import 'prefs.dart';
 import 'profile_editor.dart';
 import 'profile_ui.dart';
 import 'termshot.dart';
+import 'theme_spec.dart';
 import 'typography.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -52,8 +53,8 @@ final GlobalKey _termShotKey = GlobalKey();
 final ValueNotifier<double> textScale = ValueNotifier<double>(1.0);
 
 /// Driven by the active profile. The default profile follows the OS theme.
-final ValueNotifier<ThemeMode> appThemeMode = ValueNotifier<ThemeMode>(
-  ThemeMode.system,
+final ValueNotifier<String> appThemeSpec = ValueNotifier<String>(
+  appThemeSystem,
 );
 
 Future<void> main() async {
@@ -121,13 +122,13 @@ class QuotaBotApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: appThemeMode,
-      builder: (context, mode, _) => MaterialApp(
+    return ValueListenableBuilder<String>(
+      valueListenable: appThemeSpec,
+      builder: (context, spec, _) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        themeMode: mode,
-        theme: _theme(Brightness.light),
-        darkTheme: _theme(Brightness.dark),
+        themeMode: themeModeForAppTheme(spec),
+        theme: _theme(Brightness.light, spec),
+        darkTheme: _theme(Brightness.dark, spec),
         builder: (context, child) => RepaintBoundary(
           key: _shotBoundaryKey,
           child: ValueListenableBuilder<double>(
@@ -145,20 +146,27 @@ class QuotaBotApp extends StatelessWidget {
     );
   }
 
-  ThemeData _theme(Brightness b) {
-    final dark = b == Brightness.dark;
+  ThemeData _theme(Brightness b, String spec) {
+    final chrome = AppChromeTheme.forSpec(b, spec);
     final base = ThemeData(
       brightness: b,
-      scaffoldBackgroundColor: dark
-          ? const Color(0xFF14161A)
-          : const Color(0xFFF4F5F7),
+      scaffoldBackgroundColor: chrome.scaffold,
       fontFamily: 'Segoe UI',
+      colorScheme: ColorScheme.fromSeed(seedColor: chrome.accent, brightness: b)
+          .copyWith(
+            primary: chrome.accent,
+            surface: chrome.scaffold,
+            onSurface: chrome.foreground,
+          ),
     );
     // Use tabular (monospaced) figures everywhere so digits line up and the main
     // quota view and the analytics screen render numbers identically. Text styles
     // inherit and merge onto these defaults without setting fontFeatures
     // themselves, so this one setting carries across both screens.
-    return base.copyWith(textTheme: _tabularFigures(base.textTheme));
+    return base.copyWith(
+      textTheme: _tabularFigures(base.textTheme),
+      extensions: [chrome],
+    );
   }
 }
 
@@ -348,11 +356,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _applyProfileUiState(QuotaProfile profile) {
-    appThemeMode.value = switch (profile.theme) {
-      'light' => ThemeMode.light,
-      'dark' => ThemeMode.dark,
-      _ => ThemeMode.system,
-    };
+    appThemeSpec.value = normalizeAppTheme(profile.theme);
     if (profile.name == defaultProfileName) {
       _hidden = {..._defaultHidden};
       _sort = _defaultSort;
@@ -951,8 +955,7 @@ class _DashboardState extends State<Dashboard>
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final card = dark ? const Color(0xFF1C1F25) : Colors.white;
+    final chrome = AppChromeTheme.of(context);
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -967,21 +970,19 @@ class _DashboardState extends State<Dashboard>
         child: SingleChildScrollView(
           controller: _scroll,
           physics: const ClampingScrollPhysics(),
-          child: _contentBox(dark, card, _contentKey),
+          child: _contentBox(chrome, _contentKey),
         ),
       ),
     );
   }
 
-  Widget _contentBox(bool dark, Color card, Key? key) {
+  Widget _contentBox(AppChromeTheme chrome, Key? key) {
     return Container(
       key: key,
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
+        color: chrome.scaffold,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: dark ? const Color(0xFF2A2E36) : const Color(0xFFE2E4E8),
-        ),
+        border: Border.all(color: chrome.border),
       ),
       child: _loading
           ? const SizedBox(
@@ -996,12 +997,12 @@ class _DashboardState extends State<Dashboard>
               ),
             )
           : _compact
-          ? _compactView(dark)
-          : _expandedView(dark, card),
+          ? _compactView()
+          : _expandedView(chrome.card),
     );
   }
 
-  Widget _expandedView(bool dark, Color card) {
+  Widget _expandedView(Color card) {
     final displayed = _displayed;
     final counts = _providerCounts(displayed);
     final groups = groupProvidersForDisplay(displayed);
@@ -1010,10 +1011,10 @@ class _DashboardState extends State<Dashboard>
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _header(dark),
+        _header(),
         const SizedBox(height: 2),
         if (groups.isEmpty)
-          _emptyProfileState(dark)
+          _emptyProfileState()
         else
           GestureDetector(
             behavior: HitTestBehavior.translucent,
@@ -1029,7 +1030,6 @@ class _DashboardState extends State<Dashboard>
                       _AccountGroupHeader(
                         account: groups[g].account,
                         count: groups[g].quotas.length,
-                        dark: dark,
                       ),
                       const SizedBox(height: 6),
                     ],
@@ -1046,8 +1046,8 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  Widget _emptyProfileState(bool dark) {
-    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
+  Widget _emptyProfileState() {
+    final muted = AppChromeTheme.of(context).muted;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: (_) => windowManager.startDragging(),
@@ -1082,10 +1082,11 @@ class _DashboardState extends State<Dashboard>
   }
 
   /// Tiny strip: each visible provider as logo + status dot. Glanceable.
-  Widget _compactView(bool dark) {
+  Widget _compactView() {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
-    final fg = dark ? Colors.white : const Color(0xFF111317);
+    final chrome = AppChromeTheme.of(context);
+    final muted = chrome.muted;
+    final fg = chrome.foreground;
     final displayed = _displayed;
     final counts = _providerCounts(displayed);
     return SizedBox(
@@ -1184,8 +1185,9 @@ class _DashboardState extends State<Dashboard>
     return n == 0 ? null : sum / n;
   }
 
-  Widget _header(bool dark) {
-    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
+  Widget _header() {
+    final chrome = AppChromeTheme.of(context);
+    final muted = chrome.muted;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: (_) => windowManager.startDragging(),
@@ -1199,9 +1201,7 @@ class _DashboardState extends State<Dashboard>
                 children: [
                   () {
                     final pool = _poolHeadroom();
-                    final track = dark
-                        ? const Color(0xFF333842)
-                        : const Color(0xFFD8DBE0);
+                    final track = chrome.gaugeTrack;
                     return AppGauge(
                       size: 17,
                       value: (pool ?? 0) / 100.0,
@@ -1216,7 +1216,7 @@ class _DashboardState extends State<Dashboard>
                       fontSize: AppType.title,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.2,
-                      color: dark ? Colors.white : const Color(0xFF111317),
+                      color: chrome.foreground,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -2081,23 +2081,16 @@ class _DashboardState extends State<Dashboard>
 class _AccountGroupHeader extends StatelessWidget {
   final String? account;
   final int count;
-  final bool dark;
 
-  const _AccountGroupHeader({
-    required this.account,
-    required this.count,
-    required this.dark,
-  });
+  const _AccountGroupHeader({required this.account, required this.count});
 
   @override
   Widget build(BuildContext context) {
-    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
-    final fg = dark ? Colors.white : const Color(0xFF111317);
-    final line = dark ? const Color(0xFF2A2E36) : const Color(0xFFE2E4E8);
+    final chrome = AppChromeTheme.of(context);
     final label = account ?? 'default and local';
     return Row(
       children: [
-        Icon(Icons.account_circle_outlined, size: 14, color: muted),
+        Icon(Icons.account_circle_outlined, size: 14, color: chrome.muted),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
@@ -2107,16 +2100,16 @@ class _AccountGroupHeader extends StatelessWidget {
             style: TextStyle(
               fontSize: AppType.caption,
               fontWeight: FontWeight.w700,
-              color: fg,
+              color: chrome.foreground,
             ),
           ),
         ),
         const SizedBox(width: 8),
-        Container(height: 1, width: 34, color: line),
+        Container(height: 1, width: 34, color: chrome.border),
         const SizedBox(width: 8),
         Text(
           '$count ${count == 1 ? 'provider' : 'providers'}',
-          style: TextStyle(fontSize: AppType.label, color: muted),
+          style: TextStyle(fontSize: AppType.label, color: chrome.muted),
         ),
       ],
     );
@@ -2149,8 +2142,9 @@ class ProviderTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
-    final fg = dark ? Colors.white : const Color(0xFF111317);
+    final chrome = AppChromeTheme.of(context);
+    final muted = chrome.muted;
+    final fg = chrome.foreground;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final views = quota.windows.map((w) => _view(w, now)).toList();
 
@@ -2201,9 +2195,7 @@ class ProviderTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: cardColor,
           borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: dark ? const Color(0xFF272B33) : const Color(0xFFEDEEF1),
-          ),
+          border: Border.all(color: chrome.tileBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2291,7 +2283,7 @@ class ProviderTile extends StatelessWidget {
               ...views.map(
                 (v) => Padding(
                   padding: const EdgeInsets.only(bottom: 6),
-                  child: WindowBar(view: v, muted: muted, fg: fg, dark: dark),
+                  child: WindowBar(view: v, muted: muted, fg: fg),
                 ),
               ),
             if (forecast != null) _forecastRow(forecast, muted),
@@ -2534,13 +2526,11 @@ class WindowBar extends StatelessWidget {
   final WinView view;
   final Color muted;
   final Color fg;
-  final bool dark;
   const WindowBar({
     super.key,
     required this.view,
     required this.muted,
     required this.fg,
-    required this.dark,
   });
 
   @override
@@ -2548,6 +2538,7 @@ class WindowBar extends StatelessWidget {
     final remaining = view.remaining;
     final color = _availColor(remaining);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final chrome = AppChromeTheme.of(context);
 
     return Row(
       children: [
@@ -2572,9 +2563,7 @@ class WindowBar extends StatelessWidget {
             child: LinearProgressIndicator(
               value: remaining / 100.0,
               minHeight: 7,
-              backgroundColor: dark
-                  ? const Color(0xFF2A2E36)
-                  : const Color(0xFFE9EBEF),
+              backgroundColor: chrome.gaugeTrack,
               valueColor: AlwaysStoppedAnimation(color),
             ),
           ),

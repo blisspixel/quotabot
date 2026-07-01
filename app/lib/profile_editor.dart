@@ -3,6 +3,7 @@ import 'package:quotabot_collector/collector.dart';
 
 import 'prefs.dart';
 import 'profile_ui.dart';
+import 'theme_spec.dart';
 import 'typography.dart';
 
 enum ProfileEditorAction { save, delete }
@@ -84,7 +85,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     _selection = profile.name;
     _name.text = profile.name;
     _policy = profile.routingPolicy;
-    _theme = profile.theme ?? 'system';
+    _theme = normalizeAppTheme(profile.theme);
     _sort = profile.name == widget.activeProfile
         ? widget.currentSort
         : sortFromProfile(profile);
@@ -99,7 +100,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     _selection = _newProfileValue;
     _name.text = '';
     _policy = ProfileRoutingPolicy.balanced;
-    _theme = 'system';
+    _theme = appThemeSystem;
     _sort = ProviderSort.defaultOrder;
     _hidden = const {};
     _providers = _options.map((option) => option.provider).toSet();
@@ -155,7 +156,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     hiddenProviders: _hidden,
     routingPolicy: _policy,
     sort: _sort,
-    theme: _theme == 'system' ? null : _theme,
+    theme: storedAppTheme(_theme),
   );
 
   @override
@@ -247,13 +248,21 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                   isDense: true,
                 ),
                 items: const [
-                  DropdownMenuItem(value: 'system', child: Text('System')),
-                  DropdownMenuItem(value: 'light', child: Text('Light')),
-                  DropdownMenuItem(value: 'dark', child: Text('Dark')),
+                  DropdownMenuItem(
+                    value: appThemeSystem,
+                    child: Text('System'),
+                  ),
+                  DropdownMenuItem(value: appThemeLight, child: Text('Light')),
+                  DropdownMenuItem(value: appThemeDark, child: Text('Dark')),
+                  DropdownMenuItem(
+                    value: appThemeHacker,
+                    child: Text('Hacker'),
+                  ),
                 ],
                 onChanged: _selection == defaultProfileName
                     ? null
-                    : (value) => setState(() => _theme = value ?? 'system'),
+                    : (value) =>
+                          setState(() => _theme = normalizeAppTheme(value)),
               ),
               const SizedBox(height: 12),
               Text(

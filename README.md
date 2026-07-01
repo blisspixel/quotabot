@@ -36,8 +36,9 @@ Highlights:
 
 - **Cross-platform.** One codebase on Windows, macOS, and Linux.
 - **Easy and good-looking.** A small frameless widget that follows the system
-  light/dark theme, pins always-on-top or to the taskbar, and collapses to a tiny
-  status strip.
+  light/dark theme, supports per-profile themes including a high-contrast Hacker
+  mode, pins always-on-top or to the taskbar, and collapses to a tiny status
+  strip.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, best time to run). Only quota metadata is
   ever read, never prompts, code, or other content.

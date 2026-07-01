@@ -2,6 +2,7 @@ import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/profiles.dart';
 
 import 'prefs.dart';
+import 'theme_spec.dart';
 
 const genericAccountLabels = {'default', 'unknown', 'installed', 'cli'};
 
@@ -132,7 +133,7 @@ QuotaProfile profileFromSelection({
     accounts: accounts,
     hiddenProviders: hiddenProviders,
     routingPolicy: routingPolicy,
-    theme: theme,
+    theme: theme == null ? null : storedAppTheme(theme),
     sort: sort.name,
   );
 }
