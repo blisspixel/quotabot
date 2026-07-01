@@ -13,10 +13,23 @@
 library;
 
 import 'models.dart';
+import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
 const String kCatalogUpdated = '2026-07-01';
+
+/// Providers whose windows are true rolling included-quota plans. Only these
+/// can ever mark a model quota-backed for the no-surprise `--budget=quota`
+/// envelope. Credit-pool and request-metered providers (Cursor, Kiro,
+/// Windsurf/Devin) stay out even if a future catalog update lists their
+/// models, so adding models can never silently widen the spend envelope.
+const Set<String> kQuotaPlanProviders = {
+  claudeProviderId,
+  codexProviderId,
+  antigravityProviderId,
+  grokProviderId,
+};
 
 /// Cloud models per provider id. Context windows are total tokens. Kept to the
 /// current flagships per provider; the refresh tool can widen this.

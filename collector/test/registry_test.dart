@@ -247,6 +247,40 @@ void main() {
       );
     });
 
+    test('a quota budget rejects credit-pool providers even when cataloged',
+        () {
+      // Cursor meters a monthly credit pool, not an included-quota plan. If a
+      // future catalog update lists its models, --budget=quota must still
+      // reject them; only kQuotaPlanProviders can be quota-backed.
+      final reg = buildModelRegistry(
+        [
+          _cloud('cursor', 40),
+          _cloud('codex', 30),
+        ],
+        _now,
+        catalog: {
+          ...catalog,
+          'cursor': [const ModelInfo(id: 'composer-x')],
+          'codex': [const ModelInfo(id: 'codex-x')],
+        },
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.quota,
+        ),
+      );
+      expect(reg.map((e) => e.model.id).toList(), ['codex-x']);
+
+      // Without the budget cap the cursor model is listed, but never marked
+      // quota-backed.
+      final unfiltered = buildModelRegistry(
+        [_cloud('cursor', 40)],
+        _now,
+        catalog: {
+          'cursor': [const ModelInfo(id: 'composer-x')],
+        },
+      );
+      expect(unfiltered.single.quotaBacked, isFalse);
+    });
+
     test('the hard task profile requires reasoning', () {
       expect(ids(taskProfile('hard')), ['opus']);
     });

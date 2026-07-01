@@ -313,8 +313,10 @@ List<ModelEntry> buildModelRegistry(
     if (models.isEmpty) continue;
     final a = providerAvailability(q, now);
     final binding = bindingWindow(q, now);
-    final providerQuotaBacked =
-        !q.isLocal && q.source != 'manual' && q.windows.isNotEmpty;
+    final providerQuotaBacked = !q.isLocal &&
+        q.source != 'manual' &&
+        q.windows.isNotEmpty &&
+        kQuotaPlanProviders.contains(q.provider);
     for (final m in models) {
       final quotaBacked = providerQuotaBacked &&
           (m.quotaIncludedUntil == null || now < m.quotaIncludedUntil!);
