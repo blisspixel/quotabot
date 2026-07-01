@@ -66,6 +66,38 @@ void main() {
       expect(stale.kind, 'local');
     });
 
+    test('asStale can preserve cached windows with fresh metadata', () {
+      final cached = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'blisspixel@gmail.com',
+        plan: 'Antigravity',
+        asOf: 1000,
+        status: 'old status',
+        windows: [QuotaWindow(label: '5h', usedPercent: 20)],
+      );
+      final fresh = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'blisspixel@gmail.com',
+        plan: 'Google AI Pro',
+        asOf: 2000,
+        status: 'Gemini 3.1 Pro (High)',
+        details: const ['Local Antigravity status reports higher rate limits'],
+      );
+
+      final stale =
+          cached.asStale('fresh metadata, cached quota', metadataFrom: fresh);
+
+      expect(stale.stale, isTrue);
+      expect(stale.asOf, 1000);
+      expect(stale.plan, 'Google AI Pro');
+      expect(stale.status, 'Gemini 3.1 Pro (High)');
+      expect(stale.details, fresh.details);
+      expect(stale.windows.single.usedPercent, 20);
+      expect(stale.error, 'fresh metadata, cached quota');
+    });
+
     test('defaults to subscription kind and exposes isLocal', () {
       final sub = ProviderQuota(
         provider: 'codex',

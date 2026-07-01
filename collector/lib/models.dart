@@ -196,22 +196,29 @@ class ProviderQuota {
       );
 
   /// Returns a copy marked stale, preserving the original capture time.
-  ProviderQuota asStale(String note) => ProviderQuota(
+  /// If [metadataFrom] is supplied, current identity/status labels are used
+  /// while the cached quota windows remain intact.
+  ProviderQuota asStale(String note, {ProviderQuota? metadataFrom}) =>
+      ProviderQuota(
         provider: provider,
         displayName: displayName,
-        account: account,
-        plan: plan,
-        source: source,
+        account: metadataFrom?.account ?? account,
+        plan: metadataFrom?.plan ?? plan,
+        source: metadataFrom?.source ?? source,
         ok: true,
         error: note,
         asOf: asOf,
         stale: true,
         kind: kind,
-        status: status,
-        active: active,
-        details: details,
+        status: metadataFrom?.status ?? status,
+        active: metadataFrom?.active ?? active,
+        details: metadataFrom != null && metadataFrom.details.isNotEmpty
+            ? metadataFrom.details
+            : details,
         windows: windows,
-        models: models,
+        models: metadataFrom != null && metadataFrom.models.isNotEmpty
+            ? metadataFrom.models
+            : models,
       );
 
   /// True when this snapshot carries usable quota windows.

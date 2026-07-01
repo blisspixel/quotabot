@@ -7,6 +7,7 @@ import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'theme_spec.dart';
 import 'typography.dart';
 
 /// Health color on the shared green-to-red scale (input is remaining free %).
@@ -182,11 +183,12 @@ class _FleetScreenState extends State<FleetScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = dark ? const Color(0xFF0C0E12) : const Color(0xFFF4F5F7);
-    final panel = dark ? const Color(0xFF14171D) : Colors.white;
-    final fg = dark ? Colors.white : const Color(0xFF111317);
-    final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
-    final line = dark ? const Color(0xFF262B33) : const Color(0xFFE3E5EA);
+    final chrome = AppChromeTheme.of(context);
+    final bg = chrome.scaffold;
+    final panel = chrome.card;
+    final fg = chrome.foreground;
+    final muted = chrome.muted;
+    final line = chrome.tileBorder;
     final c = (panel: panel, fg: fg, muted: muted, line: line);
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -213,7 +215,7 @@ class _FleetScreenState extends State<FleetScreen> {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: c.line),
+          border: Border.all(color: chrome.border),
         ),
         child: Column(
           children: [
@@ -731,7 +733,6 @@ class _FleetScreenState extends State<FleetScreen> {
                     style: TextStyle(
                       fontSize: AppType.title,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 0.2,
                       color: c.fg,
                     ),
                   ),
@@ -766,7 +767,7 @@ class _FleetScreenState extends State<FleetScreen> {
       child: Container(
         decoration: BoxDecoration(
           color: c.panel,
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(color: c.line),
         ),
         padding: const EdgeInsets.all(3),
@@ -785,7 +786,7 @@ class _FleetScreenState extends State<FleetScreen> {
                                 ? const Color(0xFF24303B)
                                 : const Color(0xFFE7EBF0))
                           : Colors.transparent,
-                      borderRadius: BorderRadius.circular(7),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       r.label,
@@ -814,7 +815,7 @@ class _FleetScreenState extends State<FleetScreen> {
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       decoration: BoxDecoration(
         color: c.panel,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: c.line),
       ),
       child: Column(
@@ -884,7 +885,7 @@ class _FleetScreenState extends State<FleetScreen> {
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: c.panel,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: c.line),
       ),
       child: Column(
@@ -899,7 +900,6 @@ class _FleetScreenState extends State<FleetScreen> {
                 style: TextStyle(
                   fontSize: AppType.bodySmall,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 1.1,
                   color: c.fg,
                 ),
               ),

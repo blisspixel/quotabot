@@ -9,11 +9,11 @@ import 'package:flutter/widgets.dart';
 /// screens had grown independently (13 vs 13.5, 12 vs 12.5, 8.5 vs 9) onto one
 /// step each, so the same kind of text is the same size on both screens.
 abstract final class AppType {
-  /// Hero stat number on the analytics screen.
-  static const double stat = 20.0;
+  /// Emphasized stat number on the analytics screen.
+  static const double stat = 18.0;
 
   /// The single sanctioned analytics glyph. Kept distinct on purpose.
-  static const double glyph = 15.0;
+  static const double glyph = 14.0;
 
   /// Largest text: provider names and section titles.
   static const double title = 13.5;
