@@ -2,9 +2,57 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.5.5 - 2026-07-01
+
+### Added
+- `quotabot verify`: mechanical honesty checks over one live read, for the 1.0
+  release-candidate provider verification matrix. Classifies each provider's
+  read state (live, cached, out of quota, no data, error, local, undetected),
+  checks bounds, capture times, staleness labels, reset plausibility, and
+  account uniqueness, validates the live snapshot against the frozen
+  `quotabot.v1` contract, and names each provider's own usage surface for the
+  human cross-check. `--json` emits a `quotabot.verify.v1` record; exit code is
+  0 when every snapshot is reading correctly or failing with a plain reason and
+  65 when any check fails. Truthful absences (a local runtime that is not
+  running, a signed-out account that says so) pass; lying or silent numbers
+  fail.
+
+### Fixed
+- The `quotabot.v1` schema and validator now cover the `quota_included_until`
+  model field that model JSON was already emitting, closing a contract-drift
+  gap.
+- The desktop analytics history views (7d/90d) now find burn history stored
+  under account-scoped keys. Previously any provider with a known account
+  identity, which includes most signed-in providers, showed "history is still
+  warming up" even when weeks of history existed.
+- Local runtimes no longer form their own account groups in the desktop quota
+  view: a runtime's account field is a model summary ("3 models"), not an
+  identity, so headers like "3 models - 1 provider" no longer appear and
+  locals group under "default and local".
 
 ### Changed
+- Quota Analytics now renders inside the main dashboard under the exact same
+  header, actions, and menu as the quota view: the analytics button becomes a
+  back arrow, the title switches between Quota and Analytics, and the window
+  is never resized or re-chromed by the switch. The separate analytics
+  toolbar is gone.
+- Demo mode now shows a readable fleet of five metered plans plus two local
+  runtimes, and its synthetic history includes occasional spent afternoons so
+  the analytics reliability, calendar, and trend cards show believable
+  texture. The README screenshots and demo GIF are regenerated from it, and
+  the CLI `top` frame in them is now drawn inside a real terminal window with
+  a title bar and prompt.
+- `quotabot top` polish pass: narrow terminals now drop whole columns in a
+  stable order (forecast first, then the reset countdown) instead of clipping
+  text mid-word, and the footer keymap yields whole key hints under width
+  pressure; the reset column is padded so forecasts and tags align vertically;
+  cached rows carry the age of the cache ("(cached 8h)"); multi-account fleets
+  label duplicate-provider rows with their account and the cursor marks only
+  the selected account's row; the selected provider name takes the palette
+  accent; the route line drops its redundant "Use <provider>" prefix and trims
+  a long reason at a word boundary with an ellipsis; a long local-runtime
+  status keeps its text and yields the "[always on]" tag when the row is
+  tight.
 - Quota Analytics now uses the main quota view's compact gauge header, icon-only
   window controls, card radius, and tighter metric typography to reduce the
   visual jump between the two screens, and removes the decorative analytics
