@@ -283,7 +283,7 @@ String? desktopRouteSignalLine(
     final label = confidence >= 0.8
         ? 'high confidence'
         : confidence >= 0.55
-        ? 'thin data'
+        ? 'medium confidence'
         : 'low confidence';
     parts.add('$pct% $label');
   }

@@ -420,7 +420,7 @@ class _FleetScreenState extends State<FleetScreen> {
         _card(
           c,
           'BEST TIME TO RUN',
-          'smoothed mean free % by weekday x hour, local',
+          'mean free % by weekday/hour',
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

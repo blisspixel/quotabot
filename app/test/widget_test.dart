@@ -388,7 +388,7 @@ void main() {
       expect(line, contains('Next: Claude'));
       expect(line, contains('80% free'));
       expect(line, contains('60% after burn'));
-      expect(line, contains('67% thin data'));
+      expect(line, contains('67% medium confidence'));
       expect(line, isNot(contains('solo@example.com')));
     });
 
