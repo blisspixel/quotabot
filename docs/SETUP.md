@@ -80,7 +80,7 @@ Each row shows a state and, when useful, the exact next step:
 | State           | Meaning                                                        |
 |-----------------|---------------------------------------------------------------|
 | `live`          | Working now, nothing to do (Codex and Claude are always live). |
-| `cached (age)`  | Last good read; reopen that app or connect quotabot (step 4).  |
+| `cached`        | Last good read (age shown in the row); reopen that app or connect quotabot (step 4). |
 | `no live data`  | That tool is not installed or has not run on this machine yet. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
