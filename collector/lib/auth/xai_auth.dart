@@ -96,10 +96,17 @@ class XaiAuth {
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
     if (refreshed?.accessToken == null) return null;
-    _saveGrant(refreshed!, account: account);
+    // Persist the rotated token only to the slot it was loaded from. Writing
+    // the default slot here too would let a background refresh of one account
+    // overwrite the provider-default grant with that account's tokens, so a
+    // later default-slot fallback could return the wrong account's token.
+    TokenStore.save(provider, refreshed!, account: account);
     return refreshed.accessToken;
   }
 
+  /// Establishes the grant at login: the account-scoped slot when the email is
+  /// known, and always the provider-default slot so the primary-account
+  /// fallback has a deterministic grant to fall back to.
   static void _saveGrant(Tokens tokens, {String? account}) {
     TokenStore.save(provider, tokens);
     if (account != null) {

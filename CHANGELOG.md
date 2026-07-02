@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- A background token refresh no longer overwrites the provider-default grant
+  with the refreshed account's tokens. Previously every account refresh
+  rewrote the default slot, so which account the default represented depended
+  on refresh order, and a later default-slot fallback for a different account
+  could return the wrong account's token. Refreshes now persist only to the
+  slot they were loaded from; login still establishes the default slot
+  deterministically.
 - `quotabot logout` now clears the account-scoped grant as well as the
   provider-default grant. Login persists both (the account slot is keyed by the
   email in the id token), so clearing only the default left a live,
