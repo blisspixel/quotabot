@@ -2,6 +2,33 @@ import 'package:quotabot_collector/insights.dart';
 import 'package:test/test.dart';
 
 void main() {
+  group('contribution calendar legend', () {
+    ContributionDay day(double meanFree, int samples, int spentSamples) =>
+        ContributionDay(
+          dayStart: 0,
+          samples: samples,
+          meanFreePercent: meanFree,
+          spentSamples: spentSamples,
+        );
+
+    test('every glyph a day can emit has exactly one legend entry', () {
+      // Cover each branch of ContributionDay.marker so the legend can never
+      // drift from the glyphs a surface actually prints.
+      final emitted = {
+        day(90, 4, 0).marker, // . light
+        day(65, 4, 0).marker, // + moderate
+        day(40, 4, 0).marker, // * moderate-high
+        day(10, 4, 0).marker, // # heavy
+        day(50, 4, 2).marker, // ! mixed
+        day(0, 4, 4).marker, // x spent
+      };
+      final legendGlyphs = kContributionCalendarLegend.map((e) => e.$1).toSet();
+      expect(emitted, equals(legendGlyphs));
+      expect(kContributionCalendarLegend.length, legendGlyphs.length,
+          reason: 'no duplicate glyphs in the legend');
+    });
+  });
+
   group('HeadroomBucket', () {
     test('add accumulates mean, extremes, and exhausted count', () {
       final b = HeadroomBucket(start: 0);

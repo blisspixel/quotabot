@@ -306,6 +306,18 @@ List<ContributionDay> contributionCalendarDays(
   ];
 }
 
+/// Legend for the [ContributionDay.marker] glyphs, light to heavy then the two
+/// special states. Single source of truth so every surface (CLI stats, the
+/// markdown report) describes the same glyph the same way.
+const kContributionCalendarLegend = <(String, String)>[
+  ('.', 'light'),
+  ('+', 'moderate'),
+  ('*', 'moderate-high'),
+  ('#', 'heavy'),
+  ('!', 'mixed'),
+  ('x', 'spent'),
+];
+
 String contributionCalendarMarkers(
   List<ContributionDay> days, {
   int maxDays = kRetentionDays,

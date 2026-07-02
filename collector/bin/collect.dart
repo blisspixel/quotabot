@@ -1601,11 +1601,24 @@ String _stateStyled(String state) {
   }
 }
 
+String _doctorAccountSuffix(ProviderQuota q) => (q.account != 'default' &&
+        q.account != 'unknown' &&
+        q.account != 'installed' &&
+        q.account != 'cli')
+    ? ' (${q.account})'
+    : '';
+
 void _printDoctor(List<ProviderQuota> results) {
   final now = nowEpoch();
   print(
     '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
   );
+  // Size the name column to the widest row (a long account can exceed the base
+  // width) so the state column stays aligned instead of jutting out.
+  final nameWidth = results
+      .map((q) => '${q.displayName}${_doctorAccountSuffix(q)}'.length)
+      .fold(28, (w, len) => len > w ? len : w);
+  final indent = ' '.padRight(nameWidth);
   for (final q in results) {
     bool exhausted = false;
     if (q.windows.isNotEmpty) {
@@ -1632,22 +1645,15 @@ void _printDoctor(List<ProviderQuota> results) {
                 final reset = w.resetsAt == null
                     ? ''
                     : ' (resets ${_in(w.resetsAt!, now)})';
-                return '${w.label} ${pct}%used$reset';
+                return '${w.label} $pct% used$reset';
               }).join(', ');
-    final acct = (q.account != 'default' &&
-            q.account != 'unknown' &&
-            q.account != 'installed' &&
-            q.account != 'cli')
-        ? ' (${q.account})'
-        : '';
-    final namePart = '${q.displayName}$acct';
-    print('  ${namePart.padRight(28)} ${_stateStyled(state)} $detail');
+    final namePart = '${q.displayName}${_doctorAccountSuffix(q)}';
+    print('  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} $detail');
     for (final d in q.details) {
-      print('  ${' '.padRight(28)} ${' '.padRight(12)} $d');
+      print('  $indent ${' '.padRight(12)} $d');
     }
     final hint = _doctorHint(q, state);
-    if (hint != null)
-      print('  ${' '.padRight(28)} ${' '.padRight(12)} -> $hint');
+    if (hint != null) print('  $indent ${' '.padRight(12)} -> $hint');
   }
 
   // Close the loop: tell the user where to route work next.
@@ -1870,9 +1876,6 @@ void _printModels(List<ModelEntry> reg) {
                 e.headroomPercent!,
                 '${e.headroomPercent!.round()}% free'.padRight(9),
               ));
-    final ctx = m.contextTokens == null
-        ? ''
-        : style.dim('  ${_ctxLabel(m.contextTokens!)} ctx');
     final caps = [
       if (m.tier != null) m.tier!,
       if (m.tools == true) 'tools',
@@ -1882,9 +1885,18 @@ void _printModels(List<ModelEntry> reg) {
     final capStr = caps.isEmpty ? '' : style.dim('  $caps');
     final loaded = (e.local && m.loaded) ? style.cyan('  [loaded]') : '';
     final spent = e.available ? '' : style.red('  spent');
+    // Pad the context cell to a fixed width so the capability column lines up
+    // across "1M ctx", "400K ctx", and context-less local models. Only pad when
+    // something follows, so a row that ends at the context adds no trailing gap.
+    final ctxText =
+        m.contextTokens == null ? '' : '${_ctxLabel(m.contextTokens!)} ctx';
+    final trailing = '$capStr$loaded$spent';
+    final ctx = trailing.isEmpty
+        ? (ctxText.isEmpty ? '' : style.dim('  $ctxText'))
+        : style.dim('  ${ctxText.padRight(8)}');
     print(
       '  ${m.id.padRight(22)} ${e.provider.padRight(11)} '
-      '$budget$ctx$capStr$loaded$spent',
+      '$budget$ctx$trailing',
     );
   }
   print(style.dim('\n  capability catalog updated $kCatalogUpdated'));
@@ -2000,6 +2012,7 @@ void _printStats(
     print('');
   }
 
+  var anyCalendar = false;
   for (final p in providers) {
     final buckets = bucketsByProvider[p] ?? _historyBuckets(p);
     final ins = insights[p] ?? Insights.from(buckets, now, tzOffset: tz);
@@ -2054,6 +2067,7 @@ void _printStats(
     );
     if (calendar.isNotEmpty) {
       extras.add('calendar $calendar');
+      anyCalendar = true;
     }
     extras.add('${ins.samples} samples / ${ins.sampledDays} sampled days');
     print('  ${' '.padRight(12)} ${extras.join('   ')}');
@@ -2061,6 +2075,13 @@ void _printStats(
     if (pace != null && pace.burnPerHour >= 0.2) {
       print('  ${' '.padRight(12)} pace: ${pace.verdict}');
     }
+  }
+  if (anyCalendar) {
+    final legend =
+        kContributionCalendarLegend.map((e) => '${e.$1} ${e.$2}').join('  ');
+    print(style.dim(
+      '\n  calendar (oldest to newest sampled day): $legend',
+    ));
   }
 }
 
