@@ -134,7 +134,7 @@ class QuotaHealthReport {
         ..add('## Weekly calendar')
         ..add('')
         ..add(
-          '`#` heavy use, `*` moderate-high, `+` moderate, `.` light, `!` mixed, `x` spent. Oldest to newest.',
+          '${kContributionCalendarLegend.map((e) => '`${e.$1}` ${e.$2}').join(', ')}. Oldest to newest.',
         );
       for (final provider in calendars) {
         lines.add(
