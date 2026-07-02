@@ -1294,7 +1294,7 @@ Future<void> _runWatch(
   var failStreak = 0;
   var data = <ProviderQuota>[];
 
-  Future<void> pass() async {
+  Future<int> pass() async {
     data =
         await _collectProfiled(profile, excludedProviders: excludedProviders);
     final now = nowEpoch();
@@ -1345,10 +1345,19 @@ Future<void> _runWatch(
         }
       }
     }
+    return fired.length;
   }
 
   if (once) {
-    await pass();
+    final fired = await pass();
+    // A one-shot run that fired nothing must still confirm it ran, so an empty
+    // result reads as "checked, all clear" instead of a hang or a broken read.
+    if (fired == 0 && !wantsJson) {
+      final scope = wasteThreshold == null
+          ? 'no window has crossed into red'
+          : 'no window is red and no renewing quota is projected to go to waste';
+      stdout.writeln('quotabot watch: all clear - $scope.');
+    }
     client.close();
     return;
   }
