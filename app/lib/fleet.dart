@@ -173,7 +173,7 @@ class _FleetScreenState extends State<FleetScreen> {
         _card(
           c,
           'CONSUMPTION',
-          'share of total spend',
+          'share of total usage',
           SizedBox(
             height: 150,
             child: nodes.every((n) => n.used <= 0.5)
