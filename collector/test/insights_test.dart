@@ -154,6 +154,21 @@ void main() {
         isNull,
       );
     });
+
+    test('non-positive when headroom recovers', () {
+      // A provider whose reported usage drops without a reset (Grok can revise
+      // its shared weekly pool percent downward mid-window) reads as rising
+      // headroom. Burn must be treated as recovery, never as consumption, so
+      // it cannot fabricate a strand risk from a usage decrease.
+      final now = 10 * 3600;
+      final buckets = [
+        for (var i = 0; i < 6; i++)
+          HeadroomBucket(start: (4 + i) * 3600)..add(0.0 + i * 5),
+      ];
+      final burn = burnRatePerHour(buckets, now);
+      expect(burn, isNotNull);
+      expect(burn, lessThanOrEqualTo(0));
+    });
   });
 
   group('computePace', () {
