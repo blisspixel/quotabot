@@ -239,8 +239,11 @@ Future<void> main(List<String> rawArgs) async {
         print(_jsonPretty(modelRegistryJson(results, now,
             catalog: kModelCatalog, requirements: reqs.requirements)));
       } else {
-        _printModels(buildModelRegistry(results, now,
-            catalog: kModelCatalog, requirements: reqs.requirements));
+        _printModels(
+          buildModelRegistry(results, now,
+              catalog: kModelCatalog, requirements: reqs.requirements),
+          filtersActive: !reqs.requirements.isEmpty,
+        );
       }
       return;
     case 'calibration':
@@ -1869,10 +1872,15 @@ String _ctxLabel(int tokens) => tokens >= 1000000
 
 /// Prints the model registry: every model you can route to now, with the live
 /// budget that gates it and its capability hints.
-void _printModels(List<ModelEntry> reg) {
+void _printModels(List<ModelEntry> reg, {bool filtersActive = false}) {
   print('quotabot models  (what you can route to now, 0 usage tokens)\n');
   if (reg.isEmpty) {
-    print('  no models detected; start a local runtime or connect a provider');
+    // Distinguish "nothing to route to" from "your filters excluded everything",
+    // so a too-strict flag does not read as a missing runtime.
+    print(filtersActive
+        ? '  no models match these filters; loosen them or run '
+            '"quotabot models" with no filters'
+        : '  no models detected; start a local runtime or connect a provider');
     return;
   }
   for (final e in reg) {
