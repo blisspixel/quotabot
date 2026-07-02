@@ -44,10 +44,13 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       expect(windows.single.label, 'credits');
       expect(windows.single.usedPercent, 82);
     case ProviderFixtureKind.grokGrpcBytes:
+      // Live shape captured 2026-07-02: pool percent in config field 1,
+      // window end in field 5, per-product breakdowns (66 + 5 + 2 = 73) in
+      // repeated field 7 that must never pose as the pool total.
       final window = grokWindow(_fixtureBytes(entry.fixtureFile), now);
       expect(window, isNotNull);
-      expect(window!.usedPercent, 6);
-      expect(window.resetsAt, 1782086400);
+      expect(window!.usedPercent, 73);
+      expect(window.resetsAt, 1783379179);
     case ProviderFixtureKind.lmStudioNativeModels:
       final models = lmStudioNativeFromJson(_fixtureMap(entry.fixtureFile));
       expect(models!.installed, hasLength(2));

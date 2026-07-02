@@ -156,7 +156,9 @@ Iterable<String> protoStrings(List<int> b) sync* {
       final (len, n2) = readVarint(b, i);
       if (len == null) break;
       i = n2;
-      if (i + len > b.length) break;
+      // Subtraction form: a hostile length varint near 2^62 wraps `i + len`
+      // negative and would pass an addition-form check into the sublist.
+      if (len < 0 || len > b.length - i) break;
       final chunk = b.sublist(i, i + len);
       i += len;
       final txt = asciiString(chunk);

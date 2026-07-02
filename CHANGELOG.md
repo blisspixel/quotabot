@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- The schema-less protobuf walkers (Grok billing scan, embedded-string scan)
+  now reject hostile length varints near 2^62 that wrapped an addition-form
+  bounds check negative and threw inside sublist. The throw was contained by
+  the adapter's blanket catch, but it degraded every Grok account to a generic
+  read error; malformed frames now degrade to a truthful null parse instead.
 - Provider-sourced strings (window labels, accounts, plans, statuses, error
   notes, model ids) are now stripped of terminal control bytes when snapshots
   are collected, and the `top` renderer strips them again at the draw
@@ -14,6 +19,16 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- Grok: the weekly pool percent and reset are now read from their known fields
+  in the billing protobuf (pool total from the config message, reset from the
+  window end) instead of the first plausible float and the nearest future
+  timestamp. A per-product breakdown percent (Chat, Build, Imagine) can no
+  longer pose as the pool total, and the reset can no longer point at the
+  window start. The schema-less scan remains as a drift fallback, and the
+  live-captured response shape is pinned as the provider fixture. Also
+  documented: xAI can revise the pool percent downward mid-window without a
+  reset (observed live, 100 to 73 under the same reset time); quotabot mirrors
+  Grok's own number and burn analytics already treat decreases as recovery.
 - One hung provider can no longer wedge the whole fleet: every adapter collect
   now runs under a hard 20s deadline and degrades to a truthful per-provider
   "timed out" error while the rest of the snapshot proceeds. The desktop
