@@ -785,7 +785,8 @@ Future<void> _runManual(
           'removed': removed,
         }));
       } else {
-        stdout.writeln(removed ? 'removed ${pos[1]}' : 'no manual entry found');
+        stdout.writeln(
+            removed ? 'removed ${pos[1]}' : 'no manual entry for ${pos[1]}');
       }
       return;
   }
@@ -800,7 +801,7 @@ Map<String, dynamic> _manualEntriesJson(List<ManualQuotaEntry> entries) => {
 
 void _printManualEntries(List<ManualQuotaEntry> entries) {
   if (entries.isEmpty) {
-    stdout.writeln('No manual quota entries.');
+    stdout.writeln('no manual quota entries');
     return;
   }
   final now = nowEpoch();
@@ -1507,6 +1508,9 @@ Future<void> _check(
         'provider': key,
         'found': false,
       }));
+    } else if (excludedProviders.contains(key)) {
+      stderr.writeln('provider "$name" is hidden by the current --exclude '
+          'or profile filter; drop the filter to check it');
     } else {
       stderr.writeln('no provider named "$name"');
       stderr.writeln('known: ${results.map((r) => r.provider).join(', ')}');
@@ -1575,13 +1579,13 @@ Future<void> _login(String provider) async {
       }
       break;
     default:
-      stderr.writeln('Usage: quotabot login <grok|antigravity>');
+      stderr.writeln('usage: quotabot login <grok|antigravity>');
   }
 }
 
 void _logout(String provider) {
   if (provider != 'grok' && provider != 'antigravity') {
-    stderr.writeln('Usage: quotabot logout <grok|antigravity>');
+    stderr.writeln('usage: quotabot logout <grok|antigravity>');
     return;
   }
   // Login persists both a provider-default grant and an account-scoped grant
@@ -1688,7 +1692,7 @@ void _printDoctor(List<ProviderQuota> results) {
       );
     }
     print(
-      '  (Aider/Cline etc often use underlying provider quotas already tracked above.)',
+      '  (Aider/Cline etc. often use underlying provider quotas already tracked above.)',
     );
   }
 }

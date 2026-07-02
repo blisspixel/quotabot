@@ -112,6 +112,15 @@ void main() {
     expect(json['found'], isFalse);
   });
 
+  test('check names a filtered provider as hidden, not unknown', () async {
+    final result = await runCli(['check', 'codex', '--exclude=codex']);
+
+    expectExitCode(result, 64);
+    final err = result.stderr as String;
+    expect(err, contains('hidden by the current'));
+    expect(err, isNot(contains('no provider named')));
+  });
+
   test('watch once excludes named providers before alerting', () async {
     final result = await runCli([
       'watch',
