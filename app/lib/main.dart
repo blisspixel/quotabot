@@ -2831,11 +2831,15 @@ class WindowBar extends StatelessWidget {
     final color = _availColor(remaining);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final chrome = AppChromeTheme.of(context);
+    // Track the Text Size preference so the fixed label/value columns grow with
+    // the font instead of overflowing the meter. This is identity at the
+    // default (medium = 1.0), so it never changes the normal-scale layout.
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
 
     return Row(
       children: [
         SizedBox(
-          width: 42,
+          width: 42 * textScale,
           child: Text(
             view.label,
             maxLines: 1,
@@ -2862,7 +2866,7 @@ class WindowBar extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         SizedBox(
-          width: 96,
+          width: 96 * textScale,
           child: Text(
             view.rolledOver
                 ? 'ready'
