@@ -285,7 +285,7 @@ String? desktopRouteSignalLine(
         : confidence >= 0.55
         ? 'medium confidence'
         : 'low confidence';
-    parts.add('$pct% $label');
+    parts.add('$label ($pct%)');
   }
   final ageSeconds = now - suggestion.asOf;
   if (ageSeconds >= 60) {
@@ -1588,7 +1588,7 @@ class _DashboardState extends State<Dashboard>
   Widget _menuButton(Color muted) {
     final counts = _providerCounts(_profiledData);
     return PopupMenuButton<String>(
-      tooltip: 'Providers and refresh',
+      tooltip: 'Menu: profiles, providers, and settings',
       padding: EdgeInsets.zero,
       position: PopupMenuPosition.under,
       icon: Icon(Icons.more_vert_rounded, size: 16, color: muted),
@@ -2266,6 +2266,10 @@ class _DashboardState extends State<Dashboard>
   /// row reflects the new state. Returns whether the provider is now live.
   Future<bool> _connectAndValidate(String provider) async {
     final messenger = ScaffoldMessenger.of(context);
+    // The connect flow only handles these two, and their display names are
+    // fixed, so the toast can use the same capitalized label as the dialog
+    // title instead of the raw provider id.
+    final label = provider == 'antigravity' ? 'Antigravity' : 'Grok';
     try {
       if (provider == 'antigravity') {
         await GoogleAuth().loginLoopback(
@@ -2321,13 +2325,13 @@ class _DashboardState extends State<Dashboard>
           providerHeadroom(match.first, now) != null;
       messenger.showSnackBar(
         SnackBar(
-          content: Text(ok ? '$provider connected' : '$provider not live yet'),
+          content: Text(ok ? '$label connected' : '$label not live yet'),
         ),
       );
       return ok;
-    } catch (e) {
+    } catch (_) {
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not connect $provider: $e')),
+        SnackBar(content: Text('Could not connect $label')),
       );
       return false;
     }
@@ -2347,8 +2351,8 @@ class _DashboardState extends State<Dashboard>
         red = Color(0xFFF85149),
         grey = Color(0xFF8A91A0),
         blue = Color(0xFF58A6FF);
-    if (q.isLocal) return q.active ? ('in use', green) : ('running', blue);
-    if (!q.ok || q.windows.isEmpty) return ('no data', grey);
+    if (q.isLocal) return q.active ? ('in use', green) : ('idle', blue);
+    if (!q.ok || q.windows.isEmpty) return ('no live data', grey);
     if (q.stale) return ('cached', amber);
     final h = providerHeadroom(q, now) ?? 100;
     if (h <= 0.5) return ('spent', red);
