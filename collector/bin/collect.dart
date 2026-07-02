@@ -1553,7 +1553,8 @@ Future<void> _login(String provider) async {
           stderr.writeln('Open this URL and confirm the code $code:\n  $url');
         },
       );
-      stderr.writeln('Grok connected.');
+      stderr.writeln(
+          'Grok connected. Run "quotabot doctor" to verify live data.');
       break;
     case 'antigravity':
       try {
