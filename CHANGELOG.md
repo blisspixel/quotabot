@@ -37,6 +37,10 @@ Notable changes to quotabot. Newest first.
   absent sidecar falls back to HTTPS-only, while any parse or hash error after
   the sidecar is fetched aborts the install. The prior structure could misread
   an IO or lock error as "no checksum" and proceed unverified.
+- `tools/setup.ps1` no longer falls back to `C:\flutter` or `C:\src\flutter`
+  when locating the Dart toolchain. Those roots are world-creatable on Windows,
+  so a local user could plant a `dart.bat` the source build would then run;
+  only PATH and per-user locations are trusted now.
 - Provider-sourced strings (window labels, accounts, plans, statuses, error
   notes, model ids) are now stripped of terminal control bytes when snapshots
   are collected, and the `top` renderer strips them again at the draw

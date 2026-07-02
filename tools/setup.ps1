@@ -43,18 +43,21 @@ $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
 $installDir = Join-Path $installRoot 'bin'
 
 # Resolve the Flutter/Dart bin directory from PATH, falling back to common
-# install locations, so this works on any machine.
+# user-owned install locations. The fallbacks are deliberately limited to
+# per-user directories: C:\ is world-creatable by default, so trusting
+# C:\flutter\bin\dart.bat would let any local user plant a binary that this
+# script then runs. If Flutter lives elsewhere, add it to PATH and it is found
+# by the Get-Command check above.
 function Resolve-DartBin {
   foreach ($name in @('dart', 'flutter')) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if ($cmd) { return Split-Path -Parent $cmd.Source }
   }
   foreach ($c in @(
-      "$env:LOCALAPPDATA\flutter\bin", 'C:\flutter\bin', 'C:\src\flutter\bin',
-      "$env:USERPROFILE\flutter\bin")) {
+      "$env:LOCALAPPDATA\flutter\bin", "$env:USERPROFILE\flutter\bin")) {
     if (Test-Path (Join-Path $c 'dart.bat')) { return $c }
   }
-  throw "Dart/Flutter not found. Install Flutter (https://docs.flutter.dev/get-started/install) and re-run."
+  throw "Dart/Flutter not found on PATH. Install Flutter (https://docs.flutter.dev/get-started/install), or add its bin directory to PATH, and re-run."
 }
 
 Write-Step 'Locating the Dart toolchain'
