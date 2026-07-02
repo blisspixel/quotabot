@@ -210,13 +210,19 @@ void main() {
       expect(await auth.freshAccessToken(account: account), 'GA');
     });
 
-    test('GoogleAuth.freshAccessToken refreshes an account grant', () async {
+    test('GoogleAuth.freshAccessToken refreshes only the account slot',
+        () async {
       const provider = GoogleAuth.provider;
       const account = 'work@example.com';
       addTearDown(() {
         TokenStore.clear(provider);
         TokenStore.clearAccounts(provider);
       });
+      // A different account already holds the provider-default slot.
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'home-token', refreshToken: 'HR', expiresAt: 1),
+      );
       TokenStore.save(
         provider,
         Tokens(accessToken: 'old', refreshToken: 'GR', expiresAt: 1),
@@ -233,11 +239,38 @@ void main() {
       );
 
       expect(await auth.freshAccessToken(account: account), 'fresh');
-      expect(TokenStore.load(provider)!.accessToken, 'fresh');
       expect(
         TokenStore.load(provider, account: account)!.accessToken,
         'fresh',
       );
+      // The default slot must not be clobbered by the account refresh.
+      expect(TokenStore.load(provider)!.accessToken, 'home-token');
+    });
+
+    test('GoogleAuth.freshAccessToken refreshes the default slot in place',
+        () async {
+      const provider = GoogleAuth.provider;
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'DR', expiresAt: 1),
+      );
+      final auth = GoogleAuth(
+        client: MockClient((req) async {
+          expect(req.body, contains('refresh_token=DR'));
+          return http.Response(
+            jsonEncode({'access_token': 'fresh', 'expires_in': 3600}),
+            200,
+          );
+        }),
+      );
+
+      expect(await auth.freshAccessToken(), 'fresh');
+      expect(TokenStore.load(provider)!.accessToken, 'fresh');
+      expect(TokenStore.accounts(provider), isEmpty);
     });
 
     test('XaiAuth.refresh returns null on a non-200', () async {
@@ -249,6 +282,10 @@ void main() {
         () async {
       const provider = XaiAuth.provider;
       const account = 'work@example.com';
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'default-old', refreshToken: 'DR', expiresAt: 1),
+      );
       TokenStore.save(
         provider,
         Tokens(accessToken: 'old', refreshToken: 'RW', expiresAt: 1),
@@ -275,6 +312,8 @@ void main() {
         TokenStore.load(provider, account: account)!.accessToken,
         'fresh',
       );
+      // The account refresh must not overwrite the provider-default grant.
+      expect(TokenStore.load(provider)!.accessToken, 'default-old');
     });
   });
 
