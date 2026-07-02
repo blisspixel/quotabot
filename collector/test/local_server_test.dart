@@ -111,6 +111,59 @@ void main() {
     }
   });
 
+  test('rejects a non-loopback Host header (DNS-rebinding guard)', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      now: () => _now,
+    );
+    try {
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(
+          Uri.parse('http://127.0.0.1:${server.port}/'),
+        );
+        request.headers.set('host', 'evil.example');
+        final response = await request.close();
+        final body = jsonDecode(await utf8.decodeStream(response))
+            as Map<String, dynamic>;
+        expect(response.statusCode, 403);
+        expect(body['error'], 'forbidden host');
+        expect(body.containsKey('providers'), isFalse);
+      } finally {
+        client.close(force: true);
+      }
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('allows a loopback Host header with a port', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      now: () => _now,
+    );
+    try {
+      for (final host in ['localhost:9999', '127.0.0.1:1', '[::1]:8721']) {
+        final client = HttpClient();
+        try {
+          final request = await client.getUrl(
+            Uri.parse('http://127.0.0.1:${server.port}/health'),
+          );
+          request.headers.set('host', host);
+          final response = await request.close();
+          expect(response.statusCode, 200, reason: 'host $host must pass');
+          await response.drain<void>();
+        } finally {
+          client.close(force: true);
+        }
+      }
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('local /suggest honors exclude query providers', () async {
     final server = await startLocalQuotabotServer(
       port: 0,

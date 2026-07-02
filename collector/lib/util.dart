@@ -141,8 +141,10 @@ dynamic findKey(dynamic node, String key) {
 }
 
 /// Yields printable, length-delimited strings from a protobuf byte stream,
-/// recursing into nested messages.
-Iterable<String> protoStrings(List<int> b) sync* {
+/// recursing into nested messages. The depth cap matches the other schema-less
+/// walkers so a deeply nested untrusted payload cannot exhaust the stack.
+Iterable<String> protoStrings(List<int> b, [int depth = 0]) sync* {
+  if (depth > 8) return;
   var i = 0;
   while (i < b.length) {
     final (tag, ni) = readVarint(b, i);
@@ -165,7 +167,7 @@ Iterable<String> protoStrings(List<int> b) sync* {
       if (txt != null) {
         yield txt;
       } else {
-        yield* protoStrings(chunk);
+        yield* protoStrings(chunk, depth + 1);
       }
     } else if (wt == 5) {
       i += 4;

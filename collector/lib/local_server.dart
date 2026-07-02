@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'analysis.dart';
 import 'cache.dart';
+import 'mcp_http.dart' show isLoopbackMcpHost;
 import 'models.dart';
 import 'provider_filters.dart';
 import 'util.dart';
@@ -92,6 +93,15 @@ Future<HttpServer> startLocalQuotabotServer({
     await for (final request in server) {
       final path = request.uri.path;
       try {
+        // Reject non-loopback Host headers before doing any work. The socket
+        // is already bound to loopback, but a DNS-rebinding page can still
+        // reach it as same-origin; the Host check is the fix the MCP HTTP
+        // server uses, and this server exposes account identities the same way.
+        if (!_isLoopbackHost(request.headers.value('host'))) {
+          writeJson(request, {'error': 'forbidden host'}, HttpStatus.forbidden);
+          await request.response.close();
+          continue;
+        }
         if (request.method != 'GET') {
           writeJson(
             request,
@@ -188,4 +198,22 @@ Future<HttpServer> startLocalQuotabotServer({
 
   unawaited(serve());
   return server;
+}
+
+/// True when a request's Host header names a loopback host, ignoring the port.
+/// A missing Host header (HTTP/1.0, some raw clients) is allowed because the
+/// socket already only accepts loopback connections; the guard exists to defeat
+/// browser DNS rebinding, which always sends the attacker's Host.
+bool _isLoopbackHost(String? host) {
+  if (host == null || host.isEmpty) return true;
+  var hostname = host.trim();
+  if (hostname.startsWith('[')) {
+    final close = hostname.indexOf(']');
+    if (close < 0) return false;
+    hostname = hostname.substring(1, close);
+  } else {
+    final colon = hostname.indexOf(':');
+    if (colon >= 0) hostname = hostname.substring(0, colon);
+  }
+  return isLoopbackMcpHost(hostname);
 }

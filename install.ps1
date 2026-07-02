@@ -42,21 +42,30 @@ try {
     Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
     Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
     $checksumUrl = "$downloadUrl.sha256"
+    # Only the checksum download itself is allowed to fail (asset genuinely
+    # absent). Once the sidecar is present, every parse and hash step is fatal
+    # on failure, so a lock, IO error, or malformed file cannot be misread as
+    # "no checksum" and let an unverified bundle install.
+    $checksumFound = $true
     try {
         Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
-        $expected = ((Get-Content $checksumPath -Raw) -split '\s+')[0].ToLowerInvariant()
-        if ($expected -notmatch '^[0-9a-f]{64}$') {
-            throw "Invalid checksum file for $assetName"
-        }
-        $actual = (Get-FileHash -Algorithm SHA256 $downloadPath).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) {
-            throw "Checksum mismatch for $assetName"
-        }
     } catch {
-        if ($_.Exception.Message -like '*Checksum mismatch*' -or $_.Exception.Message -like '*Invalid checksum*') { throw }
+        $checksumFound = $false
         Write-Host "No checksum asset found at $checksumUrl; continuing with HTTPS verification only."
-    } finally {
-        Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
+    }
+    if ($checksumFound) {
+        try {
+            $expected = ((Get-Content $checksumPath -Raw) -split '\s+')[0].ToLowerInvariant()
+            if ($expected -notmatch '^[0-9a-f]{64}$') {
+                throw "Invalid checksum file for $assetName"
+            }
+            $actual = (Get-FileHash -Algorithm SHA256 $downloadPath).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+                throw "Checksum mismatch for $assetName"
+            }
+        } finally {
+            Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
+        }
     }
     Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractPath -Force
     $downloadedExe = Join-Path $extractPath "bin\quotabot.exe"

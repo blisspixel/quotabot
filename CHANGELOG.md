@@ -5,11 +5,31 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- `quotabot logout` now clears the account-scoped grant as well as the
+  provider-default grant. Login persists both (the account slot is keyed by the
+  email in the id token), so clearing only the default left a live,
+  self-renewing refresh token on disk that the next collect would refresh and
+  keep using despite the disconnect.
+- Profile files (which carry account emails and hidden provider/account
+  targets) are now written owner-only, matching every other local metadata
+  writer. They were previously created with the default umask, leaving them
+  group- and world-readable on POSIX.
+- The local quota JSON server (`quotabot serve`) now rejects requests whose
+  Host header is not loopback, closing the DNS-rebinding hole that let a web
+  page the user merely visited read provider account identities and quota
+  state as same-origin. This mirrors the MCP HTTP server's existing guard.
 - The schema-less protobuf walkers (Grok billing scan, embedded-string scan)
   now reject hostile length varints near 2^62 that wrapped an addition-form
   bounds check negative and threw inside sublist. The throw was contained by
   the adapter's blanket catch, but it degraded every Grok account to a generic
   read error; malformed frames now degrade to a truthful null parse instead.
+- `protoStrings` gained the same recursion-depth cap the other schema-less
+  protobuf walkers already carry, so a deeply nested untrusted local-state
+  payload cannot exhaust the stack.
+- `install.ps1` now fails closed on checksum verification: only a genuinely
+  absent sidecar falls back to HTTPS-only, while any parse or hash error after
+  the sidecar is fetched aborts the install. The prior structure could misread
+  an IO or lock error as "no checksum" and proceed unverified.
 - Provider-sourced strings (window labels, accounts, plans, statuses, error
   notes, model ids) are now stripped of terminal control bytes when snapshots
   are collected, and the `top` renderer strips them again at the draw
