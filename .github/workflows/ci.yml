@@ -4,6 +4,8 @@ on:
   push:
   pull_request:
 
+# Actions pinned to commit SHAs (version in the trailing comment); Dependabot's
+# github-actions group keeps them current.
 permissions:
   contents: read
 
@@ -26,15 +28,15 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       # Pin Python so `python` resolves on every runner (macOS ships only
       # python3), for the coverage gate and the LiteLLM router tests.
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
 
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           cache: true

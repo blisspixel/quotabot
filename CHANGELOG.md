@@ -60,6 +60,13 @@ Notable changes to quotabot. Newest first.
   Previously the exclusion relied on those providers having no catalog models.
 
 ### Changed
+- The release workflow now creates the GitHub release as a draft, attaches a
+  signed SLSA build provenance attestation to every platform archive, and only
+  publishes (flipping `releases/latest`) after all build legs succeed. A tag
+  whose matrix had a failing leg stays a draft instead of exposing a
+  missing-asset release. All CI, CodeQL, and release workflow actions are now
+  pinned to commit SHAs so a repointed tag cannot inject a compromised action
+  into the artifact build path.
 - `quotabot check --json` and MCP `check_provider_availability` now emit their
   own `quotabot.check.v1` schema id with an `as_of` timestamp. They previously
   claimed `quotabot.v1` while not conforming to it (no `providers` array).
