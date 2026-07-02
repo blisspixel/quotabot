@@ -92,6 +92,32 @@ void main() {
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
 
+  test('watch --once confirms an all-clear run instead of printing nothing',
+      () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    expect(result.stdout as String, contains('all clear'));
+  });
+
+  test('watch --once stays silent in JSON mode when nothing fires', () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--json',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    expect((result.stdout as String).trim(), isEmpty);
+  });
+
   test('watch rejects invalid projected-waste thresholds', () async {
     final result = await runCli([
       'watch',
