@@ -70,13 +70,19 @@ class GrokAdapter {
       if (accounts.isEmpty) {
         return [ProviderQuota.error(id, name, 'no grok account', asOf)];
       }
+      // The provider-default grant has no recorded owner, so it may only stand
+      // in for the primary account when there is exactly one account to read.
+      // With several accounts, lending the default to the first would risk
+      // fetching one account's usage under another account's label, since the
+      // Grok billing response carries no identity to cross-check.
+      final soleAccount = accounts.length == 1;
       final out = <ProviderQuota>[];
       for (var i = 0; i < accounts.length; i++) {
         out.add(
           await _collectAccount(
             accounts[i],
             asOf,
-            allowDefaultGrant: i == 0,
+            allowDefaultGrant: i == 0 && soleAccount,
           ),
         );
       }

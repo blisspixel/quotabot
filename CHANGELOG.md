@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- Grok no longer lends the ownerless provider-default grant across multiple
+  accounts. When `~/.grok/auth.json` lists more than one account, an account
+  without its own grant is read only from its own CLI token, never from the
+  default grant, which could otherwise fetch a different account's usage and
+  display it under the wrong account's label (the Grok billing response carries
+  no identity to cross-check, unlike Antigravity). The default grant still
+  stands in for a lone single account.
 - A background token refresh no longer overwrites the provider-default grant
   with the refreshed account's tokens. Previously every account refresh
   rewrote the default slot, so which account the default represented depended
