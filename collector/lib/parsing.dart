@@ -793,8 +793,63 @@ List<int> grpcMessage(Uint8List resp) {
 }
 
 /// Parses the Grok billing protobuf into a single shared weekly usage window.
+///
+/// GetGrokCreditsConfig wraps one config message in field 1. Inside it, field
+/// 1 is the shared pool's used percent (fixed32 float), fields 4 and 5 are the
+/// window start and end timestamps, and repeated field 7 carries per-product
+/// breakdown percents that sum to the total. Reading the percent by field
+/// number keeps a breakdown value from ever posing as the pool total, and the
+/// reset comes from the window end, never the start. The schema-less scan
+/// remains as a fallback for shape drift. Note that xAI can revise the pool
+/// percent downward mid-window (observed live: 100 to 73 under an unchanged
+/// reset), so Grok usage is not monotonic between resets.
 QuotaWindow? grokWindow(List<int> message, int now) {
   if (message.isEmpty) return null;
+  return _grokConfigWindow(message, now) ?? _grokScanWindow(message, now);
+}
+
+/// Schema-anchored read of the Grok credits config message.
+QuotaWindow? _grokConfigWindow(List<int> message, int now) {
+  List<int>? config;
+  // The top-level walk's verdict is deliberately ignored: trailing garbage
+  // after a well-delimited config must not force the less precise scan
+  // fallback. The config body itself is still parsed strictly below.
+  _forEachProtoField(message, (field, wireType, varint, bytes) {
+    if (field == 1 && wireType == 2) config ??= bytes;
+  });
+  final body = config;
+  if (body == null) return null;
+  double? used;
+  int? windowEnd;
+  final ok = _forEachProtoField(body, (field, wireType, varint, bytes) {
+    if (field == 1 && wireType == 5) {
+      final f = _float32(bytes);
+      // This field is the pool total by schema, so a finite value outside
+      // 0..100 is clamped rather than discarded; discarding would hand the
+      // read back to the scan, which can pick a breakdown percent.
+      if (f.isFinite) used ??= _percent2(f.clamp(0.0, 100.0));
+    } else if (field == 5 && wireType == 2) {
+      _forEachProtoField(bytes, (subField, subWire, subVarint, _) {
+        if (subField == 1 &&
+            subWire == 0 &&
+            subVarint != null &&
+            _plausibleEpochSeconds(subVarint)) {
+          windowEnd ??= subVarint;
+        }
+      });
+    }
+  });
+  if (!ok || used == null) return null;
+  return QuotaWindow(
+    label: 'weekly',
+    usedPercent: used,
+    resetsAt:
+        windowEnd ?? (ProtoScan()..walk(message)).nearestFutureTimestamp(now),
+  );
+}
+
+/// Schema-less fallback: first plausible percent, nearest future timestamp.
+QuotaWindow? _grokScanWindow(List<int> message, int now) {
   final scan = ProtoScan()..walk(message);
   final percent = scan.firstPercent;
   if (percent == null) return null;
@@ -805,6 +860,59 @@ QuotaWindow? grokWindow(List<int> message, int now) {
   );
 }
 
+/// Plausibility bounds for a unix-seconds varint (2020..2033), so field ids,
+/// enums, and nano counts are never mistaken for timestamps.
+bool _plausibleEpochSeconds(int v) => v > 1600000000 && v < 2000000000;
+
+double _percent2(double f) => double.parse(f.toStringAsFixed(2));
+
+double _float32(List<int> bytes) =>
+    ByteData.sublistView(Uint8List.fromList(bytes))
+        .getFloat32(0, Endian.little);
+
+/// Calls [visit] for each top-level field of protobuf [b]. Varint fields pass
+/// their value; fixed-width and length-delimited fields pass their raw bytes.
+/// Returns false as soon as the buffer stops parsing as valid protobuf.
+bool _forEachProtoField(
+  List<int> b,
+  void Function(int field, int wireType, int? varint, List<int> bytes) visit,
+) {
+  var i = 0;
+  while (i < b.length) {
+    final (tag, ni) = readVarint(b, i);
+    if (tag == null) return false;
+    i = ni;
+    final field = tag >> 3;
+    final wireType = tag & 7;
+    switch (wireType) {
+      case 0:
+        final (v, n2) = readVarint(b, i);
+        if (v == null) return false;
+        i = n2;
+        visit(field, wireType, v, const []);
+      case 5:
+        if (i + 4 > b.length) return false;
+        visit(field, wireType, null, b.sublist(i, i + 4));
+        i += 4;
+      case 1:
+        if (i + 8 > b.length) return false;
+        visit(field, wireType, null, b.sublist(i, i + 8));
+        i += 8;
+      case 2:
+        // Subtraction-form bounds check: a hostile 9-byte length varint
+        // decodes near 2^62, where `n2 + len` wraps negative and would pass
+        // an addition-form check straight into a throwing sublist.
+        final (len, n2) = readVarint(b, i);
+        if (len == null || len < 0 || len > b.length - n2) return false;
+        visit(field, wireType, null, b.sublist(n2, n2 + len));
+        i = n2 + len;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
 /// Walks a protobuf collecting 32-bit floats and timestamp-like varints without
 /// the schema. Used for the Grok billing response.
 class ProtoScan {
@@ -813,7 +921,7 @@ class ProtoScan {
 
   double? get firstPercent {
     for (final f in floats) {
-      if (f >= 0 && f <= 100) return double.parse(f.toStringAsFixed(2));
+      if (f >= 0 && f <= 100) return _percent2(f);
     }
     return null;
   }
@@ -827,40 +935,15 @@ class ProtoScan {
 
   void walk(List<int> b, [int depth = 0]) {
     if (depth > 8) return;
-    var i = 0;
-    while (i < b.length) {
-      final (tag, ni) = readVarint(b, i);
-      if (tag == null) break;
-      i = ni;
-      final wt = tag & 7;
-      switch (wt) {
+    _forEachProtoField(b, (field, wireType, varint, bytes) {
+      switch (wireType) {
         case 0:
-          final (v, n2) = readVarint(b, i);
-          if (v == null) return;
-          i = n2;
-          if (v > 1600000000 && v < 2000000000) timestamps.add(v);
-          break;
+          if (_plausibleEpochSeconds(varint!)) timestamps.add(varint);
         case 5:
-          if (i + 4 > b.length) return;
-          final view = ByteData.sublistView(
-            Uint8List.fromList(b.sublist(i, i + 4)),
-          );
-          floats.add(view.getFloat32(0, Endian.little));
-          i += 4;
-          break;
-        case 1:
-          i += 8;
-          break;
+          floats.add(_float32(bytes));
         case 2:
-          final (len, n2) = readVarint(b, i);
-          if (len == null || n2 + len > b.length) return;
-          i = n2;
-          walk(b.sublist(i, i + len), depth + 1);
-          i += len;
-          break;
-        default:
-          return;
+          walk(bytes, depth + 1);
       }
-    }
+    });
   }
 }

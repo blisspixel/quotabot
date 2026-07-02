@@ -48,6 +48,13 @@ void main() {
       expect(asciiString(utf8.encode('ok')), 'ok');
     });
 
+    test('rejects a hostile length varint without throwing', () {
+      // Decodes near 2^62; an addition-form bounds check would wrap negative
+      // and throw in sublist.
+      final hostile = [0x0a, 255, 255, 255, 255, 255, 255, 255, 255, 0x7f];
+      expect(protoStrings(hostile), isEmpty);
+    });
+
     test('skips non-string wire types and recurses into nested messages', () {
       final bytes = [
         0x0a,

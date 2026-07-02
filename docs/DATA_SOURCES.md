@@ -51,11 +51,19 @@ the adapters resolve the user home directory cross-platform.
 - Live usage: a gRPC-web POST to
   `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` with the
   bearer token and an empty request frame. The protobuf response carries the
-  credit usage percent for the shared paid-plan weekly pool and the pool reset
-  timestamp, parsed into a single weekly window. The usage page's Imagine, Chat,
-  and Build percentages are category breakdowns inside that shared pool, not
-  independent spendable buckets. This is a billing metadata call, not a
-  model call, so it costs no tokens.
+  used percent of the shared paid-plan weekly pool plus the window start and
+  end timestamps; quotabot reads the percent and window end by their known
+  fields and parses them into a single weekly window. The usage page's Imagine,
+  Chat, and Build percentages are category breakdowns inside that shared pool,
+  not independent spendable buckets, and while the response matches the known
+  shape a breakdown is not mistaken for the total (if the shape ever drifts, a
+  schema-less scan is the best-effort fallback). This is a billing metadata
+  call, not a model call, so it costs no tokens.
+- Not monotonic: xAI can revise the pool percent downward mid-window without a
+  reset (observed live: 100 to 73 under the same reset time, consistent with
+  re-rated compute charges or a grown allowance). quotabot mirrors the number
+  Grok's own usage page shows; burn analytics treat a decrease as recovery, so
+  it cannot poison burn-rate or runway estimates.
 - Multi-account: every account object in `auth.json` is read. quotabot tries the
   matching account-scoped grant before the provider-default grant (primary
   account only) or that account's CLI token, and successful reads are cached per

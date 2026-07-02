@@ -5,24 +5,35 @@ import 'package:quotabot_collector/parsing.dart';
 import 'package:test/test.dart';
 
 /// Builds a protobuf field-1 32-bit float, then a field-4 varint timestamp.
-Uint8List _grokMessage(double percent, int timestamp) {
+Uint8List _grokMessage(double percent, int timestamp) => Uint8List.fromList([
+      ..._float32Field(1, percent),
+      ..._varintField(4, timestamp),
+    ]);
+
+List<int> _varint(int value) {
   final out = <int>[];
-  out.add(0x0d); // field 1, wire type 5 (32-bit)
-  final f = ByteData(4)..setFloat32(0, percent, Endian.little);
-  out.addAll(f.buffer.asUint8List());
-  out.add(0x20); // field 4, wire type 0 (varint)
-  var t = timestamp;
+  var v = value;
   while (true) {
-    final b = t & 0x7f;
-    t >>= 7;
-    if (t == 0) {
+    final b = v & 0x7f;
+    v >>= 7;
+    if (v == 0) {
       out.add(b);
-      break;
+      return out;
     }
     out.add(b | 0x80);
   }
-  return Uint8List.fromList(out);
 }
+
+List<int> _varintField(int field, int value) =>
+    [(field << 3) | 0, ..._varint(value)];
+
+List<int> _float32Field(int field, double value) {
+  final f = ByteData(4)..setFloat32(0, value, Endian.little);
+  return [(field << 3) | 5, ...f.buffer.asUint8List()];
+}
+
+List<int> _messageField(int field, List<int> body) =>
+    [(field << 3) | 2, ..._varint(body.length), ...body];
 
 List<int> _fieldString(String value) {
   final bytes = utf8.encode(value);
@@ -282,6 +293,84 @@ void main() {
 
     test('grokWindow returns null without a percent', () {
       expect(grokWindow(const [], 0), isNull);
+    });
+
+    test('grokWindow reads the pool percent by field, never the first float',
+        () {
+      const now = 1782000000;
+      // A per-product breakdown float precedes the pool total in the bytes;
+      // the schema-anchored read must still report the total.
+      final config = <int>[
+        ..._messageField(7, [..._varintField(1, 5), ..._float32Field(2, 66)]),
+        ..._float32Field(1, 73),
+        ..._messageField(4, _varintField(1, now - 3 * 86400)),
+        ..._messageField(5, _varintField(1, now + 4 * 86400)),
+      ];
+      final w = grokWindow(_messageField(1, config), now);
+      expect(w, isNotNull);
+      expect(w!.usedPercent, 73);
+      expect(w.resetsAt, now + 4 * 86400);
+    });
+
+    test('grokWindow takes the reset from the window end, not the start', () {
+      const now = 1782000000;
+      final config = <int>[
+        ..._float32Field(1, 100),
+        ..._messageField(4, _varintField(1, now + 3600)),
+        ..._messageField(5, _varintField(1, now + 7200)),
+      ];
+      final w = grokWindow(_messageField(1, config), now);
+      expect(w, isNotNull);
+      expect(w!.usedPercent, 100);
+      expect(w.resetsAt, now + 7200);
+    });
+
+    test(
+        'grokWindow clamps an out-of-bounds pool total instead of falling '
+        'back to a breakdown percent', () {
+      const now = 1782000000;
+      final config = <int>[
+        ..._messageField(7, [..._varintField(1, 5), ..._float32Field(2, 66)]),
+        ..._float32Field(1, 100.5),
+        ..._messageField(5, _varintField(1, now + 7200)),
+      ];
+      final w = grokWindow(_messageField(1, config), now);
+      expect(w, isNotNull);
+      expect(w!.usedPercent, 100);
+      expect(w.resetsAt, now + 7200);
+    });
+
+    test('grokWindow keeps the anchored read despite trailing garbage', () {
+      const now = 1782000000;
+      final config = <int>[
+        ..._messageField(7, [..._varintField(1, 5), ..._float32Field(2, 66)]),
+        ..._float32Field(1, 73),
+        ..._messageField(5, _varintField(1, now + 7200)),
+      ];
+      final w = grokWindow([..._messageField(1, config), 0xff], now);
+      expect(w, isNotNull);
+      expect(w!.usedPercent, 73);
+      expect(w.resetsAt, now + 7200);
+    });
+
+    test('hostile length varints are rejected, not thrown', () {
+      // A 9-byte length varint decodes near 2^62; an addition-form bounds
+      // check would wrap negative and throw in sublist.
+      final hostile = [0x0a, 255, 255, 255, 255, 255, 255, 255, 255, 0x7f];
+      expect(grokWindow(hostile, 1782000000), isNull);
+      expect((ProtoScan()..walk(hostile)).floats, isEmpty);
+    });
+
+    test('grokWindow falls back to the scan on malformed config bytes', () {
+      // Field 1 wraps a truncated tag, so the anchored read fails; the
+      // schema-less scan still finds the bare percent that follows.
+      final msg = <int>[
+        ..._messageField(1, [0x0d]),
+        ..._float32Field(2, 41)
+      ];
+      final w = grokWindow(msg, 1782000000);
+      expect(w, isNotNull);
+      expect(w!.usedPercent, 41);
     });
 
     test('ProtoScan walks nested messages', () {
