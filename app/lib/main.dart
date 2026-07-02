@@ -1172,8 +1172,10 @@ class _DashboardState extends State<Dashboard>
             'the app once and sign in, then refresh.';
       case 'ollama':
       case 'lmstudio':
-        return 'Local runtime. Start it and load a model; quotabot detects what '
-            'is installed and loaded automatically. No login needed.';
+      case 'lemonade':
+        return 'Local runtime. Start its server and load a model; quotabot '
+            'detects what is installed and loaded automatically. No login '
+            'needed.';
       default:
         return 'quotabot reads this provider from local data; no setup needed.';
     }
@@ -2208,7 +2210,7 @@ class _DashboardState extends State<Dashboard>
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final (label, color) = _stateChip(q, now);
     final canConnect = _canConnectProvider(q.provider);
-    final isLive = label == 'live' || label == 'in use' || label == 'running';
+    final isLive = label == 'live' || label == 'in use';
     final busy = connecting.contains(q.provider);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),

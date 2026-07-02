@@ -1452,8 +1452,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     title: 'Reserve provider',
     description:
         'Create a short local routing lease for the current best subscription, '
-        'or for an explicit provider/account. The lease reduces that account '
-        'effective headroom for later suggestions so parallel agents do not all '
+        'or for an explicit provider/account. The lease reduces that account'
+        "'s effective headroom for later suggestions so parallel agents do not all "
         'choose the same provider at once. This writes only local metadata and '
         'expires automatically.',
     inputSchema: JsonSchema.object(
@@ -1667,7 +1667,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'heavier or paid tier only when the requirements force it. Takes the same '
         'filter as list_models, including budget=local or budget=quota. quotabot '
         'never reads the task; the caller supplies the profile, and tiers are the '
-        'providers own, not a quality ranking. Pass use_expiring_quota=true to '
+        "provider's own, not a quality ranking. Pass use_expiring_quota=true to "
         'let soon-resetting measured included quota outrank local capacity when '
         'projected waste is high.',
     inputSchema: _modelFilterInputSchema,
