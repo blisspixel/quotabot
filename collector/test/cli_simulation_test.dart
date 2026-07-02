@@ -92,6 +92,19 @@ void main() {
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
 
+  test('models says filters excluded everything, not "no models detected"',
+      () async {
+    final result = await runCollectCli(
+      ['models', '--min-context=999000000'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('no models match these filters'));
+    expect(out, isNot(contains('no models detected')));
+  });
+
   test('watch --once confirms an all-clear run instead of printing nothing',
       () async {
     final result = await runCli([
