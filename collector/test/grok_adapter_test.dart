@@ -86,7 +86,9 @@ void main() {
     ]);
     expect(q.map((p) => p.windows.single.usedPercent).toList(), [10, 20]);
     expect(tokens, ['token-a', 'token-b']);
-    expect(resolverCalls, ['a@example.com:true', 'b@example.com:false']);
+    // With more than one account, the default grant is offered to none of them,
+    // so neither resolver call permits it.
+    expect(resolverCalls, ['a@example.com:false', 'b@example.com:false']);
   });
 
   test('collect returns the first account snapshot', () async {
@@ -127,7 +129,10 @@ void main() {
     expect(tokens, ['own-a', 'token-b']);
   });
 
-  test('stored grants are scoped by account and default grant use', () async {
+  test('the default grant is never lent across multiple accounts', () async {
+    // With several accounts the ownerless default grant must not stand in for
+    // any of them: account a would otherwise be read under b's or another
+    // account's token and mislabeled. Only b, which has its own slot, reads.
     TokenStore.clear(XaiAuth.provider);
     TokenStore.clearAccounts(XaiAuth.provider);
     addTearDown(() {
@@ -159,13 +164,43 @@ void main() {
       },
     ).collectAccounts();
 
-    expect(tokens, ['default-token', 'b-token']);
+    expect(tokens, ['b-token']);
     expect(q.map((p) => p.account).toList(), [
       'a@example.com',
       'b@example.com',
       'c@example.com',
     ]);
+    expect(q.first.error, 'no token - run: quotabot login grok');
     expect(q.last.error, 'no token - run: quotabot login grok');
+  });
+
+  test('the default grant stands in for a single account', () async {
+    TokenStore.clear(XaiAuth.provider);
+    TokenStore.clearAccounts(XaiAuth.provider);
+    addTearDown(() {
+      TokenStore.clear(XaiAuth.provider);
+      TokenStore.clearAccounts(XaiAuth.provider);
+    });
+    TokenStore.save(
+      XaiAuth.provider,
+      Tokens(accessToken: 'default-token', expiresAt: nowEpoch() + 3600),
+    );
+    writeAuth({
+      'a': {'email': 'a@example.com'},
+    });
+    final tokens = <String>[];
+
+    final q = await GrokAdapter(
+      authFile: authFile,
+      usageFetcher: (token, asOf) async {
+        tokens.add(token);
+        return QuotaWindow(label: 'monthly', usedPercent: 9);
+      },
+    ).collectAccounts();
+
+    expect(tokens, ['default-token']);
+    expect(q.single.account, 'a@example.com');
+    expect(q.single.windows.single.usedPercent, 9);
   });
 
   test('expired billing tokens keep the account visible', () async {
