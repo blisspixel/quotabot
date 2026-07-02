@@ -1572,7 +1572,12 @@ void _logout(String provider) {
     stderr.writeln('Usage: quotabot logout <grok|antigravity>');
     return;
   }
+  // Login persists both a provider-default grant and an account-scoped grant
+  // (keyed by the email in the id token). Clearing only the default slot would
+  // leave the account grant on disk, and the next collect would refresh and
+  // keep using it, so disconnect must remove every slot for the provider.
   TokenStore.clear(provider);
+  TokenStore.clearAccounts(provider);
   stderr.writeln('$provider disconnected.');
 }
 

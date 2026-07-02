@@ -163,4 +163,23 @@ void main() {
     expect(loadProfile('work', dir: temp), isNull);
     expect(listProfiles(dir: temp).map((p) => p.name), ['default']);
   });
+
+  test('saved profile file and directory are owner-only on POSIX', () {
+    // Profile JSON carries account emails; on POSIX it must not be group- or
+    // world-readable. Windows uses ACLs, verified by the util layer's tests.
+    if (Platform.isWindows) return;
+    saveProfile(
+      QuotaProfile(
+        name: 'work',
+        providers: {'grok'},
+        accounts: {
+          'grok': {'work@example.com'},
+        },
+      ),
+      dir: temp,
+    );
+    final file = profileFile('work', dir: temp);
+    expect(file.statSync().mode & 0x3f, 0, reason: 'no group/other bits');
+    expect(temp.statSync().mode & 0x3f, 0, reason: 'directory owner-only');
+  });
 }

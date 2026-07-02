@@ -122,6 +122,7 @@ List<ProviderQuota> applyProfile(
 Directory profilesDir({Directory? root}) {
   if (root != null) {
     if (!root.existsSync()) root.createSync(recursive: true);
+    restrictOwnerOnlyDirectory(root);
     return root;
   }
   return quotabotDir('profiles');
@@ -146,9 +147,15 @@ void saveProfile(QuotaProfile profile, {Directory? dir}) {
     sort: profile.sort,
   );
   final file = profileFile(normalized, dir: dir);
+  // Profile JSON carries account emails and hidden provider/account targets,
+  // so it is owner-only like every other local metadata file: lock the tmp
+  // before the secret lands, then re-lock the final file after the rename.
   final tmp = File('${file.path}.$pid.tmp');
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictOwnerOnlyFile(tmp);
   tmp.writeAsStringSync(jsonEncode(safe.toJson()));
   tmp.renameSync(file.path);
+  restrictOwnerOnlyFile(file);
 }
 
 void deleteProfile(String name, {Directory? dir}) {
