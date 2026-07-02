@@ -3,22 +3,32 @@ name: Release
 # Cuts a GitHub release when a v* tag is pushed, building the CLI asset that the
 # one-line installers download (quotabot-<os>-<arch> archive plus a .sha256
 # sidecar) natively on each platform so every OS gets a real, checksummed
-# bundle with its native assets.
+# bundle with its native assets. The release is created as a draft and only
+# published after every platform's asset has uploaded, so `releases/latest`
+# never points at a half-built tag. Each archive also gets a signed build
+# provenance attestation, so an installer can verify where and how it was built,
+# not just its checksum.
 
 on:
   push:
     tags:
       - 'v*'
 
+# Least privilege by default; jobs widen only what they need. Actions are
+# pinned to commit SHAs (version in the trailing comment) so a repointed tag
+# cannot inject a compromised action into the artifact build path. Dependabot's
+# github-actions group keeps the pins current.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - name: Create the release if it does not exist
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Create the release as a draft if it does not exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -29,6 +39,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
+            --draft \
             --generate-notes
 
   build:
@@ -46,16 +57,43 @@ jobs:
           - { os: macos-latest,     script: bash tools/package-cli.sh }
           - { os: windows-latest,   script: pwsh tools/package-cli.ps1 }
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # upload the asset to the release
+      id-token: write # mint the provenance signing certificate
+      attestations: write # record the attestation
     steps:
-      - uses: actions/checkout@v7
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
       - name: Resolve collector dependencies
         working-directory: collector
         run: dart pub get
       - name: Build and package the CLI asset
         run: ${{ matrix.script }}
+      - name: Attest build provenance for the archive
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          # One archive exists per leg; the non-matching glob is ignored.
+          subject-path: |
+            release/quotabot-*.tar.gz
+            release/quotabot-*.zip
       - name: Upload the asset to the release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" release/quotabot-* --repo "$GITHUB_REPOSITORY" --clobber
+
+  publish-release:
+    # Runs only if every build leg succeeded, so the release is published (and
+    # `latest` flips) exactly once all platform assets are present.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the drafted release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
