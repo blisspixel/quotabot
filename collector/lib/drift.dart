@@ -36,23 +36,46 @@ const _reRatingProviders = {grokProviderId};
 /// Returns a short reason when [fresh] is implausible versus [previous] - the
 /// signature of a silently drifted read rather than normal consumption or a
 /// reset - or null when the reading is consistent. Windows are matched by label
-/// so only like is compared with like. Fail-soft: the caller still shows the
-/// number, only annotated as suspect.
+/// and per-model pools by model name, so only like is compared with like.
+/// Fail-soft: the caller still shows the number, only annotated as suspect.
 String? detectQuotaDrift(ProviderQuota fresh, ProviderQuota previous) {
-  if (_syntheticWindowProviders.contains(fresh.provider)) return null;
-  final prev = {for (final w in previous.windows) w.label: w};
-  for (final w in fresh.windows) {
-    final p = prev[w.label];
+  // Windows: skipped for providers whose single window is a synthetic
+  // max-over-models artifact (Antigravity); their real signal is per-model.
+  if (!_syntheticWindowProviders.contains(fresh.provider)) {
+    final prev = {for (final w in previous.windows) w.label: w};
+    for (final w in fresh.windows) {
+      final p = prev[w.label];
+      if (p == null) continue;
+      final reason = _pairDrift(
+          fresh.provider, w.percent, w.resetsAt, p.percent, p.resetsAt);
+      if (reason != null) return '${w.label} $reason';
+    }
+  }
+  // Per-model pools are real per-model rolling windows (Antigravity meters each
+  // model family separately), so the same monotonicity applies, matched by
+  // model name. This is where Antigravity's drift is actually caught.
+  final prevModels = {for (final m in previous.modelQuotas) m.model: m};
+  for (final m in fresh.modelQuotas) {
+    final p = prevModels[m.model];
     if (p == null) continue;
-    final reason = _windowDrift(fresh.provider, w, p);
-    if (reason != null) return '${w.label} $reason';
+    final reason = _pairDrift(
+        fresh.provider, m.usedPercent, m.resetsAt, p.usedPercent, p.resetsAt);
+    if (reason != null) return '${m.model} $reason';
   }
   return null;
 }
 
-String? _windowDrift(String provider, QuotaWindow fresh, QuotaWindow previous) {
-  final fr = fresh.resetsAt;
-  final pr = previous.resetsAt;
+/// The monotonicity checks shared by windows and per-model pools, given a fresh
+/// and previous `(usedPercent, resetsAt)` pair.
+String? _pairDrift(
+  String provider,
+  double? freshUsed,
+  int? freshReset,
+  double? prevUsed,
+  int? prevReset,
+) {
+  final fr = freshReset;
+  final pr = prevReset;
   // (1) A reset only ever advances or holds; one that moved earlier by more
   // than the tolerance is implausible for any provider.
   if (fr != null && pr != null && fr < pr - _resetRegressToleranceSeconds) {
@@ -65,10 +88,11 @@ String? _windowDrift(String provider, QuotaWindow fresh, QuotaWindow previous) {
       fr != null &&
       pr != null &&
       fr == pr) {
-    final fu = fresh.percent;
-    final pu = previous.percent;
-    if (fu != null && pu != null && fu < pu - _headroomGainTolerancePoints) {
-      return 'usage fell ${pu.round()}% to ${fu.round()}% with no reset';
+    if (freshUsed != null &&
+        prevUsed != null &&
+        freshUsed < prevUsed - _headroomGainTolerancePoints) {
+      return 'usage fell ${prevUsed.round()}% to ${freshUsed.round()}% '
+          'with no reset';
     }
   }
   return null;

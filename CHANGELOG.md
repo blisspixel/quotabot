@@ -222,7 +222,10 @@ Notable changes to quotabot. Newest first.
   fail-soft (the number is still shown, only annotated), the concern rides
   through `quotabot json`, `doctor`, and MCP, and it is provider-aware, so
   xAI's legitimate Grok pool re-rating and Antigravity's max-over-models window
-  are not false-flagged. This is the first use of stored history to check a
+  are not false-flagged. The same monotonicity runs per model for providers
+  that meter each model separately (Antigravity), where the single window is a
+  synthetic artifact and the real drift signal lives in the per-model pools.
+  This is the first use of stored history to check a
   fresh reading, closing the gap where a provider that starts reading wrong
   without failing was previously trusted, which the 1.0 promise of "reads
   correctly or fails plainly" did not otherwise enforce.
