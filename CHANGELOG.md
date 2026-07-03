@@ -5,6 +5,14 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- The Grok provider-default grant is now stamped with the account it belongs to
+  at login, and is only lent to a fallback account when it is unclaimed (a
+  legacy grant, already limited to the sole account) or owned by that same
+  account. Previously a single Grok CLI account that differed from the
+  quotabot-logged-in account could be read using the other account's default
+  grant and shown under the wrong account (the Grok billing response carries no
+  identity to cross-check, unlike Antigravity), and that misattribution
+  persisted into per-account burn history.
 - A corrupt or hostile local cache/history file can no longer crash the CLI or
   MCP server. Non-finite numbers (an `Infinity` or `NaN` that JSON allows but
   `jsonEncode` rejects) read back from a quota snapshot or an analytics bucket

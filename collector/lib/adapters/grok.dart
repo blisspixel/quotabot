@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../auth/tokens.dart';
 import '../auth/xai_auth.dart';
 import '../models.dart';
 import '../parsing.dart';
@@ -132,8 +133,17 @@ class GrokAdapter {
       return _tokenResolver(account, allowDefaultGrant);
     }
     final xai = XaiAuth();
-    return await xai.freshAccessToken(account: account) ??
-        (allowDefaultGrant ? await xai.freshAccessToken() : null);
+    final own = await xai.freshAccessToken(account: account);
+    if (own != null) return own;
+    if (!allowDefaultGrant) return null;
+    // The Grok billing response carries no identity, so the default grant may
+    // only stand in for this account when it is unclaimed (a legacy grant, and
+    // allowDefaultGrant already limits that to the sole account) or is stamped
+    // for this account. Lending a default owned by a different account would
+    // show that account's usage under this one.
+    final owner = TokenStore.defaultOwner(XaiAuth.provider);
+    if (owner != null && owner != account) return null;
+    return await xai.freshAccessToken();
   }
 
   static List<_GrokAccount> _readAccounts(File authFile) {

@@ -104,7 +104,25 @@ class TokenStore {
 
   static void save(String provider, Tokens tokens, {String? account}) {
     final accountName = _normalizeAccount(account);
-    final f = _file(provider, account: accountName);
+    _write(provider, tokens, fileAccount: accountName, ownerStamp: accountName);
+  }
+
+  /// Writes the provider-default grant while recording which account it belongs
+  /// to. The grant still lives in the default slot; [owner] is only an ownership
+  /// marker in the file content, so a fallback consumer can refuse to lend the
+  /// default grant to a different account (see [defaultOwner]).
+  static void saveDefaultOwnedBy(String provider, Tokens tokens, String owner) {
+    _write(provider, tokens,
+        fileAccount: null, ownerStamp: _normalizeAccount(owner));
+  }
+
+  static void _write(
+    String provider,
+    Tokens tokens, {
+    required String? fileAccount,
+    required String? ownerStamp,
+  }) {
+    final f = _file(provider, account: fileAccount);
     // Lock down the directory and pre-create the file with restrictive
     // permissions BEFORE writing the secret, so the token is never briefly
     // world-readable under the default umask.
@@ -115,9 +133,24 @@ class TokenStore {
     restrictOwnerOnlyFile(f);
     f.writeAsStringSync(jsonEncode({
       ...tokens.toJson(),
-      if (accountName != null) _accountKey: accountName,
+      if (ownerStamp != null) _accountKey: ownerStamp,
     }));
     restrictOwnerOnlyFile(f);
+  }
+
+  /// The account a provider-default grant is stamped for, or null when the
+  /// default slot is absent, unreadable, or a legacy grant written without a
+  /// stamp. Reads only the ownership marker, never exposing the token.
+  static String? defaultOwner(String provider) {
+    final f = _file(provider);
+    try {
+      if (!f.existsSync() || f.lengthSync() > _maxTokenBytes) return null;
+      final decoded = jsonDecode(f.readAsStringSync());
+      if (decoded is Map && decoded[_accountKey] is String) {
+        return _normalizeAccount(decoded[_accountKey] as String);
+      }
+    } catch (_) {}
+    return null;
   }
 
   static void clear(String provider, {String? account}) {

@@ -105,12 +105,15 @@ class XaiAuth {
   }
 
   /// Establishes the grant at login: the account-scoped slot when the email is
-  /// known, and always the provider-default slot so the primary-account
-  /// fallback has a deterministic grant to fall back to.
+  /// known, and the provider-default slot so the primary-account fallback has a
+  /// deterministic grant. The default slot is stamped with its owner when known,
+  /// so a later fallback never lends it to a different account.
   static void _saveGrant(Tokens tokens, {String? account}) {
-    TokenStore.save(provider, tokens);
     if (account != null) {
+      TokenStore.saveDefaultOwnedBy(provider, tokens, account);
       TokenStore.save(provider, tokens, account: account);
+    } else {
+      TokenStore.save(provider, tokens);
     }
   }
 
