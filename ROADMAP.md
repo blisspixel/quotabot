@@ -134,11 +134,11 @@ logical order (each enables the next; no dates):
    it (a reset that moved earlier, or usage that fell with no reset), fail-soft
    and provider-aware (Grok's legitimate re-rate and Antigravity's synthetic
    max-over-models window are exempt), surfaced in `json`, `doctor`, and MCP.
-   This is the first use of stored history to validate a fresh read. Next
-   layers: per-model drift on Antigravity's `model_quotas`, and calibrated
-   large-jump/inversion detection (a big single-interval swing not explained by
-   a reset), which needs a threshold tuned against real history to avoid
-   flagging a legitimate heavy-use burst.
+   This is the first use of stored history to validate a fresh read. Per-model
+   drift on Antigravity's `model_quotas` now runs too (its window is synthetic,
+   so the real signal is per-model). Next layer: calibrated large-jump/inversion
+   detection (a big single-interval swing not explained by a reset), which needs
+   a threshold tuned against real history to avoid flagging a heavy-use burst.
 3. **The refresh and currency loop.** Run the drift canary and the model-catalog
    audit on a regular cadence so how usage works and which models exist stay
    current automatically.

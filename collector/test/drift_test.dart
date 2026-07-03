@@ -16,6 +16,14 @@ void main() {
       );
   QuotaWindow win(String label, double used, int reset) =>
       QuotaWindow(label: label, usedPercent: used, resetsAt: reset);
+  ProviderQuota snapModels(String provider, List<ModelQuota> models) =>
+      ProviderQuota(
+        provider: provider,
+        displayName: provider,
+        account: 'a',
+        asOf: 0,
+        modelQuotas: models,
+      );
 
   group('detectQuotaDrift', () {
     test('normal consumption within a window is not flagged', () {
@@ -83,6 +91,45 @@ void main() {
       final prev = snap(codexProviderId, [win('weekly', 50, 1000)]);
       final fresh = snap(codexProviderId, [win('weekly', 5, 1000)]);
       expect(detectQuotaDrift(fresh, prev), startsWith('weekly '));
+    });
+
+    test('Antigravity per-model drift is caught though its window is exempt',
+        () {
+      final prev = snapModels(antigravityProviderId, [
+        const ModelQuota(
+            model: 'Gemini 3.5 Flash', usedPercent: 60, resetsAt: 1000),
+      ]);
+      final fresh = snapModels(antigravityProviderId, [
+        const ModelQuota(
+            model: 'Gemini 3.5 Flash', usedPercent: 5, resetsAt: 1000),
+      ]);
+      final reason = detectQuotaDrift(fresh, prev);
+      expect(reason, contains('Gemini 3.5 Flash'));
+      expect(reason, contains('usage fell'));
+    });
+
+    test('a per-model reset that moved earlier is flagged', () {
+      final prev = snapModels(antigravityProviderId, [
+        const ModelQuota(
+            model: 'Claude Opus 4.6', usedPercent: 10, resetsAt: 2000),
+      ]);
+      final fresh = snapModels(antigravityProviderId, [
+        const ModelQuota(
+            model: 'Claude Opus 4.6', usedPercent: 10, resetsAt: 1000),
+      ]);
+      expect(detectQuotaDrift(fresh, prev), contains('reset moved earlier'));
+    });
+
+    test('normal per-model consumption is not flagged', () {
+      final prev = snapModels(antigravityProviderId, [
+        const ModelQuota(
+            model: 'Gemini 3.5 Flash', usedPercent: 5, resetsAt: 1000),
+      ]);
+      final fresh = snapModels(antigravityProviderId, [
+        const ModelQuota(
+            model: 'Gemini 3.5 Flash', usedPercent: 20, resetsAt: 1000),
+      ]);
+      expect(detectQuotaDrift(fresh, prev), isNull);
     });
   });
 
