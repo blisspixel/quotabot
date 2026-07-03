@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- OAuth token grants and the desktop prefs file are now written atomically (to
+  a temp file, then renamed over the target), like every other local metadata
+  file. Previously they were truncate-written in place, so a crash or a
+  concurrent read during the write could leave a truncated file: for the token
+  store that means losing the rotated refresh token the next refresh depends
+  on, the one durability the code explicitly calls critical.
 - The LiteLLM plugin now fails closed on a managed logical model that is
   declared with an empty candidate list, instead of passing the request through
   to the caller's original (possibly paid) model. Previously a declared-but-

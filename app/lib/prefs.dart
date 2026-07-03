@@ -167,12 +167,15 @@ class Prefs {
   void save() {
     try {
       // prefs.json can hold a webhook URL (a secret-bearing capability for
-      // chat webhooks), so write it owner-only like other local metadata.
+      // chat webhooks), so write it owner-only like other local metadata, and
+      // via a temp file plus rename so a torn write cannot leave corrupt prefs.
       final f = _file();
       restrictOwnerOnlyDirectory(f.parent);
-      if (!f.existsSync()) f.createSync(recursive: true);
-      restrictOwnerOnlyFile(f);
-      f.writeAsStringSync(jsonEncode(toJson()));
+      final tmp = File('${f.path}.$pid.tmp');
+      if (!tmp.existsSync()) tmp.createSync(recursive: true);
+      restrictOwnerOnlyFile(tmp);
+      tmp.writeAsStringSync(jsonEncode(toJson()));
+      tmp.renameSync(f.path);
       restrictOwnerOnlyFile(f);
     } catch (_) {
       // Preferences are best-effort; ignore write failures.
