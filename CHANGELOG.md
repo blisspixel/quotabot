@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- The LiteLLM plugin now fails closed on a managed logical model that is
+  declared with an empty candidate list, instead of passing the request through
+  to the caller's original (possibly paid) model. Previously a declared-but-
+  empty entry was indistinguishable from an unmanaged model, so a policy
+  misconfiguration could reopen the passthrough that the no-surprise-billing
+  default is meant to prevent. A model truly absent from the policy still
+  passes through.
 - The Grok provider-default grant is now stamped with the account it belongs to
   at login, and is only lent to a fallback account when it is unclaimed (a
   legacy grant, already limited to the sole account) or owned by that same

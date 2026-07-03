@@ -339,8 +339,13 @@ class QuotabotRouter(CustomLogger):
         # An agent may redirect to a different logical model, then route it.
         logical = (rule.model if rule and rule.model else requested) or ""
         candidates = self.policy.models.get(logical)
-        if not candidates:
+        if candidates is None:
             return requested  # not a managed model; pass through unchanged
+        if not candidates:
+            # Declared in the policy but with no candidate route. This is a
+            # managed model, so it must fail closed rather than fall through to
+            # the caller's original model and risk paid spend.
+            return self._unsafe_passthrough(requested)
 
         allowed = [c for c in candidates if self._candidate_allowed(c)]
         if not allowed:
