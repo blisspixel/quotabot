@@ -309,11 +309,20 @@ class FileRouteLeaseStore implements RouteLeaseStore {
   File _lockFile(Directory dir) => File('${dir.path}/route_leases.lock');
 
   @override
-  List<RouteLease> active(int now) => _withLock((dir) {
+  List<RouteLease> active(int now) {
+    // Leases are advisory; a lock or IO failure must never break the read-only
+    // routing tools that consult them (suggest_provider, decide_now). Degrade
+    // to no active leases, matching NoopRouteLeaseStore.
+    try {
+      return _withLock((dir) {
         final active = _activeOnly(_readUnlocked(_dataFile(dir)), now);
         _writeUnlocked(_dataFile(dir), active);
         return List.unmodifiable(active);
       });
+    } catch (_) {
+      return const [];
+    }
+  }
 
   @override
   RouteLeaseReservation reserve({
@@ -324,8 +333,9 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     required double weightPercent,
     String? client,
     String? idempotencyKey,
-  }) =>
-      _withLock((dir) {
+  }) {
+    try {
+      return _withLock((dir) {
         final file = _dataFile(dir);
         final active = _activeOnly(_readUnlocked(file), now);
         final request = _leaseFromRequest(
@@ -369,10 +379,21 @@ class FileRouteLeaseStore implements RouteLeaseStore {
           activeLeases: List.unmodifiable(next),
         );
       });
+    } catch (_) {
+      return const RouteLeaseReservation(
+        reserved: false,
+        reused: false,
+        reason: 'lease store unavailable',
+        lease: null,
+        activeLeases: [],
+      );
+    }
+  }
 
   @override
-  RouteLeaseRelease release({required String leaseId, required int now}) =>
-      _withLock((dir) {
+  RouteLeaseRelease release({required String leaseId, required int now}) {
+    try {
+      return _withLock((dir) {
         final file = _dataFile(dir);
         final active = _activeOnly(_readUnlocked(file), now);
         final normalized = leaseId.trim();
@@ -393,6 +414,15 @@ class FileRouteLeaseStore implements RouteLeaseStore {
           activeLeases: List.unmodifiable(kept),
         );
       });
+    } catch (_) {
+      return const RouteLeaseRelease(
+        released: false,
+        reason: 'lease store unavailable',
+        lease: null,
+        activeLeases: [],
+      );
+    }
+  }
 
   T _withLock<T>(T Function(Directory dir) run) {
     final dir = dirFactory();
