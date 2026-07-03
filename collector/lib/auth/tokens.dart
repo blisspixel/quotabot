@@ -123,18 +123,22 @@ class TokenStore {
     required String? ownerStamp,
   }) {
     final f = _file(provider, account: fileAccount);
-    // Lock down the directory and pre-create the file with restrictive
-    // permissions BEFORE writing the secret, so the token is never briefly
-    // world-readable under the default umask.
+    // Write to a temp file and rename over the target so a crash or a
+    // concurrent read never leaves a truncated grant: losing a rotated refresh
+    // token this way would break every later refresh. Lock the temp down BEFORE
+    // the secret lands so it is never briefly world-readable under the default
+    // umask, then re-lock after the rename.
     restrictOwnerOnlyDirectory(f.parent);
-    if (!f.existsSync()) {
-      f.createSync(recursive: true);
+    final tmp = File('${f.path}.$pid.tmp');
+    if (!tmp.existsSync()) {
+      tmp.createSync(recursive: true);
     }
-    restrictOwnerOnlyFile(f);
-    f.writeAsStringSync(jsonEncode({
+    restrictOwnerOnlyFile(tmp);
+    tmp.writeAsStringSync(jsonEncode({
       ...tokens.toJson(),
       if (ownerStamp != null) _accountKey: ownerStamp,
     }));
+    tmp.renameSync(f.path);
     restrictOwnerOnlyFile(f);
   }
 

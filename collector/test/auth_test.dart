@@ -69,6 +69,19 @@ void main() {
       expect(TokenStore.load(provider), isNull);
     });
 
+    test('save is atomic and leaves no temp file behind', () {
+      TokenStore.save(provider, Tokens(accessToken: 'a', refreshToken: 'r'));
+      final leftover = quotabotDir('auth')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.uri.pathSegments.last.startsWith(provider))
+          .where((f) => f.path.endsWith('.tmp'))
+          .toList();
+      expect(leftover, isEmpty);
+      // The rename must have produced a readable grant.
+      expect(TokenStore.load(provider)!.refreshToken, 'r');
+    });
+
     test('rejects path-like provider ids', () {
       expect(
         () => TokenStore.save('../escape', Tokens(accessToken: 'a')),
