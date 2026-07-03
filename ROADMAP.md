@@ -129,12 +129,13 @@ logical order (each enables the next; no dates):
    `/usage` shows), reusing the stored token, so it is cross-device like Grok
    and Antigravity. The real gap is Codex: it reads `~/.codex/sessions` local
    files, and its own code notes the symptom - a fresh bucket shows 0% while
-   real usage sits on another machine. Fix: hit the provider's own authoritative
-   usage endpoint the way Claude does (reuse the stored token, cache to avoid
-   spam - these are free metadata reads, not inference and not a proxy of your
-   credentials), for Codex first; Cursor/Windsurf/Kiro read local IDE state and
-   may have no clean endpoint, so where none exists, label the number as a
-   this-machine view. Local runtimes are correctly per-machine. Open:
+   real usage sits on another machine. Landed for Codex: it now reads the
+   authoritative `chatgpt.com/backend-api/wham/usage` endpoint (the source the
+   CLI's own status view polls), reusing the stored token - a free metadata
+   read, no inference, no credential proxy - with the local sessions kept only
+   as a this-machine fallback when signed out. Cursor/Windsurf/Kiro read local
+   IDE state and may have no clean endpoint, so where none exists, label the
+   number as a this-machine view. Local runtimes are correctly per-machine. Open:
    Antigravity's separate weekly window (live longer reset, or an account-level
    number?), and the exact Codex usage endpoint and shape (research, no
    guessing). Rule: capture richly, display compactly, prefer authoritative over
