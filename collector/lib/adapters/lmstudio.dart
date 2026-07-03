@@ -107,8 +107,8 @@ class LmStudioAdapter {
       quant: m['quantization'] as String?,
       vramBytes: null,
       expiresAt: null,
-      context: (m['loaded_context_length'] as num?)?.toInt() ??
-          (m['max_context_length'] as num?)?.toInt(),
+      context: finiteOrNull(m['loaded_context_length'])?.toInt() ??
+          finiteOrNull(m['max_context_length'])?.toInt(),
     );
     installed.add(model);
     if (m['state'] == 'loaded') loaded.add(model);
