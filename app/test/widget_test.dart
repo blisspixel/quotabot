@@ -321,10 +321,13 @@ void main() {
       expect(quotaShouldShowAccountLabel(quota, {'antigravity': 2}), isTrue);
     });
 
-    test('keeps a flat group for the common single-account case', () {
+    test('keeps a flat list when every provider has a single account', () {
+      // Different providers signed in with different emails is the common case,
+      // not multi-account, so it must not group by email.
       final groups = groupProvidersForDisplay([
-        _provider('codex', 'you@example.com'),
-        _provider('claude', 'you@example.com'),
+        _provider('codex', 'work@example.com'),
+        _provider('antigravity', 'home@example.com'),
+        _provider('grok', 'work@example.com'),
         _provider('ollama', 'installed', kind: 'local'),
       ]);
 
@@ -332,18 +335,21 @@ void main() {
       expect(groups.single.account, isNull);
       expect(groups.single.quotas.map((q) => q.provider).toList(), [
         'codex',
-        'claude',
+        'antigravity',
+        'grok',
         'ollama',
       ]);
     });
 
     test(
-      'groups distinct accounts while preserving provider order per group',
+      'groups by account only when a provider is signed into more than one',
       () {
+        // Claude is signed into both work and home, a real work/personal split,
+        // so the fleet groups by account; codex rides along in its account.
         final groups = groupProvidersForDisplay([
+          _provider('claude', 'work@example.com'),
           _provider('codex', 'work@example.com'),
-          _provider('antigravity', 'home@example.com'),
-          _provider('grok', 'work@example.com'),
+          _provider('claude', 'home@example.com'),
           _provider('ollama', 'installed', kind: 'local'),
         ]);
 
@@ -353,10 +359,10 @@ void main() {
           null,
         ]);
         expect(groups.first.quotas.map((q) => q.provider).toList(), [
+          'claude',
           'codex',
-          'grok',
         ]);
-        expect(groups[1].quotas.single.provider, 'antigravity');
+        expect(groups[1].quotas.single.provider, 'claude');
         expect(groups.last.quotas.single.provider, 'ollama');
       },
     );

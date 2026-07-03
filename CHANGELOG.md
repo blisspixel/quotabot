@@ -180,6 +180,13 @@ Notable changes to quotabot. Newest first.
   Previously the exclusion relied on those providers having no catalog models.
 
 ### Changed
+- The desktop widget no longer groups the fleet under account-email headers just
+  because different providers are signed in with different emails (the common
+  case). It groups by account only when a provider is genuinely signed into more
+  than one account (a real work/personal split on the same service); otherwise
+  it stays one clean list. An account label now appears only to disambiguate a
+  duplicated provider, consistently across the widget, `top`, and `doctor` - a
+  single-account fleet shows no emails at all.
 - Added a server-side secret-scan CI job (gitleaks, pinned and checksum
   verified) on every push and pull request, reusing the repository config,
   alongside the existing local scan, GitHub secret scanning, and CodeQL.
