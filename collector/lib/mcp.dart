@@ -1507,6 +1507,34 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final results = profiled.providers;
       final burnStats = burnByProvider(results, n);
       final explicit = normalizeLeaseText(args['provider']) != null;
+      final idempotencyKey = normalizeLeaseText(args['idempotency_key']);
+      // An idempotent retry with an auto-selected target must reuse the
+      // existing lease. The first lease's discount can flip the ranking, so
+      // re-selecting would reserve a second provider under the same key and
+      // double-count the discount. Explicit-provider retries are already
+      // matched provider+account+key by the store, so this only covers the
+      // auto-select path.
+      if (!explicit && idempotencyKey != null) {
+        for (final lease in activeLeases) {
+          if (lease.idempotencyKey == idempotencyKey) {
+            return CallToolResult.fromStructuredContent(
+              _withProfileMeta(
+                _reserveJson(
+                  RouteLeaseReservation(
+                    reserved: true,
+                    reused: true,
+                    reason: 'reused the active lease for this idempotency key',
+                    lease: lease,
+                    activeLeases: activeLeases,
+                  ),
+                  n,
+                ),
+                profiled,
+              ),
+            );
+          }
+        }
+      }
       final target = _explicitReserveTarget(
             results,
             n,
