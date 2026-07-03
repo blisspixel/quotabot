@@ -92,6 +92,18 @@ void main() {
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
 
+  test('models tolerates an overflowing --min-context instead of crashing',
+      () async {
+    // 1e309 parses to Infinity; round() throws on a non-finite double, so the
+    // filter must fall back to "no filter" rather than crash with exit 255.
+    final result = await runCollectCli(
+      ['models', '--min-context=1e309'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+    expectExitCode(result, 0);
+    expect(result.stdout as String, contains('quotabot models'));
+  });
+
   test('models says filters excluded everything, not "no models detected"',
       () async {
     final result = await runCollectCli(
