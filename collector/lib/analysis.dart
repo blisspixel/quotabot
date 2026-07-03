@@ -61,23 +61,19 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
 }
 
 /// Availability of a single provider: usable when it has any headroom left.
+/// When spent, `resetsAt` is when it becomes usable again, which is the reset of
+/// the window that clears last, not the soonest (see [bindingWindow]).
 ({bool available, double? headroom, int? resetsAt}) providerAvailability(
   ProviderQuota q,
   int now,
 ) {
   final h = providerHeadroom(q, now);
   if (h == null) return (available: false, headroom: null, resetsAt: null);
-  // Reset time of the most constrained window, for "available again at".
-  int? bindingReset;
-  double minRemaining = 100;
-  for (final w in q.windows) {
-    final remaining = windowHeadroom(w, now);
-    if (remaining < minRemaining) {
-      minRemaining = remaining;
-      bindingReset = w.resetsAt;
-    }
-  }
-  return (available: h > 0.5, headroom: h, resetsAt: bindingReset);
+  return (
+    available: h > 0.5,
+    headroom: h,
+    resetsAt: bindingWindow(q, now)?.resetsAt,
+  );
 }
 
 /// Whether any provider can take work right now: a running local runtime, or a
@@ -94,10 +90,33 @@ bool anyProviderUsable(List<ProviderQuota> quotas, int now) {
   return false;
 }
 
-/// Returns the window that is currently the binding constraint (lowest headroom).
-/// Used by display to decide collapse and which reset to show.
+/// Returns the window that is currently the binding constraint, and whose reset
+/// the display and "available again" logic should show.
+///
+/// While the provider still has headroom, that is the tightest (lowest-headroom)
+/// window. Once it is spent, the binding constraint is instead the spent window
+/// that resets *last*: the provider is not usable again until every spent window
+/// has rolled over, so returning the soonest reset would understate the wait and
+/// could name the wrong provider to wait for. A spent window with an unknown
+/// reset is treated as furthest out, since its clear time is genuinely unknown.
 QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return null;
+  final spent = (providerHeadroom(q, now) ?? 100) <= 0.5;
+  if (spent) {
+    QuotaWindow? latest;
+    for (final w in q.windows) {
+      if (windowHeadroom(w, now) > 0.5) continue; // not a blocking window
+      if (latest == null) {
+        latest = w;
+        continue;
+      }
+      final lr = latest.resetsAt;
+      if (lr == null) continue; // current pick already unknown, i.e. furthest
+      final wr = w.resetsAt;
+      if (wr == null || wr > lr) latest = w;
+    }
+    return latest;
+  }
   QuotaWindow? worst;
   double minRem = 100;
   for (final w in q.windows) {
