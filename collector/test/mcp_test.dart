@@ -695,6 +695,56 @@ void main() {
       );
     });
 
+    test('reserve_provider reuses an auto-selected lease on idempotent retry',
+        () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 30)]),
+        ],
+        leaseStore: store,
+      );
+
+      // First auto-selected reservation picks the freest provider (claude).
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'weight_percent': 30,
+            'lease_seconds': 120,
+            'idempotency_key': 'retry-lease',
+          },
+        ),
+      );
+      expect(reserved.structuredContent?['reused'], isFalse);
+      final first = reserved.structuredContent?['lease'] as Map;
+      expect(first['provider'], 'claude');
+
+      // The retry, with the same key and no explicit provider, must reuse the
+      // first lease. Without the fix the discount would flip the pick to codex
+      // and a second lease would be created.
+      final retry = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'weight_percent': 30,
+            'lease_seconds': 120,
+            'idempotency_key': 'retry-lease',
+          },
+        ),
+      );
+      expect(retry.structuredContent?['reused'], isTrue);
+      final second = retry.structuredContent?['lease'] as Map;
+      expect(second['id'], first['id']);
+      expect(second['provider'], 'claude');
+      // Exactly one lease exists, not two.
+      expect((retry.structuredContent?['active_leases'] as List).length, 1);
+    });
+
     test('reserve_provider reports profile and explicit target failures',
         () async {
       await connect(_fixture());

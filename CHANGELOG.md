@@ -79,6 +79,13 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- MCP `reserve_provider` now honors an idempotency key when the target is
+  auto-selected. Previously an idempotent retry re-ran the ranking, whose
+  ordering had shifted because of the first lease's own discount, so the retry
+  reserved a second provider under the same key (a double discount and an
+  orphaned first lease). The retry now reuses the existing lease for that key
+  before re-selecting. Explicit-provider retries were already matched by the
+  store and are unchanged.
 - The desktop alert webhook no longer depends on the local-notification plugin.
   It was posted only after the notification call inside a shared try, so on
   Windows (where the notification plugin has no implementation and throws) the
