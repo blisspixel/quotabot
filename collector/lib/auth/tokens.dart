@@ -23,9 +23,13 @@ class Tokens {
   /// previous refresh token forward when the response omits a new one.
   factory Tokens.fromOAuth(Map<String, dynamic> json, {String? priorRefresh}) {
     final expiresIn = (json['expires_in'] as num?)?.toInt();
+    // Treat an empty refresh_token as absent so a blank value cannot overwrite
+    // a still-valid prior refresh token and leave a dead grant.
+    final rotated = json['refresh_token'] as String?;
     return Tokens(
       accessToken: json['access_token'] as String?,
-      refreshToken: (json['refresh_token'] as String?) ?? priorRefresh,
+      refreshToken:
+          (rotated != null && rotated.isNotEmpty) ? rotated : priorRefresh,
       expiresAt: expiresIn == null ? null : nowEpoch() + expiresIn,
     );
   }

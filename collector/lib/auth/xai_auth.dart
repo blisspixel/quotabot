@@ -30,8 +30,10 @@ class XaiAuth {
   }) async {
     final init = await _post(_device, {'client_id': clientId, 'scope': _scope});
     if (init == null) throw StateError('device authorization failed');
-    final deviceCode = init['device_code'] as String;
-    var interval = (init['interval'] as num?)?.toInt() ?? 5;
+    final deviceCode = init['device_code'] as String?;
+    if (deviceCode == null) throw StateError('device authorization failed');
+    // Clamp so a hostile or zero interval cannot drive a tight poll loop.
+    var interval = ((init['interval'] as num?)?.toInt() ?? 5).clamp(1, 60);
     prompt(
       (init['verification_uri_complete'] ?? init['verification_uri'])
           .toString(),
@@ -100,7 +102,17 @@ class XaiAuth {
     // the default slot here too would let a background refresh of one account
     // overwrite the provider-default grant with that account's tokens, so a
     // later default-slot fallback could return the wrong account's token.
-    TokenStore.save(provider, refreshed!, account: account);
+    if (account == null) {
+      // Refreshing the default slot in place: keep its owner stamp so the
+      // adapter's cross-account guard still knows who the default belongs to.
+      // A plain save would drop the stamp and reopen that guard.
+      final owner = TokenStore.defaultOwner(provider);
+      owner != null
+          ? TokenStore.saveDefaultOwnedBy(provider, refreshed!, owner)
+          : TokenStore.save(provider, refreshed!);
+    } else {
+      TokenStore.save(provider, refreshed!, account: account);
+    }
     return refreshed.accessToken;
   }
 

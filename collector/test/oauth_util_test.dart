@@ -66,6 +66,23 @@ void main() {
     },
   );
 
+  test('captureLoopbackCode surfaces a provider error without waiting',
+      () async {
+    // A denied/error callback must complete the flow at once, not hang until
+    // the multi-minute timeout.
+    final port = await freePort();
+    final future = captureLoopbackCode(
+      port: port,
+      path: '/cb',
+      expectedState: 'xyz',
+    );
+    final resp = await http.get(
+      Uri.parse('http://127.0.0.1:$port/cb?error=access_denied&state=xyz'),
+    );
+    expect(resp.statusCode, 400);
+    await expectLater(future, throwsA(isA<StateError>()));
+  });
+
   test('startLoopbackCodeCapture binds before the redirect is sent', () async {
     final capture = await startLoopbackCodeCapture(
       path: '/cb',

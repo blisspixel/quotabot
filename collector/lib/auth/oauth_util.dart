@@ -105,6 +105,22 @@ Future<String> _captureFromServer(
     }
     final code = req.uri.queryParameters['code'];
     final state = req.uri.queryParameters['state'];
+    final error = req.uri.queryParameters['error'];
+    // A provider error (for example the user denying consent) echoes state per
+    // RFC 6749, so surface it at once instead of waiting out the full timeout.
+    // The error code is not secret.
+    if (error != null && state == expectedState) {
+      req.response
+        ..statusCode = 400
+        ..headers.contentType = ContentType.html
+        ..write('<html><body>Authorization failed. '
+            'You can close this tab.</body></html>');
+      await req.response.close();
+      if (!completer.isCompleted) {
+        completer.completeError(StateError('authorization failed: $error'));
+      }
+      return;
+    }
     final ok = code != null && state == expectedState;
     req.response
       ..statusCode = ok ? 200 : 400
