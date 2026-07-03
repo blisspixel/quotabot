@@ -48,7 +48,7 @@ void restrictOwnerOnlyDirectory(Directory dir) {
       final user = windowsAclPrincipal();
       if (user == null) return;
       Process.runSync('icacls', [dir.path, '/inheritance:r']);
-      Process.runSync('icacls', [dir.path, '/grant:r', '${user}:(OI)(CI)F']);
+      Process.runSync('icacls', [dir.path, '/grant:r', '$user:(OI)(CI)F']);
     } else {
       Process.runSync('chmod', ['700', dir.path]);
     }

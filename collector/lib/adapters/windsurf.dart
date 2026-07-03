@@ -48,7 +48,7 @@ class WindsurfAdapter {
                 if (devin is Map) org = devin['org_id'] as String?;
               }
               if (org != null && org.isNotEmpty) {
-                account = org.length > 12 ? org.substring(0, 12) + '...' : org;
+                account = org.length > 12 ? '${org.substring(0, 12)}...' : org;
               }
             } catch (_) {}
           }

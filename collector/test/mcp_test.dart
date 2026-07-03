@@ -82,7 +82,7 @@ class _PairedTransport implements Transport {
     if (_closed) return;
     _closed = true;
     onclose?.call();
-    peer?.close();
+    await peer?.close();
   }
 }
 

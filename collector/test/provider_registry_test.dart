@@ -38,8 +38,7 @@ void main() {
       expect(registryFiles, hasLength(kProviderAdapterRegistry.length));
       expect(fixtureFiles, registryFiles);
       for (final entry in kProviderAdapterRegistry) {
-        expect(
-            File('${kProviderFixtureRoot}/${entry.fixtureFile}').existsSync(),
+        expect(File('$kProviderFixtureRoot/${entry.fixtureFile}').existsSync(),
             isTrue,
             reason: entry.id);
       }

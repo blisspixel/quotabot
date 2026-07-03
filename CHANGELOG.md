@@ -180,6 +180,10 @@ Notable changes to quotabot. Newest first.
   Previously the exclusion relied on those providers having no catalog models.
 
 ### Changed
+- The collector package now ships an `analysis_options.yaml` enabling
+  `strict-casts` plus the recommended lint set (and a few load-bearing extras),
+  so the documented "strict analyzer, zero warnings or infos" bar is
+  machine-enforced by CI rather than left to convention.
 - The desktop widget no longer groups the fleet under account-email headers just
   because different providers are signed in with different emails (the common
   case). It groups by account only when a provider is genuinely signed into more
