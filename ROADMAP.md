@@ -134,8 +134,11 @@ logical order (each enables the next; no dates):
    CLI's own status view polls), reusing the stored token - a free metadata
    read, no inference, no credential proxy - with the local sessions kept only
    as a this-machine fallback when signed out. Cursor/Windsurf/Kiro read local
-   IDE state and may have no clean endpoint, so where none exists, label the
-   number as a this-machine view. Local runtimes are correctly per-machine. Open:
+   IDE state and may have no clean endpoint; landed: their reads (and the Codex
+   session fallback) now carry `per_machine`, shown as a "(this machine)" note
+   and exposed over MCP, so a local-only number is never mistaken for the
+   account's cross-device total. Finding their own usage endpoints, if any, is
+   the follow-up. Local runtimes are correctly per-machine. Open:
    Antigravity's separate weekly window (live longer reset, or an account-level
    number?), and the exact Codex usage endpoint and shape (research, no
    guessing). Rule: capture richly, display compactly, prefer authoritative over

@@ -1686,7 +1686,10 @@ void _printDoctor(List<ProviderQuota> results) {
               }).join(', ');
     final namePart =
         '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}';
-    print('  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} $detail');
+    // Local-only reads reflect this machine, not the account across all devices.
+    final scope = q.perMachine ? ' ${style.dim('(this machine)')}' : '';
+    print(
+        '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} $detail$scope');
     for (final d in q.details) {
       print('  $indent ${' '.padRight(12)} $d');
     }

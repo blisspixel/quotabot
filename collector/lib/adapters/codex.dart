@@ -200,6 +200,8 @@ class CodexAdapter {
       plan: newest.rl['plan_type']?.toString(),
       asOf: capturedAt,
       windows: codexBindingWindows(snapshots.map((s) => s.rl), now),
+      // Session logs are this machine's view only; the live path is authoritative.
+      perMachine: true,
     );
     return stale ? base.asStale('snapshot ${_ageLabel(age)} old') : base;
   }

@@ -62,6 +62,7 @@ class KiroAdapter {
         asOf: asOf,
         windows: windows,
         error: err,
+        perMachine: true,
       );
     } catch (_) {
       return ProviderQuota.error(id, name, 'unable to read Kiro state', asOf);

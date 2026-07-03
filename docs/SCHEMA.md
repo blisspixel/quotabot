@@ -21,7 +21,7 @@ Provider snapshots keep these stable fields:
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
 - Optional `plan`, `source`, `status`, `active`, `details`, `error`, `models`,
-  `model_quotas`, and `suspect`.
+  `model_quotas`, `suspect`, and `per_machine`.
 - `kind` is `subscription` or `local`.
 - `source` is an additive hint. When set to `manual`, the provider window is a
   local self-reported quota entry, not measured adapter telemetry.
@@ -29,6 +29,11 @@ Provider snapshots keep these stable fields:
   canary: the fresh read was implausible versus the last cached one (a reset
   that moved earlier, or usage that fell with no reset). The reading is still
   shown; `suspect` only flags it for a human or agent to cross-check.
+- `per_machine`, when true, means the read reflects only this machine's local
+  usage (Cursor, Windsurf, Kiro, or the Codex session fallback) rather than the
+  account across every device, so it can undercount when the account is used
+  elsewhere. Authoritative server-side reads (Claude, Grok, Antigravity, Codex
+  live) omit it.
 - `windows` is always present. Local runtimes use an empty list because they have
   no spendable quota.
 
