@@ -124,14 +124,21 @@ logical order (each enables the next; no dates):
    (`model_quotas`) now reads from the authoritative live endpoint, with the
    local `userStatus` cache demoted to an offline last-known fallback - it is
    per-machine, so it lagged usage on another machine and showed a stale ~100%.
-   The same principle indicts the rest of the fleet: Codex, Cursor, Windsurf,
-   and Kiro derive quota from local files and are per-machine, so they can
-   undercount when the account is used elsewhere (Claude's local-usage read
-   needs the same audit). Fix: prefer a server-side read wherever the provider
-   exposes one; otherwise label the number honestly as a this-machine view.
-   Local runtimes are correctly per-machine. Open: Antigravity's separate weekly
-   window (live longer reset, or an account-level number?). Rule: capture
-   richly, display compactly, and prefer authoritative over local.
+   Claude already does this right: it reads the authoritative
+   `api.anthropic.com/api/oauth/usage` endpoint (the same data the in-CLI
+   `/usage` shows), reusing the stored token, so it is cross-device like Grok
+   and Antigravity. The real gap is Codex: it reads `~/.codex/sessions` local
+   files, and its own code notes the symptom - a fresh bucket shows 0% while
+   real usage sits on another machine. Fix: hit the provider's own authoritative
+   usage endpoint the way Claude does (reuse the stored token, cache to avoid
+   spam - these are free metadata reads, not inference and not a proxy of your
+   credentials), for Codex first; Cursor/Windsurf/Kiro read local IDE state and
+   may have no clean endpoint, so where none exists, label the number as a
+   this-machine view. Local runtimes are correctly per-machine. Open:
+   Antigravity's separate weekly window (live longer reset, or an account-level
+   number?), and the exact Codex usage endpoint and shape (research, no
+   guessing). Rule: capture richly, display compactly, prefer authoritative over
+   local.
 2. **SEE integrity - a silent-drift canary.** 1.0 acceptance criterion 1 is
    "every provider either reads correctly or fails with a plain message," but
    nothing caught a read that is wrong and does not fail: a re-rated or
