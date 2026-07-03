@@ -76,11 +76,15 @@ void main() {
       path: '/cb',
       expectedState: 'xyz',
     );
+    // Attach the expectation (which registers a listener) before triggering the
+    // callback, so the error completion is never momentarily unhandled - which
+    // would otherwise fail the test in its async zone on a slower host.
+    final expectation = expectLater(future, throwsA(isA<StateError>()));
     final resp = await http.get(
       Uri.parse('http://127.0.0.1:$port/cb?error=access_denied&state=xyz'),
     );
     expect(resp.statusCode, 400);
-    await expectLater(future, throwsA(isA<StateError>()));
+    await expectation;
   });
 
   test('startLoopbackCodeCapture binds before the redirect is sent', () async {
