@@ -96,6 +96,16 @@ Notable changes to quotabot. Newest first.
 - Desktop low-quota notifications and reset reminders are now keyed by account,
   not just provider, so two accounts of the same provider crossing into red no
   longer overwrite each other's notification.
+- The desktop window now restores its saved position on multi-monitor layouts.
+  A tight on-screen bounds check discarded legitimate coordinates for a monitor
+  to the left or above (large negatives) or a wide arrangement (large
+  positives), re-centering on the primary display every launch. The bounds are
+  now generous enough for real multi-monitor setups while still re-centering on
+  a corrupt value.
+- Saving or switching a desktop profile no longer re-fires a low-quota alert for
+  a provider that was already alerting and is still red. The edge-trigger state
+  is no longer cleared on a profile change, since the alert engine already drops
+  providers that leave the visible set and fires for newly-visible red ones.
 - A spent provider with more than one spent window now reports when it is
   actually usable again (the window that resets last), not the soonest window's
   reset. Previously, if a 5h cap and a weekly cap were both spent, the provider

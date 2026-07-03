@@ -98,8 +98,14 @@ Future<void> main() async {
       if (prefs.windowX != null && prefs.windowY != null) {
         final x = prefs.windowX!;
         final y = prefs.windowY!;
-        // Guard against offscreen/negative saved positions (e.g. multi-monitor drift) that can make window invisible.
-        if (x > -200 && y > -100 && x < 6000 && y < 3000) {
+        // Restore the saved position, but re-center on a corrupt or wildly
+        // out-of-range value. The bounds are generous on purpose: a monitor to
+        // the left or above has large negative coordinates and a wide multi-
+        // monitor layout has large positive ones, all of which the previous
+        // tight box wrongly rejected, re-centering every launch. NaN fails every
+        // comparison and so falls through to center(), which is the safe default.
+        const limit = 20000.0;
+        if (x > -limit && y > -limit && x < limit && y < limit) {
           await windowManager.setPosition(Offset(x, y));
         } else {
           await windowManager.center();
@@ -455,7 +461,10 @@ class _DashboardState extends State<Dashboard>
 
   /// Providers currently in a red alert state, so a steady spent window is
   /// alerted once on the crossing and re-armed only after it recovers. Mirrors
-  /// the edge-trigger state `quotabot watch` keeps.
+  /// the edge-trigger state `quotabot watch` keeps. Not reset on a profile
+  /// change: the alert engine already drops providers that leave the visible
+  /// set and fires for newly-visible red ones, so clearing it here would
+  /// re-fire a still-red provider that was already alerted.
   Set<String> _armed = {};
   bool _isRefreshing = false;
   int _failStreak = 0; // consecutive refreshes with no live data at all
@@ -1813,7 +1822,6 @@ class _DashboardState extends State<Dashboard>
     setState(() {
       _activeProfile = next;
       _applyProfileUiState(next);
-      _armed = {};
     });
     _applySize();
     _persistPrefs();
@@ -1844,7 +1852,6 @@ class _DashboardState extends State<Dashboard>
       setState(() {
         _activeProfile = profile;
         _applyProfileUiState(profile);
-        _armed = {};
       });
       _persistPrefs();
       _applySize();
@@ -1865,7 +1872,6 @@ class _DashboardState extends State<Dashboard>
     setState(() {
       _activeProfile = saved;
       _applyProfileUiState(saved);
-      _armed = {};
     });
     _persistPrefs();
     _applySize();
