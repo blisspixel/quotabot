@@ -180,6 +180,9 @@ Notable changes to quotabot. Newest first.
   Previously the exclusion relied on those providers having no catalog models.
 
 ### Changed
+- Added a server-side secret-scan CI job (gitleaks, pinned and checksum
+  verified) on every push and pull request, reusing the repository config,
+  alongside the existing local scan, GitHub secret scanning, and CodeQL.
 - The release workflow now creates the GitHub release as a draft, attaches a
   signed SLSA build provenance attestation to every platform archive, and only
   publishes (flipping `releases/latest`) after all build legs succeed. A tag
