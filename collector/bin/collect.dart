@@ -1703,6 +1703,12 @@ void _printDoctor(List<ProviderQuota> results) {
           : '$n models tracked, most used: ${mostUsed.model} $u%';
       print('  $indent ${'models'.padRight(12)} $summary');
     }
+    if (q.suspect != null) {
+      print(
+        '  $indent ${' '.padRight(12)} '
+        '${style.yellow('! suspect: ${q.suspect}')}',
+      );
+    }
     final hint = _doctorHint(q, state);
     if (hint != null) print('  $indent ${' '.padRight(12)} -> $hint');
   }

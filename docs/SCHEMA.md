@@ -21,10 +21,14 @@ Provider snapshots keep these stable fields:
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
 - Optional `plan`, `source`, `status`, `active`, `details`, `error`, `models`,
-  and `model_quotas`.
+  `model_quotas`, and `suspect`.
 - `kind` is `subscription` or `local`.
 - `source` is an additive hint. When set to `manual`, the provider window is a
   local self-reported quota entry, not measured adapter telemetry.
+- `suspect`, when present, is a non-fatal plausibility note from the drift
+  canary: the fresh read was implausible versus the last cached one (a reset
+  that moved earlier, or usage that fell with no reset). The reading is still
+  shown; `suspect` only flags it for a human or agent to cross-check.
 - `windows` is always present. Local runtimes use an empty list because they have
   no spendable quota.
 

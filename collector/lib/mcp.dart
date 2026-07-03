@@ -316,6 +316,10 @@ final _providerSchema = JsonSchema.object(
     'error': JsonSchema.string(description: 'Why a read failed, when it did.'),
     'as_of': JsonSchema.integer(description: 'Capture epoch seconds.'),
     'stale': JsonSchema.boolean(description: 'True when served from cache.'),
+    'suspect': JsonSchema.string(
+      description: 'Set when this read is implausible versus the last one '
+          '(drift canary); the number is still shown, only flagged.',
+    ),
     'windows': JsonSchema.array(items: _windowSchema),
     'model_quotas': JsonSchema.array(items: _modelQuotaSchema),
   },
