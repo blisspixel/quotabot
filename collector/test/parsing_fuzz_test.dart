@@ -33,6 +33,26 @@ void main() {
     }
   });
 
+  test('local-runtime parsers tolerate non-finite numeric fields', () {
+    // A rogue localhost server could answer with Infinity/NaN where a size or
+    // context is expected; .toInt() on a non-finite double throws, so the
+    // parsers must drop it rather than crash the (caught) adapter path.
+    final ollama = ollamaModelsFromJson({
+      'models': [
+        {'name': 'm', 'size': double.infinity, 'size_vram': double.nan},
+      ],
+    });
+    expect(ollama.single.bytes, isNull);
+    expect(ollama.single.vramBytes, isNull);
+
+    final lm = lmStudioNativeFromJson({
+      'data': [
+        {'id': 'm', 'state': 'loaded', 'max_context_length': double.infinity},
+      ],
+    });
+    expect(lm!.installed.single.context, isNull);
+  });
+
   test('protobuf and token parsers tolerate arbitrary bytes and strings', () {
     final random = Random(0xB10B);
     final tokenPattern = r'ya29\.[A-Za-z0-9._\-]{20,}';
@@ -150,6 +170,10 @@ String _key(Random random) {
     'id',
     'state',
     'loaded_context_length',
+    'max_context_length',
+    'size',
+    'size_vram',
+    'expires_at',
     'models',
     'name',
     'details',

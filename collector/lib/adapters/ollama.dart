@@ -108,8 +108,10 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
     final details = m['details'];
     out.add((
       name: m['name'] as String,
-      bytes: (m['size'] as num?)?.toInt(),
-      vramBytes: (m['size_vram'] as num?)?.toInt(),
+      // finiteOrNull: a rogue localhost server sending a non-finite size would
+      // otherwise throw in .toInt() (Infinity has no int form).
+      bytes: finiteOrNull(m['size'])?.toInt(),
+      vramBytes: finiteOrNull(m['size_vram'])?.toInt(),
       param: details is Map ? details['parameter_size'] as String? : null,
       quant: details is Map ? details['quantization_level'] as String? : null,
       expiresAt: parseIsoToEpoch(m['expires_at']),
