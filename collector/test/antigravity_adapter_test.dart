@@ -617,6 +617,26 @@ void main() {
     expect(q.single.modelQuotas.first.category, 'Fast');
   });
 
+  test('a live read overrides the stale local per-model cache', () async {
+    // The account was used on another machine, so this machine's local cache is
+    // stale (shows 0% used). The authoritative live read must win.
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('me@example.com', modelQuotas: const [
+          ModelQuota(model: 'Gemini 3.5 Flash', usedPercent: 0),
+        ]),
+      ],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.4), // live: 60% used
+    ).collectAccounts();
+
+    expect(q.single.modelQuotas.single.model, 'gemini');
+    expect(q.single.modelQuotas.single.usedPercent, closeTo(60, 1e-9));
+  });
+
   test('empty or throwing account sources fail softly', () async {
     final empty = await AntigravityAdapter(
       accountSource: () => const [],

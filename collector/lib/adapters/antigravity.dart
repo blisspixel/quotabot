@@ -514,6 +514,10 @@ class AntigravityAdapter {
         project,
       );
       final windows = antigravityWindows(models, asOf);
+      // Authoritative, cross-machine per-model quota from the live read. The
+      // local userStatus cache is only a last-known fallback (see offline()), so
+      // it must never sit alongside or override a fresh live read.
+      final liveModelQuotas = antigravityModelQuotasFromLive(models);
 
       // Tier name from the load response (do not surface the raw `free-tier`
       // id as a plan: the Code Assist tier field does not reflect the user's
@@ -538,7 +542,7 @@ class AntigravityAdapter {
           if (source.localNote != null) source.localNote!,
         ],
         windows: windows,
-        modelQuotas: source.modelQuotas,
+        modelQuotas: liveModelQuotas,
       );
     } catch (_) {
       return ProviderQuota(

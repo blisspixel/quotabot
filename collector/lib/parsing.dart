@@ -137,6 +137,32 @@ List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
     ..sort((a, b) => (a.resetsAt ?? 0).compareTo(b.resetsAt ?? 0));
 }
 
+/// Per-model quota from the live Cloud Code `fetchAvailableModels` response.
+/// This is authoritative and cross-machine, unlike the local `userStatus`
+/// cache (which only reflects usage on the machine that wrote it), so it is
+/// preferred whenever the live read succeeds. Each entry is keyed by the model
+/// id and carries `{quotaInfo: {remainingFraction, resetTime}}`.
+List<ModelQuota> antigravityModelQuotasFromLive(Map<String, dynamic>? resp) {
+  final models = resp?['models'];
+  if (models is! Map) return const [];
+  final out = <ModelQuota>[];
+  models.forEach((key, m) {
+    if (m is! Map) return;
+    final qi = m['quotaInfo'];
+    if (qi is! Map) return;
+    final frac = _fraction(qi['remainingFraction']);
+    if (frac == null) return;
+    out.add(
+      ModelQuota(
+        model: key.toString(),
+        usedPercent: ((1 - frac) * 100).clamp(0, 100).toDouble(),
+        resetsAt: parseReset(qi['resetTime']),
+      ),
+    );
+  });
+  return out;
+}
+
 /// Extracts Antigravity's per-model quota table from the `userStatus` protobuf
 /// it caches locally. Each model family draws from its own pool, so this is
 /// richer and more robust than the single derived window: it names every model
