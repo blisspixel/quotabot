@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:quotabot_collector/insights.dart';
 import 'package:test/test.dart';
 
@@ -62,6 +64,33 @@ void main() {
       expect(back.count, 2);
       expect(back.mean, closeTo(50, 0.001));
       expect(back.max, 80);
+    });
+
+    test('fromJson sanitizes non-finite and negative fields from a bad file',
+        () {
+      // A corrupt or hostile cache file: 1e400 decodes to Infinity, which would
+      // otherwise make the mean Infinity and throw when the analytics are later
+      // serialized, or throw directly in .toInt().
+      final b = HeadroomBucket.fromJson({
+        's': 3600,
+        'n': double.infinity,
+        'sum': double.infinity,
+        'sq': double.nan,
+        'min': double.nan,
+        'max': double.infinity,
+        'x': -5,
+        'h': [double.infinity, -3, 4],
+      });
+      expect(b.mean.isFinite, isTrue);
+      expect(b.stddev.isFinite, isTrue);
+      expect(b.count, 0);
+      expect(b.exhausted, 0);
+      expect(b.hist, [0, 0, 4]);
+      // The whole analytics path must be JSON-encodable, not just this bucket.
+      expect(
+        () => jsonEncode(Insights.from([b], 7200).toJson()),
+        returnsNormally,
+      );
     });
   });
 

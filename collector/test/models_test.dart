@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
@@ -38,6 +40,27 @@ void main() {
       expect(back.used, 3);
       expect(back.limit, 10);
       expect(back.resetsAt, 50);
+    });
+
+    test('fromJson drops non-finite numbers from a corrupt cache file', () {
+      // 1e400 decodes to Infinity; left raw, it survives to crash jsonEncode.
+      final w = QuotaWindow.fromJson({
+        'label': '5h',
+        'used_percent': double.infinity,
+        'used': double.nan,
+        'limit': double.negativeInfinity,
+        'resets_at': double.infinity,
+      });
+      expect(w.usedPercent, isNull);
+      expect(w.used, isNull);
+      expect(w.limit, isNull);
+      expect(w.resetsAt, isNull);
+      expect(() => jsonEncode(w.toJson()), returnsNormally);
+    });
+
+    test('fromJson bounds an out-of-range percent to 0..100', () {
+      final w = QuotaWindow.fromJson({'label': 'w', 'used_percent': 250});
+      expect(w.usedPercent, 100);
     });
   });
 
