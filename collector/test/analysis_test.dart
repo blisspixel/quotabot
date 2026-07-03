@@ -109,6 +109,29 @@ void main() {
     expect(bindingWindow(_q('grok', const []), _now), isNull);
   });
 
+  test('a spent provider is bound by the window that clears last', () {
+    // Both windows are spent with different resets. The provider is usable
+    // again only when the later one (weekly) rolls over, not the sooner (5h).
+    final q = _q('claude', [
+      QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 7200),
+      QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now + 432000),
+    ]);
+    expect(bindingWindow(q, _now)?.label, 'weekly');
+    final a = providerAvailability(q, _now);
+    expect(a.available, isFalse);
+    expect(a.resetsAt, _now + 432000);
+  });
+
+  test('a spent window with an unknown reset is treated as furthest out', () {
+    final q = _q('claude', [
+      QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 7200),
+      QuotaWindow(label: 'weekly', usedPercent: 100),
+    ]);
+    expect(bindingWindow(q, _now)?.label, 'weekly');
+    // Its clear time is genuinely unknown, so do not promise a reset.
+    expect(providerAvailability(q, _now).resetsAt, isNull);
+  });
+
   test('providerWithMostHeadroom excludes local runtimes', () {
     final best = providerWithMostHeadroom([
       _local('ollama'), // 100% but local, must not win
@@ -237,6 +260,28 @@ void main() {
       ], _now);
       expect(s.recommended, isNull);
       expect(s.reason, contains('claude'));
+    });
+
+    test(
+        'all spent, names the provider that truly frees first, not the '
+        'soonest single window', () {
+      // claude has a 5h cap that clears in 2h but a weekly cap still spent for
+      // 5 days; grok clears wholly in 3h. The advice must name grok: claude is
+      // not usable at the 2h mark because its weekly window is still spent.
+      final s = suggestRoute([
+        _q('claude', [
+          QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 7200),
+          QuotaWindow(
+              label: 'weekly', usedPercent: 100, resetsAt: _now + 432000),
+        ]),
+        _q('grok', [
+          QuotaWindow(
+              label: 'weekly', usedPercent: 100, resetsAt: _now + 10800),
+        ]),
+      ], _now);
+      expect(s.recommended, isNull);
+      expect(s.reason, contains('grok'));
+      expect(s.reason, isNot(contains('claude')));
     });
 
     test('reports no data when nothing is usable', () {

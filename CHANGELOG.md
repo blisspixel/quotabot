@@ -57,6 +57,15 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- A spent provider with more than one spent window now reports when it is
+  actually usable again (the window that resets last), not the soonest window's
+  reset. Previously, if a 5h cap and a weekly cap were both spent, the provider
+  was reported as freeing when the 5h reset even though the weekly cap kept it
+  spent, so `check`/`doctor`/`top`/MCP understated the wait and the all-spent
+  routing advice could name the wrong provider to wait for (and doctor's own
+  window detail contradicted its suggestion line). A spent window whose reset
+  is unknown is treated as furthest out, so quotabot never promises a reset it
+  cannot see.
 - Grok: the weekly pool percent and reset are now read from their known fields
   in the billing protobuf (pool total from the config message, reset from the
   window end) instead of the first plausible float and the nearest future
