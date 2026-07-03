@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.6 - 2026-07-03
+
 ### Security
 - Refreshing the Grok provider-default grant in place now keeps its owner
   stamp. A plain save dropped the stamp, so the cross-account lending guard
