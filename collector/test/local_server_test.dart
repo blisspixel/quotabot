@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/local_server.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
-
-import 'package:quotabot_collector/local_server.dart';
 
 const _now = 1782000000;
 

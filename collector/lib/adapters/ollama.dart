@@ -148,10 +148,12 @@ ProviderQuota localRuntimeQuota({
   final details = <String>[];
   if (headline != null) {
     final bits = <String>[];
-    if (headline.vramBytes != null)
+    if (headline.vramBytes != null) {
       bits.add('${formatCompactBytes(headline.vramBytes!)} VRAM');
-    if (headline.context != null)
+    }
+    if (headline.context != null) {
       bits.add('${formatContextTokens(headline.context!)} ctx');
+    }
     if (headline.expiresAt != null) {
       final secs = headline.expiresAt! - (now ?? nowEpoch());
       if (secs > 0) bits.add('unloads in ${_dur(secs)}');

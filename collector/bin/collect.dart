@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
-import 'package:http/http.dart' as http;
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/top.dart';
