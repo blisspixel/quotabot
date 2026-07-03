@@ -137,6 +137,171 @@ List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
     ..sort((a, b) => (a.resetsAt ?? 0).compareTo(b.resetsAt ?? 0));
 }
 
+/// Extracts Antigravity's per-model quota table from the `userStatus` protobuf
+/// it caches locally. Each model family draws from its own pool, so this is
+/// richer and more robust than the single derived window: it names every model
+/// with its own remaining headroom and reset, needs no network call, and the
+/// same blob already yields the account email and plan. Variants that share a
+/// pool (reasoning effort or a "(Thinking)" mode) roll up to their base model so
+/// a detail view stays compact.
+///
+/// Schema, confirmed against live local state: a model entry is a message with
+/// the model name in field 1 and a quota submessage in field 15 of
+/// `{remainingFraction: fixed32 (field 1), reset: {epochSeconds: varint (field
+/// 1)} (field 2)}`; an optional speed category is field 16 and a badge field 17.
+/// The blob nests base64-encoded protobufs inside string fields, so the walk
+/// descends those layers exactly as [antigravityUserStatusFromProto] does.
+List<ModelQuota> antigravityModelQuotas(List<int> bytes) {
+  final found = <_AgModelEntry>[];
+  final seen = <String>{};
+
+  void visit(List<int> b, int depth) {
+    if (depth > 12) return;
+    final fields = <(int, int, List<int>)>[];
+    final parsed = _forEachProtoField(b, (field, wire, varint, fb) {
+      if (wire == 2 || wire == 5) fields.add((field, wire, fb));
+    });
+    if (parsed) {
+      String? name;
+      List<int>? quota;
+      String? category;
+      String? note;
+      for (final (field, wire, fb) in fields) {
+        if (field == 1 && wire == 2) {
+          name ??= asciiString(fb);
+        } else if (field == 15 && wire == 2) {
+          quota ??= fb;
+        } else if (field == 16 && wire == 2) {
+          category ??= asciiString(fb);
+        } else if (field == 17 && wire == 2) {
+          note ??= asciiString(fb);
+        }
+      }
+      // A model entry is precisely a name plus a parseable quota submessage;
+      // mime-type and "Recommended" sub-records have a name but no field 15.
+      if (name != null &&
+          quota != null &&
+          name.length >= 3 &&
+          !name.contains('/')) {
+        final q = _agModelQuota(quota);
+        if (q != null && seen.add(name)) {
+          found.add(_AgModelEntry(name, q.$1, q.$2, category, note));
+        }
+      }
+      for (final (_, wire, fb) in fields) {
+        if (wire == 2 && fb.length >= 2) visit(fb, depth + 1);
+      }
+    }
+    // Descend base64-text wrapping layers: the userStatus blob stores
+    // base64-encoded protobufs inside string fields.
+    final text = asciiString(b);
+    if (text != null) {
+      for (final m in RegExp(r'[A-Za-z0-9+/_\-]{24,}={0,2}').allMatches(text)) {
+        final decoded = _tryDecodeBase64(m.group(0)!);
+        if (decoded != null && decoded.length >= 4) visit(decoded, depth + 1);
+      }
+    }
+  }
+
+  visit(bytes, 0);
+  return _rollupModelQuotas(found);
+}
+
+/// Reads `{remainingFraction (fixed32, field 1), reset (varint field 1 of the
+/// field-2 submessage)}` from an Antigravity per-model quota submessage.
+/// Returns `(usedPercent, resetsAt)`, or null when the fraction is absent or
+/// outside the expected 0..1 range (so an unrelated submessage never matches).
+(double, int?)? _agModelQuota(List<int> bytes) {
+  double? remaining;
+  int? reset;
+  final ok = _forEachProtoField(bytes, (field, wire, varint, fb) {
+    if (field == 1 && wire == 5) {
+      final f = _float32(fb);
+      if (f.isFinite) remaining ??= f;
+    } else if (field == 2 && wire == 2) {
+      _forEachProtoField(fb, (sf, sw, sv, _) {
+        if (sf == 1 && sw == 0 && sv != null && _plausibleEpochSeconds(sv)) {
+          reset ??= sv;
+        }
+      });
+    }
+  });
+  final r = remaining;
+  if (!ok || r == null || r < -0.0001 || r > 1.0001) return null;
+  final used = ((1 - r) * 100).clamp(0, 100).toDouble();
+  return (_percent2(used), reset);
+}
+
+class _AgModelEntry {
+  final String name;
+  final double usedPercent;
+  final int? resetsAt;
+  final String? category;
+  final String? note;
+  _AgModelEntry(
+    this.name,
+    this.usedPercent,
+    this.resetsAt,
+    this.category,
+    this.note,
+  );
+}
+
+/// Strips a trailing " (…)" effort/mode qualifier so pool-sharing variants roll
+/// up, e.g. "Gemini 3.5 Flash (Medium)" -> "Gemini 3.5 Flash".
+String _modelBaseName(String name) {
+  final i = name.indexOf(' (');
+  return i > 0 ? name.substring(0, i) : name;
+}
+
+/// Collapses variants that share a base name and pool into one entry; keeps
+/// variants separate when their quota diverges so nothing is hidden.
+List<ModelQuota> _rollupModelQuotas(List<_AgModelEntry> entries) {
+  final order = <String>[];
+  final byBase = <String, List<_AgModelEntry>>{};
+  for (final e in entries) {
+    final base = _modelBaseName(e.name);
+    if (!byBase.containsKey(base)) order.add(base);
+    (byBase[base] ??= []).add(e);
+  }
+  final out = <ModelQuota>[];
+  for (final base in order) {
+    final group = byBase[base]!;
+    final distinct = <String>{
+      for (final e in group) '${e.usedPercent}|${e.resetsAt}',
+    };
+    if (distinct.length == 1) {
+      final rep = group.first;
+      out.add(
+        ModelQuota(
+          model: base,
+          usedPercent: rep.usedPercent,
+          resetsAt: rep.resetsAt,
+          category: group
+              .map((e) => e.category)
+              .firstWhere((c) => c != null, orElse: () => null),
+          note: group
+              .map((e) => e.note)
+              .firstWhere((c) => c != null, orElse: () => null),
+        ),
+      );
+    } else {
+      for (final e in group) {
+        out.add(
+          ModelQuota(
+            model: e.name,
+            usedPercent: e.usedPercent,
+            resetsAt: e.resetsAt,
+            category: e.category,
+            note: e.note,
+          ),
+        );
+      }
+    }
+  }
+  return out;
+}
+
 // --- Cursor -----------------------------------------------------------------
 
 /// Parses Cursor usage data (from state.vscdb JSON blobs).
