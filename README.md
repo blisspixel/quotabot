@@ -46,6 +46,11 @@ Highlights:
   run). Only quota metadata is ever read, never prompts, code, or other content.
 - **Zero usage tokens.** Only quota metadata is ever read, never a model or
   inference call, so quotabot never spends a usage token.
+- **Advisor, not a proxy.** quotabot suggests where to send the next request;
+  your own tools and agents make the call. It stays out of your request path, so
+  there is nothing new to route through and nothing new to trust with your
+  traffic - just a read-only signal that helps you get the most out of the
+  subscriptions you already pay for.
 - **Local-first, your data is yours.** No account, no cloud, no telemetry; your
   tokens, history, and preferences stay on your machine. Most reads are local
   files; for a few providers quotabot makes a minimal call to the provider's own
