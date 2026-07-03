@@ -100,6 +100,16 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- `quotabot models`/`suggest` no longer crash with an unhandled exception on an
+  overflowing `--min-context` (for example `1e309`, which parses to infinity):
+  the value now falls back to no filter, matching every other numeric flag.
+- `quotabot top`'s hide key (`x`) now hides only the selected account's row, not
+  every account of that provider. Selection was already per account, so hiding
+  one account of a duplicated provider previously removed its other accounts
+  too.
+- The Antigravity in-process CLI-token cache is now keyed by the refresh token
+  it was minted from, so switching the active `~/.gemini` account within a
+  long-running desktop session cannot return the previous account's token.
 - `login antigravity` no longer appears to hang for five minutes when consent
   is denied. The loopback callback handler now surfaces a provider `error=`
   response (with a matching state) at once instead of ignoring it and waiting

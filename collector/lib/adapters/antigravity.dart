@@ -119,8 +119,11 @@ class AntigravityAdapter {
       '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com';
   static const _geminiClientSecret = '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';
 
-  // In-process cache of a freshly refreshed CLI access token.
+  // In-process cache of a freshly refreshed CLI access token, keyed by the
+  // refresh token it was minted from so a switched ~/.gemini account (a
+  // different refresh token) never receives the previous account's token.
   static String? _cliTokenCache;
+  static String? _cliTokenCacheKey;
   static int _cliTokenExpMs = 0;
 
   // Default path discovery uses real per-user application directories; tests
@@ -774,11 +777,16 @@ class AntigravityAdapter {
           nowMs < exp - 60000) {
         return stored;
       }
-      // A token we refreshed earlier this session is still good.
-      if (_cliTokenCache != null && nowMs < _cliTokenExpMs - 60000) {
+      final refresh = j['refresh_token']?.toString();
+      // A token we refreshed earlier this session from this same refresh token
+      // is still good. Keying on the refresh token keeps a switched account
+      // from getting the previous account's cached token.
+      if (_cliTokenCache != null &&
+          refresh != null &&
+          _cliTokenCacheKey == refresh &&
+          nowMs < _cliTokenExpMs - 60000) {
         return _cliTokenCache;
       }
-      final refresh = j['refresh_token']?.toString();
       if (refresh == null || refresh.isEmpty) return stored;
 
       final resp = await http.post(
@@ -797,6 +805,7 @@ class AntigravityAdapter {
       if (tok == null || tok.isEmpty) return stored;
       final expiresIn = (fresh['expires_in'] as num?)?.toInt() ?? 3600;
       _cliTokenCache = tok;
+      _cliTokenCacheKey = refresh;
       _cliTokenExpMs = nowMs + expiresIn * 1000;
       return tok;
     } catch (_) {

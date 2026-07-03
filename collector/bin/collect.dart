@@ -355,7 +355,12 @@ int? _parseContext(String? s) {
           : 1;
   final digits = mult == 1 ? t : t.substring(0, t.length - 1);
   final value = double.tryParse(digits);
-  return value == null ? null : (value * mult).round();
+  if (value == null || !value.isFinite) return null;
+  // Guard the scaled value too: round() throws on a non-finite double, so an
+  // overflowing --min-context (e.g. 1e309) must fall back to "no filter"
+  // rather than crash the command.
+  final scaled = value * mult;
+  return scaled.isFinite ? scaled.round() : null;
 }
 
 /// Builds the model requirement filter from CLI flags: a coarse `--task` profile
@@ -918,7 +923,10 @@ Future<void> _runTop(
   var lastCollect = 0;
   var failStreak = 0;
   var selected = 0; // cursor index into the visible (sorted, unhidden) list
-  final hidden = <String>{}; // providers hidden this session with the x key
+  // Provider/account identities hidden this session with the x key. Keyed by
+  // account, not bare provider, so hiding one account of a duplicated provider
+  // does not also hide its other accounts (selection is per account too).
+  final hidden = <String>{};
   var copied = ''; // transient confirmation shown after the copy-route key
   final quit = Completer<void>();
   Timer? repaint;
@@ -930,7 +938,7 @@ Future<void> _runTop(
     final now = nowEpoch();
     final suggestion = _suggestFor(data, now);
     final visible = sortProvidersForTop(data, suggestion, now, sort)
-        .where((q) => !hidden.contains(q.provider))
+        .where((q) => !hidden.contains(quotaIdentityKeyFor(q)))
         .toList();
     return (visible: visible, suggestion: suggestion);
   }
@@ -1033,7 +1041,7 @@ Future<void> _runTop(
     copied = '';
     final visible = frame().visible;
     if (selected >= 0 && selected < visible.length) {
-      hidden.add(visible[selected].provider);
+      hidden.add(quotaIdentityKeyFor(visible[selected]));
     }
     draw(); // draw() reclamps the cursor to the now-shorter list
   }
