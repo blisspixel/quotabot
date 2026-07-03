@@ -44,6 +44,16 @@ void main() {
       expect(t.refreshToken, 'R1');
     });
 
+    test('fromOAuth treats an empty refresh token as absent', () {
+      // A blank refresh_token must not overwrite a still-valid prior one.
+      final t = Tokens.fromOAuth({
+        'access_token': 'AT',
+        'refresh_token': '',
+        'expires_in': 3600,
+      }, priorRefresh: 'R0');
+      expect(t.refreshToken, 'R0');
+    });
+
     test('round-trips through json', () {
       final t = Tokens(accessToken: 'a', refreshToken: 'r', expiresAt: 123);
       final back = Tokens.fromJson(t.toJson());
@@ -328,6 +338,33 @@ void main() {
       // The account refresh must not overwrite the provider-default grant.
       expect(TokenStore.load(provider)!.accessToken, 'default-old');
     });
+
+    test('XaiAuth.freshAccessToken keeps the default slot owner on refresh',
+        () async {
+      const provider = XaiAuth.provider;
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.saveDefaultOwnedBy(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'DR', expiresAt: 1),
+        'a@example.com',
+      );
+      final mock = MockClient((req) async {
+        expect(req.body, contains('refresh_token=DR'));
+        return http.Response(
+          jsonEncode({'access_token': 'fresh', 'expires_in': 21600}),
+          200,
+        );
+      });
+
+      expect(await XaiAuth(client: mock).freshAccessToken(), 'fresh');
+      // The owner stamp must survive the in-place default refresh, or the
+      // adapter's cross-account lending guard silently reopens.
+      expect(TokenStore.defaultOwner(provider), 'a@example.com');
+      expect(TokenStore.load(provider)!.accessToken, 'fresh');
+    });
   });
 
   group('GoogleAuth client', () {
@@ -410,6 +447,18 @@ void main() {
 
     test('throws when device authorization fails to start', () async {
       final mock = MockClient((req) async => http.Response('no', 400));
+      await expectLater(
+        XaiAuth(client: mock).deviceLogin(prompt: (_, __) {}),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('throws instead of crashing on a 200 with no device_code', () async {
+      // A malformed 200 (missing device_code) must be a clean StateError, not
+      // an uncaught cast TypeError.
+      final mock = MockClient(
+        (req) async => http.Response(jsonEncode({'interval': 5}), 200),
+      );
       await expectLater(
         XaiAuth(client: mock).deviceLogin(prompt: (_, __) {}),
         throwsA(isA<StateError>()),

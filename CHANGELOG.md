@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- Refreshing the Grok provider-default grant in place now keeps its owner
+  stamp. A plain save dropped the stamp, so the cross-account lending guard
+  (which reads the stamp) silently reopened after the first default-slot
+  refresh. An empty `refresh_token` in a token response is also now treated as
+  absent, so a blank value cannot overwrite a still-valid refresh token.
 - OAuth token grants and the desktop prefs file are now written atomically (to
   a temp file, then renamed over the target), like every other local metadata
   file. Previously they were truncate-written in place, so a crash or a
@@ -95,6 +100,14 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- `login antigravity` no longer appears to hang for five minutes when consent
+  is denied. The loopback callback handler now surfaces a provider `error=`
+  response (with a matching state) at once instead of ignoring it and waiting
+  out the capture timeout.
+- `login grok` no longer crashes with an uncaught cast error if the device
+  authorization endpoint returns a 200 without a device code; it reports a
+  plain failure. The device poll interval is also clamped so a zero or hostile
+  interval cannot drive a tight poll loop.
 - The file-backed routing lease store now fails soft on a lock or IO error:
   `active` degrades to no leases and `reserve`/`release` report the store
   unavailable, instead of throwing the error into the read-only routing tools
