@@ -203,6 +203,69 @@ void main() {
     expect(q.single.windows.single.usedPercent, 9);
   });
 
+  test('a default grant stamped for another account is not lent out', () async {
+    TokenStore.clear(XaiAuth.provider);
+    TokenStore.clearAccounts(XaiAuth.provider);
+    addTearDown(() {
+      TokenStore.clear(XaiAuth.provider);
+      TokenStore.clearAccounts(XaiAuth.provider);
+    });
+    // The default grant belongs to account a, but the CLI now holds only
+    // account b. b must read with its own CLI token, never a's default grant,
+    // or b's row would show a's usage.
+    TokenStore.saveDefaultOwnedBy(
+      XaiAuth.provider,
+      Tokens(accessToken: 'a-default', expiresAt: nowEpoch() + 3600),
+      'a@example.com',
+    );
+    writeAuth({
+      'b': {'email': 'b@example.com', 'key': 'token-b'},
+    });
+    final tokens = <String>[];
+
+    final q = await GrokAdapter(
+      authFile: authFile,
+      usageFetcher: (token, asOf) async {
+        tokens.add(token);
+        return QuotaWindow(label: 'monthly', usedPercent: 4);
+      },
+    ).collectAccounts();
+
+    expect(tokens, ['token-b']);
+    expect(q.single.account, 'b@example.com');
+  });
+
+  test('a default grant stamped for the sole account is lent to it', () async {
+    TokenStore.clear(XaiAuth.provider);
+    TokenStore.clearAccounts(XaiAuth.provider);
+    addTearDown(() {
+      TokenStore.clear(XaiAuth.provider);
+      TokenStore.clearAccounts(XaiAuth.provider);
+    });
+    TokenStore.saveDefaultOwnedBy(
+      XaiAuth.provider,
+      Tokens(accessToken: 'a-default', expiresAt: nowEpoch() + 3600),
+      'a@example.com',
+    );
+    writeAuth({
+      'a': {
+        'email': 'a@example.com'
+      }, // no CLI key: relies on the default grant
+    });
+    final tokens = <String>[];
+
+    final q = await GrokAdapter(
+      authFile: authFile,
+      usageFetcher: (token, asOf) async {
+        tokens.add(token);
+        return QuotaWindow(label: 'monthly', usedPercent: 4);
+      },
+    ).collectAccounts();
+
+    expect(tokens, ['a-default']);
+    expect(q.single.account, 'a@example.com');
+  });
+
   test('expired billing tokens keep the account visible', () async {
     writeAuth({
       'a': {'email': 'a@example.com', 'key': 'token-a'},
