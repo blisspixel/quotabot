@@ -743,4 +743,33 @@ void main() {
       );
     });
   });
+
+  group('strandProbability numeric contract', () {
+    // strandProbability is Phi((burn*T - headroom) / (burnSe*T)). With the reset
+    // exactly one hour out (T = 1), it reduces to Phi(burn - headroom) for
+    // burnSe = 1, so a known (burn - headroom) is a known z-score. This pins the
+    // erf / normal-CDF approximation (documented ~1.5e-7 max error) against the
+    // tabulated standard normal CDF, which the routing's strand forecast rides
+    // on. now = 0, resetsAt = 3600 => T = 1 hour.
+    double phi(double z) => strandProbability(10, 10 + z, 1, 3600, 0)!;
+
+    test('matches the standard normal CDF at known z-scores', () {
+      expect(strandProbability(10, 10, 1, 3600, 0), closeTo(0.5, 1e-5)); // z=0
+      expect(phi(1.0), closeTo(0.8413447, 1e-5));
+      expect(phi(1.96), closeTo(0.9750021, 1e-5));
+      expect(phi(2.5758), closeTo(0.9950000, 1e-5));
+      expect(strandProbability(10, 8.04, 1, 3600, 0), closeTo(0.025, 1e-5));
+    });
+
+    test('degenerate and out-of-domain inputs are null or hard 0/1', () {
+      expect(strandProbability(50, null, 1, 3600, 0), isNull); // burn unknown
+      expect(strandProbability(50, 0, 1, 3600, 0), isNull); // no burn
+      expect(strandProbability(50, 10, null, 3600, 0), isNull); // se unknown
+      expect(strandProbability(50, 10, 1, null, 0), isNull); // reset unknown
+      expect(strandProbability(50, 10, 1, 3600, 3600), isNull); // reset is now
+      // Zero standard deviation degenerates to a hard threshold, not NaN.
+      expect(strandProbability(10, 20, 0, 3600, 0), 1.0); // burn*T >= headroom
+      expect(strandProbability(30, 20, 0, 3600, 0), 0.0); // burn*T < headroom
+    });
+  });
 }
