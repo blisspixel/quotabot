@@ -44,6 +44,16 @@ wrong feature.
 - **Never touches user content.** quotabot handles quota and usage figures only.
   It never reads or transmits your prompts, code, or other content; if a feature
   ever talks to a model, it sends only quotabot's own synthetic probe.
+- **Advisor, never a proxy.** quotabot recommends where to send the next
+  request; it never carries the request itself, and it never uses a provider's
+  subscription credentials to make a model call on your behalf. This is the
+  architecture and the compliance stance at once: providers (Anthropic's
+  early-2026 clarification is explicit) treat routing requests through
+  subscription OAuth credentials as a terms violation and an account-ban
+  vector, so quotabot stays out of the request path entirely. Holding and
+  reading multiple accounts is fine; proxying their credentials is the line we
+  never cross. This is also the moat: every proxy-based competitor is exposed
+  where quotabot is not.
 - **No surprise bills.** Runtime code must not call paid model, chat, image, or
   content-generation APIs. True included-quota plans are allowed only when the
   caller can prove overages are disabled; request-metered API keys remain
@@ -60,6 +70,11 @@ wrong feature.
   from one codebase.
 - **Pure core, thin adapters.** Logic lives in pure, tested functions; adapters
   are thin I/O shells. The test-coverage floor is enforced in CI.
+- **The strict bar is machine-enforced, not aspirational.** The strict analyzer
+  runs clean in CI (zero warnings or infos); closed sets are types, not magic
+  strings; untrusted input is bounded and fails soft at every boundary; and a
+  falsifiable numerical claim is pinned by a test. Quality that only lives in a
+  reviewer's head is a regression waiting to happen.
 - **No attribution, no emoji, no em-dashes** in the repo.
 
 ## Road to 1.0
@@ -72,11 +87,12 @@ product is finished forever. It is a claim that the SEE and ROUTE core is truste
 the public contract is steady, the installation and update paths are boring, and
 known failure modes are honest instead of surprising.
 
-The current release, **0.5.4**, is best understood as a corrective patch on the
-feature-complete original 1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist:
-desktop, CLI, MCP, HTTP, LiteLLM integration, profiles, leases, model routing,
-analytics, no-surprise cost guardrails, release automation, and cross-platform CI.
-What remains before 1.0 is not random feature work. It is release-candidate
+The current line, **0.5.5 plus a large unreleased hardening batch**, is best
+understood as a corrective and hardening pass on the feature-complete original
+1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist: desktop,
+CLI, MCP, HTTP, LiteLLM integration, profiles, leases, model routing,
+analytics, no-surprise cost guardrails, release automation, and cross-platform
+CI. What remains before 1.0 is not random feature work. It is release-candidate
 hardening, real-world provider verification, docs accuracy, installer/update
 polish, and a final security/reliability pass.
 
@@ -84,6 +100,20 @@ Adding a new provider does not get us to 1.0; an existing provider never lying
 about quota on any claimed OS does. Sheer breadth, optimizer depth, package
 manager distribution, and ecosystem work stay After 1.0 unless they are needed to
 fix a 1.0 trust issue.
+
+The build order to 1.0, as operations (not dates):
+
+1. **Finish the host-doable hardening** now underway: the recurring adversarial
+   security and correctness rounds until a round comes back empty, the
+   remaining fail-soft and boundary defenses, and the code-quality elevation
+   below. This is the bulk of the unreleased batch and continues until dry.
+2. **Verify on real hardware.** The live provider matrix (item 22) and the
+   clean-host install/update smoke tests (item 25) need native macOS and Linux
+   machines with real signed-in accounts; they cannot be finished from a single
+   OS. This is the true gate that only hardware unblocks.
+3. **Freeze, dry-run, cut.** The final contract audit, the release-candidate dry
+   run from a tag (item 28), and the cut (item 29) follow once 1 and 2 are done
+   and boring.
 
 **Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
 binding-window SEE rule with honest staleness; self-explaining, risk-aware
@@ -437,8 +467,26 @@ in parallel with the phases above rather than after them:
 - **Recurring security reviews:** token handling, host/SSRF validation for local
   runtimes, injection via provider data, and the install supply chain. Each pass
   fixes what it finds. Automation shipped: Dependabot now tracks GitHub Actions,
-  Dart `pub`, and the MCP TypeScript snippet package, and CodeQL analyzes the
-  Python and TypeScript surfaces that GitHub supports for this repository.
+  Dart `pub`, and the MCP TypeScript snippet package, CodeQL analyzes the Python
+  and TypeScript surfaces GitHub supports, and a pinned gitleaks job scans for
+  secrets server-side on every push and PR.
+- **Code-quality elevation (raise the bar, then hold it):** the pure core, the
+  defensiveness, and the naming are already at the "would-a-CS-PhD-be-proud"
+  bar; a few enforceable elevations remain, ordered by leverage. (1) The strict
+  analyzer is on with `strict-casts`; the deliberate follow-up is
+  `strict-inference` + `strict-raw-types`, which need an explicit type argument
+  at every JSON decode site (a careful pass, not a sweep). (2) Turn the core's
+  remaining closed sets from magic strings into the type system so a new value
+  cannot be half-handled: `ProviderQuota.kind` (unify with the existing
+  `ProviderAdapterClass`), the `source == 'manual'` literal (use the existing
+  constant / an `isManual` getter), and `RouteFallback.kind` (an enum, dropping
+  the `_ =>` catch-all that would silently swallow a new kind). (3) Make the
+  provider registry executable - a `collect` factory on the registration so
+  `collectAll` and the cache's account-scoped set derive from it - so adding a
+  provider is one declarative addition, not a four-to-six-site edit. (4) Route
+  the desktop color through the collector's `Palette.rgbFor` to kill a small
+  drift. Numerical contracts (erf/normal-CDF) are now pinned by tests; keep new
+  falsifiable math claims pinned the same way.
 
 Self-tuning - using the calibration loop to fit the routing parameters on local
 history - and the deeper statistical layers are quality multipliers: valued and
@@ -448,19 +496,54 @@ pursued continuously, but not 1.0 gates.
 
 Breadth and depth, once the core is trusted:
 
-- **More quota-window providers:** the "coding plan" cohort is the truest fit and
-  the priority, since it sells Claude-Max-style rolling request windows that map
-  straight onto the SEE model - Z.ai (GLM), MiniMax, Kimi, and Qwen all meter
-  prompts per 5h / week / month with real resets. Then Amp, OpenCode, DeepSeek,
-  and Perplexity. GitHub Copilot moved most plans to AI Credits in June 2026,
-  with legacy premium requests only for some annual Pro and Pro+ subscribers, so
-  it is no longer in the primary quota-window tranche. Spend-based aggregators
-  (OpenRouter, Together, Fireworks), the credit-metered app builders (Replit,
-  v0, Lovable, Bolt), Copilot AI Credits, and credit-pool tools like Warp and
-  JetBrains AI only ever as a secondary cost view, since they meter dollars or
-  credits, not a rolling-window quota. Amazon Q is deliberately
-  skipped: AWS is sunsetting it in favor of Kiro, which quotabot already reads, so
-  the AWS path is to deepen Kiro rather than chase a retiring product.
+- **More quota-window providers:** the "coding plan" cohort is the truest fit
+  and the priority, since it sells Claude-Max-style rolling request windows that
+  map straight onto the SEE model. Build order, chosen by fit and read model
+  (each is trackable through the provider's own usage endpoint with the API key
+  the user already holds, so no cookie or keychain scraping): **GLM (Z.ai)
+  first** (explicit 5h + weekly prompt numbers, public devpack docs), then
+  **MiniMax** (request-per-5h with weekly = 10x), then **Kimi** (5h + weekly,
+  metered in tokens/calls within the window), then **Qwen** (fixed monthly,
+  rolling 5h, but credit-weighted by model, so a looser fit). Watch **OpenCode
+  Go** as a multi-model aggregator front-end (it covers DeepSeek/Qwen/MiniMax/
+  GLM behind one sub) rather than adding DeepSeek natively, since DeepSeek has
+  no rolling-window subscription of its own. Amp is pay-as-you-go credits with a
+  daily dollar cap, so cost-only or skip.
+- **Peak-hour and per-model consumption weighting (build before or with the
+  cohort above):** the new cohort breaks the flat "prompts remaining" model. GLM
+  consumes 2-3x during peak hours; Kimi and Qwen meter tokens/credits within the
+  window. "Remaining" is therefore model- and time-weighted, not linear. This is
+  a shared requirement across GLM/MiniMax/Kimi/Qwen, so build the weighting once,
+  at the window model. Note the code-quality dependency: `QuotaWindow` is a flat
+  value type today and `windowUsedPercent` is a pure function of the stored
+  percent, so an honest multiplier is a deliberate change to the windowing spine
+  (an optional `weight` threaded through `windowUsedPercent`/`windowHeadroom`/
+  the parsers/to-from-JSON), not a bolt-on. Do it with the type-system elevation
+  below, not hastily.
+- **Provider renames and identity aliasing:** 2026 renames must not silently
+  break existing configs or history keyed by the old id. Amazon Q -> Kiro is
+  handled (quotabot reads Kiro); still to alias: Windsurf -> Devin Desktop
+  (Cognition, June 2026) and Gemini CLI -> Antigravity CLI. Map old ids to new
+  in provider identity so a user's saved profile, hidden set, and burn history
+  survive the rename.
+- **Guard the fragile readers:** two current readers can break silently on
+  provider drift and deserve a "reader may have broken" signal plus a pinned
+  shape test. Claude's usage read depends on a rotating `anthropic-beta` header
+  that has changed before; Antigravity's local session-file path is churning as
+  Gemini CLI becomes Antigravity CLI. A silently-empty read here should surface
+  as a plain "couldn't read, the provider may have changed" rather than a blank.
+- **Reclassify Windsurf/Devin Desktop as a primary window provider.** As of June
+  2026 it dropped the monthly credit pool for daily + weekly Cascade quotas,
+  which fit the primary rolling-window model; keep it there (not in the cost-only
+  tranche) under the new Devin Desktop name.
+- **Cost-only, never primary:** GitHub Copilot moved most plans to AI Credits in
+  June 2026, Cursor is a dollar credit pool (two pools since June 2026), Kiro
+  meters monthly interactions, and Amp/DeepSeek are token pay-as-you-go. Spend-
+  based aggregators (OpenRouter, Together, Fireworks), the credit-metered app
+  builders (Replit, v0, Lovable, Bolt), and credit-pool tools (Warp, JetBrains
+  AI) are only ever a secondary cost view, since they meter dollars or credits,
+  not a rolling-window quota. Amazon Q is skipped: AWS retired it in favor of
+  Kiro (which quotabot reads), so the AWS path is to deepen Kiro.
 - **User-defined manual quota entries:** an optional way to add a tool quotabot
   has no adapter for (a limit, a reset, and an updatable used figure), so the
   long tail (Tabnine, JetBrains Junie, Trae, and similar) still shows in one
@@ -579,10 +662,30 @@ Breadth and depth, once the core is trusted:
   Homebrew, AppImage/flatpak), a docs site, and a reusable passive-reader adapter
   taxonomy to widen coverage cheaply.
 
-Differentiators (from a scan of ccusage, CodexBar, ClaudeBar, TokenTracker, and
-others) to keep leaning on: a cross-platform widget (most rivals are macOS
-menu-bar only), real rate-limit windows (not token or dollar accounting), routing
-as a primitive, and first-class local runtimes.
+Differentiators, re-scanned mid-2026 (ccusage, CodexBar, ClaudeBar,
+TokenTracker, and the new entrants Quotio and Quotio's Linux fork). The niche
+that was empty is now contested at the edges, so lean on the intersection no
+one else holds, not on any single axis:
+
+- **Advisor, not proxy - now the compliance moat.** Every routing competitor
+  that ships (Quotio's CLIProxyAPI, LiteLLM-on-Max) proxies subscription
+  credentials, which providers now treat as a terms violation and a ban vector.
+  quotabot recommends and lets the official client make the call, so it is the
+  only routing option that cannot get an account banned. Lead with this.
+- **True cross-platform, not a fork.** The menu-bar incumbents (CodexBar,
+  ClaudeBar, Quotio) are macOS-only; Quotio's Linux is a community fork. One
+  first-class Windows/Linux/macOS codebase is a real, present gap.
+- **First-class local runtimes as routing targets** (Ollama/LM Studio/Lemonade)
+  - still unclaimed; the natural overflow when every subscription window is
+  spent, and it reinforces local-first.
+- **MCP server exposing quota to agents** - nobody in the consumer category does
+  this; it is the cleanest expression of routing-as-a-primitive.
+
+What is now table-stakes (not a differentiator): reading *real* rolling-window
+quota rather than spend-derived estimates, multi-account/per-account breakdown,
+pre-limit notifications, and making any Full-Disk-Access-style permission
+optional. Raw provider *breadth* is a losing race (CodexBar is at ~56 and
+climbing); compete on what quotabot does with a provider, not the count.
 
 Staying relevant is a standing habit, re-checked each release rather than a fixed
 list: re-survey what people actually run and what quota model each tool uses,
