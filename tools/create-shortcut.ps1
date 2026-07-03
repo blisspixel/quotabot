@@ -2,14 +2,23 @@
 # Points at the Release build and uses the app's own icon. Re-run after a build
 # to repoint the shortcut. Build first with: cd app; flutter build windows --release
 param(
-  [string]$ExePath = (Join-Path $PSScriptRoot '..\app\build\windows\x64\runner\Release\quotabot.exe')
+  [string]$ExePath
 )
 
 $ErrorActionPreference = 'Stop'
 
-$resolved = Resolve-Path -LiteralPath $ExePath -ErrorAction SilentlyContinue
+# Flutter builds under build\windows\<arch>\runner\Release (x64 or arm64); pick
+# whichever exists rather than assuming x64, so the shortcut works on ARM64.
+if (-not $ExePath) {
+  foreach ($arch in @('x64', 'arm64')) {
+    $candidate = Join-Path $PSScriptRoot "..\app\build\windows\$arch\runner\Release\quotabot.exe"
+    if (Test-Path -LiteralPath $candidate) { $ExePath = $candidate; break }
+  }
+}
+
+$resolved = if ($ExePath) { Resolve-Path -LiteralPath $ExePath -ErrorAction SilentlyContinue } else { $null }
 if (-not $resolved) {
-  throw "quotabot.exe not found at '$ExePath'. Build it first: cd app; flutter build windows --release"
+  throw "quotabot.exe not found. Build it first: cd app; flutter build windows --release"
 }
 $exe = $resolved.Path
 
