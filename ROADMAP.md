@@ -117,14 +117,21 @@ The build order to 1.0, as operations (not dates):
 The near-term hardening inside operation 1, from a mid-2026 SEE audit, in
 logical order (each enables the next; no dates):
 
-1. **SEE completeness - capture everything a provider exposes.** Antigravity
-   meters each model family from its own pool and caches the full per-model
-   table in local state; quotabot now reads it (remaining, reset, category,
-   badge) network-free, rolls pool-sharing variants up to the base model, and
-   exposes it as `model_quotas` while the window summary stays the headline.
-   Open: confirm whether Antigravity's separate weekly window is the live
-   endpoint's longer reset or an account-level number, then capture it too.
-   Rule: capture richly, display compactly.
+1. **SEE completeness and cross-device authority.** Quota is an account-level,
+   server-side truth consumed across every device a person uses (laptop,
+   desktop, phone), so quotabot must reflect the authoritative cross-machine
+   number, not a per-machine local view. Landed: Antigravity per-model quota
+   (`model_quotas`) now reads from the authoritative live endpoint, with the
+   local `userStatus` cache demoted to an offline last-known fallback - it is
+   per-machine, so it lagged usage on another machine and showed a stale ~100%.
+   The same principle indicts the rest of the fleet: Codex, Cursor, Windsurf,
+   and Kiro derive quota from local files and are per-machine, so they can
+   undercount when the account is used elsewhere (Claude's local-usage read
+   needs the same audit). Fix: prefer a server-side read wherever the provider
+   exposes one; otherwise label the number honestly as a this-machine view.
+   Local runtimes are correctly per-machine. Open: Antigravity's separate weekly
+   window (live longer reset, or an account-level number?). Rule: capture
+   richly, display compactly, and prefer authoritative over local.
 2. **SEE integrity - a silent-drift canary.** 1.0 acceptance criterion 1 is
    "every provider either reads correctly or fails with a plain message," but
    nothing caught a read that is wrong and does not fail: a re-rated or
