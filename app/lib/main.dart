@@ -214,14 +214,25 @@ class ProviderDisplayGroup {
 
 @visibleForTesting
 List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
-  // A local runtime's account field is a model summary ("3 models"), not an
-  // identity; locals never define an account group and always land in the
-  // account-less bucket ("default and local").
-  final accounts = <String>{};
+  // Group by account only when it is genuinely meaningful: some provider is
+  // signed in under more than one account (a real work/personal split on the
+  // same service). Signing into different providers with different emails - the
+  // common case - is not multi-account, so account headers there would just be
+  // noise, and the fleet stays one ungrouped list. A local runtime's account
+  // field is a model summary ("3 models"), not an identity, so locals never
+  // define a group and land in the account-less bucket.
+  final accountsByProvider = <String, Set<String>>{};
   for (final q in data) {
-    if (!q.isLocal && quotaHasSpecificAccount(q)) accounts.add(q.account);
+    if (!q.isLocal && quotaHasSpecificAccount(q)) {
+      accountsByProvider
+          .putIfAbsent(q.provider, () => <String>{})
+          .add(q.account);
+    }
   }
-  if (accounts.length < 2) {
+  final hasDuplicatedAccount = accountsByProvider.values.any(
+    (accounts) => accounts.length > 1,
+  );
+  if (!hasDuplicatedAccount) {
     return [ProviderDisplayGroup(account: null, quotas: List.of(data))];
   }
 

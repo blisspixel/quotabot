@@ -1626,22 +1626,34 @@ String _stateStyled(String state) {
   }
 }
 
-String _doctorAccountSuffix(ProviderQuota q) => (q.account != 'default' &&
-        q.account != 'unknown' &&
-        q.account != 'installed' &&
-        q.account != 'cli')
-    ? ' (${q.account})'
-    : '';
+/// The account label for a doctor row, shown only to disambiguate a provider
+/// that appears under more than one account. A single-account provider needs no
+/// label: the user knows which account it is.
+String _doctorAccountSuffix(ProviderQuota q, Map<String, int> counts) =>
+    (counts[q.provider] ?? 0) > 1 &&
+            q.account != 'default' &&
+            q.account != 'unknown' &&
+            q.account != 'installed' &&
+            q.account != 'cli'
+        ? ' (${q.account})'
+        : '';
 
 void _printDoctor(List<ProviderQuota> results) {
   final now = nowEpoch();
   print(
     '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
   );
+  // Show an account label only where a provider appears under more than one
+  // account, so a single-account fleet is not cluttered with emails.
+  final accountCounts = <String, int>{};
+  for (final q in results) {
+    accountCounts[q.provider] = (accountCounts[q.provider] ?? 0) + 1;
+  }
   // Size the name column to the widest row (a long account can exceed the base
   // width) so the state column stays aligned instead of jutting out.
   final nameWidth = results
-      .map((q) => '${q.displayName}${_doctorAccountSuffix(q)}'.length)
+      .map((q) =>
+          '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}'.length)
       .fold(28, (w, len) => len > w ? len : w);
   final indent = ' '.padRight(nameWidth);
   for (final q in results) {
@@ -1672,7 +1684,8 @@ void _printDoctor(List<ProviderQuota> results) {
                     : ' (resets ${_in(w.resetsAt!, now)})';
                 return '${w.label} $pct% used$reset';
               }).join(', ');
-    final namePart = '${q.displayName}${_doctorAccountSuffix(q)}';
+    final namePart =
+        '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}';
     print('  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} $detail');
     for (final d in q.details) {
       print('  $indent ${' '.padRight(12)} $d');
