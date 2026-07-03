@@ -376,10 +376,17 @@ List<HeadroomBucket> loadBuckets(
     if (!f.existsSync()) return [];
     if (f.lengthSync() > _maxJsonBytes) return [];
     final list = jsonDecode(f.readAsStringSync()) as List;
-    final buckets = list
-        .map((e) => HeadroomBucket.fromJson(e as Map<String, dynamic>))
-        .toList()
-      ..sort((a, b) => a.start.compareTo(b.start));
+    // Drop only a malformed element, not the whole history: up to 90 days of
+    // buckets is the most expensive local data to lose, and the lease and
+    // manual stores are already per-entry resilient the same way.
+    final buckets = <HeadroomBucket>[];
+    for (final e in list) {
+      if (e is! Map) continue;
+      try {
+        buckets.add(HeadroomBucket.fromJson(e.cast<String, dynamic>()));
+      } catch (_) {}
+    }
+    buckets.sort((a, b) => a.start.compareTo(b.start));
     return buckets;
   } catch (_) {
     return [];

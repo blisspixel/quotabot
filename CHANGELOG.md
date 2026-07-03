@@ -26,6 +26,12 @@ Notable changes to quotabot. Newest first.
   grant and shown under the wrong account (the Grok billing response carries no
   identity to cross-check, unlike Antigravity), and that misattribution
   persisted into per-account burn history.
+- A single malformed element in a bucket history file no longer discards the
+  whole file. `loadBuckets` now drops only the bad element, keeping up to 90
+  days of analytics history, matching how the lease and manual stores already
+  behave. The bucket histogram is also normalized to its fixed bin count on
+  load, so a truncated array (or a future change to the bin count) cannot make
+  a sample fold throw and silently drop that hour's data.
 - A corrupt or hostile local cache/history file can no longer crash the CLI or
   MCP server. Non-finite numbers (an `Infinity` or `NaN` that JSON allows but
   `jsonEncode` rejects) read back from a quota snapshot or an analytics bucket

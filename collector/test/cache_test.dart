@@ -173,6 +173,23 @@ void main() {
     expect(loadBuckets('__nope_does_not_exist__'), isEmpty);
   });
 
+  test('loadBuckets drops a malformed element and keeps the rest', () {
+    // Previously one stray non-object element discarded the whole file, losing
+    // up to 90 days of history. Only the bad element should be dropped now.
+    final good1 = HeadroomBucket(start: 3600)..add(80);
+    final good2 = HeadroomBucket(start: 7200)..add(40);
+    File('${cacheDir().path}/buckets_$id.json').writeAsStringSync(jsonEncode([
+      good1.toJson(),
+      'garbage',
+      42,
+      null,
+      good2.toJson(),
+    ]));
+    final buckets = loadBuckets(id);
+    expect(buckets.map((b) => b.start).toList(), [3600, 7200]);
+    expect(buckets.first.count, 1);
+  });
+
   test('recentBurnByProvider reads bucket stats by provider', () {
     final now = 1782000000;
     recordHeadroomSample(id, 80, now - 3600);

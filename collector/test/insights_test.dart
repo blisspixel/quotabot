@@ -66,6 +66,27 @@ void main() {
       expect(back.max, 80);
     });
 
+    test('fromJson normalizes a wrong-length histogram to kHistBins', () {
+      // A short array (a corrupt file or a future change to kHistBins) must not
+      // make add() index out of range or silently keep the wrong length.
+      final short = HeadroomBucket.fromJson({
+        's': 3600,
+        'n': 1,
+        'sum': 50.0,
+        'sq': 2500.0,
+        'h': [1, 2],
+      });
+      expect(short.hist.length, kHistBins);
+      expect(short.hist.take(2), [1, 2]);
+      expect(() => short.add(95), returnsNormally);
+
+      final long = HeadroomBucket.fromJson({
+        's': 3600,
+        'h': List<int>.filled(kHistBins + 5, 1),
+      });
+      expect(long.hist.length, kHistBins);
+    });
+
     test('fromJson sanitizes non-finite and negative fields from a bad file',
         () {
       // A corrupt or hostile cache file: 1e400 decodes to Infinity, which would
@@ -85,7 +106,8 @@ void main() {
       expect(b.stddev.isFinite, isTrue);
       expect(b.count, 0);
       expect(b.exhausted, 0);
-      expect(b.hist, [0, 0, 4]);
+      expect(b.hist.length, kHistBins);
+      expect(b.hist.take(3), [0, 0, 4]);
       // The whole analytics path must be JSON-encodable, not just this bucket.
       expect(
         () => jsonEncode(Insights.from([b], 7200).toJson()),

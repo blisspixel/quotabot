@@ -28,6 +28,20 @@ int _nonNegInt(Object? v) {
   return d == null || d < 0 ? 0 : d.toInt();
 }
 
+/// A histogram of exactly [kHistBins] non-negative counts. A stored array of a
+/// different length (a corrupt file, or a future change to kHistBins) is padded
+/// or truncated rather than kept as-is, so `add`'s bounded bin index can never
+/// fall outside the list.
+List<int> _fixedHist(Object? raw) {
+  final out = List<int>.filled(kHistBins, 0);
+  if (raw is List) {
+    for (var i = 0; i < kHistBins && i < raw.length; i++) {
+      out[i] = _nonNegInt(raw[i]);
+    }
+  }
+  return out;
+}
+
 /// One hour of headroom samples reduced to a fixed-size aggregate.
 ///
 /// Tracks enough to recover mean, variance, extremes, an approximate
@@ -101,7 +115,7 @@ class HeadroomBucket {
         min: finiteOrNull(j['min']) ?? double.infinity,
         max: finiteOrNull(j['max']) ?? double.negativeInfinity,
         exhausted: _nonNegInt(j['x']),
-        hist: ((j['h'] as List?) ?? const []).map(_nonNegInt).toList(),
+        hist: _fixedHist(j['h']),
       );
 }
 
