@@ -79,6 +79,16 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- The desktop alert webhook no longer depends on the local-notification plugin.
+  It was posted only after the notification call inside a shared try, so on
+  Windows (where the notification plugin has no implementation and throws) the
+  webhook never fired, and toggling notifications off also silenced it. The
+  webhook now posts independently of the notification result and of the
+  notifications toggle, and a notification failure no longer skips the rest of
+  the alert batch.
+- Desktop low-quota notifications and reset reminders are now keyed by account,
+  not just provider, so two accounts of the same provider crossing into red no
+  longer overwrite each other's notification.
 - A spent provider with more than one spent window now reports when it is
   actually usable again (the window that resets last), not the soonest window's
   reset. Previously, if a 5h cap and a weekly cap were both spent, the provider
