@@ -79,6 +79,11 @@ Notable changes to quotabot. Newest first.
   via OSC 52.
 
 ### Fixed
+- The file-backed routing lease store now fails soft on a lock or IO error:
+  `active` degrades to no leases and `reserve`/`release` report the store
+  unavailable, instead of throwing the error into the read-only routing tools
+  (`suggest_provider`, `decide_now`) that consult leases. Leases are advisory,
+  so a lease-file problem must never break routing.
 - MCP `reserve_provider` now honors an idempotency key when the target is
   auto-selected. Previously an idempotent retry re-ran the ranking, whose
   ordering had shifted because of the first lease's own discount, so the retry

@@ -171,6 +171,28 @@ void main() {
     expect(leaseDiscountFor(leases, 'codex', 'work'), 0);
   });
 
+  test('file store fails soft when the lease directory is unavailable', () {
+    // Leases are advisory; a lock/IO failure must degrade like the noop store
+    // rather than break the read-only routing tools that consult active().
+    final store = FileRouteLeaseStore(
+      dirFactory: () => throw const FileSystemException('no lease dir'),
+      idFactory: _idFactory(),
+    );
+    expect(store.active(100), isEmpty);
+    final reservation = store.reserve(
+      provider: 'grok',
+      account: 'home',
+      now: 100,
+      leaseSeconds: 30,
+      weightPercent: 15,
+    );
+    expect(reservation.reserved, isFalse);
+    expect(reservation.reason, 'lease store unavailable');
+    final release = store.release(leaseId: 'x', now: 100);
+    expect(release.released, isFalse);
+    expect(release.reason, 'lease store unavailable');
+  });
+
   test('file store persists, reuses, releases, and prunes leases', () {
     final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
     addTearDown(() {
