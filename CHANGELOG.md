@@ -251,6 +251,12 @@ Notable changes to quotabot. Newest first.
   own admission - is now a fallback used only when the live read is signed out
   or offline. It is a metadata read that spends no usage tokens, and the account
   is identified by the endpoint's email rather than only the plan name.
+- Local-only quota reads are now labeled honestly. Cursor, Windsurf, Kiro, and
+  the Codex session fallback see only this machine's usage, so they can
+  undercount when the same account is used on another device; their snapshots
+  now carry `per_machine: true` (shown as a dim "(this machine)" note in
+  `doctor` and exposed over MCP), while the authoritative cross-device reads
+  (Claude, Grok, Antigravity, Codex live) omit it.
 - `quotabot verify`: mechanical honesty checks over one live read, for the 1.0
   release-candidate provider verification matrix. Classifies each provider's
   read state (live, cached, out of quota, no data, error, local, undetected),

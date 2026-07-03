@@ -195,6 +195,13 @@ class ProviderQuota {
   /// so a silently drifted provider is flagged rather than trusted blindly.
   final String? suspect;
 
+  /// True when this reading reflects only this machine's local usage rather than
+  /// the account's usage across every device. Providers read from local IDE
+  /// state (Cursor, Windsurf, Kiro) or a per-machine session log can undercount
+  /// when the same account is used on a phone or another computer; authoritative
+  /// server-side reads (Claude, Grok, Antigravity, Codex live) leave this false.
+  final bool perMachine;
+
   ProviderQuota({
     required this.provider,
     required this.displayName,
@@ -213,6 +220,7 @@ class ProviderQuota {
     this.models = const [],
     this.modelQuotas = const [],
     this.suspect,
+    this.perMachine = false,
   });
 
   /// True when this is a local, always-available runtime rather than a metered
@@ -249,6 +257,7 @@ class ProviderQuota {
         'as_of': asOf,
         'stale': stale,
         if (suspect != null) 'suspect': suspect,
+        if (perMachine) 'per_machine': true,
         'windows': windows.map((w) => w.toJson()).toList(),
         if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
         if (modelQuotas.isNotEmpty)
@@ -269,6 +278,7 @@ class ProviderQuota {
         status: j['status'] as String?,
         active: j['active'] as bool? ?? false,
         suspect: j['suspect'] as String?,
+        perMachine: j['per_machine'] as bool? ?? false,
         details: ((j['details'] as List?) ?? const []).cast<String>(),
         windows: ((j['windows'] as List?) ?? const [])
             .map((w) => QuotaWindow.fromJson(w as Map<String, dynamic>))
@@ -311,6 +321,7 @@ class ProviderQuota {
         // The concern belongs to these cached windows, so it rides along when
         // they are served stale, regardless of fresh metadata.
         suspect: suspect,
+        perMachine: perMachine,
       );
 
   /// Returns a copy annotated with a drift/plausibility [reason], leaving the
@@ -333,6 +344,7 @@ class ProviderQuota {
         models: models,
         modelQuotas: modelQuotas,
         suspect: reason,
+        perMachine: perMachine,
       );
 
   /// True when this snapshot carries usable quota windows.
@@ -414,6 +426,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
         ),
     ],
     suspect: q.suspect == null ? null : t(q.suspect!),
+    perMachine: q.perMachine,
   );
 }
 

@@ -320,6 +320,10 @@ final _providerSchema = JsonSchema.object(
       description: 'Set when this read is implausible versus the last one '
           '(drift canary); the number is still shown, only flagged.',
     ),
+    'per_machine': JsonSchema.boolean(
+      description: 'True when the read reflects only this machine, not the '
+          'account across all devices (a local-only source that can undercount).',
+    ),
     'windows': JsonSchema.array(items: _windowSchema),
     'model_quotas': JsonSchema.array(items: _modelQuotaSchema),
   },

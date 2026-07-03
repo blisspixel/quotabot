@@ -156,6 +156,7 @@ void main() {
           ModelQuota(model: 'Gemini 3.5 Flash', usedPercent: 1.5),
           ModelQuota(model: 'Claude Opus 4.6', usedPercent: 0),
         ],
+        perMachine: true,
       );
       final back = ProviderQuota.fromJson(
         jsonDecode(jsonEncode(q.toJson())) as Map<String, dynamic>,
@@ -163,6 +164,7 @@ void main() {
       expect(back.modelQuotas.map((m) => m.model),
           ['Gemini 3.5 Flash', 'Claude Opus 4.6']);
       expect(back.modelQuotas.first.usedPercent, 1.5);
+      expect(back.perMachine, isTrue);
     });
   });
 }
