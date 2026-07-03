@@ -114,6 +114,51 @@ The build order to 1.0, as operations (not dates):
    run from a tag (item 28), and the cut (item 29) follow once 1 and 2 are done
    and boring.
 
+The near-term hardening inside operation 1, from a mid-2026 SEE audit, in
+logical order (each enables the next; no dates):
+
+1. **SEE completeness - capture everything a provider exposes.** Antigravity
+   meters each model family from its own pool and caches the full per-model
+   table in local state; quotabot now reads it (remaining, reset, category,
+   badge) network-free, rolls pool-sharing variants up to the base model, and
+   exposes it as `model_quotas` while the window summary stays the headline.
+   Open: confirm whether Antigravity's separate weekly window is the live
+   endpoint's longer reset or an account-level number, then capture it too.
+   Rule: capture richly, display compactly.
+2. **SEE integrity - a silent-drift canary.** 1.0 acceptance criterion 1 is
+   "every provider either reads correctly or fails with a plain message," but
+   nothing yet catches a read that is wrong and does not fail: a re-rated or
+   repurposed pool (the Grok 100->73 class), an inverted field, a fuzzy-key
+   match that grabs an unrelated number. Readings are checked only against
+   static bounds, out-of-range values are clamped (hiding the strongest drift
+   signal), and history is stored but never used to validate a fresh read. A
+   monotonicity/jump tripwire at the cache boundary (new reading vs last cached)
+   that flags a suspect value instead of showing it clean is the missing
+   enforcement of the 1.0 promise, not after-1.0 polish.
+3. **The refresh and currency loop.** Run the drift canary and the model-catalog
+   audit on a regular cadence so how usage works and which models exist stay
+   current automatically.
+4. **Close the feedback loop - pipe-health, not just the reservoir.** The world
+   model is quota-only: no rate-limit, throttle, 529/degradation, or
+   account-health state, and every adapter collapses a 429 into "no data," so a
+   quota-rich but throttled provider is still recommended as free. The one live
+   traffic stream (LiteLLM metrics) records only tokens and cost. Represent a
+   throttled/degraded state distinct from no-data, and mine the 429/latency
+   signal already flowing through the plugin.
+5. **Capability-aware-by-default routing.** The capability-aware engine is
+   opt-in behind `--task`; the default `suggest`, MCP `suggest_route`, and the
+   `top`/`doctor` route line are capability-blind and can name the most-open but
+   weakest provider for a hard task. Give the default path a capability floor
+   (or carry task context) so the advisor's default answer is good, not only its
+   opt-in answer. Antigravity's per-model quota is the prerequisite: routing a
+   hard task there should require a capable model with headroom.
+6. **A runtime-auditable trust surface.** The privacy boundary (reads only
+   metadata, never your code, zero tokens) is asserted in docs and enforced at
+   CI, but not verifiable at runtime. A `quotabot explain --reads --network`
+   that emits the exact files touched and hosts called this run, tagged
+   read-only/metadata, turns the headline claim from assertion into
+   demonstration; `verify` is its natural home.
+
 **Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
 binding-window SEE rule with honest staleness; self-explaining, risk-aware
 `suggest` with provenance (burn standard error, strand probability, confidence,
