@@ -26,6 +26,10 @@ Notable changes to quotabot. Newest first.
   grant and shown under the wrong account (the Grok billing response carries no
   identity to cross-check, unlike Antigravity), and that misattribution
   persisted into per-account burn history.
+- The zero-config `default` profile is now always available even if its file
+  exists but is corrupt or oversize. Previously only an absent file fell back to
+  the built-in default; a torn or hand-edited `default.json` returned null,
+  which surfaced as "no profile named default" and failed the run.
 - A single malformed element in a bucket history file no longer discards the
   whole file. `loadBuckets` now drops only the bad element, keeping up to 90
   days of analytics history, matching how the lease and manual stores already

@@ -170,18 +170,19 @@ void deleteProfile(String name, {Directory? dir}) {
 QuotaProfile? loadProfile(String name, {Directory? dir}) {
   final normalized = normalizeProfileName(name);
   if (normalized == null) return null;
-  if (normalized == defaultProfileName) {
-    final f = profileFile(normalized, dir: dir);
-    if (!f.existsSync()) return QuotaProfile.defaultProfile();
-  }
+  // The zero-config default must always be available: fall back to the built-in
+  // default not only when its file is absent but also when it is oversize or
+  // corrupt, so a single torn write cannot make the default profile unusable.
+  final fallback =
+      normalized == defaultProfileName ? QuotaProfile.defaultProfile() : null;
   try {
     final f = profileFile(normalized, dir: dir);
-    if (!f.existsSync() || f.lengthSync() > _maxProfileBytes) return null;
+    if (!f.existsSync() || f.lengthSync() > _maxProfileBytes) return fallback;
     return QuotaProfile.fromJson(
       jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
     );
   } catch (_) {
-    return null;
+    return fallback;
   }
 }
 
