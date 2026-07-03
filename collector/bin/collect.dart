@@ -1690,6 +1690,19 @@ void _printDoctor(List<ProviderQuota> results) {
     for (final d in q.details) {
       print('  $indent ${' '.padRight(12)} $d');
     }
+    if (q.modelQuotas.isNotEmpty) {
+      // Compact human summary; the full per-model table is in `quotabot json`
+      // and over MCP, so this stays one short line.
+      final mostUsed = q.modelQuotas.reduce(
+        (a, b) => (a.usedPercent ?? 0) >= (b.usedPercent ?? 0) ? a : b,
+      );
+      final u = mostUsed.usedPercent?.round() ?? 0;
+      final n = q.modelQuotas.length;
+      final summary = u <= 0
+          ? '$n models tracked, all fresh'
+          : '$n models tracked, most used: ${mostUsed.model} $u%';
+      print('  $indent ${'models'.padRight(12)} $summary');
+    }
     final hint = _doctorHint(q, state);
     if (hint != null) print('  $indent ${' '.padRight(12)} -> $hint');
   }

@@ -6,9 +6,12 @@ import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/antigravity.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:sqlite3/sqlite3.dart';
 import 'package:test/test.dart';
+
+import 'ag_proto_builder.dart';
 
 void main() {
   late Directory temp;
@@ -27,6 +30,7 @@ void main() {
     String? ideAccessToken,
     String? localModel,
     String? localNote,
+    List<ModelQuota> modelQuotas = const [],
     bool useCliToken = false,
   }) =>
       (
@@ -35,6 +39,7 @@ void main() {
         ideAccessToken: ideAccessToken,
         localModel: localModel,
         localNote: localNote,
+        modelQuotas: modelQuotas,
         useCliToken: useCliToken,
       );
 
@@ -575,6 +580,41 @@ void main() {
     ).collectAccounts();
 
     expect(q.single.account, 'resolved@example.com');
+  });
+
+  test('per-model quota is read from local state even when offline', () async {
+    final db = writeDb(
+      'ide-models',
+      email: 'me@example.com',
+      userStatus: agUserStatusValue([
+        agModelEntry('Gemini 3.5 Flash (Medium)',
+            remaining: 0.985, reset: 1782098301, category: 'Fast'),
+        agModelEntry('Gemini 3.5 Flash (High)',
+            remaining: 0.985, reset: 1782098301),
+        agModelEntry('Claude Opus 4.6 (Thinking)',
+            remaining: 1.0, reset: 1782098733),
+      ]),
+    );
+
+    final q = await AntigravityAdapter(
+      dbPathSource: () => [db.path],
+      activeAccountSource: () => null,
+      hasGeminiCreds: () => false,
+      tokenResolver: (_, __) async => null, // no live quota: offline path
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => null,
+    ).collectAccounts();
+
+    expect(q.single.account, 'me@example.com');
+    // Offline for live quota, yet the per-model table is present from local
+    // state (network-free), rolled up to base models.
+    expect(q.single.error, contains('quotabot login antigravity'));
+    expect(
+      q.single.modelQuotas.map((m) => m.model),
+      ['Gemini 3.5 Flash', 'Claude Opus 4.6'],
+    );
+    expect(q.single.modelQuotas.first.usedPercent, closeTo(1.5, 1e-9));
+    expect(q.single.modelQuotas.first.category, 'Fast');
   });
 
   test('empty or throwing account sources fail softly', () async {

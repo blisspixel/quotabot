@@ -20,8 +20,8 @@ Provider snapshots keep these stable fields:
 
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
-- Optional `plan`, `source`, `status`, `active`, `details`, `error`, and
-  `models`.
+- Optional `plan`, `source`, `status`, `active`, `details`, `error`, `models`,
+  and `model_quotas`.
 - `kind` is `subscription` or `local`.
 - `source` is an additive hint. When set to `manual`, the provider window is a
   local self-reported quota entry, not measured adapter telemetry.
@@ -34,6 +34,16 @@ Window objects keep:
 - Optional `used_percent` in the range `0..100`.
 - Optional `used` and `limit` counts.
 - Optional `resets_at` Unix epoch seconds.
+
+`model_quotas` is present only for providers that meter each model family from
+its own pool (Antigravity), and the `windows` summary stays the headline. Each
+entry keeps:
+
+- `model`, the provider's model name (pool-sharing effort/mode variants are
+  rolled up to this base name).
+- Optional `used_percent` in the range `0..100`.
+- Optional `resets_at` Unix epoch seconds.
+- Optional `category` (a provider speed label) and `note` (a provider badge).
 
 The contract is additive. Unknown fields are allowed at the root, provider,
 window, and model levels. Existing field meanings and types must not change

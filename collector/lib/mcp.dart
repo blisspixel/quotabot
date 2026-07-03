@@ -286,6 +286,23 @@ final _windowSchema = JsonSchema.object(
   required: ['label'],
 );
 
+/// One per-model quota entry, for providers that meter each model family from
+/// its own pool (Antigravity). The `windows` summary stays the headline.
+final _modelQuotaSchema = JsonSchema.object(
+  description: 'Per-model quota, when a provider meters models separately.',
+  properties: {
+    'model': JsonSchema.string(description: 'Provider model name.'),
+    'used_percent': JsonSchema.number(
+        description: 'Percent of the pool consumed (0..100).'),
+    'resets_at': JsonSchema.integer(description: 'Reset epoch seconds.'),
+    'category':
+        JsonSchema.string(description: 'Provider speed label, e.g. "Fast".'),
+    'note':
+        JsonSchema.string(description: 'Provider badge, e.g. "Limited time".'),
+  },
+  required: ['model'],
+);
+
 /// One provider entry inside a snapshot.
 final _providerSchema = JsonSchema.object(
   description: 'A provider snapshot. Unlisted fields may be added over time.',
@@ -300,6 +317,7 @@ final _providerSchema = JsonSchema.object(
     'as_of': JsonSchema.integer(description: 'Capture epoch seconds.'),
     'stale': JsonSchema.boolean(description: 'True when served from cache.'),
     'windows': JsonSchema.array(items: _windowSchema),
+    'model_quotas': JsonSchema.array(items: _modelQuotaSchema),
   },
   required: ['provider', 'account'],
 );

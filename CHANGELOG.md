@@ -215,6 +215,19 @@ Notable changes to quotabot. Newest first.
 ## 0.5.5 - 2026-07-01
 
 ### Added
+- Antigravity now reads the full per-model quota table it caches in local state
+  (`antigravityUnifiedStateSync.userStatus`), so every model family it meters
+  from its own pool (Gemini, Claude, GPT-OSS, and others) is captured with its
+  own remaining headroom, reset, speed category, and badge. It is read with no
+  network call, so the per-model table is present even when the live quota
+  endpoint is signed out; pool-sharing effort and mode variants roll up to their
+  base model. The compact window summary stays the headline: `doctor` prints a
+  one-line "N models tracked, most used: ..." summary, and the full table ships
+  in `quotabot json` and over MCP as `model_quotas`. Previously the adapter
+  collapsed the models into a single derived window and kept only the
+  most-constrained model per reset bucket, so a wide-open capable model (an
+  available Claude Opus while Gemini was spent) was hidden from view and from
+  routing.
 - `quotabot verify`: mechanical honesty checks over one live read, for the 1.0
   release-candidate provider verification matrix. Classifies each provider's
   read state (live, cached, out of quota, no data, error, local, undetected),

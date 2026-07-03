@@ -71,6 +71,62 @@ class QuotaWindow {
       );
 }
 
+/// Live per-model quota for a provider that meters each model family from its
+/// own pool rather than one shared window (Antigravity: every Gemini/Claude/
+/// GPT-OSS family has its own remaining headroom and reset). Captured richly for
+/// routing and detail views; the compact window summary stays the headline, so
+/// this never bloats the default display.
+class ModelQuota {
+  /// Model name as the provider labels it, e.g. "Gemini 3.5 Flash". Effort or
+  /// mode variants that share a pool are rolled up to this base name.
+  final String model;
+
+  /// Percent of this model's pool consumed, 0..100. Null when unknown.
+  final double? usedPercent;
+
+  /// Unix epoch seconds when this model's pool resets. Null when unknown.
+  final int? resetsAt;
+
+  /// Provider speed/category label, e.g. "Fast". Null when not exposed.
+  final String? category;
+
+  /// Short provider badge, e.g. "Limited time". Null when not exposed.
+  final String? note;
+
+  const ModelQuota({
+    required this.model,
+    this.usedPercent,
+    this.resetsAt,
+    this.category,
+    this.note,
+  });
+
+  /// Remaining headroom percent (100 - used), 0..100. Null when unknown.
+  double? get remainingPercent {
+    final u = usedPercent;
+    return u == null ? null : (100 - u).clamp(0, 100).toDouble();
+  }
+
+  /// True when this model's pool is effectively spent.
+  bool get exhausted => (usedPercent ?? 0) >= 99.5;
+
+  Map<String, dynamic> toJson() => {
+        'model': model,
+        if (usedPercent != null) 'used_percent': usedPercent,
+        if (resetsAt != null) 'resets_at': resetsAt,
+        if (category != null) 'category': category,
+        if (note != null) 'note': note,
+      };
+
+  factory ModelQuota.fromJson(Map<String, dynamic> j) => ModelQuota(
+        model: j['model'] as String,
+        usedPercent: finiteOrNull(j['used_percent'])?.clamp(0, 100).toDouble(),
+        resetsAt: finiteOrNull(j['resets_at'])?.toInt(),
+        category: j['category'] as String?,
+        note: j['note'] as String?,
+      );
+}
+
 /// One provider account's quota snapshot.
 class ProviderQuota {
   /// Stable provider id: "codex", "claude", "grok", "antigravity".
@@ -112,6 +168,11 @@ class ProviderQuota {
   /// the registry. Empty when the model set is unknown.
   final List<ModelInfo> models;
 
+  /// Live per-model quota, for providers that meter each model family from its
+  /// own pool (Antigravity). Empty for providers with a single shared window;
+  /// the [windows] summary stays the headline and this is detail on demand.
+  final List<ModelQuota> modelQuotas;
+
   /// True when data was read successfully.
   final bool ok;
 
@@ -143,6 +204,7 @@ class ProviderQuota {
     this.active = false,
     this.details = const [],
     this.models = const [],
+    this.modelQuotas = const [],
   });
 
   /// True when this is a local, always-available runtime rather than a metered
@@ -180,6 +242,8 @@ class ProviderQuota {
         'stale': stale,
         'windows': windows.map((w) => w.toJson()).toList(),
         if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
+        if (modelQuotas.isNotEmpty)
+          'model_quotas': modelQuotas.map((m) => m.toJson()).toList(),
       };
 
   factory ProviderQuota.fromJson(Map<String, dynamic> j) => ProviderQuota(
@@ -201,6 +265,9 @@ class ProviderQuota {
             .toList(),
         models: ((j['models'] as List?) ?? const [])
             .map((m) => ModelInfo.fromJson(m as Map<String, dynamic>))
+            .toList(),
+        modelQuotas: ((j['model_quotas'] as List?) ?? const [])
+            .map((m) => ModelQuota.fromJson(m as Map<String, dynamic>))
             .toList(),
       );
 
@@ -228,6 +295,9 @@ class ProviderQuota {
         models: metadataFrom != null && metadataFrom.models.isNotEmpty
             ? metadataFrom.models
             : models,
+        modelQuotas: metadataFrom != null && metadataFrom.modelQuotas.isNotEmpty
+            ? metadataFrom.modelQuotas
+            : modelQuotas,
       );
 
   /// True when this snapshot carries usable quota windows.
@@ -296,6 +366,16 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           sizeBytes: m.sizeBytes,
           vramBytes: m.vramBytes,
           quant: m.quant == null ? null : t(m.quant!),
+        ),
+    ],
+    modelQuotas: [
+      for (final m in q.modelQuotas)
+        ModelQuota(
+          model: t(m.model),
+          usedPercent: m.usedPercent,
+          resetsAt: m.resetsAt,
+          category: m.category == null ? null : t(m.category!),
+          note: m.note == null ? null : t(m.note!),
         ),
     ],
   );

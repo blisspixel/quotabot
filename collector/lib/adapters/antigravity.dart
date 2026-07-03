@@ -16,6 +16,7 @@ typedef AntigravityAccountCandidate = ({
   String? ideAccessToken,
   String? localModel,
   String? localNote,
+  List<ModelQuota> modelQuotas,
   bool useCliToken,
 });
 
@@ -25,6 +26,7 @@ typedef AntigravityLocalState = ({
   String? ideAccessToken,
   String? localModel,
   String? localNote,
+  List<ModelQuota> modelQuotas,
 });
 
 typedef AntigravityAccountSource = List<AntigravityAccountCandidate> Function();
@@ -239,6 +241,7 @@ class AntigravityAdapter {
         ideAccessToken: candidate.ideAccessToken,
         localModel: candidate.localModel,
         localNote: candidate.localNote,
+        modelQuotas: candidate.modelQuotas,
         useCliToken: candidate.useCliToken,
       );
       final existing = byAccount[account];
@@ -253,6 +256,9 @@ class AntigravityAdapter {
         ideAccessToken: existing.ideAccessToken ?? normalized.ideAccessToken,
         localModel: existing.localModel ?? normalized.localModel,
         localNote: existing.localNote ?? normalized.localNote,
+        modelQuotas: existing.modelQuotas.isNotEmpty
+            ? existing.modelQuotas
+            : normalized.modelQuotas,
         useCliToken: existing.useCliToken || normalized.useCliToken,
       );
     }
@@ -271,6 +277,7 @@ class AntigravityAdapter {
         ideAccessToken: activeLocalState?.ideAccessToken,
         localModel: activeLocalState?.localModel,
         localNote: activeLocalState?.localNote,
+        modelQuotas: activeLocalState?.modelQuotas ?? const [],
         useCliToken: activeLocalState == null,
       ));
     }
@@ -288,6 +295,7 @@ class AntigravityAdapter {
             ideAccessToken: state.ideAccessToken,
             localModel: state.localModel,
             localNote: state.localNote,
+            modelQuotas: state.modelQuotas,
             useCliToken: false,
           ));
         } else {
@@ -297,6 +305,7 @@ class AntigravityAdapter {
             ideAccessToken: state.ideAccessToken,
             localModel: state.localModel,
             localNote: state.localNote,
+            modelQuotas: state.modelQuotas,
             useCliToken: false,
           );
         }
@@ -311,6 +320,7 @@ class AntigravityAdapter {
         ideAccessToken: null,
         localModel: null,
         localNote: null,
+        modelQuotas: const [],
         useCliToken: true,
       ));
     }
@@ -334,6 +344,7 @@ class AntigravityAdapter {
               ideAccessToken: account.ideAccessToken,
               localModel: account.localModel,
               localNote: account.localNote,
+              modelQuotas: account.modelQuotas,
               useCliToken: account.useCliToken,
             )
           : (
@@ -342,6 +353,9 @@ class AntigravityAdapter {
               ideAccessToken: existing.ideAccessToken ?? account.ideAccessToken,
               localModel: existing.localModel ?? account.localModel,
               localNote: existing.localNote ?? account.localNote,
+              modelQuotas: existing.modelQuotas.isNotEmpty
+                  ? existing.modelQuotas
+                  : account.modelQuotas,
               useCliToken: existing.useCliToken || account.useCliToken,
             );
     }
@@ -415,6 +429,7 @@ class AntigravityAdapter {
             if (source.localNote != null) source.localNote!,
           ],
           windows: const [],
+          modelQuotas: source.modelQuotas,
         );
 
     try {
@@ -523,6 +538,7 @@ class AntigravityAdapter {
           if (source.localNote != null) source.localNote!,
         ],
         windows: windows,
+        modelQuotas: source.modelQuotas,
       );
     } catch (_) {
       return ProviderQuota(
@@ -669,6 +685,7 @@ class AntigravityAdapter {
           _value(db, 'antigravityUnifiedStateSync.userStatus');
 
       String? email, plan, localModel, localNote;
+      List<int>? authProtoBytes;
       if (authRaw != null) {
         final status = jsonDecode(authRaw) as Map<String, dynamic>;
         email = status['email']?.toString();
@@ -676,6 +693,7 @@ class AntigravityAdapter {
         if (b64 is String) {
           final bytes = _decodeBase64Bytes(b64);
           if (bytes != null) {
+            authProtoBytes = bytes;
             final parsed = antigravityUserStatusFromProto(bytes);
             plan = planFromProto(bytes) ?? parsed?.plan;
             localModel = parsed?.model;
@@ -692,6 +710,19 @@ class AntigravityAdapter {
         localModel ??= localStatus.model;
         localNote ??= localStatus.note;
       }
+      // Per-model quota lives in the unified userStatus blob (the richer
+      // source); fall back to the proto embedded in antigravityAuthStatus.
+      var modelQuotas = const <ModelQuota>[];
+      final userStatusBytes =
+          userStatusRaw == null ? null : _decodeBase64Bytes(userStatusRaw);
+      for (final src in [userStatusBytes, authProtoBytes]) {
+        if (src == null) continue;
+        final q = antigravityModelQuotas(src);
+        if (q.isNotEmpty) {
+          modelQuotas = q;
+          break;
+        }
+      }
       final access = tokenRaw == null
           ? null
           : findEmbeddedToken(tokenRaw, r'ya29\.[A-Za-z0-9._\-]{30,}');
@@ -701,6 +732,7 @@ class AntigravityAdapter {
         ideAccessToken: access,
         localModel: localModel,
         localNote: localNote,
+        modelQuotas: modelQuotas,
       );
     } finally {
       db.close();
