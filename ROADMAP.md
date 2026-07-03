@@ -46,14 +46,13 @@ wrong feature.
   ever talks to a model, it sends only quotabot's own synthetic probe.
 - **Advisor, never a proxy.** quotabot recommends where to send the next
   request; it never carries the request itself, and it never uses a provider's
-  subscription credentials to make a model call on your behalf. This is the
-  architecture and the compliance stance at once: providers (Anthropic's
-  early-2026 clarification is explicit) treat routing requests through
-  subscription OAuth credentials as a terms violation and an account-ban
-  vector, so quotabot stays out of the request path entirely. Holding and
-  reading multiple accounts is fine; proxying their credentials is the line we
-  never cross. This is also the moat: every proxy-based competitor is exposed
-  where quotabot is not.
+  subscription credentials to make a model call on your behalf. It reads what
+  your own tools already store and hands back a suggestion, staying out of the
+  request path. That keeps it a lightweight, read-only signal source rather than
+  another gateway in the critical path: nothing new to route through, nothing
+  new to trust with your traffic, and each provider's own client keeps making
+  the call the way it always has. Reading multiple accounts is fully supported;
+  making the call on their behalf is simply not what quotabot does.
 - **No surprise bills.** Runtime code must not call paid model, chat, image, or
   content-generation APIs. True included-quota plans are allowed only when the
   caller can prove overages are disabled; request-metered API keys remain
@@ -667,11 +666,15 @@ TokenTracker, and the new entrants Quotio and Quotio's Linux fork). The niche
 that was empty is now contested at the edges, so lean on the intersection no
 one else holds, not on any single axis:
 
-- **Advisor, not proxy - now the compliance moat.** Every routing competitor
-  that ships (Quotio's CLIProxyAPI, LiteLLM-on-Max) proxies subscription
-  credentials, which providers now treat as a terms violation and a ban vector.
-  quotabot recommends and lets the official client make the call, so it is the
-  only routing option that cannot get an account banned. Lead with this.
+- **Advisor, not proxy.** quotabot suggests where the next request should go and
+  lets each provider's own client make the call; it stays out of the request
+  path. Other routing tools work by proxying the request through a gateway, so
+  staying an advisor is a real architectural difference: quotabot is one more
+  read-only signal, not one more hop your traffic depends on, which is the
+  cleanest fit for the agent-facing routing it is built around. Lead with the
+  value, not the contrast: quotabot helps you get the most out of the
+  subscriptions you already pay for, and the agent-facing suggestion lets agents
+  route across accounts the way a person would.
 - **True cross-platform, not a fork.** The menu-bar incumbents (CodexBar,
   ClaudeBar, Quotio) are macOS-only; Quotio's Linux is a community fork. One
   first-class Windows/Linux/macOS codebase is a real, present gap.
