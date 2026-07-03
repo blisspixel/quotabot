@@ -73,8 +73,10 @@ try {
   & (Join-Path $scriptDir 'package-cli.ps1')
 } finally { Pop-Location }
 
-$asset = Join-Path $root 'release\quotabot-windows-x64.zip'
-if (-not (Test-Path $asset)) { throw "CLI build did not produce $asset" }
+# package-cli.ps1 names the asset by host arch (x64 or arm64), so match either
+# rather than assuming x64, which broke the source build on ARM64 Windows.
+$asset = (Get-ChildItem (Join-Path $root 'release') -Filter 'quotabot-windows-*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+if (-not $asset -or -not (Test-Path $asset)) { throw "CLI build did not produce a quotabot-windows-*.zip in release/" }
 
 Write-Step "Installing the CLI to $installRoot"
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
@@ -90,8 +92,17 @@ try {
   if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
     throw "CLI archive did not contain lib\sqlite3.dll"
   }
-  Remove-Item -LiteralPath (Join-Path $installRoot 'bin') -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath (Join-Path $installRoot 'lib') -Recurse -Force -ErrorAction SilentlyContinue
+  # Do not swallow a removal failure: a running quotabot holding the exe open
+  # would otherwise leave the old bin/ and nest the new bundle at bin\bin, so
+  # PATH would keep the stale binary while setup reports success.
+  $binDst = Join-Path $installRoot 'bin'
+  $libDst = Join-Path $installRoot 'lib'
+  try {
+    if (Test-Path -LiteralPath $binDst) { Remove-Item -LiteralPath $binDst -Recurse -Force }
+    if (Test-Path -LiteralPath $libDst) { Remove-Item -LiteralPath $libDst -Recurse -Force }
+  } catch {
+    throw "Could not replace the existing install. Close any running quotabot (for example 'quotabot top' or the MCP server) and re-run. ($($_.Exception.Message))"
+  }
   Copy-Item -LiteralPath (Join-Path $extractPath 'bin') -Destination $installRoot -Recurse
   Copy-Item -LiteralPath (Join-Path $extractPath 'lib') -Destination $installRoot -Recurse
 } finally {
@@ -107,9 +118,13 @@ foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
 }
 Write-Ok "Installed quotabot.exe"
 
-# Add the install dir to the user PATH if it is not already there.
+# Add the install dir to the user PATH if it is not already there. Compare exact
+# entries, not a -like substring: a wildcard metacharacter in the path (for
+# example a bracket in the username) would make -like miss the existing entry
+# and append a duplicate on every run.
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($userPath -notlike "*$installDir*") {
+$userPaths = @($userPath -split ';' | Where-Object { $_ })
+if ($userPaths -notcontains $installDir) {
   [Environment]::SetEnvironmentVariable('Path', "$installDir;$userPath", 'User')
   Write-Ok "Added $installDir to your PATH (restart the terminal to pick it up)"
 } else {
@@ -121,6 +136,7 @@ if (-not $CliOnly -and -not $NoApp) {
   Push-Location $app
   try {
     & flutter build windows --release
+    if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed with exit code $LASTEXITCODE" }
   } finally { Pop-Location }
 
   Write-Step 'Creating the Desktop shortcut'
