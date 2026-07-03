@@ -1,25 +1,41 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
+
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
 import '../util.dart';
 
-/// Reads Codex (OpenAI) usage from the rate_limits events Codex writes to its
-/// session rollout files on every turn. No network or auth required.
+typedef CodexUsageFetcher = Future<Map<String, dynamic>?> Function();
+
+/// Reads Codex (OpenAI) usage. Prefers the authoritative live usage endpoint
+/// (`/backend-api/wham/usage`, the same data the CLI's own status view polls),
+/// which is cross-device, reusing the access token Codex already stores in
+/// ~/.codex/auth.json. Falls back to the rate_limits events Codex writes to its
+/// local session rollout files - a this-machine-only view that undercounts when
+/// the account is used on another device - when the live read is unavailable.
 ///
 /// Codex meters different models against separate limit buckets, and each
-/// session only records the bucket it used. Reading a single newest session can
-/// therefore show 0% on a fresh model bucket while real usage sits on another.
-/// This reads the latest snapshot of each bucket across recent sessions and
-/// keeps the binding (most-constrained) window per slot.
+/// session only records the bucket it used, so the session fallback reads the
+/// latest snapshot of each bucket across recent sessions and keeps the binding
+/// (most-constrained) window per slot.
 class CodexAdapter {
   static const id = codexProviderId;
   static const name = codexProviderName;
+  static const _usageEndpoint = 'https://chatgpt.com/backend-api/wham/usage';
   final Directory? _sessionsDir;
+  final CodexUsageFetcher? _usageFetcher;
+  final http.Client? _http;
 
-  CodexAdapter({Directory? sessionsDir}) : _sessionsDir = sessionsDir;
+  CodexAdapter({
+    Directory? sessionsDir,
+    CodexUsageFetcher? usageFetcher,
+    http.Client? client,
+  })  : _sessionsDir = sessionsDir,
+        _usageFetcher = usageFetcher,
+        _http = client;
 
   /// How many recent rollout files to scan for per-bucket snapshots. Enough to
   /// catch buckets touched across a normal working window without reading the
@@ -28,6 +44,66 @@ class CodexAdapter {
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
+    // Prefer the authoritative cross-device live read; fall back to the local
+    // per-machine session snapshots only when it is unavailable.
+    final live = await _tryLive(asOf);
+    if (live != null) return live;
+    return _fromSessions(asOf);
+  }
+
+  /// Reads the authoritative live usage endpoint. Returns null (so the caller
+  /// falls back to sessions) when there is no token, the token is expired, or
+  /// the network fails - it never throws.
+  Future<ProviderQuota?> _tryLive(int asOf) async {
+    try {
+      final resp =
+          _usageFetcher != null ? await _usageFetcher() : await _fetchUsage();
+      if (resp == null) return null;
+      final windows = codexUsageWindows(resp);
+      if (windows.isEmpty) return null;
+      final plan = resp['plan_type']?.toString();
+      final email = resp['email']?.toString();
+      return ProviderQuota(
+        provider: id,
+        displayName: name,
+        account:
+            (email != null && email.isNotEmpty) ? email : (plan ?? 'default'),
+        plan: plan,
+        asOf: asOf,
+        windows: windows,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // A metadata GET that reuses the token Codex already stores and keeps fresh;
+  // it spends no usage tokens. auth.json sits beside the sessions directory.
+  Future<Map<String, dynamic>?> _fetchUsage() async {
+    final base = _sessionsDir?.parent.path ?? '${home()}/.codex';
+    final authFile = File('$base/auth.json');
+    if (!authFile.existsSync()) return null;
+    final auth = jsonDecode(authFile.readAsStringSync());
+    if (auth is! Map) return null;
+    final tokens = auth['tokens'];
+    if (tokens is! Map) return null;
+    final token = tokens['access_token'] as String?;
+    final acct = tokens['account_id'] as String?;
+    if (token == null || token.isEmpty) return null;
+    final get = _http?.get ?? http.get;
+    final resp = await get(
+      Uri.parse(_usageEndpoint),
+      headers: {
+        'Authorization': 'Bearer $token',
+        if (acct != null) 'chatgpt-account-id': acct,
+      },
+    ).timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) return null;
+    final body = jsonDecode(resp.body);
+    return body is Map<String, dynamic> ? body : null;
+  }
+
+  Future<ProviderQuota> _fromSessions(int asOf) async {
     try {
       final sessionsDir =
           _sessionsDir ?? Directory('${home()}/.codex/sessions');

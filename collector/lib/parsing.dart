@@ -70,6 +70,31 @@ String codexLabel(dynamic minutes, String fallback) {
   return fallback;
 }
 
+/// Windows from the live Codex `/backend-api/wham/usage` response, which is
+/// authoritative and cross-device unlike the per-machine session snapshots.
+/// `rate_limit.primary_window` is the 5-hour window and `secondary_window` the
+/// weekly, each with `used_percent`, `reset_at`, and `limit_window_seconds`.
+List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) {
+  final rl = resp?['rate_limit'];
+  if (rl is! Map) return const [];
+  final out = <QuotaWindow>[];
+  for (final entry in const [
+    ['primary_window', '5h'],
+    ['secondary_window', 'weekly'],
+  ]) {
+    final w = rl[entry[0]];
+    if (w is! Map) continue;
+    final pct = _boundedPercent(w['used_percent']);
+    final reset = parseReset(w['reset_at']);
+    final secs = w['limit_window_seconds'];
+    final label = secs is num ? codexLabel(secs / 60, entry[1]) : entry[1];
+    if (pct != null || reset != null) {
+      out.add(QuotaWindow(label: label, usedPercent: pct, resetsAt: reset));
+    }
+  }
+  return out;
+}
+
 // --- Claude -----------------------------------------------------------------
 
 /// Builds windows from the Anthropic OAuth usage response.

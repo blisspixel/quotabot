@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/adapters/codex.dart';
+import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -120,6 +121,54 @@ void main() {
     expect(q.error, contains('snapshot 2h old'));
     expect(q.windows.firstWhere((w) => w.label == '1h').usedPercent, 42);
   });
+
+  test('prefers the authoritative live usage endpoint over local sessions',
+      () async {
+    // A local session says barely used; the account was hammered on another
+    // machine, so the live read (weekly spent) must win.
+    _writeRollout(temp, 'rollout-standard.jsonl', [
+      {
+        'timestamp': _iso(nowEpoch()),
+        'rate_limits': _limits('standard', primary: 5, weekly: 5),
+      },
+    ]);
+
+    final q = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async => _wham(primary: 0, secondary: 100),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.account, 'blisspixel@example.com');
+    expect(q.plan, 'pro');
+    expect(q.windows.firstWhere((w) => w.label == '5h').usedPercent, 0);
+    expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 100);
+  });
+
+  test('falls back to local sessions when the live read is unavailable',
+      () async {
+    _writeRollout(temp, 'rollout-standard.jsonl', [
+      {
+        'timestamp': _iso(nowEpoch()),
+        'rate_limits': _limits('standard', primary: 20, weekly: 15),
+      },
+    ]);
+
+    final q = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async => null, // no token, expired, or offline
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 15);
+  });
+
+  test('codexUsageWindows maps the live rate_limit windows', () {
+    final w = codexUsageWindows(_wham(primary: 12, secondary: 100));
+    expect(w.firstWhere((x) => x.label == '5h').usedPercent, 12);
+    expect(w.firstWhere((x) => x.label == 'weekly').usedPercent, 100);
+    expect(codexUsageWindows(const {}), isEmpty);
+  });
 }
 
 void _writeRollout(
@@ -156,6 +205,29 @@ Map<String, dynamic> _limits(
       'used_percent': weekly,
       'window_minutes': 10080,
       'resets_at': now + 2000,
+    },
+  };
+}
+
+/// The live `/backend-api/wham/usage` response shape (sanitized).
+Map<String, dynamic> _wham({required num primary, required num secondary}) {
+  final now = nowEpoch();
+  return {
+    'email': 'blisspixel@example.com',
+    'plan_type': 'pro',
+    'rate_limit': {
+      'allowed': secondary < 100,
+      'limit_reached': secondary >= 100,
+      'primary_window': {
+        'used_percent': primary,
+        'limit_window_seconds': 18000,
+        'reset_at': now + 18000,
+      },
+      'secondary_window': {
+        'used_percent': secondary,
+        'limit_window_seconds': 604800,
+        'reset_at': now + 604800,
+      },
     },
   };
 }
