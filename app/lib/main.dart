@@ -1988,7 +1988,11 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<void> _checkAndNotify() async {
-    if (!_enableNotifications) return;
+    final webhookUrl = _webhookUrl;
+    // Local notifications and the alert webhook are independent transports; run
+    // when either is active. Alerts are still computed and armed so the
+    // edge-trigger stays correct even when only the webhook is on.
+    if (!_enableNotifications && webhookUrl == null) return;
     try {
       final now = DateTime.now();
       final nowSec = now.millisecondsSinceEpoch ~/ 1000;
@@ -1999,8 +2003,7 @@ class _DashboardState extends State<Dashboard>
 
       // Proactive low-quota alerts: fire once when a provider's binding window
       // crosses into red, naming where to route next, using the same
-      // edge-triggered engine as `quotabot watch`. Optionally mirror each alert
-      // to a local webhook so it can reach a tray, a shell, or chat.
+      // edge-triggered engine as `quotabot watch`.
       final alerts = computeAlerts(
         snapshot: snapshot,
         suggestion: suggestion,
@@ -2009,50 +2012,64 @@ class _DashboardState extends State<Dashboard>
       );
       _armed = alerts.armed;
       for (final a in alerts.fired) {
-        final id = _notificationId('${a.provider}:low');
-        await flutterLocalNotificationsPlugin.cancel(id);
-        await flutterLocalNotificationsPlugin.show(
-          id,
-          'Low quota',
-          a.message,
-          _buildDetails(a.displayName),
-        );
-        final url = _webhookUrl;
-        if (url != null) {
+        // The notification and the webhook post independently: a notification
+        // plugin failure (for example no Windows implementation) must not
+        // suppress the webhook or skip the rest of the batch. Both keys carry
+        // the account so two accounts of one provider do not collide.
+        if (_enableNotifications) {
+          final id = _notificationId(
+            '${quotaIdentityKey(a.provider, a.account)}:low',
+          );
+          try {
+            await flutterLocalNotificationsPlugin.cancel(id);
+            await flutterLocalNotificationsPlugin.show(
+              id,
+              'Low quota',
+              a.message,
+              _buildDetails(a.displayName),
+            );
+          } catch (_) {}
+        }
+        if (webhookUrl != null) {
           await postAlert(
-            url,
+            webhookUrl,
             a.toJson(),
             allowExternal: _webhookAllowExternal,
           );
         }
       }
 
-      // Scheduled "resets soon" reminders for windows that are nearly full.
-      for (final q in snapshot) {
-        if (q.stale) continue;
-        for (final w in q.windows) {
-          if (w.resetsAt != null &&
-              w.resetsAt! > nowSec &&
-              w.percent != null &&
-              w.percent! > 80) {
-            final key = '${q.provider}:${w.label}:reset';
-            if (_shouldNotify(key, now)) {
-              final resetDt = DateTime.fromMillisecondsSinceEpoch(
-                w.resetsAt! * 1000,
-              );
-              final tzReset = tz.TZDateTime.from(resetDt, tz.local);
-              final id = _notificationId(key);
-              await flutterLocalNotificationsPlugin.cancel(id);
-              await flutterLocalNotificationsPlugin.zonedSchedule(
-                id,
-                'Quota reset soon',
-                '${q.displayName} ${w.label} resets soon',
-                tzReset,
-                _buildDetails(q.displayName),
-                androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-                uiLocalNotificationDateInterpretation:
-                    UILocalNotificationDateInterpretation.absoluteTime,
-              );
+      // Scheduled "resets soon" reminders are local notifications only.
+      if (_enableNotifications) {
+        for (final q in snapshot) {
+          if (q.stale) continue;
+          for (final w in q.windows) {
+            if (w.resetsAt != null &&
+                w.resetsAt! > nowSec &&
+                w.percent != null &&
+                w.percent! > 80) {
+              final key = '${quotaIdentityKeyFor(q)}:${w.label}:reset';
+              if (_shouldNotify(key, now)) {
+                final resetDt = DateTime.fromMillisecondsSinceEpoch(
+                  w.resetsAt! * 1000,
+                );
+                final tzReset = tz.TZDateTime.from(resetDt, tz.local);
+                final id = _notificationId(key);
+                try {
+                  await flutterLocalNotificationsPlugin.cancel(id);
+                  await flutterLocalNotificationsPlugin.zonedSchedule(
+                    id,
+                    'Quota reset soon',
+                    '${q.displayName} ${w.label} resets soon',
+                    tzReset,
+                    _buildDetails(q.displayName),
+                    androidScheduleMode:
+                        AndroidScheduleMode.exactAllowWhileIdle,
+                    uiLocalNotificationDateInterpretation:
+                        UILocalNotificationDateInterpretation.absoluteTime,
+                  );
+                } catch (_) {}
+              }
             }
           }
         }
