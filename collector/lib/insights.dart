@@ -20,6 +20,14 @@ const int kHeatmapShrinkagePriorSamples = 4;
 /// Aligns an epoch second to the start of its hour bucket.
 int bucketStart(int epoch) => epoch - (epoch % kBucketSpan);
 
+/// A non-negative int from a JSON number, or 0. Non-finite and negative values
+/// collapse to 0 so a hostile bucket count/histogram cannot throw in `.toInt()`
+/// or skew the aggregate.
+int _nonNegInt(Object? v) {
+  final d = finiteOrNull(v);
+  return d == null || d < 0 ? 0 : d.toInt();
+}
+
 /// One hour of headroom samples reduced to a fixed-size aggregate.
 ///
 /// Tracks enough to recover mean, variance, extremes, an approximate
@@ -80,17 +88,20 @@ class HeadroomBucket {
         'h': hist,
       };
 
+  // Every numeric is read through [finiteOrNull] so a corrupt or hostile bucket
+  // file (an Infinity sum, a NaN mean) can neither throw in `.toInt()` nor
+  // survive to crash `jsonEncode` when the analytics are later serialized. A
+  // bad entry degrades to a harmless empty-ish bucket instead of losing the
+  // whole history file.
   factory HeadroomBucket.fromJson(Map<String, dynamic> j) => HeadroomBucket(
-        start: j['s'] as int,
-        count: (j['n'] as num?)?.toInt() ?? 0,
-        sum: (j['sum'] as num?)?.toDouble() ?? 0,
-        sumSq: (j['sq'] as num?)?.toDouble() ?? 0,
-        min: (j['min'] as num?)?.toDouble() ?? double.infinity,
-        max: (j['max'] as num?)?.toDouble() ?? double.negativeInfinity,
-        exhausted: (j['x'] as num?)?.toInt() ?? 0,
-        hist: ((j['h'] as List?) ?? const [])
-            .map((e) => (e as num).toInt())
-            .toList(),
+        start: finiteOrNull(j['s'])?.toInt() ?? 0,
+        count: _nonNegInt(j['n']),
+        sum: finiteOrNull(j['sum']) ?? 0,
+        sumSq: finiteOrNull(j['sq']) ?? 0,
+        min: finiteOrNull(j['min']) ?? double.infinity,
+        max: finiteOrNull(j['max']) ?? double.negativeInfinity,
+        exhausted: _nonNegInt(j['x']),
+        hist: ((j['h'] as List?) ?? const []).map(_nonNegInt).toList(),
       );
 }
 

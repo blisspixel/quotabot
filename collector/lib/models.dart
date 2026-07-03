@@ -7,6 +7,13 @@ library;
 const double kDefaultExpiringQuotaWasteThreshold = 35.0;
 const int kDefaultExpiringQuotaMaxHours = 24;
 
+/// A finite double from a JSON-decoded number, or null. `jsonEncode` throws on
+/// NaN and infinities, and the routing and analytics math assume finite input,
+/// so a non-finite value read back from a corrupt or hostile cache/history file
+/// is dropped here at the boundary rather than propagated into a later crash.
+double? finiteOrNull(Object? v) =>
+    v is num && v.toDouble().isFinite ? v.toDouble() : null;
+
 /// A single rolling limit window for a provider (e.g. a 5-hour or weekly cap).
 class QuotaWindow {
   /// Short human label, e.g. "5h", "weekly", "daily".
@@ -55,10 +62,12 @@ class QuotaWindow {
 
   factory QuotaWindow.fromJson(Map<String, dynamic> j) => QuotaWindow(
         label: j['label'] as String,
-        usedPercent: (j['used_percent'] as num?)?.toDouble(),
-        used: j['used'] as num?,
-        limit: j['limit'] as num?,
-        resetsAt: j['resets_at'] as int?,
+        // Percents bound to 0..100; counts kept as-is but finite; a non-finite
+        // reset is dropped rather than thrown through `as int`.
+        usedPercent: finiteOrNull(j['used_percent'])?.clamp(0, 100).toDouble(),
+        used: finiteOrNull(j['used']),
+        limit: finiteOrNull(j['limit']),
+        resetsAt: finiteOrNull(j['resets_at'])?.toInt(),
       );
 }
 

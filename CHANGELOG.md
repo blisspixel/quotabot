@@ -5,6 +5,13 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Security
+- A corrupt or hostile local cache/history file can no longer crash the CLI or
+  MCP server. Non-finite numbers (an `Infinity` or `NaN` that JSON allows but
+  `jsonEncode` rejects) read back from a quota snapshot or an analytics bucket
+  are now dropped or bounded at the load boundary, instead of surviving to
+  throw when `stats`/`report`/`suggest --json`, `list_quotas`, or the MCP
+  routing tools serialize their output. A bad analytics bucket degrades to a
+  harmless empty bucket rather than losing the whole history file.
 - Grok no longer lends the ownerless provider-default grant across multiple
   accounts. When `~/.grok/auth.json` lists more than one account, an account
   without its own grant is read only from its own CLI token, never from the
