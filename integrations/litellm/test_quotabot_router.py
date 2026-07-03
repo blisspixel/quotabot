@@ -124,6 +124,22 @@ class RouterTests(unittest.TestCase):
         chosen = asyncio.run(router._route("frontier", {}, None))
         self.assertEqual(chosen, "ollama-qwen")
 
+    def test_managed_model_with_no_candidates_fails_closed(self):
+        # A logical model declared in the policy but with an empty candidate
+        # list is managed: it must fail closed, not fall through to the caller's
+        # original (possibly paid) model.
+        router = QuotabotRouter()
+        router.policy = Policy(models={"frontier": []})
+        with self.assertRaises(UnsafeRouteError):
+            asyncio.run(router._route("frontier", {}, None))
+
+    def test_unmanaged_model_passes_through(self):
+        # A model absent from the policy is not managed and passes through.
+        router = QuotabotRouter()
+        router.policy = Policy(models={"frontier": []})
+        chosen = asyncio.run(router._route("some-other-model", {}, None))
+        self.assertEqual(chosen, "some-other-model")
+
     def test_quota_plan_candidates_require_overages_disabled(self):
         router = QuotabotRouter()
         router.policy = Policy(
