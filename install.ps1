@@ -76,8 +76,18 @@ try {
     if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
         throw "Downloaded archive did not contain lib\sqlite3.dll"
     }
-    Remove-Item -LiteralPath (Join-Path $installRoot "bin") -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath (Join-Path $installRoot "lib") -Recurse -Force -ErrorAction SilentlyContinue
+    # Replace the old install. Do NOT swallow a removal failure: if a running
+    # quotabot holds the exe open, a silenced Remove-Item would leave the old
+    # bin/ in place and Copy-Item would nest the new bundle at bin\bin, so PATH
+    # would keep resolving the stale binary while the installer reports success.
+    $binDst = Join-Path $installRoot "bin"
+    $libDst = Join-Path $installRoot "lib"
+    try {
+        if (Test-Path -LiteralPath $binDst) { Remove-Item -LiteralPath $binDst -Recurse -Force }
+        if (Test-Path -LiteralPath $libDst) { Remove-Item -LiteralPath $libDst -Recurse -Force }
+    } catch {
+        throw "Could not replace the existing install. Close any running quotabot (for example 'quotabot top' or the MCP server) and re-run. ($($_.Exception.Message))"
+    }
     Copy-Item -LiteralPath (Join-Path $extractPath "bin") -Destination $installRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $extractPath "lib") -Destination $installRoot -Recurse
     Write-Host "Installed to $installRoot"
