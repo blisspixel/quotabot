@@ -215,6 +215,17 @@ Notable changes to quotabot. Newest first.
 ## 0.5.5 - 2026-07-01
 
 ### Added
+- A silent-drift canary now validates each fresh read against the last cached
+  one at the point it is persisted, and flags an implausible read as `suspect`
+  instead of trusting it blindly: a window whose reset moved earlier, or usage
+  that fell with no reset for a provider that only ever consumes. It is
+  fail-soft (the number is still shown, only annotated), the concern rides
+  through `quotabot json`, `doctor`, and MCP, and it is provider-aware, so
+  xAI's legitimate Grok pool re-rating and Antigravity's max-over-models window
+  are not false-flagged. This is the first use of stored history to check a
+  fresh reading, closing the gap where a provider that starts reading wrong
+  without failing was previously trusted, which the 1.0 promise of "reads
+  correctly or fails plainly" did not otherwise enforce.
 - Antigravity now reads the full per-model quota table it caches in local state
   (`antigravityUnifiedStateSync.userStatus`), so every model family it meters
   from its own pool (Gemini, Claude, GPT-OSS, and others) is captured with its

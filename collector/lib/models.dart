@@ -188,6 +188,13 @@ class ProviderQuota {
   /// True when [asOf] is older data served from cache (e.g. logged-out account).
   final bool stale;
 
+  /// A non-fatal plausibility concern raised by the drift canary when this read
+  /// is implausible versus the last one (e.g. a window's reset moved earlier, or
+  /// usage fell with no reset for a provider that only consumes). Null when the
+  /// read looks consistent. The reading is still shown; this only annotates it,
+  /// so a silently drifted provider is flagged rather than trusted blindly.
+  final String? suspect;
+
   ProviderQuota({
     required this.provider,
     required this.displayName,
@@ -205,6 +212,7 @@ class ProviderQuota {
     this.details = const [],
     this.models = const [],
     this.modelQuotas = const [],
+    this.suspect,
   });
 
   /// True when this is a local, always-available runtime rather than a metered
@@ -240,6 +248,7 @@ class ProviderQuota {
         if (error != null) 'error': error,
         'as_of': asOf,
         'stale': stale,
+        if (suspect != null) 'suspect': suspect,
         'windows': windows.map((w) => w.toJson()).toList(),
         if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
         if (modelQuotas.isNotEmpty)
@@ -259,6 +268,7 @@ class ProviderQuota {
         kind: j['kind'] as String? ?? 'subscription',
         status: j['status'] as String?,
         active: j['active'] as bool? ?? false,
+        suspect: j['suspect'] as String?,
         details: ((j['details'] as List?) ?? const []).cast<String>(),
         windows: ((j['windows'] as List?) ?? const [])
             .map((w) => QuotaWindow.fromJson(w as Map<String, dynamic>))
@@ -298,6 +308,31 @@ class ProviderQuota {
         modelQuotas: metadataFrom != null && metadataFrom.modelQuotas.isNotEmpty
             ? metadataFrom.modelQuotas
             : modelQuotas,
+        // The concern belongs to these cached windows, so it rides along when
+        // they are served stale, regardless of fresh metadata.
+        suspect: suspect,
+      );
+
+  /// Returns a copy annotated with a drift/plausibility [reason], leaving the
+  /// reading itself intact so it is shown, not hidden.
+  ProviderQuota withSuspect(String reason) => ProviderQuota(
+        provider: provider,
+        displayName: displayName,
+        account: account,
+        asOf: asOf,
+        plan: plan,
+        source: source,
+        ok: ok,
+        error: error,
+        windows: windows,
+        stale: stale,
+        kind: kind,
+        status: status,
+        active: active,
+        details: details,
+        models: models,
+        modelQuotas: modelQuotas,
+        suspect: reason,
       );
 
   /// True when this snapshot carries usable quota windows.
@@ -378,6 +413,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           note: m.note == null ? null : t(m.note!),
         ),
     ],
+    suspect: q.suspect == null ? null : t(q.suspect!),
   );
 }
 

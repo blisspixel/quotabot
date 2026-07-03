@@ -13,6 +13,7 @@ import 'adapters/windsurf.dart';
 import 'analysis.dart';
 import 'cache.dart';
 import 'demo.dart';
+import 'drift.dart';
 import 'manual_quota.dart';
 import 'models.dart';
 import 'provider_ids.dart';
@@ -196,17 +197,17 @@ Future<ProviderQuota> _withCache(
 
 ProviderQuota _cacheResult(ProviderQuota result) {
   if (result.ok && result.hasWindows) {
-    saveSnapshot(result);
-    return result;
+    // Validate the fresh read against the last one before trusting it: a value
+    // that is implausible versus the previous read (a reset that moved earlier,
+    // usage that fell with no reset) is flagged suspect, not hidden.
+    final previous = _loadCachedSnapshot(result);
+    final drift = previous == null ? null : detectQuotaDrift(result, previous);
+    final flagged = drift == null ? result : result.withSuspect(drift);
+    saveSnapshot(flagged);
+    return flagged;
   }
   // Read failed or returned no windows; serve last-known if we have one.
-  // Antigravity is cached per account, so load the accounted file for the
-  // active account rather than the generic (never-written) antigravity.json.
-  final cached = switch (result.provider) {
-    AntigravityAdapter.id => loadAntigravitySnapshot(result.account),
-    GrokAdapter.id => loadGrokSnapshot(result.account),
-    _ => loadSnapshot(result.provider),
-  };
+  final cached = _loadCachedSnapshot(result);
   if (cached != null && cached.hasWindows) {
     // For antigravity, only serve the cache if its account is still one of the
     // currently logged-in profiles. This prevents showing a previous account's
@@ -223,3 +224,13 @@ ProviderQuota _cacheResult(ProviderQuota result) {
   }
   return result;
 }
+
+/// Loads the last-known snapshot for [result]'s provider and account.
+/// Antigravity and Grok are cached per account, so the accounted file is loaded
+/// for the active account rather than the generic (never-written) file.
+ProviderQuota? _loadCachedSnapshot(ProviderQuota result) =>
+    switch (result.provider) {
+      AntigravityAdapter.id => loadAntigravitySnapshot(result.account),
+      GrokAdapter.id => loadGrokSnapshot(result.account),
+      _ => loadSnapshot(result.provider),
+    };
