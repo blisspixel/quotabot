@@ -164,6 +164,18 @@ void main() {
     expect(listProfiles(dir: temp).map((p) => p.name), ['default']);
   });
 
+  test('a corrupt default.json still yields the zero-config default', () {
+    // A torn or hand-edited default file must not make the always-available
+    // default profile unusable; a non-default corrupt file still returns null.
+    File('${temp.path}/default.json').writeAsStringSync('{not json');
+    final loaded = loadProfile('default', dir: temp);
+    expect(loaded, isNotNull);
+    expect(loaded!.name, defaultProfileName);
+
+    File('${temp.path}/broken.json').writeAsStringSync('{not json');
+    expect(loadProfile('broken', dir: temp), isNull);
+  });
+
   test('saved profile file and directory are owner-only on POSIX', () {
     // Profile JSON carries account emails; on POSIX it must not be group- or
     // world-readable. Windows uses ACLs, verified by the util layer's tests.
