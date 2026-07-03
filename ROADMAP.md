@@ -127,14 +127,18 @@ logical order (each enables the next; no dates):
    Rule: capture richly, display compactly.
 2. **SEE integrity - a silent-drift canary.** 1.0 acceptance criterion 1 is
    "every provider either reads correctly or fails with a plain message," but
-   nothing yet catches a read that is wrong and does not fail: a re-rated or
-   repurposed pool (the Grok 100->73 class), an inverted field, a fuzzy-key
-   match that grabs an unrelated number. Readings are checked only against
-   static bounds, out-of-range values are clamped (hiding the strongest drift
-   signal), and history is stored but never used to validate a fresh read. A
-   monotonicity/jump tripwire at the cache boundary (new reading vs last cached)
-   that flags a suspect value instead of showing it clean is the missing
-   enforcement of the 1.0 promise, not after-1.0 polish.
+   nothing caught a read that is wrong and does not fail: a re-rated or
+   repurposed pool, an inverted field, a fuzzy-key match that grabs an unrelated
+   number. Landed: a first canary at the cache boundary compares each fresh read
+   against the last cached one and flags a `suspect` value instead of trusting
+   it (a reset that moved earlier, or usage that fell with no reset), fail-soft
+   and provider-aware (Grok's legitimate re-rate and Antigravity's synthetic
+   max-over-models window are exempt), surfaced in `json`, `doctor`, and MCP.
+   This is the first use of stored history to validate a fresh read. Next
+   layers: per-model drift on Antigravity's `model_quotas`, and calibrated
+   large-jump/inversion detection (a big single-interval swing not explained by
+   a reset), which needs a threshold tuned against real history to avoid
+   flagging a legitimate heavy-use burst.
 3. **The refresh and currency loop.** Run the drift canary and the model-catalog
    audit on a regular cadence so how usage works and which models exist stay
    current automatically.
