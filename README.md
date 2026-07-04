@@ -25,8 +25,9 @@ quotabot does two things:
    AI tools and agents can route across your accounts instead of stalling on a
    spent cap.
 
-It reads the usage your tools already track locally, so most providers need no
-setup (Claude and Codex just work; a one-time login covers Antigravity and Grok).
+It reuses the tokens your tools already store, so most providers need no setup:
+Claude, Codex, and Antigravity read live from their signed-in apps, and a
+one-time login covers Grok.
 
 <p align="center">
   <img src="docs/quotabot-demo.gif" alt="quotabot demo showing the widget, compact strip, 90-day analytics, and top dashboard" width="620">
