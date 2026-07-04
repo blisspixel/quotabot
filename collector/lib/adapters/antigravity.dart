@@ -24,6 +24,7 @@ typedef AntigravityLocalState = ({
   String? email,
   String? plan,
   String? ideAccessToken,
+  String? ideRefreshToken,
   String? localModel,
   String? localNote,
   List<ModelQuota> modelQuotas,
@@ -280,6 +281,10 @@ class AntigravityAdapter {
         modelQuotas: activeLocalState?.modelQuotas ?? const [],
         useCliToken: activeLocalState == null,
       ));
+      if (activeLocalState?.ideRefreshToken != null) {
+        // coverage:ignore-line
+        _ideRefreshByAccount[active] = activeLocalState!.ideRefreshToken!;
+      }
     }
 
     for (final dbPath in (_dbPathSource ?? _findAllDbPaths)()) {
@@ -288,6 +293,10 @@ class AntigravityAdapter {
       try {
         final state = _readLocalState(dbPath);
         final email = state.email;
+        if (state.ideRefreshToken != null) {
+          // coverage:ignore-line
+          _ideRefreshByAccount[email ?? 'default'] = state.ideRefreshToken!;
+        }
         if (email != null && email.isNotEmpty) {
           add((
             account: email,
@@ -445,6 +454,19 @@ class AntigravityAdapter {
         usingQuotabot = true;
       }
 
+      // Mint a fresh token from the IDE's own stored refresh token (Antigravity's
+      // client, which the quota endpoint accepts) before falling back to the
+      // possibly-expired IDE access token, so a live read works without login.
+      if (access == null) {
+        final ideRefresh = _ideRefreshByAccount[account];
+        if (ideRefresh != null) {
+          // coverage:ignore-start
+          access = (await GoogleAuth().refresh(ideRefresh))?.accessToken;
+          if (access != null) usingQuotabot = true;
+          // coverage:ignore-end
+        }
+      }
+
       if (access == null && source.useCliToken) {
         access = source.ideAccessToken ?? await _getCliAccess();
         usingCli = access != null;
@@ -594,6 +616,13 @@ class AntigravityAdapter {
   // per process instead of on every refresh.
   static final Map<String, String> _projectCache = {};
 
+  // The IDE's own stored refresh token (Antigravity's OAuth client), captured
+  // per account from state.vscdb during this instance's discovery. Refreshing
+  // it mints a token the quota endpoint accepts, so a live read works without an
+  // explicit `login antigravity` even after the IDE's short-lived access token
+  // expired. Instance-scoped, so it never leaks between collects.
+  final Map<String, String> _ideRefreshByAccount = {};
+
   static const _metadata = {
     'ideType': 'ANTIGRAVITY',
     'platform': 'PLATFORM_UNSPECIFIED',
@@ -730,10 +759,16 @@ class AntigravityAdapter {
       final access = tokenRaw == null
           ? null
           : findEmbeddedToken(tokenRaw, r'ya29\.[A-Za-z0-9._\-]{30,}');
+      // Capture the IDE's refresh token (Antigravity's client) so a live read
+      // can mint a fresh, endpoint-accepted token without an explicit login.
+      final ideRefresh = tokenRaw == null
+          ? null
+          : findEmbeddedToken(tokenRaw, r'1//[A-Za-z0-9._\-]{20,}');
       return (
         email: email,
         plan: plan,
         ideAccessToken: access,
+        ideRefreshToken: ideRefresh,
         localModel: localModel,
         localNote: localNote,
         modelQuotas: modelQuotas,

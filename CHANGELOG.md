@@ -4,6 +4,18 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.7 - 2026-07-03
+
+### Fixed
+- Antigravity now reads live, cross-device quota without an explicit
+  `login antigravity`. The Cloud Code quota endpoint rejects the Gemini-CLI
+  token (403, wrong OAuth client), so quotabot had been falling back to the
+  stale local cache. It now refreshes the Antigravity IDE's own stored refresh
+  token (Antigravity's OAuth client) into a fresh, endpoint-accepted access
+  token, so a live authoritative read works whenever you are signed into the
+  Antigravity IDE, with the short-lived IDE access token as a further fallback.
+  This is a metadata read that spends no usage tokens.
+
 ## 0.5.6 - 2026-07-03
 
 ### Security
