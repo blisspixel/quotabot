@@ -16,20 +16,20 @@ the adapters resolve the user home directory cross-platform.
 
 ## Codex (OpenAI)
 
-- Source: the newest `rollout-*.jsonl` under `~/.codex/sessions/<date>/`.
-- The Codex CLI writes a `rate_limits` object to its session log on every turn:
-
-  ```json
-  "rate_limits": {
-    "primary":   { "used_percent": 62.0, "window_minutes": 300,   "resets_at": 1781935855 },
-    "secondary": { "used_percent": 98.0, "window_minutes": 10080, "resets_at": 1782335912 },
-    "plan_type": "pro"
-  }
-  ```
-
-- `primary` is the 5 hour window, `secondary` is the weekly window.
-- No network or auth. The values are as of the last Codex session, so a reset
-  time in the past simply means that window has rolled over.
+- Source (authoritative, cross-device): `GET
+  https://chatgpt.com/backend-api/wham/usage`, the same endpoint the CLI's own
+  status view polls, reusing the OAuth access token Codex stores in
+  `~/.codex/auth.json` (with a `chatgpt-account-id` header). The response's
+  `rate_limit.primary_window` is the 5 hour window and `secondary_window` the
+  weekly, each with `used_percent` and `reset_at`; `plan_type` and `email`
+  identify the account. This is a metadata read, so it costs no tokens.
+- Fallback (this machine only): the newest `rollout-*.jsonl` under
+  `~/.codex/sessions/<date>/`, where the CLI writes a `rate_limits` object with
+  `primary` (5 hour) and `secondary` (weekly) buckets on every turn. Used only
+  when the live read is signed out or offline. It reflects this machine's
+  sessions alone, so its snapshot is marked `per_machine` and can undercount
+  when the account is used on another device; a reset time in the past means
+  that window has rolled over since the last session here.
 
 ## Claude (Anthropic)
 
@@ -77,12 +77,17 @@ State lives in the Antigravity globalStorage SQLite database at
 
 - Account and plan: the `antigravityAuthStatus` key holds JSON with the email
   and a base64 `userStatus` protobuf; the adapter decodes the plan tier from it.
-- Auth, in priority order: quotabot's own grant from `quotabot login antigravity`
-  (preferred); otherwise the token the Gemini/Antigravity CLI stored in
-  `~/.gemini/oauth_creds.json`, refreshed from its refresh token when the saved
-  access token has expired; otherwise the IDE's access token from the
-  `antigravityUnifiedStateSync.oauthToken` key (a protobuf wrapping a
-  base64-encoded inner protobuf; `findEmbeddedToken` peels the layers).
+- Auth, in priority order: quotabot's own grant from `quotabot login
+  antigravity` (preferred); otherwise the Antigravity IDE's own refresh token,
+  recovered from the `antigravityUnifiedStateSync.oauthToken` key (a protobuf
+  wrapping a base64-encoded inner protobuf; `findEmbeddedToken` peels the layers)
+  and refreshed via Antigravity's public OAuth client, so a live read works
+  whenever the IDE is signed in without any explicit `login antigravity`; then
+  the IDE's short-lived access token; then the Gemini CLI token in
+  `~/.gemini/oauth_creds.json`. The quota endpoint only accepts a token minted by
+  Antigravity's own client, so the Gemini-CLI token returns 403 and is a last
+  resort; the IDE refresh token uses the right client and is the path that makes
+  Antigravity "just work" from a signed-in IDE.
 - Live usage: the quota endpoint only accepts tokens minted by Antigravity's own
   OAuth client and an onboarded project, so `login antigravity` uses that public
   client and the adapter runs `:onboardUser` (retried) to provision the project,
