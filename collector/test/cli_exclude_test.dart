@@ -40,7 +40,9 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.suggest.v1');
     expect(json['cost_weight'], 1.0);
-    final codex = (json['ranked'] as List).cast<Map>().firstWhere(
+    final codex = (json['ranked'] as List<Object?>)
+        .cast<Map<String, dynamic>>()
+        .firstWhere(
           (entry) => entry['provider'] == 'codex',
         );
     expect(codex['cost_penalty'], 2.0);
@@ -69,8 +71,8 @@ void main() {
 
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
-    final providers = (json['providers'] as List)
-        .map((entry) => (entry as Map)['provider'] as String)
+    final providers = (json['providers'] as List<Object?>)
+        .map((entry) => (entry as Map<String, dynamic>)['provider'] as String)
         .toSet();
     expect(providers, isNot(contains('codex')));
     expect(providers, isNot(contains('ollama')));
@@ -88,8 +90,8 @@ void main() {
 
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
-    final providers = (json['providers'] as List)
-        .map((entry) => (entry as Map)['provider'] as String)
+    final providers = (json['providers'] as List<Object?>)
+        .map((entry) => (entry as Map<String, dynamic>)['provider'] as String)
         .toSet();
     expect(providers, isNot(contains('codex')));
   });
@@ -141,9 +143,12 @@ void main() {
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['budget_policy'], 'local');
-    final models = json['models'] as List;
+    final models = json['models'] as List<Object?>;
     expect(models, isNotEmpty);
-    expect(models.every((entry) => (entry as Map)['local'] == true), isTrue);
+    expect(
+      models.every((entry) => (entry as Map<String, dynamic>)['local'] == true),
+      isTrue,
+    );
   });
 
   test('suggest budget local recommends a concrete local model', () async {
@@ -153,7 +158,7 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.suggest_model.v1');
     expect(json['budget_policy'], 'local');
-    expect((json['recommended'] as Map)['local'], isTrue);
+    expect((json['recommended'] as Map<String, dynamic>)['local'], isTrue);
   });
 
   test('suggest can opt into expiring-quota model routing', () async {
@@ -164,7 +169,7 @@ void main() {
     expect(json['schema'], 'quotabot.suggest_model.v1');
     expect(json['use_expiring_quota'], isTrue);
     expect(json['expiring_quota_threshold_percent'], 35.0);
-    expect(json['recommended'], isA<Map>());
+    expect(json['recommended'], isA<Map<String, dynamic>>());
   });
 
   test('suggest rejects malformed exclude providers', () async {

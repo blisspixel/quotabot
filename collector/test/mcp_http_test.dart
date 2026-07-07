@@ -93,7 +93,7 @@ Map<String, Object?> _initializeBody() => const {
       'method': 'initialize',
       'params': {
         'protocolVersion': '2025-11-25',
-        'capabilities': {},
+        'capabilities': <String, Object?>{},
         'clientInfo': {'name': 'direct-http-test', 'version': '1.0.0'},
       },
     };

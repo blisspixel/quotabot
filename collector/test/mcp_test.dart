@@ -122,9 +122,9 @@ void main() {
       final r = suggestResponse(_fixture(), _now);
       expect(r['schema'], 'quotabot.suggest.v1');
       expect(r['routing_policy'], 'balanced');
-      expect((r['recommended'] as Map)['provider'], 'claude');
-      expect(r['fallback'], isA<Map>());
-      expect(r['ranked'], isA<List>());
+      expect((r['recommended'] as Map<String, dynamic>)['provider'], 'claude');
+      expect(r['fallback'], isA<Map<String, dynamic>>());
+      expect(r['ranked'], isA<List<Object?>>());
     });
 
     test('suggestResponse can prefer local runtime explicitly', () {
@@ -386,11 +386,12 @@ void main() {
 
       expect(suggestion.structuredContent?['cost_weight'], 1.0);
       expect(
-        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        (suggestion.structuredContent?['recommended']
+            as Map<String, dynamic>)['provider'],
         'codex',
       );
-      final ranked = suggestion.structuredContent?['ranked'] as List;
-      final claude = ranked.cast<Map>().firstWhere(
+      final ranked = suggestion.structuredContent?['ranked'] as List<Object?>;
+      final claude = ranked.cast<Map<String, dynamic>>().firstWhere(
             (entry) => entry['provider'] == 'claude',
           );
       expect(claude['cost_penalty'], 1.0);

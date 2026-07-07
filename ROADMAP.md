@@ -540,9 +540,11 @@ in parallel with the phases above rather than after them:
 - **Code-quality elevation (raise the bar, then hold it):** the pure core, the
   defensiveness, and the naming are already at the "would-a-CS-PhD-be-proud"
   bar; a few enforceable elevations remain, ordered by leverage. (1) The strict
-  analyzer is on with `strict-casts`; the deliberate follow-up is
-  `strict-inference` + `strict-raw-types`, which need an explicit type argument
-  at every JSON decode site (a careful pass, not a sweep). (2) Turn the core's
+  analyzer is on with `strict-casts`; the deliberate follow-up,
+  `strict-inference` + `strict-raw-types`, was completed 2026-07-07 with the
+  collector analyzer enforcing all three strict modes, explicit generic JSON
+  and collection boundaries, full collector tests, app tests, and 90.24% line
+  coverage. (2) Turn the core's
   remaining closed sets from magic strings into the type system so a new value
   cannot be half-handled: `ProviderQuota.kind` (completed 2026-07-07 with
   `ProviderQuotaKind`, `ProviderAdapterClass.quotaKind`, and JSON wire values

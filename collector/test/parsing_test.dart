@@ -158,7 +158,7 @@ void main() {
     });
 
     test('skips blocks without utilization', () {
-      expect(claudeWindows({'five_hour': {}}), isEmpty);
+      expect(claudeWindows({'five_hour': <String, Object?>{}}), isEmpty);
       expect(claudeWindows({'seven_day': 'nope'}), isEmpty);
     });
 
@@ -196,7 +196,7 @@ void main() {
     });
 
     test('ignores models lacking fraction or reset', () {
-      expect(antigravityWindows({'models': {}}, now), isEmpty);
+      expect(antigravityWindows({'models': <String, Object?>{}}, now), isEmpty);
       expect(antigravityWindows({'models': 'x'}, now), isEmpty);
       expect(antigravityWindows(null, now), isEmpty);
     });
@@ -442,7 +442,7 @@ void main() {
       expect(w.single.label, 'daily');
       expect(w.single.usedPercent, closeTo(25, 0.1));
       expect(windsurfWindows('not a map', now), isEmpty);
-      expect(windsurfWindows({}, now), isEmpty);
+      expect(windsurfWindows(<String, Object?>{}, now), isEmpty);
     });
   });
 

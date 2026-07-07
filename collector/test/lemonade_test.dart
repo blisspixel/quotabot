@@ -37,7 +37,7 @@ void main() {
 
     test('is not-running when the listing is empty', () async {
       final mock = MockClient(
-        (req) async => http.Response(jsonEncode({'data': []}), 200),
+        (req) async => http.Response(jsonEncode({'data': <Object?>[]}), 200),
       );
       final q = await LemonadeAdapter(client: mock).collect();
       expect(q.ok, isFalse);

@@ -428,7 +428,7 @@ void main() {
       final body = jsonDecode(req.body) as Map<String, dynamic>;
       switch (method) {
         case 'loadCodeAssist':
-          expect(body['metadata'], isA<Map>());
+          expect(body['metadata'], isA<Map<String, dynamic>>());
           return http.Response(jsonEncode(load()), 200);
         case 'onboardUser':
           expect(body['tierId'], 'PRO');
@@ -437,7 +437,7 @@ void main() {
               'done': true,
               'response': {
                 'cloudaicompanionProject': {'id': 'project-api'}
-              }
+              },
             }),
             200,
           );
@@ -505,7 +505,7 @@ void main() {
       emailResolver: (_, __, ___) async => null,
       loadCodeAssist: (_) async => load(),
       onboardUser: (_, __) async => 'project',
-      fetchModels: (_, __) async => {'models': {}},
+      fetchModels: (_, __) async => {'models': <String, Object?>{}},
     ).collectAccounts();
 
     expect(q.single.ok, isTrue);

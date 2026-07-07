@@ -42,7 +42,7 @@ class XaiAuth {
 
     final deadline = DateTime.now().add(const Duration(minutes: 15));
     while (DateTime.now().isBefore(deadline)) {
-      await Future.delayed(Duration(seconds: interval));
+      await Future<void>.delayed(Duration(seconds: interval));
       final resp = await _postRaw(_token, {
         'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
         'device_code': deviceCode,

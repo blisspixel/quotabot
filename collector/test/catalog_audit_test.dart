@@ -299,8 +299,8 @@ void main() {
     expect(
       parseModelList({
         'data': ['data-string'],
-        'models': {
-          'models/map-key': {},
+        'models': <Object, Object>{
+          'models/map-key': <String, Object?>{},
           4: {},
         },
       }),
