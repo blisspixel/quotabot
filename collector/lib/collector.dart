@@ -151,7 +151,7 @@ void _recordAnalytics(List<ProviderQuota> results) {
   final seen = <String>{};
   for (final q in results) {
     if (q.isLocal || !q.hasWindows) continue;
-    if (q.source == manualQuotaSource) continue;
+    if (q.isManual) continue;
     if (!seen.add(quotaIdentityKeyFor(q))) continue;
     final h = providerHeadroom(q, now);
     if (h != null) {

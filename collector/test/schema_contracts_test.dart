@@ -24,7 +24,7 @@ void main() {
             displayName: 'Claude',
             account: 'work@example.com',
             plan: 'max',
-            source: 'manual',
+            source: providerQuotaManualSource,
             asOf: 1782000000,
             windows: [
               QuotaWindow(

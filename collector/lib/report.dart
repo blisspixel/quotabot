@@ -43,6 +43,8 @@ class QuotaHealthProviderLine {
     required this.pace,
   });
 
+  bool get isManual => source == providerQuotaManualSource;
+
   Map<String, dynamic> toJson() => {
         'provider': provider,
         'display_name': displayName,
@@ -111,7 +113,7 @@ class QuotaHealthReport {
             '${_cell(_streak(provider))} | '
             '${_cell(provider.pace ?? 'n/a')} |',
     ];
-    if (providers.any((provider) => provider.source == 'manual')) {
+    if (providers.any((provider) => provider.isManual)) {
       lines
         ..add('')
         ..add(

@@ -14,7 +14,6 @@
 library;
 
 import 'analysis.dart';
-import 'manual_quota.dart' show manualQuotaSource;
 import 'models.dart';
 import 'provider_adapters.dart';
 import 'provider_ids.dart';
@@ -395,8 +394,7 @@ List<VerifyCheck> _fleetChecks(
       : VerifyCheck('unique_accounts', VerifyStatus.fail,
           'duplicate provider/account pairs: ${duplicates.join(', ')}'));
 
-  final manualCount =
-      results.where((q) => q.source == manualQuotaSource).length;
+  final manualCount = results.where((q) => q.isManual).length;
   if (manualCount > 0) {
     checks.add(VerifyCheck(
         'manual_entries',

@@ -6,7 +6,7 @@ import 'profiles.dart';
 import 'util.dart';
 
 const manualQuotaSchema = 'quotabot.manual.v1';
-const manualQuotaSource = 'manual';
+const manualQuotaSource = providerQuotaManualSource;
 
 class ManualQuotaEntry {
   final String provider;
