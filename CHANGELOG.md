@@ -5,6 +5,8 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Fixed
+- Compact desktop chrome controls now have tooltip and assistive-technology
+  labels for the expand and close buttons.
 - Desktop refresh failures now show a quiet sanitized "showing previous data"
   note instead of failing silently.
 - Provider setup dialogs now label their icon-only close and help buttons for
