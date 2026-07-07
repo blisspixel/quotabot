@@ -254,13 +254,22 @@ class RouteCandidate {
       };
 }
 
+/// The closed set of fail-soft fallback actions quotabot can recommend.
+enum RouteFallbackKind {
+  local('local'),
+  soonestReset('soonest_reset'),
+  passthrough('passthrough');
+
+  final String wireName;
+
+  const RouteFallbackKind(this.wireName);
+}
+
 /// The fail-soft next step in a [RouteSuggestion]: what to do if the caller
 /// skips the recommendation, or there is no usable recommendation at all. Always
 /// present, so quotabot never leaves a caller without an actionable answer.
 class RouteFallback {
-  /// One of 'local' (use a local runtime), 'soonest_reset' (wait for the named
-  /// provider to reset), or 'passthrough' (no signal; use the requested model).
-  final String kind;
+  final RouteFallbackKind kind;
 
   /// The local runtime, or the soonest-resetting provider, when applicable.
   final String? provider;
@@ -279,7 +288,7 @@ class RouteFallback {
   });
 
   Map<String, dynamic> toJson() => {
-        'kind': kind,
+        'kind': kind.wireName,
         if (provider != null) 'provider': provider,
         if (resetsAt != null) 'resets_at': resetsAt,
         'reason': reason,
@@ -372,7 +381,7 @@ RouteFallback _fallbackFor(
   if (locals.isNotEmpty) {
     final l = locals.first;
     return RouteFallback(
-      kind: 'local',
+      kind: RouteFallbackKind.local,
       provider: l.provider,
       reason: 'Skip the pick? Use local ${l.provider} - free and always on.',
     );
@@ -382,14 +391,14 @@ RouteFallback _fallbackFor(
   if (resetting.isNotEmpty) {
     final s = resetting.first;
     return RouteFallback(
-      kind: 'soonest_reset',
+      kind: RouteFallbackKind.soonestReset,
       provider: s.provider,
       resetsAt: s.resetsAt,
       reason: '${s.provider} resets soonest - wait for it.',
     );
   }
   return const RouteFallback(
-    kind: 'passthrough',
+    kind: RouteFallbackKind.passthrough,
     reason: 'No quota signal - use the model you requested.',
   );
 }

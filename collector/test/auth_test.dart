@@ -12,6 +12,18 @@ import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 void main() {
+  late Directory tempConfig;
+
+  setUp(() {
+    tempConfig = Directory.systemTemp.createTempSync('quotabot_auth_test_');
+    setQuotabotDirOverrideForTesting(tempConfig);
+  });
+
+  tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
+    if (tempConfig.existsSync()) tempConfig.deleteSync(recursive: true);
+  });
+
   group('Tokens', () {
     test('isFresh respects the expiry margin', () {
       expect(

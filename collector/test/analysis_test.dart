@@ -650,7 +650,7 @@ void main() {
         ],
         _now,
       );
-      expect(s.fallback.kind, 'local');
+      expect(s.fallback.kind, RouteFallbackKind.local);
       expect(s.fallback.provider, 'ollama');
       expect((s.toJson()['fallback'] as Map)['kind'], 'local');
     });
@@ -667,14 +667,14 @@ void main() {
         ],
         _now,
       );
-      expect(s.fallback.kind, 'soonest_reset');
+      expect(s.fallback.kind, RouteFallbackKind.soonestReset);
       expect(s.fallback.provider, 'claude');
       expect(s.fallback.resetsAt, _now + 3600);
     });
 
     test('fallback is passthrough when there is no signal at all', () {
       final s = suggestRoute([_q('grok', const [])], _now);
-      expect(s.fallback.kind, 'passthrough');
+      expect(s.fallback.kind, RouteFallbackKind.passthrough);
       expect(s.fallback.provider, isNull);
       expect(
         s.reason,
@@ -690,7 +690,7 @@ void main() {
         _now,
       );
       expect(s.recommended?.provider, 'codex');
-      expect(s.fallback.kind, 'passthrough'); // no local, no reset known
+      expect(s.fallback.kind, RouteFallbackKind.passthrough);
     });
   });
 
