@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.8 - 2026-07-07
+
 ### Fixed
 - Compact desktop chrome controls now have tooltip and assistive-technology
   labels for the expand and close buttons.
