@@ -363,11 +363,11 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   at any size and recolor for light or dark. The in-app header shows a small
   dynamic radial "pool gauge" (`AppGauge` in `logos.dart`) next to the "Quota"
   wordmark; it fills clockwise to the average remaining headroom across visible
-  providers (`_poolHeadroom` in `main.dart`) and is colored with the same
-  `_availColor` scale as the cards (green at >=50% free, amber >=25%, orange >0,
-  red when spent; neutral grey when no data). The OS application icon
-  (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style
-  mark (light/dark friendly) for the desktop icon.
+  providers (`_poolHeadroom` in `main.dart`) and is colored through
+  `headroomColor`, which delegates to the collector's `Palette.rgbFor`; neutral
+  grey is still used when no data is available. The OS application icon
+  (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style mark
+  (light/dark friendly) for the desktop icon.
 - Compact and expanded views, plus hide/show per provider. The expanded view
   groups distinct account identities when work and personal accounts coexist,
   and expansion state is keyed by provider/account so opening one account's
