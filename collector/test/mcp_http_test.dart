@@ -32,7 +32,7 @@ List<ProviderQuota> _fixture() => [
         account: 'local',
         asOf: _now,
         windows: [],
-        kind: 'local',
+        kind: ProviderQuotaKind.local,
       ),
     ];
 

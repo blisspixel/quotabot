@@ -8,7 +8,7 @@ ProviderQuota _q(
   String id,
   List<QuotaWindow> windows, {
   bool stale = false,
-  String kind = 'subscription',
+  ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   String? source,
 }) =>
     ProviderQuota(
@@ -23,7 +23,8 @@ ProviderQuota _q(
     );
 
 // A local runtime carries no quota windows; it is available simply by running.
-ProviderQuota _local(String id) => _q(id, const [], kind: 'local');
+ProviderQuota _local(String id) =>
+    _q(id, const [], kind: ProviderQuotaKind.local);
 
 void main() {
   test('providerHeadroom is governed by the most constrained window', () {

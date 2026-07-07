@@ -8,7 +8,7 @@ class QuotaHealthProviderLine {
   final String provider;
   final String displayName;
   final String account;
-  final String kind;
+  final ProviderQuotaKind kind;
   final String? source;
   final String state;
   final double? headroomPercent;
@@ -49,7 +49,7 @@ class QuotaHealthProviderLine {
         'provider': provider,
         'display_name': displayName,
         'account': account,
-        'kind': kind,
+        'kind': kind.wireName,
         if (source != null) 'source': source,
         'state': state,
         'headroom_percent': headroomPercent,
@@ -120,7 +120,7 @@ class QuotaHealthReport {
           'Manual entries are self-reported and excluded from measured history.',
         );
     }
-    if (providers.any((provider) => provider.kind == 'local')) {
+    if (providers.any((provider) => provider.kind.isLocal)) {
       lines
         ..add('')
         ..add(

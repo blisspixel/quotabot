@@ -6,13 +6,18 @@
 /// registry row here, including its sanitized parser fixture.
 library;
 
+import 'models.dart';
 import 'provider_ids.dart';
 
 const kProviderFixtureRoot = 'test/fixtures/provider_shapes';
 
 enum ProviderAdapterClass {
-  subscription,
-  localRuntime,
+  subscription(ProviderQuotaKind.subscription),
+  localRuntime(ProviderQuotaKind.local);
+
+  const ProviderAdapterClass(this.quotaKind);
+
+  final ProviderQuotaKind quotaKind;
 }
 
 enum ProviderFixtureKind {
@@ -48,7 +53,7 @@ class ProviderAdapterRegistration {
     this.cached = true,
   });
 
-  bool get localRuntime => adapterClass == ProviderAdapterClass.localRuntime;
+  bool get localRuntime => adapterClass.quotaKind.isLocal;
 }
 
 const kProviderAdapterRegistry = <ProviderAdapterRegistration>[

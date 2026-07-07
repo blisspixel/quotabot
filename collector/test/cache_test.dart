@@ -30,6 +30,7 @@ void main() {
       'grok_test-account.json',
       'rogue-cache-entry.json',
       'claude_forged.json',
+      'future-kind.json',
     ]) {
       final f = File('${cacheDir().path}/$name');
       if (f.existsSync()) f.deleteSync();
@@ -148,6 +149,26 @@ void main() {
       isFalse,
     );
     expect(cached.any((provider) => provider.provider == id), isFalse);
+  });
+
+  test('loadCachedSnapshots rejects unknown provider kind cache entries', () {
+    final q = ProviderQuota(
+      provider: 'future-kind',
+      displayName: 'Future Kind',
+      account: 'default',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 5)],
+    ).toJson()
+      ..['kind'] = 'future-kind';
+    File('${cacheDir().path}/future-kind.json').writeAsStringSync(
+      jsonEncode(q),
+    );
+
+    final cached = loadCachedSnapshots(now: 1782000000);
+
+    expect(
+        cached.any((provider) => provider.provider == 'future-kind'), isFalse);
+    expect(loadSnapshot('future-kind'), isNull);
   });
 
   test('recordHeadroomSample accumulates into one hourly bucket', () {

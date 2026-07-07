@@ -10,7 +10,7 @@ ProviderQuota _q(
   String id,
   double usedPercent, {
   bool stale = false,
-  String kind = 'subscription',
+  ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   int? resetsAt,
   String account = 'default',
 }) =>
@@ -132,7 +132,7 @@ void main() {
     });
 
     test('local runtimes are never alerted on', () {
-      final snap = [_q('ollama', 100, kind: 'local')];
+      final snap = [_q('ollama', 100, kind: ProviderQuotaKind.local)];
       final r = computeAlerts(
         snapshot: snap,
         suggestion: _suggestion(snap),

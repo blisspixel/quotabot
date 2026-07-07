@@ -9,7 +9,7 @@ const _now = 1782000000;
 ProviderQuota _quota(
   String provider,
   double usedPercent, {
-  String kind = 'subscription',
+  ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   String? source,
   int resetInSeconds = 8 * Duration.secondsPerDay,
 }) =>
@@ -20,7 +20,7 @@ ProviderQuota _quota(
       asOf: _now,
       kind: kind,
       source: source,
-      windows: kind == 'local'
+      windows: kind.isLocal
           ? const []
           : [
               QuotaWindow(
@@ -41,7 +41,7 @@ void main() {
   test('buildQuotaHealthReport produces versioned JSON', () {
     final providers = [
       _quota('claude', 20),
-      _quota('ollama', 0, kind: 'local')
+      _quota('ollama', 0, kind: ProviderQuotaKind.local)
     ];
     final report = buildQuotaHealthReport(
       providers,
@@ -75,7 +75,7 @@ void main() {
     final providers = [
       _quota('claude', 20),
       _quota('manual-ai', 50, source: providerQuotaManualSource),
-      _quota('ollama', 0, kind: 'local'),
+      _quota('ollama', 0, kind: ProviderQuotaKind.local),
     ];
     final report = buildQuotaHealthReport(
       providers,

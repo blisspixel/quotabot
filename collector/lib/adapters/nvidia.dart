@@ -66,7 +66,7 @@ class NvidiaAdapter {
           'trial rate limits are model-specific and unpublished',
         ],
         windows: const [],
-        kind: 'subscription',
+        kind: ProviderQuotaKind.subscription,
       );
     } catch (_) {
       return _keyInvalid(asOf);

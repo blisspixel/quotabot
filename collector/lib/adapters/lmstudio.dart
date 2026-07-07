@@ -81,7 +81,7 @@ class LmStudioAdapter {
         displayName: name,
         account: 'local',
         plan: 'local',
-        kind: 'local',
+        kind: ProviderQuotaKind.local,
         asOf: asOf,
         ok: false,
         error: 'not running',

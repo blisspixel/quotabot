@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/provider_adapters.dart';
 import 'package:quotabot_collector/provider_ids.dart';
 import 'package:test/test.dart';
@@ -57,11 +58,13 @@ void main() {
       final ollama = providerAdapterById(' OLLAMA ');
       expect(ollama, isNotNull);
       expect(ollama!.localRuntime, isTrue);
+      expect(ollama.adapterClass.quotaKind, ProviderQuotaKind.local);
       expect(ollama.cached, isFalse);
 
       final claude = providerAdapterById(claudeProviderId);
       expect(claude, isNotNull);
       expect(claude!.localRuntime, isFalse);
+      expect(claude.adapterClass.quotaKind, ProviderQuotaKind.subscription);
       expect(claude.cached, isTrue);
 
       expect(providerAdapterById('missing'), isNull);

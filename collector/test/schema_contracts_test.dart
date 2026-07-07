@@ -48,7 +48,7 @@ void main() {
             displayName: 'Ollama',
             account: '2 models',
             plan: 'local',
-            kind: 'local',
+            kind: ProviderQuotaKind.local,
             asOf: 1782000000,
             models: const [
               ModelInfo(id: 'qwen2.5-coder:7b', local: true),

@@ -13,7 +13,7 @@ ProviderQuota _q(
   bool stale = false,
   bool ok = true,
   String? error,
-  String kind = 'subscription',
+  ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   String? status,
   bool active = false,
 }) =>
@@ -102,7 +102,9 @@ void main() {
   test('a local runtime shows its status as an always-on fallback', () {
     final lines = _frame([
       _q('ollama', const [],
-          kind: 'local', status: '3 models, llama3 loaded', active: true),
+          kind: ProviderQuotaKind.local,
+          status: '3 models, llama3 loaded',
+          active: true),
     ]);
     final row = lines.firstWhere((l) => _plain(l).contains('ollama'));
     expect(_plain(row), contains('local'));
@@ -261,7 +263,7 @@ void main() {
       displayName: 'Ollama',
       account: 'local',
       asOf: _now,
-      kind: 'local',
+      kind: ProviderQuotaKind.local,
       status: 'qwen loaded',
       active: true,
       details: const ['4 GB VRAM . 32K ctx', '3 installed . 18 GB on disk'],
@@ -419,7 +421,7 @@ void main() {
 
   test('a long route reason yields at a word boundary with an ellipsis', () {
     final providers = [
-      _q('ollama', const [], kind: 'local', status: 'ready'),
+      _q('ollama', const [], kind: ProviderQuotaKind.local, status: 'ready'),
       _q('codex', [QuotaWindow(label: '5h', usedPercent: 99)]),
     ];
     final lines = _frame(providers, width: 56);
@@ -474,7 +476,9 @@ void main() {
 
   test('the always-on tag yields before a long local status clips', () {
     final q = _q('ollama', const [],
-        kind: 'local', status: 'qwen2.5-coder 7B Q4_K_M loaded', active: true);
+        kind: ProviderQuotaKind.local,
+        status: 'qwen2.5-coder 7B Q4_K_M loaded',
+        active: true);
     final wide = _frame([q], width: 90);
     final narrow = _frame([q], width: 60);
     expect(wide.any((l) => _plain(l).contains('[always on]')), isTrue);
@@ -520,7 +524,8 @@ void main() {
           _q('grok', [
             QuotaWindow(label: '5h', usedPercent: 60, resetsAt: _now + 5000),
           ]), // 40% free, latest reset
-          _q('ollama', const [], kind: 'local', status: 'ready'),
+          _q('ollama', const [],
+              kind: ProviderQuotaKind.local, status: 'ready'),
         ];
 
     List<String> order(List<ProviderQuota> ps) =>
