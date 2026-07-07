@@ -31,57 +31,56 @@ void main() {
     expect(port, lessThanOrEqualTo(65535));
   });
 
-  test('captureLoopbackCode returns the code when state matches', () async {
-    final port = await freePort();
-    final future = captureLoopbackCode(
-      port: port,
+  test('startLoopbackCodeCapture returns the code when state matches',
+      () async {
+    final capture = await startLoopbackCodeCapture(
       path: '/cb',
       expectedState: 'xyz',
     );
     final resp = await http.get(
-      Uri.parse('http://127.0.0.1:$port/cb?code=abc123&state=xyz'),
+      Uri.parse('http://127.0.0.1:${capture.port}/cb?code=abc123&state=xyz'),
     );
     expect(resp.statusCode, 200);
-    expect(await future, 'abc123');
+    expect(await capture.code, 'abc123');
   });
 
   test(
-    'captureLoopbackCode ignores a state mismatch and keeps waiting',
+    'startLoopbackCodeCapture ignores a state mismatch and keeps waiting',
     () async {
-      final port = await freePort();
-      final future = captureLoopbackCode(
-        port: port,
+      final capture = await startLoopbackCodeCapture(
         path: '/cb',
         expectedState: 'expected',
       );
       final resp = await http.get(
-        Uri.parse('http://127.0.0.1:$port/cb?code=abc&state=wrong'),
+        Uri.parse('http://127.0.0.1:${capture.port}/cb?code=abc&state=wrong'),
       );
       expect(resp.statusCode, 400);
       final ok = await http.get(
-        Uri.parse('http://127.0.0.1:$port/cb?code=abc&state=expected'),
+        Uri.parse(
+          'http://127.0.0.1:${capture.port}/cb?code=abc&state=expected',
+        ),
       );
       expect(ok.statusCode, 200);
-      expect(await future, 'abc');
+      expect(await capture.code, 'abc');
     },
   );
 
-  test('captureLoopbackCode surfaces a provider error without waiting',
+  test('startLoopbackCodeCapture surfaces a provider error without waiting',
       () async {
     // A denied/error callback must complete the flow at once, not hang until
     // the multi-minute timeout.
-    final port = await freePort();
-    final future = captureLoopbackCode(
-      port: port,
+    final capture = await startLoopbackCodeCapture(
       path: '/cb',
       expectedState: 'xyz',
     );
     // Attach the expectation (which registers a listener) before triggering the
     // callback, so the error completion is never momentarily unhandled - which
     // would otherwise fail the test in its async zone on a slower host.
-    final expectation = expectLater(future, throwsA(isA<StateError>()));
+    final expectation = expectLater(capture.code, throwsA(isA<StateError>()));
     final resp = await http.get(
-      Uri.parse('http://127.0.0.1:$port/cb?error=access_denied&state=xyz'),
+      Uri.parse(
+        'http://127.0.0.1:${capture.port}/cb?error=access_denied&state=xyz',
+      ),
     );
     expect(resp.statusCode, 400);
     await expectation;
