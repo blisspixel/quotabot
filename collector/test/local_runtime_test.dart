@@ -43,7 +43,7 @@ void main() {
           ),
         ],
       );
-      expect(q.kind, 'local');
+      expect(q.kind, ProviderQuotaKind.local);
       expect(q.active, isTrue);
       expect(q.windows, isEmpty);
       expect(q.account, '3 models');

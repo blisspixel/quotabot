@@ -13,7 +13,7 @@ import 'package:quotabot_collector/collector.dart';
 ProviderQuota _provider(
   String id,
   String account, {
-  String kind = 'subscription',
+  ProviderQuotaKind kind = ProviderQuotaKind.subscription,
 }) => ProviderQuota(
   provider: id,
   displayName: id,
@@ -444,7 +444,7 @@ void main() {
         _provider('codex', 'work@example.com'),
         _provider('antigravity', 'home@example.com'),
         _provider('grok', 'work@example.com'),
-        _provider('ollama', 'installed', kind: 'local'),
+        _provider('ollama', 'installed', kind: ProviderQuotaKind.local),
       ]);
 
       expect(groups, hasLength(1));
@@ -466,7 +466,7 @@ void main() {
           _provider('claude', 'work@example.com'),
           _provider('codex', 'work@example.com'),
           _provider('claude', 'home@example.com'),
-          _provider('ollama', 'installed', kind: 'local'),
+          _provider('ollama', 'installed', kind: ProviderQuotaKind.local),
         ]);
 
         expect(groups.map((g) => g.account).toList(), [

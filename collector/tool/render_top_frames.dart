@@ -84,7 +84,7 @@ List<ProviderQuota> _stressFleet(int now) {
       provider: 'ollama',
       displayName: 'Ollama',
       account: '3 models',
-      kind: 'local',
+      kind: ProviderQuotaKind.local,
       asOf: now,
       status: '3 models, idle',
       details: const ['qwen2.5-coder:7b 4.0GB Q4_K_M on disk'],

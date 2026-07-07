@@ -93,7 +93,7 @@ void main() {
           provider: 'ollama',
           displayName: 'Ollama',
           account: 'local',
-          kind: 'local',
+          kind: ProviderQuotaKind.local,
           asOf: _now,
           status: 'qwen\x1B[8m hidden loaded',
         ),

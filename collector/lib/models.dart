@@ -128,7 +128,26 @@ class ModelQuota {
 }
 
 /// One provider account's quota snapshot.
+const providerQuotaSubscriptionKind = 'subscription';
+const providerQuotaLocalKind = 'local';
 const providerQuotaManualSource = 'manual';
+
+enum ProviderQuotaKind {
+  subscription(providerQuotaSubscriptionKind),
+  local(providerQuotaLocalKind);
+
+  const ProviderQuotaKind(this.wireName);
+
+  final String wireName;
+
+  bool get isLocal => this == ProviderQuotaKind.local;
+
+  static ProviderQuotaKind fromWire(String? value) => switch (value) {
+        null || providerQuotaSubscriptionKind => ProviderQuotaKind.subscription,
+        providerQuotaLocalKind => ProviderQuotaKind.local,
+        _ => throw FormatException('unknown provider quota kind: $value'),
+      };
+}
 
 class ProviderQuota {
   /// Stable provider id: "codex", "claude", "grok", "antigravity".
@@ -148,11 +167,11 @@ class ProviderQuota {
   /// themselves.
   final String? source;
 
-  /// Provider class. "subscription" (default) is a metered paid/free account
-  /// whose headroom governs routing. "local" is an always-available local
-  /// runtime (e.g. Ollama, LM Studio) used as a fallback and never counted as
-  /// the "most headroom" winner; it is effectively unlimited and free.
-  final String kind;
+  /// Provider class. [ProviderQuotaKind.subscription] is a metered paid/free
+  /// account whose headroom governs routing. [ProviderQuotaKind.local] is an
+  /// always-available local runtime used as fallback capacity and never counted
+  /// as the "most headroom" winner.
+  final ProviderQuotaKind kind;
 
   /// Short status line for providers that have no quota windows, such as a
   /// local runtime ("qwen3-coder loaded" / "5 models, idle"). Null otherwise.
@@ -216,7 +235,7 @@ class ProviderQuota {
     this.error,
     this.windows = const [],
     this.stale = false,
-    this.kind = 'subscription',
+    this.kind = ProviderQuotaKind.subscription,
     this.status,
     this.active = false,
     this.details = const [],
@@ -228,7 +247,7 @@ class ProviderQuota {
 
   /// True when this is a local, always-available runtime rather than a metered
   /// remote subscription.
-  bool get isLocal => kind == 'local';
+  bool get isLocal => kind.isLocal;
 
   /// True when this is a self-reported manual quota entry, not measured data.
   bool get isManual => source == providerQuotaManualSource;
@@ -254,7 +273,7 @@ class ProviderQuota {
         'account': account,
         if (plan != null) 'plan': plan,
         if (source != null) 'source': source,
-        'kind': kind,
+        'kind': kind.wireName,
         if (status != null) 'status': status,
         if (active) 'active': active,
         if (details.isNotEmpty) 'details': details,
@@ -280,7 +299,7 @@ class ProviderQuota {
         error: j['error'] as String?,
         asOf: j['as_of'] as int? ?? 0,
         stale: j['stale'] as bool? ?? false,
-        kind: j['kind'] as String? ?? 'subscription',
+        kind: ProviderQuotaKind.fromWire(j['kind'] as String?),
         status: j['status'] as String?,
         active: j['active'] as bool? ?? false,
         suspect: j['suspect'] as String?,
@@ -388,7 +407,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     error: q.error == null ? null : t(q.error!),
     asOf: q.asOf,
     stale: q.stale,
-    kind: t(q.kind),
+    kind: q.kind,
     status: q.status == null ? null : t(q.status!),
     active: q.active,
     details: [for (final d in q.details) t(d)],

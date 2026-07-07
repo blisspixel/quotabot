@@ -18,7 +18,7 @@ void main() {
   ProviderQuota q(
     String provider, {
     String account = 'default',
-    String kind = 'subscription',
+    ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   }) =>
       ProviderQuota(
         provider: provider,
@@ -33,7 +33,7 @@ void main() {
     final fleet = [
       q('codex'),
       q('grok', account: 'work'),
-      q('ollama', kind: 'local')
+      q('ollama', kind: ProviderQuotaKind.local)
     ];
 
     expect(profile.name, defaultProfileName);
@@ -47,7 +47,7 @@ void main() {
       q('codex'),
       q('grok', account: 'work@example.com'),
       q('grok', account: 'personal@example.com'),
-      q('ollama', kind: 'local'),
+      q('ollama', kind: ProviderQuotaKind.local),
     ];
 
     final work = QuotaProfile(

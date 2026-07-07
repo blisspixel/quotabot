@@ -34,7 +34,7 @@ ProviderQuota _local(String id, List<ModelInfo> models) => ProviderQuota(
       displayName: id,
       account: 'local',
       asOf: _now,
-      kind: 'local',
+      kind: ProviderQuotaKind.local,
       models: models,
     );
 

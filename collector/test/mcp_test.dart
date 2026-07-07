@@ -15,7 +15,7 @@ ProviderQuota _q(
   String id,
   List<QuotaWindow> windows, {
   bool stale = false,
-  String kind = 'subscription',
+  ProviderQuotaKind kind = ProviderQuotaKind.subscription,
 }) =>
     ProviderQuota(
       provider: id,
@@ -27,7 +27,8 @@ ProviderQuota _q(
       kind: kind,
     );
 
-ProviderQuota _local(String id) => _q(id, const [], kind: 'local');
+ProviderQuota _local(String id) =>
+    _q(id, const [], kind: ProviderQuotaKind.local);
 
 ProviderQuota _accountQ(String id, String account, double usedPercent) =>
     ProviderQuota(
@@ -411,7 +412,7 @@ void main() {
           displayName: 'ollama',
           account: 'local',
           asOf: _now,
-          kind: 'local',
+          kind: ProviderQuotaKind.local,
           models: const [ModelInfo(id: 'qwen', local: true)],
         ),
       ];

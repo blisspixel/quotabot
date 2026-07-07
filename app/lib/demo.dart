@@ -37,7 +37,7 @@ ProviderQuota _local(
   displayName: name,
   account: account,
   plan: 'local',
-  kind: 'local',
+  kind: ProviderQuotaKind.local,
   asOf: _now(),
   status: status,
   active: active,

@@ -78,7 +78,7 @@ void main() {
         displayName: 'Codex',
         account: 'pro',
         asOf: 1000,
-        kind: 'local',
+        kind: ProviderQuotaKind.local,
         windows: [QuotaWindow(label: '5h', usedPercent: 10)],
       );
       final stale = q.asStale('cached');
@@ -86,7 +86,7 @@ void main() {
       expect(stale.asOf, 1000);
       expect(stale.error, 'cached');
       expect(stale.hasWindows, isTrue);
-      expect(stale.kind, 'local');
+      expect(stale.kind, ProviderQuotaKind.local);
     });
 
     test('asStale can preserve cached windows with fresh metadata', () {
@@ -128,16 +128,24 @@ void main() {
         account: 'a',
         asOf: 0,
       );
-      expect(sub.kind, 'subscription');
+      expect(sub.kind, ProviderQuotaKind.subscription);
       expect(sub.isLocal, isFalse);
       final local = ProviderQuota(
         provider: 'ollama',
         displayName: 'Ollama',
         account: 'local',
         asOf: 0,
-        kind: 'local',
+        kind: ProviderQuotaKind.local,
       );
       expect(local.isLocal, isTrue);
+      expect(local.toJson()['kind'], providerQuotaLocalKind);
+      expect(ProviderQuotaKind.fromWire(providerQuotaLocalKind),
+          ProviderQuotaKind.local);
+      expect(ProviderQuotaKind.fromWire(null), ProviderQuotaKind.subscription);
+      expect(
+        () => ProviderQuotaKind.fromWire('future-kind'),
+        throwsFormatException,
+      );
     });
 
     test('manual source exposes isManual while preserving the wire value', () {
@@ -167,7 +175,7 @@ void main() {
       expect(back.provider, 'claude');
       expect(back.plan, 'max');
       expect(back.asOf, 123);
-      expect(back.kind, 'subscription');
+      expect(back.kind, ProviderQuotaKind.subscription);
       expect(back.windows.single.usedPercent, 18);
     });
 
@@ -177,11 +185,12 @@ void main() {
         displayName: 'Ollama',
         account: '3 models',
         plan: 'local',
-        kind: 'local',
+        kind: ProviderQuotaKind.local,
         asOf: 1,
         windows: [QuotaWindow(label: 'local', usedPercent: 0)],
       );
-      expect(ProviderQuota.fromJson(q.toJson()).kind, 'local');
+      expect(q.toJson()['kind'], providerQuotaLocalKind);
+      expect(ProviderQuota.fromJson(q.toJson()).kind, ProviderQuotaKind.local);
     });
   });
 }

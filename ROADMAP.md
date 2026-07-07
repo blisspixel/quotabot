@@ -544,12 +544,13 @@ in parallel with the phases above rather than after them:
   `strict-inference` + `strict-raw-types`, which need an explicit type argument
   at every JSON decode site (a careful pass, not a sweep). (2) Turn the core's
   remaining closed sets from magic strings into the type system so a new value
-  cannot be half-handled: `ProviderQuota.kind` (unify with the existing
-  `ProviderAdapterClass`), the manual quota source marker (completed
-  2026-07-07 with `providerQuotaManualSource` / `ProviderQuota.isManual` and
-  JSON wire values preserved), and `RouteFallback.kind` (an enum, dropping the
-  `_ =>` catch-all that would silently swallow a new kind; completed 2026-07-07
-  with JSON wire values preserved). (3) Make the provider registry
+  cannot be half-handled: `ProviderQuota.kind` (completed 2026-07-07 with
+  `ProviderQuotaKind`, `ProviderAdapterClass.quotaKind`, and JSON wire values
+  preserved), the manual quota source marker (completed 2026-07-07 with
+  `providerQuotaManualSource` / `ProviderQuota.isManual` and JSON wire values
+  preserved), and `RouteFallback.kind` (an enum, dropping the `_ =>` catch-all
+  that would silently swallow a new kind; completed 2026-07-07 with JSON wire
+  values preserved). (3) Make the provider registry
   executable - a `collect` factory on the registration so `collectAll` and the
   cache's account-scoped set derive from it - so adding a provider is one
   declarative addition, not a four-to-six-site edit. (4) Route the desktop color

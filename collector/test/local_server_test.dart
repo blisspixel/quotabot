@@ -26,7 +26,7 @@ ProviderQuota _local(String id) => ProviderQuota(
       displayName: id,
       account: 'local',
       asOf: _now,
-      kind: 'local',
+      kind: ProviderQuotaKind.local,
     );
 
 Future<({int status, Map<String, dynamic> body})> _requestJson(

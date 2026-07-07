@@ -63,7 +63,7 @@ void main() {
         displayName: 'Ollama',
         account: '',
         asOf: 1782046566,
-        kind: 'local',
+        kind: ProviderQuotaKind.local,
       ),
     ];
     final buckets = {

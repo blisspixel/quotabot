@@ -33,7 +33,7 @@ void main() {
             provider: 'ollama',
             displayName: 'Ollama',
             account: '2 models',
-            kind: 'local',
+            kind: ProviderQuotaKind.local,
             asOf: now,
           ),
           now,
