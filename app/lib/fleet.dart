@@ -6,17 +6,13 @@ import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
 
+import 'headroom_colors.dart';
 import 'profile_ui.dart' show quotaDisplayKey;
 import 'theme_spec.dart';
 import 'typography.dart';
 
 /// Health color on the shared green-to-red scale (input is remaining free %).
-Color fleetColor(num freePct) {
-  if (freePct >= 50) return const Color(0xFF3FB950);
-  if (freePct >= 25) return const Color(0xFFD29922);
-  if (freePct > 0) return const Color(0xFFDB6D28);
-  return const Color(0xFFF85149);
-}
+Color fleetColor(num freePct) => headroomColor(freePct);
 
 /// The time window the dashboard is showing.
 enum FleetRange {
@@ -745,13 +741,8 @@ class _FleetScreenState extends State<FleetScreen> {
         style: TextStyle(fontSize: AppType.small, color: muted),
       ),
       const SizedBox(width: 6),
-      for (final col in const [
-        Color(0xFFF85149),
-        Color(0xFFDB6D28),
-        Color(0xFFD29922),
-        Color(0xFF3FB950),
-      ])
-        Container(width: 16, height: 8, color: col),
+      for (final remaining in const [0, 25, 50, 100])
+        Container(width: 16, height: 8, color: fleetColor(remaining)),
       const SizedBox(width: 6),
       Text(
         'free',
@@ -1106,8 +1097,8 @@ class _CalendarPainter extends CustomPainter {
   }
 
   Color _dayColor(ContributionDay day) {
-    if (day.spent) return const Color(0xFFF85149);
-    if (day.mixed) return const Color(0xFFDB6D28);
+    if (day.spent) return fleetColor(0);
+    if (day.mixed) return fleetColor(math.min(day.meanFreePercent, 25));
     final alpha = day.intensity <= 1 ? (dark ? 0.55 : 0.65) : 0.9;
     return fleetColor(day.meanFreePercent).withValues(alpha: alpha);
   }

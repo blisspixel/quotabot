@@ -23,6 +23,7 @@ import 'package:window_manager/window_manager.dart';
 import 'chrome_controls.dart';
 import 'demo.dart';
 import 'fleet.dart';
+import 'headroom_colors.dart';
 import 'logos.dart';
 import 'prefs.dart';
 import 'profile_editor.dart';
@@ -2976,10 +2977,7 @@ WinView _view(QuotaWindow w, int now) {
 }
 
 Color _availColor(num remaining) {
-  if (remaining >= 50) return const Color(0xFF3FB950); // healthy green
-  if (remaining >= 25) return const Color(0xFFD29922); // amber
-  if (remaining > 0) return const Color(0xFFDB6D28); // orange
-  return const Color(0xFFF85149); // red (exhausted)
+  return headroomColor(remaining);
 }
 
 /// One rolling window rendered as: [label] [availability bar] [reset / %].

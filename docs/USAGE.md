@@ -39,8 +39,8 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   and theme preferences.
 
 The header shows a radial "pool gauge" next to the "Quota" wordmark: it fills to
-the average remaining headroom across visible providers, colored green (>=50%
-free), amber (>=25%), orange (>0), or red (spent).
+the average remaining headroom across visible providers and uses the same smooth
+headroom palette as the terminal truecolor view.
 
 ## Quota Analytics
 

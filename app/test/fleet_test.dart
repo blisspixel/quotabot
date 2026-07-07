@@ -28,6 +28,11 @@ List<HeadroomBucket> _buckets(double base) {
   return out;
 }
 
+Color _defaultPaletteColor(num remaining) {
+  final rgb = kDefaultPalette.rgbFor(remaining.toDouble());
+  return Color.fromARGB(0xFF, rgb.r, rgb.g, rgb.b);
+}
+
 List<HeadroomBucket> _scheduleBuckets() {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final nextHour =
@@ -237,10 +242,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('fleetColor maps the headroom scale', () {
-    expect(fleetColor(80), const Color(0xFF3FB950));
-    expect(fleetColor(30), const Color(0xFFD29922));
-    expect(fleetColor(5), const Color(0xFFDB6D28));
-    expect(fleetColor(0), const Color(0xFFF85149));
+  test('fleetColor maps the shared collector palette scale', () {
+    for (final remaining in [80, 30, 5, 0]) {
+      expect(fleetColor(remaining), _defaultPaletteColor(remaining));
+    }
   });
 }
