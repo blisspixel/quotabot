@@ -1,23 +1,12 @@
 import 'dart:io';
 
-import 'adapters/antigravity.dart';
-import 'adapters/claude.dart';
-import 'adapters/codex.dart';
-import 'adapters/cursor.dart';
-import 'adapters/grok.dart';
-import 'adapters/kiro.dart';
-import 'adapters/lemonade.dart';
-import 'adapters/lmstudio.dart';
-import 'adapters/nvidia.dart';
-import 'adapters/ollama.dart';
-import 'adapters/windsurf.dart';
 import 'analysis.dart';
 import 'cache.dart';
 import 'demo.dart';
 import 'drift.dart';
 import 'manual_quota.dart';
 import 'models.dart';
-import 'provider_ids.dart';
+import 'provider_adapters.dart';
 import 'util.dart';
 
 export 'alerts.dart';
@@ -57,37 +46,23 @@ bool _sweptTemp = false;
 /// the whole fleet, the desktop refresh loop, and MCP snapshot calls.
 const Duration kAdapterDeadline = Duration(seconds: 20);
 
-Future<ProviderQuota> _withDeadline(
-  String id,
-  String displayName,
-  Future<ProviderQuota> Function() run,
-) =>
-    run().timeout(
-      kAdapterDeadline,
-      onTimeout: () => ProviderQuota.error(
-        id,
-        displayName,
-        'timed out after ${kAdapterDeadline.inSeconds}s',
-        nowEpoch(),
-      ),
-    );
-
 Future<List<ProviderQuota>> _listWithDeadline(
-  String id,
-  String displayName,
-  Future<List<ProviderQuota>> Function() run,
+  ProviderAdapterRegistration entry,
 ) =>
-    run().timeout(
-      kAdapterDeadline,
-      onTimeout: () => [
-        ProviderQuota.error(
-          id,
-          displayName,
-          'timed out after ${kAdapterDeadline.inSeconds}s',
-          nowEpoch(),
-        ),
-      ],
-    );
+    entry.collect().timeout(
+          kAdapterDeadline,
+          onTimeout: () => [
+            ProviderQuota(
+              provider: entry.id,
+              displayName: entry.displayName,
+              account: 'unknown',
+              asOf: nowEpoch(),
+              ok: false,
+              error: 'timed out after ${kAdapterDeadline.inSeconds}s',
+              kind: entry.adapterClass.quotaKind,
+            ),
+          ],
+        );
 
 /// Runs every provider adapter concurrently and returns their snapshots.
 /// Shared by the CLI (bin/collect.dart) and the desktop app.
@@ -101,42 +76,16 @@ Future<List<ProviderQuota>> collectAll() async {
     _sweptTemp = true;
     sweepStaleTempFiles(); // once per process, clear any crash leftovers
   }
-  // Default order roughly follows how widely each is used, most popular first.
-  // Multi-account providers are appended after this list so each account gets
-  // its own cache fallback.
-  final others = await Future.wait<ProviderQuota>([
-    _withCache(() => _withDeadline(
-        claudeProviderId, claudeProviderName, () => ClaudeAdapter().collect())),
-    _withCache(() => _withDeadline(
-        codexProviderId, codexProviderName, () => CodexAdapter().collect())),
-    _withCache(() => _withDeadline(
-        cursorProviderId, cursorProviderName, () => CursorAdapter().collect())),
-    _withCache(() => _withDeadline(windsurfProviderId, windsurfProviderName,
-        () => WindsurfAdapter().collect())),
-    _withCache(() => _withDeadline(
-        kiroProviderId, kiroProviderName, () => KiroAdapter().collect())),
-    // Local runtimes are live probes: never serve a cached "available" when the
-    // daemon is actually off, so they are collected without the cache fallback.
-    _withDeadline(
-        ollamaProviderId, ollamaProviderName, () => OllamaAdapter().collect()),
-    _withDeadline(lmStudioProviderId, lmStudioProviderName,
-        () => LmStudioAdapter().collect()),
-    _withDeadline(lemonadeProviderId, lemonadeProviderName,
-        () => LemonadeAdapter().collect()),
-    _withDeadline(
-        nvidiaProviderId, nvidiaProviderName, () => NvidiaAdapter().collect()),
+  final collected = await Future.wait([
+    for (final entry in kProviderAdapterRegistry) _collectRegistered(entry),
   ]);
-  final groks = await _collectGrokMulti();
-  final antis = await _collectAntigravityMulti();
   final manual = loadManualProviderQuotas();
   // A local runtime that is not running is not ok; drop it so users who do not
   // run one never see an empty card. Cloud providers stay even when empty.
   // Every snapshot is sanitized last, so no provider-sourced string can carry
   // terminal control bytes to any display surface.
   final results = [
-    ...others,
-    ...groks,
-    ...antis,
+    for (final group in collected) ...group,
     ...manual,
   ].where((q) => !(q.isLocal && !q.ok)).map(sanitizeProviderQuota).toList();
   _recordAnalytics(results);
@@ -160,42 +109,23 @@ void _recordAnalytics(List<ProviderQuota> results) {
   }
 }
 
-Future<List<ProviderQuota>> _collectGrokMulti() async {
-  final collected = await _listWithDeadline(
-      grokProviderId, grokProviderName, () => GrokAdapter().collectAccounts());
-  final results = <ProviderQuota>[];
-  for (final q in collected) {
-    results.add(_cacheResult(q));
-  }
-  results.addAll(currentAccountFallbacks(
-    liveResults: results,
-    cachedSnapshots: loadAllGrokSnapshots(),
-    currentAccounts: GrokAdapter.currentAccounts,
-  ));
-  return results;
-}
-
-Future<List<ProviderQuota>> _collectAntigravityMulti() async {
-  final collected = await _listWithDeadline(antigravityProviderId,
-      antigravityProviderName, () => AntigravityAdapter().collectAccounts());
-  final results = <ProviderQuota>[];
-  for (final q in collected) {
-    results.add(_cacheResult(q));
-  }
-  results.addAll(currentAccountFallbacks(
-    liveResults: results,
-    cachedSnapshots: loadAllAntigravitySnapshots(),
-    currentAccounts: AntigravityAdapter.currentAccounts,
-  ));
-  return results;
-}
-
-/// Persists good reads and falls back to the last-known snapshot on failure.
-Future<ProviderQuota> _withCache(
-  Future<ProviderQuota> Function() run,
+Future<List<ProviderQuota>> _collectRegistered(
+  ProviderAdapterRegistration entry,
 ) async {
-  final result = await run();
-  return _cacheResult(result);
+  final collected = await _listWithDeadline(entry);
+  if (!entry.cached) return collected;
+  final results = <ProviderQuota>[];
+  for (final q in collected) {
+    results.add(_cacheResult(q));
+  }
+  if (entry.accountScopedCache) {
+    results.addAll(currentAccountFallbacks(
+      liveResults: results,
+      cachedSnapshots: loadAccountSnapshots(entry.id),
+      currentAccounts: entry.currentAccounts!(),
+    ));
+  }
+  return results;
 }
 
 ProviderQuota _cacheResult(ProviderQuota result) {
@@ -212,15 +142,9 @@ ProviderQuota _cacheResult(ProviderQuota result) {
   // Read failed or returned no windows; serve last-known if we have one.
   final cached = _loadCachedSnapshot(result);
   if (cached != null && cached.hasWindows) {
-    // For antigravity, only serve the cache if its account is still one of the
-    // currently logged-in profiles. This prevents showing a previous account's
-    // quota after the active login has switched.
-    if (result.provider == AntigravityAdapter.id &&
-        !AntigravityAdapter.currentAccounts.contains(cached.account)) {
-      return result; // active login changed; surface the fresh (empty) result
-    }
-    if (result.provider == GrokAdapter.id &&
-        !GrokAdapter.currentAccounts.contains(cached.account)) {
+    final entry = providerAdapterById(result.provider);
+    if (entry?.accountScopedCache == true &&
+        !entry!.currentAccounts!().contains(cached.account)) {
       return result;
     }
     return cached.asStale(result.error ?? 'cached', metadataFrom: result);
@@ -229,11 +153,9 @@ ProviderQuota _cacheResult(ProviderQuota result) {
 }
 
 /// Loads the last-known snapshot for [result]'s provider and account.
-/// Antigravity and Grok are cached per account, so the accounted file is loaded
-/// for the active account rather than the generic (never-written) file.
+/// Account-scoped providers are loaded by account rather than from the generic
+/// provider file, because one machine can hold several provider logins.
 ProviderQuota? _loadCachedSnapshot(ProviderQuota result) =>
-    switch (result.provider) {
-      AntigravityAdapter.id => loadAntigravitySnapshot(result.account),
-      GrokAdapter.id => loadGrokSnapshot(result.account),
-      _ => loadSnapshot(result.provider),
-    };
+    providerAdapterById(result.provider)?.accountScopedCache == true
+        ? loadAccountSnapshot(result.provider, result.account)
+        : loadSnapshot(result.provider);

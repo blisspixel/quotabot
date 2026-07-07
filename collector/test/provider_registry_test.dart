@@ -69,5 +69,45 @@ void main() {
 
       expect(providerAdapterById('missing'), isNull);
     });
+
+    test('owns collection order and cache policy metadata', () {
+      expect(kProviderAdapterRegistry.map((entry) => entry.id), [
+        claudeProviderId,
+        codexProviderId,
+        cursorProviderId,
+        windsurfProviderId,
+        kiroProviderId,
+        ollamaProviderId,
+        lmStudioProviderId,
+        lemonadeProviderId,
+        nvidiaProviderId,
+        grokProviderId,
+        antigravityProviderId,
+      ]);
+
+      expect(
+        kProviderAdapterRegistry
+            .where((entry) => entry.accountScopedCache)
+            .map((entry) => entry.id),
+        [grokProviderId, antigravityProviderId],
+      );
+      expect(
+        kProviderAdapterRegistry
+            .where((entry) => !entry.cached)
+            .map((entry) => entry.id),
+        [
+          ollamaProviderId,
+          lmStudioProviderId,
+          lemonadeProviderId,
+          nvidiaProviderId
+        ],
+      );
+      expect(
+        kProviderAdapterRegistry
+            .where((entry) => entry.multiAccount)
+            .every((entry) => entry.currentAccounts != null),
+        isTrue,
+      );
+    });
   });
 }

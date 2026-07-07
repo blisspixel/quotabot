@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'insights.dart';
 import 'models.dart';
+import 'provider_adapters.dart';
 import 'util.dart';
 
 /// Last-known-good snapshot cache.
@@ -94,7 +95,10 @@ void saveHistory(ProviderQuota q) {
 /// account cache file by, rather than a placeholder.
 bool _hasAccount(String account) => hasSpecificQuotaAccount(account);
 
-const _accountScopedProviders = {'antigravity', 'grok'};
+Set<String> get _accountScopedProviders => {
+      for (final entry in kProviderAdapterRegistry)
+        if (entry.accountScopedCache) entry.id,
+    };
 
 /// Path of the per-account snapshot file for [provider]/[account], e.g.
 /// `antigravity_work_at_example.com.json`. One machine can hold several logins
