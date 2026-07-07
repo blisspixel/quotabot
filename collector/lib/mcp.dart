@@ -1234,7 +1234,7 @@ Map<String, dynamic> _modelRegistryError(int now, String error) => {
       'generated_at': now,
       'catalog_updated': kCatalogUpdated,
       'budget_policy': ModelBudgetPolicy.any.wireName,
-      'models': const [],
+      'models': const <Object?>[],
       'error': error,
     };
 
@@ -1244,7 +1244,7 @@ Map<String, dynamic> _modelSuggestionError(int now, String error) => {
       'budget_policy': ModelBudgetPolicy.any.wireName,
       'recommended': null,
       'reason': error,
-      'ranked': const [],
+      'ranked': const <Object?>[],
       'error': error,
     };
 

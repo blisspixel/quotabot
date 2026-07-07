@@ -229,8 +229,11 @@ void main() {
       );
 
       expect(json['cost_weight'], 1.0);
-      expect((json['recommended'] as Map)['provider'], 'codex');
-      final claude = (json['ranked'] as List).cast<Map>().firstWhere(
+      expect(
+          (json['recommended'] as Map<String, dynamic>)['provider'], 'codex');
+      final claude = (json['ranked'] as List<Object?>)
+          .cast<Map<String, dynamic>>()
+          .firstWhere(
             (entry) => entry['provider'] == 'claude',
           );
       expect(claude['cost_penalty'], 1.0);

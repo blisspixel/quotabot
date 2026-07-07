@@ -447,9 +447,9 @@ List<RouteLease> _readUnlocked(File file) {
   try {
     if (!file.existsSync() || file.lengthSync() > 1024 * 1024) return [];
     final decoded = jsonDecode(file.readAsStringSync());
-    if (decoded is! List) return [];
+    if (decoded is! List<Object?>) return [];
     return decoded
-        .whereType<Map>()
+        .whereType<Map<Object?, Object?>>()
         .map((entry) {
           try {
             return RouteLease.fromJson(entry.cast<String, dynamic>());

@@ -8,10 +8,11 @@ include: package:lints/recommended.yaml
 analyzer:
   # Refuse implicit and loose casts so a JSON boundary or a refactor cannot
   # silently reintroduce an unchecked `dynamic` cast. strict-inference and
-  # strict-raw-types are a deliberate follow-up (they require explicit type
-  # arguments at every JSON decode site) tracked in the roadmap.
+  # strict-raw-types keep untyped JSON and collection boundaries explicit.
   language:
     strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
 
 linter:
   rules:
