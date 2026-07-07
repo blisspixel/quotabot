@@ -35,10 +35,11 @@ class NvidiaAdapter {
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
-    final key = _keySource?.call() ??
-        Platform.environment['NVIDIA_API_KEY'] ??
-        Platform.environment['nvapi'];
-    if (key == null || key.isEmpty) {
+    final key = resolveNvidiaApiKey(
+      explicit: _keySource?.call(),
+      env: Platform.environment,
+    );
+    if (key == null) {
       return _noKey(asOf);
     }
     try {
@@ -91,4 +92,19 @@ class NvidiaAdapter {
         ok: false,
         error: 'NVIDIA key present but /models failed (invalid or network)',
       );
+}
+
+String? resolveNvidiaApiKey({
+  String? explicit,
+  Map<String, String> env = const {},
+}) {
+  for (final value in [
+    explicit,
+    env['NVIDIA_API_KEY'],
+    env['nvapi'],
+  ]) {
+    final trimmed = value?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) return trimmed;
+  }
+  return null;
 }

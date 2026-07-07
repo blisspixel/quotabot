@@ -34,6 +34,8 @@ Notable changes to quotabot. Newest first.
   cluttering the main quota view.
 - Windows source setup now restarts an already-running source-built desktop app
   after rebuilding it, so the tray app does not keep showing old code.
+- NVIDIA NIM key lookup now ignores blank key values before falling back to the
+  alternate `nvapi` or `NVIDIA_API_KEY` alias.
 
 ### Changed
 - Desktop setup help now describes Codex live usage reads, Codex this-machine
