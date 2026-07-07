@@ -86,7 +86,7 @@ product is finished forever. It is a claim that the SEE and ROUTE core is truste
 the public contract is steady, the installation and update paths are boring, and
 known failure modes are honest instead of surprising.
 
-The current line, **0.5.7**, is best
+The current line, **0.5.8**, is best
 understood as a corrective and hardening pass on the feature-complete original
 1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist: desktop,
 CLI, MCP, HTTP, LiteLLM integration, profiles, leases, model routing,

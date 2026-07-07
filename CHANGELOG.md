@@ -4,6 +4,9 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- Roadmap current-line copy now matches the shipped 0.5.8 release.
+
 ## 0.5.8 - 2026-07-07
 
 ### Fixed
