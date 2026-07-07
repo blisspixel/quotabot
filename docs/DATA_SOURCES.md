@@ -96,9 +96,16 @@ State lives in the Antigravity globalStorage SQLite database at
   `:fetchAvailableModels`) for per-model `quotaInfo` with `remainingFraction`,
   `resetTime`, and `isExhausted`. These are quota metadata calls, not generation,
   so they cost no tokens. The per-model quotas are bucketed into windows by reset.
+- The local `userStatus` cache is this-machine state. It is used for account and
+  plan discovery, and as an offline last-known fallback when live quota is
+  unavailable. A successful live read is preferred and is not overridden by local
+  settings data; local fallback snapshots are marked `per_machine`.
 - The Code Assist tier field reports `free-tier` even for paid accounts, so it is
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
+- Antigravity also exposes AI Premium credits and baseline quota concepts in its
+  own CLI/docs. quotabot does not guess those as spendable windows until their
+  API shape is verified; per-model quota remains the measured live signal.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
   Library, Linux XDG) and scans Antigravity profile directories. Each active
   account gets its own live read when a matching account grant, active CLI token,
@@ -107,8 +114,9 @@ State lives in the Antigravity globalStorage SQLite database at
 
 ## Authentication
 
-Codex needs no auth (it reads a file). Claude reuses the token Claude Code
-stores. Grok and Antigravity can run two ways:
+Codex reuses the OAuth access token Codex stores locally for the ChatGPT usage
+endpoint and falls back to local session snapshots when unavailable. Claude
+reuses the token Claude Code stores. Grok and Antigravity can run two ways:
 
 - Opportunistic: reuse the token the CLI or IDE currently holds, read-only. This
   is live only while that app keeps the token fresh.
@@ -229,6 +237,25 @@ model, chat, image, and content-generation endpoints, including xAI image APIs.
 Gemini CLI (consumer) and related Code Assist for individuals transitioned to Antigravity CLI around June 18, 2026. Antigravity (the VS Code fork + CLI) is the current Google agentic platform. See the Antigravity section above for local state.vscdb + live Cloud Code quota (already covers the unified offering, including multi-account). Legacy ~/.gemini paths may linger but are no longer primary for consumer quota.
 
 Free tier users typically see "free tier" (no hard tracked % windows) or 100% availability on reported buckets. There are still per-minute rate limits, but no weekly spend cap like paid tiers for the quotas quotabot tracks. Plan/tier is extracted from local state or responses when available.
+
+## NVIDIA NIM (build.nvidia.com / integrate.api.nvidia.com)
+
+NVIDIA offers free hosted NIM API access for development and testing through
+build.nvidia.com. The API is OpenAI-compatible at
+`https://integrate.api.nvidia.com/v1`.
+
+- Source: when `NVIDIA_API_KEY` or `nvapi` is present, quotabot performs
+  `GET https://integrate.api.nvidia.com/v1/models` to confirm the key works.
+  This is model discovery only, not inference.
+- Numeric quota: no local state file or zero-cost API endpoint for remaining
+  trial balance/rate-limit headroom is known. NVIDIA now describes trial usage
+  as model-specific rate limits rather than a published credit counter, so
+  quotabot reports availability with no quota windows instead of showing 0
+  percent or inventing a balance.
+- Routing: because no measured quota windows are known, NVIDIA NIM availability
+  is not treated as a routable model-budget candidate.
+- Users who want to track a manually observed balance or reset can use
+  `quotabot manual set nvidia ...` with self-reported values.
 
 ## A note on secrets
 

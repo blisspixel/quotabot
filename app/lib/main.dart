@@ -280,7 +280,8 @@ String? desktopRouteSignalLine(
           quotaShouldShowAccountLabel(quota, counts)
       ? ' (${quota.account})'
       : '';
-  final parts = <String>['Next: $display$accountLabel'];
+  final machineNote = (quota?.perMachine ?? false) ? ' (this machine)' : '';
+  final parts = <String>['Next: $display$accountLabel$machineNote'];
   if (candidate.isLocal) {
     parts.add('local fallback');
   } else if (candidate.headroom != null) {
@@ -310,6 +311,88 @@ String? desktopRouteSignalLine(
   }
   return parts.join(' | ');
 }
+
+@visibleForTesting
+String providerSetupText(String provider) {
+  switch (provider) {
+    case 'codex':
+      return 'Sign in to the Codex CLI (run codex once). quotabot reads the '
+          'ChatGPT usage endpoint and falls back to this-machine session '
+          'snapshots when live data is unavailable. No quotabot login needed '
+          'here.';
+    case 'claude':
+      return 'Sign in to Claude Code. quotabot reads its usage automatically. '
+          'No login needed here.';
+    case 'grok':
+      return 'Grok shows live while the Grok CLI token is fresh. To keep it '
+          'live without reopening the CLI, connect quotabot once with a device '
+          'code (works on Windows, macOS, and Linux).';
+    case 'antigravity':
+      return 'Antigravity shows live while the IDE token is fresh. To keep it '
+          'live without reopening the IDE, connect quotabot once and sign in '
+          'with the account you want shown.';
+    case 'nvidia':
+      return 'Set NVIDIA_API_KEY or nvapi to check NVIDIA NIM trial access. '
+          'quotabot only calls /v1/models and shows availability without a '
+          'numeric balance.';
+    case 'kiro':
+    case 'cursor':
+    case 'windsurf':
+      return 'Detected from the app\'s local data. If it shows no data, open '
+          'the app once and sign in, then refresh.';
+    case 'ollama':
+    case 'lmstudio':
+    case 'lemonade':
+      return 'Local runtime. Start its server and load a model; quotabot '
+          'detects what is installed and loaded automatically. No login '
+          'needed.';
+    default:
+      return 'quotabot reads this provider from local or provider metadata; '
+          'no setup needed here.';
+  }
+}
+
+@visibleForTesting
+bool providerRowShouldBeVisible(
+  ProviderQuota quota,
+  Set<String> detectedProviders,
+) {
+  if (quota.windows.isNotEmpty || quota.stale) return true;
+  if ((quota.status ?? '').isNotEmpty) return true;
+  final err = (quota.error ?? '').toLowerCase();
+  final passiveStub =
+      err.contains('installed') ||
+      err.contains('no data') ||
+      err.contains('free tier') ||
+      err.contains('not configured') ||
+      err.contains('not installed');
+  if (passiveStub) return detectedProviders.contains(quota.provider);
+  return true;
+}
+
+@visibleForTesting
+List<ProviderQuota> visibleProviderRows(
+  List<ProviderQuota> results,
+  Set<String> detectedProviders,
+) => [
+  for (final quota in results)
+    if (providerRowShouldBeVisible(quota, detectedProviders)) quota,
+];
+
+@visibleForTesting
+List<ProviderQuota> providerSetupRows(List<ProviderQuota> results) {
+  final seen = <String>{};
+  final rows = <ProviderQuota>[];
+  for (final quota in results) {
+    if (seen.add(quotaDisplayKey(quota))) rows.add(quota);
+  }
+  return rows;
+}
+
+@visibleForTesting
+String refreshFailureMessage(Object error) => error is TimeoutException
+    ? 'Refresh timed out; showing previous data'
+    : 'Refresh failed; showing previous data';
 
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
@@ -455,6 +538,7 @@ class _QuotaLoadingPainter extends CustomPainter {
 class _DashboardState extends State<Dashboard>
     with WindowListener, TrayListener {
   List<ProviderQuota> _data = const [];
+  List<ProviderQuota> _setupData = const [];
   bool _loading = true;
   late bool _compact = widget.prefs.compact;
   late Cadence _cadence = widget.prefs.cadence;
@@ -487,6 +571,7 @@ class _DashboardState extends State<Dashboard>
   Map<String, List<HeadroomBucket>> _buckets = {};
   Map<String, BurnStat> _burnStats = {};
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
+  String? _lastRefreshError;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
   // Analytics renders as a body inside this dashboard (same header, same
@@ -857,22 +942,8 @@ class _DashboardState extends State<Dashboard>
       final routeSummary = loadRoutedRequestSummary();
       if (!mounted) return;
       final det = detectInstalledAgenticTools();
-      // Only keep providers that have data or are detected as installed.
-      // This hides e.g. Kiro/Cursor/Windsurf/Antigravity when not present and no data.
-      // Core providers (codex etc.) are kept even if currently empty.
-      final active = results.where((q) {
-        if (q.windows.isNotEmpty || q.stale) return true;
-        final err = (q.error ?? '').toLowerCase();
-        final isPassiveStub =
-            err.contains('installed') ||
-            err.contains('no data') ||
-            err.contains('free tier') ||
-            err.contains('not installed');
-        if (isPassiveStub) {
-          return det.contains(q.provider);
-        }
-        return true;
-      }).toList();
+      final active = visibleProviderRows(results, det);
+      final setupRows = providerSetupRows(results);
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -887,6 +958,7 @@ class _DashboardState extends State<Dashboard>
         _activeProfile = _profileByName(selectedProfile);
         _applyProfileUiState(_activeProfile);
         _data = active;
+        _setupData = setupRows;
         _loading = false;
         _updated = DateTime.now();
         _history = {};
@@ -894,6 +966,7 @@ class _DashboardState extends State<Dashboard>
         _buckets = {};
         _burnStats = burnStats;
         _routeSummary = routeSummary;
+        _lastRefreshError = null;
         final tz = DateTime.now().timeZoneOffset;
         final rawInsights = <String, Insights>{};
         for (final q in active) {
@@ -910,10 +983,13 @@ class _DashboardState extends State<Dashboard>
       });
       _checkAndNotify();
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
-    } on Exception {
+    } on Exception catch (error) {
       // A failed or timed-out refresh keeps the last data on screen; the next
       // poll (scheduled in finally) retries.
       _failStreak += 1;
+      if (mounted) {
+        setState(() => _lastRefreshError = refreshFailureMessage(error));
+      }
     } finally {
       // Always reschedule, so one thrown refresh can never stop auto-polling.
       if (mounted) {
@@ -936,8 +1012,9 @@ class _DashboardState extends State<Dashboard>
         _hidden = {};
         _sort = ProviderSort.defaultOrder;
       }
-      _showAccounts = true; // show the (fake) account names in the demo
+      _showAccounts = true; // show demo account labels in screenshots
       _data = demo;
+      _setupData = providerSetupRows(demo);
       _loading = false;
       _updated = DateTime.now();
       _history = {};
@@ -1150,7 +1227,7 @@ class _DashboardState extends State<Dashboard>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Set up ${q.displayName}'),
-        content: Text(_setupText(q.provider)),
+        content: Text(providerSetupText(q.provider)),
         actions: [
           if (canConnect)
             TextButton(
@@ -1167,38 +1244,6 @@ class _DashboardState extends State<Dashboard>
         ],
       ),
     );
-  }
-
-  static String _setupText(String provider) {
-    switch (provider) {
-      case 'codex':
-        return 'Sign in to the Codex CLI (run codex once). quotabot reads its '
-            'local rate-limit file automatically. No login needed here.';
-      case 'claude':
-        return 'Sign in to Claude Code. quotabot reads its usage automatically. '
-            'No login needed here.';
-      case 'grok':
-        return 'Grok shows live while the Grok CLI token is fresh. To keep it '
-            'live without reopening the CLI, connect quotabot once with a device '
-            'code (works on Windows, macOS, and Linux).';
-      case 'antigravity':
-        return 'Antigravity shows live while the IDE token is fresh. To keep it '
-            'live without reopening the IDE, connect quotabot once and sign in '
-            'with the account you want shown.';
-      case 'kiro':
-      case 'cursor':
-      case 'windsurf':
-        return 'Detected from the app\'s local data. If it shows no data, open '
-            'the app once and sign in, then refresh.';
-      case 'ollama':
-      case 'lmstudio':
-      case 'lemonade':
-        return 'Local runtime. Start its server and load a model; quotabot '
-            'detects what is installed and loaded automatically. No login '
-            'needed.';
-      default:
-        return 'quotabot reads this provider from local data; no setup needed.';
-    }
   }
 
   @override
@@ -1470,6 +1515,7 @@ class _DashboardState extends State<Dashboard>
   Widget _header() {
     final chrome = AppChromeTheme.of(context);
     final muted = chrome.muted;
+    const warning = Color(0xFFD29922);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final routeLine = desktopRouteSignalLine(
       _routeSuggestion(now),
@@ -1595,6 +1641,32 @@ class _DashboardState extends State<Dashboard>
                           fontSize: AppType.caption,
                           fontWeight: FontWeight.w500,
                           color: muted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_lastRefreshError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, right: 4),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.warning_amber_rounded,
+                      size: 12,
+                      color: warning,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        _lastRefreshError!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: AppType.caption,
+                          fontWeight: FontWeight.w500,
+                          color: warning,
                         ),
                       ),
                     ),
@@ -2140,9 +2212,9 @@ class _DashboardState extends State<Dashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
-  /// Compact setup/help panel: a short intro, then every detected provider with
-  /// its live status and an inline Connect for Grok/Antigravity (login then
-  /// re-validate). Reachable from the help button; never pops up on its own.
+  /// Compact setup/help panel: a short intro, then every provider from the
+  /// latest snapshot with its live status and an inline Connect for
+  /// Grok/Antigravity. Reachable from the help button; never pops up on its own.
   /// All path/state reads are portable, so it works the same on every OS.
   void _showSetup() {
     // Mid-connect providers; declared outside the builder so it survives the
@@ -2154,6 +2226,7 @@ class _DashboardState extends State<Dashboard>
         final dark = Theme.of(ctx).brightness == Brightness.dark;
         final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
         final fg = dark ? Colors.white : const Color(0xFF111317);
+        final setupRows = _setupData.isEmpty ? _data : _setupData;
         return StatefulBuilder(
           builder: (ctx, setDlg) => Dialog(
             insetPadding: const EdgeInsets.symmetric(
@@ -2180,6 +2253,7 @@ class _DashboardState extends State<Dashboard>
                         ),
                         const Spacer(),
                         IconButton(
+                          tooltip: 'Close providers',
                           icon: Icon(
                             Icons.close_rounded,
                             size: 18,
@@ -2195,10 +2269,9 @@ class _DashboardState extends State<Dashboard>
                       ],
                     ),
                     Text(
-                      'Detected automatically. Grok and Antigravity can be '
-                      'connected once to stay live. Local models (Ollama, LM '
-                      'Studio, Lemonade) appear only while their server is '
-                      'running; in LM Studio, start the local server.',
+                      'Connect Grok or Antigravity once to stay live. '
+                      'Key-based and local providers show their current setup '
+                      'state.',
                       style: TextStyle(
                         fontSize: AppType.bodySmall,
                         height: 1.3,
@@ -2212,7 +2285,7 @@ class _DashboardState extends State<Dashboard>
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            for (final q in _data)
+                            for (final q in setupRows)
                               _setupRow(ctx, q, muted, fg, connecting, setDlg),
                           ],
                         ),
@@ -2288,6 +2361,7 @@ class _DashboardState extends State<Dashboard>
             )
           else if (!busy)
             IconButton(
+              tooltip: 'Set up ${q.displayName}',
               icon: Icon(Icons.help_outline_rounded, size: 16, color: muted),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
@@ -2388,7 +2462,11 @@ class _DashboardState extends State<Dashboard>
         grey = Color(0xFF8A91A0),
         blue = Color(0xFF58A6FF);
     if (q.isLocal) return q.active ? ('in use', green) : ('idle', blue);
-    if (!q.ok || q.windows.isEmpty) return ('no live data', grey);
+    if (!q.ok) return ('no live data', grey);
+    if (q.windows.isEmpty && (q.status ?? '').isNotEmpty) {
+      return ('available', green);
+    }
+    if (q.windows.isEmpty) return ('no live data', grey);
     if (q.stale) return ('cached', amber);
     final h = providerHeadroom(q, now) ?? 100;
     if (h <= 0.5) return ('spent', red);
@@ -2588,6 +2666,24 @@ class ProviderTile extends StatelessWidget {
                       color: muted,
                     ),
                   ),
+                if (quota.perMachine)
+                  Text(
+                    ' (this machine)',
+                    style: TextStyle(
+                      fontSize: AppType.caption,
+                      fontWeight: FontWeight.w500,
+                      color: muted,
+                    ),
+                  ),
+                if (quota.suspect != null)
+                  Text(
+                    ' !',
+                    style: TextStyle(
+                      fontSize: AppType.caption,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFFE3B341),
+                    ),
+                  ),
                 if (hasInsights) ...[
                   const SizedBox(width: 4),
                   Icon(
@@ -2600,13 +2696,23 @@ class ProviderTile extends StatelessWidget {
                 ],
               ],
             ),
+            if (quota.perMachine)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  quota.provider == 'antigravity'
+                      ? 'Note: Antigravity is using local fallback data; usage on other devices may not be reflected'
+                      : 'Note: this view is local fallback data; usage on other devices may not be reflected',
+                  style: TextStyle(fontSize: AppType.caption, color: muted),
+                ),
+              ),
             const SizedBox(height: 10),
             if (quota.isLocal)
               _localRow(quota, muted, fg)
             else if (quota.windows.isEmpty)
-              ((quota.plan ?? '').toLowerCase().contains('free')
-                  ? _freeTierRow(muted)
-                  : _noData(quota.error, muted))
+              ((quota.status ?? '').isNotEmpty
+                  ? _statusOnlyRow(quota, muted, fg)
+                  : _noData(quota.error, muted, quota.perMachine))
             else if (blocked)
               _blockedRow(binding, now, muted)
             else
@@ -2735,8 +2841,9 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _noData(String? err, Color muted) {
+  Widget _noData(String? err, Color muted, [bool perMachine = false]) {
     final msg = (err != null && err.length < 80) ? err : 'no live data';
+    final scope = perMachine ? ' (this machine)' : '';
     return Row(
       children: [
         Container(
@@ -2748,30 +2855,46 @@ class ProviderTile extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 7),
-        Text(
-          msg,
-          style: TextStyle(fontSize: AppType.caption, color: muted),
+        Expanded(
+          child: Text(
+            '$msg$scope',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: AppType.caption, color: muted),
+          ),
         ),
       ],
     );
   }
 
-  Widget _freeTierRow(Color muted) {
-    return Row(
+  Widget _statusOnlyRow(ProviderQuota quota, Color muted, Color fg) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: muted, width: 1.4),
+        Row(
+          children: [
+            Icon(Icons.check_circle_outline_rounded, size: 13, color: muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                quota.status!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: AppType.caption, color: fg),
+              ),
+            ),
+          ],
+        ),
+        for (final detail in quota.details)
+          Padding(
+            padding: const EdgeInsets.only(top: 3, left: 19),
+            child: Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: AppType.small, color: muted),
+            ),
           ),
-        ),
-        const SizedBox(width: 7),
-        Text(
-          'free tier',
-          style: TextStyle(fontSize: AppType.caption, color: muted),
-        ),
       ],
     );
   }
@@ -2877,7 +3000,7 @@ class WindowBar extends StatelessWidget {
         SizedBox(
           width: 42 * textScale,
           child: Text(
-            view.label,
+            view.label == 'baseline' ? 'baseline' : view.label,
             maxLines: 1,
             softWrap: false,
             overflow: TextOverflow.visible,

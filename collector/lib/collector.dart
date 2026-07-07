@@ -8,6 +8,7 @@ import 'adapters/grok.dart';
 import 'adapters/kiro.dart';
 import 'adapters/lemonade.dart';
 import 'adapters/lmstudio.dart';
+import 'adapters/nvidia.dart';
 import 'adapters/ollama.dart';
 import 'adapters/windsurf.dart';
 import 'analysis.dart';
@@ -122,6 +123,8 @@ Future<List<ProviderQuota>> collectAll() async {
         () => LmStudioAdapter().collect()),
     _withDeadline(lemonadeProviderId, lemonadeProviderName,
         () => LemonadeAdapter().collect()),
+    _withDeadline(
+        nvidiaProviderId, nvidiaProviderName, () => NvidiaAdapter().collect()),
   ]);
   final groks = await _collectGrokMulti();
   final antis = await _collectAntigravityMulti();

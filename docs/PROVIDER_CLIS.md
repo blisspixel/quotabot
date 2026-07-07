@@ -18,7 +18,7 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 - Windows: a rolling 5-hour window plus a weekly cap, shared across Claude Code,
   Claude.ai, and related products.
 - quotabot reads: the OAuth usage endpoint, reusing the token Claude Code stores.
-  Always live, no setup.
+  Live when Claude Code has a valid signed-in token; no quotabot login.
 
 ## Codex (OpenAI)
 
@@ -27,8 +27,10 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
   limits.
 - Windows: message quotas that reset every 5 hours, with weekly limits on some
   plans. Plus/Pro/Business plans get higher limits.
-- quotabot reads: the `rate_limits` snapshot Codex writes to its newest session
-  rollout file. Always live, no setup.
+- quotabot reads: the ChatGPT usage endpoint, reusing the OAuth access token
+  Codex stores locally. If the live read is unavailable, it falls back to the
+  newest local session `rate_limits` snapshot and marks that data as this
+  machine.
 
 ## Antigravity / Gemini (Google)
 
@@ -44,7 +46,9 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 - quotabot reads: the Cloud Code API (`loadCodeAssist`, `onboardUser`,
   `fetchAvailableModels`) using Antigravity's own public OAuth client. Run
   `quotabot login antigravity` once and sign in with the account you want shown;
-  no Google Cloud setup is required.
+  no Google Cloud setup is required. The live read is preferred; local
+  Antigravity state is only used for account discovery and offline fallback,
+  where quotabot marks the result `per_machine`.
 
 ## Grok (xAI)
 
@@ -57,6 +61,19 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
   shared pool (SuperGrok / Premium+ raise the limits).
 - quotabot reads: the gRPC-web billing endpoint, reusing the token the Grok CLI
   stores. Live while that token is fresh; `quotabot login grok` keeps it live.
+
+## NVIDIA NIM
+
+- Official docs: https://build.nvidia.com/ and
+  https://developer.nvidia.com/nim
+- Check access yourself: create an API key on build.nvidia.com, set
+  `NVIDIA_API_KEY` (or `nvapi`), then call the OpenAI-compatible
+  `https://integrate.api.nvidia.com/v1/models` endpoint.
+- Windows: NVIDIA-hosted NIM APIs are free for development/testing with
+  model-specific trial rate limits. NVIDIA does not publish a zero-cost numeric
+  remaining-balance endpoint.
+- quotabot reads: `GET /v1/models` only, to confirm the key works. It reports
+  availability with unknown numeric quota and never calls inference.
 
 ## Passive and local
 

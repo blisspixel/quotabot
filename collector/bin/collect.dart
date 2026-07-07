@@ -1693,6 +1693,10 @@ void _printDoctor(List<ProviderQuota> results) {
     for (final d in q.details) {
       print('  $indent ${' '.padRight(12)} $d');
     }
+    if (q.perMachine) {
+      print(
+          '  $indent ${' '.padRight(12)} ${style.dim('note: local fallback; other devices may differ')}');
+    }
     if (q.modelQuotas.isNotEmpty) {
       // Compact human summary; the full per-model table is in `quotabot json`
       // and over MCP, so this stays one short line.

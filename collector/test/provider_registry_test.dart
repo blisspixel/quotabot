@@ -20,6 +20,7 @@ void main() {
           kiroProviderId,
           lemonadeProviderId,
           lmStudioProviderId,
+          nvidiaProviderId,
           ollamaProviderId,
           windsurfProviderId,
         ]),

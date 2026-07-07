@@ -158,6 +158,26 @@ void main() {
     expect(reg, isEmpty);
   });
 
+  test('a status-only cloud provider contributes no routable models', () {
+    final reg = buildModelRegistry(
+      [
+        ProviderQuota(
+          provider: 'nvidia',
+          displayName: 'NVIDIA NIM',
+          account: 'default',
+          asOf: _now,
+          status: 'free trial available; balance unknown',
+          windows: const [],
+        ),
+      ],
+      _now,
+      catalog: {
+        'nvidia': [const ModelInfo(id: 'nvidia-test-model')],
+      },
+    );
+    expect(reg, isEmpty);
+  });
+
   group('requirement filtering', () {
     final providers = [_cloud('claude', 20)];
     const catalog = {

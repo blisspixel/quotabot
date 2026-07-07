@@ -183,6 +183,7 @@ void main() {
       'c@example.com',
     ]);
     expect(q.map((p) => p.windows.single.usedPercent).toList(), [25, 25, 75]);
+    expect(q.every((p) => !p.perMachine), isTrue);
     expect(tokenCalls, [
       'a@example.com:true',
       'b@example.com:false',
@@ -337,8 +338,9 @@ void main() {
         contains('Local Antigravity status reports higher rate limits'));
     expect(
       q.single.error,
-      'no live quota - run: quotabot login antigravity (then sign in with this account)',
+      'no live quota (this machine only) - run: quotabot login antigravity (then sign in with this account)',
     );
+    expect(q.single.perMachine, isTrue);
   });
 
   test('explicit local status is not overwritten by a mismatched token',
@@ -362,9 +364,10 @@ void main() {
     expect(q.single.status, 'Gemini 3.1 Pro (High)');
     expect(
       q.single.error,
-      'local Antigravity status found; live quota token is signed in to another account',
+      'local Antigravity status found (this machine only); live quota token is signed in to another account',
     );
     expect(q.single.windows, isEmpty);
+    expect(q.single.perMachine, isTrue);
   });
 
   test('discovery keeps a default database account when no email exists',
@@ -500,7 +503,8 @@ void main() {
     expect(q.single.ok, isTrue);
     expect(q.single.windows, isEmpty);
     expect(q.single.error,
-        'connected; Antigravity is not returning live quota here yet');
+        'connected (this machine only); Antigravity is not returning live quota here yet');
+    expect(q.single.perMachine, isTrue);
   });
 
   test('collect returns the first account snapshot', () async {
@@ -615,6 +619,7 @@ void main() {
     );
     expect(q.single.modelQuotas.first.usedPercent, closeTo(1.5, 1e-9));
     expect(q.single.modelQuotas.first.category, 'Fast');
+    expect(q.single.perMachine, isTrue);
   });
 
   test('a live read overrides the stale local per-model cache', () async {
@@ -635,6 +640,27 @@ void main() {
 
     expect(q.single.modelQuotas.single.model, 'gemini');
     expect(q.single.modelQuotas.single.usedPercent, closeTo(60, 1e-9));
+    expect(q.single.perMachine, isFalse);
+  });
+
+  test('a live read does not merge this-machine local cache', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('me@example.com', modelQuotas: const [
+          ModelQuota(model: 'gemini', usedPercent: 90),
+        ]),
+      ],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.4), // live: 60% used
+    ).collectAccounts();
+
+    expect(q.single.modelQuotas.single.model, 'gemini');
+    expect(q.single.modelQuotas.single.usedPercent, closeTo(60, 1e-9));
+    expect(q.single.windows.single.usedPercent, closeTo(60, 1e-9));
+    expect(q.single.perMachine, isFalse);
   });
 
   test('empty or throwing account sources fail softly', () async {

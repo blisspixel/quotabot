@@ -9,7 +9,7 @@ with C++" (Windows), Xcode and CocoaPods (macOS), or
 ## One-command setup
 
 From a fresh clone, a single idempotent script builds and installs the CLI and
-the desktop app (with a Desktop/tray shortcut) and finishes by running
+the desktop app (with a Desktop shortcut) and finishes by running
 `quotabot doctor`:
 
 ```powershell
@@ -21,7 +21,9 @@ bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
 
 The CLI is installed to your per-user bin (`%LOCALAPPDATA%\quotabot\bin` on
 Windows, `~/.local/bin` on macOS and Linux) and added to PATH. Re-run after a
-`git pull` to update. The manual steps below are the same thing by hand.
+`git pull` to update. On Windows, if the source-built desktop app is already
+running from the Release folder, setup restarts it after rebuilding so the tray
+app is not left on old code. The manual steps below are the same thing by hand.
 
 ## Run from source
 

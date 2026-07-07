@@ -21,14 +21,26 @@ quotabot does not log in to providers for you; it reads what their own apps have
 already saved. So before running quotabot, make sure you have used each tool at
 least once on this machine:
 
-- **Always live once their app has run:** Codex CLI, Claude Code.
+- **Live when their app is signed in:** Codex CLI, Claude Code.
 - **Live while their app is fresh:** Grok CLI, Antigravity IDE (step 4 keeps
-  these live longer).
+  these live longer). Antigravity uses the live Cloud Code quota read when
+  available; local settings are only an offline fallback.
+- **Optional key-based status:** NVIDIA NIM trial access appears when
+  `NVIDIA_API_KEY` or `nvapi` is set. It reports availability only because
+  NVIDIA does not expose a zero-cost numeric quota window.
 - **Detected automatically, no setup:** Kiro, Cursor, Windsurf, and a local
   runtime (Ollama, LM Studio, or Lemonade) while its server is running.
 
 If a tool has never run here, that provider simply shows "no live data" until you
 use it once.
+
+### Key-based status-only providers
+
+NVIDIA NIM is optional. Create an API key on build.nvidia.com, then set either
+`NVIDIA_API_KEY` or `nvapi` in the environment before running quotabot. quotabot
+only calls the OpenAI-compatible `/v1/models` metadata endpoint to confirm the
+key works. It never calls inference, does not invent a balance, and does not use
+NIM as a model-budget route while no measured quota windows are known.
 
 ### Local models (Ollama, LM Studio, Lemonade)
 
@@ -79,9 +91,9 @@ Each row shows a state and, when useful, the exact next step:
 
 | State           | Meaning                                                        |
 |-----------------|---------------------------------------------------------------|
-| `live`          | Working now, nothing to do (Codex and Claude are always live). |
+| `live`          | Working now; for Claude/Codex this means the host app is signed in. |
 | `cached`        | Last good read (age shown in the row); reopen that app or connect quotabot (step 4). |
-| `no live data`  | That tool is not installed or has not run on this machine yet. |
+| `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
 `doctor` ends with a one-line routing suggestion. Other useful commands:
@@ -94,10 +106,12 @@ quotabot suggest          # where to send the next request (step 6)
 
 ## 4. Keep Grok and Antigravity live (optional)
 
-Claude and Codex are always live. Antigravity and Grok are live for the account
-their app is signed into, and quotabot refreshes that token on its own. Two cases
-call for a one-time `login`: the app is signed out, or you use several accounts
-and want a specific one shown.
+Claude and Codex read live when their host apps have valid signed-in
+credentials. Codex can fall back to this-machine session snapshots if its live
+read is unavailable. Antigravity and Grok are live for the account their app is
+signed into, and quotabot refreshes that token on its own. Two cases call for a
+one-time `login`: the app is signed out, or you use several accounts and want a
+specific one shown.
 
 ```bash
 quotabot login grok          # device-code flow; confirm in the browser
@@ -175,6 +189,9 @@ that folder to reset quotabot completely.
 
 - **"no live data" for a provider you use:** open that provider's app once so it
   writes local state, then re-run `quotabot doctor`.
+- **NVIDIA NIM stays missing:** make sure `NVIDIA_API_KEY` or `nvapi` is visible
+  in the same shell that starts quotabot. A valid key shows availability with
+  unknown numeric quota, not a percentage window.
 - **Everything reads as "cached":** your machine was offline or asleep; reopen a
   provider app, or connect Grok/Antigravity once (step 4).
 - **`quotabot` not found after install:** restart your terminal so the new PATH

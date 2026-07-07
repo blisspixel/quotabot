@@ -439,6 +439,7 @@ class AntigravityAdapter {
           ],
           windows: const [],
           modelQuotas: source.modelQuotas,
+          perMachine: true,
         );
 
     try {
@@ -484,7 +485,7 @@ class AntigravityAdapter {
           : await (_loadCodeAssistFn ?? _loadCodeAssist)(access);
       if (access == null || load == null) {
         return offline(
-          'no live quota - run: quotabot login antigravity (then sign in with this account)',
+          'no live quota (this machine only) - run: quotabot login antigravity (then sign in with this account)',
         );
       }
 
@@ -497,7 +498,7 @@ class AntigravityAdapter {
         if (account != 'default' &&
             tokenEmail.toLowerCase() != account.toLowerCase()) {
           return offline(
-            'local Antigravity status found; live quota token is signed in to another account',
+            'local Antigravity status found (this machine only); live quota token is signed in to another account',
           );
         }
         account = tokenEmail;
@@ -536,9 +537,9 @@ class AntigravityAdapter {
         project,
       );
       final windows = antigravityWindows(models, asOf);
-      // Authoritative, cross-machine per-model quota from the live read. The
-      // local userStatus cache is only a last-known fallback (see offline()), so
-      // it must never sit alongside or override a fresh live read.
+      // Authoritative live quota from the Cloud Code endpoint. The local
+      // userStatus cache is this-machine state, so it is only used by the
+      // offline path and must not override a successful live read.
       final liveModelQuotas = antigravityModelQuotasFromLive(models);
 
       // Tier name from the load response (do not surface the raw `free-tier`
@@ -549,8 +550,8 @@ class AntigravityAdapter {
 
       if (windows.isEmpty) {
         return offline(source.localModel != null
-            ? 'connected; Antigravity local status is available, but live quota windows are not exposed here yet'
-            : 'connected; Antigravity is not returning live quota here yet');
+            ? 'connected (this machine only); Antigravity local status is available, but live quota windows are not exposed here yet'
+            : 'connected (this machine only); Antigravity is not returning live quota here yet');
       }
 
       return ProviderQuota(
@@ -756,6 +757,7 @@ class AntigravityAdapter {
           break;
         }
       }
+
       final access = tokenRaw == null
           ? null
           : findEmbeddedToken(tokenRaw, r'ya29\.[A-Za-z0-9._\-]{30,}');
@@ -954,5 +956,6 @@ class AntigravityAdapter {
       return null;
     }
   }
+
   // coverage:ignore-end
 }

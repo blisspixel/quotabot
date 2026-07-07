@@ -34,8 +34,10 @@ Provider snapshots keep these stable fields:
   account across every device, so it can undercount when the account is used
   elsewhere. Authoritative server-side reads (Claude, Grok, Antigravity, Codex
   live) omit it.
-- `windows` is always present. Local runtimes use an empty list because they have
-  no spendable quota.
+- `windows` is always present. Local runtimes use an empty list because they
+  have no spendable quota. Status-only cloud providers can also have an empty
+  list when quotabot can verify availability but has no measured quota window;
+  those providers may carry `status` and `details` instead of budget fields.
 
 Window objects keep:
 
@@ -117,10 +119,12 @@ Each model entry includes provider/account, `local`, `available`, `stale`,
 `quota_backed`, capability hints where known, and the gating quota budget when
 the model is remote: `headroom_percent`, `resets_at`, and the binding
 `gating_window` label. Entries gated by a self-reported manual quota carry
-`source: "manual"`. Some provider models with temporary included-quota
-terms can include `quota_included_until`; after that epoch, quotabot no longer
-marks the model `quota_backed` for `--budget=quota` routing unless the provider
-exposes a normal quota-backed path for it. Local-runtime entries also include
+`source: "manual"`. Status-only cloud providers with no measured quota windows
+stay visible in `quotabot.v1` snapshots but do not contribute `models` entries.
+Some provider models with temporary included-quota terms can include
+`quota_included_until`; after that epoch, quotabot no longer marks the model
+`quota_backed` for `--budget=quota` routing unless the provider exposes a normal
+quota-backed path for it. Local-runtime entries also include
 `local_readiness` (`loaded` or `cold`), `size_bytes`, loaded-model
 `vram_bytes`, and `quant` when the runtime exposes them, so routers can
 distinguish ready-now models from installed models that may need a cold start.

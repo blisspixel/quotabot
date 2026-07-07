@@ -31,3 +31,6 @@ const ollamaProviderName = 'Ollama';
 
 const windsurfProviderId = 'windsurf';
 const windsurfProviderName = 'Windsurf';
+
+const nvidiaProviderId = 'nvidia';
+const nvidiaProviderName = 'NVIDIA NIM';

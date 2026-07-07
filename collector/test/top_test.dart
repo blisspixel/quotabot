@@ -489,6 +489,10 @@ void main() {
     final lines = _frame(const [], width: 60);
     expect(
         lines.any((l) => _plain(l).contains('no providers detected')), isTrue);
+    expect(
+      lines.any((l) => _plain(l).contains('login supports Grok')),
+      isTrue,
+    );
     for (final line in lines) {
       expect(_plain(line).length, 60);
     }

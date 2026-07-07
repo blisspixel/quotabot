@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Builds and installs the quotabot CLI, and (by default) the desktop app with a
-  Start-menu/Desktop shortcut, then runs `quotabot doctor`. Idempotent: safe to
+  Desktop shortcut, then runs `quotabot doctor`. Idempotent: safe to
   re-run after a `git pull`. Everything stays local; no telemetry, no account.
 
   An AI agent can run this unattended:  pwsh tools/setup.ps1 -Yes
@@ -58,6 +58,32 @@ function Resolve-DartBin {
     if (Test-Path (Join-Path $c 'dart.bat')) { return $c }
   }
   throw "Dart/Flutter not found on PATH. Install Flutter (https://docs.flutter.dev/get-started/install), or add its bin directory to PATH, and re-run."
+}
+
+function Resolve-BuiltAppExe {
+  foreach ($arch in @('x64', 'arm64')) {
+    $candidate = Join-Path $app "build\windows\$arch\runner\Release\quotabot.exe"
+    $resolved = Resolve-Path -LiteralPath $candidate -ErrorAction SilentlyContinue
+    if ($resolved) { return $resolved.Path }
+  }
+  return $null
+}
+
+function Get-RunningDesktopApp($exePath) {
+  if (-not $exePath) { return @() }
+  $resolvedExe = [IO.Path]::GetFullPath($exePath)
+  $matches = @()
+  foreach ($proc in Get-Process quotabot -ErrorAction SilentlyContinue) {
+    try {
+      if ($proc.Path -and ([IO.Path]::GetFullPath($proc.Path) -ieq $resolvedExe)) {
+        $matches += $proc
+      }
+    } catch {
+      # Some process paths can be inaccessible; ignore them rather than
+      # stopping an unrelated quotabot CLI or service.
+    }
+  }
+  return $matches
 }
 
 Write-Step 'Locating the Dart toolchain'
@@ -132,6 +158,20 @@ if ($userPaths -notcontains $installDir) {
 }
 
 if (-not $CliOnly -and -not $NoApp) {
+  $wasRunningApp = $false
+  $existingAppExe = Resolve-BuiltAppExe
+  $runningApp = Get-RunningDesktopApp $existingAppExe
+  if ($runningApp.Count -gt 0) {
+    $wasRunningApp = $true
+    Write-Step 'Stopping the running desktop app so the rebuilt app is used'
+    foreach ($proc in $runningApp) {
+      Stop-Process -Id $proc.Id -Force
+    }
+    foreach ($proc in $runningApp) {
+      try { Wait-Process -Id $proc.Id -Timeout 10 } catch {}
+    }
+  }
+
   Write-Step 'Building the desktop app (this takes a few minutes)'
   Push-Location $app
   try {
@@ -139,8 +179,16 @@ if (-not $CliOnly -and -not $NoApp) {
     if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed with exit code $LASTEXITCODE" }
   } finally { Pop-Location }
 
+  $builtAppExe = Resolve-BuiltAppExe
+  if (-not $builtAppExe) { throw "Desktop build finished, but quotabot.exe was not found under app\build\windows" }
+
   Write-Step 'Creating the Desktop shortcut'
-  & (Join-Path $scriptDir 'create-shortcut.ps1')
+  & (Join-Path $scriptDir 'create-shortcut.ps1') -ExePath $builtAppExe
+
+  if ($wasRunningApp) {
+    Start-Process -FilePath $builtAppExe -WorkingDirectory (Split-Path -Parent $builtAppExe)
+    Write-Ok 'Restarted the desktop app from the rebuilt Release folder'
+  }
 }
 
 Write-Step 'Verifying with quotabot doctor'

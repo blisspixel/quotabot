@@ -868,7 +868,7 @@ RouteSuggestion suggestRoute(
   if (usable.isEmpty) {
     return result(
       null,
-      'No live quota data. Open a provider app or run a login to refresh.',
+      'No live quota data. Open the provider app, or use quotabot login for Grok/Antigravity.',
     );
   }
 

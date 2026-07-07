@@ -138,11 +138,12 @@ logical order (each enables the next; no dates):
    session fallback) now carry `per_machine`, shown as a "(this machine)" note
    and exposed over MCP, so a local-only number is never mistaken for the
    account's cross-device total. Finding their own usage endpoints, if any, is
-   the follow-up. Local runtimes are correctly per-machine. Open:
-   Antigravity's separate weekly window (live longer reset, or an account-level
-   number?), and the exact Codex usage endpoint and shape (research, no
-   guessing). Rule: capture richly, display compactly, prefer authoritative over
-   local.
+   the follow-up. Local runtimes are correctly per-machine. Addressed for
+   Antigravity: successful reads use the live Cloud Code quota endpoint and keep
+   the local `userStatus` cache as an offline last-known fallback, marked
+   `per_machine`. Open: exact weekly versus baseline-credit distinction in the
+   Antigravity API (research, no guessing). Rule: capture richly, display
+   compactly, prefer authoritative over local.
 2. **SEE integrity - a silent-drift canary.** 1.0 acceptance criterion 1 is
    "every provider either reads correctly or fails with a plain message," but
    nothing caught a read that is wrong and does not fail: a re-rated or

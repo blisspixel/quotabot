@@ -131,4 +131,77 @@ void main() {
     expect(find.textContaining('Antigravity'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('long no-data setup messages stay inside provider tiles', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(220, 180));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final q = ProviderQuota(
+      provider: 'nvidia',
+      displayName: 'NVIDIA NIM',
+      account: 'default',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      ok: false,
+      error: 'NVIDIA NIM not configured; set NVIDIA_API_KEY or nvapi',
+      windows: const [],
+    );
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 160,
+          child: ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('NVIDIA NIM not configured'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'shows (this machine) note for perMachine quota like Antigravity fallback',
+    (tester) async {
+      final q = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'user@example.com',
+        asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        windows: const [],
+        perMachine: true,
+      );
+      await tester.pumpWidget(
+        _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
+      );
+      await tester.pump();
+
+      expect(find.text(' (this machine)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('shows status-only providers without a zero quota', (
+    tester,
+  ) async {
+    final q = ProviderQuota(
+      provider: 'nvidia',
+      displayName: 'NVIDIA NIM',
+      account: 'default',
+      plan: 'free trial',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      status: 'free trial available; balance unknown',
+      details: const ['trial rate limits are model-specific and unpublished'],
+      windows: const [],
+    );
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.text('free trial available; balance unknown'), findsOneWidget);
+    expect(find.textContaining('0% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

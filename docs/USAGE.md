@@ -18,6 +18,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   always-on-top, taskbar visibility, notifications, and "Show account names".
   Account names auto-hide for single-account providers and show only when a
   provider has more than one account on screen.
+- **Setup/help:** shows the current setup state for supported providers,
+  including key-based providers hidden from the main quota view until they are
+  configured.
 - **Smart schedule:** refreshes more often as a reset nears or a cap fills, and
   relaxes to as little as twice a day when everything is healthy.
 - **Route signal:** the expanded header shows the next recommended route, its
@@ -303,10 +306,12 @@ Add `--budget=local` for a hard cap to free local-runtime models, or
 `--budget=quota` to allow local runtimes plus measured built-in quota plans while
 excluding self-reported manual quotas. `quota` is not permission to use
 request-metered paid APIs; those remain blocked by the LiteLLM guardrails unless
-explicitly enabled in that integration. If a provider model is only temporarily
-included in a plan, quotabot marks it quota-backed only until the documented
-cutoff; after that point `--budget=quota` excludes it rather than drifting into
-credit-backed usage.
+explicitly enabled in that integration. Providers that expose availability but
+no measured quota windows, such as NVIDIA NIM trial access, stay visible in
+status views but do not become `models` candidates. If a provider model is only
+temporarily included in a plan, quotabot marks it quota-backed only until the
+documented cutoff; after that point `--budget=quota` excludes it rather than
+drifting into credit-backed usage.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only
