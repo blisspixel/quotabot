@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
@@ -74,6 +76,96 @@ void main() {
     expect(back.provider, 'codex');
     expect(back.windows.single.usedPercent, 7);
     expect(back.windows.single.resetsAt, 1782050000);
+  });
+
+  test('provider setup copy matches live and status-only sources', () {
+    final codex = providerSetupText('codex');
+    expect(codex, contains('ChatGPT usage endpoint'));
+    expect(codex, contains('this-machine session snapshots'));
+    expect(codex, contains('No quotabot login needed'));
+
+    final nvidia = providerSetupText('nvidia');
+    expect(nvidia, contains('NVIDIA_API_KEY'));
+    expect(nvidia, contains('nvapi'));
+    expect(nvidia, contains('/v1/models'));
+    expect(nvidia, contains('without a numeric balance'));
+  });
+
+  test(
+    'visible provider rows keep status-only and actionable setup states',
+    () {
+      final statusOnly = ProviderQuota(
+        provider: 'nvidia',
+        displayName: 'NVIDIA NIM',
+        account: 'default',
+        asOf: 1782046566,
+        ok: true,
+        status: 'free trial available; balance unknown',
+        windows: const [],
+      );
+      final missingKey = ProviderQuota(
+        provider: 'nvidia',
+        displayName: 'NVIDIA NIM',
+        account: 'default',
+        asOf: 1782046566,
+        ok: false,
+        error: 'NVIDIA NIM not configured; set NVIDIA_API_KEY or nvapi',
+        windows: const [],
+      );
+      final invalidKey = ProviderQuota(
+        provider: 'nvidia',
+        displayName: 'NVIDIA NIM',
+        account: 'default',
+        asOf: 1782046566,
+        ok: false,
+        error: 'NVIDIA key present but /models failed (invalid or network)',
+        windows: const [],
+      );
+      final passiveMissing = ProviderQuota(
+        provider: 'cursor',
+        displayName: 'Cursor',
+        account: 'default',
+        asOf: 1782046566,
+        ok: false,
+        error: 'not installed',
+        windows: const [],
+      );
+
+      final hiddenPassive = visibleProviderRows([
+        statusOnly,
+        missingKey,
+        invalidKey,
+        passiveMissing,
+      ], const {});
+      expect(hiddenPassive, contains(statusOnly));
+      expect(hiddenPassive, contains(invalidKey));
+      expect(hiddenPassive, isNot(contains(missingKey)));
+      expect(hiddenPassive, isNot(contains(passiveMissing)));
+      expect(providerSetupRows([missingKey, passiveMissing]), [
+        missingKey,
+        passiveMissing,
+      ]);
+      expect(providerSetupRows([missingKey, invalidKey]), [missingKey]);
+
+      final detectedPassive = visibleProviderRows(
+        [statusOnly, missingKey, invalidKey, passiveMissing],
+        {'cursor', 'nvidia'},
+      );
+      expect(detectedPassive, contains(missingKey));
+      expect(detectedPassive, contains(passiveMissing));
+    },
+  );
+
+  test('refresh failure messages are sanitized', () {
+    final timeout = refreshFailureMessage(
+      TimeoutException('secret path C:\\Users\\name\\token.json'),
+    );
+    final failure = refreshFailureMessage(StateError('secret-token'));
+
+    expect(timeout, 'Refresh timed out; showing previous data');
+    expect(failure, 'Refresh failed; showing previous data');
+    expect(timeout, isNot(contains('secret')));
+    expect(failure, isNot(contains('secret')));
   });
 
   group('Prefs', () {

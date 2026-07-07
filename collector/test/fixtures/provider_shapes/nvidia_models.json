@@ -1,0 +1,15 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "meta/llama-3.1-8b-instruct",
+      "object": "model",
+      "owned_by": "meta"
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "object": "model",
+      "owned_by": "nvidia"
+    }
+  ]
+}

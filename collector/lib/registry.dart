@@ -309,6 +309,7 @@ List<ModelEntry> buildModelRegistry(
 }) {
   final entries = <ModelEntry>[];
   for (final q in snapshot) {
+    if (!q.isLocal && q.windows.isEmpty) continue;
     final models = q.isLocal ? q.models : (catalog[q.provider] ?? const []);
     if (models.isEmpty) continue;
     final a = providerAvailability(q, now);

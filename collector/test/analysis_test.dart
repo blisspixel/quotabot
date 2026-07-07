@@ -676,6 +676,10 @@ void main() {
       final s = suggestRoute([_q('grok', const [])], _now);
       expect(s.fallback.kind, 'passthrough');
       expect(s.fallback.provider, isNull);
+      expect(
+        s.reason,
+        'No live quota data. Open the provider app, or use quotabot login for Grok/Antigravity.',
+      );
     });
 
     test('fallback is present on the happy path', () {

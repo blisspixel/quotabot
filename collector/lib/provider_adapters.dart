@@ -26,6 +26,7 @@ enum ProviderFixtureKind {
   ollamaTags,
   lmStudioNativeModels,
   lemonadeModels,
+  nvidiaModels,
 }
 
 class ProviderAdapterRegistration {
@@ -125,6 +126,14 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     cached: false,
     fixtureKind: ProviderFixtureKind.lemonadeModels,
     fixtureFile: 'lemonade_models.json',
+  ),
+  ProviderAdapterRegistration(
+    id: nvidiaProviderId,
+    displayName: nvidiaProviderName,
+    adapterClass: ProviderAdapterClass.subscription,
+    cached: false,
+    fixtureKind: ProviderFixtureKind.nvidiaModels,
+    fixtureFile: 'nvidia_models.json',
   ),
 ];
 

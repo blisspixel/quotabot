@@ -63,6 +63,10 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       final models = lmStudioCompatFromJson(_fixtureMap(entry.fixtureFile));
       expect(models, hasLength(2));
       expect(models!.first.name, 'llama-3.2-3b-instruct');
+    case ProviderFixtureKind.nvidiaModels:
+      final fixture = _fixtureMap(entry.fixtureFile);
+      expect(fixture['object'], 'list');
+      expect(fixture['data'], isA<List<dynamic>>());
   }
 }
 

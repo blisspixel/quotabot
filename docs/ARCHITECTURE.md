@@ -112,8 +112,9 @@ fail when a new adapter lacks a registry row or fixture.
 
 Each adapter has a single `collect()` method returning a `ProviderQuota`:
 
-- Codex reads a local file (the newest session rollout) and parses the
-  `rate_limits` snapshot. No network or auth.
+- Codex calls the ChatGPT usage metadata endpoint with the OAuth access token
+  Codex stores locally, then falls back to the newest local session
+  `rate_limits` snapshot when the live read is unavailable. No model call.
 - Claude, Grok, and Antigravity call live metadata endpoints (no model calls, no
   token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
   prefer quotabot's own OAuth grant (see Authentication) and fall back to the

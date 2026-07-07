@@ -4,6 +4,50 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- Desktop refresh failures now show a quiet sanitized "showing previous data"
+  note instead of failing silently.
+- Provider setup dialogs now label their icon-only close and help buttons for
+  tooltip and assistive-technology users.
+- No-quota routing guidance now says `quotabot login` only applies to Grok and
+  Antigravity, avoiding misleading recovery advice for Claude, Codex, and other
+  providers.
+- Antigravity live reads no longer get labeled "(this machine)" or overridden by
+  local `userStatus` cache data. The local cache remains an offline fallback and
+  is the only Antigravity path marked `per_machine`.
+- The desktop and terminal views now show status-only providers, such as
+  NVIDIA NIM trial access, as available with unknown numeric quota instead of
+  flattening them into generic no-live-data rows.
+- NVIDIA NIM setup and no-key messages now name both supported environment
+  variables: `NVIDIA_API_KEY` and `nvapi`.
+- Status-only cloud providers with no measured quota windows are excluded from
+  model-budget routing, so NVIDIA NIM availability cannot be mistaken for a
+  spendable quota-backed route.
+- Long no-live-data setup messages now ellipsize inside desktop provider cards
+  instead of risking overflow on narrow windows.
+- Schema docs now clarify that status-only cloud providers can have empty
+  `windows` and do not contribute model registry entries without measured quota.
+- Setup docs now include the optional NVIDIA NIM key path and explain why it is
+  status-only rather than a model-budget route.
+- Desktop setup/help now keeps dashboard-hidden setup states reachable, so
+  NVIDIA NIM can explain the missing `NVIDIA_API_KEY` or `nvapi` key without
+  cluttering the main quota view.
+- Windows source setup now restarts an already-running source-built desktop app
+  after rebuilding it, so the tray app does not keep showing old code.
+
+### Changed
+- Desktop setup help now describes Codex live usage reads, Codex this-machine
+  fallback, and NVIDIA NIM key-based availability instead of generic local-data
+  setup copy.
+- Aligned Codex README and provider docs with the current ChatGPT usage endpoint
+  plus this-machine session fallback.
+- Clarified Antigravity docs around live Cloud Code quota versus local fallback.
+
+### Added
+- NVIDIA NIM trial availability as an opportunistic provider. With
+  `NVIDIA_API_KEY` or `nvapi`, quotabot performs only safe `/v1/models`
+  discovery and reports availability without inventing quota windows.
+
 ## 0.5.7 - 2026-07-03
 
 ### Fixed

@@ -343,10 +343,11 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     ];
   }
   if (q.windows.isEmpty) {
+    final status = q.status?.isNotEmpty == true ? q.status! : 'no live data';
     return [
       _line([
         ..._rowHead(q.displayName, '', selected: selected, palette: p),
-        _Cell('no live data', (s, t) => s.dim(t)),
+        _Cell(status, (s, t) => s.dim(t)),
         _Cell(cachedTag, (s, t) => s.dim(t)),
         _Cell(accountTag, (s, t) => s.dim(t)),
       ], width, s),
@@ -534,7 +535,7 @@ List<String> renderTopFrame({
   if (cloud.isEmpty && local.isEmpty) {
     lines.add(_line([
       const _Cell('  '),
-      _Cell('no providers detected - open a provider app or run a login',
+      _Cell('no providers detected - open app; login supports Grok/Antigravity',
           (s, t) => s.dim(t)),
     ], w, s));
   }

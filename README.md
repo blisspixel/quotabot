@@ -26,8 +26,9 @@ quotabot does two things:
    spent cap.
 
 It reuses the tokens your tools already store, so most providers need no setup:
-Claude, Codex, and Antigravity read live from their signed-in apps, and a
-one-time login covers Grok.
+Claude and Codex read live when their apps are signed in, Antigravity reads from
+a signed-in IDE or a one-time quotabot login, and Grok can stay live with a
+one-time quotabot login.
 
 <p align="center">
   <img src="docs/quotabot-demo.gif" alt="quotabot demo showing the widget, compact strip, 90-day analytics, and top dashboard" width="620">
@@ -77,20 +78,31 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 | Provider     | Source                                                   | Live usage      |
 |--------------|----------------------------------------------------------|-----------------|
 | Claude       | OAuth usage endpoint, token reused from Claude Code       | Yes             |
-| Codex        | `rate_limits` event in the newest session rollout        | Yes             |
-| Antigravity  | Google Cloud Code API (Gemini), token reused and refreshed | Yes, signed-in account |
+| Codex        | ChatGPT usage endpoint; local session fallback           | Yes; local fallback marked this machine |
+| Antigravity  | Google Cloud Code API (Gemini), token reused and refreshed | Yes, signed-in account; local fallback marked this machine |
 | Grok         | gRPC-web billing endpoint, token reused from the CLI     | Yes, when fresh |
 | Cursor       | Local credits/state; passive detect for free/Pro          | opportunistic   |
 | Windsurf     | Local `cachedPlanInfo` (daily/weekly Cascade quota)       | opportunistic   |
 | Kiro         | Local credits/state (CLI+IDE); passive detect             | opportunistic   |
 | Ollama / LM Studio / Lemonade | Local server; installed and loaded models | when running |
+| NVIDIA NIM | `NVIDIA_API_KEY` or `nvapi` + safe `/v1/models` discovery | free trial available; numeric quota unknown |
 | Manual entries | User-entered limit, used count, and reset for any tool  | self-reported   |
 
-Claude and Codex are always live with no setup. Antigravity and Grok are live for
-the account their app is signed into; quotabot refreshes that token on its own.
+Claude and Codex are live with no quotabot login when their host apps have valid
+signed-in credentials. Codex reads the ChatGPT usage endpoint using the token
+Codex stores locally and falls back to this-machine session snapshots when the
+live read is unavailable. Antigravity and Grok are live for the account their app
+is signed into; quotabot refreshes that token on its own.
 Google's consumer Gemini CLI has been superseded by Antigravity, so Google
-coverage runs through the Antigravity adapter. Any OpenAI-compatible local server
-(Lemonade, Jan, llama.cpp, GPT4All, and similar) is detected the same way.
+coverage runs through the Antigravity adapter. Its live Cloud Code quota read is
+preferred; local Antigravity settings are only used for account discovery and
+offline last-known fallback, where the result is marked "(this machine)". Any
+OpenAI-compatible local server (Lemonade, Jan, llama.cpp, GPT4All, and similar)
+is detected the same way. NVIDIA NIM is an optional free trial signal when
+`NVIDIA_API_KEY` or `nvapi` is present: quotabot confirms the key with a
+model-list metadata read, but does not invent a numeric balance because NVIDIA
+does not expose one without using the service. Because no quota windows are
+known, NIM availability is not used as a routable model-budget candidate.
 
 For exactly where each number comes from, see
 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md); for each provider's own usage
@@ -114,11 +126,11 @@ irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 ```
 
 Restart your terminal, then run `quotabot doctor`. Claude and Codex should read
-live immediately. Full getting-started guide, including which providers need a
-one-time login: [docs/SETUP.md](docs/SETUP.md).
+live immediately when their host apps are signed in. Full getting-started guide,
+including which providers need a one-time login: [docs/SETUP.md](docs/SETUP.md).
 
 To build everything from source in one command (CLI, desktop app, and a
-Desktop/tray shortcut), run `pwsh tools/setup.ps1` on Windows or
+Desktop shortcut), run `pwsh tools/setup.ps1` on Windows or
 `bash tools/setup.sh` on macOS/Linux (add `-CliOnly` / `--cli-only` for just the
 CLI). Details in [docs/BUILDING.md](docs/BUILDING.md).
 
