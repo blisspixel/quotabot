@@ -1456,8 +1456,18 @@ class _DashboardState extends State<Dashboard>
                 ),
               ),
             ),
-            _iconButton(Icons.open_in_full_rounded, muted, _toggleCompact),
-            _iconButton(Icons.close_rounded, muted, windowManager.close),
+            _iconButton(
+              Icons.open_in_full_rounded,
+              muted,
+              _toggleCompact,
+              tooltip: 'Expand',
+            ),
+            _iconButton(
+              Icons.close_rounded,
+              muted,
+              windowManager.close,
+              tooltip: 'Close',
+            ),
           ],
         ),
       ),
@@ -2477,7 +2487,7 @@ class _DashboardState extends State<Dashboard>
     IconData icon,
     Color color,
     VoidCallback? onTap, {
-    String? tooltip,
+    required String tooltip,
   }) => AppChromeIconButton(
     icon: icon,
     color: color,

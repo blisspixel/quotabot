@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:quotabot/chrome_controls.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/profile_ui.dart';
@@ -51,6 +52,29 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(find.bySemanticsLabel('Loading quota data'), findsOneWidget);
   });
+
+  testWidgets(
+    'desktop chrome icon button exposes tooltip and semantics label',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: AppChromeIconButton(
+                icon: Icons.open_in_full_rounded,
+                color: Colors.black,
+                onTap: () {},
+                tooltip: 'Expand',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byTooltip('Expand'), findsOneWidget);
+      expect(find.bySemanticsLabel('Expand'), findsOneWidget);
+    },
+  );
 
   test('QuotaWindow derives percent from used/limit', () {
     final w = QuotaWindow(label: '5h', used: 25, limit: 100);
