@@ -3,7 +3,8 @@
 #
 # Builds and installs the quotabot CLI, and (by default) the desktop app, then
 # runs `quotabot doctor`. Idempotent: safe to re-run after a `git pull`.
-# Everything stays local; no telemetry, no account.
+# No quotabot account or telemetry is used. `doctor` reads quota metadata only:
+# no prompts, code, inference requests, or usage-token-spending calls.
 #
 # An AI agent can run this unattended:  bash tools/setup.sh --cli-only
 #
