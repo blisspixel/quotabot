@@ -88,8 +88,10 @@ write a spend ledger, or change routing from this advisory.
 
 ## CLI reference
 
-Run `quotabot help` for the live list. Every command is a local metadata read and
-costs no usage tokens; add `--json` to any read command for machine output.
+Run `quotabot help` for the live list. Every command is a quota metadata read and
+costs no usage tokens. Most providers read local files; live providers may call
+their own metadata endpoint with an existing local token or key. Add `--json` to
+any read command for machine output.
 
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|

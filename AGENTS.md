@@ -2,8 +2,10 @@
 
 quotabot reports how much quota is left across a user's AI coding subscriptions
 (Claude, Codex, Antigravity/Gemini, Grok) and local runtimes (Ollama, LM Studio),
-and recommends which one to send the next request to. Every call is a local
-metadata read: no model calls, no usage tokens, no prompts or code ever read.
+and recommends which one to send the next request to. Every call is a metadata
+read: no model calls, no usage tokens, and no prompts or code ever read. Most
+providers are read from local files; live providers may call their own quota or
+model-list metadata endpoint with an existing local token or key.
 
 If you are an agent or tool that picks a model/provider, use quotabot to route to
 whichever subscription still has budget instead of stalling on a spent cap.
@@ -12,8 +14,8 @@ whichever subscription still has budget instead of stalling on a spent cap.
 
 From a fresh clone, one idempotent command builds and installs everything (the
 CLI, the desktop app, and a Desktop/tray shortcut) and then verifies it with
-`quotabot doctor`. It needs only Flutter/Dart on the machine, and nothing leaves
-the machine.
+`quotabot doctor`. It needs only Flutter/Dart on the machine, and no prompts,
+code, or usage-token-spending requests leave the machine.
 
 - Windows: `pwsh tools/setup.ps1`
 - macOS / Linux: `bash tools/setup.sh`
@@ -160,7 +162,9 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
 
 - It makes no model/inference calls and spends no usage tokens.
 - It reads only quota/usage metadata, never prompts, code, or other content.
-- It stays local: no account, no cloud, nothing leaves the machine.
+- It has no quotabot account, cloud, or telemetry. Provider metadata calls, when
+  needed, send only provider credentials and quota-discovery requests, never
+  prompts, code, or other user content.
 - Runtime code is guarded against direct paid model, chat, image, and
   content-generation endpoints; model-list catalog audits are maintenance-only.
 

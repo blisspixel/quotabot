@@ -38,6 +38,8 @@ Notable changes to quotabot. Newest first.
   alternate `nvapi` or `NVIDIA_API_KEY` alias.
 
 ### Changed
+- Clarified agent, setup, and usage docs so no-token/no-content claims match the
+  current mix of local files and provider metadata endpoint reads.
 - Desktop setup help now describes Codex live usage reads, Codex this-machine
   fallback, and NVIDIA NIM key-based availability instead of generic local-data
   setup copy.

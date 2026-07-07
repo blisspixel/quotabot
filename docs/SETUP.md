@@ -7,8 +7,11 @@ quotabot has two parts, and you can use either on its own:
 2. A **desktop widget** (a small always-available card per provider). You run it
    from source today; it builds on Windows, macOS, and Linux.
 
-Everything reads quota from the local files your existing AI tools already wrote.
-quotabot makes no model calls, so every command here costs zero usage tokens.
+quotabot reads quota metadata from the safest source each provider exposes. Most
+reads come from local files your existing AI tools already wrote; live providers
+may call their own quota or model-list metadata endpoint with an existing local
+token or key. quotabot makes no model calls, so every command here costs zero
+usage tokens.
 
 If you just want the numbers fast, do steps 1 to 3. The widget (step 5) and
 routing (step 6) are optional.
@@ -216,4 +219,6 @@ cd app
 flutter run -d windows    # or: macos, linux
 ```
 
-Every command in this guide is a local metadata read and costs zero usage tokens.
+Every command in this guide is a quota metadata read and costs zero usage
+tokens. Some live providers contact their own metadata endpoint, but quotabot
+never sends prompts, code, or inference requests.
