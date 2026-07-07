@@ -246,7 +246,7 @@ void main() {
     test('a quota budget rejects self-reported manual cloud quotas', () {
       final reg = buildModelRegistry(
         [
-          _cloud('claude', 20, source: 'manual'),
+          _cloud('claude', 20, source: providerQuotaManualSource),
           _cloud('grok', 0),
           _cloud('codex', 30),
           _local('ollama', const [ModelInfo(id: 'local-m', local: true)]),
@@ -493,7 +493,12 @@ void main() {
       final signals = expiringQuotaSignals(
         [
           _cloud('claude', 10, resetsAt: reset),
-          _cloud('manual', 10, source: 'manual', resetsAt: reset),
+          _cloud(
+            'manual',
+            10,
+            source: providerQuotaManualSource,
+            resetsAt: reset,
+          ),
           _cloud('stale', 10, stale: true, resetsAt: reset),
           _cloud('later', 10, resetsAt: _now + 48 * 3600),
           _local('ollama', const [ModelInfo(id: 'qwen', local: true)]),

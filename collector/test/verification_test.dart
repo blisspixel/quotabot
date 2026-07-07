@@ -358,7 +358,7 @@ void main() {
             provider: 'tabnine',
             displayName: 'Tabnine',
             account: 'default',
-            source: 'manual',
+            source: providerQuotaManualSource,
             asOf: now,
             windows: [
               QuotaWindow(label: 'monthly', used: 10, limit: 100),

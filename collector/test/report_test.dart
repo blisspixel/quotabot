@@ -74,7 +74,7 @@ void main() {
   test('markdown report includes recommendation, metrics, and local note', () {
     final providers = [
       _quota('claude', 20),
-      _quota('manual-ai', 50, source: 'manual'),
+      _quota('manual-ai', 50, source: providerQuotaManualSource),
       _quota('ollama', 0, kind: 'local'),
     ];
     final report = buildQuotaHealthReport(

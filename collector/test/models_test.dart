@@ -140,6 +140,20 @@ void main() {
       expect(local.isLocal, isTrue);
     });
 
+    test('manual source exposes isManual while preserving the wire value', () {
+      final q = ProviderQuota(
+        provider: 'manual-ai',
+        displayName: 'Manual AI',
+        account: 'default',
+        asOf: 0,
+        source: providerQuotaManualSource,
+      );
+
+      expect(q.isManual, isTrue);
+      expect(q.toJson()['source'], 'manual');
+      expect(ProviderQuota.fromJson(q.toJson()).isManual, isTrue);
+    });
+
     test('round-trips through json', () {
       final q = ProviderQuota(
         provider: 'claude',

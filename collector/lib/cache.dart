@@ -342,12 +342,12 @@ Map<String, BurnStat> recentBurnStatsByQuota(
   final list = providers.where((q) => !q.isLocal).toList();
   final measuredCounts = <String, int>{};
   for (final q in list) {
-    if (q.source == 'manual' || !q.hasWindows) continue;
+    if (q.isManual || !q.hasWindows) continue;
     measuredCounts[q.provider] = (measuredCounts[q.provider] ?? 0) + 1;
   }
   final out = <String, BurnStat>{};
   for (final q in list) {
-    if (q.source == 'manual' || !q.hasWindows) continue;
+    if (q.isManual || !q.hasWindows) continue;
     final key = quotaIdentityKeyFor(q);
     var buckets = hasSpecificQuotaAccount(q.account)
         ? loadBuckets(q.provider, account: q.account, fallbackToProvider: false)

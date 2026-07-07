@@ -331,7 +331,7 @@ void main() {
         _q(
           'manual-tool',
           [QuotaWindow(label: 'monthly', usedPercent: 10)],
-          source: 'manual',
+          source: providerQuotaManualSource,
         ),
       ], _now);
 
@@ -564,7 +564,7 @@ void main() {
           _q(
             'manual',
             [QuotaWindow(label: 'weekly', usedPercent: 40, resetsAt: reset)],
-            source: 'manual',
+            source: providerQuotaManualSource,
           ),
         ],
         _now,

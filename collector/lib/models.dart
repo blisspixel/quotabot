@@ -128,6 +128,8 @@ class ModelQuota {
 }
 
 /// One provider account's quota snapshot.
+const providerQuotaManualSource = 'manual';
+
 class ProviderQuota {
   /// Stable provider id: "codex", "claude", "grok", "antigravity".
   final String provider;
@@ -142,7 +144,8 @@ class ProviderQuota {
   final String? plan;
 
   /// Data source hint. Null means a built-in adapter or local runtime produced
-  /// the snapshot; "manual" means the user entered the quota themselves.
+  /// the snapshot; [providerQuotaManualSource] means the user entered the quota
+  /// themselves.
   final String? source;
 
   /// Provider class. "subscription" (default) is a metered paid/free account
@@ -226,6 +229,9 @@ class ProviderQuota {
   /// True when this is a local, always-available runtime rather than a metered
   /// remote subscription.
   bool get isLocal => kind == 'local';
+
+  /// True when this is a self-reported manual quota entry, not measured data.
+  bool get isManual => source == providerQuotaManualSource;
 
   factory ProviderQuota.error(
     String provider,

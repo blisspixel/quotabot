@@ -147,13 +147,13 @@ Map<String, ExpiringQuotaSignal> expiringQuotaSignals(
   final maxSeconds = maxHoursToReset.clamp(0, 24 * 14).toInt() * 3600;
   final measuredProviderCounts = <String, int>{};
   for (final q in providers) {
-    if (q.isLocal || q.source == 'manual' || q.windows.isEmpty) continue;
+    if (q.isLocal || q.isManual || q.windows.isEmpty) continue;
     measuredProviderCounts[q.provider] =
         (measuredProviderCounts[q.provider] ?? 0) + 1;
   }
   final out = <String, ExpiringQuotaSignal>{};
   for (final q in providers) {
-    if (q.isLocal || q.source == 'manual' || q.stale || q.windows.isEmpty) {
+    if (q.isLocal || q.isManual || q.stale || q.windows.isEmpty) {
       continue;
     }
     final availability = providerAvailability(q, now);
@@ -315,7 +315,7 @@ List<ModelEntry> buildModelRegistry(
     final a = providerAvailability(q, now);
     final binding = bindingWindow(q, now);
     final providerQuotaBacked = !q.isLocal &&
-        q.source != 'manual' &&
+        !q.isManual &&
         q.windows.isNotEmpty &&
         kQuotaPlanProviders.contains(q.provider);
     for (final m in models) {
