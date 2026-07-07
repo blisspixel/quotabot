@@ -194,9 +194,9 @@ QuotaHealthReport buildQuotaHealthReport(
 }) {
   final recommended = suggestion.recommended;
   final fallbackKind = switch (suggestion.fallback.kind) {
-    'local' => 'local runtime',
-    'soonest_reset' => 'wait for reset',
-    _ => 'passthrough',
+    RouteFallbackKind.local => 'local runtime',
+    RouteFallbackKind.soonestReset => 'wait for reset',
+    RouteFallbackKind.passthrough => 'passthrough',
   };
   return QuotaHealthReport(
     generatedAt: now,

@@ -17,10 +17,12 @@ void main() {
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('quotabot_grok_adapter_');
+    setQuotabotDirOverrideForTesting(temp);
     authFile = File('${temp.path}/auth.json');
   });
 
   tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 

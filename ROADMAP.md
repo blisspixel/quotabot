@@ -547,13 +547,14 @@ in parallel with the phases above rather than after them:
   cannot be half-handled: `ProviderQuota.kind` (unify with the existing
   `ProviderAdapterClass`), the `source == 'manual'` literal (use the existing
   constant / an `isManual` getter), and `RouteFallback.kind` (an enum, dropping
-  the `_ =>` catch-all that would silently swallow a new kind). (3) Make the
-  provider registry executable - a `collect` factory on the registration so
-  `collectAll` and the cache's account-scoped set derive from it - so adding a
-  provider is one declarative addition, not a four-to-six-site edit. (4) Route
-  the desktop color through the collector's `Palette.rgbFor` to kill a small
-  drift. Numerical contracts (erf/normal-CDF) are now pinned by tests; keep new
-  falsifiable math claims pinned the same way.
+  the `_ =>` catch-all that would silently swallow a new kind; completed
+  2026-07-07 with JSON wire values preserved). (3) Make the provider registry
+  executable - a `collect` factory on the registration so `collectAll` and the
+  cache's account-scoped set derive from it - so adding a provider is one
+  declarative addition, not a four-to-six-site edit. (4) Route the desktop color
+  through the collector's `Palette.rgbFor` to kill a small drift. Numerical
+  contracts (erf/normal-CDF) are now pinned by tests; keep new falsifiable math
+  claims pinned the same way.
 
 Self-tuning - using the calibration loop to fit the routing parameters on local
 history - and the deeper statistical layers are quality multipliers: valued and

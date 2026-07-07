@@ -18,9 +18,11 @@ void main() {
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('quotabot_antigravity_adapter_');
+    setQuotabotDirOverrideForTesting(temp);
   });
 
   tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 
@@ -202,8 +204,14 @@ void main() {
     ]);
   });
 
-  test('currentAccounts default scan is fail-soft', () {
-    expect(AntigravityAdapter.currentAccounts, isA<Set<String>>());
+  test('injected empty account discovery is fail-soft', () async {
+    final q = await AntigravityAdapter(
+      activeAccountSource: () => null,
+      dbPathSource: () => const [],
+      hasGeminiCreds: () => false,
+    ).collectAccounts();
+
+    expect(q.single.error, 'Antigravity not installed');
   });
 
   test('stored Antigravity grants are resolved by account and default scope',

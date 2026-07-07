@@ -1,5 +1,7 @@
 import 'dart:io';
 
+Directory? _quotabotDirOverrideForTesting;
+
 /// User home directory across platforms.
 String home() =>
     Platform.environment['USERPROFILE'] ??
@@ -9,9 +11,26 @@ String home() =>
 /// Current unix epoch seconds.
 int nowEpoch() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
+/// Overrides quotabot's config root for tests that exercise persistent stores.
+///
+/// Production code must leave this unset. It exists so parallel package tests do
+/// not read, write, or delete the developer's real local grants.
+void setQuotabotDirOverrideForTesting(Directory? directory) {
+  var assertsEnabled = false;
+  assert(() {
+    assertsEnabled = true;
+    return true;
+  }());
+  if (!assertsEnabled) {
+    throw UnsupportedError('test config override is unavailable in release');
+  }
+  _quotabotDirOverrideForTesting = directory;
+}
+
 /// Per-user config/data base directory for quotabot, created if missing.
 Directory quotabotDir(String sub) {
-  final base = Platform.environment['LOCALAPPDATA'] ??
+  final base = _quotabotDirOverrideForTesting?.path ??
+      Platform.environment['LOCALAPPDATA'] ??
       Platform.environment['XDG_CONFIG_HOME'] ??
       '${home()}/.config';
   final dir = Directory('$base/quotabot/$sub');
