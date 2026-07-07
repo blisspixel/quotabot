@@ -6,10 +6,24 @@
 /// registry row here, including its sanitized parser fixture.
 library;
 
+import 'adapters/antigravity.dart';
+import 'adapters/claude.dart';
+import 'adapters/codex.dart';
+import 'adapters/cursor.dart';
+import 'adapters/grok.dart';
+import 'adapters/kiro.dart';
+import 'adapters/lemonade.dart';
+import 'adapters/lmstudio.dart';
+import 'adapters/nvidia.dart';
+import 'adapters/ollama.dart';
+import 'adapters/windsurf.dart';
 import 'models.dart';
 import 'provider_ids.dart';
 
 const kProviderFixtureRoot = 'test/fixtures/provider_shapes';
+
+typedef ProviderCollector = Future<List<ProviderQuota>> Function();
+typedef CurrentAccountsReader = Set<String> Function();
 
 enum ProviderAdapterClass {
   subscription(ProviderQuotaKind.subscription),
@@ -38,8 +52,10 @@ class ProviderAdapterRegistration {
   final String id;
   final String displayName;
   final ProviderAdapterClass adapterClass;
+  final ProviderCollector collect;
   final bool multiAccount;
   final bool cached;
+  final CurrentAccountsReader? currentAccounts;
   final ProviderFixtureKind fixtureKind;
   final String fixtureFile;
 
@@ -47,13 +63,17 @@ class ProviderAdapterRegistration {
     required this.id,
     required this.displayName,
     required this.adapterClass,
+    required this.collect,
     required this.fixtureKind,
     required this.fixtureFile,
     this.multiAccount = false,
     this.cached = true,
+    this.currentAccounts,
   });
 
   bool get localRuntime => adapterClass.quotaKind.isLocal;
+
+  bool get accountScopedCache => multiAccount && currentAccounts != null;
 }
 
 const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
@@ -61,6 +81,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: claudeProviderId,
     displayName: claudeProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectClaude,
     fixtureKind: ProviderFixtureKind.claudeUsage,
     fixtureFile: 'claude_usage.json',
   ),
@@ -68,6 +89,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: codexProviderId,
     displayName: codexProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectCodex,
     fixtureKind: ProviderFixtureKind.codexRateLimits,
     fixtureFile: 'codex_rate_limits.json',
   ),
@@ -75,6 +97,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: cursorProviderId,
     displayName: cursorProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectCursor,
     fixtureKind: ProviderFixtureKind.cursorState,
     fixtureFile: 'cursor_state.json',
   ),
@@ -82,6 +105,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: windsurfProviderId,
     displayName: windsurfProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectWindsurf,
     fixtureKind: ProviderFixtureKind.windsurfState,
     fixtureFile: 'windsurf_state.json',
   ),
@@ -89,29 +113,15 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: kiroProviderId,
     displayName: kiroProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectKiro,
     fixtureKind: ProviderFixtureKind.kiroUsageState,
     fixtureFile: 'kiro_usage_state.json',
-  ),
-  ProviderAdapterRegistration(
-    id: grokProviderId,
-    displayName: grokProviderName,
-    adapterClass: ProviderAdapterClass.subscription,
-    multiAccount: true,
-    fixtureKind: ProviderFixtureKind.grokGrpcBytes,
-    fixtureFile: 'grok_message_bytes.json',
-  ),
-  ProviderAdapterRegistration(
-    id: antigravityProviderId,
-    displayName: antigravityProviderName,
-    adapterClass: ProviderAdapterClass.subscription,
-    multiAccount: true,
-    fixtureKind: ProviderFixtureKind.antigravityQuota,
-    fixtureFile: 'antigravity_quota.json',
   ),
   ProviderAdapterRegistration(
     id: ollamaProviderId,
     displayName: ollamaProviderName,
     adapterClass: ProviderAdapterClass.localRuntime,
+    collect: _collectOllama,
     cached: false,
     fixtureKind: ProviderFixtureKind.ollamaTags,
     fixtureFile: 'ollama_tags.json',
@@ -120,6 +130,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: lmStudioProviderId,
     displayName: lmStudioProviderName,
     adapterClass: ProviderAdapterClass.localRuntime,
+    collect: _collectLmStudio,
     cached: false,
     fixtureKind: ProviderFixtureKind.lmStudioNativeModels,
     fixtureFile: 'lmstudio_native.json',
@@ -128,6 +139,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: lemonadeProviderId,
     displayName: lemonadeProviderName,
     adapterClass: ProviderAdapterClass.localRuntime,
+    collect: _collectLemonade,
     cached: false,
     fixtureKind: ProviderFixtureKind.lemonadeModels,
     fixtureFile: 'lemonade_models.json',
@@ -136,9 +148,30 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: nvidiaProviderId,
     displayName: nvidiaProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectNvidia,
     cached: false,
     fixtureKind: ProviderFixtureKind.nvidiaModels,
     fixtureFile: 'nvidia_models.json',
+  ),
+  ProviderAdapterRegistration(
+    id: grokProviderId,
+    displayName: grokProviderName,
+    adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectGrok,
+    multiAccount: true,
+    currentAccounts: _grokCurrentAccounts,
+    fixtureKind: ProviderFixtureKind.grokGrpcBytes,
+    fixtureFile: 'grok_message_bytes.json',
+  ),
+  ProviderAdapterRegistration(
+    id: antigravityProviderId,
+    displayName: antigravityProviderName,
+    adapterClass: ProviderAdapterClass.subscription,
+    collect: _collectAntigravity,
+    multiAccount: true,
+    currentAccounts: _antigravityCurrentAccounts,
+    fixtureKind: ProviderFixtureKind.antigravityQuota,
+    fixtureFile: 'antigravity_quota.json',
   ),
 ];
 
@@ -149,3 +182,39 @@ ProviderAdapterRegistration? providerAdapterById(String id) {
   }
   return null;
 }
+
+Future<List<ProviderQuota>> _collectClaude() async =>
+    [await ClaudeAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectCodex() async =>
+    [await CodexAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectCursor() async =>
+    [await CursorAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectWindsurf() async =>
+    [await WindsurfAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectKiro() async =>
+    [await KiroAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectOllama() async =>
+    [await OllamaAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectLmStudio() async =>
+    [await LmStudioAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectLemonade() async =>
+    [await LemonadeAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectNvidia() async =>
+    [await NvidiaAdapter().collect()];
+
+Future<List<ProviderQuota>> _collectGrok() => GrokAdapter().collectAccounts();
+
+Future<List<ProviderQuota>> _collectAntigravity() =>
+    AntigravityAdapter().collectAccounts();
+
+Set<String> _grokCurrentAccounts() => GrokAdapter.currentAccounts;
+
+Set<String> _antigravityCurrentAccounts() => AntigravityAdapter.currentAccounts;

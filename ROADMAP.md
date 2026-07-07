@@ -550,10 +550,12 @@ in parallel with the phases above rather than after them:
   `providerQuotaManualSource` / `ProviderQuota.isManual` and JSON wire values
   preserved), and `RouteFallback.kind` (an enum, dropping the `_ =>` catch-all
   that would silently swallow a new kind; completed 2026-07-07 with JSON wire
-  values preserved). (3) Make the provider registry
-  executable - a `collect` factory on the registration so `collectAll` and the
-  cache's account-scoped set derive from it - so adding a provider is one
-  declarative addition, not a four-to-six-site edit. (4) Route the desktop color
+  values preserved). (3) Make the provider registry executable - a `collect`
+  factory on the registration so `collectAll` and the cache's account-scoped
+  set derive from it - so adding a provider is one declarative addition, not a
+  four-to-six-site edit (completed 2026-07-07 with registry-owned collectors,
+  account-scoped cache metadata, and collection-order tests). (4) Route the
+  desktop color
   through the collector's `Palette.rgbFor` to kill a small drift; completed
   2026-07-07 by routing desktop headroom colors through the shared palette.
   Numerical contracts (erf/normal-CDF) are now pinned by tests; keep new
