@@ -21,6 +21,34 @@ void main() {
       expect(q.error, contains('nvapi'));
     });
 
+    test('chooses the first nonblank key alias', () {
+      expect(
+        resolveNvidiaApiKey(env: {
+          'NVIDIA_API_KEY': '   ',
+          'nvapi': ' nvapi-real ',
+        }),
+        'nvapi-real',
+      );
+      expect(
+        resolveNvidiaApiKey(
+          explicit: '',
+          env: {'NVIDIA_API_KEY': ' primary ', 'nvapi': 'secondary'},
+        ),
+        'primary',
+      );
+      expect(
+        resolveNvidiaApiKey(
+          explicit: ' explicit ',
+          env: {'NVIDIA_API_KEY': 'primary'},
+        ),
+        'explicit',
+      );
+      expect(
+        resolveNvidiaApiKey(env: {'NVIDIA_API_KEY': ' ', 'nvapi': ''}),
+        isNull,
+      );
+    });
+
     test('reports free trial availability without inventing quota windows',
         () async {
       final q = await NvidiaAdapter(
