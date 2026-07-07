@@ -5,7 +5,9 @@
 .DESCRIPTION
   Builds and installs the quotabot CLI, and (by default) the desktop app with a
   Desktop shortcut, then runs `quotabot doctor`. Idempotent: safe to
-  re-run after a `git pull`. Everything stays local; no telemetry, no account.
+  re-run after a `git pull`. No quotabot account or telemetry is used.
+  `doctor` reads quota metadata only: no prompts, code, inference requests, or
+  usage-token-spending calls.
 
   An AI agent can run this unattended:  pwsh tools/setup.ps1 -Yes
 

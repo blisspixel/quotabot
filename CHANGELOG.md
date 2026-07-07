@@ -40,6 +40,8 @@ Notable changes to quotabot. Newest first.
 ### Changed
 - Clarified agent, setup, and usage docs so no-token/no-content claims match the
   current mix of local files and provider metadata endpoint reads.
+- Clarified source setup script help to match the same no-token/no-content
+  metadata-read guarantee.
 - Desktop setup help now describes Codex live usage reads, Codex this-machine
   fallback, and NVIDIA NIM key-based availability instead of generic local-data
   setup copy.
