@@ -49,7 +49,7 @@ class KiroAdapter {
         err = 'no quota data found in local state';
       } else {
         final main = windows.first;
-        if (windowHeadroom(main, asOf) <= 0.5) {
+        if (windowHeadroom(main, asOf) <= kSpentHeadroomFloor) {
           err = 'out of quota (resets ${_resetLabel(main.resetsAt, asOf)})';
         }
       }

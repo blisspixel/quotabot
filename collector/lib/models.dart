@@ -7,6 +7,13 @@ library;
 const double kDefaultExpiringQuotaWasteThreshold = 35.0;
 const int kDefaultExpiringQuotaMaxHours = 24;
 
+/// Remaining headroom at or below this percent is treated as spent.
+///
+/// Provider quota APIs and user-facing surfaces round differently near zero.
+/// Keeping a 1.5 percent buffer avoids routing to a sliver that still renders as
+/// "1% free" after whole-percent display rounding and may already be rejected.
+const double kSpentHeadroomFloor = 1.5;
+
 /// A finite double from a JSON-decoded number, or null. `jsonEncode` throws on
 /// NaN and infinities, and the routing and analytics math assume finite input,
 /// so a non-finite value read back from a corrupt or hostile cache/history file
@@ -50,7 +57,7 @@ class QuotaWindow {
   }
 
   /// True when the window is effectively exhausted.
-  bool get exhausted => (percent ?? 0) >= 99.5;
+  bool get exhausted => (percent ?? 0) >= 100 - kSpentHeadroomFloor;
 
   Map<String, dynamic> toJson() => {
         'label': label,
@@ -108,7 +115,7 @@ class ModelQuota {
   }
 
   /// True when this model's pool is effectively spent.
-  bool get exhausted => (usedPercent ?? 0) >= 99.5;
+  bool get exhausted => (usedPercent ?? 0) >= 100 - kSpentHeadroomFloor;
 
   Map<String, dynamic> toJson() => {
         'model': model,

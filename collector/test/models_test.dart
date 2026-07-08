@@ -18,9 +18,10 @@ void main() {
       expect(QuotaWindow(label: 'w', used: 5, limit: 0).percent, isNull);
     });
 
-    test('exhausted at or above 99.5 percent', () {
+    test('exhausted at or above the shared spent headroom floor', () {
       expect(QuotaWindow(label: 'w', usedPercent: 100).exhausted, isTrue);
-      expect(QuotaWindow(label: 'w', usedPercent: 99.6).exhausted, isTrue);
+      expect(QuotaWindow(label: 'w', usedPercent: 98.6).exhausted, isTrue);
+      expect(QuotaWindow(label: 'w', usedPercent: 98.4).exhausted, isFalse);
       expect(QuotaWindow(label: 'w', usedPercent: 90).exhausted, isFalse);
     });
 

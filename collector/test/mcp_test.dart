@@ -130,6 +130,17 @@ void main() {
       expect(r['reason'], isNotEmpty);
     });
 
+    test('mostHeadroomResponse ignores rounded-one-percent slivers', () {
+      final r = mostHeadroomResponse([
+        _q(
+          'claude',
+          [QuotaWindow(label: '5h', usedPercent: 98.6)],
+        ),
+      ], _now);
+      expect(r['provider'], isNull);
+      expect(r['reason'], isNotEmpty);
+    });
+
     test('suggestResponse returns the versioned suggestion shape', () {
       final r = suggestResponse(_fixture(), _now);
       expect(r['schema'], 'quotabot.suggest.v1');
@@ -166,6 +177,21 @@ void main() {
       expect(r['stale'], isTrue);
       expect(r['headroom_percent'], 34);
     });
+
+    test(
+      'availabilityResponse treats rounded-one-percent headroom as unavailable',
+      () {
+        final r = availabilityResponse([
+          _q(
+            'claude',
+            [QuotaWindow(label: '5h', usedPercent: 98.6)],
+          ),
+        ], _now, 'claude', null);
+        expect(r['provider'], 'claude');
+        expect(r['available'], isFalse);
+        expect(r['headroom_percent'], closeTo(1.4, 1e-9));
+      },
+    );
 
     test('availabilityResponse flags an unknown provider', () {
       expect(
@@ -806,7 +832,7 @@ void main() {
       await connect([
         _local('ollama'),
         _q('claude', [
-          QuotaWindow(label: 'weekly', usedPercent: 100),
+          QuotaWindow(label: 'weekly', usedPercent: 98.6),
         ]),
       ]);
 

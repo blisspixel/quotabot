@@ -69,7 +69,7 @@ class HeadroomBucket {
   }) : hist = hist ?? List<int>.filled(kHistBins, 0);
 
   /// Folds one headroom reading (0..100) into the bucket.
-  void add(double headroom, {double spentFloor = 0.5}) {
+  void add(double headroom, {double spentFloor = kSpentHeadroomFloor}) {
     final h = headroom.clamp(0.0, 100.0);
     count++;
     sum += h;
@@ -519,7 +519,7 @@ BurnStat _shrinkBurnStat(
 
 /// Beta-binomial shrinkage for provider/account reliability rates.
 ///
-/// Reliability is a success rate: samples with any headroom left over total
+/// Reliability is a success rate: samples above the spent floor over total
 /// samples. Thin histories are partially pooled toward the current fleet rate,
 /// while mature histories mostly keep their direct observation. Unknown
 /// reliability stays unknown, and the helper waits for a real pool before it
@@ -1437,7 +1437,7 @@ class Insights {
   final double? p50;
   final double? p90;
 
-  /// Fraction of samples that had any headroom left (1 - spent rate), 0..1.
+  /// Fraction of samples above the spent floor (1 - spent rate), 0..1.
   final double? reliability;
 
   /// Headroom drift in percent per day, with R squared confidence, when there

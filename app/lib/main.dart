@@ -2525,7 +2525,7 @@ class _DashboardState extends State<Dashboard>
     if (q.windows.isEmpty) return ('no live data', grey);
     if (q.stale) return ('cached', amber);
     final h = providerHeadroom(q, now) ?? 100;
-    if (h <= 0.5) return ('spent', red);
+    if (h <= kSpentHeadroomFloor) return ('spent', red);
     return ('live', green);
   }
 
@@ -2997,7 +2997,7 @@ class WinView {
   final bool rolledOver; // reset time already passed -> fresh window
   final int? resetsAt;
   const WinView(this.label, this.remaining, this.rolledOver, this.resetsAt);
-  bool get exhausted => !rolledOver && remaining <= 0.5;
+  bool get exhausted => !rolledOver && remaining <= kSpentHeadroomFloor;
 }
 
 WinView _view(QuotaWindow w, int now) {
@@ -3360,7 +3360,7 @@ PStatus providerStatus(ProviderQuota q, int now) {
   if (q.stale) {
     return const PStatus(Color(0xFF8A91A0), true, false);
   }
-  return PStatus(_availColor(h), true, h <= 0.5);
+  return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);
 }
 
 int _notificationId(String key) {

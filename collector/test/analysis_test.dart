@@ -97,6 +97,18 @@ void main() {
     expect(a.resetsAt, _now + 86400);
   });
 
+  test('providerAvailability treats rounded-one-percent headroom as spent', () {
+    final q = _q('claude', [
+      QuotaWindow(label: '5h', usedPercent: 98.6, resetsAt: _now + 3600),
+    ]);
+    final a = providerAvailability(q, _now);
+
+    expect(a.available, isFalse);
+    expect(a.headroom, closeTo(1.4, 1e-9));
+    expect(bindingWindow(q, _now)?.label, '5h');
+    expect(anyProviderUsable([q], _now), isFalse);
+  });
+
   test('providerAvailability handles no windows', () {
     final a = providerAvailability(_q('grok', const []), _now);
     expect(a.available, isFalse);
@@ -178,6 +190,13 @@ void main() {
   test('providerWithMostHeadroom ignores stale cached quota', () {
     final best = providerWithMostHeadroom([
       _q('codex', [QuotaWindow(label: 'w', usedPercent: 10)], stale: true),
+    ], _now);
+    expect(best, isNull);
+  });
+
+  test('providerWithMostHeadroom ignores rounded-one-percent slivers', () {
+    final best = providerWithMostHeadroom([
+      _q('claude', [QuotaWindow(label: '5h', usedPercent: 98.6)]),
     ], _now);
     expect(best, isNull);
   });
@@ -279,6 +298,19 @@ void main() {
       ], _now);
       expect(s.recommended, isNull);
       expect(s.reason, contains('claude'));
+    });
+
+    test('does not recommend a rounded-one-percent cloud sliver', () {
+      final s = suggestRoute([
+        _q('claude', [
+          QuotaWindow(label: '5h', usedPercent: 98.6, resetsAt: _now + 3600),
+        ]),
+      ], _now, comfortThreshold: 1);
+
+      expect(s.recommended, isNull);
+      expect(s.ranked.single.available, isFalse);
+      expect(s.ranked.single.headroom, closeTo(1.4, 1e-9));
+      expect(s.reason, contains('Everything is spent'));
     });
 
     test(

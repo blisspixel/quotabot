@@ -278,7 +278,7 @@ String _state(ProviderQuota provider, double? headroom) {
   if (provider.isLocal) return provider.active ? 'local active' : 'local ready';
   if (provider.stale) return 'cached';
   if (headroom == null) return 'unknown';
-  if (headroom <= 0.5) return 'spent';
+  if (headroom <= kSpentHeadroomFloor) return 'spent';
   if (headroom < 15) return 'tight';
   return 'available';
 }

@@ -511,7 +511,8 @@ here is the final one.
     report, verify, MCP cache-only decision, and LiteLLM metrics surfaces;
     stale cached cloud quota remains visible as last-known evidence but no
     longer reports as available or reservable in shared routing, model,
-    `check`, MCP, or `top` surfaces.
+    `check`, MCP, or `top` surfaces; a 1.5% or smaller live cloud headroom
+    sliver is treated as spent instead of routeable.
 25. [ ] Smoke test install and update paths on clean Windows, macOS, and Linux
     hosts: one-line installers, source setup scripts, desktop shortcut/tray
     setup, CLI-only setup, release archives, checksums, `quotabot doctor`, and

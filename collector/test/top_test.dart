@@ -104,6 +104,17 @@ void main() {
     expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
   });
 
+  test('rounded-one-percent headroom renders as spent, not free', () {
+    final lines = _frame([
+      _q('claude', [
+        QuotaWindow(label: '5h', usedPercent: 98.6, resetsAt: _now + 3600),
+      ]),
+    ]);
+    final row = _plain(lines.firstWhere((l) => _plain(l).contains('claude')));
+    expect(row, contains('spent'));
+    expect(row, isNot(contains('1% free')));
+  });
+
   test('a local runtime shows its status and local trust scope', () {
     final lines = _frame([
       _q('ollama', const [],

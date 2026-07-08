@@ -71,7 +71,7 @@ void main() {
             account: 'default',
             asOf: now,
             windows: [
-              QuotaWindow(label: '5h', usedPercent: 100, resetsAt: now + 1200),
+              QuotaWindow(label: '5h', usedPercent: 98.6, resetsAt: now + 1200),
             ],
           ),
           now,

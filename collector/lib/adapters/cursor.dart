@@ -44,7 +44,7 @@ class CursorAdapter {
         err = 'no quota data found in local state';
       } else {
         final main = windows.first;
-        if ((main.percent ?? 0) >= 99.5) {
+        if (main.exhausted) {
           err = 'out of quota (resets ${_resetLabel(main.resetsAt, asOf)})';
         }
       }

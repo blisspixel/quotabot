@@ -109,6 +109,25 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('renders rounded-one-percent headroom as spent, not free', (
+    tester,
+  ) async {
+    final future = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600;
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(98.6, resetsAt: future),
+          cardColor: const Color(0xFF1A1A1A),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('5h spent'), findsOneWidget);
+    expect(find.textContaining('1% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('long account labels stay inside the provider tile header', (
     tester,
   ) async {
