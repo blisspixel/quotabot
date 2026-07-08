@@ -711,8 +711,10 @@ Breadth and depth, once the core is trusted:
   streaks from the same compact hourly history buckets and surface them in
   `quotabot stats`, `quotabot report`, and `quotabot.report.v1`. Provider/account
   bucket files now preserve per-account burn history for routing, reports, alerts,
-  and the desktop widget, while provider-only files remain a legacy fallback for
-  unambiguous snapshots. Stats and reports now also include a compact sampled-day
+  stats, and the desktop widget, while provider-only files remain a legacy
+  fallback for unambiguous snapshots; `quotabot stats` now uses account-qualified
+  series keys only when a provider appears more than once. Stats and reports now
+  also include a compact sampled-day
   contribution calendar derived from those same local buckets. Heatmap polish has
   started: stats, reports, JSON, and the desktop heatmap now surface the best
   sampled weekday/hour windows with sample counts, and those best-window
