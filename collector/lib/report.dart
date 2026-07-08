@@ -1,5 +1,6 @@
 import 'analysis.dart';
 import 'insights.dart';
+import 'model_catalog.dart';
 import 'models.dart';
 
 const quotaHealthReportSchema = 'quotabot.report.v1';
@@ -11,6 +12,8 @@ class QuotaHealthProviderLine {
   final ProviderQuotaKind kind;
   final String? source;
   final String state;
+  final int asOf;
+  final bool perMachine;
   final double? headroomPercent;
   final int? resetsAt;
   final double? p50Free;
@@ -30,6 +33,8 @@ class QuotaHealthProviderLine {
     required this.kind,
     required this.source,
     required this.state,
+    required this.asOf,
+    required this.perMachine,
     required this.headroomPercent,
     required this.resetsAt,
     required this.p50Free,
@@ -103,11 +108,13 @@ class QuotaHealthReport {
       '',
       '## Providers',
       '',
-      '| Provider | Account | State | Headroom | Reset | 7d p50 free | 7d reliability | Streak | Pace |',
-      '| --- | --- | --- | ---: | --- | ---: | ---: | --- | --- |',
+      '| Provider | Account | State | Trust | Headroom | Reset | 7d p50 free | 7d reliability | Streak | Pace |',
+      '| --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- |',
       for (final provider in providers)
         '| ${_cell(provider.displayName)} | ${_cell(provider.account)} | '
-            '${_cell(provider.state)} | ${_percent(provider.headroomPercent)} | '
+            '${_cell(provider.state)} | '
+            '${_cell(_trustContext(provider, generatedAt))} | '
+            '${_percent(provider.headroomPercent)} | '
             '${provider.resetsAt == null ? 'n/a' : _iso(provider.resetsAt!)} | '
             '${_percent(provider.p50Free)} | ${_ratio(provider.reliability)} | '
             '${_cell(_streak(provider))} | '
@@ -250,6 +257,8 @@ QuotaHealthProviderLine _providerLine(
     kind: provider.kind,
     source: provider.source,
     state: state,
+    asOf: provider.asOf,
+    perMachine: provider.perMachine,
     headroomPercent: headroom,
     resetsAt: binding?.resetsAt,
     p50Free: insights?.p50,
@@ -272,6 +281,56 @@ String _state(ProviderQuota provider, double? headroom) {
   if (headroom <= 0.5) return 'spent';
   if (headroom < 15) return 'tight';
   return 'available';
+}
+
+String _trustContext(QuotaHealthProviderLine provider, int generatedAt) {
+  final parts = <String>[
+    _trustReadState(provider),
+    _trustSpendClass(provider),
+  ];
+  if (provider.perMachine) parts.add('this machine');
+  final captured = _captureAgeLabel(provider.asOf, generatedAt);
+  if (captured.isNotEmpty) parts.add(captured);
+  return parts.join(', ');
+}
+
+String _trustReadState(QuotaHealthProviderLine provider) {
+  if (provider.state == 'unavailable') return 'error';
+  if (provider.kind.isLocal) return provider.state;
+  return switch (provider.state) {
+    'cached' => 'cached',
+    'unknown' => 'metadata',
+    _ => 'live',
+  };
+}
+
+String _trustSpendClass(QuotaHealthProviderLine provider) {
+  if (provider.kind.isLocal) {
+    return provider.state == 'local active' ? 'local loaded' : 'local cold';
+  }
+  if (provider.isManual) return 'manual';
+  if (provider.headroomPercent == null) {
+    return provider.state == 'unavailable' &&
+            kQuotaPlanProviders.contains(provider.provider)
+        ? 'quota plan'
+        : 'metadata only';
+  }
+  return kQuotaPlanProviders.contains(provider.provider)
+      ? 'quota plan'
+      : 'metered plan';
+}
+
+String _captureAgeLabel(int asOf, int generatedAt) {
+  if (asOf <= 0) return '';
+  if (asOf > generatedAt) return 'captured in the future';
+  return 'captured ${_ageLabel(generatedAt - asOf)} ago';
+}
+
+String _ageLabel(int seconds) {
+  if (seconds < 90) return '${seconds}s';
+  if (seconds < 5400) return '${(seconds / 60).round()}m';
+  if (seconds < 129600) return '${(seconds / 3600).round()}h';
+  return '${(seconds / Duration.secondsPerDay).round()}d';
 }
 
 String _iso(int epochSeconds) => DateTime.fromMillisecondsSinceEpoch(

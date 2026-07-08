@@ -55,6 +55,8 @@ void main() {
     expect(json['recommended_provider'], 'claude');
     expect(json['providers'], hasLength(2));
     final claude = (json['providers'] as List).first as Map<String, dynamic>;
+    expect(claude.containsKey('trust'), isFalse);
+    expect(claude.containsKey('as_of'), isFalse);
     expect(claude['weekly_sampled_days'], 3);
     expect(claude['weekly_usable_day_streak'], 3);
     final calendar = claude['weekly_contribution_calendar'] as List;
@@ -87,7 +89,14 @@ void main() {
     final markdown = report.toMarkdown();
     expect(markdown, startsWith('# quotabot weekly quota health'));
     expect(markdown, contains('Recommendation: claude'));
-    expect(markdown, contains('| claude | work | available | 80.0% |'));
+    expect(
+      markdown,
+      contains(
+        '| claude | work | available | live, quota plan, captured 0s ago | 80.0% |',
+      ),
+    );
+    expect(markdown, contains('live, manual, captured 0s ago'));
+    expect(markdown, contains('local ready, local cold, captured 0s ago'));
     expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
     expect(markdown, contains('Local runtimes are fallback capacity'));
@@ -118,5 +127,102 @@ void main() {
 
     expect(report.toMarkdown(), contains('custom\\|ai'));
     expect(report.toMarkdown(), contains('team\\|alpha'));
+  });
+
+  test('markdown labels failed quota-plan providers by spend class', () {
+    final providers = [
+      ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'unknown',
+        asOf: _now,
+        ok: false,
+        error: 'signed out',
+      ),
+    ];
+    final report = buildQuotaHealthReport(
+      providers,
+      _now,
+      suggestRoute(providers, _now),
+    );
+
+    expect(
+      report.toMarkdown(),
+      contains(
+          '| Codex | unknown | unavailable | error, quota plan, captured 0s ago |'),
+    );
+  });
+
+  test('markdown keeps successful no-window quota-plan rows metadata-only', () {
+    final providers = [
+      ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'unknown',
+        asOf: _now,
+        status: 'signed in, quota unavailable',
+      ),
+    ];
+    final report = buildQuotaHealthReport(
+      providers,
+      _now,
+      suggestRoute(providers, _now),
+    );
+
+    expect(
+      report.toMarkdown(),
+      contains(
+        '| Codex | unknown | unknown | metadata, metadata only, captured 0s ago |',
+      ),
+    );
+  });
+
+  test('markdown trust context flags per-machine cloud snapshots', () {
+    final providers = [
+      ProviderQuota(
+        provider: 'cursor',
+        displayName: 'Cursor',
+        account: 'work@example.com',
+        asOf: _now,
+        perMachine: true,
+        windows: [QuotaWindow(label: 'monthly', usedPercent: 20)],
+      ),
+    ];
+    final report = buildQuotaHealthReport(
+      providers,
+      _now,
+      suggestRoute(providers, _now),
+    );
+
+    expect(
+      report.toMarkdown(),
+      contains(
+          '| Cursor | work@example.com | available | live, metered plan, this machine, captured 0s ago |'),
+    );
+  });
+
+  test('markdown trust context labels failed local runtimes as errors', () {
+    final providers = [
+      ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'installed',
+        asOf: _now,
+        kind: ProviderQuotaKind.local,
+        ok: false,
+        error: 'not running',
+      ),
+    ];
+    final report = buildQuotaHealthReport(
+      providers,
+      _now,
+      suggestRoute(providers, _now),
+    );
+
+    expect(
+      report.toMarkdown(),
+      contains(
+          '| Ollama | installed | unavailable | error, local cold, captured 0s ago |'),
+    );
   });
 }

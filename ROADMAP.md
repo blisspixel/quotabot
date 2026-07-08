@@ -497,7 +497,8 @@ here is the final one.
     duplicate providers, spend class, local-only scope, and column-stable narrow
     rendering; analytics shares the dashboard chrome; `verify` now states each
     provider's honesty plainly, labels live/cached/error/metadata provenance,
-    and surfaces truthful cached/no-data reasons;
+    and surfaces truthful cached/no-data reasons; weekly markdown reports now
+    show read state, spend class, and capture age while preserving report JSON;
     desktop provider cards and human `doctor`, alert, provider recommendation,
     and model recommendation surfaces now label live/cached state, spend class,
     real account identity, local readiness where applicable, per-machine scope,
