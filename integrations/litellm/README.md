@@ -133,8 +133,10 @@ normally.
 
 Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per served
 request (requested model, served model, selected spend class, tokens, cost). The
-path is constrained to `~/.quotabot`; relative paths are placed there. This
-closes the loop: LiteLLM spend plus quotabot subscription headroom in one place.
+path is constrained to `~/.quotabot`; relative paths are placed there. The
+plugin applies owner-only permissions to the metrics directory and file before
+writing local usage metadata. This closes the loop: LiteLLM spend plus quotabot
+subscription headroom in one place.
 
 Use the default `~/.quotabot/litellm-metrics.jsonl` path when you want the
 desktop Quota Analytics screen to show the routed-request summary. The widget
