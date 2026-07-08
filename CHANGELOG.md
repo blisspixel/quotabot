@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.12 - 2026-07-08
+
 ### Added
 - LiteLLM routed-request metrics now include local-only pipe-health metadata for
   failures, throttles, Retry-After delays, and callback latency without storing
