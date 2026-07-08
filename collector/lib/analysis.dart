@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'insights.dart';
+import 'model_catalog.dart';
 import 'models.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
@@ -134,7 +135,10 @@ class RouteCandidate {
   final String provider;
   final String account;
   final String? plan;
+  final String? source;
   final bool isLocal;
+  final int asOf;
+  final bool perMachine;
 
   /// Remaining headroom percent (0..100). Local runtimes report 100.
   final double? headroom;
@@ -206,7 +210,10 @@ class RouteCandidate {
     required this.provider,
     required this.account,
     required this.plan,
+    required this.source,
     required this.isLocal,
+    required this.asOf,
+    required this.perMachine,
     required this.headroom,
     required this.effectiveHeadroom,
     required this.resetsAt,
@@ -252,6 +259,16 @@ class RouteCandidate {
         'stale': stale,
         'available': available,
       };
+
+  bool get isManual => source == providerQuotaManualSource;
+
+  String get spendClass => isLocal
+      ? 'local'
+      : isManual
+          ? 'manual'
+          : kQuotaPlanProviders.contains(provider)
+              ? 'quota plan'
+              : 'metered plan';
 }
 
 /// The closed set of fail-soft fallback actions quotabot can recommend.
@@ -808,7 +825,10 @@ RouteSuggestion suggestRoute(
       provider: q.provider,
       account: q.account,
       plan: q.plan,
+      source: q.source,
       isLocal: q.isLocal,
+      asOf: q.asOf,
+      perMachine: q.perMachine,
       headroom: headroom,
       effectiveHeadroom: effective,
       burnPerHour: burn,
