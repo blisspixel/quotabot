@@ -10,16 +10,19 @@ ProviderQuota _q(
   bool stale = false,
   ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   String? source,
+  int asOf = _now,
+  bool perMachine = false,
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id,
       account: 'a',
-      asOf: _now,
+      asOf: asOf,
       windows: windows,
       stale: stale,
       kind: kind,
       source: source,
+      perMachine: perMachine,
     );
 
 // A local runtime carries no quota windows; it is available simply by running.
@@ -338,6 +341,40 @@ void main() {
 
       expect(s.recommended?.provider, 'manual-tool');
       expect(s.recommended?.confidence, 0.35);
+    });
+
+    test('candidates retain trust provenance for human route surfaces', () {
+      final s = suggestRoute([
+        _q(
+          'manual-tool',
+          [QuotaWindow(label: 'monthly', usedPercent: 10)],
+          source: providerQuotaManualSource,
+          stale: true,
+          perMachine: true,
+          asOf: _now - 600,
+        ),
+      ], _now);
+
+      final candidate = s.ranked.single;
+      expect(candidate.source, providerQuotaManualSource);
+      expect(candidate.spendClass, 'manual');
+      expect(candidate.asOf, _now - 600);
+      expect(candidate.perMachine, isTrue);
+      expect(candidate.stale, isTrue);
+      expect(candidate.toJson(), isNot(contains('spend_class')));
+    });
+
+    test('spend class distinguishes quota plans from metered plans', () {
+      final s = suggestRoute([
+        _q('claude', [QuotaWindow(label: '5h', usedPercent: 10)]),
+        _q('cursor', [QuotaWindow(label: 'monthly', usedPercent: 20)]),
+        _local('ollama'),
+      ], _now);
+
+      final byProvider = {for (final c in s.ranked) c.provider: c.spendClass};
+      expect(byProvider['claude'], 'quota plan');
+      expect(byProvider['cursor'], 'metered plan');
+      expect(byProvider['ollama'], 'local');
     });
   });
 

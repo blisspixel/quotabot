@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import '../bin/collect.dart' as cli;
+
 import 'support/cli_process.dart';
 
 void main() {
@@ -79,6 +81,41 @@ void main() {
     expect(json['schema'], 'quotabot.suggest.v1');
     expect((json['recommended'] as Map)['provider'], 'claude');
     expect((json['ranked'] as List), hasLength(1));
+  });
+
+  test('suggest human output names trust provenance', () async {
+    final result = await runCli([
+      'suggest',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('quota plan'));
+    expect(out, contains('live'));
+    expect(out, contains('captured'));
+  });
+
+  test('suggest human output avoids calling plan strings account identities',
+      () async {
+    final result = await runCli([
+      'suggest',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[live, quota plan, captured'));
+    expect(out, isNot(contains('claude (simulated)')));
+  });
+
+  test('future capture label does not present clock skew as fresh', () {
+    expect(cli.routeCaptureAgeLabel(1050, 1000), cli.routeFutureCaptureLabel);
+    expect(cli.routeCaptureAgeLabel(1000, 1000), 'captured 0s ago');
   });
 
   test('invalid simulation state is a usage error', () async {

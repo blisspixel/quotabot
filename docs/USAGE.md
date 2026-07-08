@@ -335,6 +335,9 @@ provider ranking visible but recommends a local runtime before subscription quot
 when one is available. MCP `suggest_provider` and `decide_now` accept
 `local_first: true`; the loopback HTTP equivalent is
 `GET /suggest?local_first=true`.
+The human `quotabot suggest` view labels each candidate with live/cached state,
+spend class, account identity when it is a real account, and capture age, so a
+route is never just a bare provider name.
 When a caller has its own relative cost policy, provider suggestions also accept
 explicit cost penalties such as `quotabot suggest --cost-penalty=codex:2`.
 MCP uses `cost_penalties: {"codex": 2}` and optional `cost_weight`, while

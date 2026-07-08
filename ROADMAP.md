@@ -487,7 +487,10 @@ here is the final one.
     account identity, fallback behavior, and spend class clear without noisy
     caveats. In progress: `top` now shows cache age, account identity on
     duplicate providers, and column-stable narrow rendering; analytics shares
-    the dashboard chrome; `verify` states each provider's honesty plainly.
+    the dashboard chrome; `verify` states each provider's honesty plainly;
+    human `suggest` now labels route candidates with live/cached state, spend
+    class, real account identity, and capture age without changing the JSON
+    shape.
 25. [ ] Smoke test install and update paths on clean Windows, macOS, and Linux
     hosts: one-line installers, source setup scripts, desktop shortcut/tray
     setup, CLI-only setup, release archives, checksums, `quotabot doctor`, and

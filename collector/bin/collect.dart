@@ -1980,17 +1980,24 @@ void _printSuggest(RouteSuggestion s) {
     print('  no provider to route to right now');
   } else {
     final tag = r.isLocal ? style.dim(' (local fallback)') : '';
-    print('  ${style.green('->')} ${style.bold(r.provider)}$tag');
+    final account = _routeAccountLabel(r);
+    final provenance = _routeCandidateProvenance(r, s.asOf);
+    print(
+      '  ${style.green('->')} ${style.bold(r.provider)}$account$tag '
+      '$provenance',
+    );
   }
   print('  ${s.reason}\n');
 
   if (s.ranked.isEmpty) return;
   print('  candidates (best first):');
   for (final c in s.ranked) {
+    final provenance = _routeCandidateProvenance(c, s.asOf);
     if (c.isLocal) {
       // Local runtimes have no quota; show them as the always-on fallback.
       print(
-        '    ${c.provider.padRight(12)} ${style.cyan('local fallback')}  ${style.dim('[always on]')}',
+        '    ${c.provider.padRight(12)} ${style.cyan('local fallback')}  '
+        '$provenance',
       );
       continue;
     }
@@ -1998,7 +2005,6 @@ void _printSuggest(RouteSuggestion s) {
         ? '   ? '
         : '${c.headroom!.round().toString().padLeft(3)}%';
     final head = c.headroom == null ? pct : style.health(c.headroom!, pct);
-    final kind = style.dim('[${c.stale ? 'cached' : 'live'}]');
     final state = c.available ? '' : style.red('  spent');
     final conf = c.confidence == null
         ? ''
@@ -2006,8 +2012,36 @@ void _printSuggest(RouteSuggestion s) {
     final strand = (c.strandProbability != null && c.strandProbability! >= 0.2)
         ? style.orange('  strand ${(c.strandProbability! * 100).round()}%')
         : '';
-    print('    ${c.provider.padRight(12)} $head free  $kind$conf$strand$state');
+    print(
+      '    ${c.provider.padRight(12)} $head free  $provenance$conf$strand$state',
+    );
   }
+}
+
+String _routeAccountLabel(RouteCandidate c) =>
+    _routeHasAccountIdentity(c) ? ' (${c.account})' : '';
+
+String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
+  final parts = <String>[
+    c.stale ? 'cached' : 'live',
+    c.spendClass,
+  ];
+  if (_routeHasAccountIdentity(c)) parts.add(c.account);
+  if (c.perMachine) parts.add('this machine');
+  final captured = routeCaptureAgeLabel(c.asOf, decisionAsOf);
+  if (captured.isNotEmpty) parts.add(captured);
+  return style.dim('[${parts.join(', ')}]');
+}
+
+bool _routeHasAccountIdentity(RouteCandidate c) =>
+    !c.isLocal && c.account.contains('@') && hasSpecificQuotaAccount(c.account);
+
+const routeFutureCaptureLabel = 'captured in the future';
+
+String routeCaptureAgeLabel(int capturedAt, int decisionAsOf) {
+  if (capturedAt <= 0) return '';
+  if (capturedAt > decisionAsOf) return routeFutureCaptureLabel;
+  return 'captured ${_ago(decisionAsOf - capturedAt)}';
 }
 
 /// Pace for a provider from its live binding window plus the recent burn rate.
