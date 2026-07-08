@@ -4,6 +4,13 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.11 - 2026-07-08
+
+### Fixed
+- Metered cloud quota at or below 1.5% remaining is now treated as spent, so
+  rounded near-zero reads such as `1% free` do not route work into an exhausted
+  provider.
+
 ## 0.5.10 - 2026-07-08
 
 ### Changed
