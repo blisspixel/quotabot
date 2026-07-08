@@ -12,6 +12,7 @@ import 'dart:convert';
 
 import 'analysis.dart';
 import 'ansi.dart';
+import 'model_catalog.dart';
 import 'models.dart';
 import 'palette.dart';
 
@@ -82,7 +83,10 @@ List<ProviderQuota> sortProvidersForTop(
   TopSort sort,
 ) {
   if (sort == TopSort.defaultOrder) return List.of(providers);
-  final cand = {for (final c in suggestion.ranked) c.provider: c};
+  final cand = {
+    for (final c in suggestion.ranked)
+      quotaIdentityKey(c.provider, c.account): c
+  };
 
   // (value, rankable). Lower value sorts first; unrankable rows sink and hold
   // their original order. Signs are chosen so each mode's "most urgent" leads.
@@ -92,10 +96,10 @@ List<ProviderQuota> sortProvidersForTop(
         final h = providerHeadroom(q, now);
         return (-(h ?? 0), h != null); // most free first
       case TopSort.burn:
-        final b = cand[q.provider]?.burnPerHour;
+        final b = cand[quotaIdentityKeyFor(q)]?.burnPerHour;
         return (-(b ?? 0), b != null && b > 0); // fastest burn first
       case TopSort.strand:
-        final p = cand[q.provider]?.strandProbability;
+        final p = cand[quotaIdentityKeyFor(q)]?.strandProbability;
         return (-(p ?? 0), p != null); // most likely to strand first
       case TopSort.reset:
         final r = bindingWindow(q, now)?.resetsAt;
@@ -178,22 +182,29 @@ const _rowCore = 2 + _nameW + _labelW + 3 + 10;
 const _resetCost = 2 + 13; // "  resets 4d12h"
 const _forecastCost = 13; // "  strand 76%" / "  ~4h left"
 const _minReadableBar = 10;
+const _minBar = 6;
 
 /// Which trailing columns fit at [width], decided once per frame so every row
 /// drops the same columns and stays aligned. Under width pressure whole
 /// columns yield, forecast first and the reset countdown second, so the view
 /// narrows the story instead of clipping words mid-letter.
-({bool reset, bool forecast}) topColumnsFor(int width,
-    {required bool hasForecast}) {
-  final reset = width >= _rowCore + _minReadableBar + _resetCost;
+({bool reset, bool forecast}) topColumnsFor(
+  int width, {
+  required bool hasForecast,
+  bool hasReset = true,
+}) {
+  final reset = hasReset && width >= _rowCore + _minReadableBar + _resetCost;
   final forecast = hasForecast &&
-      width >= _rowCore + _minReadableBar + _resetCost + _forecastCost;
+      (hasReset
+          ? reset &&
+              width >= _rowCore + _minReadableBar + _resetCost + _forecastCost
+          : width >= _rowCore + _minReadableBar + _forecastCost);
   return (reset: reset, forecast: forecast);
 }
 
 /// The width of the bar for this frame, shared by every row so they align.
 /// The forecast column is reserved only when a forecast exists and fits, and
-/// [tagWidth] reserves room for the widest trailing cached/account tag in the
+/// [tagWidth] reserves room for the widest trailing trust/account tag in the
 /// fleet, so a fleet with no burn history and no annotations keeps full-width
 /// meters while an annotated fleet shrinks its meters instead of clipping.
 int _barWidth(int width,
@@ -202,7 +213,7 @@ int _barWidth(int width,
       (columns.reset ? _resetCost : 0) +
       (columns.forecast ? _forecastCost : 0) +
       tagWidth;
-  return (width - overhead).clamp(6, _barMax);
+  return (width - overhead).clamp(_minBar, _barMax);
 }
 
 /// A compact forward-looking note for a provider's binding window, derived from
@@ -296,13 +307,97 @@ String _ageTerse(int seconds) {
   return '${(seconds / 86400).round()}d';
 }
 
-/// The cached tag for a stale snapshot, carrying its age so "how old is this
-/// number" never needs a second command: " (cached 8h)".
-String _cachedTag(ProviderQuota q, int now) {
-  if (!q.stale) return '';
-  final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
-  return ' (cached$age)';
+/// Compact trust annotation for a provider row. It stays on the first row only
+/// and is included in width planning, so spend class, stale age, and local scope
+/// are visible without wrapping the dashboard.
+String _topTrustTag(ProviderQuota q, int now) {
+  final parts = <String>[_topReadState(q, now), _topSpendClass(q)];
+  if (q.perMachine) parts.add('this machine');
+  return ' (${parts.join(', ')})';
 }
+
+String _topReadState(ProviderQuota q, int now) {
+  if (!q.ok) return 'error';
+  if (q.isLocal) return q.active ? 'in use' : 'local';
+  if (q.stale) {
+    final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
+    return 'cached$age';
+  }
+  if (q.windows.isEmpty && (q.status ?? '').isEmpty) return 'no live data';
+  if (q.windows.isEmpty) return q.perMachine ? 'local fallback' : 'metadata';
+  return 'live';
+}
+
+String _topSpendClass(ProviderQuota q) {
+  if (q.isLocal) return q.active ? 'local loaded' : 'local cold';
+  if (q.isManual) return 'manual';
+  if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
+  if (q.windows.isEmpty) return 'metadata only';
+  if (kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
+  return 'metered plan';
+}
+
+bool _isCollapsedSpent(ProviderQuota q, int now) {
+  final binding = bindingWindow(q, now);
+  final headroom = providerHeadroom(q, now) ?? 100;
+  return binding != null && headroom <= 0.5;
+}
+
+int _trailingTagBudget(
+  int width,
+  ({bool reset, bool forecast}) columns,
+) =>
+    width -
+    _rowCore -
+    _minBar -
+    (columns.reset ? _resetCost : 0) -
+    (columns.forecast ? _forecastCost : 0);
+
+({String trustTag, String accountTag}) _visibleCloudTags({
+  required String trustTag,
+  required String accountTag,
+  required int budget,
+}) {
+  if (trustTag.length + accountTag.length <= budget) {
+    return (trustTag: trustTag, accountTag: accountTag);
+  }
+  if (accountTag.length <= budget) {
+    return (trustTag: '', accountTag: accountTag);
+  }
+  return (trustTag: '', accountTag: '');
+}
+
+({String trustTag, String accountTag}) _visibleInlineTags({
+  required int width,
+  required String text,
+  required String trustTag,
+  required String accountTag,
+}) {
+  final budget = width - (2 + _nameW + _labelW) - text.length;
+  return _visibleCloudTags(
+    trustTag: trustTag,
+    accountTag: accountTag,
+    budget: budget,
+  );
+}
+
+String _routeAccountTag(
+  RouteCandidate c,
+  Map<String, int> providerCounts,
+) =>
+    (providerCounts[c.provider] ?? 0) > 1 && hasSpecificQuotaAccount(c.account)
+        ? ' @${c.account}'
+        : '';
+
+String _visibleRouteAccountTag({
+  required String accountTag,
+  required int width,
+  required int fixedHeadWidth,
+  required int minReasonWidth,
+}) =>
+    fixedHeadWidth + accountTag.length + minReasonWidth <= width
+        ? accountTag
+        : '';
 
 /// The leading columns of a data row: cursor, provider name (only on the first
 /// window of a provider), then the window label. The selected provider's name
@@ -323,33 +418,46 @@ List<_Cell> _rowHead(String name, String label,
 /// collapse: when the most constrained window is spent, the whole provider
 /// collapses to a single "<label> spent" line instead of showing a misleading
 /// healthy shorter window. [columns] carries the frame-wide decision of which
-/// trailing columns fit; [accountTag] labels this row's account when the fleet
-/// holds more than one account of the same provider.
+/// trailing columns fit; [trustTag] carries read/spend provenance, and
+/// [accountTag] labels this row's account when the fleet holds more than one
+/// account of the same provider.
 List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     Palette p, int barW, ({String text, int sev})? forecast,
     {bool selected = false,
     ({bool reset, bool forecast}) columns = (reset: true, forecast: true),
+    String trustTag = '',
     String accountTag = ''}) {
-  final cachedTag = _cachedTag(q, now);
-
   if (!q.ok) {
+    final text = q.error?.isNotEmpty == true ? q.error! : 'read failed';
+    final visibleTags = _visibleInlineTags(
+      width: width,
+      text: text,
+      trustTag: trustTag,
+      accountTag: accountTag,
+    );
     return [
       _line([
         ..._rowHead(q.displayName, '', selected: selected, palette: p),
-        _Cell(q.error?.isNotEmpty == true ? q.error! : 'read failed',
-            (s, t) => s.red(t)),
-        _Cell(accountTag, (s, t) => s.dim(t)),
+        _Cell(text, (s, t) => s.red(t)),
+        _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
+        _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
     ];
   }
   if (q.windows.isEmpty) {
     final status = q.status?.isNotEmpty == true ? q.status! : 'no live data';
+    final visibleTags = _visibleInlineTags(
+      width: width,
+      text: status,
+      trustTag: trustTag,
+      accountTag: accountTag,
+    );
     return [
       _line([
         ..._rowHead(q.displayName, '', selected: selected, palette: p),
         _Cell(status, (s, t) => s.dim(t)),
-        _Cell(cachedTag, (s, t) => s.dim(t)),
-        _Cell(accountTag, (s, t) => s.dim(t)),
+        _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
+        _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
     ];
   }
@@ -360,14 +468,21 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
         : 'resets ${_eta(binding.resetsAt!, now)}';
+    final text = 'spent${reset.isEmpty ? '' : '   $reset'}';
+    final visibleTags = _visibleInlineTags(
+      width: width,
+      text: text,
+      trustTag: trustTag,
+      accountTag: accountTag,
+    );
     return [
       _line([
         ..._rowHead(q.displayName, binding.label,
             selected: selected, palette: p),
         _Cell('spent', (s, t) => s.red(t)),
         if (reset.isNotEmpty) _Cell('   $reset', (s, t) => s.dim(t)),
-        _Cell(cachedTag, (s, t) => s.dim(t)),
-        _Cell(accountTag, (s, t) => s.dim(t)),
+        _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
+        _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
     ];
   }
@@ -388,16 +503,20 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       _Cell('${remaining.round().toString().padLeft(3)}% free',
           (s, t) => _healthPaint(s, p, remaining, t)),
       // The reset column is padded to its reserved width so the forecast and
-      // cached/account tags line up vertically across every row.
+      // Trust/account tags line up vertically across every row.
       if (columns.reset) ...[
         const _Cell('  '),
         _Cell(reset.padRight(_resetCost - 2), (s, t) => s.dim(t)),
       ],
-      if (showForecast) ...[
+      if (columns.forecast) ...[
         const _Cell('  '),
-        _Cell(forecast.text, (s, t) => _forecastPaint(s, forecast.sev, t)),
+        if (showForecast)
+          _Cell(forecast.text.padRight(_forecastCost - 2),
+              (s, t) => _forecastPaint(s, forecast.sev, t))
+        else
+          _Cell(' ' * (_forecastCost - 2)),
       ],
-      if (first) _Cell(cachedTag, (s, t) => s.dim(t)),
+      if (first) _Cell(trustTag, (s, t) => s.dim(t)),
       if (first) _Cell(accountTag, (s, t) => s.dim(t)),
     ], width, s));
     first = false;
@@ -407,23 +526,32 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
 
 /// The rows for one local runtime: a headline (what is loaded, always-on) and any
 /// detail lines (VRAM, context, disk) the adapter provides, indented under it -
-/// the same detail the desktop app shows. The "[always on]" tag yields on
+/// the same detail the desktop app shows. The trust tag yields on
 /// narrow terminals so the status itself never clips.
-List<String> _localRows(ProviderQuota q, int width, AnsiStyle s, Palette p,
-    {bool selected = false}) {
-  final status = q.status?.isNotEmpty == true ? q.status! : 'ready';
-  // The tag renders only when the whole row fits, so a long model list on a
-  // narrow terminal keeps its status text intact instead of clipping the tag.
+List<String> _localRows(
+  ProviderQuota q,
+  int now,
+  int width,
+  AnsiStyle s,
+  Palette p, {
+  bool selected = false,
+}) {
+  final status = q.ok
+      ? (q.status?.isNotEmpty == true ? q.status! : 'ready')
+      : (q.error?.isNotEmpty == true ? q.error! : 'read failed');
+  // The trust tag renders only when the whole row fits, so a long model list on
+  // a narrow terminal keeps its status text intact instead of clipping the tag.
   const head = 2 + _nameW + _labelW;
-  const tag = '[always on]';
-  final showAlwaysOn = head + status.length + 2 + tag.length <= width;
+  final trustTag = _topTrustTag(q, now);
+  final showTrust = head + status.length + 2 + trustTag.length <= width;
   final lines = <String>[
     _line([
       ..._rowHead(q.displayName, 'local', selected: selected, palette: p),
-      _Cell(status, (s, t) => q.active ? s.cyan(t) : s.dim(t)),
-      if (showAlwaysOn) ...[
+      _Cell(status,
+          (s, t) => !q.ok ? s.red(t) : (q.active ? s.cyan(t) : s.dim(t))),
+      if (showTrust) ...[
         const _Cell('  '),
-        _Cell(tag, (s, t) => s.dim(t)),
+        _Cell(trustTag, (s, t) => s.dim(t)),
       ],
     ], width, s),
   ];
@@ -510,7 +638,7 @@ List<String> renderTopFrame({
   int hidden = 0,
   String copied = '',
 }) {
-  final w = width < 24 ? 24 : width;
+  final w = width < 1 ? 1 : width;
   final s = AnsiStyle(color, depth: depth);
   final p = palette;
   final lines = <String>[];
@@ -541,12 +669,21 @@ List<String> renderTopFrame({
   }
   // A forward-looking note per provider, from its routing candidate. The bar
   // only yields width when at least one provider has a forecast to show.
-  final byProvider = {for (final c in suggestion.ranked) c.provider: c};
-  final forecasts = <String, ({String text, int sev})?>{
-    for (final q in cloud) q.provider: _forecast(byProvider[q.provider]),
+  final byIdentity = {
+    for (final c in suggestion.ranked)
+      quotaIdentityKey(c.provider, c.account): c
   };
-  final columns =
-      topColumnsFor(w, hasForecast: forecasts.values.any((f) => f != null));
+  final forecasts = <ProviderQuota, ({String text, int sev})?>{
+    for (final q in cloud) q: _forecast(byIdentity[quotaIdentityKeyFor(q)]),
+  };
+  final hasReset = cloud.any(
+    (q) => q.windows.any((window) => window.resetsAt != null),
+  );
+  final columns = topColumnsFor(
+    w,
+    hasForecast: forecasts.values.any((f) => f != null),
+    hasReset: hasReset,
+  );
   // Multi-account fleets label each duplicate provider's row with its account,
   // so two Grok rows are never ambiguous; single-account fleets stay unlabeled.
   final providerCounts = <String, int>{};
@@ -560,9 +697,25 @@ List<String> renderTopFrame({
           : '';
   // Reserve room for the widest trailing annotation so tags never clip.
   var tagWidth = 0;
+  final trustTags = <ProviderQuota, ({String trustTag, String accountTag})>{};
+  final tagBudget = _trailingTagBudget(w, columns);
   for (final q in cloud) {
-    final t = _cachedTag(q, now).length + accountTagFor(q).length;
-    if (t > tagWidth) tagWidth = t;
+    final rawTrustTag = _topTrustTag(q, now);
+    final rawAccountTag = accountTagFor(q);
+    final usesInlineTagFit =
+        !q.ok || q.windows.isEmpty || _isCollapsedSpent(q, now);
+    final visibleTags = usesInlineTagFit
+        ? (trustTag: rawTrustTag, accountTag: rawAccountTag)
+        : _visibleCloudTags(
+            trustTag: rawTrustTag,
+            accountTag: rawAccountTag,
+            budget: tagBudget,
+          );
+    trustTags[q] = visibleTags;
+    if (!usesInlineTagFit) {
+      final t = visibleTags.trustTag.length + visibleTags.accountTag.length;
+      if (t > tagWidth) tagWidth = t;
+    }
   }
   final barW = _barWidth(w, columns: columns, tagWidth: tagWidth);
   // A selection names a provider and, in multi-account fleets, the account,
@@ -571,13 +724,16 @@ List<String> renderTopFrame({
       q.provider == selected &&
       (selectedAccount == null || q.account == selectedAccount);
   for (final q in cloud) {
-    lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q.provider],
+    final visibleTags =
+        trustTags[q] ?? (trustTag: '', accountTag: accountTagFor(q));
+    lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q],
         selected: isSelected(q),
         columns: columns,
-        accountTag: accountTagFor(q)));
+        trustTag: visibleTags.trustTag,
+        accountTag: visibleTags.accountTag));
   }
   for (final q in local) {
-    lines.addAll(_localRows(q, w, s, p, selected: isSelected(q)));
+    lines.addAll(_localRows(q, now, w, s, p, selected: isSelected(q)));
   }
 
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));
@@ -585,6 +741,14 @@ List<String> renderTopFrame({
   // The route line already names the pick, so a reason that repeats it as
   // "Use <provider> - " is trimmed to just the explanation, and a long reason
   // yields at a word boundary instead of clipping at the frame edge.
+  final routeAccountTag = r == null
+      ? ''
+      : _visibleRouteAccountTag(
+          accountTag: _routeAccountTag(r, providerCounts),
+          width: w,
+          fixedHeadWidth: '  route -> ${r.provider}   '.length,
+          minReasonWidth: 8,
+        );
   final routeHead = <_Cell>[
     const _Cell('  '),
     _Cell('route ', (s, t) => s.dim(t)),
@@ -593,6 +757,7 @@ List<String> renderTopFrame({
     else ...[
       _Cell('-> ', (s, t) => _accent(s, p, t)),
       _Cell(r.provider, (s, t) => s.bold(t)),
+      _Cell(routeAccountTag, (s, t) => s.dim(t)),
       if (r.isLocal) _Cell(' (local fallback)', (s, t) => s.dim(t)),
     ],
     const _Cell('   '),

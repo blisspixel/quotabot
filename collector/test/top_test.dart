@@ -16,11 +16,14 @@ ProviderQuota _q(
   ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   String? status,
   bool active = false,
+  String? source,
+  bool perMachine = false,
+  String account = 'a',
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id,
-      account: 'a',
+      account: account,
       asOf: _now,
       windows: windows,
       stale: stale,
@@ -29,6 +32,8 @@ ProviderQuota _q(
       kind: kind,
       status: status,
       active: active,
+      source: source,
+      perMachine: perMachine,
     );
 
 /// Strips ANSI SGR codes so tests can assert on visible text and width.
@@ -99,17 +104,31 @@ void main() {
     expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
   });
 
-  test('a local runtime shows its status as an always-on fallback', () {
+  test('a local runtime shows its status and local trust scope', () {
     final lines = _frame([
       _q('ollama', const [],
           kind: ProviderQuotaKind.local,
           status: '3 models, llama3 loaded',
-          active: true),
-    ]);
+          active: true,
+          perMachine: true),
+    ], width: 100);
     final row = lines.firstWhere((l) => _plain(l).contains('ollama'));
     expect(_plain(row), contains('local'));
     expect(_plain(row), contains('llama3'));
-    expect(_plain(row), contains('[always on]'));
+    expect(_plain(row), contains('(in use, local loaded, this machine)'));
+  });
+
+  test('a failed local runtime shows the error and trust state', () {
+    final lines = _frame([
+      _q('ollama', const [],
+          kind: ProviderQuotaKind.local,
+          ok: false,
+          error: 'runtime offline',
+          perMachine: true),
+    ], width: 100);
+    final row = _plain(lines.firstWhere((l) => _plain(l).contains('ollama')));
+    expect(row, contains('runtime offline'));
+    expect(row, contains('(error, local cold, this machine)'));
   });
 
   test('a failed read says so instead of faking a bar', () {
@@ -117,15 +136,59 @@ void main() {
         _frame([_q('grok', const [], ok: false, error: 'token expired')]);
     final row = lines.firstWhere((l) => _plain(l).contains('grok'));
     expect(_plain(row), contains('token expired'));
+    expect(_plain(row), contains('(error, quota plan)'));
     expect(row, isNot(contains('█')));
   });
 
-  test('a stale provider is tagged cached', () {
+  test('a stale provider is tagged cached with spend class', () {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)],
           stale: true),
-    ]);
-    expect(lines.any((l) => _plain(l).contains('(cached)')), isTrue);
+    ], width: 90);
+    expect(
+      lines.any((l) => _plain(l).contains('(cached, quota plan)')),
+      isTrue,
+    );
+  });
+
+  test('top rows label live quota plans, manual quota, and metadata-only reads',
+      () {
+    final lines = _frame([
+      _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+      _q(
+        'manual-ai',
+        [QuotaWindow(label: 'monthly', usedPercent: 45)],
+        source: providerQuotaManualSource,
+      ),
+      _q('nvidia', const [], status: 'free trial available; balance unknown'),
+    ], width: 120);
+
+    expect(lines.any((l) => _plain(l).contains('(live, quota plan)')), isTrue);
+    expect(lines.any((l) => _plain(l).contains('(live, manual)')), isTrue);
+    expect(
+      lines.any((l) => _plain(l).contains('(metadata, metadata only)')),
+      isTrue,
+    );
+  });
+
+  test('a status-only quota-plan provider is labeled metadata-only', () {
+    final lines = _frame([
+      _q('claude', const [], status: 'quota endpoint unavailable'),
+    ], width: 100);
+    final row = _plain(lines.firstWhere((l) => _plain(l).contains('claude')));
+    expect(row, contains('(metadata, metadata only)'));
+    expect(row, isNot(contains('quota plan')));
+  });
+
+  test('long status rows drop trust tags before clipping them', () {
+    final lines = _frame([
+      _q('claude', const [],
+          status: 'quota endpoint unavailable while browser is signed out'),
+    ], width: 50);
+    final row = _plain(lines.firstWhere((l) => _plain(l).contains('claude')));
+    expect(row, isNot(contains('(metadata')));
+    expect(row, isNot(contains('(met')));
+    expect(row.length, 50);
   });
 
   test('the footer recommends where to route next', () {
@@ -328,6 +391,70 @@ void main() {
       expect(lines.any((l) => _plain(l).contains('strand')), isFalse);
       expect(lines.any((l) => _plain(l).contains('left')), isFalse);
     });
+
+    test('multi-account forecasts stay on the matching account row', () {
+      final providers = [
+        _q(
+          'codex',
+          [QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600)],
+          account: 'work@example.com',
+        ),
+        _q(
+          'codex',
+          [QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600)],
+          account: 'home@example.com',
+        ),
+      ];
+      final suggestion = suggestRoute(providers, _now, burnStatsByProvider: {
+        quotaIdentityKey('codex', 'work@example.com'):
+            const BurnStat(perHour: 40, sePerHour: 5, samples: 10),
+      });
+      final lines = renderTopFrame(
+        providers: providers,
+        suggestion: suggestion,
+        now: _now,
+        width: 120,
+        color: false,
+        clock: '12:00:00',
+      ).map(_plain).toList();
+      final workRow = lines.firstWhere((l) => l.contains('@work@example.com'));
+      final homeRow = lines.firstWhere((l) => l.contains('@home@example.com'));
+      expect(workRow, contains('strand'));
+      expect(homeRow, isNot(contains('strand')));
+    });
+
+    test('mixed forecast rows keep trust tags aligned', () {
+      final providers = [
+        _q(
+          'codex',
+          [QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600)],
+          account: 'aa@example.com',
+        ),
+        _q(
+          'codex',
+          [QuotaWindow(label: '5h', usedPercent: 70, resetsAt: _now + 3600)],
+          account: 'bb@example.com',
+        ),
+      ];
+      final suggestion = suggestRoute(providers, _now, burnStatsByProvider: {
+        quotaIdentityKey('codex', 'aa@example.com'):
+            const BurnStat(perHour: 40, sePerHour: 5, samples: 10),
+      });
+      final lines = renderTopFrame(
+        providers: providers,
+        suggestion: suggestion,
+        now: _now,
+        width: 120,
+        color: false,
+        clock: '12:00:00',
+      ).map(_plain).toList();
+      final forecastRow =
+          lines.firstWhere((l) => l.contains('@aa@example.com'));
+      final quietRow = lines.firstWhere((l) => l.contains('@bb@example.com'));
+      expect(forecastRow, contains('strand'));
+      expect(quietRow, isNot(contains('strand')));
+      expect(forecastRow.indexOf('(live'), quietRow.indexOf('(live'));
+    });
   });
 
   group('width degradation', () {
@@ -366,6 +493,17 @@ void main() {
       expect(row, contains('resets'));
       expect(row, isNot(contains('strand')));
       expect(row, isNot(contains('stra')), reason: 'no mid-word clipping');
+    });
+
+    test('cloud trust tags yield whole before clipping on narrow frames', () {
+      final lines = _frame([
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+      ], width: 54)
+          .map(_plain)
+          .toList();
+      final row = lines.firstWhere((l) => l.contains('claude'));
+      expect(row, isNot(contains('(live')));
+      expect(row, isNot(contains('quota p')));
     });
 
     test('a very narrow frame drops the reset countdown too', () {
@@ -407,7 +545,10 @@ void main() {
       windows: [QuotaWindow(label: '5h', usedPercent: 44)],
     );
     final lines = _frame([q], width: 90);
-    expect(lines.any((l) => _plain(l).contains('(cached 8h)')), isTrue);
+    expect(
+      lines.any((l) => _plain(l).contains('(cached 8h, quota plan)')),
+      isTrue,
+    );
   });
 
   test('the route line drops the reason\'s redundant "Use <provider>"', () {
@@ -444,9 +585,84 @@ void main() {
     );
     expect(lines.any((l) => _plain(l).contains('@work@example.com')), isTrue);
     expect(lines.any((l) => _plain(l).contains('@home@example.com')), isTrue);
+    final route = _plain(lines.firstWhere((l) => _plain(l).contains('route')));
+    expect(route, contains('-> grok @home@example.com'));
+    final narrow = _frame(
+      [grok('work@example.com', 57), grok('home@example.com', 22)],
+      width: 76,
+    );
+    expect(
+      narrow.any((l) => _plain(l).contains('@work@example.com')),
+      isTrue,
+    );
     // A single-account provider stays unlabeled.
     final single = _frame([grok('work@example.com', 57)], width: 110);
     expect(single.any((l) => _plain(l).contains('@work@example.com')), isFalse);
+  });
+
+  test('spent duplicate rows keep trust tags when no bar is rendered', () {
+    ProviderQuota grok(String account, double used) => ProviderQuota(
+          provider: 'grok',
+          displayName: 'Grok',
+          account: account,
+          asOf: _now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final lines = _frame(
+      [grok('work@example.com', 100), grok('home@example.com', 75)],
+      width: 86,
+    );
+    final spentRow = _plain(lines.firstWhere((l) => l.contains('spent')));
+    expect(spentRow, contains('(live, quota plan)'));
+    expect(spentRow, contains('@work@example.com'));
+  });
+
+  test('status-only duplicate rows keep account labels when reset is absent',
+      () {
+    ProviderQuota grok(String account, String status) => ProviderQuota(
+          provider: 'grok',
+          displayName: 'Grok',
+          account: account,
+          asOf: _now,
+          status: status,
+          windows: const [],
+        );
+    final lines = _frame(
+      [
+        grok('work@example.com', 'balance unknown'),
+        grok('home@example.com', 'balance unknown'),
+      ],
+      width: 68,
+    );
+    expect(
+      lines.any((l) => _plain(l).contains('@work@example.com')),
+      isTrue,
+    );
+    expect(
+      lines.any((l) => _plain(l).contains('@home@example.com')),
+      isTrue,
+    );
+  });
+
+  test('the route account tag yields whole before clipping', () {
+    ProviderQuota grok(String account, double used) => ProviderQuota(
+          provider: 'grok',
+          displayName: 'Grok',
+          account: account,
+          asOf: _now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final lines = _frame(
+      [
+        grok('very-long-work-account@example.com', 22),
+        grok('home@example.com', 57)
+      ],
+      width: 58,
+    );
+    final route = _plain(lines.firstWhere((l) => l.contains('route')));
+    expect(route, isNot(contains('@very-long')));
+    expect(route, isNot(contains('@very')));
+    expect(route.length, 58);
   });
 
   test('selection in a multi-account fleet marks only the matching account',
@@ -474,18 +690,23 @@ void main() {
     expect(_plain(cursors.single), contains('@home@example.com'));
   });
 
-  test('the always-on tag yields before a long local status clips', () {
+  test('the local trust tag yields before a long local status clips', () {
     final q = _q('ollama', const [],
         kind: ProviderQuotaKind.local,
         status: 'qwen2.5-coder 7B Q4_K_M loaded',
-        active: true);
-    final wide = _frame([q], width: 90);
+        active: true,
+        perMachine: true);
+    final wide = _frame([q], width: 110);
     final narrow = _frame([q], width: 60);
-    expect(wide.any((l) => _plain(l).contains('[always on]')), isTrue);
+    expect(
+      wide.any(
+          (l) => _plain(l).contains('(in use, local loaded, this machine)')),
+      isTrue,
+    );
     final row =
         _plain(narrow.firstWhere((l) => _plain(l).contains('qwen2.5-coder')));
-    expect(row, isNot(contains('[always on]')));
-    expect(row, isNot(contains('[alway')), reason: 'no clipped tag');
+    expect(row, isNot(contains('local loaded')));
+    expect(row, isNot(contains('local lo')), reason: 'no clipped tag');
     expect(row, contains('loaded'));
   });
 
@@ -508,6 +729,15 @@ void main() {
     ], width: 30);
     for (final line in lines) {
       expect(_plain(line).length, 30, reason: line);
+    }
+  });
+
+  test('a sub-24-column terminal never overflows its width', () {
+    final lines = _frame([
+      _q('antigravity', [QuotaWindow(label: 'weekly', usedPercent: 50)]),
+    ], width: 20);
+    for (final line in lines) {
+      expect(_plain(line).length, 20, reason: line);
     }
   });
 
@@ -562,6 +792,22 @@ void main() {
       // grok burns fastest, then claude; codex (no burn) and the local sink,
       // keeping their original relative order.
       expect(order(out), ['grok', 'claude', 'codex', 'ollama']);
+    });
+
+    test('burn sort uses account-scoped stats for duplicate providers', () {
+      final ps = [
+        _q('codex', [QuotaWindow(label: '5h', usedPercent: 30)],
+            account: 'home@example.com'),
+        _q('codex', [QuotaWindow(label: '5h', usedPercent: 30)],
+            account: 'work@example.com'),
+      ];
+      final sug = suggestRoute(ps, _now, burnStatsByProvider: {
+        quotaIdentityKey('codex', 'work@example.com'):
+            const BurnStat(perHour: 30, sePerHour: 5, samples: 8),
+      });
+      final out = sortProvidersForTop(ps, sug, _now, TopSort.burn);
+      expect([for (final q in out) q.account],
+          ['work@example.com', 'home@example.com']);
     });
 
     test('an unrankable sort keeps the fleet stable (no burn history)', () {
