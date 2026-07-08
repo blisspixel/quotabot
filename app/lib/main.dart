@@ -314,6 +314,46 @@ String? desktopRouteSignalLine(
 }
 
 @visibleForTesting
+String desktopProviderTrustLine(ProviderQuota quota, int now) {
+  final parts = <String>[
+    _desktopProviderReadState(quota),
+    _desktopProviderSpendClass(quota),
+  ];
+  if (quota.perMachine) parts.add('this machine');
+  final captured = _desktopCaptureAgeLabel(quota.asOf, now);
+  if (captured.isNotEmpty) parts.add(captured);
+  return parts.join(' | ');
+}
+
+String _desktopProviderReadState(ProviderQuota quota) {
+  if (quota.isLocal) return quota.active ? 'in use' : 'local';
+  if (!quota.ok) return 'error';
+  if (quota.stale) return 'cached';
+  if (quota.windows.isEmpty && (quota.status ?? '').isEmpty) {
+    return 'no live data';
+  }
+  if (quota.windows.isEmpty) {
+    return quota.perMachine ? 'local fallback' : 'metadata';
+  }
+  return 'live';
+}
+
+String _desktopProviderSpendClass(ProviderQuota quota) {
+  if (quota.isLocal) return quota.active ? 'local loaded' : 'local cold';
+  if (quota.isManual) return 'manual';
+  if (quota.windows.isEmpty) return 'metadata only';
+  return kQuotaPlanProviders.contains(quota.provider)
+      ? 'quota plan'
+      : 'metered plan';
+}
+
+String _desktopCaptureAgeLabel(int asOf, int now) {
+  if (asOf <= 0) return '';
+  if (asOf > now) return 'captured in the future';
+  return 'captured ${_ageLabel(asOf, now)} ago';
+}
+
+@visibleForTesting
 String providerSetupText(String provider) {
   switch (provider) {
     case 'codex':
@@ -1093,7 +1133,8 @@ class _DashboardState extends State<Dashboard>
           final key = quotaDisplayKey(q);
           final blocked = providerStatus(q, now).blocked;
           final rows = (q.windows.isEmpty || blocked) ? 1 : q.windows.length;
-          var card = 50.0 + rows * 14.0; // card chrome + each window/status row
+          var card =
+              64.0 + rows * 14.0; // card chrome, trust line, and data rows
           if (q.isLocal) card += q.details.length * 14; // detail lines
           if ((_history[key] ?? const []).isNotEmpty) {
             card += 20; // "usually ~X% free" line
@@ -2579,6 +2620,7 @@ class ProviderTile extends StatelessWidget {
         ? muted
         : _availColor(binding.remaining);
     final hasInsights = insights != null && insights!.samples > 0;
+    final trustLine = desktopProviderTrustLine(quota, now);
 
     // A glance-layer forward-looking note on the binding window, in plain
     // language backed by the calibrated forecast and matching what `quotabot
@@ -2659,27 +2701,9 @@ class ProviderTile extends StatelessWidget {
                   ) // running but idle
                 else if (quota.windows.isNotEmpty)
                   _Dot(statusColor),
-                if (quota.stale) ...[
-                  Icon(Icons.history_rounded, size: 12, color: muted),
-                  const SizedBox(width: 3),
-                  Text(
-                    _ageLabel(quota.asOf, now),
-                    style: TextStyle(fontSize: AppType.label, color: muted),
-                  ),
-                  const SizedBox(width: 8),
-                ],
                 if (quota.plan != null)
                   Text(
                     quota.plan!.toLowerCase(),
-                    style: TextStyle(
-                      fontSize: AppType.caption,
-                      fontWeight: FontWeight.w500,
-                      color: muted,
-                    ),
-                  ),
-                if (quota.perMachine)
-                  Text(
-                    ' (this machine)',
                     style: TextStyle(
                       fontSize: AppType.caption,
                       fontWeight: FontWeight.w500,
@@ -2707,23 +2731,26 @@ class ProviderTile extends StatelessWidget {
                 ],
               ],
             ),
-            if (quota.perMachine)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  quota.provider == 'antigravity'
-                      ? 'Note: Antigravity is using local fallback data; usage on other devices may not be reflected'
-                      : 'Note: this view is local fallback data; usage on other devices may not be reflected',
-                  style: TextStyle(fontSize: AppType.caption, color: muted),
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                trustLine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppType.small,
+                  fontWeight: FontWeight.w500,
+                  color: muted,
                 ),
               ),
+            ),
             const SizedBox(height: 10),
             if (quota.isLocal)
               _localRow(quota, muted, fg)
             else if (quota.windows.isEmpty)
               ((quota.status ?? '').isNotEmpty
                   ? _statusOnlyRow(quota, muted, fg)
-                  : _noData(quota.error, muted, quota.perMachine))
+                  : _noData(quota.error, muted))
             else if (blocked)
               _blockedRow(binding, now, muted)
             else
@@ -2852,9 +2879,8 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _noData(String? err, Color muted, [bool perMachine = false]) {
+  Widget _noData(String? err, Color muted) {
     final msg = (err != null && err.length < 80) ? err : 'no live data';
-    final scope = perMachine ? ' (this machine)' : '';
     return Row(
       children: [
         Container(
@@ -2868,7 +2894,7 @@ class ProviderTile extends StatelessWidget {
         const SizedBox(width: 7),
         Expanded(
           child: Text(
-            '$msg$scope',
+            msg,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: AppType.caption, color: muted),

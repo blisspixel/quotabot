@@ -530,4 +530,88 @@ void main() {
       expect(line, contains('Next: Codex (work@example.com)'));
     });
   });
+
+  group('desktop provider trust line', () {
+    test('labels live quota plans and capture age', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        _quota('claude', 'Claude', 'pro'),
+        now,
+      );
+
+      expect(line, 'live | quota plan | captured 0s ago');
+    });
+
+    test('labels cached manual quota without plan identity noise', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'custom-ai',
+          displayName: 'Custom AI',
+          account: 'work',
+          source: providerQuotaManualSource,
+          asOf: now - 3600,
+          stale: true,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: 40)],
+        ),
+        now,
+      );
+
+      expect(line, 'cached | manual | captured 1h ago');
+    });
+
+    test('labels local loaded scope explicitly', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: '2 models',
+          kind: ProviderQuotaKind.local,
+          active: true,
+          perMachine: true,
+          asOf: now,
+        ),
+        now,
+      );
+
+      expect(line, 'in use | local loaded | this machine | captured 0s ago');
+    });
+
+    test('labels status-only metadata without claiming live quota', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'nvidia',
+          displayName: 'NVIDIA NIM',
+          account: 'default',
+          asOf: now,
+          status: 'free trial available; balance unknown',
+        ),
+        now,
+      );
+
+      expect(line, 'metadata | metadata only | captured 0s ago');
+    });
+
+    test('labels status-only per-machine fallback explicitly', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'antigravity',
+          displayName: 'Antigravity',
+          account: 'user@example.com',
+          asOf: now,
+          status: 'local fallback data',
+          perMachine: true,
+        ),
+        now,
+      );
+
+      expect(
+        line,
+        'local fallback | metadata only | this machine | captured 0s ago',
+      );
+    });
+  });
 }
