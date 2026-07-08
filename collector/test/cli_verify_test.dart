@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
+
+import '../bin/collect.dart' as cli;
 
 import 'support/cli_process.dart';
 
@@ -85,6 +88,98 @@ void main() {
     expect(out, contains('PASS'));
     expect(out, contains('/usage'));
     expect(out, contains('quotabot verify --json'));
+  });
+
+  test('verify human output names trust provenance', () async {
+    final result = await runCli([
+      'verify',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[live, quota plan, captured'));
+  });
+
+  test('verify human output labels truthful read failures', () async {
+    final result = await runCli([
+      'verify',
+      '--no-color',
+      '--mock-provider=grok',
+      '--state=signed-out',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[error, metadata only, captured'));
+    expect(out, contains('read_or_reason'));
+    expect(out, contains('simulated signed-out state'));
+  });
+
+  test('verify human output explains cached snapshots', () async {
+    final result = await runCli([
+      'verify',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=stale',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[cached, quota plan, captured 60m ago]'));
+    expect(out, contains('stale_honesty'));
+    expect(out, contains('simulated stale cache'));
+  });
+
+  test('verify human output explains metadata-only snapshots', () async {
+    final result = await runCli([
+      'verify',
+      '--no-color',
+      '--mock-provider=cursor',
+      '--state=metadata',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[metadata, metadata only, captured'));
+    expect(out, contains('read_or_reason'));
+    expect(out, contains('simulated metadata-only state'));
+  });
+
+  test('verify provenance matching uses row order for duplicate accounts', () {
+    const now = 2000;
+    final olderManual = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'same',
+      source: providerQuotaManualSource,
+      asOf: 1000,
+      windows: [QuotaWindow(label: 'manual', usedPercent: 20)],
+    );
+    final newerPlan = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'same',
+      asOf: 2000,
+      windows: [QuotaWindow(label: '5h', usedPercent: 40)],
+    );
+    final report = buildVerificationReport(
+      [olderManual, newerPlan],
+      now,
+      os: Platform.operatingSystem,
+      filtered: true,
+    );
+
+    expect(
+      cli.quotaForVerificationProvenance(
+        [olderManual, newerPlan],
+        report.providers[1],
+        1,
+      ),
+      same(newerPlan),
+    );
   });
 
   test('verify rejects an unknown simulation state as a usage error', () async {
