@@ -84,6 +84,27 @@ void main() {
       expect(r.armed, {quotaIdentityKey('claude', 'work@example.com')});
     });
 
+    test('does not present plan-like account strings as identities', () {
+      final alert = QuotaAlert(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'max',
+        window: 'weekly',
+        severity: AlertSeverity.red,
+        freePercent: 4,
+        asOf: _now,
+        routeTo: 'codex',
+        routeDisplayName: 'Codex',
+        routeAccount: 'pro',
+        routeFreePercent: 55,
+      );
+
+      expect(alert.message, contains('Claude weekly at 4% free'));
+      expect(alert.message, contains('route next to Codex (55% free)'));
+      expect(alert.message, isNot(contains('(max)')));
+      expect(alert.message, isNot(contains('(pro)')));
+    });
+
     test('does not re-fire while it stays red', () {
       final snap = [_q('codex', 98), _q('claude', 60)];
       final r = computeAlerts(
@@ -254,6 +275,37 @@ void main() {
       expect(r.fired, hasLength(1));
       expect(r.fired.single.account, 'work');
       expect(r.armed, {quotaIdentityKey('claude', 'work')});
+    });
+
+    test('skips self-reported manual quota projections', () {
+      final reset = _now + 10 * 3600;
+      final snap = [
+        ProviderQuota(
+          provider: 'custom-ai',
+          displayName: 'Custom AI',
+          account: 'work',
+          source: providerQuotaManualSource,
+          asOf: _now,
+          windows: [
+            QuotaWindow(label: 'monthly', usedPercent: 10, resetsAt: reset),
+          ],
+        ),
+      ];
+      final pace = computePace(
+        headroom: 90,
+        resetsAt: reset,
+        burnPerHour: 2,
+        now: _now,
+      )!;
+      final r = computeProjectedWasteAlerts(
+        snapshot: snap,
+        paceByProvider: {quotaIdentityKey('custom-ai', 'work'): pace},
+        now: _now,
+        thresholdPercent: 50,
+      );
+
+      expect(r.fired, isEmpty);
+      expect(r.armed, isEmpty);
     });
 
     test('re-arms after projected waste falls below threshold', () {

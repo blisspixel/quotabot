@@ -254,9 +254,11 @@ once per crossing and re-arms only after the window recovers, so a steady spent
 window never spams. Alerts carry quota metadata only, never prompts or content.
 Add `--waste-threshold=N` to also alert when the recent burn pace projects that
 at least N percent of a paid window will expire unused at reset.
-When a provider exposes account identity, both low-quota and projected-waste
-alerts are keyed and serialized by that provider/account pair, including
-same-provider sibling routes.
+Human alert lines include the same compact provenance tags as `doctor`: live
+state, spend class, true account identity when safe, per-machine scope, and
+capture age. When a provider exposes account identity, both low-quota and
+projected-waste alerts are keyed and serialized by that provider/account pair,
+including same-provider sibling routes.
 
 ```bash
 quotabot watch                                   # print alerts, adaptive cadence

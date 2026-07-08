@@ -205,7 +205,7 @@ class QuotaAlert {
   final fired = <QuotaAlert>[];
   final next = <String>{};
   for (final q in snapshot) {
-    if (q.isLocal) continue;
+    if (q.isLocal || q.isManual) continue;
     final bw = bindingWindow(q, now);
     final free = providerHeadroom(q, now);
     if (bw == null || bw.resetsAt == null || free == null) continue;
@@ -252,6 +252,6 @@ String? _displayNameOf(
 }
 
 String _displayLabel(String displayName, String? account) =>
-    account != null && hasSpecificQuotaAccount(account)
+    account != null && account.contains('@') && hasSpecificQuotaAccount(account)
         ? '$displayName ($account)'
         : displayName;

@@ -109,6 +109,34 @@ void main() {
     expect(out, contains('[live, manual, work, captured'));
     expect(out, contains('[live, manual, home, captured'));
   });
+
+  test('watch preserves safe non-email manual account provenance', () async {
+    final set = await runCli([
+      'manual',
+      'set',
+      'custom-ai',
+      '--display-name',
+      'Custom AI',
+      '--account',
+      'work',
+      '--window',
+      'monthly',
+      '--used',
+      '10',
+      '--limit',
+      '10',
+      '--reset',
+      '1893456000',
+    ]);
+    expectExitCode(set, 0);
+
+    final watch = await runCli(['watch', '--once', '--no-color']);
+
+    expectExitCode(watch, 0);
+    final out = watch.stdout as String;
+    expect(out, contains('[red] Custom AI monthly at 0% free'));
+    expect(out, contains('[live, manual, work, captured'));
+  });
 }
 
 Map<String, String> _isolatedEnv(Directory temp) => {
