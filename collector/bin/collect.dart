@@ -184,7 +184,9 @@ Future<void> main(List<String> rawArgs) async {
                 )
               : const <String, ExpiringQuotaSignal>{},
         );
-        wantsJson ? print(_jsonPretty(s.toJson(now))) : _printSuggestModel(s);
+        wantsJson
+            ? print(_jsonPretty(s.toJson(now)))
+            : _printSuggestModel(s, now);
       } else {
         final riskZ =
             _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
@@ -242,6 +244,7 @@ Future<void> main(List<String> rawArgs) async {
         _printModels(
           buildModelRegistry(results, now,
               catalog: kModelCatalog, requirements: reqs.requirements),
+          now,
           filtersActive: !reqs.requirements.isEmpty,
         );
       }
@@ -567,15 +570,16 @@ List<TierPlanOption>? _parseTierPlans(String raw) {
 }
 
 /// Prints a concrete-model recommendation for a task profile.
-void _printSuggestModel(ModelSuggestion s) {
+void _printSuggestModel(ModelSuggestion s, int now) {
   print('quotabot suggest  (best model for your task, 0 usage tokens)\n');
   final r = s.recommended;
   if (r == null) {
     print('  no model to route to right now');
   } else {
+    final provenance = _modelEntryProvenance(r, now);
     print(
       '  ${style.green('->')} ${style.bold(r.model.id)} '
-      '${style.dim('on ${r.provider}')}',
+      '${style.dim('on ${r.provider}')} $provenance',
     );
   }
   print('  ${s.reason}\n');
@@ -591,8 +595,11 @@ void _printSuggestModel(ModelSuggestion s) {
                 '${e.headroomPercent!.round()}% free'.padRight(9)));
     final tier = m.tier == null ? '' : style.dim('  ${m.tier}');
     final spent = e.available ? '' : style.red('  spent');
+    final provenance = _modelEntryProvenance(e, now);
     print(
-        '    ${m.id.padRight(22)} ${e.provider.padRight(11)} $budget$tier$spent');
+      '    ${m.id.padRight(22)} ${e.provider.padRight(11)} '
+      '$budget $provenance$tier$spent',
+    );
   }
 }
 
@@ -1924,7 +1931,11 @@ String _ctxLabel(int tokens) => tokens >= 1000000
 
 /// Prints the model registry: every model you can route to now, with the live
 /// budget that gates it and its capability hints.
-void _printModels(List<ModelEntry> reg, {bool filtersActive = false}) {
+void _printModels(
+  List<ModelEntry> reg,
+  int now, {
+  bool filtersActive = false,
+}) {
   print('quotabot models  (what you can route to now, 0 usage tokens)\n');
   if (reg.isEmpty) {
     // Distinguish "nothing to route to" from "your filters excluded everything",
@@ -1952,24 +1963,48 @@ void _printModels(List<ModelEntry> reg, {bool filtersActive = false}) {
       if (m.reasoning != null) 'reason',
     ].join(',');
     final capStr = caps.isEmpty ? '' : style.dim('  $caps');
-    final loaded = (e.local && m.loaded) ? style.cyan('  [loaded]') : '';
     final spent = e.available ? '' : style.red('  spent');
+    final provenance = _modelEntryProvenance(e, now);
     // Pad the context cell to a fixed width so the capability column lines up
     // across "1M ctx", "400K ctx", and context-less local models. Only pad when
     // something follows, so a row that ends at the context adds no trailing gap.
     final ctxText =
         m.contextTokens == null ? '' : '${_ctxLabel(m.contextTokens!)} ctx';
-    final trailing = '$capStr$loaded$spent';
+    final trailing = '$capStr$spent';
     final ctx = trailing.isEmpty
         ? (ctxText.isEmpty ? '' : style.dim('  $ctxText'))
         : style.dim('  ${ctxText.padRight(8)}');
     print(
       '  ${m.id.padRight(22)} ${e.provider.padRight(11)} '
-      '$budget$ctx$trailing',
+      '$budget $provenance$ctx$trailing',
     );
   }
   print(style.dim('\n  capability catalog updated $kCatalogUpdated'));
 }
+
+String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
+  final parts = <String>[
+    e.stale ? 'cached' : 'live',
+    _modelSpendClass(e),
+  ];
+  if (_modelHasAccountIdentity(e)) parts.add(e.account);
+  if (e.perMachine) parts.add('this machine');
+  final captured = routeCaptureAgeLabel(e.asOf, decisionAsOf);
+  if (captured.isNotEmpty) parts.add(captured);
+  return style.dim('[${parts.join(', ')}]');
+}
+
+String _modelSpendClass(ModelEntry e) {
+  if (e.local) {
+    final readiness = e.localReadiness;
+    return readiness == null ? 'local' : 'local $readiness';
+  }
+  if (e.source == providerQuotaManualSource) return 'manual';
+  return e.quotaBacked ? 'quota plan' : 'metered plan';
+}
+
+bool _modelHasAccountIdentity(ModelEntry e) =>
+    !e.local && e.account.contains('@') && hasSpecificQuotaAccount(e.account);
 
 /// Prints a routing recommendation: where to send the next request and why,
 /// with the ranked alternatives below it.

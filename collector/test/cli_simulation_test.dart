@@ -113,6 +113,33 @@ void main() {
     expect(out, isNot(contains('claude (simulated)')));
   });
 
+  test('models human output names trust provenance', () async {
+    final result = await runCollectCli(
+      ['models', '--no-color'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[live, quota plan'));
+    expect(out, contains('you@example.com'));
+    expect(out, contains('local loaded'));
+    expect(out, contains('local cold'));
+    expect(out, contains('captured'));
+  });
+
+  test('task-profiled suggest human output names model provenance', () async {
+    final result = await runCollectCli(
+      ['suggest', '--task=hard', '--no-color'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('on grok [live, quota plan, you@example.com'));
+    expect(out, contains('captured'));
+  });
+
   test('future capture label does not present clock skew as fresh', () {
     expect(cli.routeCaptureAgeLabel(1050, 1000), cli.routeFutureCaptureLabel);
     expect(cli.routeCaptureAgeLabel(1000, 1000), 'captured 0s ago');

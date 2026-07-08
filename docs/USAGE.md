@@ -293,10 +293,12 @@ route only when Claude is spent.
 local runtimes, each with the live budget that gates it (headroom, window, reset),
 capability hints (context window, tools, vision, reasoning), and the provider's own
 tier (light/standard/flagship), most routable first. Local-runtime models are read
-live; cloud capability hints come from a refreshable catalog. Local-runtime
-entries carry `local_readiness` in JSON (`loaded` or `cold`), and concrete model
-suggestions prefer loaded local models before installed-but-cold local models
-when both meet the requested profile.
+live; cloud capability hints come from a refreshable catalog. Human `models` and
+task-profiled `suggest` rows label live versus cached reads, spend class, real
+account identity when the provider exposes one, per-machine scope, and capture
+age; JSON keeps stable machine fields such as `local_readiness` (`loaded` or
+`cold`). Concrete model suggestions prefer loaded local models before
+installed-but-cold local models when both meet the requested profile.
 
 Filter to what a task needs with a coarse `--task=simple|standard|hard` profile or
 explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,

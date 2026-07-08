@@ -40,6 +40,12 @@ class ModelEntry {
   /// True when the gating provider's data is cached/stale.
   final bool stale;
 
+  /// Unix epoch seconds when the gating provider snapshot was captured.
+  final int asOf;
+
+  /// True when the gating provider's quota is known to be machine-local state.
+  final bool perMachine;
+
   const ModelEntry({
     required this.model,
     required this.provider,
@@ -52,6 +58,8 @@ class ModelEntry {
     required this.gatingWindow,
     required this.available,
     required this.stale,
+    required this.asOf,
+    required this.perMachine,
   });
 
   String? get localReadiness =>
@@ -333,6 +341,8 @@ List<ModelEntry> buildModelRegistry(
         gatingWindow: q.isLocal ? null : binding?.label,
         available: q.isLocal ? q.ok : a.available,
         stale: q.stale,
+        asOf: q.asOf,
+        perMachine: q.perMachine,
       ));
     }
   }

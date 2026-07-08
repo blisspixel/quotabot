@@ -12,12 +12,14 @@ ProviderQuota _cloud(
   String? source,
   int? resetsAt,
   String account = 'a',
+  bool perMachine = false,
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id,
       account: account,
       asOf: _now,
+      perMachine: perMachine,
       stale: stale,
       source: source,
       windows: [
@@ -57,6 +59,25 @@ void main() {
     expect(e.gatingWindow, 'weekly');
     expect(e.available, isTrue);
     expect(e.model.contextTokens, 200000);
+  });
+
+  test('entries keep capture provenance without changing JSON shape', () {
+    final reg = buildModelRegistry(
+      [_cloud('claude', 20, stale: true, perMachine: true)],
+      _now,
+      catalog: {
+        'claude': [
+          const ModelInfo(id: 'claude-opus', contextTokens: 200000),
+        ],
+      },
+    );
+
+    final e = reg.single;
+    expect(e.stale, isTrue);
+    expect(e.asOf, _now);
+    expect(e.perMachine, isTrue);
+    expect(e.toJson().containsKey('as_of'), isFalse);
+    expect(e.toJson().containsKey('per_machine'), isFalse);
   });
 
   test('Claude catalog exposes Fable 5 with temporary quota backing', () {
