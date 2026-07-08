@@ -16,6 +16,9 @@ const litellmPipeHealthNoData = 'no_data';
 const litellmPipeHealthHealthy = 'healthy';
 const litellmPipeHealthThrottled = 'throttled';
 const litellmPipeHealthDegraded = 'degraded';
+const litellmRecentPipePenaltyMaxAgeSeconds = 15 * 60;
+const litellmThrottlePenaltyPercent = 60.0;
+const litellmDegradedPenaltyPercent = 30.0;
 
 /// The default JSONL file written by the LiteLLM integration. The Python plugin
 /// constrains metrics paths to `~/.quotabot`, so the reader uses the same root
@@ -25,6 +28,8 @@ File defaultLiteLlmMetricsFile() =>
 
 class LiteLlmRouteMetric {
   final int at;
+  final String? provider;
+  final String? account;
   final String? requestedModel;
   final String? servedModel;
   final int promptTokens;
@@ -39,6 +44,8 @@ class LiteLlmRouteMetric {
 
   const LiteLlmRouteMetric({
     required this.at,
+    this.provider,
+    this.account,
     required this.requestedModel,
     required this.servedModel,
     required this.promptTokens,
@@ -67,6 +74,8 @@ class LiteLlmRouteMetric {
   Map<String, dynamic> toJson() => {
         'at': at,
         'event': normalizedEvent,
+        if (provider != null) 'provider': provider,
+        if (account != null) 'account': account,
         if (requestedModel != null) 'requested_model': requestedModel,
         if (servedModel != null) 'served_model': servedModel,
         'spend': normalizedSpend,
@@ -94,6 +103,76 @@ class RoutedModelCount {
       };
 }
 
+class ProviderPipeHealth {
+  final String provider;
+  final String? account;
+  final int totalRequests;
+  final int failedRequests;
+  final int throttledRequests;
+  final int degradedRequests;
+  final int? maxRetryAfterSeconds;
+  final int? retryUntil;
+  final int? lastProblemAt;
+  final int? lastAt;
+
+  const ProviderPipeHealth({
+    required this.provider,
+    this.account,
+    required this.totalRequests,
+    required this.failedRequests,
+    required this.throttledRequests,
+    required this.degradedRequests,
+    required this.maxRetryAfterSeconds,
+    required this.retryUntil,
+    required this.lastProblemAt,
+    required this.lastAt,
+  });
+
+  String get key => liteLlmProviderPipeKey(provider, account);
+
+  String get pipeHealth {
+    if (totalRequests <= 0) return litellmPipeHealthNoData;
+    if (throttledRequests > 0) return litellmPipeHealthThrottled;
+    if (degradedRequests > 0 || failedRequests > 0) {
+      return litellmPipeHealthDegraded;
+    }
+    return litellmPipeHealthHealthy;
+  }
+
+  double get routingPenaltyPercent {
+    if (totalRequests <= 0) return 0;
+    final throttleRate = throttledRequests / totalRequests;
+    final degradedRate = degradedRequests / totalRequests;
+    final floor = throttledRequests > 0
+        ? 20.0
+        : degradedRequests > 0 || failedRequests > 0
+            ? 10.0
+            : 0.0;
+    final retryPenalty = maxRetryAfterSeconds == null
+        ? 0.0
+        : (maxRetryAfterSeconds! / 60.0).clamp(0.0, 20.0).toDouble();
+    final ratePenalty = throttleRate * litellmThrottlePenaltyPercent +
+        degradedRate * litellmDegradedPenaltyPercent;
+    return math.max(floor, ratePenalty + retryPenalty).clamp(0.0, 80.0);
+  }
+
+  Map<String, dynamic> toJson() => {
+        'provider': provider,
+        if (account != null) 'account': account,
+        'total_requests': totalRequests,
+        'failed_requests': failedRequests,
+        'throttled_requests': throttledRequests,
+        'degraded_requests': degradedRequests,
+        'pipe_health': pipeHealth,
+        'routing_penalty_percent':
+            double.parse(routingPenaltyPercent.toStringAsFixed(1)),
+        if (maxRetryAfterSeconds != null)
+          'max_retry_after_seconds': maxRetryAfterSeconds,
+        if (lastProblemAt != null) 'last_problem_at': lastProblemAt,
+        if (lastAt != null) 'last_at': lastAt,
+      };
+}
+
 class RoutedRequestSummary {
   final int totalRequests;
   final int routedRequests;
@@ -114,6 +193,7 @@ class RoutedRequestSummary {
   final int? firstAt;
   final int? lastAt;
   final List<RoutedModelCount> topServedModels;
+  final List<ProviderPipeHealth> providerPipeHealth;
 
   const RoutedRequestSummary({
     required this.totalRequests,
@@ -135,6 +215,7 @@ class RoutedRequestSummary {
     required this.firstAt,
     required this.lastAt,
     required this.topServedModels,
+    this.providerPipeHealth = const [],
   });
 
   int get totalTokens => promptTokens + completionTokens;
@@ -175,7 +256,31 @@ class RoutedRequestSummary {
         if (lastAt != null) 'last_at': lastAt,
         'top_served_models':
             topServedModels.map((entry) => entry.toJson()).toList(),
+        'provider_pipe_health':
+            providerPipeHealth.map((entry) => entry.toJson()).toList(),
       };
+
+  Map<String, double> pipePenaltyByProvider({
+    required int now,
+    int maxAgeSeconds = litellmRecentPipePenaltyMaxAgeSeconds,
+  }) {
+    final out = <String, double>{};
+    for (final health in providerPipeHealth) {
+      final penalty = health.routingPenaltyPercent;
+      if (penalty <= 0) continue;
+      final last = health.lastProblemAt;
+      if (last == null) continue;
+      final activeRetry = health.retryUntil != null && health.retryUntil! > now;
+      final age = math.max(0, now - last);
+      if (!activeRetry && age > maxAgeSeconds) continue;
+      if (health.account == null || health.account!.trim().isEmpty) {
+        _putMax(out, health.provider, penalty);
+      } else {
+        _putMax(out, health.key, penalty);
+      }
+    }
+    return out;
+  }
 }
 
 const emptyRoutedRequestSummary = RoutedRequestSummary(
@@ -191,6 +296,7 @@ const emptyRoutedRequestSummary = RoutedRequestSummary(
   firstAt: null,
   lastAt: null,
   topServedModels: [],
+  providerPipeHealth: [],
 );
 
 /// Reads the local LiteLLM routed-request JSONL file and summarizes recent
@@ -201,12 +307,16 @@ RoutedRequestSummary loadRoutedRequestSummary({
   int maxRecords = 5000,
   int maxBytes = 1024 * 1024,
 }) {
-  final metrics = loadLiteLlmRouteMetrics(
-    file: file,
-    maxRecords: maxRecords,
-    maxBytes: maxBytes,
-  );
-  return summarizeRoutedRequests(metrics);
+  try {
+    final metrics = loadLiteLlmRouteMetrics(
+      file: file,
+      maxRecords: maxRecords,
+      maxBytes: maxBytes,
+    );
+    return summarizeRoutedRequests(metrics);
+  } on FileSystemException {
+    return emptyRoutedRequestSummary;
+  }
 }
 
 List<LiteLlmRouteMetric> loadLiteLlmRouteMetrics({
@@ -241,6 +351,8 @@ LiteLlmRouteMetric? parseLiteLlmRouteMetric(String line) {
     }
     return LiteLlmRouteMetric(
       at: at,
+      provider: _string(decoded['provider']),
+      account: _string(decoded['account']),
       requestedModel: _string(decoded['requested_model']),
       servedModel: served,
       spend: normalizeLiteLlmSpend(decoded['spend']),
@@ -282,6 +394,7 @@ RoutedRequestSummary summarizeRoutedRequests(
   int? first;
   int? last;
   final byModel = <String, int>{};
+  final byProvider = <String, _ProviderPipeHealthAccumulator>{};
   for (final metric in metrics) {
     total++;
     if (metric.wasRouted) routed++;
@@ -328,6 +441,15 @@ RoutedRequestSummary summarizeRoutedRequests(
     if (!metric.failed && served != null) {
       byModel[served] = (byModel[served] ?? 0) + 1;
     }
+    final provider = metric.provider;
+    if (provider != null) {
+      final key = liteLlmProviderPipeKey(provider, metric.account);
+      final acc = byProvider.putIfAbsent(
+        key,
+        () => _ProviderPipeHealthAccumulator(provider, metric.account),
+      );
+      acc.add(metric);
+    }
   }
   final top = byModel.entries.toList()
     ..sort((a, b) {
@@ -358,7 +480,17 @@ RoutedRequestSummary summarizeRoutedRequests(
       for (final entry in top.take(topModelLimit))
         RoutedModelCount(entry.key, entry.value),
     ],
+    providerPipeHealth: _providerPipeHealth(byProvider),
   );
+}
+
+String liteLlmProviderPipeKey(String provider, String? account) {
+  final normalizedProvider = provider.trim().toLowerCase();
+  final normalizedAccount = account?.trim();
+  if (normalizedAccount == null || normalizedAccount.isEmpty) {
+    return normalizedProvider;
+  }
+  return '$normalizedProvider\u0000$normalizedAccount';
 }
 
 String normalizeLiteLlmSpend(Object? value) {
@@ -424,6 +556,75 @@ int? _nonNegativeInt(Object? value) {
     return value.toInt();
   }
   return null;
+}
+
+void _putMax(Map<String, double> out, String key, double value) {
+  final existing = out[key];
+  if (existing == null || value > existing) out[key] = value;
+}
+
+List<ProviderPipeHealth> _providerPipeHealth(
+  Map<String, _ProviderPipeHealthAccumulator> byProvider,
+) {
+  final out = byProvider.values.map((acc) => acc.toPipeHealth()).toList()
+    ..sort((a, b) {
+      final provider = a.provider.compareTo(b.provider);
+      if (provider != 0) return provider;
+      return (a.account ?? '').compareTo(b.account ?? '');
+    });
+  return out;
+}
+
+class _ProviderPipeHealthAccumulator {
+  final String provider;
+  final String? account;
+  var totalRequests = 0;
+  var failedRequests = 0;
+  var throttledRequests = 0;
+  var degradedRequests = 0;
+  int? maxRetryAfterSeconds;
+  int? retryUntil;
+  int? lastProblemAt;
+  int? lastAt;
+
+  _ProviderPipeHealthAccumulator(this.provider, this.account);
+
+  void add(LiteLlmRouteMetric metric) {
+    totalRequests++;
+    if (metric.failed) {
+      failedRequests++;
+      lastProblemAt = lastProblemAt == null
+          ? metric.at
+          : math.max(lastProblemAt!, metric.at);
+      if (metric.throttled) {
+        throttledRequests++;
+      } else {
+        degradedRequests++;
+      }
+    }
+    if (metric.retryAfterSeconds != null) {
+      final retry = metric.retryAfterSeconds!;
+      maxRetryAfterSeconds = maxRetryAfterSeconds == null
+          ? retry
+          : math.max(maxRetryAfterSeconds!, retry).toInt();
+      final until = metric.at + retry;
+      retryUntil = retryUntil == null ? until : math.max(retryUntil!, until);
+    }
+    lastAt = lastAt == null ? metric.at : math.max(lastAt!, metric.at);
+  }
+
+  ProviderPipeHealth toPipeHealth() => ProviderPipeHealth(
+        provider: provider,
+        account: account,
+        totalRequests: totalRequests,
+        failedRequests: failedRequests,
+        throttledRequests: throttledRequests,
+        degradedRequests: degradedRequests,
+        maxRetryAfterSeconds: maxRetryAfterSeconds,
+        retryUntil: retryUntil,
+        lastProblemAt: lastProblemAt,
+        lastAt: lastAt,
+      );
 }
 
 double? _nonNegativeDouble(Object? value) {

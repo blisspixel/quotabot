@@ -163,6 +163,8 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
 _SPEND_METADATA_KEY = "quotabot_spend"
+_PROVIDER_METADATA_KEY = "quotabot_provider"
+_ACCOUNT_METADATA_KEY = "quotabot_account"
 
 
 class UnsafeRouteError(RuntimeError):
@@ -174,29 +176,45 @@ class Candidate:
 
     ``deployment`` is a ``model_name`` defined in the LiteLLM proxy config.
     ``provider`` is the quotabot provider id whose headroom gates this candidate
-    (codex, claude, grok, antigravity, ...). ``local`` marks an always-available
-    local runtime that is never gated by headroom. ``spend`` is a safety label:
-    ``quota_plan`` means an included quota plan; ``overages_disabled`` is the
-    separate proof bit that lets that plan route. ``paid_api`` means
-    request-metered API spend that must be explicitly enabled.
+    (codex, claude, grok, antigravity, ...). ``account`` optionally narrows that
+    gate to one quotabot account for multi-account setups. ``local`` marks an
+    always-available local runtime that is never gated by headroom. ``spend`` is
+    a safety label: ``quota_plan`` means an included quota plan;
+    ``overages_disabled`` is the separate proof bit that lets that plan route.
+    ``paid_api`` means request-metered API spend that must be explicitly enabled.
     """
 
-    __slots__ = ("deployment", "provider", "local", "spend", "overages_disabled")
+    __slots__ = (
+        "deployment",
+        "provider",
+        "account",
+        "local",
+        "spend",
+        "overages_disabled",
+    )
 
     def __init__(
         self,
         deployment: str,
         provider: Optional[str] = None,
+        account: Optional[str] = None,
         local: bool = False,
         spend: Optional[str] = None,
         overages_disabled: bool = False,
     ) -> None:
         self.deployment = deployment
-        self.provider = provider
+        self.provider = _optional_text(provider)
+        self.account = _optional_text(account)
         normalized_spend = "local" if local else _normalize_spend(spend)
         self.local = local or normalized_spend == "local"
         self.spend = "local" if self.local else normalized_spend
         self.overages_disabled = overages_disabled is True if not self.local else True
+
+
+def _optional_text(value: Any) -> Optional[str]:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _normalize_spend(value: Optional[str]) -> str:
@@ -301,6 +319,7 @@ class Policy:
                     Candidate(
                         deployment=c["deployment"],
                         provider=c.get("provider"),
+                        account=c.get("account"),
                         local=_bool_value(c.get("local"), False),
                         spend=c.get("spend"),
                         overages_disabled=_overages_disabled_value(
@@ -367,8 +386,8 @@ class QuotabotRouter(CustomLogger):
         except Exception:
             # A broken policy must not take the proxy down; route nothing.
             self.policy = Policy()
-        # Cached availability map: provider id -> candidate dict from /suggest.
-        self._cache: dict[str, dict[str, Any]] = {}
+        # Cached ranked candidate dicts from /suggest.
+        self._cache: list[dict[str, Any]] = []
         self._cache_at: float = 0.0
         self._lock = asyncio.Lock()
 
@@ -404,7 +423,7 @@ class QuotabotRouter(CustomLogger):
         # still must satisfy the spend policy.
         if rule and rule.pin:
             if self._spend_allowed(rule.pin_spend, rule.pin_overages_disabled):
-                self._mark_spend(data, rule.pin_spend)
+                self._mark_route(data, spend=rule.pin_spend)
                 return rule.pin
             return self._unsafe_passthrough(requested)
 
@@ -427,31 +446,69 @@ class QuotabotRouter(CustomLogger):
         if avail is None:
             for c in allowed:
                 if c.local:
-                    self._mark_spend(data, c.spend)
+                    self._mark_route(data, candidate=c)
                     return c.deployment
             return self._unsafe_passthrough(requested)
 
-        # First pass: honor the comfort threshold. Second pass: accept any
-        # provider with a sliver left. Preference order is the policy order.
-        # A local candidate wins exactly where the policy places it, so a
-        # local-first logical model stays local while frontier models can keep
-        # local candidates last as the fallback.
-        for floor in (self.policy.comfort_threshold, 0.5):
-            for c in allowed:
-                if c.local:
-                    self._mark_spend(data, c.spend)
-                    return c.deployment
-                info = avail.get(c.provider or "")
-                if info and info.get("available") and _headroom(info) >= floor:
-                    self._mark_spend(data, c.spend)
-                    return c.deployment
+        ranked = _ranked_infos(avail)
+        local = next((c for c in allowed if c.local), None)
+        if allowed[0].local:
+            self._mark_route(data, candidate=allowed[0])
+            return allowed[0].deployment
+
+        remote = _best_ranked_candidate(
+            allowed,
+            ranked,
+            self.policy.comfort_threshold,
+        )
+        if remote:
+            candidate, info = remote
+            self._mark_route(
+                data,
+                candidate=candidate,
+                info=_metric_info_for_candidate(info, ranked, candidate),
+            )
+            return candidate.deployment
+        if local:
+            self._mark_route(data, candidate=local)
+            return local.deployment
+
+        remote = _best_ranked_candidate(allowed, ranked, 0.5)
+        if remote:
+            candidate, info = remote
+            self._mark_route(
+                data,
+                candidate=candidate,
+                info=_metric_info_for_candidate(info, ranked, candidate),
+            )
+            return candidate.deployment
         return self._unsafe_passthrough(requested)
 
     @staticmethod
-    def _mark_spend(data: dict, spend: Optional[str]) -> None:
-        if not spend:
-            return
-        data.setdefault("metadata", {})[_SPEND_METADATA_KEY] = _normalize_spend(spend)
+    def _mark_route(
+        data: dict,
+        candidate: Optional[Candidate] = None,
+        info: Optional[dict[str, Any]] = None,
+        spend: Optional[str] = None,
+    ) -> None:
+        meta = data.setdefault("metadata", {})
+        if spend is not None:
+            route_spend = spend
+        elif candidate:
+            route_spend = candidate.spend
+        else:
+            route_spend = None
+        if route_spend:
+            meta[_SPEND_METADATA_KEY] = _normalize_spend(route_spend)
+        provider = _string_field(info, "provider") or (
+            candidate.provider if candidate else None
+        )
+        if provider:
+            meta[_PROVIDER_METADATA_KEY] = provider
+        account = candidate.account if candidate else None
+        account = account or _string_field(info, "account")
+        if account:
+            meta[_ACCOUNT_METADATA_KEY] = account
 
     def _candidate_allowed(self, candidate: Candidate) -> bool:
         return candidate.local or self._spend_allowed(
@@ -493,9 +550,9 @@ class QuotabotRouter(CustomLogger):
 
     # -- quotabot snapshot --------------------------------------------------
 
-    async def _availability(self) -> Optional[dict[str, dict[str, Any]]]:
-        """Returns ``{provider_id: candidate_info}`` from quotabot's /suggest,
-        cached for ``snapshot_ttl_seconds``. None when quotabot is unreachable."""
+    async def _availability(self) -> Optional[list[dict[str, Any]]]:
+        """Returns ranked candidate info from quotabot's /suggest, cached for
+        ``snapshot_ttl_seconds``. None when quotabot is unreachable."""
         async with self._lock:
             if self._cache and (time.monotonic() - self._cache_at) < self.policy.snapshot_ttl_seconds:
                 return self._cache
@@ -503,7 +560,9 @@ class QuotabotRouter(CustomLogger):
             if payload is None:
                 return None
             ranked = payload.get("ranked") or []
-            self._cache = {c["provider"]: c for c in ranked if "provider" in c}
+            self._cache = [
+                c for c in ranked if isinstance(c, dict) and _string_field(c, "provider")
+            ]
             self._cache_at = time.monotonic()
             return self._cache
 
@@ -530,6 +589,8 @@ class QuotabotRouter(CustomLogger):
             record = {
                 "at": int(time.time()),
                 "event": "success",
+                "provider": meta.get(_PROVIDER_METADATA_KEY),
+                "account": meta.get(_ACCOUNT_METADATA_KEY),
                 "requested_model": meta.get("quotabot_original_model"),
                 "served_model": kwargs.get("model"),
                 "spend": meta.get(_SPEND_METADATA_KEY),
@@ -554,6 +615,8 @@ class QuotabotRouter(CustomLogger):
             record = {
                 "at": int(time.time()),
                 "event": "failure",
+                "provider": meta.get(_PROVIDER_METADATA_KEY),
+                "account": meta.get(_ACCOUNT_METADATA_KEY),
                 "requested_model": meta.get("quotabot_original_model"),
                 "served_model": kwargs.get("model"),
                 "spend": meta.get(_SPEND_METADATA_KEY),
@@ -593,9 +656,82 @@ class QuotabotRouter(CustomLogger):
         _restrict_owner_only_file(path)
 
 
-def _headroom(info: dict[str, Any]) -> float:
+def _ranked_infos(value: Any) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [entry for entry in value if isinstance(entry, dict)]
+    if isinstance(value, dict):
+        ranked = value.get("ranked")
+        if isinstance(ranked, list):
+            return [entry for entry in ranked if isinstance(entry, dict)]
+        return [entry for entry in value.values() if isinstance(entry, dict)]
+    return []
+
+
+def _best_ranked_candidate(
+    candidates: list[Candidate],
+    ranked: list[dict[str, Any]],
+    floor: float,
+) -> Optional[tuple[Candidate, dict[str, Any]]]:
+    for info in ranked:
+        if not info.get("available"):
+            continue
+        if _effective_headroom(info) < floor:
+            continue
+        for candidate in candidates:
+            if _candidate_matches_info(candidate, info):
+                return candidate, info
+    return None
+
+
+def _candidate_matches_info(candidate: Candidate, info: dict[str, Any]) -> bool:
+    if candidate.local:
+        return False
+    provider = _string_field(info, "provider")
+    if not candidate.provider or candidate.provider != provider:
+        return False
+    account = _string_field(info, "account")
+    return candidate.account is None or candidate.account == account
+
+
+def _metric_info_for_candidate(
+    info: dict[str, Any],
+    ranked: list[dict[str, Any]],
+    candidate: Candidate,
+) -> dict[str, Any]:
+    out = dict(info)
+    if candidate.account:
+        out["account"] = candidate.account
+        return out
+    accounts = set()
+    provider = _string_field(info, "provider")
+    for entry in ranked:
+        if provider != _string_field(entry, "provider"):
+            continue
+        account = _string_field(entry, "account")
+        if account:
+            accounts.add(account)
+    if len(accounts) != 1:
+        out.pop("account", None)
+    return out
+
+
+def _effective_headroom(info: dict[str, Any]) -> float:
+    value = info.get("effective_headroom_percent")
+    if isinstance(value, (int, float)):
+        return float(value)
     value = info.get("headroom_percent")
     return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _string_field(source: Optional[dict[str, Any]], key: str) -> Optional[str]:
+    if not source:
+        return None
+    value = source.get(key)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def _usage_counts(*sources: Any) -> tuple[Optional[int], Optional[int]]:

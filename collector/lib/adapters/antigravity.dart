@@ -583,7 +583,7 @@ class AntigravityAdapter {
   Future<String?> _resolveGrant(String account, bool allowDefaultGrant) async {
     try {
       if (_tokenResolver != null) {
-        return _tokenResolver(account, allowDefaultGrant);
+        return await _tokenResolver(account, allowDefaultGrant);
       }
       final auth = GoogleAuth();
       return await auth.freshAccessToken(account: account) ??
@@ -600,12 +600,12 @@ class AntigravityAdapter {
   }) async {
     try {
       if (_emailResolver != null) {
-        return _emailResolver(access, usingCli, usingQuotabot);
+        return await _emailResolver(access, usingCli, usingQuotabot);
       }
       if (usingCli && !usingQuotabot) {
-        return _getCliEmail(access);
+        return await _getCliEmail(access);
       }
-      return GoogleAuth().emailForAccessToken(access);
+      return await GoogleAuth().emailForAccessToken(access);
     } catch (_) {
       return null;
     }

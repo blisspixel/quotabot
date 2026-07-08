@@ -158,6 +158,12 @@ class RouteCandidate {
   /// away from the same currently attractive account.
   final double leaseDiscount;
 
+  /// Recent provider/account pipe-health discount applied to
+  /// [effectiveHeadroom], derived from local LiteLLM failure/throttle metadata.
+  /// It is additive and fail-soft: raw [headroom] and [available] still reflect
+  /// quota truth, while ranking accounts for likely request success.
+  final double pipeDiscount;
+
   /// Standard error of [burnPerHour], when estimable. Null for local runtimes or
   /// when there were too few history points to estimate it.
   final double? burnSe;
@@ -222,6 +228,7 @@ class RouteCandidate {
     required this.stale,
     required this.available,
     this.leaseDiscount = 0,
+    this.pipeDiscount = 0,
     this.burnPerHour,
     this.burnSe,
     this.strandProbability,
@@ -242,6 +249,7 @@ class RouteCandidate {
         'headroom_percent': headroom,
         'effective_headroom_percent': effectiveHeadroom,
         if (leaseDiscount > 0) 'lease_discount_percent': leaseDiscount,
+        if (pipeDiscount > 0) 'pipe_discount_percent': pipeDiscount,
         if (burnPerHour != null) 'burn_percent_per_hour': burnPerHour,
         if (burnSe != null) 'burn_se_percent_per_hour': burnSe,
         if (strandProbability != null) 'strand_probability': strandProbability,
@@ -424,15 +432,21 @@ RouteFallback _fallbackFor(
 
 /// A short ", ~N% after burn" note when recent burn materially discounts a
 /// candidate's headroom (by at least one point), else an empty string.
-String _burnNote(RouteCandidate c) {
+String _effectiveHeadroomNote(RouteCandidate c) {
   final h = c.headroom, e = c.effectiveHeadroom;
   if (h == null || e == null) return '';
-  if ((c.burnPerHour == null || c.burnPerHour! <= 0) && c.leaseDiscount <= 0) {
+  if ((c.burnPerHour == null || c.burnPerHour! <= 0) &&
+      c.leaseDiscount <= 0 &&
+      c.pipeDiscount <= 0) {
     return '';
   }
   if (h - e < 1) return '';
-  final cause = c.leaseDiscount > 0 ? 'burn/leases' : 'burn';
-  return ', ~${e.round()}% after $cause';
+  final causes = <String>[
+    if (c.burnPerHour != null && c.burnPerHour! > 0) 'burn',
+    if (c.leaseDiscount > 0) 'leases',
+    if (c.pipeDiscount > 0) 'pipe',
+  ];
+  return ', ~${e.round()}% after ${causes.join('/')}';
 }
 
 /// Floor burn, in percent of quota per hour, used to convert headroom into a
@@ -762,6 +776,7 @@ RouteSuggestion suggestRoute(
   int wasteMaxHours = kDefaultExpiringQuotaMaxHours,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
+  Map<String, double> pipePenaltyByProvider = const {},
 }) {
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
@@ -784,10 +799,13 @@ RouteSuggestion suggestRoute(
     final leaseDiscount = q.isLocal
         ? 0.0
         : leaseDiscountFor(q.provider, q.account).clamp(0.0, 100.0).toDouble();
+    final pipeDiscount =
+        q.isLocal ? 0.0 : _pipePenaltyFor(q, pipePenaltyByProvider);
     final effective = headroom == null
         ? null
         : (riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ) -
-                leaseDiscount)
+                leaseDiscount -
+                pipeDiscount)
             .clamp(0.0, 100.0)
             .toDouble();
     final strand = headroom == null
@@ -850,6 +868,7 @@ RouteSuggestion suggestRoute(
       stale: q.stale,
       available: q.isLocal || a.available,
       leaseDiscount: leaseDiscount,
+      pipeDiscount: pipeDiscount,
     );
   }
 
@@ -932,7 +951,7 @@ RouteSuggestion suggestRoute(
   if (comfy.isNotEmpty) {
     final best = comfy.first;
     final note = best.stale ? ' (cached)' : '';
-    final burnNote = _burnNote(best);
+    final burnNote = _effectiveHeadroomNote(best);
     return result(
       best,
       'Use ${best.provider}$note - best risk-adjusted runway (${best.headroom!.round()}% free$burnNote).',
@@ -986,6 +1005,17 @@ RouteSuggestion suggestRoute(
   }
 
   return result(null, 'Everything is spent and no reset time is known.');
+}
+
+double _pipePenaltyFor(ProviderQuota q, Map<String, double> penalties) {
+  double normalize(double? value) {
+    if (value == null || !value.isFinite) return 0;
+    return value.clamp(0.0, 100.0).toDouble();
+  }
+
+  final accountScoped = normalize(penalties[quotaIdentityKeyFor(q)]);
+  if (accountScoped > 0) return accountScoped;
+  return normalize(penalties[q.provider]);
 }
 
 double? _projectedWastePercent(

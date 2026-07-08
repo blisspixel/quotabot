@@ -103,6 +103,159 @@ class RouterTests(unittest.TestCase):
         chosen = asyncio.run(router._route("cheap-bulk", {}, None))
         self.assertEqual(chosen, "ollama-qwen")
 
+    def test_quota_candidate_marks_provider_account_for_metrics(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-sonnet",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ]
+            }
+        )
+
+        async def availability():
+            return {
+                "claude": {
+                    "provider": "claude",
+                    "account": "work@example.com",
+                    "available": True,
+                    "headroom_percent": 90,
+                }
+            }
+
+        data = {}
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", data, None))
+        self.assertEqual(chosen, "claude-sonnet")
+        self.assertEqual(data["metadata"]["quotabot_spend"], "quota_plan")
+        self.assertEqual(data["metadata"]["quotabot_provider"], "claude")
+        self.assertEqual(data["metadata"]["quotabot_account"], "work@example.com")
+
+    def test_quota_candidates_follow_quotabot_ranking(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-sonnet",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    ),
+                    Candidate(
+                        deployment="codex-high",
+                        provider="codex",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    ),
+                ]
+            }
+        )
+
+        async def availability():
+            return [
+                {
+                    "provider": "codex",
+                    "available": True,
+                    "headroom_percent": 60,
+                    "effective_headroom_percent": 60,
+                },
+                {
+                    "provider": "claude",
+                    "available": True,
+                    "headroom_percent": 90,
+                    "effective_headroom_percent": 10,
+                    "pipe_discount_percent": 80,
+                },
+            ]
+
+        data = {}
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", data, None))
+        self.assertEqual(chosen, "codex-high")
+        self.assertEqual(data["metadata"]["quotabot_provider"], "codex")
+
+    def test_ambiguous_provider_accounts_are_not_guessed_for_metrics(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-sonnet",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ]
+            }
+        )
+
+        async def availability():
+            return [
+                {
+                    "provider": "claude",
+                    "account": "work@example.com",
+                    "available": True,
+                    "effective_headroom_percent": 80,
+                },
+                {
+                    "provider": "claude",
+                    "account": "home@example.com",
+                    "available": True,
+                    "effective_headroom_percent": 70,
+                },
+            ]
+
+        data = {}
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", data, None))
+        self.assertEqual(chosen, "claude-sonnet")
+        self.assertEqual(data["metadata"]["quotabot_provider"], "claude")
+        self.assertNotIn("quotabot_account", data["metadata"])
+
+    def test_candidate_account_matches_ranked_account(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-home",
+                        provider="claude",
+                        account="home@example.com",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ]
+            }
+        )
+
+        async def availability():
+            return [
+                {
+                    "provider": "claude",
+                    "account": "work@example.com",
+                    "available": True,
+                    "effective_headroom_percent": 90,
+                },
+                {
+                    "provider": "claude",
+                    "account": "home@example.com",
+                    "available": True,
+                    "effective_headroom_percent": 70,
+                },
+            ]
+
+        data = {}
+        router._availability = availability  # type: ignore[method-assign]
+        chosen = asyncio.run(router._route("frontier", data, None))
+        self.assertEqual(chosen, "claude-home")
+        self.assertEqual(data["metadata"]["quotabot_account"], "home@example.com")
+
     def test_paid_api_candidates_are_skipped_by_default(self):
         router = QuotabotRouter()
         router.policy = Policy(
@@ -433,6 +586,7 @@ models:
         spend: paid_api
       - deployment: claude-subscription
         provider: claude
+        account: work@example.com
         spend: quota_plan
         overages: disabled
       - deployment: misconfigured-subscription
@@ -455,6 +609,7 @@ agents:
         self.assertFalse(policy.block_unsafe_passthrough)
         self.assertEqual(policy.models["frontier"][0].spend, "paid_api")
         self.assertEqual(policy.models["frontier"][1].spend, "quota_plan")
+        self.assertEqual(policy.models["frontier"][1].account, "work@example.com")
         self.assertTrue(policy.models["frontier"][1].overages_disabled)
         self.assertFalse(policy.models["frontier"][2].overages_disabled)
         self.assertEqual(policy.agents["architect"].pin_spend, "quota_plan")
@@ -562,6 +717,8 @@ models:
                             "metadata": {
                                 "quotabot_original_model": "frontier",
                                 "quotabot_spend": "quota_plan",
+                                "quotabot_provider": "claude",
+                                "quotabot_account": "work@example.com",
                             }
                         },
                     },
@@ -574,6 +731,8 @@ models:
             record = json.loads(path.read_text(encoding="utf-8").strip())
 
         self.assertEqual(record["event"], "failure")
+        self.assertEqual(record["provider"], "claude")
+        self.assertEqual(record["account"], "work@example.com")
         self.assertEqual(record["requested_model"], "frontier")
         self.assertEqual(record["served_model"], "claude-sonnet")
         self.assertEqual(record["spend"], "quota_plan")

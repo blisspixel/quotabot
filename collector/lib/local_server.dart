@@ -4,17 +4,21 @@ import 'dart:io';
 
 import 'analysis.dart';
 import 'cache.dart';
+import 'litellm_metrics.dart';
 import 'mcp_http.dart' show isLoopbackMcpHost;
 import 'models.dart';
 import 'provider_filters.dart';
 import 'util.dart';
 
 typedef LocalQuotaSnapshotProvider = Future<List<ProviderQuota>> Function();
+typedef LocalRoutedRequestSummaryProvider = RoutedRequestSummary Function();
 
 Future<HttpServer> startLocalQuotabotServer({
   int port = 8721,
   InternetAddress? address,
   required LocalQuotaSnapshotProvider snapshotProvider,
+  LocalRoutedRequestSummaryProvider routeSummaryProvider =
+      loadRoutedRequestSummary,
   int Function() now = nowEpoch,
   void Function(String message)? log,
 }) async {
@@ -164,6 +168,10 @@ Future<HttpServer> startLocalQuotabotServer({
                     queryFlag(request.uri, 'local_first', 'local-first'),
                 costPenaltyByProvider: costPenalties.penalties,
                 costWeight: costWeight.weight,
+                pipePenaltyByProvider:
+                    routeSummaryProvider().pipePenaltyByProvider(
+                  now: current,
+                ),
               ).toJson(),
             );
           }

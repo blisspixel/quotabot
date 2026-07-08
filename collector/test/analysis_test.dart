@@ -472,6 +472,53 @@ void main() {
       expect(s.usingLocalFallback, isTrue);
     });
 
+    test('pipe-health discount can route around a throttled provider', () {
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'w', usedPercent: 10)]), // 90 free
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 40)]), // 60 free
+        ],
+        _now,
+        pipePenaltyByProvider: const {'codex': 60},
+      );
+
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(s.recommended?.provider, 'claude');
+      expect(codex.effectiveHeadroom, 30);
+      expect(codex.pipeDiscount, 60);
+      expect(codex.toJson()['pipe_discount_percent'], 60);
+      expect(s.reason, isNot(contains('codex')));
+    });
+
+    test('pipe-health discount uses account scope before provider scope', () {
+      ProviderQuota account(String name) => ProviderQuota(
+            provider: 'claude',
+            displayName: 'Claude',
+            account: name,
+            asOf: _now,
+            windows: [
+              QuotaWindow(label: 'weekly', usedPercent: 10),
+            ],
+          );
+
+      final s = suggestRoute(
+        [account('work'), account('home')],
+        _now,
+        pipePenaltyByProvider: const {
+          'claude': 10,
+          'claude\u0000work': 70,
+        },
+      );
+
+      final work = s.ranked.firstWhere((c) => c.account == 'work');
+      final home = s.ranked.firstWhere((c) => c.account == 'home');
+      expect(s.recommended?.account, 'home');
+      expect(work.pipeDiscount, 70);
+      expect(home.pipeDiscount, 10);
+      expect(work.effectiveHeadroom, 20);
+      expect(home.effectiveHeadroom, 80);
+    });
+
     test('effective headroom never goes negative', () {
       final s = suggestRoute(
         [

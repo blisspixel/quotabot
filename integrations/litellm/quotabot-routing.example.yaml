@@ -41,6 +41,7 @@ models:
     candidates:
       - deployment: claude-sonnet   # API-key deployments are skipped by default
         provider: claude
+        # account: work@example.com # Optional: match one quotabot account.
         spend: paid_api
       - deployment: codex-gpt
         provider: codex

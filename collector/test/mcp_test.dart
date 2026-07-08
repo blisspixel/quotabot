@@ -157,6 +157,23 @@ void main() {
       expect(r['using_local_fallback'], isTrue);
     });
 
+    test('suggestResponse applies pipe-health discounts', () {
+      final r = suggestResponse(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 10)]),
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 40)]),
+        ],
+        _now,
+        pipePenaltyByProvider: const {'claude': 60},
+      );
+
+      expect((r['recommended'] as Map)['provider'], 'codex');
+      final claude = (r['ranked'] as List<Object?>)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((entry) => entry['provider'] == 'claude');
+      expect(claude['pipe_discount_percent'], 60);
+    });
+
     test('availabilityResponse answers for a known provider', () {
       final r = availabilityResponse(_fixture(), _now, 'CLAUDE', null);
       expect(r['provider'], 'claude');

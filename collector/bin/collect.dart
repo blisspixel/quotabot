@@ -311,12 +311,20 @@ RouteSuggestion _suggestFor(
       preferLocal: preferLocal,
       costPenaltyByProvider: costPenaltyByProvider,
       costWeight: costWeight,
+      pipePenaltyByProvider: _pipePenaltyFor(results, now),
     );
 
 Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
   if (Platform.environment['QUOTABOT_DEMO'] == '1') return demo.demoBurnStats();
   if (_usingSimulation) return const <String, BurnStat>{};
   return recentBurnStatsByQuota(results, now);
+}
+
+Map<String, double> _pipePenaltyFor(List<ProviderQuota> results, int now) {
+  if (Platform.environment['QUOTABOT_DEMO'] == '1' || _usingSimulation) {
+    return const <String, double>{};
+  }
+  return loadRoutedRequestSummary().pipePenaltyByProvider(now: now);
 }
 
 List<HeadroomBucket> _historyBuckets(

@@ -24,6 +24,7 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'alerts.dart';
 import 'analysis.dart';
 import 'leases.dart';
+import 'litellm_metrics.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'profiles.dart';
@@ -97,6 +98,7 @@ Map<String, dynamic> suggestResponse(
   bool preferLocal = false,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
+  Map<String, double> pipePenaltyByProvider = const {},
 }) {
   final response = suggestRoute(
     providers,
@@ -107,6 +109,7 @@ Map<String, dynamic> suggestResponse(
     preferLocal: preferLocal,
     costPenaltyByProvider: costPenaltyByProvider,
     costWeight: costWeight,
+    pipePenaltyByProvider: pipePenaltyByProvider,
   ).toJson();
   response['active_leases'] = leaseDiscounts(activeLeases)
       .map((discount) => discount.toJson())
@@ -157,6 +160,7 @@ Map<String, dynamic> decideNowResponse(
   bool preferLocal = false,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
+  Map<String, double> pipePenaltyByProvider = const {},
 }) {
   final age = cached.asOf == null
       ? null
@@ -174,6 +178,7 @@ Map<String, dynamic> decideNowResponse(
     preferLocal: preferLocal,
     costPenaltyByProvider: costPenaltyByProvider,
     costWeight: costWeight,
+    pipePenaltyByProvider: pipePenaltyByProvider,
   ).toJson();
   return {
     'schema': 'quotabot.decision.v1',
@@ -411,6 +416,10 @@ final _candidateSchema = JsonSchema.object(
     'lease_discount_percent': JsonSchema.number(
       description:
           'Temporary active lease discount applied to effective headroom.',
+    ),
+    'pipe_discount_percent': JsonSchema.number(
+      description:
+          'Recent local LiteLLM pipe-health discount applied to effective headroom.',
     ),
     'burn_percent_per_hour': JsonSchema.number(),
     'burn_se_percent_per_hour': JsonSchema.number(
@@ -1093,7 +1102,13 @@ class QuotaResourceSubscriptionHub {
         await notifyUpdated(quotasCurrentResourceUri);
       }
       final burnStats = burnByProvider(data, n);
-      final suggestion = suggestRoute(data, n, burnStatsByProvider: burnStats);
+      final suggestion = suggestRoute(
+        data,
+        n,
+        burnStatsByProvider: burnStats,
+        pipePenaltyByProvider:
+            loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
+      );
       final alerts = computeAlerts(
         snapshot: data,
         suggestion: suggestion,
@@ -1194,6 +1209,7 @@ RouteCandidate? _explicitReserveTarget(
   Map<String, dynamic> args,
   List<RouteLease> activeLeases,
   Map<String, BurnStat> burnStatsByProvider,
+  Map<String, double> pipePenaltyByProvider,
 ) {
   final requestedProvider = normalizeLeaseText(args['provider'])?.toLowerCase();
   if (requestedProvider == null) return null;
@@ -1210,6 +1226,7 @@ RouteCandidate? _explicitReserveTarget(
     burnStatsByProvider: burnStatsByProvider,
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(activeLeases, provider, account),
+    pipePenaltyByProvider: pipePenaltyByProvider,
   ).ranked;
   return ranked.isEmpty ? null : ranked.first;
 }
@@ -1375,6 +1392,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             preferLocal: args['local_first'] == true,
             costPenaltyByProvider: costPolicy.penalties,
             costWeight: costPolicy.weight,
+            pipePenaltyByProvider:
+                loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
           ),
           profiled,
         ),
@@ -1466,6 +1485,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             preferLocal: args['local_first'] == true,
             costPenaltyByProvider: costPolicy.penalties,
             costWeight: costPolicy.weight,
+            pipePenaltyByProvider:
+                loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
           ),
           profiled,
         ),
@@ -1532,6 +1553,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
 
       final results = profiled.providers;
       final burnStats = burnByProvider(results, n);
+      final pipePenalties =
+          loadRoutedRequestSummary().pipePenaltyByProvider(now: n);
       final explicit = normalizeLeaseText(args['provider']) != null;
       final idempotencyKey = normalizeLeaseText(args['idempotency_key']);
       // An idempotent retry with an auto-selected target must reuse the
@@ -1567,6 +1590,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             args,
             activeLeases,
             burnStats,
+            pipePenalties,
           ) ??
           (explicit
               ? null
@@ -1576,6 +1600,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
                   burnStatsByProvider: burnStats,
                   leaseDiscountFor: (provider, account) =>
                       leaseDiscountFor(activeLeases, provider, account),
+                  pipePenaltyByProvider: pipePenalties,
                 ).recommended);
       if (target == null) {
         return CallToolResult.fromStructuredContent(

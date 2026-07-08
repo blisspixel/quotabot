@@ -171,8 +171,12 @@ logical order (each enables the next; no dates):
    plugin now appends local-only success/failure event metadata with HTTP status,
    Retry-After, callback latency, and sanitized exception class; the collector
    summarizes pipe health as healthy, throttled, degraded, or no-data, and the
-   desktop analytics card surfaces that signal. Remaining: feed this pipe-health
-   signal back into route scoring without weakening fail-soft behavior.
+   desktop analytics card surfaces that signal. Second slice landed: recent
+   LiteLLM provider/account pipe failures feed back into CLI, MCP, desktop,
+   loopback `/suggest`, and LiteLLM managed-route ranking as bounded
+   `pipe_discount_percent`, while raw quota availability remains unchanged and
+   fail-soft. Remaining: extend native provider adapter diagnostics beyond
+   LiteLLM traffic when reliable metadata exists.
 5. **Capability-aware-by-default routing.** The capability-aware engine is
    opt-in behind `--task`; the default `suggest`, MCP `suggest_route`, and the
    `top`/`doctor` route line are capability-blind and can name the most-open but
