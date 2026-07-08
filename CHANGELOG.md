@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.9 - 2026-07-08
+
 ### Fixed
 - Roadmap current-line copy now matches the shipped 0.5.8 release.
 - Stale cached cloud quotas now remain visible as last-known evidence but no
