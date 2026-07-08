@@ -408,6 +408,14 @@ leverage is the quality of the signal it hands a router.
     loop reuses the existing edge-triggered alert engine, emits
     `notifications/resources/updated` for `quotas://alerts` on amber/red
     crossings, and keeps resources unfiltered for compatibility.
+    Watchlist 2026-07-07: the MCP 2026-07-28 release candidate is
+    roadmap-relevant but not a 1.0 blocker while it remains pre-final. After the
+    final spec lands, run a focused MCP compatibility audit for stateless
+    Streamable HTTP, `Mcp-Method` / `Mcp-Name`, `server/discover`, resource
+    subscription migration from `resources/subscribe` to `subscriptions/listen`,
+    `ttlMs` / `cacheScope` on list/read responses including `tools/list`, Tasks
+    / Apps extensions, authorization hardening, full JSON Schema 2020-12 tool
+    schemas, and roots/sampling/logging deprecations.
 
 ### Phase 5 - Freeze and ship
 
@@ -486,8 +494,9 @@ here is the final one.
     `suggest`, `models`, alerts, and docs should make quota age, staleness,
     account identity, fallback behavior, and spend class clear without noisy
     caveats. In progress: `top` now shows cache age, account identity on
-    duplicate providers, and column-stable narrow rendering; analytics shares
-    the dashboard chrome; `verify` states each provider's honesty plainly;
+    duplicate providers, spend class, local-only scope, and column-stable narrow
+    rendering; analytics shares the dashboard chrome; `verify` states each
+    provider's honesty plainly;
     desktop provider cards and human `doctor`, alert, provider recommendation,
     and model recommendation surfaces now label live/cached state, spend class,
     real account identity, local readiness where applicable, per-machine scope,

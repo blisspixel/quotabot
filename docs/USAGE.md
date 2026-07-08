@@ -192,6 +192,9 @@ forward-looking note:
 a strand probability (the chance it is spent before it resets) when that is
 material, otherwise a time-to-empty estimate. It redraws in place on the alternate
 screen and repaints countdowns every second.
+Each provider row also carries a compact trust tag with live/cached state, spend
+class, stale age when relevant, account identity when needed to disambiguate
+duplicate providers, and local-only scope for this-machine fallback data.
 
 ```bash
 quotabot top                # adaptive refresh (the default)
