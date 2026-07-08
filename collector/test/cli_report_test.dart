@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
+
+import '../bin/collect.dart' as cli;
 
 import 'support/cli_process.dart';
 
@@ -90,6 +93,52 @@ void main() {
     expect(output, contains('best '));
     expect(output, contains('raw '));
     expect(output, contains('support='));
+  });
+
+  test('stats series keep duplicate provider accounts separate', () {
+    ProviderQuota quota(String account) => ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: account,
+          asOf: 1000,
+          windows: [
+            QuotaWindow(label: '5h', usedPercent: 10),
+          ],
+        );
+    final loaded = <String>[];
+
+    final duplicateRows = cli.buildStatsSeries(
+      [quota('work'), quota('home')],
+      null,
+      (provider, {account, fallbackToProvider = true}) {
+        loaded.add('$provider/${account ?? ''}/$fallbackToProvider');
+        return const <HeadroomBucket>[];
+      },
+    );
+
+    expect(
+      duplicateRows.map((row) => row.key).toList(),
+      ['claude:home', 'claude:work'],
+    );
+    expect(
+      duplicateRows.map((row) => row.label).toList(),
+      ['claude (home)', 'claude (work)'],
+    );
+    expect(loaded, ['claude/home/false', 'claude/work/false']);
+    loaded.clear();
+
+    final singleRows = cli.buildStatsSeries(
+      [quota('work')],
+      null,
+      (provider, {account, fallbackToProvider = true}) {
+        loaded.add('$provider/${account ?? ''}/$fallbackToProvider');
+        return const <HeadroomBucket>[];
+      },
+    );
+
+    expect(singleRows.single.key, 'claude');
+    expect(singleRows.single.label, 'claude');
+    expect(loaded, ['claude/work/true']);
   });
 
   test('stats json includes a reset-aware schedule hint when supported',

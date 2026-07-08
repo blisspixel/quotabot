@@ -319,10 +319,18 @@ Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
   return recentBurnStatsByQuota(results, now);
 }
 
-List<HeadroomBucket> _historyBuckets(String provider, {String? account}) =>
+List<HeadroomBucket> _historyBuckets(
+  String provider, {
+  String? account,
+  bool fallbackToProvider = true,
+}) =>
     _usingSimulation
         ? const <HeadroomBucket>[]
-        : loadBuckets(provider, account: account);
+        : loadBuckets(
+            provider,
+            account: account,
+            fallbackToProvider: fallbackToProvider,
+          );
 
 List<HeadroomBucket> _weeklyHistoryBuckets(
   String provider,
@@ -334,6 +342,73 @@ List<HeadroomBucket> _weeklyHistoryBuckets(
     for (final bucket in _historyBuckets(provider, account: account))
       if (bucket.start >= cutoff) bucket,
   ];
+}
+
+typedef StatsSeriesBucketLoader = List<HeadroomBucket> Function(
+  String provider, {
+  String? account,
+  bool fallbackToProvider,
+});
+
+typedef StatsSeries = ({
+  String key,
+  String label,
+  ProviderQuota quota,
+  List<HeadroomBucket> buckets,
+});
+
+/// Builds the analytics series shown by `quotabot stats`.
+///
+/// Single-account providers keep their historical provider id as the output key
+/// for compatibility, while duplicate provider accounts get account-qualified
+/// keys and labels so their histories cannot overwrite each other.
+List<StatsSeries> buildStatsSeries(
+  List<ProviderQuota> results,
+  String? only,
+  StatsSeriesBucketLoader loadBucketsFor,
+) {
+  final onlyProvider = only?.toLowerCase();
+  final quotas = [
+    for (final q in results)
+      if (!q.isLocal && (onlyProvider == null || q.provider == onlyProvider)) q,
+  ]..sort((a, b) {
+      final byProvider = a.provider.compareTo(b.provider);
+      return byProvider == 0 ? a.account.compareTo(b.account) : byProvider;
+    });
+  final providerCounts = <String, int>{};
+  for (final q in quotas) {
+    providerCounts[q.provider] = (providerCounts[q.provider] ?? 0) + 1;
+  }
+  return [
+    for (final q in quotas)
+      _statsSeriesFor(
+        q,
+        providerCounts[q.provider] ?? 1,
+        loadBucketsFor,
+      ),
+  ];
+}
+
+StatsSeries _statsSeriesFor(
+  ProviderQuota quota,
+  int providerCount,
+  StatsSeriesBucketLoader loadBucketsFor,
+) {
+  final account = stripTerminalControl(quota.account);
+  final duplicateProvider = providerCount > 1;
+  final bucketAccount =
+      hasSpecificQuotaAccount(quota.account) ? quota.account : null;
+  final fallbackToProvider = !duplicateProvider;
+  return (
+    key: duplicateProvider ? '${quota.provider}:$account' : quota.provider,
+    label: duplicateProvider ? '${quota.provider} ($account)' : quota.provider,
+    quota: quota,
+    buckets: loadBucketsFor(
+      quota.provider,
+      account: bucketAccount,
+      fallbackToProvider: fallbackToProvider,
+    ),
+  );
 }
 
 /// Reads a `--name=double` option from [flags], or [dflt] when absent or invalid.
@@ -1430,27 +1505,22 @@ Future<void> _runStats(
   final only = rest.isEmpty ? null : rest.first.toLowerCase();
   final now = nowEpoch();
   final results = await _read(profile, excludedProviders);
-  final providers = {
-    ...results.where((q) => !q.isLocal).map((q) => q.provider),
-  }.where((p) => only == null || p == only).toList()
-    ..sort();
+  final series = buildStatsSeries(results, only, _historyBuckets);
   final tz = DateTime.now().timeZoneOffset;
-  final byProvider = {for (final q in results) q.provider: q};
-  final bucketsByProvider = {
-    for (final p in providers) p: _historyBuckets(p),
-  };
   final insights = shrinkInsightsReliability({
-    for (final p in providers)
-      p: Insights.from(bucketsByProvider[p]!, now, tzOffset: tz),
+    for (final row in series)
+      row.key: Insights.from(row.buckets, now, tzOffset: tz),
   });
   if (wantsJson) {
     final report = <String, dynamic>{};
-    for (final p in providers) {
-      final ins = insights[p]!;
-      final pace = _paceFor(byProvider[p], ins, now);
-      final schedule = _scheduleFor(byProvider[p], ins, now, tz);
-      final tierFit = _tierFitFor(bucketsByProvider[p]!, tierFitPolicy);
-      report[p] = {
+    for (final row in series) {
+      final ins = insights[row.key]!;
+      final pace = _paceFor(row.quota, ins, now);
+      final schedule = _scheduleFor(row.quota, ins, now, tz);
+      final tierFit = _tierFitFor(row.buckets, tierFitPolicy);
+      report[row.key] = {
+        if (row.key != row.quota.provider) 'provider': row.quota.provider,
+        if (row.key != row.quota.provider) 'account': row.quota.account,
         ...ins.toJson(),
         if (pace != null) 'pace': pace.toJson(),
         if (schedule != null) 'schedule_hint': schedule.toJson(),
@@ -1460,12 +1530,10 @@ Future<void> _runStats(
     print(_jsonPretty(report));
   } else {
     _printStats(
-      providers,
-      byProvider,
+      series,
       now,
       tz,
       insights,
-      bucketsByProvider,
       tierFitPolicy,
     );
   }
@@ -2296,24 +2364,24 @@ WeekHourScheduleHint? _scheduleFor(
 /// Prints historical analytics per provider: distribution, reliability, usage
 /// pattern, and a forward-looking pace read for the current window.
 void _printStats(
-  List<String> providers,
-  Map<String, ProviderQuota> live,
+  List<StatsSeries> series,
   int now,
   Duration tz,
   Map<String, Insights> insights,
-  Map<String, List<HeadroomBucket>> bucketsByProvider,
   _TierFitPolicy tierFitPolicy,
 ) {
   print(
     'quotabot stats  (90-day analytics from local history, 0 usage tokens)\n',
   );
-  if (providers.isEmpty) {
+  if (series.isEmpty) {
     print('  no history yet; leave quotabot running to build it');
     return;
   }
 
   // Portfolio view: where you actually spend, and what you barely use.
-  final port = portfolioInsight(insights);
+  final port = portfolioInsight({
+    for (final row in series) row.label: insights[row.key]!,
+  });
   if (port.mostUsed != null) {
     print(
       '  Most used: ${port.mostUsed!.provider} '
@@ -2336,17 +2404,18 @@ void _printStats(
   }
 
   var anyCalendar = false;
-  for (final p in providers) {
-    final buckets = bucketsByProvider[p] ?? _historyBuckets(p);
-    final ins = insights[p] ?? Insights.from(buckets, now, tzOffset: tz);
+  for (final row in series) {
+    final buckets = row.buckets;
+    final ins = insights[row.key] ?? Insights.from(buckets, now, tzOffset: tz);
+    final label = row.label;
     if (ins.samples == 0) {
-      print('  ${p.padRight(12)} no history yet');
+      print('  ${label.padRight(12)} no history yet');
       continue;
     }
     final mean = ins.mean!.round();
     final rel = (ins.reliability! * 100).round();
     print(
-      '  ${p.padRight(12)} avg ${mean.toString().padLeft(3)}% free'
+      '  ${label.padRight(12)} avg ${mean.toString().padLeft(3)}% free'
       '   p10/p50/p90 ${_pct(ins.p10)}/${_pct(ins.p50)}/${_pct(ins.p90)}'
       '   usable $rel% of the time',
     );
@@ -2375,7 +2444,7 @@ void _printStats(
     if (ins.bestTimeWindows.isNotEmpty) {
       extras.add('best ${ins.bestTimeWindows.first.summary}');
     }
-    final schedule = _scheduleFor(live[p], ins, now, tz);
+    final schedule = _scheduleFor(row.quota, ins, now, tz);
     if (schedule != null) {
       extras.add('schedule ${schedule.summary}');
     }
@@ -2394,7 +2463,7 @@ void _printStats(
     }
     extras.add('${ins.samples} samples / ${ins.sampledDays} sampled days');
     print('  ${' '.padRight(12)} ${extras.join('   ')}');
-    final pace = _paceFor(live[p], ins, now);
+    final pace = _paceFor(row.quota, ins, now);
     if (pace != null && pace.burnPerHour >= 0.2) {
       print('  ${' '.padRight(12)} pace: ${pace.verdict}');
     }
