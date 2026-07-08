@@ -24,6 +24,7 @@ permissions:
 jobs:
   create-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -57,6 +58,7 @@ jobs:
           - { os: macos-latest,     script: bash tools/package-cli.sh }
           - { os: windows-latest,   script: pwsh tools/package-cli.ps1 }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     permissions:
       contents: write # upload the asset to the release
       id-token: write # mint the provenance signing certificate
@@ -87,6 +89,7 @@ jobs:
     # `latest` flips) exactly once all platform assets are present.
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
