@@ -490,7 +490,7 @@ here is the final one.
     gap found was closed: `--budget=quota` now enforces an explicit
     quota-plan provider allowlist instead of relying on catalog omission,
     pinned with a test.
-24. [ ] Polish user-facing trust surfaces. The desktop widget, `top`, `doctor`,
+24. [x] Polish user-facing trust surfaces. The desktop widget, `top`, `doctor`,
     `suggest`, `models`, alerts, and docs should make quota age, staleness,
     account identity, fallback behavior, and spend class clear without noisy
     caveats. In progress: `top` now shows cache age, account identity on
@@ -505,7 +505,13 @@ here is the final one.
     real account identity, local readiness where applicable, per-machine scope,
     and capture age; local runtime snapshots also set the existing
     `per_machine` JSON flag explicitly, while recommendation JSON shapes remain
-    stable.
+    stable. Completed 2026-07-08: SETUP now introduces the same compact trust
+    vocabulary for first-run users; USAGE documents the desktop card, `top`,
+    human `doctor`, alerts, provider recommendation, model recommendation,
+    report, verify, MCP cache-only decision, and LiteLLM metrics surfaces;
+    stale cached cloud quota remains visible as last-known evidence but no
+    longer reports as available or reservable in shared routing, model,
+    `check`, MCP, or `top` surfaces.
 25. [ ] Smoke test install and update paths on clean Windows, macOS, and Linux
     hosts: one-line installers, source setup scripts, desktop shortcut/tray
     setup, CLI-only setup, release archives, checksums, `quotabot doctor`, and

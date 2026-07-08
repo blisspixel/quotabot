@@ -99,6 +99,13 @@ Each row shows a state and, when useful, the exact next step:
 | `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
+Rows can also include compact trust context: live versus cached state, spend
+class, account label when the provider exposes one, this-machine scope for
+local-only fallback data, and capture age. Treat those labels as part of the
+number; a cached or this-machine read can still be useful, but it is not the
+same evidence as a fresh account-level live read. Cached cloud quota is shown as
+last-known evidence and is not treated as currently available for routing.
+
 `doctor` ends with a one-line routing suggestion. Other useful commands:
 
 ```bash

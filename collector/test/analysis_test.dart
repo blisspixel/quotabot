@@ -47,6 +47,9 @@ void main() {
     expect(anyProviderUsable([spent, healthy], _now), isTrue);
     // A running local runtime is a usable fallback even with everything spent.
     expect(anyProviderUsable([spent, _local('ollama')], _now), isTrue);
+    final cached = _q('grok', [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        stale: true);
+    expect(anyProviderUsable([cached], _now), isFalse);
   });
 
   test('window helpers treat reached resets as fresh', () {
@@ -98,6 +101,18 @@ void main() {
     final a = providerAvailability(_q('grok', const []), _now);
     expect(a.available, isFalse);
     expect(a.headroom, isNull);
+  });
+
+  test('providerAvailability keeps stale headroom but marks it unavailable',
+      () {
+    final q = _q(
+      'grok',
+      [QuotaWindow(label: 'weekly', usedPercent: 66)],
+      stale: true,
+    );
+    final a = providerAvailability(q, _now);
+    expect(a.available, isFalse);
+    expect(a.headroom, 34);
   });
 
   test('bindingWindow returns the most constrained window', () {
@@ -160,11 +175,11 @@ void main() {
     },
   );
 
-  test('providerWithMostHeadroom falls back to stale when nothing is live', () {
+  test('providerWithMostHeadroom ignores stale cached quota', () {
     final best = providerWithMostHeadroom([
       _q('codex', [QuotaWindow(label: 'w', usedPercent: 10)], stale: true),
     ], _now);
-    expect(best?.provider, 'codex');
+    expect(best, isNull);
   });
 
   test('providerHeadroom derives from used and limit when no percent', () {
@@ -319,16 +334,16 @@ void main() {
       },
     );
 
-    test(
-      'uses stale subscription only when no live or local option exists',
-      () {
-        final s = suggestRoute([
-          _q('codex', [QuotaWindow(label: 'w', usedPercent: 5)], stale: true),
-        ], _now);
-        expect(s.recommended?.provider, 'codex');
-        expect(s.reason, contains('cached'));
-      },
-    );
+    test('does not recommend stale cached quota as usable capacity', () {
+      final s = suggestRoute([
+        _q('codex', [QuotaWindow(label: 'w', usedPercent: 5)], stale: true),
+      ], _now);
+      expect(s.recommended, isNull);
+      expect(s.ranked.single.available, isFalse);
+      expect(s.ranked.single.headroom, 95);
+      expect(s.reason, contains('Only cached quota evidence is present'));
+      expect(s.reason, contains('last-known headroom was 95%'));
+    });
 
     test('manual entries carry lower routing confidence', () {
       final s = suggestRoute([
@@ -361,6 +376,7 @@ void main() {
       expect(candidate.asOf, _now - 600);
       expect(candidate.perMachine, isTrue);
       expect(candidate.stale, isTrue);
+      expect(candidate.available, isFalse);
       expect(candidate.toJson(), isNot(contains('spend_class')));
     });
 

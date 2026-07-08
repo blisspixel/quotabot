@@ -91,6 +91,7 @@ List<ProviderQuota> sortProvidersForTop(
   // (value, rankable). Lower value sorts first; unrankable rows sink and hold
   // their original order. Signs are chosen so each mode's "most urgent" leads.
   (double, bool) keyFor(ProviderQuota q) {
+    if (q.stale) return (0, false);
     switch (sort) {
       case TopSort.headroom:
         final h = providerHeadroom(q, now);
@@ -224,6 +225,7 @@ int _barWidth(int width,
 /// [sev] grades urgency for color: 2 likely to strand, 1 watch, 0 informational.
 ({String text, int sev})? _forecast(RouteCandidate? c) {
   if (c == null) return null;
+  if (c.stale) return null;
   final f = classifyForecast(
     strandProbability: c.strandProbability,
     burnPerHour: c.burnPerHour,
@@ -468,7 +470,8 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
         : 'resets ${_eta(binding.resetsAt!, now)}';
-    final text = 'spent${reset.isEmpty ? '' : '   $reset'}';
+    final state = q.stale ? 'last spent' : 'spent';
+    final text = '$state${reset.isEmpty ? '' : '   $reset'}';
     final visibleTags = _visibleInlineTags(
       width: width,
       text: text,
@@ -479,7 +482,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       _line([
         ..._rowHead(q.displayName, binding.label,
             selected: selected, palette: p),
-        _Cell('spent', (s, t) => s.red(t)),
+        _Cell(state, (s, t) => q.stale ? s.dim(t) : s.red(t)),
         if (reset.isNotEmpty) _Cell('   $reset', (s, t) => s.dim(t)),
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
@@ -495,13 +498,15 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
     final showForecast =
         columns.forecast && forecast != null && w.label == binding?.label;
+    final headroomText =
+        '${remaining.round().toString().padLeft(3)}% ${q.stale ? 'last' : 'free'}';
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label,
           selected: first && selected, palette: p),
       ..._bar(used, remaining, barW, s, p),
       _Cell(' '),
-      _Cell('${remaining.round().toString().padLeft(3)}% free',
-          (s, t) => _healthPaint(s, p, remaining, t)),
+      _Cell(headroomText,
+          (s, t) => q.stale ? s.dim(t) : _healthPaint(s, p, remaining, t)),
       // The reset column is padded to its reserved width so the forecast and
       // Trust/account tags line up vertically across every row.
       if (columns.reset) ...[
@@ -610,6 +615,7 @@ double? _poolHeadroom(List<ProviderQuota> providers, int now) {
   var n = 0;
   for (final q in providers) {
     if (q.isLocal) continue;
+    if (q.stale) continue;
     final h = providerHeadroom(q, now);
     if (h != null) {
       sum += h;

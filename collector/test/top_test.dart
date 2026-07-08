@@ -149,6 +149,8 @@ void main() {
       lines.any((l) => _plain(l).contains('(cached, quota plan)')),
       isTrue,
     );
+    expect(_plain(lines.join('\n')), contains('80% last'));
+    expect(_plain(lines.join('\n')), isNot(contains('80% free')));
   });
 
   test('top rows label live quota plans, manual quota, and metadata-only reads',
@@ -549,6 +551,16 @@ void main() {
       lines.any((l) => _plain(l).contains('(cached 8h, quota plan)')),
       isTrue,
     );
+    expect(_plain(lines.join('\n')), contains('56% last'));
+  });
+
+  test('the pool gauge ignores stale cached cloud headroom', () {
+    final lines = _frame([
+      _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)],
+          stale: true),
+      _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 60)]),
+    ], width: 90);
+    expect(_plain(lines.first), contains('pool 40% free'));
   });
 
   test('the route line drops the reason\'s redundant "Use <provider>"', () {
@@ -815,6 +827,23 @@ void main() {
       final out =
           sortProvidersForTop(ps, suggestRoute(ps, _now), _now, TopSort.burn);
       expect(order(out), ['claude', 'codex', 'grok', 'ollama']);
+    });
+
+    test('stale cached providers do not lead headroom sort', () {
+      final ps = [
+        _q(
+            'grok',
+            [
+              QuotaWindow(label: 'weekly', usedPercent: 1),
+            ],
+            stale: true),
+        _q('claude', [
+          QuotaWindow(label: 'weekly', usedPercent: 30),
+        ]),
+      ];
+      final out = sortProvidersForTop(
+          ps, suggestRoute(ps, _now), _now, TopSort.headroom);
+      expect(order(out), ['claude', 'grok']);
     });
 
     test('the footer shows the active sort label', () {

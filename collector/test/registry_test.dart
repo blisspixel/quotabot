@@ -74,6 +74,8 @@ void main() {
 
     final e = reg.single;
     expect(e.stale, isTrue);
+    expect(e.available, isFalse);
+    expect(e.headroomPercent, 80);
     expect(e.asOf, _now);
     expect(e.perMachine, isTrue);
     expect(e.toJson().containsKey('as_of'), isFalse);
@@ -157,6 +159,23 @@ void main() {
     );
     expect(reg.first.model.id, 'local-m'); // available beats spent
     expect(reg.last.available, isFalse);
+  });
+
+  test('a stale cloud model sorts below an available local fallback', () {
+    final reg = buildModelRegistry(
+      [
+        _cloud('claude', 20, stale: true),
+        _local('ollama', const [ModelInfo(id: 'local-m', local: true)]),
+      ],
+      _now,
+      catalog: {
+        'claude': [const ModelInfo(id: 'claude-x')],
+      },
+    );
+    expect(reg.first.model.id, 'local-m');
+    expect(reg.last.model.id, 'claude-x');
+    expect(reg.last.available, isFalse);
+    expect(reg.last.headroomPercent, 80);
   });
 
   test('loaded local models sort ahead of cold local models', () {
