@@ -33,7 +33,8 @@ void main() {
     final output = result.stdout as String;
     expect(output, startsWith('# quotabot weekly quota health'));
     expect(output, contains('Recommendation:'));
-    expect(output, contains('| Provider | Account | State | Headroom |'));
+    expect(output, contains('| Provider | Account | State | Trust |'));
+    expect(output, contains('captured'));
     expect(output, contains('| Streak | Pace |'));
   });
 
