@@ -218,6 +218,19 @@ void main() {
         completionTokens: 100,
         cost: 0.02,
       ),
+      const LiteLlmRouteMetric(
+        at: 1782046600,
+        requestedModel: 'frontier-coder',
+        servedModel: 'claude/sonnet-4.5',
+        spend: litellmSpendQuotaPlan,
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        event: litellmEventFailure,
+        httpStatus: 429,
+        retryAfterSeconds: 120,
+        latencyMs: 900,
+      ),
     ]);
 
     await tester.pumpWidget(
@@ -233,9 +246,13 @@ void main() {
     await tester.pump();
 
     expect(find.text('ROUTED REQUESTS'), findsOneWidget);
-    expect(find.text('2 routed'), findsOneWidget);
+    expect(find.text('3 routed'), findsOneWidget);
     expect(
       find.text('spend: 1 local | 1 quota | 1 paid API (\$0.16)'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('pipe: throttled, 1 failed, 1 throttled'),
       findsOneWidget,
     );
     expect(find.textContaining('top served:'), findsOneWidget);

@@ -167,7 +167,12 @@ logical order (each enables the next; no dates):
    quota-rich but throttled provider is still recommended as free. The one live
    traffic stream (LiteLLM metrics) records only tokens and cost. Represent a
    throttled/degraded state distinct from no-data, and mine the 429/latency
-   signal already flowing through the plugin.
+   signal already flowing through the plugin. First slice landed: the LiteLLM
+   plugin now appends local-only success/failure event metadata with HTTP status,
+   Retry-After, callback latency, and sanitized exception class; the collector
+   summarizes pipe health as healthy, throttled, degraded, or no-data, and the
+   desktop analytics card surfaces that signal. Remaining: feed this pipe-health
+   signal back into route scoring without weakening fail-soft behavior.
 5. **Capability-aware-by-default routing.** The capability-aware engine is
    opt-in behind `--task`; the default `suggest`, MCP `suggest_route`, and the
    `top`/`doctor` route line are capability-blind and can name the most-open but

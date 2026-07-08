@@ -30,8 +30,11 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import datetime
+import email.utils
 import ipaddress
 import json
+import math
 import os
 import subprocess
 import time
@@ -523,15 +526,52 @@ class QuotabotRouter(CustomLogger):
             return
         try:
             meta = (kwargs.get("litellm_params") or {}).get("metadata") or {}
-            usage = getattr(response_obj, "usage", None)
+            prompt_tokens, completion_tokens = _usage_counts(response_obj, kwargs)
             record = {
                 "at": int(time.time()),
+                "event": "success",
                 "requested_model": meta.get("quotabot_original_model"),
                 "served_model": kwargs.get("model"),
                 "spend": meta.get(_SPEND_METADATA_KEY),
-                "prompt_tokens": getattr(usage, "prompt_tokens", None),
-                "completion_tokens": getattr(usage, "completion_tokens", None),
-                "cost": kwargs.get("response_cost"),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "cost": _metric_cost(kwargs),
+                "latency_ms": _latency_ms(start_time, end_time),
+            }
+            await asyncio.to_thread(self._append_metric, record)
+        except Exception:
+            return
+
+    async def async_log_failure_event(
+        self, kwargs: dict, response_obj: Any, start_time: Any, end_time: Any
+    ) -> None:
+        if not self.policy.metrics_path:
+            return
+        try:
+            meta = (kwargs.get("litellm_params") or {}).get("metadata") or {}
+            exception = kwargs.get("exception")
+            prompt_tokens, completion_tokens = _usage_counts(response_obj, kwargs)
+            record = {
+                "at": int(time.time()),
+                "event": "failure",
+                "requested_model": meta.get("quotabot_original_model"),
+                "served_model": kwargs.get("model"),
+                "spend": meta.get(_SPEND_METADATA_KEY),
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "cost": _metric_cost(kwargs),
+                "latency_ms": _latency_ms(start_time, end_time),
+                "http_status": _extract_http_status(
+                    kwargs,
+                    response_obj,
+                    exception,
+                ),
+                "retry_after_seconds": _extract_retry_after_seconds(
+                    kwargs,
+                    response_obj,
+                    exception,
+                ),
+                "error_type": _error_type(exception),
             }
             await asyncio.to_thread(self._append_metric, record)
         except Exception:
@@ -556,6 +596,195 @@ class QuotabotRouter(CustomLogger):
 def _headroom(info: dict[str, Any]) -> float:
     value = info.get("headroom_percent")
     return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _usage_counts(*sources: Any) -> tuple[Optional[int], Optional[int]]:
+    for source in sources:
+        usage = _usage_source(source)
+        if usage is None:
+            continue
+        prompt = _non_negative_int(
+            _field(usage, "prompt_tokens"),
+            _field(usage, "input_tokens"),
+        )
+        completion = _non_negative_int(
+            _field(usage, "completion_tokens"),
+            _field(usage, "output_tokens"),
+        )
+        if prompt is not None or completion is not None:
+            return prompt, completion
+    return None, None
+
+
+def _usage_source(value: Any) -> Any:
+    if value is None:
+        return None
+    usage = _field(value, "usage")
+    if usage is not None:
+        return usage
+    if isinstance(value, dict):
+        response = value.get("response_obj") or value.get("response")
+        usage = _field(response, "usage") if response is not None else None
+        if usage is not None:
+            return usage
+        for key in ("usage_object", "usage"):
+            if value.get(key) is not None:
+                return value[key]
+    return None
+
+
+def _metric_cost(kwargs: dict) -> Optional[float]:
+    for key in ("response_cost", "cost"):
+        parsed = _non_negative_float(kwargs.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _non_negative_int(*values: Any) -> Optional[int]:
+    for value in values:
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+        if isinstance(value, float) and value.is_integer() and value >= 0:
+            return int(value)
+    return None
+
+
+def _non_negative_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        parsed = float(value)
+        if math.isfinite(parsed) and parsed >= 0:
+            return parsed
+    return None
+
+
+def _latency_ms(start_time: Any, end_time: Any) -> Optional[int]:
+    start = _timestamp_seconds(start_time)
+    end = _timestamp_seconds(end_time)
+    if start is None or end is None:
+        return None
+    delta = end - start
+    if delta < 0 or delta > 86400:
+        return None
+    return int(round(delta * 1000))
+
+
+def _timestamp_seconds(value: Any) -> Optional[float]:
+    if isinstance(value, (int, float)):
+        parsed = float(value)
+        return parsed if parsed >= 0 else None
+    timestamp = getattr(value, "timestamp", None)
+    if callable(timestamp):
+        try:
+            parsed = float(timestamp())
+            return parsed if parsed >= 0 else None
+        except Exception:
+            return None
+    return None
+
+
+def _status_code(value: Any) -> Optional[int]:
+    if isinstance(value, int):
+        return value if 100 <= value <= 599 else None
+    if isinstance(value, float) and value.is_integer():
+        parsed = int(value)
+        return parsed if 100 <= parsed <= 599 else None
+    return None
+
+
+def _field(value: Any, name: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _extract_http_status(*sources: Any) -> Optional[int]:
+    for source in sources:
+        if source is None:
+            continue
+        for name in ("status_code", "status", "http_status", "code"):
+            parsed = _status_code(_field(source, name))
+            if parsed is not None:
+                return parsed
+        response = _field(source, "response")
+        if response is not None:
+            parsed = _extract_http_status(response)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _headers(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    headers = _field(value, "headers")
+    if isinstance(headers, dict):
+        return headers
+    if headers is None:
+        return {}
+    try:
+        return dict(headers)
+    except Exception:
+        return {}
+
+
+def _extract_retry_after_seconds(*sources: Any) -> Optional[int]:
+    for source in sources:
+        candidates = [_headers(source)]
+        response = _field(source, "response") if source is not None else None
+        if response is not None:
+            candidates.append(_headers(response))
+        for headers in candidates:
+            for key, value in headers.items():
+                if str(key).lower() != "retry-after":
+                    continue
+                parsed = _retry_after_seconds(value)
+                if parsed is not None:
+                    return parsed
+    return None
+
+
+def _retry_after_seconds(value: Any) -> Optional[int]:
+    if isinstance(value, (int, float)):
+        seconds = int(value)
+        return seconds if seconds >= 0 else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        seconds = int(float(text))
+        return seconds if seconds >= 0 else None
+    except ValueError:
+        pass
+    try:
+        dt = email.utils.parsedate_to_datetime(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        delta = dt - datetime.datetime.now(datetime.timezone.utc)
+        seconds = int(round(delta.total_seconds()))
+        return max(0, seconds)
+    except Exception:
+        return None
+
+
+def _error_type(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    name = type(value).__name__.strip()
+    if not name or name == "NoneType":
+        return None
+    allowed = []
+    for char in name[:80]:
+        if char.isalnum() or char in {"_", "."}:
+            allowed.append(char)
+    parsed = "".join(allowed)
+    return parsed or None
 
 
 # The proxy references this instance by attribute path in config.yaml.

@@ -131,18 +131,22 @@ normally.
 
 ## Usage metrics
 
-Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per served
-request (requested model, served model, selected spend class, tokens, cost). The
-path is constrained to `~/.quotabot`; relative paths are placed there. The
+Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per
+successful or failed request. Records contain routing metadata only: requested
+model, served model, selected spend class, callback event, HTTP status,
+Retry-After seconds, callback latency, sanitized exception class, tokens, and
+cost. They never contain prompts, responses, exception messages, or source code.
+The path is constrained to `~/.quotabot`; relative paths are placed there. The
 plugin applies owner-only permissions to the metrics directory and file before
-writing local usage metadata. This closes the loop: LiteLLM spend plus quotabot
-subscription headroom in one place.
+writing local usage metadata. This closes the loop: LiteLLM pipe health, spend,
+and quotabot subscription headroom in one place.
 
 Use the default `~/.quotabot/litellm-metrics.jsonl` path when you want the
 desktop Quota Analytics screen to show the routed-request summary. The widget
 reads a bounded tail of that local JSONL file and shows only metadata totals:
-served requests, routed requests, tokens, tracked cost, spend-class counts, top
-served models, and last request age.
+request attempts, routed attempts, tokens, tracked cost, spend-class counts, top
+successfully served models, pipe health, throttled/failed requests, callback
+latency, and last request age.
 
 ## Failure behavior
 
