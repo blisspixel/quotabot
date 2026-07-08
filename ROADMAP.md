@@ -495,8 +495,9 @@ here is the final one.
     account identity, fallback behavior, and spend class clear without noisy
     caveats. In progress: `top` now shows cache age, account identity on
     duplicate providers, spend class, local-only scope, and column-stable narrow
-    rendering; analytics shares the dashboard chrome; `verify` states each
-    provider's honesty plainly;
+    rendering; analytics shares the dashboard chrome; `verify` now states each
+    provider's honesty plainly, labels live/cached/error/metadata provenance,
+    and surfaces truthful cached/no-data reasons;
     desktop provider cards and human `doctor`, alert, provider recommendation,
     and model recommendation surfaces now label live/cached state, spend class,
     real account identity, local readiness where applicable, per-machine scope,

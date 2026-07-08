@@ -17,6 +17,7 @@ const simulationStates = {
   'blocked',
   'signed-out',
   'stale',
+  'metadata',
 };
 
 const _displayNames = {
@@ -81,6 +82,7 @@ ProviderQuota? simulateProvider({
         window('5h', 39, 2 * 60 * 60),
         window('weekly', 52, 3 * 24 * 60 * 60),
       ],
+    'metadata' => const <QuotaWindow>[],
     _ => const <QuotaWindow>[],
   };
 
@@ -92,6 +94,8 @@ ProviderQuota? simulateProvider({
     asOf: normalizedState == 'stale' ? now - 3600 : now,
     stale: normalizedState == 'stale',
     error: normalizedState == 'stale' ? 'simulated stale cache' : null,
+    status:
+        normalizedState == 'metadata' ? 'simulated metadata-only state' : null,
     windows: windows,
   );
 }

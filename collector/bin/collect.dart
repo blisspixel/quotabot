@@ -1895,7 +1895,7 @@ Future<void> _runVerify(
   if (wantsJson) {
     print(_jsonPretty(report.toJson()));
   } else {
-    _printVerify(report);
+    _printVerify(report, results);
   }
   if (!report.passed) exitCode = _exitVerifyFailed;
 }
@@ -1907,11 +1907,12 @@ String _verifyStateLabel(String state) => switch (state) {
       _ => state,
     };
 
-void _printVerify(VerificationReport report) {
+void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
   print(
     '${style.bold('quotabot verify')}  ${style.dim('mechanical honesty checks over one live read, 0 usage tokens')}\n',
   );
-  for (final p in report.providers) {
+  for (var i = 0; i < report.providers.length; i++) {
+    final p = report.providers[i];
     final acct = (p.account != 'default' &&
             p.account != 'unknown' &&
             p.account != 'none' &&
@@ -1920,14 +1921,13 @@ void _printVerify(VerificationReport report) {
         ? ' (${p.account})'
         : '';
     final verdict = p.passed ? style.green('PASS') : style.red('FAIL');
-    final age = p.stalenessSeconds == null
-        ? ''
-        : '  ${style.dim('captured ${_ago(p.stalenessSeconds!)}')}';
+    final provenance =
+        _verificationProvenance(p, snapshot, i, report.generatedAt);
     print(
       '  ${'${p.displayName}$acct'.padRight(28)} '
-      '${_stateStyled(_verifyStateLabel(p.state))} $verdict$age',
+      '${_stateStyled(_verifyStateLabel(p.state))} $verdict $provenance',
     );
-    for (final c in p.checks.where((c) => c.status != VerifyStatus.pass)) {
+    for (final c in _visibleVerifyChecks(p)) {
       final tag =
           c.status == VerifyStatus.fail ? style.red(c.id) : style.dim(c.id);
       print('  ${' '.padRight(28)} ${' '.padRight(12)} -> $tag: ${c.detail}');
@@ -1963,6 +1963,66 @@ void _printVerify(VerificationReport report) {
     '${style.bold('quotabot verify --json')}',
   );
 }
+
+Iterable<VerifyCheck> _visibleVerifyChecks(ProviderVerification p) =>
+    p.checks.where((c) =>
+        c.status != VerifyStatus.pass ||
+        ({'error', 'no_data'}.contains(p.state) && c.id == 'read_or_reason') ||
+        (p.state == 'cached' && c.id == 'stale_honesty'));
+
+String _verificationProvenance(
+  ProviderVerification verification,
+  List<ProviderQuota> snapshot,
+  int snapshotIndex,
+  int now,
+) {
+  final quota = quotaForVerificationProvenance(
+    snapshot,
+    verification,
+    snapshotIndex,
+  );
+  if (quota == null) {
+    return style.dim('[undetected]');
+  }
+  return _providerProvenance(
+    quota,
+    now,
+    _verificationProvenanceState(quota, verification.state),
+  );
+}
+
+ProviderQuota? quotaForVerificationProvenance(
+  List<ProviderQuota> snapshot,
+  ProviderVerification verification,
+  int snapshotIndex,
+) {
+  if (snapshotIndex < snapshot.length) {
+    final q = snapshot[snapshotIndex];
+    if (q.provider == verification.provider &&
+        q.account == verification.account) {
+      return q;
+    }
+    return null;
+  }
+  ProviderQuota? singleMatch;
+  for (final q in snapshot) {
+    if (q.provider == verification.provider &&
+        q.account == verification.account) {
+      if (singleMatch != null) return null;
+      singleMatch = q;
+    }
+  }
+  return singleMatch;
+}
+
+String _verificationProvenanceState(ProviderQuota q, String state) =>
+    switch (state) {
+      'out_of_quota' => 'OUT OF QUOTA',
+      'error' => 'ERROR',
+      'no_data' => 'metadata',
+      'local' => q.active ? 'in use' : 'local',
+      _ => state,
+    };
 
 /// A compact "Ns/Nm/Nh ago" age label.
 String _ago(int seconds) {
