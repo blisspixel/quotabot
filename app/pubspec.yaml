@@ -1,7 +1,7 @@
 name: quotabot
 description: "Glanceable AI quota tracker desktop widget."
 publish_to: 'none'
-version: 0.5.9+10
+version: 0.5.10+11
 
 environment:
   sdk: ^3.12.2
