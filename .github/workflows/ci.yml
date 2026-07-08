@@ -36,6 +36,10 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: |
+            integrations/litellm/requirements.in
+            integrations/litellm/requirements.txt
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
@@ -110,5 +114,5 @@ jobs:
         env:
           QUOTABOT_RUN_LITELLM_PROXY_TEST: '1'
         run: |
-          python -m pip install "litellm[proxy]"
+          python -m pip install --require-hashes -r requirements.txt
           python -m unittest test_quotabot_router.py test_quotabot_proxy_integration.py
