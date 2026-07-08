@@ -36,6 +36,8 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 const Color _quotaGreen = Color(0xFF3FB950);
+const String _windowsAppUserModelId = 'io.quotabot.app';
+const String _windowsNotificationGuid = 'f3063433-3b97-5b9f-9448-2f70cbbf4ad1';
 
 /// Screenshot-export mode (`QUOTABOT_SHOTS=1`): the app loads demo data, captures
 /// the widget and analytics views to PNGs (in `QUOTABOT_SHOTS_DIR`, default the
@@ -68,15 +70,20 @@ Future<void> main() async {
   final prefs = Prefs.load();
   textScale.value = prefs.textSize.scale;
 
-  // init notifications (cross platform) - wrapped to prevent crash on Windows if not fully supported
+  // Keep startup resilient when a platform notification backend is unavailable.
   try {
     const initSettings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       iOS: DarwinInitializationSettings(),
       macOS: DarwinInitializationSettings(),
       linux: LinuxInitializationSettings(defaultActionName: 'Open'),
+      windows: WindowsInitializationSettings(
+        appName: 'quotabot',
+        appUserModelId: _windowsAppUserModelId,
+        guid: _windowsNotificationGuid,
+      ),
     );
-    await flutterLocalNotificationsPlugin.initialize(initSettings);
+    await flutterLocalNotificationsPlugin.initialize(settings: initSettings);
     tz.initializeTimeZones();
     tz.setLocalLocation(tz.local);
   } catch (_) {
@@ -2162,12 +2169,12 @@ class _DashboardState extends State<Dashboard>
             '${quotaIdentityKey(a.provider, a.account)}:low',
           );
           try {
-            await flutterLocalNotificationsPlugin.cancel(id);
+            await flutterLocalNotificationsPlugin.cancel(id: id);
             await flutterLocalNotificationsPlugin.show(
-              id,
-              'Low quota',
-              a.message,
-              _buildDetails(a.displayName),
+              id: id,
+              title: 'Low quota',
+              body: a.message,
+              notificationDetails: _buildDetails(a.displayName),
             );
           } catch (_) {}
         }
@@ -2197,17 +2204,15 @@ class _DashboardState extends State<Dashboard>
                 final tzReset = tz.TZDateTime.from(resetDt, tz.local);
                 final id = _notificationId(key);
                 try {
-                  await flutterLocalNotificationsPlugin.cancel(id);
+                  await flutterLocalNotificationsPlugin.cancel(id: id);
                   await flutterLocalNotificationsPlugin.zonedSchedule(
-                    id,
-                    'Quota reset soon',
-                    '${q.displayName} ${w.label} resets soon',
-                    tzReset,
-                    _buildDetails(q.displayName),
+                    id: id,
+                    title: 'Quota reset soon',
+                    body: '${q.displayName} ${w.label} resets soon',
+                    scheduledDate: tzReset,
+                    notificationDetails: _buildDetails(q.displayName),
                     androidScheduleMode:
                         AndroidScheduleMode.exactAllowWhileIdle,
-                    uiLocalNotificationDateInterpretation:
-                        UILocalNotificationDateInterpretation.absoluteTime,
                   );
                 } catch (_) {}
               }
@@ -2229,17 +2234,16 @@ class _DashboardState extends State<Dashboard>
     return false;
   }
 
-  // Platform-aware details. Android base works via compat on desktop;
-  // full Darwin/Linux specifics supplied for better integration where supported.
-  // Windows falls back gracefully. Errors are caught by caller.
-  NotificationDetails _buildDetails(String name) => const NotificationDetails(
-    android: AndroidNotificationDetails(
+  // Platform-aware details. Errors are caught by caller.
+  NotificationDetails _buildDetails(String name) => NotificationDetails(
+    android: const AndroidNotificationDetails(
       'quotabot_quota',
       'Quota Alerts',
       importance: Importance.high,
     ),
-    macOS: DarwinNotificationDetails(),
-    linux: LinuxNotificationDetails(defaultActionName: 'View'),
+    macOS: const DarwinNotificationDetails(),
+    linux: const LinuxNotificationDetails(defaultActionName: 'View'),
+    windows: WindowsNotificationDetails(subtitle: name),
   );
 
   void _toggleNotifications() {

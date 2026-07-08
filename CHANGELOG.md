@@ -4,6 +4,10 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- Updated desktop app Flutter notification/window dependencies and migrated
+  local notification calls to the current named-parameter API.
+
 ## 0.5.9 - 2026-07-08
 
 ### Fixed
