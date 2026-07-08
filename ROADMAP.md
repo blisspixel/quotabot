@@ -524,7 +524,7 @@ here is the final one.
     MCP output schemas declare their injected profile/account/error fields,
     and SCHEMA.md now documents every emitted field including
     `quotabot.calibration.v1` and `quotabot.catalog_audit.v1`.
-27. [ ] Final security and reliability pass. Run secret scanning, CodeQL,
+27. [x] Final security and reliability pass. Run secret scanning, CodeQL,
     dependency review, installer/script review, credential-handling review,
     local-file permission review, webhook/HTTP host validation review, and an
     adversarial bug hunt. Fix and pin anything real with tests. First
@@ -534,8 +534,13 @@ here is the final one.
     wedging the fleet and the desktop poll loop) were fixed and pinned with
     tests. Repeat round progress: CI, release, and secret-scan jobs now have
     explicit timeouts, while CodeQL already did; the LiteLLM proxy test now
-    installs from a hash-locked requirements file covered by Dependabot. The
-    item closes when a repeat round comes back empty.
+    installs from a hash-locked requirements file covered by Dependabot. Final
+    repeat round completed 2026-07-08: added a pinned dependency-review PR gate
+    that fails low-or-higher vulnerabilities across runtime, development, and
+    unknown scopes; fixed LiteLLM metrics writes so the `~/.quotabot` metrics
+    directory and JSONL file are owner-only before local usage metadata is
+    retained; full local CI-equivalent gate, coverage, gitleaks, workflow policy
+    checks, and enabled LiteLLM proxy tests passed.
 28. [ ] 1.0 release candidate dry run. Build artifacts from a tag candidate,
     verify release notes and checksums, install from artifacts, run smoke tests,
     verify GitHub alerts are clear, and confirm the working tree has one clean

@@ -29,9 +29,11 @@ dependency), so it runs unchanged on Windows, macOS, and Linux.
 from __future__ import annotations
 
 import asyncio
+import csv
 import ipaddress
 import json
 import os
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -82,6 +84,73 @@ def _safe_metrics_path(raw: Optional[str]) -> Optional[str]:
         return str(path)
     except Exception:
         return None
+
+
+def _windows_acl_principal() -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["whoami", "/user", "/fo", "csv"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    for row in csv.reader(result.stdout.splitlines()):
+        if len(row) >= 2 and row[1].startswith("S-1-"):
+            return f"*{row[1]}"
+    return None
+
+
+def _restrict_owner_only_file(path: Path) -> None:
+    try:
+        if os.name == "nt":
+            principal = _windows_acl_principal()
+            if not principal:
+                return
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                ["icacls", str(path), "/grant:r", f"{principal}:F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            path.chmod(0o600)
+    except Exception:
+        return
+
+
+def _restrict_owner_only_directory(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            principal = _windows_acl_principal()
+            if not principal:
+                return
+            subprocess.run(
+                ["icacls", str(path), "/inheritance:r"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.run(
+                ["icacls", str(path), "/grant:r", f"{principal}:(OI)(CI)F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            path.chmod(0o700)
+    except Exception:
+        return
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -472,9 +541,16 @@ class QuotabotRouter(CustomLogger):
         if not self.policy.metrics_path:
             return
         path = Path(self.policy.metrics_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
+        _restrict_owner_only_directory(path.parent)
+        fd: Optional[int] = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                fd = None
+                fh.write(json.dumps(record) + "\n")
+        finally:
+            if fd is not None:
+                os.close(fd)
+        _restrict_owner_only_file(path)
 
 
 def _headroom(info: dict[str, Any]) -> float:

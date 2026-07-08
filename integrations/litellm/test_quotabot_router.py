@@ -1,11 +1,14 @@
 import asyncio
 import json
+import os
 import tempfile
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
+import quotabot_router
 from quotabot_router import (
     AgentRule,
     Candidate,
@@ -493,31 +496,43 @@ models:
             router = QuotabotRouter()
             router.policy = Policy()
             router.policy.metrics_path = str(path)
+            open_modes = []
+            original_open = quotabot_router.os.open
 
-            asyncio.run(
-                router.async_log_success_event(
-                    {
-                        "model": "ollama-qwen",
-                        "response_cost": 0,
-                        "litellm_params": {
-                            "metadata": {
-                                "quotabot_original_model": "cheap-bulk",
-                                "quotabot_spend": "local",
-                            }
+            def capture_open(*args, **kwargs):
+                if Path(args[0]) == path:
+                    open_modes.append(args[2] if len(args) >= 3 else kwargs.get("mode"))
+                return original_open(*args, **kwargs)
+
+            with mock.patch("quotabot_router.os.open", capture_open):
+                asyncio.run(
+                    router.async_log_success_event(
+                        {
+                            "model": "ollama-qwen",
+                            "response_cost": 0,
+                            "litellm_params": {
+                                "metadata": {
+                                    "quotabot_original_model": "cheap-bulk",
+                                    "quotabot_spend": "local",
+                                }
+                            },
                         },
-                    },
-                    Response(),
-                    None,
-                    None,
+                        Response(),
+                        None,
+                        None,
+                    )
                 )
-            )
 
             record = json.loads(path.read_text(encoding="utf-8").strip())
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
 
         self.assertEqual(record["requested_model"], "cheap-bulk")
         self.assertEqual(record["served_model"], "ollama-qwen")
         self.assertEqual(record["spend"], "local")
         self.assertEqual(record["prompt_tokens"], 10)
+        self.assertEqual(open_modes, [0o600])
 
 
 if __name__ == "__main__":
