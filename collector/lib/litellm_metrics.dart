@@ -76,8 +76,7 @@ class LiteLlmRouteMetric {
         'cost': cost,
         'routed': wasRouted,
         if (httpStatus != null) 'http_status': httpStatus,
-        if (retryAfterSeconds != null)
-          'retry_after_seconds': retryAfterSeconds,
+        if (retryAfterSeconds != null) 'retry_after_seconds': retryAfterSeconds,
         if (latencyMs != null) 'latency_ms': latencyMs,
         if (errorType != null) 'error_type': errorType,
       };
@@ -169,8 +168,7 @@ class RoutedRequestSummary {
         'paid_api_requests': paidApiRequests,
         'unknown_spend_requests': unknownSpendRequests,
         'paid_api_cost': double.parse(paidApiCost.toStringAsFixed(6)),
-        if (averageLatencyMs != null)
-          'average_latency_ms': averageLatencyMs,
+        if (averageLatencyMs != null) 'average_latency_ms': averageLatencyMs,
         if (maxRetryAfterSeconds != null)
           'max_retry_after_seconds': maxRetryAfterSeconds,
         if (firstAt != null) 'first_at': firstAt,
