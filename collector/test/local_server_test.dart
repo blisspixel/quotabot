@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/local_server.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
@@ -238,6 +239,47 @@ void main() {
           );
       expect(claude['cost_penalty'], 1.0);
       expect(claude['cost_discount'], 0.5);
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('local /suggest discounts recent LiteLLM pipe failures', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 10),
+        _q('codex', 30),
+      ],
+      routeSummaryProvider: () => summarizeRoutedRequests([
+        const LiteLlmRouteMetric(
+          at: _now,
+          provider: 'claude',
+          account: 'a',
+          requestedModel: 'claude-3',
+          servedModel: 'claude-3',
+          promptTokens: 0,
+          completionTokens: 0,
+          cost: 0,
+          spend: litellmSpendQuotaPlan,
+          event: litellmEventFailure,
+          latencyMs: 0,
+          httpStatus: 429,
+          retryAfterSeconds: 60,
+        ),
+      ]),
+      now: () => _now,
+    );
+    try {
+      final json = await _getJson(
+        Uri.parse('http://127.0.0.1:${server.port}/suggest'),
+      );
+
+      expect((json['recommended'] as Map)['provider'], 'codex');
+      final claude = (json['ranked'] as List<Object?>)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((entry) => entry['provider'] == 'claude');
+      expect(claude['pipe_discount_percent'], greaterThan(0));
     } finally {
       await server.close(force: true);
     }

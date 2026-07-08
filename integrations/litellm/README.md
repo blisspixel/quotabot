@@ -107,6 +107,11 @@ Use `allow_paid_api: true` only when you intentionally want request-metered API
 spend. To use a provider subscription quota safely, route to a deployment whose
 cost is bounded by that quota plan and has overages disabled, then mark that
 candidate `spend: quota_plan` plus `overages_disabled: true`.
+When quotabot reports multiple accounts for the same provider, add
+`account: <quotabot account label>` to a candidate to bind that LiteLLM
+deployment to the matching account. Without an account binding, the router still
+uses provider-level ranking, but it omits account from metrics when multiple
+accounts would make attribution ambiguous.
 
 ## Steering specific agents
 
@@ -133,13 +138,14 @@ normally.
 
 Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per
 successful or failed request. Records contain routing metadata only: requested
-model, served model, selected spend class, callback event, HTTP status,
-Retry-After seconds, callback latency, sanitized exception class, tokens, and
-cost. They never contain prompts, responses, exception messages, or source code.
-The path is constrained to `~/.quotabot`; relative paths are placed there. The
-plugin applies owner-only permissions to the metrics directory and file before
-writing local usage metadata. This closes the loop: LiteLLM pipe health, spend,
-and quotabot subscription headroom in one place.
+model, served model, gated provider/account when known, selected spend class,
+callback event, HTTP status, Retry-After seconds, callback latency, sanitized
+exception class, tokens, and cost. They never contain prompts, responses,
+exception messages, or source code. The path is constrained to `~/.quotabot`;
+relative paths are placed there. The plugin applies owner-only permissions to
+the metrics directory and file before writing local usage metadata. This closes
+the loop: LiteLLM pipe health, spend, and quotabot subscription headroom in one
+place.
 
 Use the default `~/.quotabot/litellm-metrics.jsonl` path when you want the
 desktop Quota Analytics screen to show the routed-request summary. The widget
@@ -147,6 +153,10 @@ reads a bounded tail of that local JSONL file and shows only metadata totals:
 request attempts, routed attempts, tokens, tracked cost, spend-class counts, top
 successfully served models, pipe health, throttled/failed requests, callback
 latency, and last request age.
+Recent provider/account pipe failures from this file feed back into local
+`/suggest` ranking as a bounded `pipe_discount_percent`. Managed LiteLLM routes
+consume that ranked response, so a funded route that is actively throttling or
+failing can be skipped without hiding its raw quota headroom.
 
 ## Failure behavior
 

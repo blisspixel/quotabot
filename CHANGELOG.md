@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- Local route suggestions and LiteLLM managed routes now discount providers with
+  recent LiteLLM provider/account pipe failures or throttles, exposing
+  `pipe_discount_percent` on ranked candidates without changing raw quota
+  availability.
+
 ## 0.5.12 - 2026-07-08
 
 ### Added

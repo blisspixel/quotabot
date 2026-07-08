@@ -29,6 +29,8 @@ void main() {
   test('parses LiteLLM failure pipe-health metadata', () {
     final metric = parseLiteLlmRouteMetric(jsonEncode({
       'at': 1782000000,
+      'provider': 'claude',
+      'account': 'work@example.com',
       'event': 'failure',
       'requested_model': 'frontier-coder',
       'served_model': 'claude-sonnet',
@@ -41,12 +43,16 @@ void main() {
 
     expect(metric, isNotNull);
     expect(metric!.failed, isTrue);
+    expect(metric.provider, 'claude');
+    expect(metric.account, 'work@example.com');
     expect(metric.throttled, isTrue);
     expect(metric.httpStatus, 429);
     expect(metric.retryAfterSeconds, 90);
     expect(metric.latencyMs, 1234);
     expect(metric.errorType, 'RateLimitError');
     expect(metric.toJson()['event'], litellmEventFailure);
+    expect(metric.toJson()['provider'], 'claude');
+    expect(metric.toJson()['account'], 'work@example.com');
     expect(metric.toJson()['http_status'], 429);
   });
 
@@ -91,6 +97,8 @@ void main() {
     final summary = summarizeRoutedRequests([
       const LiteLlmRouteMetric(
         at: 10,
+        provider: 'codex',
+        account: 'work@example.com',
         requestedModel: 'frontier',
         servedModel: 'codex',
         spend: litellmSpendQuotaPlan,
@@ -101,6 +109,8 @@ void main() {
       ),
       const LiteLlmRouteMetric(
         at: 20,
+        provider: 'codex',
+        account: 'work@example.com',
         requestedModel: null,
         servedModel: 'codex',
         spend: litellmSpendPaidApi,
@@ -111,6 +121,7 @@ void main() {
       ),
       const LiteLlmRouteMetric(
         at: 15,
+        provider: 'grok',
         requestedModel: 'bulk',
         servedModel: 'grok',
         spend: litellmSpendLocal,
@@ -154,6 +165,56 @@ void main() {
     expect(summary.toJson()['pipe_health'], litellmPipeHealthThrottled);
     expect(summary.toJson()['average_latency_ms'], 200);
     expect(summary.toJson()['max_retry_after_seconds'], 120);
+    expect(summary.providerPipeHealth.length, 2);
+    final codex = summary.providerPipeHealth
+        .singleWhere((entry) => entry.provider == 'codex');
+    expect(codex.account, 'work@example.com');
+    expect(codex.pipeHealth, litellmPipeHealthHealthy);
+    final grok = summary.providerPipeHealth
+        .singleWhere((entry) => entry.provider == 'grok');
+    expect(grok.pipeHealth, litellmPipeHealthThrottled);
+    expect(grok.routingPenaltyPercent, greaterThanOrEqualTo(60));
+    final penalties = summary.pipePenaltyByProvider(now: 16);
+    expect(penalties['grok'], greaterThanOrEqualTo(60));
+    expect(penalties['codex|work@example.com'], isNull);
+  });
+
+  test('account-scoped pipe penalties do not bleed provider-wide', () {
+    final summary = summarizeRoutedRequests([
+      const LiteLlmRouteMetric(
+        at: 10,
+        provider: 'claude',
+        account: 'work@example.com',
+        requestedModel: 'frontier',
+        servedModel: 'claude',
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        event: litellmEventFailure,
+        httpStatus: 429,
+      ),
+      const LiteLlmRouteMetric(
+        at: 12,
+        provider: 'claude',
+        account: 'home@example.com',
+        requestedModel: 'frontier',
+        servedModel: 'claude',
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+      ),
+    ]);
+
+    final penalties = summary.pipePenaltyByProvider(now: 20);
+    expect(
+      penalties[liteLlmProviderPipeKey('claude', 'work@example.com')],
+      greaterThan(0),
+    );
+    expect(penalties, isNot(contains('claude')));
+    expect(
+      penalties,
+      isNot(contains(liteLlmProviderPipeKey('claude', 'home@example.com'))),
+    );
   });
 
   test('classifies non-throttle failures as degraded pipe health', () {
@@ -174,6 +235,63 @@ void main() {
     expect(summary.failedRequests, 1);
     expect(summary.degradedRequests, 1);
     expect(summary.throttledRequests, 0);
+  });
+
+  test('expires provider pipe penalties after the recent window', () {
+    final summary = summarizeRoutedRequests([
+      const LiteLlmRouteMetric(
+        at: 10,
+        provider: 'claude',
+        requestedModel: 'frontier',
+        servedModel: 'claude',
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        event: litellmEventFailure,
+        httpStatus: 529,
+      ),
+    ]);
+
+    expect(summary.pipePenaltyByProvider(now: 20), contains('claude'));
+    expect(
+      summary.pipePenaltyByProvider(
+        now: 2000,
+        maxAgeSeconds: 60,
+      ),
+      isNot(contains('claude')),
+    );
+  });
+
+  test('successful requests do not refresh an old pipe penalty', () {
+    final summary = summarizeRoutedRequests([
+      const LiteLlmRouteMetric(
+        at: 10,
+        provider: 'claude',
+        requestedModel: 'frontier',
+        servedModel: 'claude',
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+        event: litellmEventFailure,
+        httpStatus: 529,
+      ),
+      const LiteLlmRouteMetric(
+        at: 1000,
+        provider: 'claude',
+        requestedModel: 'frontier',
+        servedModel: 'claude',
+        promptTokens: 0,
+        completionTokens: 0,
+        cost: 0,
+      ),
+    ]);
+
+    expect(summary.providerPipeHealth.single.lastAt, 1000);
+    expect(summary.providerPipeHealth.single.lastProblemAt, 10);
+    expect(
+      summary.pipePenaltyByProvider(now: 1000, maxAgeSeconds: 60),
+      isNot(contains('claude')),
+    );
   });
 
   test('loads only the bounded tail of the metrics file', () {

@@ -78,9 +78,10 @@ emit `quotabot.suggest.v1` with:
 - Each candidate carries identity (`provider`, `account`, optional `plan`,
   `local`) and budget fields such as `headroom_percent`,
   `effective_headroom_percent`, optional `lease_discount_percent`,
-  `burn_percent_per_hour`, `burn_se_percent_per_hour`, `strand_probability`,
-  `confidence`, `runway_hours`, optional `projected_waste_percent`, optional
-  `waste_boost`, optional `cost_penalty`, optional `cost_discount`,
+  optional `pipe_discount_percent`, `burn_percent_per_hour`,
+  `burn_se_percent_per_hour`, `strand_probability`, `confidence`,
+  `runway_hours`, optional `projected_waste_percent`, optional `waste_boost`,
+  optional `cost_penalty`, optional `cost_discount`,
   `routing_score`, `resets_at`, `stale`, and `available`.
   `runway_hours` is the risk-adjusted runway before confidence is applied;
   `projected_waste_percent` is included only when measured burn and a near reset
@@ -90,6 +91,9 @@ emit `quotabot.suggest.v1` with:
   it appears only when a caller provided a cost policy. Local runtimes may omit
   these score fields because their placement is governed by the explicit fallback
   or local-first policy.
+  `pipe_discount_percent` is a recent local LiteLLM pipe-health discount applied
+  to `effective_headroom_percent` for ranking. It does not change
+  `headroom_percent` or `available`; those remain quota availability evidence.
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields (including `active_leases`) plus `source`,
@@ -266,12 +270,17 @@ request-attempt metrics read from `~/.quotabot/litellm-metrics.jsonl`:
   records.
 - `top_served_models`: an array of `{model, count}` entries counted from
   successful records only.
+- `provider_pipe_health`: an array of recent provider/account pipe-health rows
+  with `provider`, optional `account`, request counts, `pipe_health`,
+  `routing_penalty_percent`, optional `max_retry_after_seconds`, and optional
+  `last_problem_at` and `last_at`. The local router can apply this bounded
+  metadata as `pipe_discount_percent` in routing outputs.
 
 The source JSONL records are local metadata only: timestamp, requested model,
-served model, selected spend class, success/failure event, HTTP status,
-Retry-After seconds, callback latency, sanitized exception class, token counts,
-and response cost. They never contain prompts, responses, exception messages, or
-source code.
+served model, gated provider/account when known, selected spend class,
+success/failure event, HTTP status, Retry-After seconds, callback latency,
+sanitized exception class, token counts, and response cost. They never contain
+prompts, responses, exception messages, or source code.
 
 ## Provider fixture registry
 
