@@ -1634,16 +1634,50 @@ String _stateStyled(String state) {
 }
 
 /// The account label for a doctor row, shown only to disambiguate a provider
-/// that appears under more than one account. A single-account provider needs no
-/// label: the user knows which account it is.
+/// that appears under more than one real account. A single-account provider
+/// gets its identity in the provenance tag instead of the row label.
 String _doctorAccountSuffix(ProviderQuota q, Map<String, int> counts) =>
-    (counts[q.provider] ?? 0) > 1 &&
-            q.account != 'default' &&
-            q.account != 'unknown' &&
-            q.account != 'installed' &&
-            q.account != 'cli'
+    (counts[q.provider] ?? 0) > 1 && _providerHasDoctorAccountIdentity(q)
         ? ' (${q.account})'
         : '';
+
+String _providerProvenance(ProviderQuota q, int now, String state) {
+  final parts = <String>[
+    _providerReadStateLabel(state),
+    _providerSpendClass(q),
+  ];
+  if (providerHasDoctorProvenanceIdentity(q)) parts.add(q.account);
+  if (q.perMachine) parts.add('this machine');
+  final captured = routeCaptureAgeLabel(q.asOf, now);
+  if (captured.isNotEmpty) parts.add(captured);
+  return style.dim('[${parts.join(', ')}]');
+}
+
+String _providerReadStateLabel(String state) => switch (state) {
+      'OUT OF QUOTA' => 'live',
+      'ERROR' => 'error',
+      _ => state,
+    };
+
+String _providerSpendClass(ProviderQuota q) {
+  if (q.isLocal) return q.active ? 'local loaded' : 'local cold';
+  if (q.isManual) return 'manual';
+  if (q.windows.isEmpty) return 'metadata only';
+  return kQuotaPlanProviders.contains(q.provider)
+      ? 'quota plan'
+      : 'metered plan';
+}
+
+bool _providerHasDoctorAccountIdentity(ProviderQuota q) {
+  const placeholders = {'cli', 'installed', 'simulated'};
+  return !q.isLocal &&
+      hasSpecificQuotaAccount(q.account) &&
+      !placeholders.contains(q.account.toLowerCase());
+}
+
+bool providerHasDoctorProvenanceIdentity(ProviderQuota q) =>
+    _providerHasDoctorAccountIdentity(q) &&
+    (q.isManual || q.account.contains('@'));
 
 void _printDoctor(List<ProviderQuota> results) {
   final now = nowEpoch();
@@ -1693,16 +1727,19 @@ void _printDoctor(List<ProviderQuota> results) {
               }).join(', ');
     final namePart =
         '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}';
-    // Local-only reads reflect this machine, not the account across all devices.
-    final scope = q.perMachine ? ' ${style.dim('(this machine)')}' : '';
+    final provenance = _providerProvenance(q, now, state);
     print(
-        '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} $detail$scope');
+      '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} '
+      '$detail $provenance',
+    );
     for (final d in q.details) {
       print('  $indent ${' '.padRight(12)} $d');
     }
-    if (q.perMachine) {
+    if (q.perMachine && !q.isLocal) {
       print(
-          '  $indent ${' '.padRight(12)} ${style.dim('note: local fallback; other devices may differ')}');
+        '  $indent ${' '.padRight(12)} '
+        '${style.dim('note: this machine only; other devices may differ')}',
+      );
     }
     if (q.modelQuotas.isNotEmpty) {
       // Compact human summary; the full per-model table is in `quotabot json`

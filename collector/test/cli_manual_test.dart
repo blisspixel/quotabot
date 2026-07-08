@@ -17,7 +17,7 @@ void main() {
   });
 
   Future<ProcessResult> runCli(List<String> args) {
-    return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
+    return runCollectCli(args, environment: _isolatedEnv(temp));
   }
 
   test('manual set list and remove round-trip through the CLI', () async {
@@ -79,4 +79,49 @@ void main() {
     expectExitCode(result, 64);
     expect(result.stderr as String, contains('usage: quotabot manual set'));
   });
+
+  test('doctor disambiguates duplicate manual accounts', () async {
+    for (final account in ['work', 'home']) {
+      final result = await runCli([
+        'manual',
+        'set',
+        'custom-ai',
+        '--display-name',
+        'Custom AI',
+        '--account',
+        account,
+        '--used',
+        account == 'work' ? '3' : '4',
+        '--limit',
+        '10',
+        '--reset',
+        '1893456000',
+      ]);
+      expectExitCode(result, 0);
+    }
+
+    final doctor = await runCli(['doctor', '--no-color']);
+
+    expectExitCode(doctor, 0);
+    final out = doctor.stdout as String;
+    expect(out, contains('Custom AI (work)'));
+    expect(out, contains('Custom AI (home)'));
+    expect(out, contains('[live, manual, work, captured'));
+    expect(out, contains('[live, manual, home, captured'));
+  });
 }
+
+Map<String, String> _isolatedEnv(Directory temp) => {
+      'LOCALAPPDATA': '${temp.path}${Platform.pathSeparator}LocalAppData',
+      'APPDATA': '${temp.path}${Platform.pathSeparator}AppData',
+      'USERPROFILE': '${temp.path}${Platform.pathSeparator}UserProfile',
+      'HOME': '${temp.path}${Platform.pathSeparator}Home',
+      'XDG_CONFIG_HOME': '${temp.path}${Platform.pathSeparator}XdgConfig',
+      'XDG_DATA_HOME': '${temp.path}${Platform.pathSeparator}XdgData',
+      'QUOTABOT_DEMO': '0',
+      'NVIDIA_API_KEY': '',
+      'nvapi': '',
+      'OLLAMA_HOST': 'http://127.0.0.1:9',
+      'LMSTUDIO_HOST': 'http://127.0.0.1:9',
+      'LEMONADE_HOST': 'http://127.0.0.1:9',
+    };

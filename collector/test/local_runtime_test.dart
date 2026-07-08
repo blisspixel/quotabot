@@ -45,6 +45,9 @@ void main() {
       );
       expect(q.kind, ProviderQuotaKind.local);
       expect(q.active, isTrue);
+      expect(q.perMachine, isTrue);
+      expect(q.toJson()['per_machine'], isTrue);
+      expect(ProviderQuota.fromJson(q.toJson()).perMachine, isTrue);
       expect(q.windows, isEmpty);
       expect(q.account, '3 models');
       expect(q.status, contains('qwen3-coder'));

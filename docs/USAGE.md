@@ -111,6 +111,9 @@ any read command for machine output.
 | `help`, `version`      | Usage and version.                                    |
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
+Human `doctor` rows include a compact provenance tag with read state, spend
+class, real account identity when the provider exposes one, local-only scope,
+and capture age.
 The frozen `quotabot.v1` contract is documented in [SCHEMA.md](SCHEMA.md).
 
 ### Deterministic simulation
