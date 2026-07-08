@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
 
 import '../bin/collect.dart' as cli;
@@ -138,6 +139,64 @@ void main() {
     final out = result.stdout as String;
     expect(out, contains('on grok [live, quota plan, you@example.com'));
     expect(out, contains('captured'));
+  });
+
+  test('doctor human output names trust provenance', () async {
+    final result = await runCli([
+      'doctor',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[live, quota plan, captured'));
+    expect(out, isNot(contains('Claude (simulated)')));
+  });
+
+  test('doctor demo output labels local scope without duplicate badges',
+      () async {
+    final result = await runCollectCli(
+      ['doctor', '--no-color'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[live, quota plan, you@example.com'));
+    expect(out, contains('[in use, local loaded, this machine'));
+    expect(out, isNot(contains('note: this machine only')));
+    expect(out, isNot(contains('local fallback; other devices may differ')));
+  });
+
+  test('doctor provenance does not call plan strings account identities', () {
+    final planOnly = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'max',
+      asOf: 1000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+    );
+    final emailIdentity = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'you@example.com',
+      asOf: 1000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+    );
+    final manualIdentity = ProviderQuota(
+      provider: 'custom-ai',
+      displayName: 'Custom AI',
+      account: 'work',
+      source: providerQuotaManualSource,
+      asOf: 1000,
+      windows: [QuotaWindow(label: 'manual', usedPercent: 10)],
+    );
+
+    expect(cli.providerHasDoctorProvenanceIdentity(planOnly), isFalse);
+    expect(cli.providerHasDoctorProvenanceIdentity(emailIdentity), isTrue);
+    expect(cli.providerHasDoctorProvenanceIdentity(manualIdentity), isTrue);
   });
 
   test('future capture label does not present clock skew as fresh', () {

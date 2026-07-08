@@ -195,6 +195,7 @@ ProviderQuota localRuntimeQuota({
     active: headline != null,
     details: details,
     models: models,
+    perMachine: true,
   );
 }
 
