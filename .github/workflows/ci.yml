@@ -20,6 +20,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     # Use bash on every runner (Git Bash on Windows) so the multi-line coverage
     # step's line continuations and paths behave the same everywhere.
