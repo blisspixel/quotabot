@@ -488,9 +488,9 @@ here is the final one.
     caveats. In progress: `top` now shows cache age, account identity on
     duplicate providers, and column-stable narrow rendering; analytics shares
     the dashboard chrome; `verify` states each provider's honesty plainly;
-    human `suggest` now labels route candidates with live/cached state, spend
-    class, real account identity, and capture age without changing the JSON
-    shape.
+    human provider and model recommendation surfaces now label live/cached
+    state, spend class, real account identity, local readiness, per-machine
+    scope, and capture age without changing the JSON shape.
 25. [ ] Smoke test install and update paths on clean Windows, macOS, and Linux
     hosts: one-line installers, source setup scripts, desktop shortcut/tray
     setup, CLI-only setup, release archives, checksums, `quotabot doctor`, and
