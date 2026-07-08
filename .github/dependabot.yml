@@ -51,3 +51,16 @@ updates:
       mcp-client-npm:
         patterns:
           - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/integrations/litellm"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "10:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    groups:
+      litellm-python:
+        patterns:
+          - "*"

@@ -1,0 +1,3 @@
+# Python 3.10 through 3.13 only; LiteLLM 1.91.0 does not support Python 3.14.
+litellm[proxy]==1.91.0
+PyYAML==6.0.3

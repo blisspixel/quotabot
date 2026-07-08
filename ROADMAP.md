@@ -533,8 +533,9 @@ here is the final one.
     findings (terminal escape injection via provider strings; a hung provider
     wedging the fleet and the desktop poll loop) were fixed and pinned with
     tests. Repeat round progress: CI, release, and secret-scan jobs now have
-    explicit timeouts, while CodeQL already did. The item closes when a repeat
-    round comes back empty.
+    explicit timeouts, while CodeQL already did; the LiteLLM proxy test now
+    installs from a hash-locked requirements file covered by Dependabot. The
+    item closes when a repeat round comes back empty.
 28. [ ] 1.0 release candidate dry run. Build artifacts from a tag candidate,
     verify release notes and checksums, install from artifacts, run smoke tests,
     verify GitHub alerts are clear, and confirm the working tree has one clean

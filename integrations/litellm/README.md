@@ -50,10 +50,14 @@ so routing here stays consistent with the desktop widget and the MCP server.
 2. Install LiteLLM and copy the example files:
 
    ```
-   pip install "litellm[proxy]" pyyaml
+   pip install -r requirements.txt
    cp config.example.yaml config.yaml
    cp quotabot-routing.example.yaml quotabot-routing.yaml
    ```
+
+   Use Python 3.10 through 3.13; the currently tested LiteLLM proxy release does
+   not support Python 3.14. The requirements file locks the proxy dependency and
+   its transitive packages with hashes; Dependabot keeps those pins current.
 
    Keep `config.yaml` in the same folder as `quotabot_router.py`; current
    LiteLLM proxy releases resolve custom callback modules relative to the config

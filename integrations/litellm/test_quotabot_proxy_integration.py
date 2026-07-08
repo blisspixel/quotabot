@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -250,6 +251,34 @@ def _post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _stop_process_tree(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            process.kill()
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=10)
+
+
 @unittest.skipUnless(RUN_PROXY_TEST, "set QUOTABOT_RUN_LITELLM_PROXY_TEST=1")
 class LiteLLMProxyIntegrationTest(unittest.TestCase):
     def test_proxy_routes_logical_model_with_real_precall_hook(self) -> None:
@@ -296,6 +325,12 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
                     env=env,
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
+                    creationflags=(
+                        subprocess.CREATE_NEW_PROCESS_GROUP
+                        if os.name == "nt"
+                        else 0
+                    ),
+                    start_new_session=os.name != "nt",
                 )
                 try:
                     _wait_for_proxy(proxy_url, process, log_path)
@@ -307,12 +342,7 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
                         },
                     )
                 finally:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=10)
+                    _stop_process_tree(process)
 
         self.assertEqual("ok", response["choices"][0]["message"]["content"])
         self.assertGreaterEqual(_FakeQuotabotHandler.requests_seen, 1)
