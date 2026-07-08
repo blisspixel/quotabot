@@ -126,4 +126,63 @@ void main() {
 
     expect(loadManualQuotaEntries(dir: temp).map((e) => e.provider), ['ok']);
   });
+
+  test('restricts the temp file before writing manual quota JSON', () {
+    final entry = buildManualQuotaEntry(
+      provider: 'custom',
+      displayName: 'Custom',
+      account: 'work@example.com',
+      plan: null,
+      window: 'weekly',
+      used: '1',
+      limit: '10',
+      reset: '1893456000',
+      now: 123,
+    )!;
+    final calls = <String>[];
+    addTearDown(() => setManualQuotaFileRestrictorForTesting(null));
+
+    setManualQuotaFileRestrictorForTesting((file) {
+      calls.add(file.path);
+      if (calls.length == 1) {
+        expect(file.path, endsWith('.tmp'));
+        expect(file.existsSync(), isTrue);
+        expect(file.lengthSync(), 0,
+            reason: 'tmp must be restricted before sensitive JSON is written');
+      } else {
+        expect(file.path, manualQuotaFile(dir: temp).path);
+        expect(file.readAsStringSync(), contains('work@example.com'));
+      }
+    });
+
+    saveManualQuotaEntries([entry], dir: temp);
+
+    expect(calls, hasLength(2));
+    expect(calls.first, contains('quotas.json.'));
+    expect(calls.last, manualQuotaFile(dir: temp).path);
+  });
+
+  test('saved manual quota file and directory are owner-only on POSIX', () {
+    // Manual quota JSON can carry account labels. On POSIX it must not be
+    // group- or world-readable. The sequencing test above runs on every
+    // platform and proves the temp file is restricted before content lands.
+    if (Platform.isWindows) return;
+    final entry = buildManualQuotaEntry(
+      provider: 'custom',
+      displayName: 'Custom',
+      account: 'work@example.com',
+      plan: null,
+      window: 'weekly',
+      used: '1',
+      limit: '10',
+      reset: '1893456000',
+      now: 123,
+    )!;
+
+    saveManualQuotaEntries([entry], dir: temp);
+
+    final file = manualQuotaFile(dir: temp);
+    expect(file.statSync().mode & 0x3f, 0, reason: 'no group/other bits');
+    expect(temp.statSync().mode & 0x3f, 0, reason: 'directory owner-only');
+  });
 }

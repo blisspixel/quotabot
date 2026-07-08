@@ -8,6 +8,22 @@ import 'util.dart';
 const manualQuotaSchema = 'quotabot.manual.v1';
 const manualQuotaSource = providerQuotaManualSource;
 
+void Function(File file)? _restrictManualQuotaFileForTesting;
+
+void setManualQuotaFileRestrictorForTesting(
+  void Function(File file)? restrictor,
+) {
+  var assertsEnabled = false;
+  assert(() {
+    assertsEnabled = true;
+    return true;
+  }());
+  if (!assertsEnabled) {
+    throw UnsupportedError('test file restrictor is unavailable in release');
+  }
+  _restrictManualQuotaFileForTesting = restrictor;
+}
+
 class ManualQuotaEntry {
   final String provider;
   final String displayName;
@@ -148,13 +164,16 @@ void saveManualQuotaEntries(
   final out = normalized.values.toList()..sort(_compareEntries);
   final file = manualQuotaFile(dir: dir);
   final tmp = File('${file.path}.$pid.tmp');
+  final restrictFile =
+      _restrictManualQuotaFileForTesting ?? restrictOwnerOnlyFile;
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictFile(tmp);
   tmp.writeAsStringSync(jsonEncode({
     'schema': manualQuotaSchema,
     'entries': out.map((entry) => entry.toJson()).toList(),
   }));
-  restrictOwnerOnlyFile(tmp);
   tmp.renameSync(file.path);
-  restrictOwnerOnlyFile(file);
+  restrictFile(file);
 }
 
 ManualQuotaEntry setManualQuotaEntry(
