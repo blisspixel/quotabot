@@ -248,7 +248,7 @@ void main() {
     expect(find.text('ROUTED REQUESTS'), findsOneWidget);
     expect(find.text('3 routed'), findsOneWidget);
     expect(
-      find.text('spend: 1 local | 1 quota | 1 paid API (\$0.16)'),
+      find.text('spend: 1 local | 2 quota | 1 paid API (\$0.16)'),
       findsOneWidget,
     );
     expect(
