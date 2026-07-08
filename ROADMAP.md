@@ -86,7 +86,7 @@ product is finished forever. It is a claim that the SEE and ROUTE core is truste
 the public contract is steady, the installation and update paths are boring, and
 known failure modes are honest instead of surprising.
 
-The current line, **0.5.12**, is best
+The current line, **0.5.13**, is best
 understood as a corrective and hardening pass on the feature-complete original
 1.0 foundation, not as 1.0 itself. The major pre-1.0 surfaces exist: desktop,
 CLI, MCP, HTTP, LiteLLM integration, profiles, leases, model routing,
@@ -566,9 +566,9 @@ here is the final one.
     demo-mode `doctor --json`; local Windows desktop release build passed with a
     produced Release bundle; published `v0.5.10` assets and checksum sidecars
     were verified; `v0.5.11` shipped the near-zero headroom availability fix;
-    the current patch source line is `0.5.12` for the LiteLLM pipe-health
-    release catch-up; `gh attestation verify` passed for the downloaded Windows
-    archive; hosted CI, CodeQL, Secret scan, and the release workflow
+    the current patch source line is `0.5.13` for the LiteLLM pipe-health
+    routing release catch-up; `gh attestation verify` passed for the downloaded
+    Windows archive; hosted CI, CodeQL, Secret scan, and the release workflow
     passed on the release commit and tag; GitHub now has only the `main` branch
     and no open PRs. Still required before completion: run the
     true 1.0 tag-candidate release workflow, install and smoke-test from
