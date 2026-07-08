@@ -246,7 +246,7 @@ Map<String, dynamic> _bucketSamplesAt(
     'sq': headroom * headroom * samples,
     'min': headroom,
     'max': headroom,
-    'x': headroom <= 0.5 ? samples : 0,
+    'x': headroom <= kSpentHeadroomFloor ? samples : 0,
     'h': hist,
   };
 }

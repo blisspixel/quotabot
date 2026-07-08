@@ -15,6 +15,7 @@ library;
 
 import 'analysis.dart';
 import 'insights.dart';
+import 'models.dart';
 
 /// One bucket of a reliability diagram: predictions whose probability fell in a
 /// [0.1)-wide band, with the mean predicted probability, the observed frequency
@@ -188,7 +189,7 @@ CalibrationReport calibrationFromHistory(
   int now, {
   int horizonHours = 5,
   int burnLookbackHours = 6,
-  double spentFloor = 0.5,
+  double spentFloor = kSpentHeadroomFloor,
   int bins = 10,
 }) =>
     _score(
@@ -205,7 +206,7 @@ CalibrationReport calibrationAcross(
   int now, {
   int horizonHours = 5,
   int burnLookbackHours = 6,
-  double spentFloor = 0.5,
+  double spentFloor = kSpentHeadroomFloor,
   int bins = 10,
 }) {
   final predicted = <double>[];

@@ -342,7 +342,7 @@ String _topSpendClass(ProviderQuota q) {
 bool _isCollapsedSpent(ProviderQuota q, int now) {
   final binding = bindingWindow(q, now);
   final headroom = providerHeadroom(q, now) ?? 100;
-  return binding != null && headroom <= 0.5;
+  return binding != null && headroom <= kSpentHeadroomFloor;
 }
 
 int _trailingTagBudget(
@@ -466,7 +466,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
 
   final binding = bindingWindow(q, now);
   final headroom = providerHeadroom(q, now) ?? 100;
-  if (binding != null && headroom <= 0.5) {
+  if (binding != null && headroom <= kSpentHeadroomFloor) {
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
         : 'resets ${_eta(binding.resetsAt!, now)}';

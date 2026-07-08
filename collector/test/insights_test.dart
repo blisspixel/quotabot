@@ -44,6 +44,12 @@ void main() {
       expect(b.exhausted, 1); // only the 0.0 sample is spent
     });
 
+    test('counts rounded-one-percent headroom as exhausted', () {
+      final b = HeadroomBucket(start: 0)..add(1.4);
+
+      expect(b.exhausted, 1);
+    });
+
     test('stddev is zero for identical samples and positive otherwise', () {
       final flat = HeadroomBucket(start: 0)
         ..add(40)

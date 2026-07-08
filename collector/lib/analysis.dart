@@ -41,15 +41,16 @@ double? providerHeadroom(ProviderQuota q, int now) {
 
 /// The provider with the most remaining headroom, for choosing where to route
 /// work. Local runtimes are excluded (they read 100% and would always win; use
-/// [suggestRoute] for fallback logic). Stale cached snapshots are excluded:
-/// they are last-known evidence, not current usable capacity.
+/// [suggestRoute] for fallback logic). Stale cached snapshots and providers at
+/// or below the spent floor are excluded: they are evidence, not current usable
+/// capacity.
 ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   ProviderQuota? best;
   double bestHeadroom = -1;
   for (final q in quotas) {
     if (q.isLocal || q.stale) continue;
     final h = providerHeadroom(q, now);
-    if (h != null && h > bestHeadroom) {
+    if (h != null && h > kSpentHeadroomFloor && h > bestHeadroom) {
       bestHeadroom = h;
       best = q;
     }
@@ -57,9 +58,10 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   return best;
 }
 
-/// Availability of a single provider: usable when a fresh snapshot has any
-/// headroom left. Stale cached windows still return their last-known headroom
-/// and reset for display, but they are not reported as currently available.
+/// Availability of a single provider: usable when a fresh snapshot has more
+/// than [kSpentHeadroomFloor] headroom left. Stale cached windows still return
+/// their last-known headroom and reset for display, but they are not reported
+/// as currently available.
 /// When spent, `resetsAt` is when it becomes usable again, which is the reset of
 /// the window that clears last, not the soonest (see [bindingWindow]).
 ({bool available, double? headroom, int? resetsAt}) providerAvailability(
@@ -69,7 +71,7 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   final h = providerHeadroom(q, now);
   if (h == null) return (available: false, headroom: null, resetsAt: null);
   return (
-    available: !q.stale && h > 0.5,
+    available: !q.stale && h > kSpentHeadroomFloor,
     headroom: h,
     resetsAt: bindingWindow(q, now)?.resetsAt,
   );
@@ -100,11 +102,11 @@ bool anyProviderUsable(List<ProviderQuota> quotas, int now) {
 /// reset is treated as furthest out, since its clear time is genuinely unknown.
 QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return null;
-  final spent = (providerHeadroom(q, now) ?? 100) <= 0.5;
+  final spent = (providerHeadroom(q, now) ?? 100) <= kSpentHeadroomFloor;
   if (spent) {
     QuotaWindow? latest;
     for (final w in q.windows) {
-      if (windowHeadroom(w, now) > 0.5) continue; // not a blocking window
+      if (windowHeadroom(w, now) > kSpentHeadroomFloor) continue;
       if (latest == null) {
         latest = w;
         continue;
@@ -728,9 +730,9 @@ int _compareSubscriptionCandidates(RouteCandidate a, RouteCandidate b) {
 /// leases (so we don't burn the last sliver of a cap). If no subscription clears
 /// the threshold, recommend any available local runtime as a free, always-on
 /// fallback. If there is no local fallback either, recommend the least-bad
-/// fresh subscription that still has *some* headroom; otherwise the one that
-/// resets soonest. Cached stale windows remain visible in ranked evidence but
-/// are never recommended as usable capacity.
+/// fresh subscription that still has headroom above the spent floor; otherwise
+/// the one that resets soonest. Cached stale windows remain visible in ranked
+/// evidence but are never recommended as usable capacity.
 ///
 /// The comfort gate uses *effective* headroom: present headroom
 /// discounted by each provider's recent burn over the [leadHours] planning
@@ -923,7 +925,9 @@ RouteSuggestion suggestRoute(
 
   final liveSubs = subs.where((c) => !c.stale).toList();
   final comfy = liveSubs
-      .where((c) => (c.effectiveHeadroom ?? 0) >= comfortThreshold)
+      .where(
+        (c) => c.available && (c.effectiveHeadroom ?? 0) >= comfortThreshold,
+      )
       .toList();
   if (comfy.isNotEmpty) {
     final best = comfy.first;
@@ -949,8 +953,10 @@ RouteSuggestion suggestRoute(
     );
   }
 
-  // No local fallback. Recommend the subscription with any headroom left.
-  final withAny = liveSubs.where((c) => (c.headroom ?? 0) > 0.5).toList();
+  // No local fallback. Recommend the best subscription above the spent floor.
+  final withAny = liveSubs
+      .where((c) => (c.headroom ?? 0) > kSpentHeadroomFloor)
+      .toList();
   if (withAny.isNotEmpty) {
     final best = withAny.first;
     return result(

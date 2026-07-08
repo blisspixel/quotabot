@@ -295,6 +295,11 @@ output:
 - `69` unavailable: the named provider (`check`), or the whole fleet (piped
   `top`), has no usable quota at the moment.
 
+For metered providers, `available` means more than the practical spent floor is
+left. Quotabot treats 1.5% or less remaining headroom as unavailable so
+near-zero provider reads that round to `1% free` do not route work into an
+already exhausted cap.
+
 For example, `quotabot check claude || quotabot suggest --json` falls through to a
 route only when Claude is spent.
 

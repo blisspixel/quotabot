@@ -240,7 +240,7 @@ String verifyState(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return 'no_data';
   if (q.stale) return 'cached';
   final headroom = providerHeadroom(q, now) ?? 100;
-  return headroom <= 0.5 ? 'out_of_quota' : 'live';
+  return headroom <= kSpentHeadroomFloor ? 'out_of_quota' : 'live';
 }
 
 VerifyCheck _identityCheck(ProviderQuota q) {
