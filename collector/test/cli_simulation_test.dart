@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
 
@@ -251,6 +252,71 @@ void main() {
 
     expectExitCode(result, 0);
     expect(result.stdout as String, contains('all clear'));
+  });
+
+  test('watch human alerts include trust provenance', () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=exhausted',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[red] Claude 5h at 0% free'));
+    expect(out, contains('fallback: wait for claude'));
+    expect(out, contains('[live, quota plan, captured'));
+    expect(out, isNot(contains('simulated')));
+  });
+
+  test('watch provenance names cached route evidence without duplicate emails',
+      () {
+    cli.style = const AnsiStyle(false);
+    const now = 2000;
+    final alert = QuotaAlert(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'work@example.com',
+      window: 'weekly',
+      severity: AlertSeverity.red,
+      freePercent: 4,
+      asOf: 1940,
+      routeTo: 'claude',
+      routeDisplayName: 'Claude',
+      routeAccount: 'home@example.com',
+      routeFreePercent: 70,
+    );
+    final provenance = cli.quotaAlertProvenance(
+      alert,
+      [
+        ProviderQuota(
+          provider: 'codex',
+          displayName: 'Codex',
+          account: 'work@example.com',
+          asOf: 1940,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 96)],
+        ),
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'home@example.com',
+          asOf: 1400,
+          stale: true,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 30)],
+        ),
+      ],
+      now,
+    );
+
+    expect(alert.message, contains('work@example.com'));
+    expect(alert.message, contains('home@example.com'));
+    expect(provenance, contains('live'));
+    expect(provenance, contains('route cached'));
+    expect(provenance, contains('route captured 10m ago'));
+    expect(provenance, isNot(contains('work@example.com')));
+    expect(provenance, isNot(contains('home@example.com')));
   });
 
   test('watch --once stays silent in JSON mode when nothing fires', () async {

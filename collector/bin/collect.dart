@@ -1327,7 +1327,9 @@ Future<void> _runWatch(
     if (wasteThreshold != null) {
       final paceByProvider = <String, Pace>{};
       final tz = DateTime.now().timeZoneOffset;
-      for (final q in data.where((provider) => !provider.isLocal)) {
+      for (final q in data.where(
+        (provider) => !provider.isLocal && !provider.isManual,
+      )) {
         final ins = Insights.from(
           _historyBuckets(q.provider, account: q.account),
           now,
@@ -1353,7 +1355,11 @@ Future<void> _runWatch(
         final tag = a.severity == AlertSeverity.red
             ? style.red('[red]')
             : style.orange('[amber]');
-        stdout.writeln('$tag ${a.message}');
+        final fallback = a.kind == QuotaAlertKind.lowQuota && a.routeTo == null
+            ? _quotaAlertFallback(suggestion.fallback, now)
+            : '';
+        final provenance = quotaAlertProvenance(a, data, now);
+        stdout.writeln('$tag ${a.message}$fallback $provenance');
       }
       if (webhook != null) {
         final r = await postAlert(webhook, a.toJson(),
@@ -1642,15 +1648,96 @@ String _doctorAccountSuffix(ProviderQuota q, Map<String, int> counts) =>
         : '';
 
 String _providerProvenance(ProviderQuota q, int now, String state) {
+  final parts = _providerProvenanceParts(q, now, state);
+  return style.dim('[${parts.join(', ')}]');
+}
+
+List<String> _providerProvenanceParts(
+  ProviderQuota q,
+  int now,
+  String state, {
+  bool includeAccount = true,
+}) {
   final parts = <String>[
     _providerReadStateLabel(state),
     _providerSpendClass(q),
   ];
-  if (providerHasDoctorProvenanceIdentity(q)) parts.add(q.account);
+  if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
+    parts.add(q.account);
+  }
   if (q.perMachine) parts.add('this machine');
   final captured = routeCaptureAgeLabel(q.asOf, now);
   if (captured.isNotEmpty) parts.add(captured);
-  return style.dim('[${parts.join(', ')}]');
+  return parts;
+}
+
+String quotaAlertProvenance(
+  QuotaAlert alert,
+  List<ProviderQuota> snapshot,
+  int now,
+) {
+  final q = _findQuota(snapshot, alert.provider, alert.account);
+  final parts = q == null
+      ? <String>[routeCaptureAgeLabel(alert.asOf, now)]
+      : _providerProvenanceParts(
+          q,
+          now,
+          _providerAlertState(q),
+          includeAccount: !_alertMessageShowsAccount(alert.account),
+        );
+  final route = alert.routeTo == null
+      ? null
+      : _findQuota(snapshot, alert.routeTo!, alert.routeAccount);
+  if (route != null) {
+    final routeParts = _providerProvenanceParts(
+      route,
+      now,
+      _providerAlertState(route),
+      includeAccount: !_alertMessageShowsAccount(alert.routeAccount),
+    );
+    parts.addAll(routeParts.map((part) => 'route $part'));
+  }
+  return style.dim('[${parts.where((part) => part.isNotEmpty).join(', ')}]');
+}
+
+String _quotaAlertFallback(RouteFallback fallback, int now) {
+  switch (fallback.kind) {
+    case RouteFallbackKind.local:
+      return ' - fallback: use ${fallback.provider} locally';
+    case RouteFallbackKind.soonestReset:
+      final reset = fallback.resetsAt == null
+          ? ''
+          : ' (resets ${_in(fallback.resetsAt!, now)})';
+      return ' - fallback: wait for ${fallback.provider}$reset';
+    case RouteFallbackKind.passthrough:
+      return ' - fallback: use the requested provider';
+  }
+}
+
+String _providerAlertState(ProviderQuota q) {
+  if (q.isLocal) return q.active ? 'in use' : 'local';
+  return q.stale ? 'cached' : 'live';
+}
+
+bool _alertMessageShowsAccount(String? account) =>
+    account != null &&
+    account.contains('@') &&
+    hasSpecificQuotaAccount(account);
+
+ProviderQuota? _findQuota(
+  List<ProviderQuota> snapshot,
+  String provider, [
+  String? account,
+]) {
+  if (account != null) {
+    for (final q in snapshot) {
+      if (q.provider == provider && q.account == account) return q;
+    }
+  }
+  for (final q in snapshot) {
+    if (q.provider == provider) return q;
+  }
+  return null;
 }
 
 String _providerReadStateLabel(String state) => switch (state) {
