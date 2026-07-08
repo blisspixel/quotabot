@@ -544,7 +544,16 @@ here is the final one.
 28. [ ] 1.0 release candidate dry run. Build artifacts from a tag candidate,
     verify release notes and checksums, install from artifacts, run smoke tests,
     verify GitHub alerts are clear, and confirm the working tree has one clean
-    main branch.
+    main branch. Progress 2026-07-08: local Windows dry run built the CLI
+    release archive, verified the `.sha256` sidecar, expanded the archive in an
+    isolated temp directory, and ran packaged `quotabot --version` plus
+    demo-mode `doctor --json`; local Windows desktop release build passed with a
+    produced Release bundle; published `v0.5.8` assets and checksum sidecars are
+    present; `gh attestation verify` passed for the downloaded Windows archive;
+    GitHub reports zero open CodeQL, Dependabot, and secret-scanning alerts.
+    Still required before completion: push this branch, let the new dependency
+    review plus existing CI/security workflows pass on hosted GitHub, run the
+    tag-candidate release workflow for 1.0, and start from a clean main worktree.
 29. [ ] Cut 1.0 only after the dry run is boring. The final release should feel
     like publishing a utility that has already been used, installed, updated,
     and audited, not like discovering whether it works.
