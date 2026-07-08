@@ -70,6 +70,24 @@ void main() {
     expect(json['headroom_percent'], 0);
   });
 
+  test('check exits unavailable for a stale cached mock provider', () async {
+    final result = await runCli([
+      'check',
+      'grok',
+      '--json',
+      '--mock-provider=grok',
+      '--state=stale',
+    ]);
+
+    expectExitCode(result, 69);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.check.v1');
+    expect(json['provider'], 'grok');
+    expect(json['available'], isFalse);
+    expect(json['stale'], isTrue);
+    expect(json['headroom_percent'], 48);
+  });
+
   test('suggest uses the mock snapshot without real burn history', () async {
     final result = await runCli([
       'suggest',
@@ -98,6 +116,24 @@ void main() {
     expect(out, contains('quota plan'));
     expect(out, contains('live'));
     expect(out, contains('captured'));
+  });
+
+  test('suggest human output marks stale quota as last known unavailable',
+      () async {
+    final result = await runCli([
+      'suggest',
+      '--no-color',
+      '--mock-provider=grok',
+      '--state=stale',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('no provider to route to right now'));
+    expect(out, contains('Only cached quota evidence is present'));
+    expect(out, contains('48% last known'));
+    expect(out, contains('unavailable'));
+    expect(out, isNot(contains('-> grok')));
   });
 
   test('suggest human output avoids calling plan strings account identities',

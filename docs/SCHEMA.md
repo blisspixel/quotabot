@@ -103,7 +103,9 @@ same routing fields (including `active_leases`) plus `source`,
 (CLI, unknown name), an `error` note (MCP, unknown provider/account), or
 `account`, `available`, `headroom_percent`, `resets_at`, and `stale`. This is
 deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
-no `providers` array.
+no `providers` array. `available` means usable from current evidence; stale
+cached cloud quota has `available: false` even when `headroom_percent` still
+carries a last-known value.
 
 MCP `provider_with_most_headroom` emits `quotabot.headroom.v1`: `schema`,
 `as_of`, then `provider` (null with a `reason` when nothing is usable) plus
@@ -118,7 +120,8 @@ problems.
 Each model entry includes provider/account, `local`, `available`, `stale`,
 `quota_backed`, capability hints where known, and the gating quota budget when
 the model is remote: `headroom_percent`, `resets_at`, and the binding
-`gating_window` label. Entries gated by a self-reported manual quota carry
+`gating_window` label. Stale remote entries keep last-known quota fields but set
+`available: false`. Entries gated by a self-reported manual quota carry
 `source: "manual"`. Status-only cloud providers with no measured quota windows
 stay visible in `quotabot.v1` snapshots but do not contribute `models` entries.
 Some provider models with temporary included-quota terms can include

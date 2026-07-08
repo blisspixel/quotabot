@@ -6,6 +6,9 @@ Notable changes to quotabot. Newest first.
 
 ### Fixed
 - Roadmap current-line copy now matches the shipped 0.5.8 release.
+- Stale cached cloud quotas now remain visible as last-known evidence but no
+  longer report as available capacity in routing, model, `check`, MCP, or `top`
+  surfaces.
 
 ## 0.5.8 - 2026-07-07
 

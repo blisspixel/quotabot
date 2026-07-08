@@ -666,10 +666,16 @@ void _printSuggestModel(ModelSuggestion s, int now) {
         ? style.cyan('local'.padRight(9))
         : (e.headroomPercent == null
             ? style.dim('?'.padRight(9))
-            : style.health(e.headroomPercent!,
-                '${e.headroomPercent!.round()}% free'.padRight(9)));
+            : e.stale
+                ? style.dim('${e.headroomPercent!.round()}% last'.padRight(9))
+                : style.health(e.headroomPercent!,
+                    '${e.headroomPercent!.round()}% free'.padRight(9)));
     final tier = m.tier == null ? '' : style.dim('  ${m.tier}');
-    final spent = e.available ? '' : style.red('  spent');
+    final spent = e.available
+        ? ''
+        : e.stale
+            ? style.dim('  unavailable')
+            : style.red('  spent');
     final provenance = _modelEntryProvenance(e, now);
     print(
       '    ${m.id.padRight(22)} ${e.provider.padRight(11)} '
@@ -1609,7 +1615,8 @@ Future<void> _check(
   }
   final head = providerHeadroom(q, now);
   final binding = bindingWindow(q, now);
-  final available = q.isLocal ? q.ok : (head != null && head > 0.5);
+  final availability = providerAvailability(q, now);
+  final available = q.isLocal ? q.ok : availability.available;
   // Stable exit code so a script can branch on usability without parsing output.
   exitCode = available ? 0 : _exitUnavailable;
   final reset = binding?.resetsAt;
@@ -1627,8 +1634,11 @@ Future<void> _check(
     return;
   }
   final label = available ? style.green('available') : style.red('unavailable');
-  final pct =
-      head == null ? '' : '  ${style.health(head, '${head.round()}% free')}';
+  final pct = head == null
+      ? ''
+      : q.stale
+          ? '  ${style.dim('last ${head.round()}% free')}'
+          : '  ${style.health(head, '${head.round()}% free')}';
   final rs = reset == null ? '' : style.dim('  resets ${_in(reset, now)}');
   final staleTag = q.stale ? style.dim(' (cached)') : '';
   stdout.writeln('${style.bold(q.displayName)}: $label$pct$rs$staleTag');
@@ -2205,10 +2215,12 @@ void _printModels(
         ? style.cyan('local'.padRight(9))
         : (e.headroomPercent == null
             ? style.dim('?'.padRight(9))
-            : style.health(
-                e.headroomPercent!,
-                '${e.headroomPercent!.round()}% free'.padRight(9),
-              ));
+            : e.stale
+                ? style.dim('${e.headroomPercent!.round()}% last'.padRight(9))
+                : style.health(
+                    e.headroomPercent!,
+                    '${e.headroomPercent!.round()}% free'.padRight(9),
+                  ));
     final caps = [
       if (m.tier != null) m.tier!,
       if (m.tools == true) 'tools',
@@ -2216,7 +2228,11 @@ void _printModels(
       if (m.reasoning != null) 'reason',
     ].join(',');
     final capStr = caps.isEmpty ? '' : style.dim('  $caps');
-    final spent = e.available ? '' : style.red('  spent');
+    final spent = e.available
+        ? ''
+        : e.stale
+            ? style.dim('  unavailable')
+            : style.red('  spent');
     final provenance = _modelEntryProvenance(e, now);
     // Pad the context cell to a fixed width so the capability column lines up
     // across "1M ctx", "400K ctx", and context-less local models. Only pad when
@@ -2292,8 +2308,17 @@ void _printSuggest(RouteSuggestion s) {
     final pct = c.headroom == null
         ? '   ? '
         : '${c.headroom!.round().toString().padLeft(3)}%';
-    final head = c.headroom == null ? pct : style.health(c.headroom!, pct);
-    final state = c.available ? '' : style.red('  spent');
+    final head = c.headroom == null
+        ? pct
+        : c.stale
+            ? style.dim(pct)
+            : style.health(c.headroom!, pct);
+    final qualifier = c.stale ? 'last known' : 'free';
+    final state = c.available
+        ? ''
+        : c.stale
+            ? style.dim('  unavailable')
+            : style.red('  spent');
     final conf = c.confidence == null
         ? ''
         : style.dim('  conf ${(c.confidence! * 100).round()}%');
@@ -2301,7 +2326,7 @@ void _printSuggest(RouteSuggestion s) {
         ? style.orange('  strand ${(c.strandProbability! * 100).round()}%')
         : '';
     print(
-      '    ${c.provider.padRight(12)} $head free  $provenance$conf$strand$state',
+      '    ${c.provider.padRight(12)} $head $qualifier  $provenance$conf$strand$state',
     );
   }
 }
@@ -2547,6 +2572,9 @@ String? _doctorHint(ProviderQuota q, String state) {
   const canLogin = {'grok', 'antigravity'};
   if (state == 'cached' && canLogin.contains(q.provider)) {
     return 'run: quotabot login ${q.provider}  (keeps it live without reopening the app)';
+  }
+  if (state == 'cached' && q.error?.isNotEmpty == true) {
+    return q.error;
   }
   if (state == 'no live data' && !q.isLocal) {
     return 'open the ${q.displayName} app once so it writes local state, then re-run';

@@ -118,6 +118,18 @@ void main() {
       expect(r['reason'], isNotEmpty);
     });
 
+    test('mostHeadroomResponse ignores stale cached quota', () {
+      final r = mostHeadroomResponse([
+        _q(
+          'grok',
+          [QuotaWindow(label: 'weekly', usedPercent: 1)],
+          stale: true,
+        ),
+      ], _now);
+      expect(r['provider'], isNull);
+      expect(r['reason'], isNotEmpty);
+    });
+
     test('suggestResponse returns the versioned suggestion shape', () {
       final r = suggestResponse(_fixture(), _now);
       expect(r['schema'], 'quotabot.suggest.v1');
@@ -139,6 +151,20 @@ void main() {
       expect(r['provider'], 'claude');
       expect(r['available'], isTrue);
       expect(r['headroom_percent'], 80);
+    });
+
+    test('availabilityResponse does not treat stale quota as available', () {
+      final r = availabilityResponse([
+        _q(
+          'grok',
+          [QuotaWindow(label: 'weekly', usedPercent: 66)],
+          stale: true,
+        ),
+      ], _now, 'grok', null);
+      expect(r['provider'], 'grok');
+      expect(r['available'], isFalse);
+      expect(r['stale'], isTrue);
+      expect(r['headroom_percent'], 34);
     });
 
     test('availabilityResponse flags an unknown provider', () {
