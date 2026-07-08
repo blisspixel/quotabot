@@ -156,6 +156,20 @@ void main() {
     expect(out, isNot(contains('Claude (simulated)')));
   });
 
+  test('doctor human output labels failed quota-plan provenance', () async {
+    final result = await runCli([
+      'doctor',
+      '--no-color',
+      '--mock-provider=grok',
+      '--state=signed-out',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[error, quota plan, captured'));
+    expect(out, contains('simulated signed-out state'));
+  });
+
   test('doctor demo output labels local scope without duplicate badges',
       () async {
     final result = await runCollectCli(

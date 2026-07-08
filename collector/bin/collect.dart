@@ -1749,6 +1749,7 @@ String _providerReadStateLabel(String state) => switch (state) {
 String _providerSpendClass(ProviderQuota q) {
   if (q.isLocal) return q.active ? 'local loaded' : 'local cold';
   if (q.isManual) return 'manual';
+  if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
   if (q.windows.isEmpty) return 'metadata only';
   return kQuotaPlanProviders.contains(q.provider)
       ? 'quota plan'
