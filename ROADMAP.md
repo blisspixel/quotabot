@@ -499,6 +499,7 @@ here is the final one.
     provider's honesty plainly, labels live/cached/error/metadata provenance,
     and surfaces truthful cached/no-data reasons; weekly markdown reports now
     show read state, spend class, and capture age while preserving report JSON;
+    failed quota-plan reads now keep their spend class in `doctor` and `verify`;
     desktop provider cards and human `doctor`, alert, provider recommendation,
     and model recommendation surfaces now label live/cached state, spend class,
     real account identity, local readiness where applicable, per-machine scope,

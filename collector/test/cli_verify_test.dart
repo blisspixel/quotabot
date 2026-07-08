@@ -113,7 +113,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[error, metadata only, captured'));
+    expect(out, contains('[error, quota plan, captured'));
     expect(out, contains('read_or_reason'));
     expect(out, contains('simulated signed-out state'));
   });
@@ -134,18 +134,28 @@ void main() {
   });
 
   test('verify human output explains metadata-only snapshots', () async {
-    final result = await runCli([
+    final cursorResult = await runCli([
       'verify',
       '--no-color',
       '--mock-provider=cursor',
       '--state=metadata',
     ]);
+    final quotaPlanResult = await runCli([
+      'verify',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=metadata',
+    ]);
 
-    expectExitCode(result, 0);
-    final out = result.stdout as String;
-    expect(out, contains('[metadata, metadata only, captured'));
-    expect(out, contains('read_or_reason'));
-    expect(out, contains('simulated metadata-only state'));
+    expectExitCode(cursorResult, 0);
+    expectExitCode(quotaPlanResult, 0);
+    final cursorOut = cursorResult.stdout as String;
+    final quotaPlanOut = quotaPlanResult.stdout as String;
+    for (final out in [cursorOut, quotaPlanOut]) {
+      expect(out, contains('[metadata, metadata only, captured'));
+      expect(out, contains('read_or_reason'));
+      expect(out, contains('simulated metadata-only state'));
+    }
   });
 
   test('verify provenance matching uses row order for duplicate accounts', () {
