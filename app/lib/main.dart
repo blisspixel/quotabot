@@ -1551,13 +1551,12 @@ class _DashboardState extends State<Dashboard>
     return q.stale ? '$base (cached)' : base;
   }
 
-  RouteSuggestion _routeSuggestion(int now) =>
-      suggestRoute(
-        _visible,
-        now,
-        burnStatsByProvider: _burnStats,
-        pipePenaltyByProvider: _routeSummary.pipePenaltyByProvider(now: now),
-      );
+  RouteSuggestion _routeSuggestion(int now) => suggestRoute(
+    _visible,
+    now,
+    burnStatsByProvider: _burnStats,
+    pipePenaltyByProvider: _routeSummary.pipePenaltyByProvider(now: now),
+  );
 
   /// Average remaining headroom across visible providers that report quota,
   /// as a percent (0..100), or null when nothing has data. This is the "pool"
