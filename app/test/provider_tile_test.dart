@@ -161,26 +161,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'shows (this machine) note for perMachine quota like Antigravity fallback',
-    (tester) async {
-      final q = ProviderQuota(
-        provider: 'antigravity',
-        displayName: 'Antigravity',
-        account: 'user@example.com',
-        asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        windows: const [],
-        perMachine: true,
-      );
-      await tester.pumpWidget(
-        _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
-      );
-      await tester.pump();
+  testWidgets('shows machine scope in the compact trust line', (tester) async {
+    final q = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'user@example.com',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: const [],
+      perMachine: true,
+    );
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
 
-      expect(find.text(' (this machine)'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(
+      find.textContaining(
+        'no live data | metadata only | this machine | captured',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text(' (this machine)'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('shows status-only providers without a zero quota', (
     tester,
@@ -201,7 +204,97 @@ void main() {
     await tester.pump();
 
     expect(find.text('free trial available; balance unknown'), findsOneWidget);
+    expect(
+      find.textContaining('metadata | metadata only | captured'),
+      findsOneWidget,
+    );
     expect(find.textContaining('0% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shows local fallback state for status-only per-machine data', (
+    tester,
+  ) async {
+    final q = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'user@example.com',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      status: 'local fallback data',
+      windows: const [],
+      perMachine: true,
+    );
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(
+      find.textContaining(
+        'local fallback | metadata only | this machine | captured',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shows compact trust provenance for a live quota-plan tile', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: _q(20), cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('live | quota plan | captured'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shows manual and cached provenance without calling it a plan', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final manual = ProviderQuota(
+      provider: 'custom-ai',
+      displayName: 'Custom AI',
+      account: 'work',
+      source: providerQuotaManualSource,
+      asOf: now - 3600,
+      stale: true,
+      windows: [QuotaWindow(label: 'monthly', usedPercent: 90)],
+    );
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: manual, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('cached | manual | captured'), findsOneWidget);
+    expect(find.textContaining('quota plan'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shows local loaded provenance and machine scope', (
+    tester,
+  ) async {
+    final q = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: '2 models',
+      kind: ProviderQuotaKind.local,
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      status: 'qwen loaded',
+      active: true,
+      perMachine: true,
+    );
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(
+      find.textContaining('in use | local loaded | this machine | captured'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 }

@@ -27,6 +27,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   current free headroom, any material burn discount, and confidence. Account
   names still appear only when needed to distinguish multiple accounts.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
+- **Trust line:** each provider card carries a compact line for live/cached
+  state, spend class, per-machine scope when relevant, and capture age, so the
+  number is not separated from where it came from.
 - **Forecast at a glance:** when a provider is visibly burning, the card adds a
   plain-language line on the binding window ("about an hour of usage left", or
   "likely to run out before it resets" once that risk is material), the same
