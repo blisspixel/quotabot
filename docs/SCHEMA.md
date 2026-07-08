@@ -243,24 +243,35 @@ source code. The contract is additive; consumers should ignore unknown fields.
 ## `quotabot.routed_requests.v1`
 
 The desktop analytics screen uses this local summary shape for LiteLLM proxy
-metrics read from `~/.quotabot/litellm-metrics.jsonl`:
+request-attempt metrics read from `~/.quotabot/litellm-metrics.jsonl`:
 
 - `schema`: always `quotabot.routed_requests.v1`.
-- `total_requests`: served requests summarized from the bounded JSONL tail.
+- `total_requests`: request attempts summarized from the bounded JSONL tail.
 - `routed_requests`: requests whose requested model differed from the served
   model.
+- `successful_requests`, `failed_requests`, `throttled_requests`, and
+  `degraded_requests`: counts grouped by LiteLLM callback result. HTTP 429
+  failures are throttled; other failures are degraded.
+- `pipe_health`: `no_data`, `healthy`, `throttled`, or `degraded`.
 - `prompt_tokens`, `completion_tokens`, and `total_tokens`.
 - `cost`: tracked LiteLLM response cost when present, otherwise zero.
 - `local_requests`, `quota_plan_requests`, `paid_api_requests`, and
   `unknown_spend_requests`: counts grouped by the LiteLLM route's spend class.
 - `paid_api_cost`: tracked cost for records marked `paid_api`.
+- `average_latency_ms`: optional rounded mean over records that include callback
+  timing.
+- `max_retry_after_seconds`: optional largest Retry-After delay observed on
+  failed records.
 - `first_at` and `last_at`: optional Unix epoch seconds from the summarized
   records.
-- `top_served_models`: an array of `{model, count}` entries.
+- `top_served_models`: an array of `{model, count}` entries counted from
+  successful records only.
 
 The source JSONL records are local metadata only: timestamp, requested model,
-served model, selected spend class, token counts, and response cost. They never
-contain prompts, responses, or source code.
+served model, selected spend class, success/failure event, HTTP status,
+Retry-After seconds, callback latency, sanitized exception class, token counts,
+and response cost. They never contain prompts, responses, exception messages, or
+source code.
 
 ## Provider fixture registry
 

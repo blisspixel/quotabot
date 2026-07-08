@@ -534,6 +534,58 @@ models:
         self.assertEqual(record["prompt_tokens"], 10)
         self.assertEqual(open_modes, [0o600])
 
+    def test_failure_metrics_include_pipe_health_without_messages(self):
+        class Response:
+            status_code = 429
+            headers = {"Retry-After": "120"}
+
+        class RateLimitError(Exception):
+            status_code = 429
+            response = Response()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metrics.jsonl"
+            router = QuotabotRouter()
+            router.policy = Policy()
+            router.policy.metrics_path = str(path)
+            asyncio.run(
+                router.async_log_failure_event(
+                    {
+                        "model": "claude-sonnet",
+                        "exception": RateLimitError("do not log this message"),
+                        "response_cost": 0.03,
+                        "usage": {
+                            "prompt_tokens": 12,
+                            "completion_tokens": 4,
+                        },
+                        "litellm_params": {
+                            "metadata": {
+                                "quotabot_original_model": "frontier",
+                                "quotabot_spend": "quota_plan",
+                            }
+                        },
+                    },
+                    None,
+                    100.0,
+                    101.25,
+                )
+            )
+
+            record = json.loads(path.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(record["event"], "failure")
+        self.assertEqual(record["requested_model"], "frontier")
+        self.assertEqual(record["served_model"], "claude-sonnet")
+        self.assertEqual(record["spend"], "quota_plan")
+        self.assertEqual(record["http_status"], 429)
+        self.assertEqual(record["retry_after_seconds"], 120)
+        self.assertEqual(record["latency_ms"], 1250)
+        self.assertEqual(record["error_type"], "RateLimitError")
+        self.assertEqual(record["prompt_tokens"], 12)
+        self.assertEqual(record["completion_tokens"], 4)
+        self.assertEqual(record["cost"], 0.03)
+        self.assertNotIn("do not log", json.dumps(record))
+
 
 if __name__ == "__main__":
     unittest.main()

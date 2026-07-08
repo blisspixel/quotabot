@@ -201,6 +201,10 @@ class _FleetScreenState extends State<FleetScreen> {
         ? 'last request unknown'
         : 'last request ${_age(summary.lastAt!, now)} ago';
     final spend = _spendLine(summary);
+    final pipe = _pipeLine(summary);
+    final pipeColor = summary.pipeHealth == litellmPipeHealthHealthy
+        ? c.muted
+        : const Color(0xFFD29922);
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: _card(
@@ -251,6 +255,17 @@ class _FleetScreenState extends State<FleetScreen> {
                 color: summary.paidApiRequests > 0
                     ? const Color(0xFFD29922)
                     : c.muted,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              pipe,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppType.caption,
+                height: 1.3,
+                color: pipeColor,
               ),
             ),
             const SizedBox(height: 4),
@@ -775,8 +790,31 @@ class _FleetScreenState extends State<FleetScreen> {
     return parts.isEmpty ? 'spend: no labels' : 'spend: ${parts.join(' | ')}';
   }
 
+  String _pipeLine(RoutedRequestSummary summary) {
+    final latency = summary.averageLatencyMs == null
+        ? 'latency n/a'
+        : 'avg ${summary.averageLatencyMs}ms';
+    final failures = summary.failedRequests == 0
+        ? 'no failures'
+        : '${summary.failedRequests} failed';
+    final throttled = summary.throttledRequests == 0
+        ? ''
+        : ', ${summary.throttledRequests} throttled';
+    final retry = summary.maxRetryAfterSeconds == null
+        ? ''
+        : ', retry up to ${_duration(summary.maxRetryAfterSeconds!)}';
+    return 'pipe: ${summary.pipeHealth}, $failures$throttled, $latency$retry';
+  }
+
   String _age(int then, int now) {
     final seconds = math.max(0, now - then);
+    if (seconds < 60) return '${seconds}s';
+    if (seconds < 3600) return '${seconds ~/ 60}m';
+    if (seconds < 86400) return '${seconds ~/ 3600}h';
+    return '${seconds ~/ 86400}d';
+  }
+
+  String _duration(int seconds) {
     if (seconds < 60) return '${seconds}s';
     if (seconds < 3600) return '${seconds ~/ 60}m';
     if (seconds < 86400) return '${seconds ~/ 3600}h';

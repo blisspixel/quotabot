@@ -398,10 +398,11 @@ shape. It is still local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from
 `~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped
-LiteLLM router. It summarizes served requests, routed requests, tokens, tracked
-cost, spend-class counts, top served models, and the last request age. The file
-is local JSONL only; quotabot reads a bounded tail of it and never reads prompts
-or response content.
+LiteLLM router. It summarizes request attempts, routed attempts, tokens, tracked
+cost, spend-class counts, top successfully served models, pipe health,
+throttled/failed requests, Retry-After delays, callback latency, and the last
+request age. The file is local JSONL only; quotabot reads a bounded tail of it
+and never reads prompts, response content, exception messages, or source code.
 The router treats request-metered API keys as `spend: paid_api` and skips them
 unless `allow_paid_api: true` is set. Use `spend: quota_plan` only for included
 quota plans with overages disabled, and set `overages_disabled: true` or
