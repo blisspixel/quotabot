@@ -926,7 +926,8 @@ RouteSuggestion suggestRoute(
   final liveSubs = subs.where((c) => !c.stale).toList();
   final comfy = liveSubs
       .where(
-        (c) => c.available && (c.effectiveHeadroom ?? 0) >= comfortThreshold,
+        (c) =>
+            c.available && (c.effectiveHeadroom ?? 0) >= comfortThreshold,
       )
       .toList();
   if (comfy.isNotEmpty) {
