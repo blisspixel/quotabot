@@ -926,8 +926,7 @@ RouteSuggestion suggestRoute(
   final liveSubs = subs.where((c) => !c.stale).toList();
   final comfy = liveSubs
       .where(
-        (c) =>
-            c.available && (c.effectiveHeadroom ?? 0) >= comfortThreshold,
+        (c) => c.available && (c.effectiveHeadroom ?? 0) >= comfortThreshold,
       )
       .toList();
   if (comfy.isNotEmpty) {
@@ -955,9 +954,8 @@ RouteSuggestion suggestRoute(
   }
 
   // No local fallback. Recommend the best subscription above the spent floor.
-  final withAny = liveSubs
-      .where((c) => (c.headroom ?? 0) > kSpentHeadroomFloor)
-      .toList();
+  final withAny =
+      liveSubs.where((c) => (c.headroom ?? 0) > kSpentHeadroomFloor).toList();
   if (withAny.isNotEmpty) {
     final best = withAny.first;
     return result(
