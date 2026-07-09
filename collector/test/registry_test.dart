@@ -145,6 +145,58 @@ void main() {
     expect(reg.single.available, isFalse);
   });
 
+  test('model capability gates separate known capability from available budget',
+      () {
+    final gates = modelCapabilityGates(
+      [
+        _cloud(
+          'antigravity',
+          10,
+          modelQuotas: [
+            ModelQuota(
+              model: 'gemini',
+              usedPercent: 100,
+              resetsAt: _now + 3600,
+            ),
+            ModelQuota(model: 'Gemini 3 Flash', usedPercent: 0),
+          ],
+        ),
+        _cloud('claude', 40),
+      ],
+      _now,
+      catalog: const {
+        'antigravity': [
+          ModelInfo(
+            id: 'gemini-3.1-pro',
+            displayName: 'Gemini 3.1 Pro',
+            reasoning: 'reasoning',
+            tier: 'flagship',
+          ),
+          ModelInfo(
+            id: 'gemini-3-flash',
+            displayName: 'Gemini 3 Flash',
+            tier: 'standard',
+          ),
+        ],
+        'claude': [
+          ModelInfo(
+            id: 'claude-opus',
+            displayName: 'Claude Opus',
+            reasoning: 'reasoning',
+            tier: 'flagship',
+          ),
+        ],
+      },
+    );
+
+    final antigravityKey = quotaIdentityKey('antigravity', 'a');
+    final claudeKey = quotaIdentityKey('claude', 'a');
+    expect(gates.knownQuotaKeys, containsAll([antigravityKey, claudeKey]));
+    expect(gates.availableQuotaKeys, contains(claudeKey));
+    expect(gates.availableQuotaKeys, isNot(contains(antigravityKey)));
+    expect(gates.budgetResetByQuotaKey[antigravityKey], _now + 3600);
+  });
+
   test('entries keep capture provenance without changing JSON shape', () {
     final reg = buildModelRegistry(
       [_cloud('claude', 20, stale: true, perMachine: true)],

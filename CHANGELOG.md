@@ -17,6 +17,9 @@ Notable changes to quotabot. Newest first.
 - Model routing now uses matched model or model-family quota headroom when a
   provider exposes it, preventing a capable but exhausted model pool from
   inheriting the provider account's broader headroom.
+- Default provider routing now applies an agentic-coding capability floor from
+  the model catalog, so a provider with broad account headroom does not win when
+  its capable model pool is exhausted.
 
 ## 0.5.13 - 2026-07-08
 

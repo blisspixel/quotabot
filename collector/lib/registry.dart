@@ -307,11 +307,76 @@ bool meetsBudgetPolicy(ModelEntry e, ModelBudgetPolicy policy) {
   };
 }
 
+/// Default capability floor for provider-level route surfaces. It reflects the
+/// common agentic coding case without reading the task: require a measured
+/// included-quota provider to have at least one standard-or-better reasoning
+/// model with budget before that provider can win the default route.
+const kDefaultProviderRouteRequirements = ModelRequirements(
+  requireReasoning: true,
+  tierFloor: 'standard',
+  budgetPolicy: ModelBudgetPolicy.quota,
+);
+
+class ModelCapabilityGates {
+  /// Provider/account keys with at least one catalog model that satisfies the
+  /// capability floor, regardless of whether its quota gate currently has
+  /// headroom.
+  final Set<String> knownQuotaKeys;
+
+  /// Provider/account keys with at least one satisfying model whose own budget
+  /// gate is available now.
+  final Set<String> availableQuotaKeys;
+
+  /// Provider/account keys with known matching capability but no available
+  /// model budget, mapped to the earliest known reset of a matching model gate.
+  final Map<String, int> budgetResetByQuotaKey;
+
+  const ModelCapabilityGates({
+    required this.knownQuotaKeys,
+    required this.availableQuotaKeys,
+    this.budgetResetByQuotaKey = const {},
+  });
+}
+
+ModelCapabilityGates modelCapabilityGates(
+  List<ProviderQuota> snapshot,
+  int now, {
+  Map<String, List<ModelInfo>> catalog = const {},
+  ModelRequirements requirements = kDefaultProviderRouteRequirements,
+}) {
+  final known = <String>{};
+  final available = <String>{};
+  final budgetResets = <String, int>{};
+  for (final entry in buildModelRegistry(snapshot, now, catalog: catalog)) {
+    if (entry.local || !meetsRequirements(entry, requirements)) continue;
+    final key = quotaIdentityKey(entry.provider, entry.account);
+    known.add(key);
+    if (entry.available) {
+      available.add(key);
+    } else {
+      final reset = entry.resetsAt;
+      if (reset != null) {
+        budgetResets.update(
+          key,
+          (previous) => previous <= reset ? previous : reset,
+          ifAbsent: () => reset,
+        );
+      }
+    }
+  }
+  return ModelCapabilityGates(
+    knownQuotaKeys: known,
+    availableQuotaKeys: available,
+    budgetResetByQuotaKey: budgetResets,
+  );
+}
+
 /// Builds the registry from a snapshot. For each provider, local models come from
 /// `q.models` (live) and cloud models from `catalog[provider]`; every model
-/// inherits its provider's binding-window budget. Optionally filtered to models
-/// meeting [requirements]. Sorted so the most routable models lead: available
-/// first, cloud before local (local is the fallback), then by most headroom.
+/// gets the provider-wide, model-specific, or provider-family budget gate that
+/// controls it. Optionally filtered to models meeting [requirements]. Sorted so
+/// the most routable models lead: available first, cloud before local (local is
+/// the fallback), then by most headroom.
 List<ModelEntry> buildModelRegistry(
   List<ProviderQuota> snapshot,
   int now, {

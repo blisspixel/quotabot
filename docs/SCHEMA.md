@@ -91,6 +91,7 @@ emit `quotabot.suggest.v1` with:
   `burn_se_percent_per_hour`, `strand_probability`, `confidence`,
   `runway_hours`, optional `projected_waste_percent`, optional `waste_boost`,
   optional `cost_penalty`, optional `cost_discount`,
+  optional `capability_limited`, optional `capability_budget_limited`,
   `routing_score`, `resets_at`, `stale`, and `available`.
   `runway_hours` is the risk-adjusted runway before confidence is applied;
   `projected_waste_percent` is included only when measured burn and a near reset
@@ -104,6 +105,12 @@ emit `quotabot.suggest.v1` with:
   pipe-health discount applied to `effective_headroom_percent` for ranking. It
   does not change `headroom_percent` or `available`; those remain quota
   availability evidence.
+  Provider-route surfaces apply a default agentic-coding capability floor using
+  the model catalog. `capability_limited` means no catalog model meets that
+  floor for the provider/account; `capability_budget_limited` means a capable
+  model exists but its model gate has no budget now. When
+  `capability_budget_limited` is present, `resets_at` is the earliest known
+  reset of a matching model gate, not the broader provider window.
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields (including `active_leases`) plus `source`,
