@@ -49,7 +49,14 @@ class NvidiaAdapter {
         headers: {'Authorization': 'Bearer $key'},
       ).timeout(const Duration(seconds: 5));
       if (resp.statusCode != 200) {
-        return _keyInvalid(asOf);
+        final retryAfter =
+            retryAfterSeconds(resp.headers['retry-after'], now: asOf);
+        return _keyInvalid(
+          asOf,
+          httpStatus: resp.statusCode,
+          pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
+          retryAfterSeconds: retryAfter,
+        );
       }
       // Success: key works. NVIDIA does not expose a zero-cost numeric balance
       // endpoint, so this is availability only rather than a quota window.
@@ -83,15 +90,38 @@ class NvidiaAdapter {
         error: 'NVIDIA NIM not configured; set NVIDIA_API_KEY or nvapi',
       );
 
-  ProviderQuota _keyInvalid(int asOf) => ProviderQuota(
+  ProviderQuota _keyInvalid(
+    int asOf, {
+    int? httpStatus,
+    String? pipeHealth,
+    int? retryAfterSeconds,
+  }) =>
+      ProviderQuota(
         provider: id,
         displayName: name,
         account: 'default',
         plan: 'free trial',
         asOf: asOf,
         ok: false,
-        error: 'NVIDIA key present but /models failed (invalid or network)',
+        error: _modelsFailureMessage(httpStatus, pipeHealth),
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfterSeconds,
       );
+}
+
+String _modelsFailureMessage(int? httpStatus, String? pipeHealth) {
+  final status = httpStatus == null ? '' : ' (HTTP $httpStatus)';
+  if (pipeHealth == providerPipeHealthThrottled) {
+    return 'NVIDIA /models throttled$status';
+  }
+  if (pipeHealth == providerPipeHealthDegraded) {
+    return 'NVIDIA /models degraded$status';
+  }
+  if (httpStatus != null) {
+    return 'NVIDIA key rejected by /models$status';
+  }
+  return 'NVIDIA key present but /models failed (network or invalid response)';
 }
 
 String? resolveNvidiaApiKey({

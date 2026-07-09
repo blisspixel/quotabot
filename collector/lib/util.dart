@@ -11,6 +11,26 @@ String home() =>
 /// Current unix epoch seconds.
 int nowEpoch() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
+/// Parses an HTTP Retry-After header into a non-negative delay in seconds.
+/// Accepts both RFC 9110 forms: delay seconds and HTTP-date.
+int? retryAfterSeconds(String? value, {int? now}) {
+  final raw = value?.trim();
+  if (raw == null || raw.isEmpty) return null;
+  final seconds = int.tryParse(raw);
+  if (seconds != null) return seconds < 0 ? null : seconds;
+  try {
+    final retryAt = HttpDate.parse(raw).toUtc();
+    final base = DateTime.fromMillisecondsSinceEpoch(
+      (now ?? nowEpoch()) * 1000,
+      isUtc: true,
+    );
+    final delta = retryAt.difference(base).inSeconds;
+    return delta < 0 ? 0 : delta;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Overrides quotabot's config root for tests that exercise persistent stores.
 ///
 /// Production code must leave this unset. It exists so parallel package tests do

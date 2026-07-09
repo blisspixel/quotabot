@@ -7,6 +7,8 @@
 /// contract tests.
 library;
 
+import 'models.dart';
+
 const quotabotV1SchemaId = 'quotabot.v1';
 const quotabotV1SchemaUri =
     'https://quotabot.local/schemas/quotabot.v1.schema.json';
@@ -31,7 +33,6 @@ const _providerRequired = [
   'windows',
 ];
 const _windowRequired = ['label'];
-
 const quotabotV1JsonSchema = <String, Object?>{
   r'$schema': 'https://json-schema.org/draft/2020-12/schema',
   r'$id': quotabotV1SchemaUri,
@@ -70,6 +71,19 @@ const quotabotV1JsonSchema = <String, Object?>{
         'details': {
           'type': 'array',
           'items': {'type': 'string'},
+        },
+        'pipe_health': {
+          'type': 'string',
+          'enum': providerPipeHealthValues,
+        },
+        'http_status': {
+          'type': 'integer',
+          'minimum': 100,
+          'maximum': 599,
+        },
+        'retry_after_seconds': {
+          'type': 'integer',
+          'minimum': 0,
         },
         'ok': {'type': 'boolean'},
         'error': {'type': 'string'},
@@ -166,6 +180,18 @@ void _validateProvider(
   _checkOptionalString(provider, 'status', path, errors);
   _checkBool(provider, 'active', path, errors, required: false);
   _checkStringList(provider, 'details', path, errors);
+  _checkStringEnum(
+    provider,
+    'pipe_health',
+    path,
+    providerPipeHealthValues.toSet(),
+    errors,
+    required: false,
+  );
+  _checkIntRange(provider, 'http_status', path, errors,
+      min: 100, max: 599, required: false);
+  _checkNonNegativeInt(provider, 'retry_after_seconds', path, errors,
+      required: false);
   _checkBool(provider, 'ok', path, errors);
   _checkOptionalString(provider, 'error', path, errors);
   _checkNonNegativeInt(provider, 'as_of', path, errors);
@@ -313,11 +339,29 @@ void _checkStringEnum(
   String field,
   String path,
   Set<String> allowed,
-  List<String> errors,
-) {
+  List<String> errors, {
+  bool required = true,
+}) {
   final fieldValue = value[field];
+  if (fieldValue == null && !required) return;
   if (fieldValue is! String || !allowed.contains(fieldValue)) {
     errors.add('$path.$field must be one of ${allowed.join(', ')}');
+  }
+}
+
+void _checkIntRange(
+  Map<String, dynamic> value,
+  String field,
+  String path,
+  List<String> errors, {
+  required int min,
+  required int max,
+  bool required = true,
+}) {
+  final fieldValue = value[field];
+  if (fieldValue == null && !required) return;
+  if (fieldValue is! int || fieldValue < min || fieldValue > max) {
+    errors.add('$path.$field must be an integer from $min to $max');
   }
 }
 

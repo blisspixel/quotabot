@@ -67,10 +67,25 @@ void main() {
 
   group('ProviderQuota', () {
     test('error factory marks not ok with no windows', () {
-      final q = ProviderQuota.error('grok', 'Grok', 'boom', 99);
+      final q = ProviderQuota.error(
+        'grok',
+        'Grok',
+        'boom',
+        99,
+        pipeHealth: providerPipeHealthThrottled,
+        httpStatus: 429,
+        retryAfterSeconds: 60,
+      );
       expect(q.ok, isFalse);
       expect(q.error, 'boom');
       expect(q.hasWindows, isFalse);
+      expect(q.toJson()['pipe_health'], providerPipeHealthThrottled);
+      expect(q.toJson()['http_status'], 429);
+      expect(q.toJson()['retry_after_seconds'], 60);
+      final decoded = ProviderQuota.fromJson(q.toJson());
+      expect(decoded.pipeHealth, providerPipeHealthThrottled);
+      expect(decoded.httpStatus, 429);
+      expect(decoded.retryAfterSeconds, 60);
     });
 
     test('asStale preserves windows, capture time, and kind', () {
@@ -120,6 +135,34 @@ void main() {
       expect(stale.details, fresh.details);
       expect(stale.windows.single.usedPercent, 20);
       expect(stale.error, 'fresh metadata, cached quota');
+    });
+
+    test('asStale carries fresh native pipe-health diagnostics', () {
+      final cached = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'max',
+        asOf: 1000,
+        windows: [QuotaWindow(label: '5h', usedPercent: 20)],
+      );
+      final freshError = ProviderQuota.error(
+        'claude',
+        'Claude',
+        'HTTP 429',
+        2000,
+        pipeHealth: providerPipeHealthThrottled,
+        httpStatus: 429,
+        retryAfterSeconds: 120,
+      );
+
+      final stale = cached.asStale('HTTP 429', metadataFrom: freshError);
+
+      expect(stale.stale, isTrue);
+      expect(stale.account, 'max');
+      expect(stale.windows.single.usedPercent, 20);
+      expect(stale.pipeHealth, providerPipeHealthThrottled);
+      expect(stale.httpStatus, 429);
+      expect(stale.retryAfterSeconds, 120);
     });
 
     test('defaults to subscription kind and exposes isLocal', () {
@@ -178,6 +221,37 @@ void main() {
       expect(back.asOf, 123);
       expect(back.kind, ProviderQuotaKind.subscription);
       expect(back.windows.single.usedPercent, 18);
+    });
+
+    test('classifies reliable native HTTP pipe-health statuses', () {
+      expect(providerPipeHealthForHttpStatus(429), providerPipeHealthThrottled);
+      expect(providerPipeHealthForHttpStatus(503), providerPipeHealthDegraded);
+      expect(providerPipeHealthForHttpStatus(529), providerPipeHealthDegraded);
+      expect(providerPipeHealthForHttpStatus(401), isNull);
+      expect(providerPipeHealthForHttpStatus(404), isNull);
+    });
+
+    test('drops malformed cached native pipe-health diagnostics', () {
+      final q = ProviderQuota.fromJson({
+        'provider': 'claude',
+        'display_name': 'Claude',
+        'account': 'max',
+        'kind': providerQuotaSubscriptionKind,
+        'ok': false,
+        'as_of': 1000,
+        'stale': false,
+        'pipe_health': 'overheated',
+        'http_status': 99,
+        'retry_after_seconds': -1,
+        'windows': const <Map<String, Object?>>[],
+      });
+
+      expect(q.pipeHealth, isNull);
+      expect(q.httpStatus, isNull);
+      expect(q.retryAfterSeconds, isNull);
+      expect(q.toJson().containsKey('pipe_health'), isFalse);
+      expect(q.toJson().containsKey('http_status'), isFalse);
+      expect(q.toJson().containsKey('retry_after_seconds'), isFalse);
     });
 
     test('round-trips local kind through json', () {

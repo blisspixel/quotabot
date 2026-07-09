@@ -16,10 +16,18 @@ class ClaudeAdapter {
   static const name = claudeProviderName;
   static const _endpoint = 'https://api.anthropic.com/api/oauth/usage';
 
+  final http.Client? _http;
+  final File? _credentialsFile;
+
+  ClaudeAdapter({http.Client? client, File? credentialsFile})
+      : _http = client,
+        _credentialsFile = credentialsFile;
+
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
-      final credFile = File('${home()}/.claude/.credentials.json');
+      final credFile =
+          _credentialsFile ?? File('${home()}/.claude/.credentials.json');
       if (!credFile.existsSync()) {
         return ProviderQuota.error(
           id,
@@ -36,7 +44,8 @@ class ClaudeAdapter {
       }
       final plan = oauth?['subscriptionType']?.toString();
 
-      final resp = await http.get(
+      final get = _http?.get ?? http.get;
+      final resp = await get(
         Uri.parse(_endpoint),
         headers: {
           'Authorization': 'Bearer $token',
@@ -51,10 +60,25 @@ class ClaudeAdapter {
           name,
           'token expired (re-run claude)',
           asOf,
+          account: plan ?? 'default',
+          plan: plan,
+          httpStatus: resp.statusCode,
         );
       }
       if (resp.statusCode != 200) {
-        return ProviderQuota.error(id, name, 'HTTP ${resp.statusCode}', asOf);
+        final retryAfter =
+            retryAfterSeconds(resp.headers['retry-after'], now: asOf);
+        return ProviderQuota.error(
+          id,
+          name,
+          'HTTP ${resp.statusCode}',
+          asOf,
+          account: plan ?? 'default',
+          plan: plan,
+          pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
+          httpStatus: resp.statusCode,
+          retryAfterSeconds: retryAfter,
+        );
       }
 
       final data = jsonDecode(resp.body) as Map<String, dynamic>;

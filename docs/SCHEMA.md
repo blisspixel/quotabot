@@ -21,7 +21,8 @@ Provider snapshots keep these stable fields:
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
 - Optional `plan`, `source`, `status`, `active`, `details`, `error`, `models`,
-  `model_quotas`, `suspect`, and `per_machine`.
+  `model_quotas`, `suspect`, `per_machine`, `pipe_health`, `http_status`, and
+  `retry_after_seconds`.
 - `kind` is `subscription` or `local`.
 - `source` is an additive hint. When set to `manual`, the provider window is a
   local self-reported quota entry, not measured adapter telemetry.
@@ -34,6 +35,14 @@ Provider snapshots keep these stable fields:
   account across every device, so it can undercount when the account is used
   elsewhere. Authoritative server-side reads (Claude, Grok, Antigravity, Codex
   live) omit it.
+- `pipe_health` is an optional native adapter diagnostic for metadata endpoint
+  failures. It is one of `healthy`, `throttled`, `degraded`, or `no_data`;
+  current native adapters set it only when a reliable HTTP response distinguishes
+  throttling or provider-side degradation from generic no-data.
+- `http_status` is an optional sanitized metadata-endpoint status code
+  (`100..599`). `retry_after_seconds` is an optional non-negative delay parsed
+  from `Retry-After`. These are metadata only and must not include response
+  bodies, prompts, generated text, source code, or secrets.
 - `windows` is always present. Local runtimes use an empty list because they
   have no spendable quota. Status-only cloud providers can also have an empty
   list when quotabot can verify availability but has no measured quota window;

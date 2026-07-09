@@ -138,6 +138,33 @@ class ModelQuota {
 const providerQuotaSubscriptionKind = 'subscription';
 const providerQuotaLocalKind = 'local';
 const providerQuotaManualSource = 'manual';
+const providerPipeHealthHealthy = 'healthy';
+const providerPipeHealthThrottled = 'throttled';
+const providerPipeHealthDegraded = 'degraded';
+const providerPipeHealthNoData = 'no_data';
+const providerPipeHealthValues = [
+  providerPipeHealthHealthy,
+  providerPipeHealthThrottled,
+  providerPipeHealthDegraded,
+  providerPipeHealthNoData,
+];
+
+String? providerPipeHealthFromWire(Object? value) =>
+    value is String && providerPipeHealthValues.contains(value) ? value : null;
+
+String? providerPipeHealthForHttpStatus(int statusCode) {
+  if (statusCode == 429) return providerPipeHealthThrottled;
+  if (statusCode >= 500 && statusCode <= 599) return providerPipeHealthDegraded;
+  return null;
+}
+
+int? boundedIntFromWire(Object? value, {required int min, int? max}) {
+  final number = finiteOrNull(value);
+  if (number == null || number.truncateToDouble() != number) return null;
+  final parsed = number.toInt();
+  if (parsed < min || (max != null && parsed > max)) return null;
+  return parsed;
+}
 
 enum ProviderQuotaKind {
   subscription(providerQuotaSubscriptionKind),
@@ -231,6 +258,19 @@ class ProviderQuota {
   /// server-side reads (Claude, Grok, Antigravity, Codex live) leave this false.
   final bool perMachine;
 
+  /// Native adapter pipe-health classification when a metadata read reached the
+  /// provider but could not return quota. This distinguishes throttling or
+  /// provider-side degradation from generic no-data without exposing response
+  /// bodies or secrets.
+  final String? pipeHealth;
+
+  /// Sanitized HTTP status from the metadata endpoint, when available.
+  final int? httpStatus;
+
+  /// Sanitized Retry-After delay in seconds from the metadata endpoint, when
+  /// available and parseable.
+  final int? retryAfterSeconds;
+
   ProviderQuota({
     required this.provider,
     required this.displayName,
@@ -250,6 +290,9 @@ class ProviderQuota {
     this.modelQuotas = const [],
     this.suspect,
     this.perMachine = false,
+    this.pipeHealth,
+    this.httpStatus,
+    this.retryAfterSeconds,
   });
 
   /// True when this is a local, always-available runtime rather than a metered
@@ -263,15 +306,24 @@ class ProviderQuota {
     String provider,
     String displayName,
     String error,
-    int asOf,
-  ) =>
+    int asOf, {
+    String account = 'unknown',
+    String? plan,
+    String? pipeHealth,
+    int? httpStatus,
+    int? retryAfterSeconds,
+  }) =>
       ProviderQuota(
         provider: provider,
         displayName: displayName,
-        account: 'unknown',
+        account: account,
+        plan: plan,
         asOf: asOf,
         ok: false,
         error: error,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfterSeconds,
       );
 
   Map<String, dynamic> toJson() => {
@@ -290,6 +342,9 @@ class ProviderQuota {
         'stale': stale,
         if (suspect != null) 'suspect': suspect,
         if (perMachine) 'per_machine': true,
+        if (pipeHealth != null) 'pipe_health': pipeHealth,
+        if (httpStatus != null) 'http_status': httpStatus,
+        if (retryAfterSeconds != null) 'retry_after_seconds': retryAfterSeconds,
         'windows': windows.map((w) => w.toJson()).toList(),
         if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
         if (modelQuotas.isNotEmpty)
@@ -311,6 +366,9 @@ class ProviderQuota {
         active: j['active'] as bool? ?? false,
         suspect: j['suspect'] as String?,
         perMachine: j['per_machine'] as bool? ?? false,
+        pipeHealth: providerPipeHealthFromWire(j['pipe_health']),
+        httpStatus: boundedIntFromWire(j['http_status'], min: 100, max: 599),
+        retryAfterSeconds: boundedIntFromWire(j['retry_after_seconds'], min: 0),
         details: ((j['details'] as List?) ?? const []).cast<String>(),
         windows: ((j['windows'] as List?) ?? const [])
             .map((w) => QuotaWindow.fromJson(w as Map<String, dynamic>))
@@ -330,7 +388,7 @@ class ProviderQuota {
       ProviderQuota(
         provider: provider,
         displayName: displayName,
-        account: metadataFrom?.account ?? account,
+        account: _staleMetadataAccount(metadataFrom, account),
         plan: metadataFrom?.plan ?? plan,
         source: metadataFrom?.source ?? source,
         ok: true,
@@ -354,6 +412,9 @@ class ProviderQuota {
         // they are served stale, regardless of fresh metadata.
         suspect: suspect,
         perMachine: perMachine,
+        pipeHealth: metadataFrom?.pipeHealth ?? pipeHealth,
+        httpStatus: metadataFrom?.httpStatus ?? httpStatus,
+        retryAfterSeconds: metadataFrom?.retryAfterSeconds ?? retryAfterSeconds,
       );
 
   /// Returns a copy annotated with a drift/plausibility [reason], leaving the
@@ -377,10 +438,20 @@ class ProviderQuota {
         modelQuotas: modelQuotas,
         suspect: reason,
         perMachine: perMachine,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfterSeconds,
       );
 
   /// True when this snapshot carries usable quota windows.
   bool get hasWindows => windows.isNotEmpty;
+}
+
+String _staleMetadataAccount(
+    ProviderQuota? metadataFrom, String cachedAccount) {
+  final fresh = metadataFrom?.account;
+  if (fresh == null || fresh == 'unknown') return cachedAccount;
+  return fresh;
 }
 
 /// Strips terminal control bytes (C0 controls, DEL, and C1 controls) from
@@ -459,6 +530,9 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     ],
     suspect: q.suspect == null ? null : t(q.suspect!),
     perMachine: q.perMachine,
+    pipeHealth: q.pipeHealth == null ? null : t(q.pipeHealth!),
+    httpStatus: q.httpStatus,
+    retryAfterSeconds: q.retryAfterSeconds,
   );
 }
 
