@@ -31,6 +31,10 @@ Notable changes to quotabot. Newest first.
   provider adapters invoked by the read, including local metadata writes and a
   fleet-level zero-token boundary check.
 
+### Fixed
+- Schema docs now distinguish individual `quotabot.alert.v1` alert payloads from
+  the MCP `quotas://alerts` resource envelope (`quotabot.alerts.v1`).
+
 ## 0.5.13 - 2026-07-08
 
 ### Changed
