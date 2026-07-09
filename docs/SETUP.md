@@ -146,7 +146,7 @@ plus the per-OS build tools:
 
 | OS      | Build tools                                                          |
 |---------|---------------------------------------------------------------------|
-| Windows | Visual Studio with the "Desktop development with C++" workload       |
+| Windows | Visual Studio with "Desktop development with C++" plus C++ ATL       |
 | macOS   | Xcode and CocoaPods (`sudo gem install cocoapods`)                   |
 | Linux   | `clang cmake ninja-build pkg-config libgtk-3-dev` (apt names)        |
 
@@ -208,6 +208,8 @@ that folder to reset quotabot completely.
   entry is picked up. On Windows, open a fresh PowerShell window.
 - **Windows blocks the downloaded exe:** it is unsigned for now. Verify the
   release `.sha256`, or run from source instead (below).
+- **Windows widget build reports `atlbase.h` missing:** modify Visual Studio
+  Build Tools and add C++ ATL support for your installed MSVC toolset.
 - **Widget build fails on Windows inside OneDrive:** OneDrive file locks break
   Flutter builds; move the repo outside OneDrive (e.g. `%USERPROFILE%\dev`).
 

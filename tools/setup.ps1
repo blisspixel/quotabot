@@ -43,6 +43,7 @@ $collector = Join-Path $root 'collector'
 $app = Join-Path $root 'app'
 $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
 $installDir = Join-Path $installRoot 'bin'
+. (Join-Path $scriptDir 'windows-build-prereqs.ps1')
 
 # Resolve the Flutter/Dart bin directory from PATH, falling back to common
 # user-owned install locations. The fallbacks are deliberately limited to
@@ -175,6 +176,10 @@ if (-not $CliOnly -and -not $NoApp) {
   }
 
   Write-Step 'Building the desktop app (this takes a few minutes)'
+  $windowsBuildPrereqs = Assert-WindowsDesktopBuildPrereqs
+  if ($windowsBuildPrereqs) {
+    Write-Ok "Visual Studio ATL ready: $($windowsBuildPrereqs.VisualStudioPath)"
+  }
   Push-Location $app
   try {
     & flutter build windows --release

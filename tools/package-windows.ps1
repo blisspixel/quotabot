@@ -8,10 +8,15 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 $appDir = Join-Path $root 'app'
+. (Join-Path $scriptDir 'windows-build-prereqs.ps1')
 
 # Find flutter on PATH so this builds on any machine.
 $flutter = (Get-Command flutter -ErrorAction SilentlyContinue).Source
 if (-not $flutter) { throw "flutter not found on PATH. Install Flutter and add it to PATH." }
+$windowsBuildPrereqs = Assert-WindowsDesktopBuildPrereqs
+if ($windowsBuildPrereqs) {
+  Write-Host "Visual Studio ATL ready: $($windowsBuildPrereqs.VisualStudioPath)"
+}
 
 Write-Host 'Building Windows release...'
 Push-Location $appDir
