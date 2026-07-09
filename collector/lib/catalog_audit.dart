@@ -128,6 +128,67 @@ class CatalogAuditReport {
       };
 }
 
+String formatCatalogAuditReport(
+  CatalogAuditReport report, {
+  bool includeModelIds = true,
+}) {
+  final lines = <String>[
+    'quotabot model catalog audit',
+    'catalog updated ${report.catalogUpdated}',
+    '',
+  ];
+  for (final provider in report.providers) {
+    final status = provider.skipped
+        ? 'skipped'
+        : provider.ok
+            ? (provider.hasDrift ? 'drift' : 'clean')
+            : 'error';
+    lines.add('${provider.provider}: $status');
+    if (provider.error != null) {
+      lines.add('  ${provider.error}');
+    }
+    if (provider.ok) {
+      lines.add(
+        '  catalog ${provider.catalogModelIds.length}, '
+        'endpoint ${provider.endpointModelIds.length}',
+      );
+      if (provider.missingFromCatalog.isNotEmpty) {
+        lines.add(_auditDiffLine(
+          label: 'missing from catalog',
+          values: provider.missingFromCatalog,
+          includeModelIds: includeModelIds,
+        ));
+      }
+      if (provider.catalogOnly.isNotEmpty) {
+        lines.add(_auditDiffLine(
+          label: 'catalog only',
+          values: provider.catalogOnly,
+          includeModelIds: includeModelIds,
+        ));
+      }
+    }
+  }
+  lines.add('');
+  if (includeModelIds) {
+    lines.add('Use --json for a machine-readable quotabot.catalog_audit.v1 '
+        'report.');
+  } else {
+    lines.add('Model ids redacted. Re-run locally without --summary for '
+        'details.');
+  }
+  lines.add('Use --fail-on-drift or --fail-on-error when wiring this into CI.');
+  return lines.join('\n');
+}
+
+String _auditDiffLine({
+  required String label,
+  required List<String> values,
+  required bool includeModelIds,
+}) {
+  if (includeModelIds) return '  $label: ${values.join(', ')}';
+  return '  $label: ${values.length}';
+}
+
 Future<CatalogAuditReport> auditModelCatalog({
   required int now,
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
