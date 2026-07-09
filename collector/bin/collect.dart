@@ -73,6 +73,25 @@ Future<List<ProviderQuota>> _read([
       () => _collectProfiled(profile, excludedProviders: excludedProviders),
     );
 
+class _VerifiedRead {
+  final List<ProviderQuota> results;
+  final RuntimeAccessReport runtimeAccess;
+
+  const _VerifiedRead(this.results, this.runtimeAccess);
+}
+
+Future<_VerifiedRead> _readForVerify([
+  QuotaProfile? profile,
+  Set<String> excludedProviders = const {},
+]) =>
+    _withSpinner(
+      'reading quota',
+      () => _collectProfiledForVerify(
+        profile,
+        excludedProviders: excludedProviders,
+      ),
+    );
+
 Future<List<ProviderQuota>> _collectProfiled(
   QuotaProfile? profile, {
   Set<String> excludedProviders = const {},
@@ -81,6 +100,34 @@ Future<List<ProviderQuota>> _collectProfiled(
   final profiled =
       profile == null ? List.of(results) : applyProfile(results, profile);
   return filterExcludedProviders(profiled, excludedProviders);
+}
+
+Future<_VerifiedRead> _collectProfiledForVerify(
+  QuotaProfile? profile, {
+  Set<String> excludedProviders = const {},
+}) async {
+  if (_simulatedSnapshot != null) {
+    final profiled = profile == null
+        ? List.of(_simulatedSnapshot!)
+        : applyProfile(_simulatedSnapshot!, profile);
+    return _VerifiedRead(
+      filterExcludedProviders(profiled, excludedProviders),
+      buildRuntimeAccessReport(
+        generatedAt: nowEpoch(),
+        includeReads: true,
+        includeNetwork: true,
+        providers: const [],
+      ),
+    );
+  }
+  final collected = await collectAllWithRuntimeAccess();
+  final profiled = profile == null
+      ? List.of(collected.providers)
+      : applyProfile(collected.providers, profile);
+  return _VerifiedRead(
+    filterExcludedProviders(profiled, excludedProviders),
+    collected.runtimeAccess,
+  );
 }
 
 Map<String, dynamic> _snapshot(
@@ -2111,13 +2158,15 @@ Future<void> _runVerify(
   QuotaProfile? profile,
   Set<String> excludedProviders,
 ) async {
-  final results = await _read(profile, excludedProviders);
+  final read = await _readForVerify(profile, excludedProviders);
+  final results = read.results;
   final report = buildVerificationReport(
     results,
     nowEpoch(),
     os: Platform.operatingSystem,
     filtered:
         profile != null || excludedProviders.isNotEmpty || _usingSimulation,
+    runtimeAccess: read.runtimeAccess,
   );
   if (wantsJson) {
     print(_jsonPretty(report.toJson()));
@@ -2168,6 +2217,16 @@ void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
       VerifyStatus.info => style.dim('info'),
     };
     print('  fleet ${c.id.padRight(22)} $verdict  ${style.dim(c.detail)}');
+  }
+  final runtimeAccess = report.runtimeAccess;
+  if (runtimeAccess != null) {
+    final mode =
+        runtimeAccess.collectionExecuted ? 'observed' : 'manifest only';
+    final providerCount = runtimeAccess.providers.length;
+    print(
+      '  runtime access ${mode.padRight(16)} '
+      '${style.dim('$providerCount provider adapter(s), no prompts/code, 0 usage tokens')}',
+    );
   }
   final failed = report.failCount;
   print('');

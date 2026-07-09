@@ -7,6 +7,7 @@ import 'drift.dart';
 import 'manual_quota.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
+import 'runtime_audit.dart';
 import 'util.dart';
 
 export 'alerts.dart';
@@ -47,6 +48,16 @@ bool _sweptTemp = false;
 /// the whole fleet, the desktop refresh loop, and MCP snapshot calls.
 const Duration kAdapterDeadline = Duration(seconds: 20);
 
+class CollectedQuotaSnapshot {
+  final List<ProviderQuota> providers;
+  final RuntimeAccessReport runtimeAccess;
+
+  const CollectedQuotaSnapshot({
+    required this.providers,
+    required this.runtimeAccess,
+  });
+}
+
 Future<List<ProviderQuota>> _listWithDeadline(
   ProviderAdapterRegistration entry,
 ) =>
@@ -67,10 +78,46 @@ Future<List<ProviderQuota>> _listWithDeadline(
 
 /// Runs every provider adapter concurrently and returns their snapshots.
 /// Shared by the CLI (bin/collect.dart) and the desktop app.
-Future<List<ProviderQuota>> collectAll() async {
+Future<List<ProviderQuota>> collectAll() => _collectAllProviders();
+
+/// Runs a normal collection and also returns the audited runtime access surface
+/// for the adapters that were invoked. The access records intentionally come
+/// from the same static map as `quotabot explain`; the observation is which
+/// adapters participated in this run.
+Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess() async {
+  if (Platform.environment['QUOTABOT_DEMO'] == '1') {
+    final asOf = nowEpoch();
+    return CollectedQuotaSnapshot(
+      providers: demoProviders(asOf),
+      runtimeAccess: buildRuntimeAccessReport(
+        generatedAt: asOf,
+        includeReads: true,
+        includeNetwork: true,
+        providers: const [],
+      ),
+    );
+  }
+  final results = await _collectAllProviders(skipDemoCheck: true);
+  return CollectedQuotaSnapshot(
+    providers: results,
+    runtimeAccess: buildRuntimeAccessReport(
+      generatedAt: nowEpoch(),
+      includeReads: true,
+      includeNetwork: true,
+      observedProviderIds: {
+        for (final entry in kProviderAdapterRegistry) entry.id,
+      },
+      collectionExecuted: true,
+    ),
+  );
+}
+
+Future<List<ProviderQuota>> _collectAllProviders({
+  bool skipDemoCheck = false,
+}) async {
   // Demo mode: synthetic data for previews and screenshots. Returns before any
   // adapter call or analytics write, so it touches no account and no history.
-  if (Platform.environment['QUOTABOT_DEMO'] == '1') {
+  if (!skipDemoCheck && Platform.environment['QUOTABOT_DEMO'] == '1') {
     return demoProviders(nowEpoch());
   }
   if (!_sweptTemp) {

@@ -403,5 +403,78 @@ void main() {
       }
       expect(json['fleet_checks'], isNotEmpty);
     });
+
+    test('can attach a runtime access observation with a boundary check', () {
+      final runtimeAccess = buildRuntimeAccessReport(
+        generatedAt: now,
+        includeReads: true,
+        includeNetwork: true,
+        observedProviderIds: const {'claude'},
+        collectionExecuted: true,
+        environment: const {'HOME': '/home/tester'},
+        os: 'linux',
+      );
+      final report = buildVerificationReport(
+        [healthy()],
+        now,
+        os: 'linux',
+        filtered: true,
+        runtimeAccess: runtimeAccess,
+      );
+
+      final access = report.toJson()['runtime_access'] as Map;
+      expect(access['mode'], 'runtime_access_observation');
+      expect(access['collection_executed'], isTrue);
+      expect((access['providers'] as List).single['provider'], 'claude');
+      final runtimeCheck = report.fleetChecks.firstWhere(
+        (c) => c.id == 'runtime_access_boundary',
+      );
+      expect(runtimeCheck.status, VerifyStatus.pass);
+      expect(runtimeCheck.detail, contains('no prompts'));
+      expect(runtimeCheck.detail, contains('token spend'));
+    });
+
+    test('flags generation-looking runtime network endpoints', () {
+      final runtimeAccess = buildRuntimeAccessReport(
+        generatedAt: now,
+        includeReads: true,
+        includeNetwork: true,
+        providers: const [
+          ProviderRuntimeAccess(
+            provider: 'bad',
+            displayName: 'Bad',
+            kind: 'subscription',
+            network: [
+              RuntimeAccessRecord(
+                kind: RuntimeAccessKind.network,
+                target: 'https://example.invalid/v1/messages',
+                method: 'POST',
+                scheme: 'https',
+                host: 'example.invalid',
+                path: '/v1/messages',
+                purpose: 'bad generation call',
+                dataClass: 'unknown',
+                access: 'request',
+              ),
+            ],
+          ),
+        ],
+        collectionExecuted: true,
+        os: 'linux',
+      );
+      final report = buildVerificationReport(
+        [healthy()],
+        now,
+        os: 'linux',
+        filtered: true,
+        runtimeAccess: runtimeAccess,
+      );
+
+      final runtimeCheck = report.fleetChecks.firstWhere(
+        (c) => c.id == 'runtime_access_boundary',
+      );
+      expect(runtimeCheck.status, VerifyStatus.fail);
+      expect(runtimeCheck.detail, contains('generation endpoint'));
+    });
   });
 }

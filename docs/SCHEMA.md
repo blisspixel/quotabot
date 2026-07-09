@@ -230,12 +230,16 @@ optional `error`, `catalog_models`, `endpoint_models`,
   percent, effective used percent, reset time, and seconds to reset), a
   `passed` verdict, `checks`, and an optional `cross_check` naming the
   provider's own usage surface to confirm the numbers against.
+- `runtime_access`: optional `quotabot.explain.v1` object attached by the CLI
+  for the read. Real reads use `mode: "runtime_access_observation"` and
+  `collection_executed: true`; simulations use the dry-run manifest form.
 - `checks` entries carry `id`, `status` (`pass`, `fail`, or `info`), and a
   plain-language `detail`. Provider check ids are `identity`,
   `read_or_reason`, `percent_bounds`, `as_of_sane`, `stale_honesty`, and
   `reset_sanity`; fleet check ids are `schema_contract`, `unique_accounts`,
-  `manual_entries`, and `claimed_coverage`. An undetected claimed provider
-  carries `claimed_coverage` as its single provider-level check as well.
+  `manual_entries`, `claimed_coverage`, and `runtime_access_boundary`. An
+  undetected claimed provider carries `claimed_coverage` as its single
+  provider-level check as well.
 - `fleet_checks`: run-level checks, including validation of the live snapshot
   against the frozen `quotabot.v1` contract above.
 
@@ -247,25 +251,36 @@ silent failures, and contract drift. The CLI exits 65 when any check fails.
 ## `quotabot.explain.v1`
 
 `quotabot explain --reads --network --json` emits a dry-run runtime access
-manifest:
+manifest. `quotabot verify --json` embeds the same schema as a runtime access
+observation for the provider adapters invoked by that read:
 
 - `schema`: always `quotabot.explain.v1`.
-- `generated_at`, `os`, `mode: "runtime_access_manifest"`,
-  `collection_executed: false`, `include_reads`, and `include_network`.
+- `generated_at`, `os`, `mode` (`runtime_access_manifest` or
+  `runtime_access_observation`), `collection_executed`, `include_reads`,
+  `include_network`, and `evidence` (`static_manifest` or
+  `provider_adapter_invoked_static_access_map`).
 - Optional `profile` and `excluded_providers` when local filters narrow the
   manifest.
 - `privacy_boundary`: booleans for `metadata_only`, `spends_tokens`,
   `sends_prompt_or_code`, `records_secrets`, and `url_query_values_recorded`.
 - `providers`: provider rows with `provider`, `display_name`, `kind`, optional
-  `reads`, optional `network`, and optional `notes`.
+  `reads`, optional `network`, optional `notes`, and, for observations,
+  `observed: true` plus per-row `evidence`.
 - `shared`: local metadata paths shared across providers, such as manual quota,
-  cache, history, and LiteLLM metrics files.
+  cache, history, and LiteLLM metrics files. Cache and history writes are
+  included as metadata writes.
+- `notes`: optional limitations. The current observation records which adapters
+  were invoked and uses their audited static access map; provider-specific
+  branches may skip some listed records at runtime.
 
-Each access record carries `kind` (`fileRead`, `environmentRead`, or
-`network`), `target`, `purpose`, `data_class`, `access`, and booleans for
-`metadata_only`, `sends_prompt_or_code`, `spends_tokens`, and
+Each access record carries `kind` (`fileRead`, `fileWrite`,
+`environmentRead`, or `network`), `target`, `purpose`, `data_class`, `access`,
+and booleans for `metadata_only`, `sends_prompt_or_code`, `spends_tokens`, and
 `credential_material`. Network records additionally carry `method`, `scheme`,
-`host`, and `path`; query values are intentionally not recorded.
+`host`, and `path`; query values are intentionally not recorded. Credential
+records may set `metadata_only: false`; the no-surprise boundary enforced by
+`verify` is no prompts, no source code, no token spend, and no generation
+endpoints.
 
 ## `quotabot.alert.v1`
 

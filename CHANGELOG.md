@@ -27,6 +27,9 @@ Notable changes to quotabot. Newest first.
   `quotabot.explain.v1` runtime access manifest naming local read paths,
   loopback runtime endpoints, provider metadata hosts, and the zero-token privacy
   boundary.
+- `quotabot verify --json` now attaches a runtime access observation for the
+  provider adapters invoked by the read, including local metadata writes and a
+  fleet-level zero-token boundary check.
 
 ## 0.5.13 - 2026-07-08
 

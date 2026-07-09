@@ -144,10 +144,11 @@ does not read analytics buckets.
 live read: every window percentage finite and in bounds, every snapshot
 carrying a sane capture time, every failure carrying a plain reason, cached
 data labeled stale with a note, reset times plausible, provider/account pairs
-unique, and the emitted snapshot conforming to the frozen `quotabot.v1`
-contract. A provider that is out of quota, signed out, or not running still
-passes when it says so truthfully; the failure mode `verify` hunts is a lying
-or silent number, not an empty one.
+unique, the emitted snapshot conforming to the frozen `quotabot.v1` contract,
+and the runtime access boundary staying free of prompts, source code, token
+spend, and generation endpoints. A provider that is out of quota, signed out,
+or not running still passes when it says so truthfully; the failure mode
+`verify` hunts is a lying or silent number, not an empty one.
 
 ```bash
 quotabot verify           # human summary, one line per provider
@@ -164,6 +165,13 @@ runtimes are reported as truthful absences, not failures. `--profile`,
 claimed-provider coverage check then reports itself skipped instead of
 misreading the filter.
 
+`verify --json` includes `runtime_access`, a `quotabot.explain.v1` object for
+the collection. For real reads it is `mode: "runtime_access_observation"` and
+marks provider rows whose adapters were invoked. For simulations it remains a
+manifest with `collection_executed: false`. Profile and exclude filters are
+applied after the quota read today, so the runtime access observation reports
+the full adapter read surface rather than only the filtered output rows.
+
 ### Runtime access manifest (`quotabot explain`)
 
 `quotabot explain --reads --network` emits the local trust-boundary manifest for
@@ -173,12 +181,16 @@ loopback runtime endpoints, and provider metadata hosts quotabot may use during 
 normal read. The JSON shape is `quotabot.explain.v1`; every network record states
 the method, host, path, data class, and the invariant that it sends no prompts,
 source code, model outputs, or generation requests and spends zero tokens.
+Shared local metadata records include cache and history writes, because a normal
+live read can persist fresh quota metadata locally. Provider-specific records
+can include credential reads and rotated OAuth grant writes, but still never
+include prompt/code content or model-generation calls.
 
 Use `--reads` or `--network` alone to narrow the manifest. `--profile` and
 `--exclude` filter provider rows the same way quota commands do. This is a
 dry-run manifest, not a replacement for `verify`: `verify` proves the snapshot is
-honest, while `explain` proves what local paths and hosts are in the runtime
-boundary.
+honest and attaches the invoked-adapter observation, while `explain` proves what
+local paths and hosts are in the runtime boundary before a read is run.
 
 ### Manual quota entries
 
