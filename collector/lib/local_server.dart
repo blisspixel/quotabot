@@ -95,6 +95,63 @@ Future<HttpServer> startLocalQuotabotServer({
     return (weight: weight, error: null);
   }
 
+  String? queryLast(Uri uri, String snakeName, String kebabName) {
+    final values = queryValues(uri, snakeName, kebabName);
+    if (values == null) return null;
+    final trimmed = values.last.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  ({ModelRequirements? requirements, String? error}) queryRouteRequirements(
+    Uri uri,
+  ) {
+    final hasRequirements = queryLast(uri, 'task', 'task') != null ||
+        queryLast(uri, 'min_context', 'min-context') != null ||
+        queryFlag(uri, 'require_tools', 'require-tools') ||
+        queryFlag(uri, 'require_vision', 'require-vision') ||
+        queryFlag(uri, 'require_reasoning', 'require-reasoning') ||
+        queryLast(uri, 'tier_floor', 'tier-floor') != null ||
+        queryLast(uri, 'tier_ceiling', 'tier-ceiling') != null ||
+        queryLast(uri, 'budget', 'budget') != null;
+    if (!hasRequirements) return (requirements: null, error: null);
+    final rawTask = queryLast(uri, 'task', 'task');
+    final rawBudget = queryLast(uri, 'budget', 'budget');
+    final budget = rawBudget == null
+        ? ModelBudgetPolicy.any
+        : modelBudgetPolicyFromName(rawBudget);
+    if (budget == null) {
+      return (
+        requirements: null,
+        error: 'unknown budget policy: "$rawBudget"',
+      );
+    }
+    final minContext = int.tryParse(
+      queryLast(uri, 'min_context', 'min-context') ?? '',
+    );
+    final profile = taskProfile(rawTask);
+    final explicit = ModelRequirements(
+      minContextTokens: minContext == null || minContext <= 0
+          ? null
+          : minContext.clamp(0, 1 << 31).toInt(),
+      requireTools: queryFlag(uri, 'require_tools', 'require-tools'),
+      requireVision: queryFlag(uri, 'require_vision', 'require-vision'),
+      requireReasoning:
+          queryFlag(uri, 'require_reasoning', 'require-reasoning'),
+      tierFloor: queryLast(uri, 'tier_floor', 'tier-floor'),
+      tierCeiling: queryLast(uri, 'tier_ceiling', 'tier-ceiling'),
+      budgetPolicy: budget,
+    );
+    final parsed = profile.merge(explicit);
+    if (parsed.isEmpty && rawBudget == null) {
+      return (requirements: null, error: null);
+    }
+    final requirements = rawBudget == null
+        ? const ModelRequirements(budgetPolicy: ModelBudgetPolicy.quota)
+            .merge(parsed)
+        : parsed;
+    return (requirements: requirements, error: null);
+  }
+
   Future<void> serve() async {
     await for (final request in server) {
       final path = request.uri.path;
@@ -157,13 +214,24 @@ Future<HttpServer> startLocalQuotabotServer({
               await request.response.close();
               continue;
             }
+            final routeRequirements = queryRouteRequirements(request.uri);
+            if (routeRequirements.error != null) {
+              writeJson(
+                request,
+                {'error': routeRequirements.error},
+                HttpStatus.badRequest,
+              );
+              await request.response.close();
+              continue;
+            }
             final snap =
                 filterExcludedProviders(await snapshot(), exclusions.providers);
             final current = now();
-            final capabilityGates = modelCapabilityGates(
+            final capabilityGates = providerRouteCapabilityGates(
               snap,
               current,
               catalog: kModelCatalog,
+              requirements: routeRequirements.requirements,
             );
             writeJson(
               request,

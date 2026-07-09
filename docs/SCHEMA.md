@@ -106,7 +106,8 @@ emit `quotabot.suggest.v1` with:
   does not change `headroom_percent` or `available`; those remain quota
   availability evidence.
   Provider-route surfaces apply a default agentic-coding capability floor using
-  the model catalog. `capability_limited` means no catalog model meets that
+  the model catalog, or a caller-supplied provider-route task/capability filter
+  when one is present. `capability_limited` means no catalog model meets that
   floor for the provider/account; `capability_budget_limited` means a capable
   model exists but its model gate has no budget now. When
   `capability_budget_limited` is present, `resets_at` is the earliest known

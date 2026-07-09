@@ -353,6 +353,14 @@ provider ranking visible but recommends a local runtime before subscription quot
 when one is available. MCP `suggest_provider` and `decide_now` accept
 `local_first: true`; the loopback HTTP equivalent is
 `GET /suggest?local_first=true`.
+Provider-route suggestions use an agentic-coding floor by default. When a caller
+still wants a provider-level answer for a different task, pass explicit route
+context: `quotabot suggest --provider-route --task=simple`, MCP
+`suggest_provider`/`decide_now` arguments such as `{"task": "simple"}` or
+`{"require_vision": true}`, or loopback HTTP
+`GET /suggest?task=simple`. The provider route then gates providers by that
+caller-supplied model requirement instead of the default floor while still
+returning `quotabot.suggest.v1`, not a concrete model pick.
 The human `quotabot suggest` view labels each candidate with live/cached state,
 spend class, account identity when it is a real account, and capture age, so a
 route is never just a bare provider name.
@@ -449,7 +457,8 @@ measured included quota near reset can win a close tie before it expires unused,
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
 `--min-context`/`--budget` filters) returns the cheapest model that meets the need
-and has budget, local-first. With `--use-expiring-quota`, a qualifying measured
+and has budget, local-first. Add `--provider-route` when you want those same
+filters to keep provider-level output instead. With `--use-expiring-quota`, a qualifying measured
 quota-backed model may outrank local when the reset is soon and the included
 quota would otherwise expire unused. The MCP `suggest_model` tool does the same
 for agents. For providers that meter individual models or model families,

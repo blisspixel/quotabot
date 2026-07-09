@@ -367,7 +367,14 @@ void main() {
           .toJson()['properties'] as Map<String, dynamic>;
       expect(
         suggestProviderInput.keys,
-        containsAll(['cost_penalties', 'cost_weight']),
+        containsAll([
+          'cost_penalties',
+          'cost_weight',
+          'task',
+          'min_context',
+          'require_reasoning',
+          'budget',
+        ]),
       );
       final suggestProviderOutput = byName['suggest_provider']!
           .outputSchema!
@@ -536,6 +543,51 @@ void main() {
           .cast<Map<String, dynamic>>()
           .firstWhere((route) => route['provider'] == 'claude');
       expect(claude['capability_limited'], isTrue);
+
+      final typoSuggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'task': 'typo'},
+        ),
+      );
+      expect(
+        (typoSuggestion.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+    });
+
+    test('suggest_provider applies supplied provider-route task context',
+        () async {
+      await connect(
+        _fixture(),
+        catalog: const {
+          'claude': [
+            ModelInfo(
+              id: 'claude-test',
+              contextTokens: 200000,
+              tier: 'standard',
+              tools: true,
+            ),
+          ],
+        },
+      );
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'task': 'simple'},
+        ),
+      );
+
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+      final rankedRoutes = suggestion.structuredContent?['ranked'] as List;
+      final claude = rankedRoutes
+          .cast<Map<String, dynamic>>()
+          .firstWhere((route) => route['provider'] == 'claude');
+      expect(claude.containsKey('capability_limited'), isFalse);
     });
 
     test('suggest_model can prefer expiring included quota when requested',
@@ -1073,6 +1125,40 @@ void main() {
       expect(
         (decision.structuredContent?['recommended'] as Map)['provider'],
         'codex',
+      );
+    });
+
+    test('decide_now applies supplied provider-route task context', () async {
+      await connect(
+        const [],
+        snapshotProvider: () async => throw StateError('live collection'),
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: _fixture(),
+          asOf: _now,
+          source: 'memory',
+        ),
+        catalog: const {
+          'claude': [
+            ModelInfo(
+              id: 'claude-test',
+              contextTokens: 200000,
+              tier: 'standard',
+              tools: true,
+            ),
+          ],
+        },
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'task': 'simple'},
+        ),
+      );
+
+      expect(
+        (decision.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
       );
     });
 

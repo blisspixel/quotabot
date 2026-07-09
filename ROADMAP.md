@@ -200,8 +200,10 @@ logical order (each enables the next; no dates):
    inheriting account-wide provider headroom. Second slice landed: default
    provider route surfaces now apply an agentic-coding capability floor from the
    model catalog and fail closed when a provider has quota but no capable model
-   budget. Remaining: make that floor configurable by caller task context where
-   provider-level routing is still desired.
+   budget. Third slice landed: provider-level route callers can supply task or
+   capability context through CLI `--provider-route`, MCP `suggest_provider` and
+   `decide_now`, and loopback HTTP `/suggest`, so the floor is configurable
+   without switching to concrete-model output.
 6. **A runtime-auditable trust surface.** The privacy boundary (reads only
    metadata, never your code, zero tokens) is asserted in docs and enforced at
    CI, but not verifiable at runtime. A `quotabot explain --reads --network`

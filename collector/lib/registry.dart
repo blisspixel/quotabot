@@ -267,6 +267,9 @@ ModelRequirements taskProfile(String? task) {
   switch (task?.toLowerCase()) {
     case 'simple':
       return const ModelRequirements(tierCeiling: 'standard');
+    case 'standard':
+      return const ModelRequirements(
+          tierFloor: 'standard', tierCeiling: 'standard');
     case 'hard':
     case 'complex':
       return const ModelRequirements(
@@ -370,6 +373,19 @@ ModelCapabilityGates modelCapabilityGates(
     budgetResetByQuotaKey: budgetResets,
   );
 }
+
+ModelCapabilityGates providerRouteCapabilityGates(
+  List<ProviderQuota> snapshot,
+  int now, {
+  Map<String, List<ModelInfo>> catalog = const {},
+  ModelRequirements? requirements,
+}) =>
+    modelCapabilityGates(
+      snapshot,
+      now,
+      catalog: catalog,
+      requirements: requirements ?? kDefaultProviderRouteRequirements,
+    );
 
 /// Builds the registry from a snapshot. For each provider, local models come from
 /// `q.models` (live) and cloud models from `catalog[provider]`; every model

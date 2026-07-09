@@ -8,7 +8,12 @@ import 'package:test/test.dart';
 
 const _now = 1782000000;
 
-ProviderQuota _q(String id, double usedPercent) => ProviderQuota(
+ProviderQuota _q(
+  String id,
+  double usedPercent, {
+  List<ModelQuota> modelQuotas = const [],
+}) =>
+    ProviderQuota(
       provider: id,
       displayName: id,
       account: 'a',
@@ -20,6 +25,7 @@ ProviderQuota _q(String id, double usedPercent) => ProviderQuota(
           resetsAt: _now + 3600,
         ),
       ],
+      modelQuotas: modelQuotas,
     );
 
 ProviderQuota _local(String id) => ProviderQuota(
@@ -208,6 +214,39 @@ void main() {
       expect(json['routing_policy'], 'local_first');
       expect((json['recommended'] as Map)['provider'], 'ollama');
       expect(json['using_local_fallback'], isTrue);
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('local /suggest applies provider-route task query context', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q(
+          'antigravity',
+          10,
+          modelQuotas: const [
+            ModelQuota(model: 'gemini', usedPercent: 100),
+            ModelQuota(model: 'Gemini 3 Flash', usedPercent: 0),
+          ],
+        ),
+      ],
+      now: () => _now,
+    );
+    try {
+      final defaultRoute = await _getJson(
+        Uri.parse('http://127.0.0.1:${server.port}/suggest'),
+      );
+      expect(defaultRoute['recommended'], isNull);
+      final blocked =
+          (defaultRoute['ranked'] as List).cast<Map<String, dynamic>>().single;
+      expect(blocked['capability_budget_limited'], isTrue);
+
+      final simpleRoute = await _getJson(
+        Uri.parse('http://127.0.0.1:${server.port}/suggest?task=simple'),
+      );
+      expect((simpleRoute['recommended'] as Map)['provider'], 'antigravity');
     } finally {
       await server.close(force: true);
     }

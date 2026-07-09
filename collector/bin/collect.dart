@@ -154,7 +154,8 @@ Future<void> main(List<String> rawArgs) async {
     case 'suggest':
       final results = await _read(profile, excludedProviders);
       final now = nowEpoch();
-      if (_hasModelProfile(flags)) {
+      final providerRoute = flags.contains('--provider-route');
+      if (_hasModelProfile(flags) && !providerRoute) {
         if (_hasRouteCostPolicy(flags)) {
           stderr.writeln(
             'quotabot: --cost-penalty and --cost-weight apply to provider '
@@ -188,6 +189,20 @@ Future<void> main(List<String> rawArgs) async {
             ? print(_jsonPretty(s.toJson(now)))
             : _printSuggestModel(s, now);
       } else {
+        if (providerRoute && flags.contains('--use-expiring-quota')) {
+          stderr.writeln(
+            'quotabot: --use-expiring-quota applies to model suggestions only',
+          );
+          exitCode = _exitUsage;
+          return;
+        }
+        final routeReqs = providerRoute && _hasCapabilityProfile(flags)
+            ? _routeRequirements(flags)
+            : (requirements: null, ok: true);
+        if (!routeReqs.ok) {
+          exitCode = _exitUsage;
+          return;
+        }
         final riskZ =
             _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
         final costPolicy = _routeCostPolicy(flags);
@@ -202,6 +217,7 @@ Future<void> main(List<String> rawArgs) async {
           preferLocal: flags.contains('--local-first'),
           costPenaltyByProvider: costPolicy.penalties,
           costWeight: costPolicy.weight,
+          routeRequirements: routeReqs.requirements,
         );
         wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       }
@@ -302,12 +318,14 @@ RouteSuggestion _suggestFor(
   bool preferLocal = false,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
+  ModelRequirements? routeRequirements,
 }) =>
     () {
-      final capabilityGates = modelCapabilityGates(
+      final capabilityGates = providerRouteCapabilityGates(
         results,
         now,
         catalog: kModelCatalog,
+        requirements: routeRequirements,
       );
       return suggestRoute(
         results,
@@ -463,9 +481,13 @@ int? _parseContext(String? s) {
 /// overlaid with explicit `--min-context`, `--require-*`, and `--tier-*` flags.
 /// quotabot never sees the task itself, only this profile.
 ({ModelRequirements requirements, bool ok}) _modelRequirements(
-    Set<String> flags) {
+  Set<String> flags, {
+  ModelBudgetPolicy defaultBudgetPolicy = ModelBudgetPolicy.any,
+}) {
   final rawBudget = _stringOption(flags, 'budget', null);
-  final budget = modelBudgetPolicyFromName(rawBudget);
+  final budget = rawBudget == null
+      ? defaultBudgetPolicy
+      : modelBudgetPolicyFromName(rawBudget);
   if (budget == null) {
     stderr.writeln(
       'quotabot: unknown --budget value "$rawBudget" '
@@ -492,11 +514,14 @@ int? _parseContext(String? s) {
 /// True when the user passed any model-capability flag, so `suggest` should
 /// recommend a concrete model rather than a provider.
 bool _hasModelProfile(Set<String> flags) {
+  return _hasCapabilityProfile(flags) || flags.contains('--use-expiring-quota');
+}
+
+bool _hasCapabilityProfile(Set<String> flags) {
   const bare = {
     '--require-tools',
     '--require-vision',
     '--require-reasoning',
-    '--use-expiring-quota',
   };
   if (flags.any(bare.contains)) return true;
   const prefixed = [
@@ -507,6 +532,22 @@ bool _hasModelProfile(Set<String> flags) {
     '--budget=',
   ];
   return flags.any((f) => prefixed.any(f.startsWith));
+}
+
+({ModelRequirements? requirements, bool ok}) _routeRequirements(
+  Set<String> flags,
+) {
+  final parsed = _modelRequirements(flags);
+  if (!parsed.ok) return (requirements: null, ok: false);
+  final rawBudget = _stringOption(flags, 'budget', null);
+  if (parsed.requirements.isEmpty && rawBudget == null) {
+    return (requirements: null, ok: true);
+  }
+  final requirements = rawBudget == null
+      ? const ModelRequirements(budgetPolicy: ModelBudgetPolicy.quota)
+          .merge(parsed.requirements)
+      : parsed.requirements;
+  return (requirements: requirements, ok: true);
 }
 
 bool _hasRouteCostPolicy(Set<String> flags) => flags.any(
@@ -1315,6 +1356,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --local-first       suggest: prefer local runtime before subscription quota',
+  );
+  stdout.writeln(
+    '  --provider-route    suggest: keep provider output while applying model filters',
   );
   stdout.writeln(
     '  --cost-penalty=A:N  suggest: explicit relative cost penalty for provider A',

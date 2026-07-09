@@ -178,6 +178,19 @@ void main() {
     expect(out, contains('captured'));
   });
 
+  test('provider-route suggest keeps provider schema with task context',
+      () async {
+    final result = await runCollectCli(
+      ['suggest', '--provider-route', '--task=simple', '--json'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.suggest.v1');
+    expect(json['ranked'], isA<List<Object?>>());
+  });
+
   test('doctor human output names trust provenance', () async {
     final result = await runCli([
       'doctor',
