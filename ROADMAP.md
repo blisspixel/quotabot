@@ -197,8 +197,11 @@ logical order (each enables the next; no dates):
    opt-in answer. First prerequisite slice landed: model registry entries now
    use matched model or model-family quotas when a provider exposes them, so a hard
    Antigravity route requires a capable model with headroom instead of
-   inheriting account-wide provider headroom. Remaining: apply a capability
-   floor or task context to the default provider route surfaces.
+   inheriting account-wide provider headroom. Second slice landed: default
+   provider route surfaces now apply an agentic-coding capability floor from the
+   model catalog and fail closed when a provider has quota but no capable model
+   budget. Remaining: make that floor configurable by caller task context where
+   provider-level routing is still desired.
 6. **A runtime-auditable trust surface.** The privacy boundary (reads only
    metadata, never your code, zero tokens) is asserted in docs and enforced at
    CI, but not verifiable at runtime. A `quotabot explain --reads --network`

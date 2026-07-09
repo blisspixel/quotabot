@@ -99,7 +99,13 @@ Map<String, dynamic> suggestResponse(
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
+  Map<String, List<ModelInfo>> catalog = kModelCatalog,
 }) {
+  final capabilityGates = modelCapabilityGates(
+    providers,
+    now,
+    catalog: catalog,
+  );
   final response = suggestRoute(
     providers,
     now,
@@ -110,6 +116,9 @@ Map<String, dynamic> suggestResponse(
     costPenaltyByProvider: costPenaltyByProvider,
     costWeight: costWeight,
     pipePenaltyByProvider: pipePenaltyByProvider,
+    capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+    capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+    capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
   ).toJson();
   response['active_leases'] = leaseDiscounts(activeLeases)
       .map((discount) => discount.toJson())
@@ -161,6 +170,7 @@ Map<String, dynamic> decideNowResponse(
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
+  Map<String, List<ModelInfo>> catalog = kModelCatalog,
 }) {
   final age = cached.asOf == null
       ? null
@@ -169,6 +179,11 @@ Map<String, dynamic> decideNowResponse(
       cached.asOf == null ||
       (age != null && age > maxAgeSeconds) ||
       cached.providers.any((provider) => provider.stale);
+  final capabilityGates = modelCapabilityGates(
+    cached.providers,
+    now,
+    catalog: catalog,
+  );
   final suggestion = suggestRoute(
     cached.providers,
     now,
@@ -179,6 +194,9 @@ Map<String, dynamic> decideNowResponse(
     costPenaltyByProvider: costPenaltyByProvider,
     costWeight: costWeight,
     pipePenaltyByProvider: pipePenaltyByProvider,
+    capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+    capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+    capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
   ).toJson();
   return {
     'schema': 'quotabot.decision.v1',
@@ -456,7 +474,18 @@ final _candidateSchema = JsonSchema.object(
       description:
           'Multiplier applied to routing_score for explicit cost penalties.',
     ),
-    'resets_at': JsonSchema.integer(),
+    'capability_limited': JsonSchema.boolean(
+      description:
+          'True when the default provider-route capability floor has no matching catalog model.',
+    ),
+    'capability_budget_limited': JsonSchema.boolean(
+      description:
+          'True when a matching capable model exists but its model budget gate is unavailable.',
+    ),
+    'resets_at': JsonSchema.integer(
+      description:
+          'Reset epoch seconds for the route-limiting provider or model gate.',
+    ),
     'stale': JsonSchema.boolean(),
     'available': JsonSchema.boolean(),
   },
@@ -1061,6 +1090,7 @@ Map<String, dynamic> _releaseJson(
 class QuotaResourceSubscriptionHub {
   final SnapshotProvider snapshot;
   final BurnProvider burnByProvider;
+  final Map<String, List<ModelInfo>> catalog;
   final int Function() now;
   final Future<void> Function(String uri) notifyUpdated;
   final bool autoStart;
@@ -1078,6 +1108,7 @@ class QuotaResourceSubscriptionHub {
   QuotaResourceSubscriptionHub({
     required this.snapshot,
     required this.burnByProvider,
+    this.catalog = kModelCatalog,
     required this.now,
     required this.notifyUpdated,
     this.autoStart = true,
@@ -1114,12 +1145,20 @@ class QuotaResourceSubscriptionHub {
         await notifyUpdated(quotasCurrentResourceUri);
       }
       final burnStats = burnByProvider(data, n);
+      final capabilityGates = modelCapabilityGates(
+        data,
+        n,
+        catalog: catalog,
+      );
       final suggestion = suggestRoute(
         data,
         n,
         burnStatsByProvider: burnStats,
         pipePenaltyByProvider:
             loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
+        capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+        capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+        capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
       );
       final alerts = computeAlerts(
         snapshot: data,
@@ -1222,6 +1261,9 @@ RouteCandidate? _explicitReserveTarget(
   List<RouteLease> activeLeases,
   Map<String, BurnStat> burnStatsByProvider,
   Map<String, double> pipePenaltyByProvider,
+  Set<String>? capabilityKnownQuotaKeys,
+  Set<String>? capabilityAvailableQuotaKeys,
+  Map<String, int> capabilityBudgetResetByQuotaKey,
 ) {
   final requestedProvider = normalizeLeaseText(args['provider'])?.toLowerCase();
   if (requestedProvider == null) return null;
@@ -1239,6 +1281,9 @@ RouteCandidate? _explicitReserveTarget(
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(activeLeases, provider, account),
     pipePenaltyByProvider: pipePenaltyByProvider,
+    capabilityKnownQuotaKeys: capabilityKnownQuotaKeys,
+    capabilityAvailableQuotaKeys: capabilityAvailableQuotaKeys,
+    capabilityBudgetResetByQuotaKey: capabilityBudgetResetByQuotaKey,
   ).ranked;
   return ranked.isEmpty ? null : ranked.first;
 }
@@ -1299,6 +1344,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
   subscriptionHub = QuotaResourceSubscriptionHub(
     snapshot: snapshot,
     burnByProvider: burnByProvider,
+    catalog: catalog,
     now: now,
     autoStart: enableSubscriptionTimers,
     notifyUpdated: (uri) async {
@@ -1406,6 +1452,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             costWeight: costPolicy.weight,
             pipePenaltyByProvider:
                 loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
+            catalog: catalog,
           ),
           profiled,
         ),
@@ -1476,6 +1523,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           const CachedQuotaSnapshot.empty(),
           n,
           maxAgeSeconds: boundedMaxAge,
+          catalog: catalog,
         );
         response['error'] = costPolicy.error;
         return CallToolResult.fromStructuredContent(
@@ -1499,6 +1547,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             costWeight: costPolicy.weight,
             pipePenaltyByProvider:
                 loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
+            catalog: catalog,
           ),
           profiled,
         ),
@@ -1596,6 +1645,11 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           }
         }
       }
+      final capabilityGates = modelCapabilityGates(
+        results,
+        n,
+        catalog: catalog,
+      );
       final target = _explicitReserveTarget(
             results,
             n,
@@ -1603,6 +1657,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             activeLeases,
             burnStats,
             pipePenalties,
+            capabilityGates.knownQuotaKeys,
+            capabilityGates.availableQuotaKeys,
+            capabilityGates.budgetResetByQuotaKey,
           ) ??
           (explicit
               ? null
@@ -1613,6 +1670,11 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
                   leaseDiscountFor: (provider, account) =>
                       leaseDiscountFor(activeLeases, provider, account),
                   pipePenaltyByProvider: pipePenalties,
+                  capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+                  capabilityAvailableQuotaKeys:
+                      capabilityGates.availableQuotaKeys,
+                  capabilityBudgetResetByQuotaKey:
+                      capabilityGates.budgetResetByQuotaKey,
                 ).recommended);
       if (target == null) {
         return CallToolResult.fromStructuredContent(

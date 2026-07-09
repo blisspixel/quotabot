@@ -208,6 +208,14 @@ class RouteCandidate {
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
+  /// True when the default provider-route capability floor has no matching
+  /// catalog model for this provider/account.
+  final bool capabilityLimited;
+
+  /// True when a matching capable model exists, but its model-specific budget
+  /// gate is not usable now.
+  final bool capabilityBudgetLimited;
+
   final bool stale;
 
   /// True when usable right now: local, or fresh cloud headroom above the
@@ -240,6 +248,8 @@ class RouteCandidate {
     this.wasteBoost,
     this.costPenalty,
     this.costDiscount,
+    this.capabilityLimited = false,
+    this.capabilityBudgetLimited = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -266,6 +276,8 @@ class RouteCandidate {
           'cost_penalty': double.parse(costPenalty!.toStringAsFixed(4)),
         if (costDiscount != null)
           'cost_discount': double.parse(costDiscount!.toStringAsFixed(4)),
+        if (capabilityLimited) 'capability_limited': true,
+        if (capabilityBudgetLimited) 'capability_budget_limited': true,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         'available': available,
@@ -401,7 +413,8 @@ class RouteSuggestion {
 
 /// Builds the always-present fail-soft fallback from the available candidates:
 /// a running local runtime if present, else the soonest-resetting subscription
-/// to wait for, else a passthrough to the model the caller requested.
+/// with a known matching capability, else a passthrough to the model the caller
+/// requested.
 RouteFallback _fallbackFor(
   List<RouteCandidate> subs,
   List<RouteCandidate> locals,
@@ -414,7 +427,9 @@ RouteFallback _fallbackFor(
       reason: 'Skip the pick? Use local ${l.provider} - free and always on.',
     );
   }
-  final resetting = subs.where((c) => !c.stale && c.resetsAt != null).toList()
+  final resetting = subs
+      .where((c) => !c.stale && !c.capabilityLimited && c.resetsAt != null)
+      .toList()
     ..sort((a, b) => a.resetsAt!.compareTo(b.resetsAt!));
   if (resetting.isNotEmpty) {
     final s = resetting.first;
@@ -726,6 +741,7 @@ double _erf(double x) {
 
 int _compareSubscriptionCandidates(RouteCandidate a, RouteCandidate b) {
   if (a.stale != b.stale) return a.stale ? 1 : -1;
+  if (a.available != b.available) return a.available ? -1 : 1;
   final score = (b.routingScore ?? -1).compareTo(a.routingScore ?? -1);
   if (score != 0) return score;
   final effective =
@@ -778,6 +794,9 @@ RouteSuggestion suggestRoute(
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
+  Set<String>? capabilityKnownQuotaKeys,
+  Set<String>? capabilityAvailableQuotaKeys,
+  Map<String, int> capabilityBudgetResetByQuotaKey = const {},
 }) {
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
@@ -789,8 +808,25 @@ RouteSuggestion suggestRoute(
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
-    final accountStat =
-        q.isLocal ? null : burnStatsByProvider[quotaIdentityKeyFor(q)];
+    final quotaKey = quotaIdentityKeyFor(q);
+    final knownCapabilityKeys =
+        capabilityKnownQuotaKeys ?? capabilityAvailableQuotaKeys;
+    final availableCapabilityKeys =
+        capabilityAvailableQuotaKeys ?? capabilityKnownQuotaKeys;
+    final hasCapabilityGate = !q.isLocal &&
+        (knownCapabilityKeys != null || availableCapabilityKeys != null);
+    final capabilityLimited = hasCapabilityGate &&
+        !(knownCapabilityKeys?.contains(quotaKey) ?? false);
+    final capabilityBudgetLimited = hasCapabilityGate &&
+        !capabilityLimited &&
+        !(availableCapabilityKeys?.contains(quotaKey) ?? false);
+    final capabilityBlocked = capabilityLimited || capabilityBudgetLimited;
+    final candidateResetsAt = capabilityLimited
+        ? null
+        : capabilityBudgetLimited
+            ? capabilityBudgetResetByQuotaKey[quotaKey]
+            : a.resetsAt;
+    final accountStat = q.isLocal ? null : burnStatsByProvider[quotaKey];
     final providerStat = q.isLocal ? null : burnStatsByProvider[q.provider];
     final stat = q.isLocal ? null : (accountStat ?? providerStat);
     final burn =
@@ -806,7 +842,7 @@ RouteSuggestion suggestRoute(
             _pipePenaltyFor(q, pipePenaltyByProvider),
             _nativePipePenaltyFor(q),
           );
-    final effective = headroom == null
+    final effective = capabilityBlocked || headroom == null
         ? null
         : (riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ) -
                 leaseDiscount -
@@ -821,7 +857,13 @@ RouteSuggestion suggestRoute(
         ((measuredProviderCounts[q.provider] ?? 0) == 1 ? providerStat : null);
     final projectedWaste = _projectedWastePercent(
       q,
-      a,
+      capabilityBlocked
+          ? (
+              available: false,
+              headroom: a.headroom,
+              resetsAt: candidateResetsAt
+            )
+          : a,
       headroom,
       wasteBurn?.perHour,
       now,
@@ -869,11 +911,13 @@ RouteSuggestion suggestRoute(
       costPenalty: costPenalty > 0 ? costPenalty : null,
       costDiscount:
           score == null || score.costDiscount >= 1 ? null : score.costDiscount,
-      resetsAt: a.resetsAt,
+      resetsAt: candidateResetsAt,
       stale: q.stale,
-      available: q.isLocal || a.available,
+      available: q.isLocal || (a.available && !capabilityBlocked),
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
+      capabilityLimited: capabilityLimited,
+      capabilityBudgetLimited: capabilityBudgetLimited,
     );
   }
 
@@ -978,13 +1022,29 @@ RouteSuggestion suggestRoute(
   }
 
   // No local fallback. Recommend the best subscription above the spent floor.
-  final withAny =
-      liveSubs.where((c) => (c.headroom ?? 0) > kSpentHeadroomFloor).toList();
+  final withAny = liveSubs
+      .where((c) => c.available && (c.headroom ?? 0) > kSpentHeadroomFloor)
+      .toList();
   if (withAny.isNotEmpty) {
     final best = withAny.first;
     return result(
       best,
       'All subscriptions are low; ${best.provider} has the best runway (${best.headroom!.round()}% free).',
+    );
+  }
+
+  final capabilityBlocked = liveSubs
+      .where((c) =>
+          (c.capabilityLimited || c.capabilityBudgetLimited) &&
+          (c.headroom ?? 0) > kSpentHeadroomFloor)
+      .toList();
+  if (capabilityBlocked.isNotEmpty) {
+    final hasKnown = capabilityBlocked.any((c) => c.capabilityBudgetLimited);
+    return result(
+      null,
+      hasKnown
+          ? 'Providers have quota, but no default-capable model has budget right now; use quotabot models or wait for the model gate to reset.'
+          : 'Providers have quota, but none has a catalog model that meets the default capability floor; use quotabot models or pass an explicit task profile.',
     );
   }
 

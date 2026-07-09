@@ -303,16 +303,26 @@ RouteSuggestion _suggestFor(
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
 }) =>
-    suggestRoute(
-      results,
-      now,
-      burnStatsByProvider: _burnStatsFor(results, now),
-      riskZ: riskZ,
-      preferLocal: preferLocal,
-      costPenaltyByProvider: costPenaltyByProvider,
-      costWeight: costWeight,
-      pipePenaltyByProvider: _pipePenaltyFor(results, now),
-    );
+    () {
+      final capabilityGates = modelCapabilityGates(
+        results,
+        now,
+        catalog: kModelCatalog,
+      );
+      return suggestRoute(
+        results,
+        now,
+        burnStatsByProvider: _burnStatsFor(results, now),
+        riskZ: riskZ,
+        preferLocal: preferLocal,
+        costPenaltyByProvider: costPenaltyByProvider,
+        costWeight: costWeight,
+        pipePenaltyByProvider: _pipePenaltyFor(results, now),
+        capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+        capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+        capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
+      );
+    }();
 
 Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
   if (Platform.environment['QUOTABOT_DEMO'] == '1') return demo.demoBurnStats();

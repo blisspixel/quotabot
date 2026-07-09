@@ -16,6 +16,7 @@ ProviderQuota _q(
   List<QuotaWindow> windows, {
   bool stale = false,
   ProviderQuotaKind kind = ProviderQuotaKind.subscription,
+  List<ModelQuota> modelQuotas = const [],
 }) =>
     ProviderQuota(
       provider: id,
@@ -25,6 +26,7 @@ ProviderQuota _q(
       windows: windows,
       stale: stale,
       kind: kind,
+      modelQuotas: modelQuotas,
     );
 
 ProviderQuota _local(String id) =>
@@ -174,6 +176,30 @@ void main() {
       expect(claude['pipe_discount_percent'], 60);
     });
 
+    test('suggestResponse uses default model capability budget gates', () {
+      final r = suggestResponse(
+        [
+          _q(
+            'antigravity',
+            [QuotaWindow(label: 'weekly', usedPercent: 10)],
+            modelQuotas: const [
+              ModelQuota(model: 'gemini', usedPercent: 100),
+              ModelQuota(model: 'Gemini 3 Flash', usedPercent: 0),
+            ],
+          ),
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 40)]),
+        ],
+        _now,
+      );
+
+      expect((r['recommended'] as Map)['provider'], 'claude');
+      final antigravity = (r['ranked'] as List<Object?>)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((entry) => entry['provider'] == 'antigravity');
+      expect(antigravity['available'], isFalse);
+      expect(antigravity['capability_budget_limited'], isTrue);
+    });
+
     test('availabilityResponse answers for a known provider', () {
       final r = availabilityResponse(_fixture(), _now, 'CLAUDE', null);
       expect(r['provider'], 'claude');
@@ -235,6 +261,26 @@ void main() {
       RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
       BurnProvider? burnProvider,
       bool enableSubscriptionTimers = false,
+      Map<String, List<ModelInfo>> catalog = const {
+        'claude': [
+          ModelInfo(
+            id: 'claude-test',
+            contextTokens: 200000,
+            reasoning: 'reasoning',
+            tier: 'standard',
+            tools: true,
+          ),
+        ],
+        'codex': [
+          ModelInfo(
+            id: 'codex-test',
+            contextTokens: 200000,
+            reasoning: 'reasoning',
+            tier: 'standard',
+            tools: true,
+          ),
+        ],
+      },
     }) async {
       final serverT = _PairedTransport();
       final clientT = _PairedTransport();
@@ -260,11 +306,7 @@ void main() {
         enableSubscriptionTimers: enableSubscriptionTimers,
         now: () => _now,
         profileLoader: profileLoader,
-        catalog: const {
-          'claude': [
-            ModelInfo(id: 'claude-test', contextTokens: 200000, tools: true),
-          ],
-        },
+        catalog: catalog,
       );
       await server.connect(serverT);
 
@@ -353,6 +395,10 @@ void main() {
         const CallToolRequest(name: 'suggest_provider'),
       );
       expect(suggest.structuredContent?['schema'], 'quotabot.suggest.v1');
+      expect(
+        (suggest.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
 
       final localFirst = await client.callTool(
         const CallToolRequest(
@@ -396,7 +442,7 @@ void main() {
       final filtered = await client.callTool(
         const CallToolRequest(
           name: 'list_models',
-          arguments: {'require_reasoning': true},
+          arguments: {'require_vision': true},
         ),
       );
       expect(filtered.structuredContent?['models'], isEmpty);
@@ -465,6 +511,31 @@ void main() {
           );
       expect(claude['cost_penalty'], 1.0);
       expect(claude['cost_discount'], 0.5);
+    });
+
+    test('suggest_provider uses the injected model catalog', () async {
+      await connect(
+        _fixture(),
+        catalog: const {
+          'claude': [
+            ModelInfo(id: 'claude-test', contextTokens: 200000, tools: true),
+          ],
+        },
+      );
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+
+      expect(
+        (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+      final rankedRoutes = suggestion.structuredContent?['ranked'] as List;
+      final claude = rankedRoutes
+          .cast<Map<String, dynamic>>()
+          .firstWhere((route) => route['provider'] == 'claude');
+      expect(claude['capability_limited'], isTrue);
     });
 
     test('suggest_model can prefer expiring included quota when requested',
@@ -638,7 +709,10 @@ void main() {
           },
         ),
       );
-      expect(models.structuredContent?['models'], isEmpty);
+      final modelProviders = (models.structuredContent?['models'] as List)
+          .map((model) => (model as Map)['provider']);
+      expect(modelProviders, contains('codex'));
+      expect(modelProviders, isNot(contains('claude')));
     });
 
     test('malformed MCP exclude arguments return a structured error', () async {
@@ -875,6 +949,48 @@ void main() {
       expect(
         spent.structuredContent?['reason'],
         'claude has no effective headroom available',
+      );
+    });
+
+    test('reserve_provider refuses explicit targets blocked by model budget',
+        () async {
+      await connect(
+        [
+          _q(
+            'antigravity',
+            [QuotaWindow(label: 'weekly', usedPercent: 10)],
+            modelQuotas: [
+              ModelQuota(
+                model: 'gemini',
+                usedPercent: 100,
+                resetsAt: _now + 7200,
+              ),
+            ],
+          ),
+        ],
+        catalog: const {
+          'antigravity': [
+            ModelInfo(
+              id: 'gemini-3.1-pro',
+              displayName: 'Gemini 3.1 Pro',
+              reasoning: 'reasoning',
+              tier: 'flagship',
+            ),
+          ],
+        },
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'provider': 'antigravity'},
+        ),
+      );
+
+      expect(reserved.structuredContent?['reserved'], isFalse);
+      expect(
+        reserved.structuredContent?['reason'],
+        'antigravity has no effective headroom available',
       );
     });
 

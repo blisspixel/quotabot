@@ -428,6 +428,57 @@ void main() {
       expect(byProvider['cursor'], 'metered plan');
       expect(byProvider['ollama'], 'local');
     });
+
+    test(
+        'capability gate routes around a provider with no capable model budget',
+        () {
+      final s = suggestRoute(
+        [
+          _q('antigravity', [QuotaWindow(label: 'weekly', usedPercent: 10)]),
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 40)]),
+        ],
+        _now,
+        capabilityKnownQuotaKeys: {
+          quotaIdentityKey('antigravity', 'a'),
+          quotaIdentityKey('claude', 'a'),
+        },
+        capabilityAvailableQuotaKeys: {
+          quotaIdentityKey('claude', 'a'),
+        },
+        capabilityBudgetResetByQuotaKey: {
+          quotaIdentityKey('antigravity', 'a'): _now + 3600,
+        },
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      final antigravity = s.ranked.firstWhere(
+        (candidate) => candidate.provider == 'antigravity',
+      );
+      expect(antigravity.available, isFalse);
+      expect(antigravity.resetsAt, _now + 3600);
+      expect(antigravity.capabilityBudgetLimited, isTrue);
+      expect(antigravity.toJson()['capability_budget_limited'], isTrue);
+      expect(antigravity.toJson()['resets_at'], _now + 3600);
+    });
+
+    test('capability gate fails closed when no catalog model meets the floor',
+        () {
+      final s = suggestRoute(
+        [
+          _q('cursor', [QuotaWindow(label: 'monthly', usedPercent: 10)]),
+        ],
+        _now,
+        capabilityKnownQuotaKeys: const {},
+        capabilityAvailableQuotaKeys: const {},
+      );
+
+      expect(s.recommended, isNull);
+      expect(s.reason, contains('default capability floor'));
+      expect(s.ranked.single.available, isFalse);
+      expect(s.ranked.single.capabilityLimited, isTrue);
+      expect(s.ranked.single.toJson()['capability_limited'], isTrue);
+      expect(s.fallback.kind, RouteFallbackKind.passthrough);
+    });
   });
 
   group('suggestRoute burn-aware effective headroom', () {

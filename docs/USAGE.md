@@ -426,19 +426,25 @@ shrunk toward the current fleet burn mean so a two-sample spike does not dominat
 the route.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 `runway_hours`, `routing_score`, `confidence`, `strand_probability`, and, when
-measurable, `projected_waste_percent` plus `waste_boost`, and, when the caller
-supplies a cost policy, `cost_penalty` plus `cost_discount`. Candidates may also
-include `pipe_discount_percent` when recent local LiteLLM or native pipe health
-down-ranks a provider/account. Top-level provenance includes `routing_policy`
+  measurable, `projected_waste_percent` plus `waste_boost`, and, when the caller
+  supplies a cost policy, `cost_penalty` plus `cost_discount`. Candidates may also
+  include `pipe_discount_percent` when recent local LiteLLM or native pipe health
+  down-ranks a provider/account, `capability_limited` when no catalog model meets
+  the default agentic-coding floor, or `capability_budget_limited` when a capable
+  model exists but its model gate has no budget now. For a
+  `capability_budget_limited` candidate, `resets_at` is the earliest known reset
+  of a matching model gate. Top-level provenance includes
+  `routing_policy`
 (`balanced` or `local_first`), `waste_weight`, `waste_threshold_percent`,
 `waste_max_hours`, and `cost_weight`. The score is a
 confidence-weighted runway index with a modest use-it-or-lose-it multiplier and
 an opt-in caller cost discount, so a slower-burning provider can rank ahead of
 one with more instantaneous headroom but a much shorter projected runway,
 measured included quota near reset can win a close tie before it expires unused,
-recent proxy failures can steer traffic away from a still-funded but unhealthy
-route, and a caller can down-rank a provider it knows is more expensive without
-turning quotabot into a spend ledger.
+  recent proxy failures can steer traffic away from a still-funded but unhealthy
+  route, the default provider route avoids a provider whose capable model pool is
+  exhausted, and a caller can down-rank a provider it knows is more expensive
+  without turning quotabot into a spend ledger.
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/

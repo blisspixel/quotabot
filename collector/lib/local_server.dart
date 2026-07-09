@@ -6,8 +6,10 @@ import 'analysis.dart';
 import 'cache.dart';
 import 'litellm_metrics.dart';
 import 'mcp_http.dart' show isLoopbackMcpHost;
+import 'model_catalog.dart';
 import 'models.dart';
 import 'provider_filters.dart';
+import 'registry.dart';
 import 'util.dart';
 
 typedef LocalQuotaSnapshotProvider = Future<List<ProviderQuota>> Function();
@@ -158,6 +160,11 @@ Future<HttpServer> startLocalQuotabotServer({
             final snap =
                 filterExcludedProviders(await snapshot(), exclusions.providers);
             final current = now();
+            final capabilityGates = modelCapabilityGates(
+              snap,
+              current,
+              catalog: kModelCatalog,
+            );
             writeJson(
               request,
               suggestRoute(
@@ -172,6 +179,11 @@ Future<HttpServer> startLocalQuotabotServer({
                     routeSummaryProvider().pipePenaltyByProvider(
                   now: current,
                 ),
+                capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+                capabilityAvailableQuotaKeys:
+                    capabilityGates.availableQuotaKeys,
+                capabilityBudgetResetByQuotaKey:
+                    capabilityGates.budgetResetByQuotaKey,
               ).toJson(),
             );
           }

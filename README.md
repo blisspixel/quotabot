@@ -176,7 +176,10 @@ burn pace would leave at least N percent of a renewing paid window unused at
 reset. Add `--webhook` to POST each alert (loopback unless `--allow-external`)
 so it can reach a tray toast, a shell, or chat. Quota-reading CLI commands accept
 `--exclude=A,B` after `--profile` for one-off provider avoidance without changing
-saved profiles. The same recommendation is available over MCP stdio or
+saved profiles. The default provider recommendation uses the model catalog as a
+capability floor for agentic coding, so a provider with broad account headroom
+does not win when its capable model pool is exhausted. The same recommendation is
+available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters, one-request `exclude` lists, and
