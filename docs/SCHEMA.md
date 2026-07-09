@@ -284,8 +284,7 @@ endpoints.
 
 ## `quotabot.alert.v1`
 
-`quotabot watch --json`, alert webhooks, and `quotas://alerts` emit alert objects
-with:
+`quotabot watch --json` and alert webhooks emit individual alert objects with:
 
 - `schema`: always `quotabot.alert.v1`.
 - `kind`: `low_quota` or `projected_waste`.
@@ -299,6 +298,11 @@ with:
 Alerts are edge-triggered by provider/account identity when a provider exposes a
 specific account label, so two accounts on the same provider can warn and
 recover independently.
+
+The MCP `quotas://alerts` resource wraps the last fired alert objects in a
+`quotabot.alerts.v1` envelope with `schema`, `generated_at`, `last_alert_at`,
+and `alerts`. Each item in `alerts` is the `quotabot.alert.v1` object described
+above.
 
 Alert payloads are metadata only. They never contain prompts, generated text, or
 source code. The contract is additive; consumers should ignore unknown fields.
