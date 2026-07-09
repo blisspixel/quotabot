@@ -178,18 +178,23 @@ so it can reach a tray toast, a shell, or chat. Quota-reading CLI commands accep
 `--exclude=A,B` after `--profile` for one-off provider avoidance without changing
 saved profiles. The default provider recommendation uses the model catalog as a
 capability floor for agentic coding, so a provider with broad account headroom
-does not win when its capable model pool is exhausted. The same recommendation is
+does not win when its capable model pool is exhausted. Add
+`--provider-route --task=simple` (or the other model filters) when you still want
+a provider-level answer but the next task has different capability needs. The
+same recommendation is
 available over MCP stdio or
 opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
 `reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
 with optional `profile`/`account` filters, one-request `exclude` lists, and
-`local_first` routing, explicit `cost_penalties`, model `budget` filters
+`local_first` routing, explicit `cost_penalties`, provider-route task filters,
+model `budget` filters
 (`local` or measured `quota`), and
 model `use_expiring_quota`, local model readiness (`loaded` versus `cold`), and
 `quotas://alerts` subscriptions) and a
 plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok` or
 `GET /suggest?local_first=true`, plus `cost_penalty=codex:2` when the caller
-explicitly wants cost-aware ranking). Use model `budget=quota` when a caller
+explicitly wants cost-aware ranking, and `task=simple` or `require_vision=true`
+when the provider route should use a caller-supplied capability floor). Use model `budget=quota` when a caller
 must avoid credit-backed or request-metered spend; temporary included-quota
 models stop qualifying for that policy after their documented cutoff. For how an agent should call quotabot and route, see
 [AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin

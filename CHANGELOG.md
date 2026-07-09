@@ -20,6 +20,9 @@ Notable changes to quotabot. Newest first.
 - Default provider routing now applies an agentic-coding capability floor from
   the model catalog, so a provider with broad account headroom does not win when
   its capable model pool is exhausted.
+- Provider-level suggestions can now accept caller-supplied task or capability
+  context while keeping provider output, covering CLI `--provider-route`, MCP
+  `suggest_provider`/`decide_now`, and loopback HTTP `/suggest`.
 
 ## 0.5.13 - 2026-07-08
 

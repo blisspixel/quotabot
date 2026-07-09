@@ -368,6 +368,13 @@ void main() {
         ),
         ModelInfo(
             id: 'haiku', contextTokens: 200000, tools: true, tier: 'light'),
+        ModelInfo(
+          id: 'sonnet',
+          contextTokens: 200000,
+          tools: true,
+          reasoning: 'reasoning',
+          tier: 'standard',
+        ),
       ],
     };
 
@@ -379,11 +386,13 @@ void main() {
         ).map((e) => e.model.id).toList();
 
     test('no requirements returns everything', () {
-      expect(ids(const ModelRequirements()).toSet(), {'opus', 'haiku'});
+      expect(
+          ids(const ModelRequirements()).toSet(), {'opus', 'haiku', 'sonnet'});
     });
 
-    test('require-reasoning keeps only the reasoning model', () {
-      expect(ids(const ModelRequirements(requireReasoning: true)), ['opus']);
+    test('require-reasoning keeps only reasoning models', () {
+      expect(ids(const ModelRequirements(requireReasoning: true)),
+          ['opus', 'sonnet']);
     });
 
     test('require-vision filters by declared capability', () {
@@ -401,7 +410,7 @@ void main() {
     test('min-context excludes models below the requirement', () {
       expect(ids(const ModelRequirements(minContextTokens: 500000)), isEmpty);
       expect(ids(const ModelRequirements(minContextTokens: 100000)).toSet(),
-          {'opus', 'haiku'});
+          {'opus', 'haiku', 'sonnet'});
     });
 
     test('a local budget keeps only local-runtime models', () {
@@ -478,11 +487,15 @@ void main() {
     });
 
     test('the hard task profile requires reasoning', () {
-      expect(ids(taskProfile('hard')), ['opus']);
+      expect(ids(taskProfile('hard')).toSet(), {'opus', 'sonnet'});
     });
 
     test('the simple task profile caps the tier', () {
-      expect(ids(taskProfile('simple')), ['haiku']);
+      expect(ids(taskProfile('simple')).toSet(), {'haiku', 'sonnet'});
+    });
+
+    test('the standard task profile keeps standard-tier models', () {
+      expect(ids(taskProfile('standard')), ['sonnet']);
     });
 
     test('merge overlays explicit flags on a task profile', () {

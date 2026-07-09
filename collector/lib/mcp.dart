@@ -100,11 +100,13 @@ Map<String, dynamic> suggestResponse(
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
+  ModelRequirements? routeRequirements,
 }) {
-  final capabilityGates = modelCapabilityGates(
+  final capabilityGates = providerRouteCapabilityGates(
     providers,
     now,
     catalog: catalog,
+    requirements: routeRequirements,
   );
   final response = suggestRoute(
     providers,
@@ -171,6 +173,7 @@ Map<String, dynamic> decideNowResponse(
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
   Map<String, List<ModelInfo>> catalog = kModelCatalog,
+  ModelRequirements? routeRequirements,
 }) {
   final age = cached.asOf == null
       ? null
@@ -179,10 +182,11 @@ Map<String, dynamic> decideNowResponse(
       cached.asOf == null ||
       (age != null && age > maxAgeSeconds) ||
       cached.providers.any((provider) => provider.stale);
-  final capabilityGates = modelCapabilityGates(
+  final capabilityGates = providerRouteCapabilityGates(
     cached.providers,
     now,
     catalog: catalog,
+    requirements: routeRequirements,
   );
   final suggestion = suggestRoute(
     cached.providers,
@@ -226,12 +230,14 @@ Map<String, dynamic> decideNowResponse(
 /// Builds a [ModelRequirements] from `list_models` tool arguments: a coarse
 /// `task` profile overlaid with explicit capability/tier/budget filters.
 ({ModelRequirements requirements, String? error}) _requirementsFromArgs(
-  Map<String, dynamic> args,
-) {
+    Map<String, dynamic> args,
+    {ModelBudgetPolicy defaultBudgetPolicy = ModelBudgetPolicy.any}) {
   final rawBudget = args['budget'];
-  final budget = rawBudget is String || rawBudget == null
-      ? modelBudgetPolicyFromName(rawBudget as String?)
-      : null;
+  final budget = rawBudget == null
+      ? defaultBudgetPolicy
+      : rawBudget is String
+          ? modelBudgetPolicyFromName(rawBudget)
+          : null;
   if (budget == null) {
     final label = rawBudget == null ? 'null' : jsonEncode(rawBudget);
     return (
@@ -252,6 +258,49 @@ Map<String, dynamic> decideNowResponse(
     requirements: taskProfile(args['task'] as String?).merge(explicit),
     error: null,
   );
+}
+
+bool _hasRequirementArgs(Map<String, dynamic> args) {
+  const keys = {
+    'task',
+    'min_context',
+    'require_tools',
+    'require_vision',
+    'require_reasoning',
+    'tier_floor',
+    'tier_ceiling',
+    'budget',
+  };
+  return keys.any((key) {
+    final value = args[key];
+    if (value == null) return false;
+    if (value is bool) return value;
+    if (value is String) return value.trim().isNotEmpty;
+    return true;
+  });
+}
+
+({ModelRequirements? requirements, String? error}) _routeRequirementsFromArgs(
+  Map<String, dynamic> args,
+) {
+  if (!_hasRequirementArgs(args)) {
+    return (requirements: null, error: null);
+  }
+  final parsed = _requirementsFromArgs(
+    args,
+    defaultBudgetPolicy: ModelBudgetPolicy.any,
+  );
+  if (parsed.error != null) {
+    return (requirements: null, error: parsed.error);
+  }
+  if (parsed.requirements.isEmpty && args['budget'] == null) {
+    return (requirements: null, error: null);
+  }
+  final requirements = args['budget'] == null
+      ? const ModelRequirements(budgetPolicy: ModelBudgetPolicy.quota)
+          .merge(parsed.requirements)
+      : parsed.requirements;
+  return (requirements: requirements, error: null);
 }
 
 /// Whether a single named provider has quota available now, or an
@@ -795,6 +844,27 @@ final _routingInputSchema = JsonSchema.object(
       description:
           'Prefer a local runtime before spending subscription quota when one is available.',
     ),
+    'task': JsonSchema.string(
+      description:
+          'Optional provider-route capability profile: simple, reasoning, hard, or complex.',
+    ),
+    'min_context': JsonSchema.integer(
+      description:
+          'Require a provider with at least one model of this context.',
+    ),
+    'require_tools': JsonSchema.boolean(),
+    'require_vision': JsonSchema.boolean(),
+    'require_reasoning': JsonSchema.boolean(),
+    'tier_floor': JsonSchema.string(
+      description: 'Minimum provider tier: light, standard, or flagship.',
+    ),
+    'tier_ceiling': JsonSchema.string(
+      description: 'Maximum provider tier: light, standard, or flagship.',
+    ),
+    'budget': JsonSchema.string(
+      description:
+          'Provider-route model budget envelope: any, quota, or local. Defaults to quota when any capability filter is supplied.',
+    ),
     'cost_penalties': JsonSchema.object(
       description:
           'Optional provider-id to relative cost-penalty map. Values are explicit caller policy, not inferred prices.',
@@ -1145,7 +1215,7 @@ class QuotaResourceSubscriptionHub {
         await notifyUpdated(quotasCurrentResourceUri);
       }
       final burnStats = burnByProvider(data, n);
-      final capabilityGates = modelCapabilityGates(
+      final capabilityGates = providerRouteCapabilityGates(
         data,
         n,
         catalog: catalog,
@@ -1433,6 +1503,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final n = now();
       final activeLeases = leaseStore.active(n);
       final costPolicy = _routingCostPolicy(args);
+      final routeRequirements = _routeRequirementsFromArgs(args);
+      if (routeRequirements.error != null) {
+        final response = suggestRoute(const [], n).toJson();
+        response['error'] = routeRequirements.error;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       if (costPolicy.error != null) {
         final response = suggestRoute(const [], n).toJson();
         response['error'] = costPolicy.error;
@@ -1453,6 +1531,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             pipePenaltyByProvider:
                 loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
             catalog: catalog,
+            routeRequirements: routeRequirements.requirements,
           ),
           profiled,
         ),
@@ -1494,6 +1573,27 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           description:
               'Prefer a local runtime before spending subscription quota when one is available.',
         ),
+        'task': JsonSchema.string(
+          description:
+              'Optional provider-route capability profile: simple, reasoning, hard, or complex.',
+        ),
+        'min_context': JsonSchema.integer(
+          description:
+              'Require a provider with at least one model of this context.',
+        ),
+        'require_tools': JsonSchema.boolean(),
+        'require_vision': JsonSchema.boolean(),
+        'require_reasoning': JsonSchema.boolean(),
+        'tier_floor': JsonSchema.string(
+          description: 'Minimum provider tier: light, standard, or flagship.',
+        ),
+        'tier_ceiling': JsonSchema.string(
+          description: 'Maximum provider tier: light, standard, or flagship.',
+        ),
+        'budget': JsonSchema.string(
+          description:
+              'Provider-route model budget envelope: any, quota, or local. Defaults to quota when any capability filter is supplied.',
+        ),
         'cost_penalties': JsonSchema.object(
           description:
               'Optional provider-id to relative cost-penalty map. Values are explicit caller policy, not inferred prices.',
@@ -1518,6 +1618,19 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final maxAge = (args['max_age_seconds'] as num?)?.toInt() ?? 300;
       final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
       final costPolicy = _routingCostPolicy(args);
+      final routeRequirements = _routeRequirementsFromArgs(args);
+      if (routeRequirements.error != null) {
+        final response = decideNowResponse(
+          const CachedQuotaSnapshot.empty(),
+          n,
+          maxAgeSeconds: boundedMaxAge,
+          catalog: catalog,
+        );
+        response['error'] = routeRequirements.error;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       if (costPolicy.error != null) {
         final response = decideNowResponse(
           const CachedQuotaSnapshot.empty(),
@@ -1548,6 +1661,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             pipePenaltyByProvider:
                 loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
             catalog: catalog,
+            routeRequirements: routeRequirements.requirements,
           ),
           profiled,
         ),
@@ -1645,7 +1759,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           }
         }
       }
-      final capabilityGates = modelCapabilityGates(
+      final capabilityGates = providerRouteCapabilityGates(
         results,
         n,
         catalog: catalog,
