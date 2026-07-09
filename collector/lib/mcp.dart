@@ -419,7 +419,7 @@ final _candidateSchema = JsonSchema.object(
     ),
     'pipe_discount_percent': JsonSchema.number(
       description:
-          'Recent local LiteLLM pipe-health discount applied to effective headroom.',
+          'Recent LiteLLM or native pipe-health discount applied to effective headroom.',
     ),
     'burn_percent_per_hour': JsonSchema.number(),
     'burn_se_percent_per_hour': JsonSchema.number(

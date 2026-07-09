@@ -409,10 +409,10 @@ cost, spend-class counts, top successfully served models, pipe health,
 throttled/failed requests, Retry-After delays, callback latency, and the last
 request age. The file is local JSONL only; quotabot reads a bounded tail of it
 and never reads prompts, response content, exception messages, or source code.
-Recent LiteLLM failures and throttles also feed back into local route ranking as
-a bounded `pipe_discount_percent`, keyed by provider/account when available. Raw
-quota availability stays unchanged; the discount only helps avoid a route that
-looks funded but is currently failing in the proxy.
+Recent LiteLLM failures, throttles, and native adapter pipe diagnostics also
+feed back into local route ranking as a bounded `pipe_discount_percent`, keyed
+by provider/account when available. Raw quota availability stays unchanged; the
+discount only helps avoid a route that looks funded but is currently failing.
 The router treats request-metered API keys as `spend: paid_api` and skips them
 unless `allow_paid_api: true` is set. Use `spend: quota_plan` only for included
 quota plans with overages disabled, and set `overages_disabled: true` or
@@ -428,10 +428,10 @@ The suggestion JSON carries, per candidate, `effective_headroom_percent`,
 `runway_hours`, `routing_score`, `confidence`, `strand_probability`, and, when
 measurable, `projected_waste_percent` plus `waste_boost`, and, when the caller
 supplies a cost policy, `cost_penalty` plus `cost_discount`. Candidates may also
-include `pipe_discount_percent` when recent local LiteLLM pipe health down-ranks
-a provider/account. Top-level provenance includes `routing_policy` (`balanced`
-or `local_first`), `waste_weight`, `waste_threshold_percent`, `waste_max_hours`,
-and `cost_weight`. The score is a
+include `pipe_discount_percent` when recent local LiteLLM or native pipe health
+down-ranks a provider/account. Top-level provenance includes `routing_policy`
+(`balanced` or `local_first`), `waste_weight`, `waste_threshold_percent`,
+`waste_max_hours`, and `cost_weight`. The score is a
 confidence-weighted runway index with a modest use-it-or-lose-it multiplier and
 an opt-in caller cost discount, so a slower-burning provider can rank ahead of
 one with more instantaneous headroom but a much shorter projected runway,

@@ -159,9 +159,10 @@ class RouteCandidate {
   final double leaseDiscount;
 
   /// Recent provider/account pipe-health discount applied to
-  /// [effectiveHeadroom], derived from local LiteLLM failure/throttle metadata.
-  /// It is additive and fail-soft: raw [headroom] and [available] still reflect
-  /// quota truth, while ranking accounts for likely request success.
+  /// [effectiveHeadroom], derived from local LiteLLM failure/throttle metadata
+  /// or native provider metadata diagnostics. It is additive and fail-soft: raw
+  /// [headroom] and [available] still reflect quota truth, while ranking
+  /// accounts for likely request success.
   final double pipeDiscount;
 
   /// Standard error of [burnPerHour], when estimable. Null for local runtimes or
@@ -799,8 +800,12 @@ RouteSuggestion suggestRoute(
     final leaseDiscount = q.isLocal
         ? 0.0
         : leaseDiscountFor(q.provider, q.account).clamp(0.0, 100.0).toDouble();
-    final pipeDiscount =
-        q.isLocal ? 0.0 : _pipePenaltyFor(q, pipePenaltyByProvider);
+    final pipeDiscount = q.isLocal
+        ? 0.0
+        : math.max(
+            _pipePenaltyFor(q, pipePenaltyByProvider),
+            _nativePipePenaltyFor(q),
+          );
     final effective = headroom == null
         ? null
         : (riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ) -
@@ -1016,6 +1021,14 @@ double _pipePenaltyFor(ProviderQuota q, Map<String, double> penalties) {
   final accountScoped = normalize(penalties[quotaIdentityKeyFor(q)]);
   if (accountScoped > 0) return accountScoped;
   return normalize(penalties[q.provider]);
+}
+
+double _nativePipePenaltyFor(ProviderQuota q) {
+  if (q.isManual) return 0.0;
+  return providerPipeHealthRoutingPenaltyPercent(
+    q.pipeHealth,
+    retryAfterSeconds: q.retryAfterSeconds,
+  );
 }
 
 double? _projectedWastePercent(

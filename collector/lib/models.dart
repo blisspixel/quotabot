@@ -142,6 +142,10 @@ const providerPipeHealthHealthy = 'healthy';
 const providerPipeHealthThrottled = 'throttled';
 const providerPipeHealthDegraded = 'degraded';
 const providerPipeHealthNoData = 'no_data';
+const providerPipeThrottlePenaltyPercent = 60.0;
+const providerPipeDegradedPenaltyPercent = 30.0;
+const providerPipeRetryAfterPenaltyMaxPercent = 20.0;
+const providerPipeRoutingPenaltyMaxPercent = 80.0;
 const providerPipeHealthValues = [
   providerPipeHealthHealthy,
   providerPipeHealthThrottled,
@@ -156,6 +160,28 @@ String? providerPipeHealthForHttpStatus(int statusCode) {
   if (statusCode == 429) return providerPipeHealthThrottled;
   if (statusCode >= 500 && statusCode <= 599) return providerPipeHealthDegraded;
   return null;
+}
+
+double providerPipeRetryAfterPenaltyPercent(int? retryAfterSeconds) =>
+    retryAfterSeconds == null
+        ? 0.0
+        : (retryAfterSeconds / 60.0)
+            .clamp(0.0, providerPipeRetryAfterPenaltyMaxPercent)
+            .toDouble();
+
+double providerPipeHealthRoutingPenaltyPercent(
+  String? pipeHealth, {
+  int? retryAfterSeconds,
+}) {
+  final basePenalty = switch (pipeHealth) {
+    providerPipeHealthThrottled => providerPipeThrottlePenaltyPercent,
+    providerPipeHealthDegraded => providerPipeDegradedPenaltyPercent,
+    _ => 0.0,
+  };
+  if (basePenalty <= 0) return 0.0;
+  return (basePenalty + providerPipeRetryAfterPenaltyPercent(retryAfterSeconds))
+      .clamp(0.0, providerPipeRoutingPenaltyMaxPercent)
+      .toDouble();
 }
 
 int? boundedIntFromWire(Object? value, {required int min, int? max}) {
