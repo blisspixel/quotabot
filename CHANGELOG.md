@@ -11,6 +11,9 @@ Notable changes to quotabot. Newest first.
 - Claude and NVIDIA native metadata reads now preserve sanitized HTTP status,
   parsed `Retry-After`, and pipe-health classification for reliable throttled or
   degraded responses in `quotabot.v1`.
+- Fresh native provider pipe diagnostics now feed the same bounded
+  `pipe_discount_percent` route discount as recent LiteLLM pipe health without
+  changing raw quota availability.
 
 ## 0.5.13 - 2026-07-08
 

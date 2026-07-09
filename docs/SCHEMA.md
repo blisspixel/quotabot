@@ -100,9 +100,10 @@ emit `quotabot.suggest.v1` with:
   it appears only when a caller provided a cost policy. Local runtimes may omit
   these score fields because their placement is governed by the explicit fallback
   or local-first policy.
-  `pipe_discount_percent` is a recent local LiteLLM pipe-health discount applied
-  to `effective_headroom_percent` for ranking. It does not change
-  `headroom_percent` or `available`; those remain quota availability evidence.
+  `pipe_discount_percent` is a recent local LiteLLM or native metadata
+  pipe-health discount applied to `effective_headroom_percent` for ranking. It
+  does not change `headroom_percent` or `available`; those remain quota
+  availability evidence.
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields (including `active_leases`) plus `source`,

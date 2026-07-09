@@ -184,9 +184,11 @@ logical order (each enables the next; no dates):
    preserve sanitized HTTP status, parsed `Retry-After`, and pipe-health
    classification for reliable throttled/degraded responses, so `429` is
    distinct from generic no-data and `5xx` provider degradation stays visible in
-   `quotabot.v1`. Remaining: extend the same native diagnostics to other
-   adapters when reliable metadata exists and decide whether fresh native
-   diagnostics should feed the same bounded route discount as LiteLLM traffic.
+   `quotabot.v1`. Fourth slice landed: fresh native pipe diagnostics now feed
+   the same bounded route discount as LiteLLM traffic, preserving raw quota
+   availability while down-ranking providers with current throttle or
+   degradation evidence. Remaining: extend the same native diagnostics to other
+   adapters when reliable metadata exists.
 5. **Capability-aware-by-default routing.** The capability-aware engine is
    opt-in behind `--task`; the default `suggest`, MCP `suggest_route`, and the
    `top`/`doctor` route line are capability-blind and can name the most-open but

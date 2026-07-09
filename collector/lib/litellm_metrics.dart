@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'models.dart';
 import 'util.dart';
 
 const litellmMetricsFileName = 'litellm-metrics.jsonl';
@@ -12,13 +13,13 @@ const litellmSpendPaidApi = 'paid_api';
 const litellmSpendUnknown = 'unknown';
 const litellmEventSuccess = 'success';
 const litellmEventFailure = 'failure';
-const litellmPipeHealthNoData = 'no_data';
-const litellmPipeHealthHealthy = 'healthy';
-const litellmPipeHealthThrottled = 'throttled';
-const litellmPipeHealthDegraded = 'degraded';
+const litellmPipeHealthNoData = providerPipeHealthNoData;
+const litellmPipeHealthHealthy = providerPipeHealthHealthy;
+const litellmPipeHealthThrottled = providerPipeHealthThrottled;
+const litellmPipeHealthDegraded = providerPipeHealthDegraded;
 const litellmRecentPipePenaltyMaxAgeSeconds = 15 * 60;
-const litellmThrottlePenaltyPercent = 60.0;
-const litellmDegradedPenaltyPercent = 30.0;
+const litellmThrottlePenaltyPercent = providerPipeThrottlePenaltyPercent;
+const litellmDegradedPenaltyPercent = providerPipeDegradedPenaltyPercent;
 
 /// The default JSONL file written by the LiteLLM integration. The Python plugin
 /// constrains metrics paths to `~/.quotabot`, so the reader uses the same root
@@ -148,12 +149,14 @@ class ProviderPipeHealth {
         : degradedRequests > 0 || failedRequests > 0
             ? 10.0
             : 0.0;
-    final retryPenalty = maxRetryAfterSeconds == null
-        ? 0.0
-        : (maxRetryAfterSeconds! / 60.0).clamp(0.0, 20.0).toDouble();
+    final retryPenalty =
+        providerPipeRetryAfterPenaltyPercent(maxRetryAfterSeconds);
     final ratePenalty = throttleRate * litellmThrottlePenaltyPercent +
         degradedRate * litellmDegradedPenaltyPercent;
-    return math.max(floor, ratePenalty + retryPenalty).clamp(0.0, 80.0);
+    return math
+        .max(floor, ratePenalty + retryPenalty)
+        .clamp(0.0, providerPipeRoutingPenaltyMaxPercent)
+        .toDouble();
   }
 
   Map<String, dynamic> toJson() => {

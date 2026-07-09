@@ -12,6 +12,8 @@ ProviderQuota _q(
   String? source,
   int asOf = _now,
   bool perMachine = false,
+  String? pipeHealth,
+  int? retryAfterSeconds,
 }) =>
     ProviderQuota(
       provider: id,
@@ -23,6 +25,8 @@ ProviderQuota _q(
       kind: kind,
       source: source,
       perMachine: perMachine,
+      pipeHealth: pipeHealth,
+      retryAfterSeconds: retryAfterSeconds,
     );
 
 // A local runtime carries no quota windows; it is available simply by running.
@@ -517,6 +521,112 @@ void main() {
       expect(home.pipeDiscount, 10);
       expect(work.effectiveHeadroom, 20);
       expect(home.effectiveHeadroom, 80);
+    });
+
+    test('native throttled diagnostics feed route pipe discount', () {
+      final s = suggestRoute(
+        [
+          _q(
+            'codex',
+            [QuotaWindow(label: 'w', usedPercent: 10)], // 90 free
+            pipeHealth: providerPipeHealthThrottled,
+          ),
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 40)]), // 60 free
+        ],
+        _now,
+      );
+
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(s.recommended?.provider, 'claude');
+      expect(codex.effectiveHeadroom, 30);
+      expect(codex.pipeDiscount, providerPipeThrottlePenaltyPercent);
+      expect(
+        codex.toJson()['pipe_discount_percent'],
+        providerPipeThrottlePenaltyPercent,
+      );
+    });
+
+    test('native degraded diagnostics apply a smaller bounded discount', () {
+      final s = suggestRoute(
+        [
+          _q(
+            'codex',
+            [QuotaWindow(label: 'w', usedPercent: 10)], // 90 free
+            pipeHealth: providerPipeHealthDegraded,
+            retryAfterSeconds: 3600,
+          ),
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 55)]), // 45 free
+        ],
+        _now,
+      );
+
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(s.recommended?.provider, 'claude');
+      expect(
+        codex.pipeDiscount,
+        providerPipeDegradedPenaltyPercent +
+            providerPipeRetryAfterPenaltyMaxPercent,
+      );
+      expect(codex.effectiveHeadroom, 40);
+    });
+
+    test('explicit pipe-health penalty wins over weaker native diagnostics',
+        () {
+      final s = suggestRoute(
+        [
+          _q(
+            'codex',
+            [QuotaWindow(label: 'w', usedPercent: 10)],
+            pipeHealth: providerPipeHealthThrottled,
+          ),
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 70)]),
+        ],
+        _now,
+        pipePenaltyByProvider: const {'codex': 75},
+      );
+
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(codex.pipeDiscount, 75);
+      expect(codex.effectiveHeadroom, 15);
+    });
+
+    test('native pipe-health penalty wins over weaker explicit diagnostics',
+        () {
+      final s = suggestRoute(
+        [
+          _q(
+            'codex',
+            [QuotaWindow(label: 'w', usedPercent: 10)],
+            pipeHealth: providerPipeHealthThrottled,
+          ),
+          _q('claude', [QuotaWindow(label: 'w', usedPercent: 70)]),
+        ],
+        _now,
+        pipePenaltyByProvider: const {'codex': 25},
+      );
+
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(codex.pipeDiscount, providerPipeThrottlePenaltyPercent);
+      expect(codex.effectiveHeadroom, 30);
+    });
+
+    test('manual quotas ignore native pipe diagnostics', () {
+      final s = suggestRoute(
+        [
+          _q(
+            'codex',
+            [QuotaWindow(label: 'w', usedPercent: 10)],
+            source: providerQuotaManualSource,
+            pipeHealth: providerPipeHealthThrottled,
+          ),
+        ],
+        _now,
+      );
+
+      final codex = s.ranked.firstWhere((c) => c.provider == 'codex');
+      expect(codex.pipeDiscount, 0);
+      expect(codex.effectiveHeadroom, 90);
+      expect(codex.toJson().containsKey('pipe_discount_percent'), isFalse);
     });
 
     test('effective headroom never goes negative', () {
