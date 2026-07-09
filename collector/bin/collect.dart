@@ -268,6 +268,9 @@ Future<void> main(List<String> rawArgs) async {
     case 'calibration':
       await _runCalibration(wantsJson, profile, excludedProviders);
       return;
+    case 'explain':
+      _runExplain(flags, wantsJson, profile, excludedProviders);
+      return;
     case 'verify':
       await _runVerify(wantsJson, profile, excludedProviders);
       return;
@@ -298,6 +301,7 @@ const _quotaReadCommands = {
   'calibration',
   'check',
   'doctor',
+  'explain',
   'json',
   'models',
   'report',
@@ -1301,6 +1305,9 @@ void _printHelp() {
   stdout.writeln(
     '  verify              honesty checks over one live read (exit 65 on any failure)',
   );
+  stdout.writeln(
+    '  explain             show local reads and network hosts in the runtime trust boundary',
+  );
   stdout.writeln('');
   stdout.writeln(head('ROUTE'));
   stdout.writeln(
@@ -2015,6 +2022,85 @@ void _printDoctor(List<ProviderQuota> results) {
       '  (Aider/Cline etc. often use underlying provider quotas already tracked above.)',
     );
   }
+}
+
+/// `explain`: a dry-run manifest of provider metadata reads and network hosts.
+/// It records what a normal quota read may touch for the current OS/profile
+/// without contacting providers or reading secret file contents.
+void _runExplain(
+  Set<String> flags,
+  bool wantsJson,
+  QuotaProfile? profile,
+  Set<String> excludedProviders,
+) {
+  final includeReadsFlag = flags.contains('--reads');
+  final includeNetworkFlag = flags.contains('--network');
+  final includeReads = includeReadsFlag || !includeNetworkFlag;
+  final includeNetwork = includeNetworkFlag || !includeReadsFlag;
+  final report = buildRuntimeAccessReport(
+    generatedAt: nowEpoch(),
+    includeReads: includeReads,
+    includeNetwork: includeNetwork,
+    profile: profile,
+    excludedProviders: excludedProviders,
+  );
+  wantsJson ? print(_jsonPretty(report.toJson())) : _printExplain(report);
+}
+
+void _printExplain(RuntimeAccessReport report) {
+  print(
+    '${style.bold('quotabot explain')}  '
+    '${style.dim('runtime trust boundary, dry-run manifest, 0 usage tokens')}\n',
+  );
+  print(
+    '  ${style.green('metadata only')}  no prompts, source code, model outputs, '
+    'or generation endpoints',
+  );
+  print(
+    '  ${style.dim('mode')} runtime_access_manifest; provider collection was not run',
+  );
+  if (report.shared.isNotEmpty) {
+    print('\n${style.bold('Shared local metadata')}');
+    for (final record in report.shared) {
+      _printAccessRecord(record);
+    }
+  }
+  for (final provider in report.providers) {
+    print(
+        '\n${style.bold(provider.displayName)} ${style.dim(provider.provider)}');
+    if (provider.reads.isNotEmpty) {
+      print('  ${style.dim('reads')}');
+      for (final record in provider.reads) {
+        _printAccessRecord(record);
+      }
+    }
+    if (provider.network.isNotEmpty) {
+      print('  ${style.dim('network')}');
+      for (final record in provider.network) {
+        _printAccessRecord(record);
+      }
+    }
+    for (final note in provider.notes) {
+      print('  ${style.dim('note')} $note');
+    }
+  }
+  print(
+    '\n${style.dim('Machine-readable form:')} '
+    '${style.bold('quotabot explain --reads --network --json')}',
+  );
+}
+
+void _printAccessRecord(RuntimeAccessRecord record) {
+  final token = record.credentialMaterial ? ' credential' : '';
+  final method =
+      record.kind == RuntimeAccessKind.network && record.method != null
+          ? ' ${record.method}'
+          : '';
+  print(
+    '    -$method ${record.target} '
+    '${style.dim('[${record.dataClass}$token]')}',
+  );
+  print('      ${style.dim(record.purpose)}');
 }
 
 /// `verify`: mechanical honesty checks over one live read, for the 1.0

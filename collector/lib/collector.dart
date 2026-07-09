@@ -33,6 +33,7 @@ export 'provider_filters.dart';
 export 'provider_ids.dart';
 export 'registry.dart';
 export 'report.dart';
+export 'runtime_audit.dart';
 export 'schema_contracts.dart';
 export 'simulation.dart';
 export 'verification.dart';

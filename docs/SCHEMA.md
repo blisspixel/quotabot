@@ -244,6 +244,29 @@ other contract here. A truthful absence (a signed-out account or a local
 runtime that is not running) passes; the failing states are lying numbers,
 silent failures, and contract drift. The CLI exits 65 when any check fails.
 
+## `quotabot.explain.v1`
+
+`quotabot explain --reads --network --json` emits a dry-run runtime access
+manifest:
+
+- `schema`: always `quotabot.explain.v1`.
+- `generated_at`, `os`, `mode: "runtime_access_manifest"`,
+  `collection_executed: false`, `include_reads`, and `include_network`.
+- Optional `profile` and `excluded_providers` when local filters narrow the
+  manifest.
+- `privacy_boundary`: booleans for `metadata_only`, `spends_tokens`,
+  `sends_prompt_or_code`, `records_secrets`, and `url_query_values_recorded`.
+- `providers`: provider rows with `provider`, `display_name`, `kind`, optional
+  `reads`, optional `network`, and optional `notes`.
+- `shared`: local metadata paths shared across providers, such as manual quota,
+  cache, history, and LiteLLM metrics files.
+
+Each access record carries `kind` (`fileRead`, `environmentRead`, or
+`network`), `target`, `purpose`, `data_class`, `access`, and booleans for
+`metadata_only`, `sends_prompt_or_code`, `spends_tokens`, and
+`credential_material`. Network records additionally carry `method`, `scheme`,
+`host`, and `path`; query values are intentionally not recorded.
+
 ## `quotabot.alert.v1`
 
 `quotabot watch --json`, alert webhooks, and `quotas://alerts` emit alert objects

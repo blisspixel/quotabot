@@ -108,6 +108,7 @@ any read command for machine output.
 | `stats [provider]`     | 90-day analytics: distribution, best windows, pace.   |
 | `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
 | `verify`               | Honesty checks over one live read (exit 65 on any failure). |
+| `explain`              | Dry-run manifest of local reads and network hosts.    |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect grok or antigravity so it stays live.         |
 | `logout <provider>`    | Disconnect a provider.                                |
@@ -162,6 +163,22 @@ runtimes are reported as truthful absences, not failures. `--profile`,
 `--exclude`, and simulation flags narrow the read as usual; the
 claimed-provider coverage check then reports itself skipped instead of
 misreading the filter.
+
+### Runtime access manifest (`quotabot explain`)
+
+`quotabot explain --reads --network` emits the local trust-boundary manifest for
+the current OS and profile without contacting providers or reading secret file
+contents. It names the credential files, quota caches, local IDE databases,
+loopback runtime endpoints, and provider metadata hosts quotabot may use during a
+normal read. The JSON shape is `quotabot.explain.v1`; every network record states
+the method, host, path, data class, and the invariant that it sends no prompts,
+source code, model outputs, or generation requests and spends zero tokens.
+
+Use `--reads` or `--network` alone to narrow the manifest. `--profile` and
+`--exclude` filter provider rows the same way quota commands do. This is a
+dry-run manifest, not a replacement for `verify`: `verify` proves the snapshot is
+honest, while `explain` proves what local paths and hosts are in the runtime
+boundary.
 
 ### Manual quota entries
 
