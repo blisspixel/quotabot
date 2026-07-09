@@ -167,6 +167,7 @@ quotabot suggest --use-expiring-quota  # model pick may use included quota befor
 quotabot stats --tier-plan=Lite:50:10,Current:100:20 --current-price=20  # explicit tier fit
 quotabot report           # weekly quota-health markdown export
 quotabot verify           # honesty checks over one live read (exit 65 on failure)
+quotabot explain --reads --network  # dry-run manifest of local reads and hosts
 ```
 
 `quotabot watch` polls in the background and raises a low-quota alert the moment

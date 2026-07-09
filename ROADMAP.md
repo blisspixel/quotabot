@@ -209,7 +209,12 @@ logical order (each enables the next; no dates):
    CI, but not verifiable at runtime. A `quotabot explain --reads --network`
    that emits the exact files touched and hosts called this run, tagged
    read-only/metadata, turns the headline claim from assertion into
-   demonstration; `verify` is its natural home.
+   demonstration; `verify` is its natural home. First slice landed: `quotabot
+   explain --reads --network` emits a dry-run `quotabot.explain.v1` runtime
+   access manifest for local read paths, loopback runtime endpoints, and provider
+   metadata hosts without collecting provider data. Remaining: wire actual
+   per-run adapter instrumentation so `verify` can attach the observed touched
+   paths and hosts for that collection.
 
 **Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
 binding-window SEE rule with honest staleness; self-explaining, risk-aware

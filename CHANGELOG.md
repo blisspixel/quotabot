@@ -23,6 +23,10 @@ Notable changes to quotabot. Newest first.
 - Provider-level suggestions can now accept caller-supplied task or capability
   context while keeping provider output, covering CLI `--provider-route`, MCP
   `suggest_provider`/`decide_now`, and loopback HTTP `/suggest`.
+- `quotabot explain --reads --network` now emits a dry-run
+  `quotabot.explain.v1` runtime access manifest naming local read paths,
+  loopback runtime endpoints, provider metadata hosts, and the zero-token privacy
+  boundary.
 
 ## 0.5.13 - 2026-07-08
 
