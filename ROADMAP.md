@@ -160,7 +160,12 @@ logical order (each enables the next; no dates):
    a threshold tuned against real history to avoid flagging a heavy-use burst.
 3. **The refresh and currency loop.** Run the drift canary and the model-catalog
    audit on a regular cadence so how usage works and which models exist stay
-   current automatically.
+   current automatically. First slice landed: the Currency workflow now runs the
+   drift and catalog tests plus the provider catalog audit daily and on manual
+   dispatch, with optional provider secrets, read-only repository permissions,
+   summary-only logs, and fail-fast drift/error flags. Remaining: run the drift
+   canary against real persisted cross-run provider history when a safe
+   maintenance host exists.
 4. **Close the feedback loop - pipe-health, not just the reservoir.** The world
    model is quota-only: no rate-limit, throttle, 529/degradation, or
    account-health state, and every adapter collapses a 429 into "no data," so a

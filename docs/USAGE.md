@@ -375,6 +375,12 @@ the environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, or
 `GEMINI_API_KEY` / `GOOGLE_API_KEY`) and otherwise marks that provider skipped.
 The output is a diff of model ids only; capability fields stay curated. Add
 `--fail-on-drift` or `--fail-on-error` when using it as a maintenance CI gate.
+The repository's Currency workflow runs the drift, catalog, and no-surprise
+endpoint tests plus this audit daily and on manual dispatch, with read-only
+repository permissions. Set the same optional secrets in GitHub Actions when you
+want the hosted gate to check live provider catalogs; unconfigured providers
+continue to skip without making a network call. Hosted runs use `--summary` so
+logs expose counts and status without publishing account-scoped model ids.
 
 `quotabot calibration` grades quotabot's own strand predictions against your
 recorded history and reports how often they come true, as a calibration

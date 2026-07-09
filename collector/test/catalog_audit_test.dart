@@ -97,6 +97,39 @@ void main() {
     expect(json['schema'], 'quotabot.catalog_audit.v1');
   });
 
+  test('summary report redacts drift model ids', () {
+    const report = CatalogAuditReport(
+      generatedAt: _now,
+      catalogUpdated: '2026-07-01',
+      providers: [
+        ProviderCatalogAudit(
+          provider: 'codex',
+          endpoint: 'https://api.openai.com/v1/models',
+          authEnv: 'OPENAI_API_KEY',
+          ok: true,
+          skipped: false,
+          error: null,
+          catalogModelIds: ['gpt-kept', 'gpt-retired-private'],
+          endpointModelIds: ['gpt-kept', 'gpt-new-private'],
+          missingFromCatalog: ['gpt-new-private'],
+          catalogOnly: ['gpt-retired-private'],
+        ),
+      ],
+    );
+
+    final summary = formatCatalogAuditReport(report, includeModelIds: false);
+    expect(summary, contains('codex: drift'));
+    expect(summary, contains('missing from catalog: 1'));
+    expect(summary, contains('catalog only: 1'));
+    expect(summary, contains('Model ids redacted.'));
+    expect(summary, isNot(contains('gpt-new-private')));
+    expect(summary, isNot(contains('gpt-retired-private')));
+
+    final detailed = formatCatalogAuditReport(report);
+    expect(detailed, contains('gpt-new-private'));
+    expect(detailed, contains('gpt-retired-private'));
+  });
+
   test('reports HTTP, JSON, timeout, thrown, and pagination errors', () async {
     Future<String?> errorFor(
       http.Client client, {

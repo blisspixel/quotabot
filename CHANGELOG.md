@@ -4,6 +4,11 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Added a daily and manually dispatchable Currency workflow that runs drift and
+  catalog audit tests plus the provider catalog audit with optional Actions
+  secrets and summary-only logs.
+
 ## 0.5.13 - 2026-07-08
 
 ### Changed

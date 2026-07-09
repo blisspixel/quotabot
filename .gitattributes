@@ -2,8 +2,12 @@
 # platform default on checkout where appropriate.
 * text=auto
 
-# Files that must stay LF regardless of platform (they run on Linux/macOS).
+# Files that must stay LF for scripts, workflows, and stable docs diffs.
+.gitattributes text eol=lf
 *.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 *.desktop text eol=lf
 
 # Files that are CRLF on Windows.

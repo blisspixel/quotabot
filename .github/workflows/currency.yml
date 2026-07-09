@@ -1,0 +1,50 @@
+name: Currency
+
+# Keeps drift and provider catalog checks alive outside normal code changes.
+# Provider secrets are optional; missing secrets are reported as skipped.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 10 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: currency-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Drift and catalog currency
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Collector dependencies
+        working-directory: collector
+        run: dart pub get
+
+      - name: Drift and catalog tests
+        working-directory: collector
+        run: >
+          dart test
+          test/drift_test.dart
+          test/catalog_audit_test.dart
+          test/no_surprise_cost_contract_test.dart
+
+      - name: Provider catalog audit
+        working-directory: collector
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: dart run bin/catalog_audit.dart --summary --fail-on-drift --fail-on-error

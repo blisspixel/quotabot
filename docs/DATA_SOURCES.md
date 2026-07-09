@@ -227,6 +227,14 @@ reasoning, and tier remain curated because provider list endpoints are
 inconsistent and often account-scoped. Missing API keys are reported as skipped,
 not failures, unless the caller opts into `--fail-on-error`.
 
+The Currency workflow runs this audit daily and on manual dispatch with
+`--summary --fail-on-drift --fail-on-error`, after exercising the drift canary,
+catalog audit, and no-surprise endpoint contract tests. It grants only read
+access to repository contents. Hosted live catalog checks are enabled only for
+the provider secrets present in GitHub Actions; absent secrets remain skipped
+and do not trigger provider network calls. Summary mode logs drift counts
+without publishing provider model ids, which can be account-scoped.
+
 The runtime cost boundary is intentionally narrow: authenticated catalog audits
 may call only model-list endpoints such as `https://api.x.ai/v1/models`. Runtime
 sources are covered by a no-surprise-cost contract test that rejects direct
