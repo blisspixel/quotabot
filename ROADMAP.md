@@ -180,8 +180,13 @@ logical order (each enables the next; no dates):
    LiteLLM provider/account pipe failures feed back into CLI, MCP, desktop,
    loopback `/suggest`, and LiteLLM managed-route ranking as bounded
    `pipe_discount_percent`, while raw quota availability remains unchanged and
-   fail-soft. Remaining: extend native provider adapter diagnostics beyond
-   LiteLLM traffic when reliable metadata exists.
+   fail-soft. Third slice landed: Claude and NVIDIA native metadata reads now
+   preserve sanitized HTTP status, parsed `Retry-After`, and pipe-health
+   classification for reliable throttled/degraded responses, so `429` is
+   distinct from generic no-data and `5xx` provider degradation stays visible in
+   `quotabot.v1`. Remaining: extend the same native diagnostics to other
+   adapters when reliable metadata exists and decide whether fresh native
+   diagnostics should feed the same bounded route discount as LiteLLM traffic.
 5. **Capability-aware-by-default routing.** The capability-aware engine is
    opt-in behind `--task`; the default `suggest`, MCP `suggest_route`, and the
    `top`/`doctor` route line are capability-blind and can name the most-open but

@@ -8,6 +8,9 @@ Notable changes to quotabot. Newest first.
 - Added a daily and manually dispatchable Currency workflow that runs drift and
   catalog audit tests plus the provider catalog audit with optional Actions
   secrets and summary-only logs.
+- Claude and NVIDIA native metadata reads now preserve sanitized HTTP status,
+  parsed `Retry-After`, and pipe-health classification for reliable throttled or
+  degraded responses in `quotabot.v1`.
 
 ## 0.5.13 - 2026-07-08
 

@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/nvidia.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -74,7 +75,24 @@ void main() {
       ).collect();
 
       expect(q.ok, isFalse);
-      expect(q.error, contains('/models failed'));
+      expect(q.error, 'NVIDIA key rejected by /models (HTTP 401)');
+    });
+
+    test('preserves throttled metadata from model discovery', () async {
+      final q = await NvidiaAdapter(
+        keySource: () => 'nvapi-throttled',
+        client: MockClient((_) async => http.Response(
+              '{}',
+              429,
+              headers: {'retry-after': '90'},
+            )),
+      ).collect();
+
+      expect(q.ok, isFalse);
+      expect(q.error, 'NVIDIA /models throttled (HTTP 429)');
+      expect(q.pipeHealth, providerPipeHealthThrottled);
+      expect(q.httpStatus, 429);
+      expect(q.retryAfterSeconds, 90);
     });
   });
 }

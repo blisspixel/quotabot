@@ -10,6 +10,33 @@ void main() {
     expect(home(), isNotEmpty);
   });
 
+  group('retryAfterSeconds', () {
+    test('parses delay seconds and rejects invalid values', () {
+      expect(retryAfterSeconds('120'), 120);
+      expect(retryAfterSeconds(' 0 '), 0);
+      expect(retryAfterSeconds('-1'), isNull);
+      expect(retryAfterSeconds('soon'), isNull);
+      expect(retryAfterSeconds(null), isNull);
+    });
+
+    test('parses HTTP-date values relative to the supplied clock', () {
+      expect(
+        retryAfterSeconds(
+          'Wed, 21 Oct 2015 07:28:00 GMT',
+          now: 1445412420,
+        ),
+        60,
+      );
+      expect(
+        retryAfterSeconds(
+          'Wed, 21 Oct 2015 07:27:00 GMT',
+          now: 1445412420,
+        ),
+        0,
+      );
+    });
+  });
+
   group('findKey', () {
     test('finds a nested value', () {
       final tree = {
