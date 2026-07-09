@@ -17,6 +17,8 @@ void main() {
 
     final json = report.toJson();
     expect(json['schema'], quotabotExplainV1SchemaId);
+    expect(json['mode'], 'runtime_access_manifest');
+    expect(json['evidence'], 'static_manifest');
     expect(json['collection_executed'], isFalse);
     expect((json['privacy_boundary'] as Map)['spends_tokens'], isFalse);
     expect((json['privacy_boundary'] as Map)['sends_prompt_or_code'], isFalse);
@@ -33,6 +35,32 @@ void main() {
     expect(claudeNetwork.single['host'], 'api.anthropic.com');
     expect(claudeNetwork.single['path'], '/api/oauth/usage');
     expect(claudeNetwork.single['spends_tokens'], isFalse);
+
+    final shared = (json['shared'] as List).cast<Map<String, dynamic>>();
+    expect(
+      shared.any((r) =>
+          r['kind'] == 'fileWrite' &&
+          (r['target'] as String).contains('quotabot') &&
+          r['access'] == 'write'),
+      isTrue,
+    );
+    final grok = providers.firstWhere((p) => p['provider'] == 'grok');
+    final grokReads = (grok['reads'] as List).cast<Map<String, dynamic>>();
+    expect(
+      grokReads.any((r) =>
+          r['kind'] == 'fileWrite' &&
+          (r['target'] as String).contains('quotabot') &&
+          r['credential_material'] == true),
+      isTrue,
+    );
+    final antigravity =
+        providers.firstWhere((p) => p['provider'] == 'antigravity');
+    final antigravityNetwork =
+        (antigravity['network'] as List).cast<Map<String, dynamic>>();
+    expect(
+      antigravityNetwork.any((r) => r['path'] == '/v1internal:onboardUser'),
+      isTrue,
+    );
   });
 
   test('runtime access report honors profile and exclusions', () {
@@ -90,5 +118,32 @@ void main() {
     expect(targets, isNot(contains('/images')));
     expect(targets, isNot(contains('/responses')));
     expect(targets, isNot(contains(':generateContent')));
+  });
+
+  test('runtime access observation records invoked providers explicitly', () {
+    final report = buildRuntimeAccessReport(
+      generatedAt: 1782000000,
+      includeReads: true,
+      includeNetwork: true,
+      observedProviderIds: const {'claude', 'ollama'},
+      collectionExecuted: true,
+      environment: const {'HOME': '/home/tester'},
+      os: 'linux',
+    );
+
+    final json = report.toJson();
+    expect(json['mode'], 'runtime_access_observation');
+    expect(json['collection_executed'], isTrue);
+    expect(json['evidence'], 'provider_adapter_invoked_static_access_map');
+    expect((json['notes'] as List).join(' '),
+        contains('provider-specific branches may skip'));
+    final providers = (json['providers'] as List).cast<Map<String, dynamic>>();
+    expect(providers.map((p) => p['provider']), ['claude', 'ollama']);
+    expect(providers.every((p) => p['observed'] == true), isTrue);
+    expect(
+      providers.every(
+          (p) => p['evidence'] == 'provider_adapter_invoked_static_access_map'),
+      isTrue,
+    );
   });
 }

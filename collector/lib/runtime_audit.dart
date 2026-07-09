@@ -6,7 +6,7 @@ import 'util.dart';
 
 const quotabotExplainV1SchemaId = 'quotabot.explain.v1';
 
-enum RuntimeAccessKind { fileRead, environmentRead, network }
+enum RuntimeAccessKind { fileRead, fileWrite, environmentRead, network }
 
 class RuntimeAccessRecord {
   final RuntimeAccessKind kind;
@@ -63,6 +63,8 @@ class ProviderRuntimeAccess {
   final List<RuntimeAccessRecord> reads;
   final List<RuntimeAccessRecord> network;
   final List<String> notes;
+  final bool observed;
+  final String? evidence;
 
   const ProviderRuntimeAccess({
     required this.provider,
@@ -71,6 +73,8 @@ class ProviderRuntimeAccess {
     this.reads = const [],
     this.network = const [],
     this.notes = const [],
+    this.observed = false,
+    this.evidence,
   });
 
   bool get hasAccess => reads.isNotEmpty || network.isNotEmpty;
@@ -83,6 +87,8 @@ class ProviderRuntimeAccess {
         if (network.isNotEmpty)
           'network': network.map((r) => r.toJson()).toList(),
         if (notes.isNotEmpty) 'notes': notes,
+        if (observed) 'observed': true,
+        if (evidence != null) 'evidence': evidence,
       };
 }
 
@@ -92,10 +98,12 @@ class RuntimeAccessReport {
   final bool includeReads;
   final bool includeNetwork;
   final bool collectionExecuted;
+  final String evidence;
   final String? profile;
   final List<String> excludedProviders;
   final List<ProviderRuntimeAccess> providers;
   final List<RuntimeAccessRecord> shared;
+  final List<String> notes;
 
   const RuntimeAccessReport({
     required this.generatedAt,
@@ -104,19 +112,32 @@ class RuntimeAccessReport {
     required this.includeNetwork,
     required this.collectionExecuted,
     required this.providers,
+    required this.evidence,
     this.profile,
     this.excludedProviders = const [],
     this.shared = const [],
+    this.notes = const [],
   });
+
+  Iterable<RuntimeAccessRecord> get allRecords sync* {
+    yield* shared;
+    for (final provider in providers) {
+      yield* provider.reads;
+      yield* provider.network;
+    }
+  }
 
   Map<String, dynamic> toJson() => {
         'schema': quotabotExplainV1SchemaId,
         'generated_at': generatedAt,
         'os': os,
-        'mode': 'runtime_access_manifest',
+        'mode': collectionExecuted
+            ? 'runtime_access_observation'
+            : 'runtime_access_manifest',
         'collection_executed': collectionExecuted,
         'include_reads': includeReads,
         'include_network': includeNetwork,
+        'evidence': evidence,
         if (profile != null) 'profile': profile,
         if (excludedProviders.isNotEmpty)
           'excluded_providers': excludedProviders,
@@ -129,6 +150,7 @@ class RuntimeAccessReport {
         },
         'providers': providers.map((p) => p.toJson()).toList(),
         if (shared.isNotEmpty) 'shared': shared.map((r) => r.toJson()).toList(),
+        if (notes.isNotEmpty) 'notes': notes,
       };
 }
 
@@ -138,16 +160,25 @@ RuntimeAccessReport buildRuntimeAccessReport({
   required bool includeNetwork,
   QuotaProfile? profile,
   Set<String> excludedProviders = const {},
-  List<ProviderRuntimeAccess> providers = const [],
+  List<ProviderRuntimeAccess>? providers,
+  Set<String>? observedProviderIds,
+  bool collectionExecuted = false,
   Map<String, String>? environment,
   String? os,
 }) {
   final env = environment ?? Platform.environment;
-  final selectedProviders = providers.isEmpty
+  final selectedProviders = providers == null
       ? defaultProviderRuntimeAccess(environment: env)
       : List<ProviderRuntimeAccess>.of(providers);
+  final observedIds = observedProviderIds
+      ?.map((p) => normalizeProviderId(p) ?? p)
+      .where((p) => p.isNotEmpty)
+      .toSet();
   final filtered = selectedProviders
       .where((p) {
+        if (observedIds != null && !observedIds.contains(p.provider)) {
+          return false;
+        }
         if (excludedProviders.contains(p.provider)) return false;
         if (profile != null) {
           final normalizedProviders = profile.providers
@@ -177,6 +208,11 @@ RuntimeAccessReport buildRuntimeAccessReport({
           reads: includeReads ? p.reads : const [],
           network: includeNetwork ? p.network : const [],
           notes: p.notes,
+          observed: collectionExecuted &&
+              (observedIds == null || observedIds.contains(p.provider)),
+          evidence: collectionExecuted
+              ? 'provider_adapter_invoked_static_access_map'
+              : null,
         );
       })
       .where((p) => p.hasAccess || p.notes.isNotEmpty)
@@ -186,11 +222,20 @@ RuntimeAccessReport buildRuntimeAccessReport({
     os: os ?? Platform.operatingSystem,
     includeReads: includeReads,
     includeNetwork: includeNetwork,
-    collectionExecuted: false,
+    collectionExecuted: collectionExecuted,
+    evidence: collectionExecuted
+        ? 'provider_adapter_invoked_static_access_map'
+        : 'static_manifest',
     profile: profile?.name,
     excludedProviders: excludedProviders.toList()..sort(),
     providers: filtered,
     shared: includeReads ? _sharedReads(env) : const [],
+    notes: collectionExecuted
+        ? const [
+            'Provider rows are limited to adapters invoked during this collection.',
+            'Access records are the audited static map for those adapters; provider-specific branches may skip some records at runtime.',
+          ]
+        : const [],
   );
 }
 
@@ -244,6 +289,9 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _file(_joinPath(config, 'quotabot/auth/grok*.json'),
             'quotabot stored Grok OAuth grant',
             dataClass: 'credential'),
+        _fileWrite(_joinPath(config, 'quotabot/auth/grok*.json'),
+            'rotated Grok OAuth grant persistence',
+            dataClass: 'credential'),
       ],
       network: [
         _https(
@@ -271,10 +319,15 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _file(_joinPath(config, 'quotabot/auth/antigravity*.json'),
             'quotabot stored Antigravity OAuth grant',
             dataClass: 'credential'),
+        _fileWrite(_joinPath(config, 'quotabot/auth/antigravity*.json'),
+            'rotated Antigravity OAuth grant persistence',
+            dataClass: 'credential'),
       ],
       network: [
         _https('POST', 'cloudcode-pa.googleapis.com',
             '/v1internal:loadCodeAssist', 'Antigravity Code Assist metadata'),
+        _https('POST', 'cloudcode-pa.googleapis.com', '/v1internal:onboardUser',
+            'Antigravity Code Assist onboarding'),
         _https(
             'POST',
             'cloudcode-pa.googleapis.com',
@@ -386,8 +439,12 @@ List<RuntimeAccessRecord> _sharedReads(Map<String, String> env) {
         'self-reported manual quota entries'),
     _file(_joinPath(config, 'quotabot/cache/*.json'),
         'last-known quota snapshot cache'),
+    _fileWrite(_joinPath(config, 'quotabot/cache/*.json'),
+        'fresh quota snapshot cache writes'),
     _file(_joinPath(config, 'quotabot/cache/history/*.jsonl'),
         'local analytics history for burn and calibration'),
+    _fileWrite(_joinPath(config, 'quotabot/cache/history/*.jsonl'),
+        'local analytics history updates'),
     _file(_joinPath(h, '.quotabot/litellm_metrics.jsonl'),
         'local LiteLLM routed-request metadata'),
   ];
@@ -404,6 +461,21 @@ RuntimeAccessRecord _file(
       purpose: purpose,
       dataClass: dataClass,
       access: 'read',
+      metadataOnly: dataClass != 'credential',
+      credentialMaterial: dataClass == 'credential',
+    );
+
+RuntimeAccessRecord _fileWrite(
+  String target,
+  String purpose, {
+  String dataClass = 'quota_metadata',
+}) =>
+    RuntimeAccessRecord(
+      kind: RuntimeAccessKind.fileWrite,
+      target: target,
+      purpose: purpose,
+      dataClass: dataClass,
+      access: 'write',
       metadataOnly: dataClass != 'credential',
       credentialMaterial: dataClass == 'credential',
     );

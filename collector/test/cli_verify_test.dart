@@ -53,6 +53,16 @@ void main() {
       reason: 'simulation narrows the read, so coverage must report itself '
           'skipped instead of failing on absent providers',
     );
+    final runtimeAccess = json['runtime_access'] as Map<String, dynamic>;
+    expect(runtimeAccess['schema'], 'quotabot.explain.v1');
+    expect(runtimeAccess['mode'], 'runtime_access_manifest');
+    expect(runtimeAccess['collection_executed'], isFalse);
+    expect(runtimeAccess['providers'], isEmpty);
+    expect(
+      fleet.any(
+          (c) => c['id'] == 'runtime_access_boundary' && c['status'] == 'info'),
+      isTrue,
+    );
   });
 
   test('verify passes a truthfully signed-out simulated snapshot', () async {
@@ -87,6 +97,7 @@ void main() {
     expect(out, contains('quotabot verify'));
     expect(out, contains('PASS'));
     expect(out, contains('/usage'));
+    expect(out, contains('runtime access manifest only'));
     expect(out, contains('quotabot verify --json'));
   });
 

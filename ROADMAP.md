@@ -212,9 +212,12 @@ logical order (each enables the next; no dates):
    demonstration; `verify` is its natural home. First slice landed: `quotabot
    explain --reads --network` emits a dry-run `quotabot.explain.v1` runtime
    access manifest for local read paths, loopback runtime endpoints, and provider
-   metadata hosts without collecting provider data. Remaining: wire actual
-   per-run adapter instrumentation so `verify` can attach the observed touched
-   paths and hosts for that collection.
+   metadata hosts without collecting provider data. Second slice landed:
+   `verify --json` now attaches a `runtime_access` observation for the adapters
+   invoked by that collection, with shared cache/history metadata writes and a
+   zero-token boundary check. Remaining: add lower-level per-branch file and
+   network hooks if the project needs exact skipped-vs-touched records inside a
+   provider adapter.
 
 **Already in place** (the full record is in [CHANGELOG.md](CHANGELOG.md)): the
 binding-window SEE rule with honest staleness; self-explaining, risk-aware

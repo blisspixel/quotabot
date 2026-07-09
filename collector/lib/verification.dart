@@ -17,6 +17,7 @@ import 'analysis.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
 import 'provider_ids.dart';
+import 'runtime_audit.dart';
 import 'schema_contracts.dart';
 
 const quotabotVerifyV1SchemaId = 'quotabot.verify.v1';
@@ -122,12 +123,14 @@ class VerificationReport {
   final String os;
   final List<ProviderVerification> providers;
   final List<VerifyCheck> fleetChecks;
+  final RuntimeAccessReport? runtimeAccess;
 
   const VerificationReport({
     required this.generatedAt,
     required this.os,
     required this.providers,
     required this.fleetChecks,
+    this.runtimeAccess,
   });
 
   bool get passed =>
@@ -144,6 +147,7 @@ class VerificationReport {
         'os': os,
         'passed': passed,
         'providers': providers.map((p) => p.toJson()).toList(),
+        if (runtimeAccess != null) 'runtime_access': runtimeAccess!.toJson(),
         'fleet_checks': fleetChecks.map((c) => c.toJson()).toList(),
       };
 }
@@ -159,6 +163,7 @@ VerificationReport buildVerificationReport(
   required String os,
   bool filtered = false,
   List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
+  RuntimeAccessReport? runtimeAccess,
 }) {
   final providers = <ProviderVerification>[
     for (final q in results) _verifyProvider(q, now),
@@ -174,7 +179,9 @@ VerificationReport buildVerificationReport(
     generatedAt: now,
     os: os,
     providers: providers,
-    fleetChecks: _fleetChecks(results, now, filtered: filtered),
+    fleetChecks: _fleetChecks(results, now,
+        filtered: filtered, runtimeAccess: runtimeAccess),
+    runtimeAccess: runtimeAccess,
   );
 }
 
@@ -365,6 +372,7 @@ List<VerifyCheck> _fleetChecks(
   List<ProviderQuota> results,
   int now, {
   required bool filtered,
+  RuntimeAccessReport? runtimeAccess,
 }) {
   final checks = <VerifyCheck>[];
 
@@ -407,5 +415,59 @@ List<VerifyCheck> _fleetChecks(
     checks.add(const VerifyCheck('claimed_coverage', VerifyStatus.info,
         'coverage check skipped: a profile or exclusion narrowed this read'));
   }
+  final runtimeAccessCheck = _runtimeAccessBoundaryCheck(runtimeAccess);
+  if (runtimeAccessCheck != null) checks.add(runtimeAccessCheck);
   return checks;
 }
+
+VerifyCheck? _runtimeAccessBoundaryCheck(RuntimeAccessReport? access) {
+  if (access == null) return null;
+  if (!access.collectionExecuted) {
+    return const VerifyCheck(
+      'runtime_access_boundary',
+      VerifyStatus.info,
+      'no provider collection was executed; runtime access is a manifest only',
+    );
+  }
+  final violations = <String>[];
+  for (final record in access.allRecords) {
+    if (record.spendsTokens) {
+      violations.add('${record.target} is marked as token-spending');
+    }
+    if (record.sendsPromptOrCode) {
+      violations.add('${record.target} is marked as sending prompts or code');
+    }
+    if (_looksLikeGenerationEndpoint(record)) {
+      violations.add('${record.target} looks like a generation endpoint');
+    }
+  }
+  if (violations.isNotEmpty) {
+    return VerifyCheck(
+      'runtime_access_boundary',
+      VerifyStatus.fail,
+      violations.join('; '),
+    );
+  }
+  return VerifyCheck(
+    'runtime_access_boundary',
+    VerifyStatus.pass,
+    'runtime access observation attached for ${access.providers.length} '
+        'invoked provider adapter(s); no prompts, source code, token spend, '
+        'or generation endpoints observed',
+  );
+}
+
+bool _looksLikeGenerationEndpoint(RuntimeAccessRecord record) {
+  if (record.kind != RuntimeAccessKind.network) return false;
+  final target = record.target.toLowerCase();
+  return _generationEndpointMarkers.any(target.contains);
+}
+
+final _generationEndpointMarkers = <String>[
+  '/chat/completions',
+  '/v1' '/completions',
+  '/v1' '/messages',
+  '/responses',
+  '/images',
+  ':generate' 'content',
+];
