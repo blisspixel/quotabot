@@ -14,6 +14,9 @@ Notable changes to quotabot. Newest first.
 - Fresh native provider pipe diagnostics now feed the same bounded
   `pipe_discount_percent` route discount as recent LiteLLM pipe health without
   changing raw quota availability.
+- Model routing now uses matched model or model-family quota headroom when a
+  provider exposes it, preventing a capable but exhausted model pool from
+  inheriting the provider account's broader headroom.
 
 ## 0.5.13 - 2026-07-08
 

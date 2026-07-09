@@ -5,14 +5,15 @@
 /// (filled live by the adapters); cloud models come from an injected [catalog]
 /// (a committed, refreshable capability table - see `model_catalog.dart` and the
 /// refresh tool), so runtime stays zero-extra-network and local-first. Each entry
-/// carries its provider's binding-window headroom and reset, so an agent sees
-/// budget per model, not just per provider.
+/// carries the quota that gates that model: provider binding-window headroom for
+/// most providers, and model-specific headroom when the provider exposes it.
 library;
 
 import 'analysis.dart';
 import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
+import 'parsing.dart' show resetLabel;
 import 'util.dart';
 
 /// One routable model plus the live budget of the provider that gates it.
@@ -24,14 +25,16 @@ class ModelEntry {
   final String? source;
   final bool quotaBacked;
 
-  /// Remaining headroom percent of the gating provider (null for local runtimes
-  /// or when unknown).
+  /// Remaining headroom percent of the gating quota (null for local runtimes or
+  /// when unknown). Providers with per-model quota expose model-specific
+  /// headroom here; other cloud providers expose provider binding-window
+  /// headroom.
   final double? headroomPercent;
 
-  /// Reset epoch of the gating (binding) window, when known.
+  /// Reset epoch of the model's gating quota, when known.
   final int? resetsAt;
 
-  /// Label of the gating window (e.g. "weekly"), when metered.
+  /// Label of the gating quota window (e.g. "weekly"), when metered.
   final String? gatingWindow;
 
   /// True when the model is usable right now (provider has headroom, or local).
@@ -327,6 +330,16 @@ List<ModelEntry> buildModelRegistry(
         q.windows.isNotEmpty &&
         kQuotaPlanProviders.contains(q.provider);
     for (final m in models) {
+      final budget = q.isLocal
+          ? null
+          : _modelBudgetFor(
+              q,
+              m,
+              providerHeadroom: a.headroom,
+              providerAvailable: a.available,
+              providerResetsAt: a.resetsAt,
+              bindingLabel: binding?.label,
+            );
       final quotaBacked = providerQuotaBacked &&
           (m.quotaIncludedUntil == null || now < m.quotaIncludedUntil!);
       entries.add(ModelEntry(
@@ -336,10 +349,10 @@ List<ModelEntry> buildModelRegistry(
         local: q.isLocal,
         source: q.source,
         quotaBacked: quotaBacked,
-        headroomPercent: q.isLocal ? null : a.headroom,
-        resetsAt: q.isLocal ? null : a.resetsAt,
-        gatingWindow: q.isLocal ? null : binding?.label,
-        available: q.isLocal ? q.ok : a.available,
+        headroomPercent: budget?.headroomPercent,
+        resetsAt: budget?.resetsAt,
+        gatingWindow: budget?.gatingWindow,
+        available: q.isLocal ? q.ok : budget?.available ?? false,
         stale: q.stale,
         asOf: q.asOf,
         perMachine: q.perMachine,
@@ -363,6 +376,73 @@ List<ModelEntry> buildModelRegistry(
   });
   return filtered;
 }
+
+({
+  double? headroomPercent,
+  int? resetsAt,
+  String? gatingWindow,
+  bool available,
+}) _modelBudgetFor(
+  ProviderQuota q,
+  ModelInfo model, {
+  required double? providerHeadroom,
+  required bool providerAvailable,
+  required int? providerResetsAt,
+  required String? bindingLabel,
+}) {
+  if (q.modelQuotas.isEmpty) {
+    return (
+      headroomPercent: providerHeadroom,
+      resetsAt: providerResetsAt,
+      gatingWindow: bindingLabel,
+      available: providerAvailable,
+    );
+  }
+  final quota = _matchingModelQuota(q.modelQuotas, model);
+  final headroom = quota?.remainingPercent;
+  final reset = quota?.resetsAt;
+  return (
+    headroomPercent: headroom,
+    resetsAt: reset,
+    gatingWindow: reset == null ? null : resetLabel(reset, q.asOf),
+    available: !q.stale && headroom != null && headroom > kSpentHeadroomFloor,
+  );
+}
+
+ModelQuota? _matchingModelQuota(List<ModelQuota> quotas, ModelInfo model) {
+  final modelKeys = _modelIdentityKeys(model.id, model.displayName);
+  ModelQuota? best;
+  var bestScore = 0;
+  for (final quota in quotas) {
+    final score = _modelQuotaMatchScore(_modelQuotaKey(quota.model), modelKeys);
+    if (score > bestScore) {
+      best = quota;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+int _modelQuotaMatchScore(String quotaKey, Set<String> modelKeys) {
+  if (modelKeys.contains(quotaKey)) return 3;
+  if (modelKeys.any((modelKey) => quotaKey.startsWith(modelKey))) return 2;
+  if (_isProviderFamilyQuotaKey(quotaKey) &&
+      modelKeys.any((modelKey) => modelKey.startsWith(quotaKey))) {
+    return 1;
+  }
+  return 0;
+}
+
+Set<String> _modelIdentityKeys(String id, String? displayName) => {
+      _modelQuotaKey(id),
+      if (displayName != null) _modelQuotaKey(displayName),
+    };
+
+String _modelQuotaKey(String label) =>
+    label.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+bool _isProviderFamilyQuotaKey(String key) =>
+    key == 'gemini' || key == 'claude' || key == 'gptoss';
 
 /// The registry as the `quotabot.models.v1` JSON envelope, shared by the CLI
 /// `models` command and the MCP `list_models` tool so both speak one shape.

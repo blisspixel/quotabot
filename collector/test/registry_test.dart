@@ -13,6 +13,7 @@ ProviderQuota _cloud(
   int? resetsAt,
   String account = 'a',
   bool perMachine = false,
+  List<ModelQuota> modelQuotas = const [],
 }) =>
     ProviderQuota(
       provider: id,
@@ -22,6 +23,7 @@ ProviderQuota _cloud(
       perMachine: perMachine,
       stale: stale,
       source: source,
+      modelQuotas: modelQuotas,
       windows: [
         QuotaWindow(
           label: 'weekly',
@@ -59,6 +61,88 @@ void main() {
     expect(e.gatingWindow, 'weekly');
     expect(e.available, isTrue);
     expect(e.model.contextTokens, 200000);
+  });
+
+  test('model quotas gate entries and exact matches beat family quotas', () {
+    final reset = _now + 3600;
+    final reg = buildModelRegistry(
+      [
+        _cloud(
+          'antigravity',
+          20,
+          resetsAt: _now + 7200,
+          modelQuotas: [
+            ModelQuota(
+              model: 'gemini',
+              usedPercent: 100,
+              resetsAt: _now + 7200,
+            ),
+            ModelQuota(
+              model: 'Gemini 3.1 Pro',
+              usedPercent: 10,
+              resetsAt: reset,
+            ),
+          ],
+        ),
+      ],
+      _now,
+      catalog: const {
+        'antigravity': [
+          ModelInfo(
+            id: 'gemini-3.1-pro',
+            displayName: 'Gemini 3.1 Pro',
+            reasoning: 'reasoning',
+            tier: 'flagship',
+          ),
+          ModelInfo(
+            id: 'gemini-3-flash',
+            displayName: 'Gemini 3 Flash',
+            tier: 'standard',
+          ),
+        ],
+      },
+    );
+
+    final pro = reg.firstWhere((e) => e.model.id == 'gemini-3.1-pro');
+    final flash = reg.firstWhere((e) => e.model.id == 'gemini-3-flash');
+    expect(pro.headroomPercent, 90);
+    expect(pro.resetsAt, reset);
+    expect(pro.gatingWindow, '5h');
+    expect(pro.available, isTrue);
+    expect(flash.headroomPercent, 0);
+    expect(flash.resetsAt, _now + 7200);
+    expect(flash.gatingWindow, '5h');
+    expect(flash.available, isFalse);
+  });
+
+  test('unmatched per-model quota does not inherit provider headroom', () {
+    final reg = buildModelRegistry(
+      [
+        _cloud(
+          'antigravity',
+          20,
+          modelQuotas: const [
+            ModelQuota(model: 'Gemini 3 Flash', usedPercent: 0),
+          ],
+        ),
+      ],
+      _now,
+      catalog: const {
+        'antigravity': [
+          ModelInfo(
+            id: 'gemini-3.1-pro',
+            displayName: 'Gemini 3.1 Pro',
+            reasoning: 'reasoning',
+            tier: 'flagship',
+          ),
+        ],
+      },
+    );
+
+    expect(reg.single.headroomPercent, isNull);
+    expect(reg.single.resetsAt, isNull);
+    expect(reg.single.gatingWindow, isNull);
+    expect(reg.single.available, isFalse);
   });
 
   test('entries keep capture provenance without changing JSON shape', () {
@@ -392,6 +476,49 @@ void main() {
       final s = sg(taskProfile('hard')); // reasoning + tier >= standard
       expect(s.recommended?.local, isFalse);
       expect(s.recommended?.model.id, 'opus'); // only opus declares reasoning
+    });
+
+    test('a hard task skips an exhausted capable per-model pool', () {
+      final s = suggestModel(
+        [
+          _cloud(
+            'antigravity',
+            10,
+            modelQuotas: const [
+              ModelQuota(model: 'gemini', usedPercent: 100),
+              ModelQuota(model: 'Gemini 3 Flash', usedPercent: 0),
+            ],
+          ),
+          _cloud('claude', 40),
+        ],
+        _now,
+        catalog: {
+          ...catalog,
+          'antigravity': const [
+            ModelInfo(
+              id: 'gemini-3.1-pro',
+              displayName: 'Gemini 3.1 Pro',
+              reasoning: 'reasoning',
+              tier: 'flagship',
+            ),
+            ModelInfo(
+              id: 'gemini-3-flash',
+              displayName: 'Gemini 3 Flash',
+              tier: 'standard',
+            ),
+          ],
+        },
+        requirements: taskProfile('hard'),
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.recommended?.model.id, 'opus');
+      final antigravity = s.ranked.firstWhere(
+        (entry) => entry.provider == 'antigravity',
+      );
+      expect(antigravity.model.id, 'gemini-3.1-pro');
+      expect(antigravity.available, isFalse);
+      expect(antigravity.headroomPercent, 0);
     });
 
     test('the lightest cloud tier wins when several qualify', () {

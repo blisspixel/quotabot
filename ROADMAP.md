@@ -194,8 +194,11 @@ logical order (each enables the next; no dates):
    `top`/`doctor` route line are capability-blind and can name the most-open but
    weakest provider for a hard task. Give the default path a capability floor
    (or carry task context) so the advisor's default answer is good, not only its
-   opt-in answer. Antigravity's per-model quota is the prerequisite: routing a
-   hard task there should require a capable model with headroom.
+   opt-in answer. First prerequisite slice landed: model registry entries now
+   use matched model or model-family quotas when a provider exposes them, so a hard
+   Antigravity route requires a capable model with headroom instead of
+   inheriting account-wide provider headroom. Remaining: apply a capability
+   floor or task context to the default provider route surfaces.
 6. **A runtime-auditable trust surface.** The privacy boundary (reads only
    metadata, never your code, zero tokens) is asserted in docs and enforced at
    CI, but not verifiable at runtime. A `quotabot explain --reads --network`
