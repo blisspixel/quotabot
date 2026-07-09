@@ -409,7 +409,10 @@ final _candidateSchema = JsonSchema.object(
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
     'local': JsonSchema.boolean(description: 'True for a local runtime.'),
-    'headroom_percent': _nullable(JsonSchema.number()),
+    'headroom_percent': _nullable(JsonSchema.number(
+      description:
+          'Remaining percent for the provider binding-window quota gate.',
+    )),
     'effective_headroom_percent': _nullable(JsonSchema.number(
       description: 'Headroom after discounting recent burn (and risk if set).',
     )),
@@ -627,9 +630,10 @@ final releaseProviderOutputSchema = JsonSchema.object(
 );
 
 /// One model entry in the registry: the model's capability fields plus the live
-/// budget of its gating provider. Permissive (additive fields allowed).
+/// provider or model-specific budget that gates it. Permissive (additive fields
+/// allowed).
 final _modelEntrySchema = JsonSchema.object(
-  description: 'A routable model plus the gating provider budget.',
+  description: 'A routable model plus the provider or model budget gating it.',
   properties: {
     'id': JsonSchema.string(description: 'Provider-native model id.'),
     'display_name': JsonSchema.string(),
@@ -670,9 +674,16 @@ final _modelEntrySchema = JsonSchema.object(
       description: 'Data source of the gating provider, e.g. "manual" for '
           'self-reported entries. Absent for built-in adapters.',
     ),
-    'headroom_percent': _nullable(JsonSchema.number()),
-    'resets_at': JsonSchema.integer(),
-    'gating_window': JsonSchema.string(),
+    'headroom_percent': _nullable(JsonSchema.number(
+      description:
+          'Remaining percent for the model gate: provider-wide, model-specific, or provider-family.',
+    )),
+    'resets_at': JsonSchema.integer(
+      description: 'Reset epoch seconds for the model gate, when known.',
+    ),
+    'gating_window': JsonSchema.string(
+      description: 'Reset-window label for the model gate, when known.',
+    ),
   },
   required: ['id', 'provider', 'local', 'available'],
 );
@@ -796,7 +807,8 @@ final suggestModelOutputSchema = JsonSchema.object(
 
 /// Output schema for `list_models`.
 final listModelsOutputSchema = JsonSchema.object(
-  description: 'Every model the user can route to now, with per-model budget.',
+  description:
+      'Every model the user can route to now, with the budget gate for each model.',
   properties: {
     ..._profileMetaProperties,
     'schema': JsonSchema.string(),

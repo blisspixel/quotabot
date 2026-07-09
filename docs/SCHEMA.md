@@ -135,10 +135,13 @@ problems.
 `schema`, `generated_at`, `catalog_updated`, `budget_policy`, and `models`.
 Each model entry includes provider/account, `local`, `available`, `stale`,
 `quota_backed`, capability hints where known, and the gating quota budget when
-the model is remote: `headroom_percent`, `resets_at`, and the binding
-`gating_window` label. Stale remote entries keep last-known quota fields, and
-remote entries at or below the spent floor keep their measured quota fields, but
-both set `available: false`. Entries gated by a self-reported manual quota carry
+the model is remote: `headroom_percent`, `resets_at`, and the `gating_window`
+label. When a provider exposes per-model or provider-family quotas, those
+matched values gate the entry instead of account-wide provider headroom; an
+unmatched model-specific quota is not treated as available by inference.
+Stale remote entries keep last-known quota fields, and remote entries at or
+below the spent floor keep their measured quota fields, but both set
+`available: false`. Entries gated by a self-reported manual quota carry
 `source: "manual"`. Status-only cloud providers with no measured quota windows
 stay visible in `quotabot.v1` snapshots but do not contribute `models` entries.
 Some provider models with temporary included-quota terms can include

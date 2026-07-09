@@ -446,7 +446,9 @@ provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`
 and has budget, local-first. With `--use-expiring-quota`, a qualifying measured
 quota-backed model may outrank local when the reset is soon and the included
 quota would otherwise expire unused. The MCP `suggest_model` tool does the same
-for agents.
+for agents. For providers that meter individual models or model families,
+quotabot uses the matched model gate as the model's headroom rather than
+assuming the whole provider account can serve every catalog model.
 
 ## Routing over MCP
 
