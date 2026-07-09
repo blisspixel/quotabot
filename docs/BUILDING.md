@@ -2,7 +2,8 @@
 
 Prerequisites: the [Flutter SDK](https://docs.flutter.dev/get-started/install)
 (it includes Dart). Per-OS build tools: Visual Studio with "Desktop development
-with C++" (Windows), Xcode and CocoaPods (macOS), or
+with C++" plus C++ ATL support for your installed MSVC toolset (Windows), Xcode
+and CocoaPods (macOS), or
 `clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev`
 (Linux).
 
@@ -53,7 +54,9 @@ Notes:
 - **Windows:** the exe, data, and plugins land in
   `app/build/windows/x64/runner/Release/quotabot.exe`. `tools/package-windows.ps1`
   runs the build. Ship the Release folder as portable, or package with Inno Setup
-  or MSIX.
+  or MSIX. The desktop notification plugin uses Visual Studio ATL headers; if a
+  build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
+  ATL support for your installed MSVC toolset.
 - **macOS:** `bash tools/package-macos.sh` runs `flutter build macos --release`
   on a macOS host and verifies the `.app` bundle. Production distribution then
   needs Developer ID signing, notarization, stapling, and a DMG or ZIP.
@@ -67,9 +70,9 @@ Notes:
   GitHub `Release` workflow runs those helpers on `v*` tags and uploads the
   installer assets automatically.
 
-The CI workflow runs the macOS and Linux desktop package scripts with
-`--no-archive`, so every pull request verifies those platform bundles on their
-native runners without publishing release artifacts.
+The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
+their native runners, using `--no-archive` for macOS and Linux, so every pull
+request verifies those platform bundles without publishing release artifacts.
 
 ## Release dry run
 

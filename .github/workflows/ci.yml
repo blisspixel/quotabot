@@ -88,6 +88,11 @@ jobs:
         working-directory: app
         run: flutter test
 
+      - name: Verify Windows desktop package build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/package-windows.ps1
+
       - name: Linux desktop build prerequisites
         if: runner.os == 'Linux'
         run: |
