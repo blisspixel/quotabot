@@ -95,7 +95,9 @@ def windows_tray_rect(process_id: int) -> tuple[int, int, int, int] | None:
         raise RuntimeError("Windows tray inspection requires Windows")
 
     import ctypes
-    from ctypes import wintypes
+    import ctypes.wintypes
+
+    wintypes = ctypes.wintypes
 
     class Guid(ctypes.Structure):
         _fields_ = [

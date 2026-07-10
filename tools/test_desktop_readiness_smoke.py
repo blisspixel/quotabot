@@ -8,7 +8,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest import mock
+import unittest.mock
 
 from tools.desktop_readiness_smoke import (
     SCHEMA,
@@ -171,10 +171,12 @@ class DesktopReadinessTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "POSIX process-group behavior")
     def test_stops_the_entire_posix_process_group(self) -> None:
-        process = mock.Mock(pid=31415)
+        process = unittest.mock.Mock(pid=31415)
         process.wait.return_value = 0
 
-        with mock.patch("tools.desktop_readiness_smoke.os.killpg") as kill_group:
+        with unittest.mock.patch(
+            "tools.desktop_readiness_smoke.os.killpg"
+        ) as kill_group:
             stop_process(process)
 
         kill_group.assert_called_once_with(31415, signal.SIGTERM)
