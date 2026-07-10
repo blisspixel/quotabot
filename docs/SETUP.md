@@ -5,7 +5,8 @@ quotabot has two parts, and you can use either on its own:
 1. A **CLI** you install with one command. It prints your quota in the terminal
    and powers routing. Works on Windows, macOS, and Linux.
 2. A **desktop widget** (a small always-available card per provider). You run it
-   from source today; it builds on Windows, macOS, and Linux.
+   from source today; the source setup command builds and installs it on Windows,
+   macOS, and Linux.
 
 quotabot reads quota metadata from the safest source each provider exposes. Most
 reads come from local files your existing AI tools already wrote; live providers
@@ -13,8 +14,22 @@ may call their own quota or model-list metadata endpoint with an existing local
 token or key. quotabot makes no model calls, so every command here costs zero
 usage tokens.
 
-If you just want the numbers fast, do steps 1 to 3. The widget (step 5) and
-routing (step 6) are optional.
+## Fastest path: install, inspect, then repair
+
+1. Install the prebuilt CLI with the one-line command in
+   [Install the quotabot CLI](#2-install-the-quotabot-cli).
+2. Restart the terminal so the new command is on `PATH`.
+3. Run `quotabot doctor`.
+
+`doctor` is both the first quota view and the setup diagnostic. You do not need
+to configure every provider before running it: working providers show their
+current state, and missing or signed-out providers show a reason and next step.
+The one-line release installers install the CLI only. To install the desktop
+widget and shortcut as well, use the full source setup described in
+[Building from source](BUILDING.md).
+
+The detailed sections below explain provider preparation, recovery, the optional
+desktop widget, and routing.
 
 ---
 
@@ -162,8 +177,8 @@ flutter run -d linux      # on Linux
 ```
 
 That opens the live widget. To build a standalone app you can pin to your
-taskbar/dock and launch without a terminal, see
-[Building from source](../README.md#building-from-source) in the README.
+taskbar or dock and launch without a terminal, see
+[Building from source](BUILDING.md).
 
 ## 6. Route work to the freest provider (optional)
 
