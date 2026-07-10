@@ -73,14 +73,28 @@ Notes:
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners, using `--no-archive` for macOS and Linux, so every pull
 request verifies those platform bundles without publishing release artifacts.
-It then launches each packaged app and requires native window setup plus every
-supported tray-registration call to complete. Windows verifies the native
-`Shell_NotifyIconGetRect` result and rectangle independently of the tray plugin;
-macOS requires non-empty native tray bounds from the plugin. The app exposes
-that integration-only signal when `QUOTABOT_DESKTOP_READINESS_FILE` names an
-output path; normal application runs do not write a readiness file. This
-automated startup gate does not replace the release-candidate's interactive
-launcher and visible-tray check on clean desktop sessions.
+It then launches the packaged Windows and Linux apps and requires native window
+setup plus every supported tray-registration call to complete. Windows verifies
+the native `Shell_NotifyIconGetRect` result and rectangle independently of the
+tray plugin. The app exposes that integration-only signal when
+`QUOTABOT_DESKTOP_READINESS_FILE` names an output path; normal application runs
+do not write a readiness file.
+
+GitHub-hosted macOS runners build the app, but direct and LaunchServices bundle
+launches did not publish an app-authored window or status-item readiness
+transition. That environment therefore is not used as evidence of interactive
+macOS readiness. On an interactive macOS host, run the same bundle-aware
+readiness harness after packaging:
+
+```bash
+python tools/desktop_readiness_smoke.py \
+  --executable app/build/macos/Build/Products/Release/quotabot.app/Contents/MacOS/quotabot
+```
+
+The harness launches the `.app` through LaunchServices, not by invoking its
+inner executable directly. Automated startup gates do not replace the release
+candidate's interactive launcher, visible-tray, close-to-tray, and reopen check
+on clean desktop sessions.
 
 ## Release dry run
 

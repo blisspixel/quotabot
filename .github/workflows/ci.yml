@@ -132,10 +132,6 @@ jobs:
         if: runner.os == 'macOS'
         run: bash tools/package-macos.sh --no-archive
 
-      - name: Verify macOS desktop window and tray readiness
-        if: runner.os == 'macOS'
-        run: python tools/desktop_readiness_smoke.py --executable app/build/macos/Build/Products/Release/quotabot.app/Contents/MacOS/quotabot
-
       - name: MCP client snippet tests
         working-directory: integrations/mcp_clients
         run: |
