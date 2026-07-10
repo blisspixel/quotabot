@@ -145,6 +145,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     final normalized = _normalizedName;
     if (normalized == null || normalized == defaultProfileName) return false;
     if (_nameCollides) return false;
+    if (_options.isNotEmpty && _providers.isEmpty) return false;
     return true;
   }
 
@@ -275,6 +276,17 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 ),
               ),
               const SizedBox(height: 4),
+              if (_options.isNotEmpty && _providers.isEmpty)
+                Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    'Select at least one provider',
+                    style: TextStyle(
+                      fontSize: AppType.caption,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
               if (_options.isEmpty)
                 Text(
                   'No providers detected yet.',

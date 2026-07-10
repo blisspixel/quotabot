@@ -183,13 +183,23 @@ void main() {
   test('refresh failure messages are sanitized', () {
     final timeout = refreshFailureMessage(
       TimeoutException('secret path C:\\Users\\name\\token.json'),
+      hasPreviousData: true,
     );
-    final failure = refreshFailureMessage(StateError('secret-token'));
+    final failure = refreshFailureMessage(
+      StateError('secret-token'),
+      hasPreviousData: true,
+    );
+    final initial = refreshFailureMessage(
+      TimeoutException('secret-token'),
+      hasPreviousData: false,
+    );
 
     expect(timeout, 'Refresh timed out; showing previous data');
     expect(failure, 'Refresh failed; showing previous data');
+    expect(initial, 'Refresh timed out; retrying automatically');
     expect(timeout, isNot(contains('secret')));
     expect(failure, isNot(contains('secret')));
+    expect(initial, isNot(contains('secret')));
   });
 
   group('Prefs', () {

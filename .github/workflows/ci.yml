@@ -46,6 +46,9 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Coverage checker tests
+        run: python -m unittest tools.test_check_lcov
+
       - name: Collector dependencies
         working-directory: collector
         run: dart pub get
@@ -84,9 +87,11 @@ jobs:
         working-directory: app
         run: flutter analyze
 
-      - name: Flutter tests
+      - name: Flutter tests with coverage
         working-directory: app
-        run: flutter test
+        run: |
+          flutter test --coverage
+          python ../tools/check_lcov.py coverage/lcov.info 80
 
       - name: Verify Windows desktop package build
         if: runner.os == 'Windows'
