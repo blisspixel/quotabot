@@ -27,9 +27,11 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   current free headroom, any material burn discount, and confidence. Account
   names still appear only when needed to distinguish multiple accounts.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
-- **Trust line:** each provider card carries a compact line for live/cached
-  state, spend class, per-machine scope when relevant, and capture age, so the
-  number is not separated from where it came from.
+- **Trust line:** each provider card carries a compact line for live, cached, or
+  provider-drift state, spend class, per-machine scope when relevant, and
+  capture age, so the number is not separated from where it came from. Drift
+  also adds a visible, screen-reader-announced warning and suppresses forecasts
+  from stale evidence.
 - **Forecast at a glance:** when a provider is visibly burning, the card adds a
   plain-language line on the binding window ("about an hour of usage left", or
   "likely to run out before it resets" once that risk is material), the same
@@ -134,9 +136,12 @@ quotabot check claude --json --mock-provider=claude --state=blocked
 quotabot suggest --json --mock-provider claude --state healthy
 ```
 
-Supported states are `healthy`, `low`, `exhausted`, `blocked`, `signed-out`, and
-`stale`. `blocked` is specifically for the binding-window rule: the short window
-looks healthy, but the longer window is spent, so the provider is unavailable.
+Supported states are `healthy`, `low`, `exhausted`, `blocked`, `signed-out`,
+`stale`, `provider-drift`, and `metadata`. `blocked` is specifically for the
+binding-window rule: the short window looks healthy, but the longer window is
+spent, so the provider is unavailable. `provider-drift` exposes stale
+last-trusted windows plus a rejected-observation diagnostic; `metadata` exposes
+a truthful status-only provider with no quota window.
 Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
 state for assertions, skips live adapter calls, ignores real burn history, and
 does not read analytics buckets.
@@ -152,6 +157,17 @@ and the runtime access boundary staying free of prompts, source code, token
 spend, and generation endpoints. A provider that is out of quota, signed out,
 or not running still passes when it says so truthfully; the failure mode
 `verify` hunts is a lying or silent number, not an empty one.
+
+Provider drift is a distinct failing check, not a new value in the stable
+`state` enum. Its verification record remains `state: "cached"` when the
+reported windows are stale last-trusted evidence, and adds `drift_reason` and
+`drift_observed_at`. An upgraded legacy `suspect` cache cannot prove a trusted
+baseline, so that record uses the existing `error` state and exposes no windows
+or headroom until every retained quota reset advances or the evidence class
+changes. The human view
+labels either form `PROVIDER DRIFT` and identifies the `provider_drift` failure.
+The provider stays unavailable to routing, and no new measured analytics sample
+is recorded until recovery. Earlier trusted history remains intact.
 
 ```bash
 quotabot verify           # human summary, one line per provider
@@ -225,9 +241,10 @@ forward-looking note:
 a strand probability (the chance it is spent before it resets) when that is
 material, otherwise a time-to-empty estimate. It redraws in place on the alternate
 screen and repaints countdowns every second.
-Each provider row also carries a compact trust tag with live/cached state, spend
-class, stale age when relevant, account identity when needed to disambiguate
-duplicate providers, and local-only scope for this-machine fallback data.
+Each provider row also carries a compact trust tag with live, cached, or
+provider-drift state, spend class, stale age when relevant, account identity
+when needed to disambiguate duplicate providers, and local-only scope for
+this-machine fallback data.
 
 ```bash
 quotabot top                # adaptive refresh (the default)
@@ -324,9 +341,11 @@ output:
   provider is usable right now.
 - `64` usage error: a bad argument or an unknown provider name.
 - `65` verification failure: a `verify` run found at least one snapshot failing
-  its honesty checks (a lying number, a silent failure, or contract drift).
+  its honesty checks (a lying number, provider drift, a silent failure, or
+  contract drift).
 - `69` unavailable: the named provider (`check`), or the whole fleet (piped
-  `top`), has no usable quota at the moment.
+  `top`), has no usable quota at the moment. `check` uses this code for
+  provider-drift evidence because last-trusted headroom is not current capacity.
 
 For metered providers, `available` means more than the practical spent floor is
 left. Quotabot treats 1.5% or less remaining headroom as unavailable so
@@ -404,8 +423,10 @@ context: `quotabot suggest --provider-route --task=simple`, MCP
 caller-supplied model requirement instead of the default floor while still
 returning `quotabot.suggest.v1`, not a concrete model pick.
 The human `quotabot suggest` view labels each candidate with live/cached state,
-spend class, account identity when it is a real account, and capture age, so a
-route is never just a bare provider name.
+provider-drift state, spend class, account identity when it is a real account,
+and capture age, so a route is never just a bare provider name. Machine-readable
+provider and model candidates carry `drift_reason` and `drift_observed_at` when
+their budget evidence was rejected; those candidates are unavailable.
 When a caller has its own relative cost policy, provider suggestions also accept
 explicit cost penalties such as `quotabot suggest --cost-penalty=codex:2`.
 MCP uses `cost_penalties: {"codex": 2}` and optional `cost_weight`, while
@@ -498,7 +519,9 @@ The suggestion JSON carries, per candidate, `effective_headroom_percent`,
   include `pipe_discount_percent` when recent local LiteLLM or native pipe health
   down-ranks a provider/account, `capability_limited` when no catalog model meets
   the default agentic-coding floor, or `capability_budget_limited` when a capable
-  model exists but its model gate has no budget now. For a
+  model exists but its model gate has no budget now. A drifted candidate includes
+  `drift_reason` and `drift_observed_at`; its last-trusted headroom is diagnostic
+  only, or null when a migrated legacy quarantine has no trusted baseline. For a
   `capability_budget_limited` candidate, `resets_at` is the earliest known reset
   of a matching model gate. Top-level provenance includes
   `routing_policy`

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'drift.dart';
 import 'insights.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
@@ -8,9 +9,9 @@ import 'util.dart';
 
 /// Last-known-good snapshot cache.
 ///
-/// Successful provider reads are written here; when a later read fails or comes
-/// back empty (rate limit, expired token, logged-out account) the collector
-/// serves the cached snapshot marked stale instead of blanking the provider.
+/// Admitted fresh provider reads are written here; when a later read fails,
+/// comes back empty, or is rejected for drift, the collector serves trusted
+/// cached evidence marked stale instead of blanking or laundering the provider.
 Directory cacheDir() {
   final dir = quotabotDir('cache');
   restrictOwnerOnlyDirectory(dir);
@@ -27,6 +28,44 @@ File _file(String provider) =>
 
 const _maxJsonBytes = 2 * 1024 * 1024;
 const _maxHistoryBytes = 5 * 1024 * 1024;
+const _maxDriftBytes = 16 * 1024;
+const _driftSchema = 'quotabot.provider-drift.v1';
+const _cacheObservedAtMicrosKey = 'cache_observed_at_micros';
+const _driftObservedAtMicrosKey = 'observed_at_micros';
+
+File _driftFile(String provider, String account) => File(
+    '${cacheDir().path}/drift_${_safeProviderStem(provider)}_${_safeProviderStem(account)}.json');
+
+File _evidenceLockFile(String provider, String account) {
+  final scope =
+      _accountScopedProviders.contains(provider) && _hasAccount(account)
+          ? account
+          : 'provider';
+  return File(
+    '${cacheDir().path}/evidence_${_safeProviderStem(provider)}_${_safeProviderStem(scope)}.lock',
+  );
+}
+
+T _withEvidenceLock<T>(
+  String provider,
+  String account,
+  T Function() run,
+) {
+  final file = _evidenceLockFile(provider, account);
+  restrictOwnerOnlyDirectory(file.parent);
+  if (!file.existsSync()) file.createSync(recursive: true);
+  restrictOwnerOnlyFile(file);
+  final lock = file.openSync(mode: FileMode.write);
+  try {
+    lock.lockSync(FileLock.blockingExclusive);
+    return run();
+  } finally {
+    try {
+      lock.unlockSync();
+    } catch (_) {}
+    lock.closeSync();
+  }
+}
 
 /// Writes via a per-process temp file then rename, so a concurrent reader (the
 /// app and the CLI can run at once) never sees a half-written file, and two
@@ -61,13 +100,194 @@ void sweepStaleTempFiles() {
   } catch (_) {}
 }
 
-void saveSnapshot(ProviderQuota q) {
+void saveSnapshot(
+  ProviderQuota q, {
+  int? observedAtMicros,
+}) {
+  final observedAt = nowEpoch();
+  if (!isTrustedQuotaEvidenceAt(q, observedAt)) return;
+  final admittedMicros = observedAtMicros ?? _nowMicros();
+  if (admittedMicros < 0) return;
   try {
-    _atomicWrite(_accountedFile(q), jsonEncode(q.toJson()));
-    saveHistory(q);
+    _withEvidenceLock(q.provider, q.account, () {
+      final snapshotFile = _accountedFile(q);
+      final candidate = _readCanonicalSnapshotEvidence(
+        snapshotFile,
+        provider: q.provider,
+        account: q.account,
+        newestAllowedAsOf: observedAt + kQuotaEvidenceClockSkewSeconds,
+      );
+      final existing = candidate != null &&
+              (isTrustedQuotaEvidence(candidate) ||
+                  isLegacySuspectQuotaEvidence(candidate))
+          ? candidate
+          : null;
+      if (existing != null && existing.asOf > q.asOf) return;
+      final existingMicros =
+          existing == null ? null : _cacheFileObservationMicros(snapshotFile);
+      if (existingMicros != null && existingMicros >= admittedMicros) return;
+      _writeTrustedSnapshotUnlocked(q, admittedMicros);
+    });
   } catch (_) {
     // Cache is best-effort; ignore write failures.
   }
+}
+
+int _nowMicros() => DateTime.now().microsecondsSinceEpoch;
+
+void _writeTrustedSnapshotUnlocked(ProviderQuota quota, int observedMicros) {
+  _atomicWrite(
+    _accountedFile(quota),
+    jsonEncode({
+      ...quota.toJson(),
+      _cacheObservedAtMicrosKey: observedMicros,
+    }),
+  );
+  saveHistory(quota);
+  _clearProviderDriftObservation(
+    quota.provider,
+    quota.account,
+    observedMicros,
+  );
+}
+
+/// Linearizable evidence admission for one provider/account. The comparison,
+/// generation check, trusted-cache update, and drift-marker update share one
+/// interprocess lock so a stalled older collector cannot overwrite or clear a
+/// newer observation.
+ProviderQuota admitAndCacheQuotaEvidence(
+  ProviderQuota fresh, {
+  required int observedAt,
+  required int observedAtMicros,
+}) {
+  final unusableReason = unusableQuotaEvidenceDriftReason(
+    fresh,
+    observedAt: observedAt,
+  );
+  if ((!isTrustedQuotaEvidence(fresh) && unusableReason == null) ||
+      observedAtMicros < 0) {
+    return fresh;
+  }
+  try {
+    return _withEvidenceLock(fresh.provider, fresh.account, () {
+      final file = _accountedFile(fresh);
+      final current = _readCanonicalSnapshotEvidence(
+        file,
+        provider: fresh.provider,
+        account: fresh.account,
+        newestAllowedAsOf: observedAt + kQuotaEvidenceClockSkewSeconds,
+      );
+      final baseline = current != null &&
+              (isTrustedQuotaEvidence(current) ||
+                  isLegacySuspectQuotaEvidence(current))
+          ? current
+          : null;
+      final currentMicros =
+          baseline == null ? null : _cacheFileObservationMicros(file);
+      if (baseline != null &&
+          ((unusableReason == null && baseline.asOf > fresh.asOf) ||
+              (currentMicros != null && currentMicros >= observedAtMicros))) {
+        if (isLegacySuspectQuotaEvidence(baseline)) {
+          return quarantineLegacyQuotaEvidence(
+            baseline,
+            observedAt: observedAt,
+            metadataFrom: fresh,
+          );
+        }
+        return _attachProviderDriftObservationUnlocked(
+          baseline,
+          now: observedAt,
+        );
+      }
+
+      final admission = admitQuotaEvidence(
+        fresh,
+        baseline,
+        observedAt: observedAt,
+      );
+      if (admission.shouldPersist) {
+        _writeTrustedSnapshotUnlocked(admission.snapshot, observedAtMicros);
+        return _attachProviderDriftObservationUnlocked(
+          admission.snapshot,
+          now: observedAt,
+        );
+      }
+      if (baseline != null &&
+          isTrustedQuotaEvidence(baseline) &&
+          admission.driftReason != null) {
+        _saveProviderDriftObservationUnlocked(
+          baseline,
+          admission.driftReason!,
+          admission.snapshot.driftObservedAt ?? observedAt,
+          observedAtMicros,
+        );
+      }
+      return admission.snapshot;
+    });
+  } catch (_) {
+    // Lock failure means the read cannot be ordered against concurrent
+    // collectors. Never expose the fresh observation as current capacity.
+    final current = _readCanonicalSnapshotEvidence(
+      _accountedFile(fresh),
+      provider: fresh.provider,
+      account: fresh.account,
+      newestAllowedAsOf: observedAt + kQuotaEvidenceClockSkewSeconds,
+    );
+    final baseline = current != null &&
+            (isTrustedQuotaEvidence(current) ||
+                isLegacySuspectQuotaEvidence(current))
+        ? current
+        : null;
+    return _lockUnavailableAdmissionResult(
+      fresh,
+      baseline,
+      observedAt: observedAt,
+    );
+  }
+}
+
+ProviderQuota _lockUnavailableAdmissionResult(
+  ProviderQuota fresh,
+  ProviderQuota? baseline, {
+  required int observedAt,
+}) {
+  if (baseline != null && isLegacySuspectQuotaEvidence(baseline)) {
+    return quarantineLegacyQuotaEvidence(
+      baseline,
+      observedAt: observedAt,
+      metadataFrom: fresh,
+    );
+  }
+  if (baseline != null && isTrustedQuotaEvidence(baseline)) {
+    final withDrift =
+        _attachProviderDriftObservationUnlocked(baseline, now: observedAt);
+    if (withDrift.driftReason != null) return withDrift;
+    return baseline.asStale(
+      'quota evidence admission unavailable; showing last trusted snapshot',
+      metadataFrom: fresh,
+    );
+  }
+  return ProviderQuota(
+    provider: fresh.provider,
+    displayName: fresh.displayName,
+    account: fresh.account,
+    plan: fresh.plan,
+    source: fresh.source,
+    ok: false,
+    error: 'quota evidence admission unavailable; no trusted snapshot is '
+        'available',
+    asOf: fresh.asOf,
+    stale: true,
+    kind: fresh.kind,
+    status: fresh.status,
+    active: fresh.active,
+    details: fresh.details,
+    models: fresh.models,
+    perMachine: fresh.perMachine,
+    pipeHealth: fresh.pipeHealth,
+    httpStatus: fresh.httpStatus,
+    retryAfterSeconds: fresh.retryAfterSeconds,
+  );
 }
 
 /// Most history rows retained per provider. Bounds file growth so the jsonl
@@ -75,6 +295,7 @@ void saveSnapshot(ProviderQuota q) {
 const _historyCap = 200;
 
 void saveHistory(ProviderQuota q) {
+  if (!isTrustedQuotaEvidenceAt(q, nowEpoch())) return;
   try {
     final f = _historyFile(q.provider, account: q.account);
     final line = jsonEncode(q.toJson());
@@ -113,17 +334,63 @@ File _accountedFile(ProviderQuota q) {
   return _file(q.provider);
 }
 
-ProviderQuota? loadSnapshot(String provider) {
+ProviderQuota? _readSnapshotEvidence(File file) {
+  if (!file.existsSync() || file.lengthSync() > _maxJsonBytes) return null;
   try {
-    final f = _file(provider);
-    if (!f.existsSync()) return null;
-    if (f.lengthSync() > _maxJsonBytes) return null;
     return ProviderQuota.fromJson(
-      jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
+      jsonDecode(file.readAsStringSync()) as Map<String, dynamic>,
     );
   } catch (_) {
     return null;
   }
+}
+
+ProviderQuota? _readCanonicalSnapshotEvidence(
+  File file, {
+  required String provider,
+  required String account,
+  required int newestAllowedAsOf,
+  bool requireExactAccount = false,
+}) {
+  final quota = _readSnapshotEvidence(file);
+  if (quota == null ||
+      quota.provider != provider ||
+      quota.asOf <= 0 ||
+      quota.asOf > newestAllowedAsOf) {
+    return null;
+  }
+  final accountScoped =
+      _accountScopedProviders.contains(provider) && _hasAccount(account);
+  if ((requireExactAccount || accountScoped) && quota.account != account) {
+    return null;
+  }
+  return quota;
+}
+
+ProviderQuota? loadSnapshot(String provider) {
+  final quota = _readCanonicalSnapshotEvidence(
+    _file(provider),
+    provider: provider,
+    account: '',
+    newestAllowedAsOf: nowEpoch() + kQuotaEvidenceClockSkewSeconds,
+  );
+  return quota != null && isTrustedQuotaEvidence(quota) ? quota : null;
+}
+
+/// Loads trusted quota or a pre-quarantine legacy suspect snapshot solely for
+/// admission comparison. Callers must never route, display windows from, or
+/// append history from a legacy result.
+ProviderQuota? loadSnapshotForAdmission(String provider) {
+  final quota = _readCanonicalSnapshotEvidence(
+    _file(provider),
+    provider: provider,
+    account: '',
+    newestAllowedAsOf: nowEpoch() + kQuotaEvidenceClockSkewSeconds,
+  );
+  return quota != null &&
+          (isTrustedQuotaEvidence(quota) || isLegacySuspectQuotaEvidence(quota))
+      ? quota
+      : null;
 }
 
 /// Loads the last-known-good per-account snapshot for [provider]/[account], or
@@ -132,15 +399,33 @@ ProviderQuota? loadSnapshot(String provider) {
 /// the plain `loadSnapshot(provider)` path never finds them.
 ProviderQuota? loadAccountSnapshot(String provider, String account) {
   if (!_hasAccount(account)) return null;
-  final f = _accountedPath(provider, account);
-  if (!f.existsSync() || f.lengthSync() > _maxJsonBytes) return null;
-  try {
-    return ProviderQuota.fromJson(
-      jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
-    );
-  } catch (_) {
-    return null;
-  }
+  final quota = _readCanonicalSnapshotEvidence(
+    _accountedPath(provider, account),
+    provider: provider,
+    account: account,
+    newestAllowedAsOf: nowEpoch() + kQuotaEvidenceClockSkewSeconds,
+    requireExactAccount: true,
+  );
+  return quota != null && isTrustedQuotaEvidence(quota) ? quota : null;
+}
+
+/// Per-account counterpart to [loadSnapshotForAdmission].
+ProviderQuota? loadAccountSnapshotForAdmission(
+  String provider,
+  String account,
+) {
+  if (!_hasAccount(account)) return null;
+  final quota = _readCanonicalSnapshotEvidence(
+    _accountedPath(provider, account),
+    provider: provider,
+    account: account,
+    newestAllowedAsOf: nowEpoch() + kQuotaEvidenceClockSkewSeconds,
+    requireExactAccount: true,
+  );
+  return quota != null &&
+          (isTrustedQuotaEvidence(quota) || isLegacySuspectQuotaEvidence(quota))
+      ? quota
+      : null;
 }
 
 /// Every cached per-account snapshot for [provider] across the accounts seen on
@@ -162,7 +447,14 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
         final q = ProviderQuota.fromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
-        if (q.provider == provider) results.add(q);
+        if (q.provider == provider &&
+            q.asOf > 0 &&
+            q.asOf <= nowEpoch() + kQuotaEvidenceClockSkewSeconds &&
+            entity.uri.pathSegments.last ==
+                '${stem}_${_safeProviderStem(q.account)}.json' &&
+            isTrustedQuotaEvidence(q)) {
+          results.add(q);
+        }
       } catch (_) {}
     }
     final main = loadSnapshot(provider);
@@ -181,28 +473,46 @@ List<ProviderQuota> loadCachedSnapshots({int? now}) {
   final dir = cacheDir();
   if (!dir.existsSync()) return const [];
   final byIdentity = <String, ProviderQuota>{};
-  final newestAllowedAsOf = (now ?? nowEpoch()) + 60;
+  final detectedAt = now ?? nowEpoch();
+  final newestAllowedAsOf = detectedAt + kQuotaEvidenceClockSkewSeconds;
   try {
     for (final entity in dir.listSync()) {
       if (entity is! File) continue;
       final name = entity.uri.pathSegments.last;
-      if (!name.endsWith('.json') || name.startsWith('buckets_')) continue;
+      if (!name.endsWith('.json') ||
+          name.startsWith('buckets_') ||
+          name.startsWith('drift_')) {
+        continue;
+      }
       if (entity.lengthSync() > _maxJsonBytes) continue;
       try {
         final q = ProviderQuota.fromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
-        if (q.asOf > newestAllowedAsOf) continue;
+        final trusted = isTrustedQuotaEvidence(q);
+        final legacySuspect = isLegacySuspectQuotaEvidence(q);
+        if (!trusted && !legacySuspect) continue;
+        if (q.asOf <= 0 || q.asOf > newestAllowedAsOf) continue;
         if (!_isCanonicalSnapshotFileName(name, q)) continue;
         final key = '${q.provider}\u0000${q.account}';
+        final visible = legacySuspect
+            ? quarantineLegacyQuotaEvidence(
+                q,
+                observedAt: detectedAt,
+              )
+            : q;
         final existing = byIdentity[key];
-        if (existing == null || q.asOf >= existing.asOf) {
-          byIdentity[key] = q;
+        if (existing == null || visible.asOf >= existing.asOf) {
+          byIdentity[key] = visible;
         }
       } catch (_) {}
     }
   } catch (_) {}
-  final out = byIdentity.values.toList()
+  final out = byIdentity.values
+      .map((quota) => isTrustedQuotaEvidence(quota)
+          ? attachProviderDriftObservation(quota, now: now)
+          : quota)
+      .toList()
     ..sort((a, b) {
       final byProvider = a.provider.compareTo(b.provider);
       return byProvider != 0 ? byProvider : a.account.compareTo(b.account);
@@ -217,6 +527,209 @@ bool _isCanonicalSnapshotFileName(String name, ProviderQuota quota) {
         '${_safeProviderStem(quota.provider)}_${_safeProviderStem(quota.account)}.json';
   }
   return name == '${_safeProviderStem(quota.provider)}.json';
+}
+
+/// Records a rejected provider observation without modifying the trusted quota
+/// snapshot or burn history. The diagnostic is local, bounded, sanitized, and
+/// cleared by the next successfully admitted snapshot for the same identity.
+void saveProviderDriftObservation(
+  ProviderQuota trusted,
+  String reason,
+  int observedAt, {
+  int? observedAtMicros,
+}) {
+  if (!isTrustedQuotaEvidence(trusted) || observedAt < 0) return;
+  final observedMicros = observedAtMicros ?? _nowMicros();
+  if (observedMicros < 0) return;
+  final boundedReason = boundedQuotaDriftReason(reason);
+  if (boundedReason.isEmpty) return;
+  try {
+    _withEvidenceLock(trusted.provider, trusted.account, () {
+      _saveProviderDriftObservationUnlocked(
+        trusted,
+        boundedReason,
+        observedAt,
+        observedMicros,
+      );
+    });
+  } catch (_) {
+    // Diagnostics are best-effort. The in-memory result still fails closed.
+  }
+}
+
+/// Attaches a persisted unresolved drift diagnostic to trusted quota evidence.
+/// Invalid, mismatched, or future-dated diagnostics are ignored.
+ProviderQuota attachProviderDriftObservation(
+  ProviderQuota trusted, {
+  int? now,
+}) {
+  if (!isTrustedQuotaEvidence(trusted)) return trusted;
+  try {
+    return _withEvidenceLock(
+      trusted.provider,
+      trusted.account,
+      () => _attachProviderDriftObservationUnlocked(trusted, now: now),
+    );
+  } catch (_) {
+    // If lock creation itself is unavailable, a best-effort read is safer than
+    // silently dropping an existing fail-closed diagnostic.
+    return _attachProviderDriftObservationUnlocked(trusted, now: now);
+  }
+}
+
+ProviderQuota _attachProviderDriftObservationUnlocked(
+  ProviderQuota trusted, {
+  int? now,
+}) {
+  try {
+    final file = _driftFile(trusted.provider, trusted.account);
+    if (!file.existsSync() || file.lengthSync() > _maxDriftBytes) {
+      return trusted;
+    }
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return trusted;
+    final record = decoded.cast<String, dynamic>();
+    final reason = record['reason'];
+    final observedAt = record['observed_at'];
+    final observedAtMicros = _driftObservationMicros(record);
+    final trustedObservedAtMicros = _cacheObservationMicros(trusted);
+    if (record['schema'] != _driftSchema ||
+        record['provider'] != trusted.provider ||
+        record['account'] != trusted.account ||
+        reason is! String ||
+        reason.trim().isEmpty ||
+        observedAt is! int ||
+        observedAt < 0 ||
+        observedAtMicros == null ||
+        (trustedObservedAtMicros != null &&
+            trustedObservedAtMicros > observedAtMicros) ||
+        observedAt > (now ?? nowEpoch()) + kQuotaEvidenceClockSkewSeconds) {
+      return trusted;
+    }
+    return trusted.withProviderDrift(
+      boundedQuotaDriftReason(reason),
+      observedAt,
+    );
+  } catch (_) {
+    return trusted;
+  }
+}
+
+int? _driftObservationMicros(Map<String, dynamic> record) {
+  final value = record[_driftObservedAtMicrosKey];
+  if (value is int && value >= 0) return value;
+  if (value != null) return null;
+  final observedAt = record['observed_at'];
+  return observedAt is int && observedAt >= 0 ? observedAt * 1000000 : null;
+}
+
+Map<String, dynamic>? _readDriftRecord(File file) {
+  if (!file.existsSync() || file.lengthSync() > _maxDriftBytes) return null;
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    return decoded is Map ? decoded.cast<String, dynamic>() : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+void _saveProviderDriftObservationUnlocked(
+  ProviderQuota trusted,
+  String boundedReason,
+  int observedAt,
+  int observedMicros,
+) {
+  final cacheMicros = _cacheFileObservationMicros(_accountedFile(trusted));
+  if (cacheMicros != null && cacheMicros > observedMicros) return;
+  final driftFile = _driftFile(trusted.provider, trusted.account);
+  final currentDrift = _readDriftRecord(driftFile);
+  final currentMicros =
+      currentDrift == null ? null : _driftObservationMicros(currentDrift);
+  if (currentMicros != null && currentMicros >= observedMicros) return;
+  _atomicWrite(
+    driftFile,
+    jsonEncode({
+      'schema': _driftSchema,
+      'provider': trusted.provider,
+      'account': trusted.account,
+      'observed_at': observedAt,
+      _driftObservedAtMicrosKey: observedMicros,
+      'reason': boundedReason,
+    }),
+  );
+}
+
+int? _cacheFileObservationMicros(File file) {
+  if (!file.existsSync() || file.lengthSync() > _maxJsonBytes) return null;
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return null;
+    final record = decoded.cast<String, dynamic>();
+    final exact = record[_cacheObservedAtMicrosKey];
+    final newestAllowed =
+        _nowMicros() + kQuotaEvidenceClockSkewSeconds * 1000000;
+    if (exact is int && exact >= 0 && exact <= newestAllowed) return exact;
+    final asOf = record['as_of'];
+    if (asOf is! int || asOf <= 0) return null;
+    final fallback = asOf * 1000000;
+    return fallback <= newestAllowed ? fallback : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+int? _asOfObservationMicros(int asOf) {
+  if (asOf <= 0) return null;
+  final value = asOf * 1000000;
+  final newestAllowed = _nowMicros() + kQuotaEvidenceClockSkewSeconds * 1000000;
+  return value <= newestAllowed ? value : null;
+}
+
+/// Returns the exact local observation generation stored with [trusted] when
+/// it still matches the canonical cache record. Legacy cache files fall back to
+/// `as_of` precision; equality remains quarantined conservatively.
+int? _cacheObservationMicros(ProviderQuota trusted) {
+  try {
+    final file = _accountedFile(trusted);
+    if (!file.existsSync() || file.lengthSync() > _maxJsonBytes) {
+      return _asOfObservationMicros(trusted.asOf);
+    }
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return null;
+    final record = decoded.cast<String, dynamic>();
+    if (record['provider'] != trusted.provider ||
+        record['account'] != trusted.account ||
+        record['as_of'] != trusted.asOf) {
+      return _asOfObservationMicros(trusted.asOf);
+    }
+    return _cacheFileObservationMicros(file) ??
+        _asOfObservationMicros(trusted.asOf);
+  } catch (_) {
+    return _asOfObservationMicros(trusted.asOf);
+  }
+}
+
+void _clearProviderDriftObservation(
+  String provider,
+  String account,
+  int admittedMicros,
+) {
+  try {
+    final file = _driftFile(provider, account);
+    if (!file.existsSync() || file.lengthSync() > _maxDriftBytes) return;
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return;
+    final record = decoded.cast<String, dynamic>();
+    if (record['schema'] != _driftSchema ||
+        record['provider'] != provider ||
+        record['account'] != account) {
+      return;
+    }
+    final driftMicros = _driftObservationMicros(record);
+    if (driftMicros != null && admittedMicros > driftMicros) {
+      file.deleteSync();
+    }
+  } catch (_) {}
 }
 
 /// Antigravity's per-account snapshot, by account. Thin alias over the generic
@@ -245,10 +758,13 @@ List<ProviderQuota> currentAccountFallbacks({
   final liveAccounts = {for (final q in liveResults) q.account};
   final out = <ProviderQuota>[];
   for (final cached in cachedSnapshots) {
-    if (cached.hasWindows &&
+    if (isTrustedQuotaEvidence(cached) &&
         currentAccounts.contains(cached.account) &&
         !liveAccounts.contains(cached.account)) {
-      out.add(cached.asStale(cached.error ?? 'cached account'));
+      final withDrift = attachProviderDriftObservation(cached);
+      out.add(withDrift.driftReason == null
+          ? cached.asStale(cached.error ?? 'cached account')
+          : withDrift);
     }
   }
   return out;
@@ -407,11 +923,13 @@ List<ProviderQuota> loadHistory(String provider, {String? account}) {
   if (f.lengthSync() > _maxHistoryBytes) return results;
   try {
     final lines = f.readAsLinesSync();
+    final observedAt = nowEpoch();
     // Last 48 raw checks: enough for a readable sparkline and a stable average.
     for (final line in lines.reversed.take(48)) {
       if (line.trim().isEmpty) continue;
       final content = jsonDecode(line) as Map<String, dynamic>;
-      results.add(ProviderQuota.fromJson(content));
+      final quota = ProviderQuota.fromJson(content);
+      if (isTrustedQuotaEvidenceAt(quota, observedAt)) results.add(quota);
     }
   } catch (_) {}
   return results.reversed.toList();

@@ -147,7 +147,7 @@ void _recordAnalytics(List<ProviderQuota> results) {
   final now = nowEpoch();
   final seen = <String>{};
   for (final q in results) {
-    if (q.isLocal || !q.hasWindows) continue;
+    if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) continue;
     if (q.isManual) continue;
     if (!seen.add(quotaIdentityKeyFor(q))) continue;
     final h = providerHeadroom(q, now);
@@ -160,11 +160,18 @@ void _recordAnalytics(List<ProviderQuota> results) {
 Future<List<ProviderQuota>> _collectRegistered(
   ProviderAdapterRegistration entry,
 ) async {
+  // This generation identifies when collection began, not when a provider
+  // eventually returned. Otherwise an earlier slow request can finish after a
+  // later fast request and overwrite the genuinely newer observation.
+  final evidenceGenerationMicros = DateTime.now().microsecondsSinceEpoch;
   final collected = await _listWithDeadline(entry);
   if (!entry.cached) return collected;
   final results = <ProviderQuota>[];
   for (final q in collected) {
-    results.add(_cacheResult(q));
+    results.add(_cacheResult(
+      q,
+      evidenceGenerationMicros: evidenceGenerationMicros,
+    ));
   }
   if (entry.accountScopedCache) {
     results.addAll(currentAccountFallbacks(
@@ -176,18 +183,23 @@ Future<List<ProviderQuota>> _collectRegistered(
   return results;
 }
 
-ProviderQuota _cacheResult(ProviderQuota result) {
-  if (result.ok && result.hasWindows) {
-    // Validate the fresh read against the last one before trusting it: a value
-    // that is implausible versus the previous read (a reset that moved earlier,
-    // usage that fell with no reset) is flagged suspect, not hidden.
-    final previous = _loadCachedSnapshot(result);
-    final drift = previous == null ? null : detectQuotaDrift(result, previous);
-    final flagged = drift == null ? result : result.withSuspect(drift);
-    saveSnapshot(flagged);
-    return flagged;
+ProviderQuota _cacheResult(
+  ProviderQuota result, {
+  required int evidenceGenerationMicros,
+}) {
+  if (isTrustedQuotaEvidence(result) ||
+      unusableQuotaEvidenceDriftReason(result) != null) {
+    // Only admitted fresh evidence may replace last-known-good cache or enter
+    // burn history. A drifted read returns the prior trusted snapshot stale and
+    // records its diagnostic separately without storing rejected quota values.
+    return admitAndCacheQuotaEvidence(
+      result,
+      observedAt: nowEpoch(),
+      observedAtMicros: evidenceGenerationMicros,
+    );
   }
-  // Read failed or returned no windows; serve last-known if we have one.
+  // Read failed, returned no windows, or supplied already-stale/untrusted
+  // evidence. Serve only a trusted last-known snapshot when one exists.
   final cached = _loadCachedSnapshot(result);
   if (cached != null && cached.hasWindows) {
     final entry = providerAdapterById(result.provider);
@@ -195,7 +207,22 @@ ProviderQuota _cacheResult(ProviderQuota result) {
         !entry!.currentAccounts!().contains(cached.account)) {
       return result;
     }
+    final withDrift = attachProviderDriftObservation(cached);
+    if (withDrift.driftReason != null) return withDrift;
     return cached.asStale(result.error ?? 'cached', metadataFrom: result);
+  }
+  final legacy = _loadCachedAdmissionBaseline(result);
+  if (legacy != null && isLegacySuspectQuotaEvidence(legacy)) {
+    final entry = providerAdapterById(result.provider);
+    if (entry?.accountScopedCache == true &&
+        !entry!.currentAccounts!().contains(legacy.account)) {
+      return result;
+    }
+    return quarantineLegacyQuotaEvidence(
+      legacy,
+      observedAt: nowEpoch(),
+      metadataFrom: result,
+    );
   }
   return result;
 }
@@ -207,3 +234,10 @@ ProviderQuota? _loadCachedSnapshot(ProviderQuota result) =>
     providerAdapterById(result.provider)?.accountScopedCache == true
         ? loadAccountSnapshot(result.provider, result.account)
         : loadSnapshot(result.provider);
+
+/// Admission-only loader that preserves legacy suspect cache as a quarantine
+/// baseline. Its windows never escape [_cacheResult] as usable evidence.
+ProviderQuota? _loadCachedAdmissionBaseline(ProviderQuota result) =>
+    providerAdapterById(result.provider)?.accountScopedCache == true
+        ? loadAccountSnapshotForAdmission(result.provider, result.account)
+        : loadSnapshotForAdmission(result.provider);

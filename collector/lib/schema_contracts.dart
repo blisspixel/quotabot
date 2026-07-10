@@ -89,6 +89,13 @@ const quotabotV1JsonSchema = <String, Object?>{
         'error': {'type': 'string'},
         'as_of': {'type': 'integer', 'minimum': 0},
         'stale': {'type': 'boolean'},
+        'suspect': {'type': 'string'},
+        'drift_reason': {
+          'type': 'string',
+          'minLength': 1,
+          'pattern': r'\S',
+        },
+        'drift_observed_at': {'type': 'integer', 'minimum': 0},
         'windows': {
           'type': 'array',
           'items': {r'$ref': r'#/$defs/quotaWindow'},
@@ -196,6 +203,14 @@ void _validateProvider(
   _checkOptionalString(provider, 'error', path, errors);
   _checkNonNegativeInt(provider, 'as_of', path, errors);
   _checkBool(provider, 'stale', path, errors);
+  _checkOptionalString(provider, 'suspect', path, errors);
+  _checkOptionalString(provider, 'drift_reason', path, errors);
+  final driftReason = provider['drift_reason'];
+  if (driftReason is String && driftReason.trim().isEmpty) {
+    errors.add('$path.drift_reason must not be blank');
+  }
+  _checkNonNegativeInt(provider, 'drift_observed_at', path, errors,
+      required: false);
 
   final windows = provider['windows'];
   if (windows is! List) {

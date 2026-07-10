@@ -20,6 +20,21 @@ Notable changes to quotabot. Newest first.
   registration check, plus a bundle-aware macOS harness for interactive hosts.
 
 ### Fixed
+- Provider drift now fails closed at the evidence-admission boundary: an
+  implausible fresh read cannot overwrite last-known-good cache or enter routing,
+  history, or measured analytics. Missing quota dimensions, unknown usage, and
+  pre-reset forward timestamps cannot erase a binding cap. The stale trusted
+  snapshot remains visible with additive `drift_reason` and
+  `drift_observed_at`, `verify` emits a failed `provider_drift` check while
+  preserving `state: "cached"`, and a bounded local diagnostic survives restarts
+  and failed reads until clean recovery. Exact local observation generations
+  prevent same-second and interleaved writers from hiding newer drift. Legacy
+  `suspect` caches remain non-routable, no-window quarantines until every
+  retained quota reset advances, while provider and model routing candidates
+  expose the drift diagnostic explicitly. Wrong-identity, missing-time, and
+  materially future live or cached evidence is rejected, direct routing applies
+  the same timestamp guard, and an unavailable admission lock cannot expose
+  unlinearized fresh evidence as routable capacity.
 - Secret-bearing desktop webhook preferences now fail closed before read or
   write when owner-only storage protection cannot be established. Permission
   checks are asynchronous and bounded, and storage failures remain visible in

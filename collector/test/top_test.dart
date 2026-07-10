@@ -19,12 +19,13 @@ ProviderQuota _q(
   String? source,
   bool perMachine = false,
   String account = 'a',
+  int asOf = _now,
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id,
       account: account,
-      asOf: _now,
+      asOf: asOf,
       windows: windows,
       stale: stale,
       ok: ok,
@@ -162,6 +163,45 @@ void main() {
     );
     expect(_plain(lines.join('\n')), contains('80% last'));
     expect(_plain(lines.join('\n')), isNot(contains('80% free')));
+  });
+
+  test('provider drift is distinct from an ordinary cached read', () {
+    final trusted = _q(
+      'claude',
+      [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      asOf: _now - 2 * 60 * 60,
+    );
+    final lines = _frame(
+      [trusted.withProviderDrift('weekly reset moved earlier', _now - 30)],
+      width: 100,
+    );
+
+    expect(
+      lines.any(
+          (line) => _plain(line).contains('(provider drift 2h, quota plan)')),
+      isTrue,
+    );
+    expect(_plain(lines.join('\n')), contains('80% last'));
+    expect(_plain(lines.join('\n')), isNot(contains('80% free')));
+  });
+
+  test('legacy no-window quarantine stays labeled provider drift', () {
+    final legacy = _q(
+      'claude',
+      [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      asOf: _now - 2 * 60 * 60,
+    ).withSuspect('legacy concern').asProviderDriftQuarantine(
+          'unresolved legacy provider drift: legacy concern',
+          _now - 30,
+        );
+    final lines = _frame([legacy], width: 100);
+
+    expect(
+      lines.any(
+          (line) => _plain(line).contains('(provider drift 2h, quota plan)')),
+      isTrue,
+    );
+    expect(_plain(lines.join('\n')), isNot(contains('(error,')));
   });
 
   test('top rows label live quota plans, manual quota, and metadata-only reads',

@@ -147,6 +147,7 @@ Each row shows a state and, when useful, the exact next step:
 |-----------------|---------------------------------------------------------------|
 | `live`          | Working now; for Claude/Codex this means the host app is signed in. |
 | `cached`        | Last good read (age shown in the row); reopen that app or connect quotabot (step 4). |
+| `PROVIDER DRIFT` | A fresh read was rejected; the row is unavailable for routing and shows stale last-trusted quota only when one exists. |
 | `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
@@ -332,6 +333,16 @@ reset and uninstall require the separate procedures above.
   unknown numeric quota, not a percentage window.
 - **Everything reads as "cached":** your machine was offline or asleep; reopen a
   provider app, or connect Grok/Antigravity once (step 4).
+- **A row says "PROVIDER DRIFT":** run `quotabot verify`, then compare the named
+  provider and any reported windows with the provider's own usage view. quotabot
+  keeps last-trusted quota visible when it exists, but will not route to it or
+  record the rejected read in measured analytics. An upgraded legacy quarantine
+  intentionally has no windows because it cannot prove a trusted baseline. A
+  later clean read clears a normal warning; legacy quarantine recovers after a
+  read proves every retained quota reset advanced, or the evidence class
+  changes. If the provider-owned view
+  changed shape or semantics, retain the verification output and report the
+  mismatch rather than deleting the cache.
 - **`quotabot` not found after install:** restart your terminal so the new PATH
   entry is picked up. On Windows, open a fresh PowerShell window.
 - **Windows blocks the downloaded exe:** it is unsigned for now. Verify the

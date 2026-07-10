@@ -68,7 +68,10 @@ class ProviderVerification {
   final String account;
 
   /// Stable read state: live, cached, out_of_quota, no_data, error, local,
-  /// or undetected (a claimed provider absent from this read).
+  /// or undetected (a claimed provider absent from this read). Provider drift
+  /// remains `cached` when stale trusted windows exist; a migrated legacy
+  /// quarantine with no trusted windows is `error`. The additive [driftReason]
+  /// and failed `provider_drift` check distinguish both cases.
   final String state;
 
   final String? plan;
@@ -76,6 +79,8 @@ class ProviderVerification {
   final int? asOf;
   final int? stalenessSeconds;
   final bool stale;
+  final String? driftReason;
+  final int? driftObservedAt;
   final List<Map<String, dynamic>> windows;
   final List<VerifyCheck> checks;
 
@@ -93,6 +98,8 @@ class ProviderVerification {
     this.asOf,
     this.stalenessSeconds,
     this.stale = false,
+    this.driftReason,
+    this.driftObservedAt,
     this.windows = const [],
     this.crossCheck,
   });
@@ -109,6 +116,8 @@ class ProviderVerification {
         if (asOf != null) 'as_of': asOf,
         if (stalenessSeconds != null) 'staleness_seconds': stalenessSeconds,
         'stale': stale,
+        if (driftReason != null) 'drift_reason': driftReason,
+        if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         if (windows.isNotEmpty) 'windows': windows,
         'passed': passed,
         'checks': checks.map((c) => c.toJson()).toList(),
@@ -209,6 +218,7 @@ ProviderVerification _undetected(ProviderAdapterRegistration entry) {
 ProviderVerification _verifyProvider(ProviderQuota q, int now) {
   final checks = <VerifyCheck>[
     _identityCheck(q),
+    _providerDriftCheck(q, now),
     _readOrReasonCheck(q),
     _percentBoundsCheck(q),
     _asOfCheck(q, now),
@@ -225,6 +235,8 @@ ProviderVerification _verifyProvider(ProviderQuota q, int now) {
     asOf: q.asOf,
     stalenessSeconds: q.asOf > 0 ? (q.asOf > now ? 0 : now - q.asOf) : null,
     stale: q.stale,
+    driftReason: q.driftReason,
+    driftObservedAt: q.driftObservedAt,
     windows: [
       for (final w in q.windows)
         {
@@ -237,6 +249,39 @@ ProviderVerification _verifyProvider(ProviderQuota q, int now) {
     ],
     checks: checks,
     crossCheck: kProviderCrossChecks[q.provider],
+  );
+}
+
+VerifyCheck _providerDriftCheck(ProviderQuota q, int now) {
+  final rawReason = q.driftReason;
+  if (rawReason == null) {
+    return const VerifyCheck(
+      'provider_drift',
+      VerifyStatus.pass,
+      'no rejected provider-drift observation is active',
+    );
+  }
+  final reason = rawReason.trim();
+  if (reason.isEmpty) {
+    return const VerifyCheck(
+      'provider_drift',
+      VerifyStatus.fail,
+      'provider drift is active but its reason is blank',
+    );
+  }
+  final observedAt = q.driftObservedAt;
+  final timing = observedAt == null
+      ? 'detection time unavailable'
+      : observedAt > now + kVerifyClockSkewSeconds
+          ? 'detection time is implausibly in the future'
+          : 'detected ${now - observedAt < 0 ? 0 : now - observedAt}s ago';
+  final evidence = q.windows.isEmpty
+      ? 'legacy evidence is quarantined and no trusted snapshot is available'
+      : 'showing the last trusted snapshot, which is not routable';
+  return VerifyCheck(
+    'provider_drift',
+    VerifyStatus.fail,
+    'rejected fresh provider evidence: $reason; $timing; $evidence',
   );
 }
 
@@ -294,7 +339,9 @@ VerifyCheck _percentBoundsCheck(ProviderQuota q) {
   final problems = <String>[];
   for (final w in q.windows) {
     final pct = w.percent;
-    if (pct != null && (!pct.isFinite || pct < 0 || pct > 100)) {
+    if (pct == null) {
+      problems.add('${w.label} has no usable percent or used/limit ratio');
+    } else if (!pct.isFinite || pct < 0 || pct > 100) {
       problems.add('${w.label} percent $pct out of 0..100');
     }
     final used = w.used;

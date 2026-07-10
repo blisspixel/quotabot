@@ -339,6 +339,8 @@ Map<String, dynamic> availabilityResponse(
     'headroom_percent': a.headroom,
     'resets_at': a.resetsAt,
     'stale': q.stale,
+    if (q.driftReason != null) 'drift_reason': q.driftReason,
+    if (q.driftObservedAt != null) 'drift_observed_at': q.driftObservedAt,
   };
 }
 
@@ -389,8 +391,15 @@ final _providerSchema = JsonSchema.object(
     'as_of': JsonSchema.integer(description: 'Capture epoch seconds.'),
     'stale': JsonSchema.boolean(description: 'True when served from cache.'),
     'suspect': JsonSchema.string(
-      description: 'Set when this read is implausible versus the last one '
-          '(drift canary); the number is still shown, only flagged.',
+      description: 'Legacy non-fatal drift-canary annotation on a fresh read; '
+          'current drift rejection uses drift_reason instead.',
+    ),
+    'drift_reason': JsonSchema.string(
+      description: 'Why fresh provider evidence was rejected. Existing windows '
+          'are stale last-trusted quota; a legacy quarantine can have none.',
+    ),
+    'drift_observed_at': JsonSchema.integer(
+      description: 'Epoch seconds when provider drift was detected.',
     ),
     'per_machine': JsonSchema.boolean(
       description: 'True when the read reflects only this machine, not the '
@@ -536,6 +545,13 @@ final _candidateSchema = JsonSchema.object(
           'Reset epoch seconds for the route-limiting provider or model gate.',
     ),
     'stale': JsonSchema.boolean(),
+    'drift_reason': JsonSchema.string(
+      description: 'Why fresh provider evidence was rejected; this candidate '
+          'is not routable and may have no trusted headroom.',
+    ),
+    'drift_observed_at': JsonSchema.integer(
+      description: 'Epoch seconds when provider drift was detected.',
+    ),
     'available': JsonSchema.boolean(),
   },
   required: ['provider', 'account', 'local', 'stale', 'available'],
@@ -762,6 +778,13 @@ final _modelEntrySchema = JsonSchema.object(
     'gating_window': JsonSchema.string(
       description: 'Reset-window label for the model gate, when known.',
     ),
+    'drift_reason': JsonSchema.string(
+      description: 'Why fresh provider evidence was rejected; this model is '
+          'gated by stale last-trusted quota and is not available.',
+    ),
+    'drift_observed_at': JsonSchema.integer(
+      description: 'Epoch seconds when provider drift was detected.',
+    ),
   },
   required: ['id', 'provider', 'local', 'available'],
 );
@@ -937,6 +960,13 @@ final availabilityOutputSchema = JsonSchema.object(
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': _nullable(JsonSchema.integer()),
     'stale': JsonSchema.boolean(),
+    'drift_reason': JsonSchema.string(
+      description: 'Why fresh provider evidence was rejected. Headroom is '
+          'last-trusted when present and null for a legacy quarantine.',
+    ),
+    'drift_observed_at': JsonSchema.integer(
+      description: 'Epoch seconds when provider drift was detected.',
+    ),
   },
   required: ['schema', 'as_of', 'provider'],
 );

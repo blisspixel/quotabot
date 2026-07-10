@@ -277,6 +277,16 @@ class ProviderQuota {
   /// so a silently drifted provider is flagged rather than trusted blindly.
   final String? suspect;
 
+  /// Why a fresh provider observation was rejected by the drift canary. The
+  /// quota windows in this object remain the prior trusted snapshot and are
+  /// marked [stale]; the rejected values are never stored here.
+  final String? driftReason;
+
+  /// Unix epoch seconds when [driftReason] was observed. This is deliberately
+  /// separate from [asOf], which remains the capture time of the trusted quota
+  /// windows being shown.
+  final int? driftObservedAt;
+
   /// True when this reading reflects only this machine's local usage rather than
   /// the account's usage across every device. Providers read from local IDE
   /// state (Cursor, Windsurf, Kiro) or a per-machine session log can undercount
@@ -315,6 +325,8 @@ class ProviderQuota {
     this.models = const [],
     this.modelQuotas = const [],
     this.suspect,
+    this.driftReason,
+    this.driftObservedAt,
     this.perMachine = false,
     this.pipeHealth,
     this.httpStatus,
@@ -367,6 +379,8 @@ class ProviderQuota {
         'as_of': asOf,
         'stale': stale,
         if (suspect != null) 'suspect': suspect,
+        if (driftReason != null) 'drift_reason': driftReason,
+        if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         if (perMachine) 'per_machine': true,
         if (pipeHealth != null) 'pipe_health': pipeHealth,
         if (httpStatus != null) 'http_status': httpStatus,
@@ -391,6 +405,8 @@ class ProviderQuota {
         status: j['status'] as String?,
         active: j['active'] as bool? ?? false,
         suspect: j['suspect'] as String?,
+        driftReason: j['drift_reason'] as String?,
+        driftObservedAt: boundedIntFromWire(j['drift_observed_at'], min: 0),
         perMachine: j['per_machine'] as bool? ?? false,
         pipeHealth: providerPipeHealthFromWire(j['pipe_health']),
         httpStatus: boundedIntFromWire(j['http_status'], min: 100, max: 599),
@@ -431,12 +447,15 @@ class ProviderQuota {
         models: metadataFrom != null && metadataFrom.models.isNotEmpty
             ? metadataFrom.models
             : models,
-        modelQuotas: metadataFrom != null && metadataFrom.modelQuotas.isNotEmpty
-            ? metadataFrom.modelQuotas
-            : modelQuotas,
+        // Per-model budget is quota evidence, not presentation metadata. A
+        // failed or windowless fresh read must never graft untrusted pools onto
+        // otherwise trusted cached windows.
+        modelQuotas: modelQuotas,
         // The concern belongs to these cached windows, so it rides along when
         // they are served stale, regardless of fresh metadata.
         suspect: suspect,
+        driftReason: driftReason,
+        driftObservedAt: driftObservedAt,
         perMachine: perMachine,
         pipeHealth: metadataFrom?.pipeHealth ?? pipeHealth,
         httpStatus: metadataFrom?.httpStatus ?? httpStatus,
@@ -463,10 +482,75 @@ class ProviderQuota {
         models: models,
         modelQuotas: modelQuotas,
         suspect: reason,
+        driftReason: driftReason,
+        driftObservedAt: driftObservedAt,
         perMachine: perMachine,
         pipeHealth: pipeHealth,
         httpStatus: httpStatus,
         retryAfterSeconds: retryAfterSeconds,
+      );
+
+  /// Returns the trusted quota evidence marked stale after a rejected fresh
+  /// observation. [asOf] and all quota windows stay unchanged; only the
+  /// additive drift diagnostic and stale explanation are attached.
+  ProviderQuota withProviderDrift(String reason, int observedAt) =>
+      ProviderQuota(
+        provider: provider,
+        displayName: displayName,
+        account: account,
+        asOf: asOf,
+        plan: plan,
+        source: source,
+        ok: true,
+        error: 'provider drift detected; showing last trusted snapshot',
+        windows: windows,
+        stale: true,
+        kind: kind,
+        status: status,
+        active: active,
+        details: details,
+        models: models,
+        modelQuotas: modelQuotas,
+        driftReason: reason,
+        driftObservedAt: observedAt,
+        perMachine: perMachine,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfterSeconds,
+      );
+
+  /// Returns a fail-closed provider-drift result when an upgraded cache contains
+  /// only legacy suspect evidence and therefore has no last-known-good windows
+  /// that can be shown safely. Identity and current adapter diagnostics remain
+  /// visible, but quota/model data is deliberately removed until every retained
+  /// reset advances or an evidence-class transition establishes a trustworthy
+  /// baseline.
+  ProviderQuota asProviderDriftQuarantine(
+    String reason,
+    int observedAt, {
+    ProviderQuota? metadataFrom,
+  }) =>
+      ProviderQuota(
+        provider: provider,
+        displayName: metadataFrom?.displayName ?? displayName,
+        account: _staleMetadataAccount(metadataFrom, account),
+        asOf: metadataFrom != null && metadataFrom.asOf > 0
+            ? metadataFrom.asOf
+            : asOf,
+        plan: metadataFrom?.plan ?? plan,
+        source: metadataFrom?.source ?? source,
+        ok: false,
+        error: 'provider drift detected; legacy quota evidence is quarantined '
+            'because no trusted snapshot is available',
+        stale: true,
+        kind: kind,
+        status: metadataFrom?.status ?? status,
+        driftReason: reason,
+        driftObservedAt: observedAt,
+        perMachine: perMachine,
+        pipeHealth: metadataFrom?.pipeHealth ?? pipeHealth,
+        httpStatus: metadataFrom?.httpStatus ?? httpStatus,
+        retryAfterSeconds: metadataFrom?.retryAfterSeconds ?? retryAfterSeconds,
       );
 
   /// True when this snapshot carries usable quota windows.
@@ -555,6 +639,8 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
         ),
     ],
     suspect: q.suspect == null ? null : t(q.suspect!),
+    driftReason: q.driftReason == null ? null : t(q.driftReason!),
+    driftObservedAt: q.driftObservedAt,
     perMachine: q.perMachine,
     pipeHealth: q.pipeHealth == null ? null : t(q.pipeHealth!),
     httpStatus: q.httpStatus,
