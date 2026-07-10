@@ -31,4 +31,35 @@ void main() {
       isA<CustomPainter>(),
     );
   });
+
+  testWidgets('every vector mark and gauge paints without raster assets', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(640, 240));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Wrap(
+          children: [
+            for (final value in [double.nan, -1.0, 0.0, 0.5, 2.0])
+              AppGauge(
+                value: value,
+                fillColor: Colors.green,
+                trackColor: Colors.grey,
+              ),
+            for (final provider in [...providersWithLogo, 'unknown'])
+              ProviderLogo(provider, color: Colors.black),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(AppGauge), findsNWidgets(5));
+    expect(
+      find.byType(ProviderLogo),
+      findsNWidgets(providersWithLogo.length + 1),
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

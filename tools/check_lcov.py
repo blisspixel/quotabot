@@ -26,7 +26,11 @@ def main() -> int:
         if int(hits) > 0:
             hit += 1
 
-    percent = 100.0 if found == 0 else hit * 100.0 / found
+    if found == 0:
+        print("coverage report contains no executable lines", file=sys.stderr)
+        return 1
+
+    percent = hit * 100.0 / found
     print(f"line coverage: {percent:.2f}% ({hit}/{found})")
     if percent < minimum:
         print(f"coverage below required {minimum:.2f}%", file=sys.stderr)

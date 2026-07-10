@@ -5,6 +5,9 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Desktop widget coverage now exercises the production dashboard, profile
+  editor, theme, analytics, terminal, demo, logo, and gauge surfaces; CI blocks
+  regressions below 80% app line coverage.
 - Added a daily and manually dispatchable Currency workflow that runs drift and
   catalog audit tests plus the provider catalog audit with optional Actions
   secrets and summary-only logs.
@@ -32,6 +35,11 @@ Notable changes to quotabot. Newest first.
   fleet-level zero-token boundary check.
 
 ### Fixed
+- Profile editing no longer permits a non-empty provider catalog to be saved
+  with every provider deselected, which previously reloaded as unrestricted.
+- An initial desktop refresh failure now leaves the loading state and exposes a
+  sanitized retryable error, and the alert-webhook dialog owns its text
+  controller for the full route lifetime instead of disposing it during exit.
 - Schema docs now distinguish individual `quotabot.alert.v1` alert payloads from
   the MCP `quotas://alerts` resource envelope (`quotabot.alerts.v1`).
 

@@ -136,7 +136,17 @@ Future<void> main() async {
 
 class QuotaBotApp extends StatelessWidget {
   final Prefs prefs;
-  const QuotaBotApp({super.key, required this.prefs});
+  @visibleForTesting
+  final Widget? testHome;
+
+  const QuotaBotApp({super.key, required this.prefs}) : testHome = null;
+
+  @visibleForTesting
+  const QuotaBotApp.test({
+    super.key,
+    required this.prefs,
+    this.testHome = const SizedBox(),
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +169,7 @@ class QuotaBotApp extends StatelessWidget {
             ),
           ),
         ),
-        home: Dashboard(prefs: prefs),
+        home: testHome ?? Dashboard(prefs: prefs),
       ),
     );
   }
@@ -438,13 +448,47 @@ List<ProviderQuota> providerSetupRows(List<ProviderQuota> results) {
 }
 
 @visibleForTesting
-String refreshFailureMessage(Object error) => error is TimeoutException
-    ? 'Refresh timed out; showing previous data'
-    : 'Refresh failed; showing previous data';
+String refreshFailureMessage(Object error, {required bool hasPreviousData}) {
+  final outcome = hasPreviousData
+      ? 'showing previous data'
+      : 'retrying automatically';
+  return error is TimeoutException
+      ? 'Refresh timed out; $outcome'
+      : 'Refresh failed; $outcome';
+}
 
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
-  const Dashboard({super.key, required this.prefs});
+  final bool _hostIntegration;
+  final bool? _demoModeOverride;
+  @visibleForTesting
+  final Future<List<ProviderQuota>> Function()? collector;
+  @visibleForTesting
+  final List<QuotaProfile>? testProfiles;
+
+  const Dashboard({super.key, required this.prefs})
+    : _hostIntegration = true,
+      _demoModeOverride = null,
+      collector = null,
+      testProfiles = null;
+
+  /// Builds a deterministic dashboard without desktop plugin or preference
+  /// side effects. This exercises the production widget tree while keeping
+  /// automated tests isolated from the user's host and account state.
+  @visibleForTesting
+  const Dashboard.test({
+    super.key,
+    required this.prefs,
+    bool demoMode = true,
+    this.collector,
+    this.testProfiles,
+  }) : _hostIntegration = false,
+       _demoModeOverride = demoMode,
+       assert(
+         demoMode || collector != null,
+         'A non-demo test dashboard requires an injected collector.',
+       );
+
   @override
   State<Dashboard> createState() => _DashboardState();
 }
@@ -696,6 +740,9 @@ class _DashboardState extends State<Dashboard>
   }
 
   List<QuotaProfile> _loadProfiles() {
+    if (!widget._hostIntegration) {
+      return widget.testProfiles ?? [QuotaProfile.defaultProfile()];
+    }
     final loaded = listProfiles();
     return loaded.isEmpty ? [QuotaProfile.defaultProfile()] : loaded;
   }
@@ -709,6 +756,15 @@ class _DashboardState extends State<Dashboard>
       (profile) => profile.name == defaultProfileName,
       orElse: QuotaProfile.defaultProfile,
     );
+  }
+
+  void _upsertProfile(QuotaProfile profile) {
+    final index = _profiles.indexWhere((item) => item.name == profile.name);
+    if (index < 0) {
+      _profiles = [..._profiles, profile];
+    } else {
+      _profiles = [..._profiles]..[index] = profile;
+    }
   }
 
   void _applyProfileUiState(QuotaProfile profile) {
@@ -733,14 +789,13 @@ class _DashboardState extends State<Dashboard>
       hiddenProviders: _hidden,
       sort: _sort,
     );
-    try {
-      saveProfile(updated);
-    } catch (_) {}
+    if (widget._hostIntegration) {
+      try {
+        saveProfile(updated);
+      } catch (_) {}
+    }
     _activeProfile = updated;
-    _profiles = [
-      for (final profile in _profiles)
-        if (profile.name == updated.name) updated else profile,
-    ];
+    _upsertProfile(updated);
   }
 
   @override
@@ -754,12 +809,14 @@ class _DashboardState extends State<Dashboard>
     _windowPos = widget.prefs.windowX == null
         ? null
         : Offset(widget.prefs.windowX!, widget.prefs.windowY ?? 0);
-    windowManager.addListener(this);
-    trayManager.addListener(this);
-    unawaited(_initTray());
-    unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
-    unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
-    unawaited(windowManager.setMinimumSize(const Size(120, 40)));
+    if (widget._hostIntegration) {
+      windowManager.addListener(this);
+      trayManager.addListener(this);
+      unawaited(_initTray());
+      unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
+      unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
+      unawaited(windowManager.setMinimumSize(const Size(120, 40)));
+    }
     _refresh();
     if (_shotsMode) unawaited(_exportShots());
     // Repaint periodically so the age label and reset countdowns stay current.
@@ -873,8 +930,10 @@ class _DashboardState extends State<Dashboard>
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
-    trayManager.removeListener(this);
+    if (widget._hostIntegration) {
+      windowManager.removeListener(this);
+      trayManager.removeListener(this);
+    }
     _refreshTimer?.cancel();
     _tick?.cancel();
     _scroll.dispose();
@@ -955,6 +1014,7 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _persistPrefs({bool saveProfileUiState = false}) {
+    if (!widget._hostIntegration) return;
     if (saveProfileUiState) _saveActiveProfileUiState();
     Prefs(
       hidden: _defaultHidden,
@@ -977,7 +1037,7 @@ class _DashboardState extends State<Dashboard>
 
   Future<void> _refresh() async {
     if (_isRefreshing) return;
-    if (_demoMode) {
+    if (widget._demoModeOverride ?? _demoMode) {
       _loadDemo();
       return;
     }
@@ -986,16 +1046,24 @@ class _DashboardState extends State<Dashboard>
       // A hard deadline over the whole collect: adapters carry their own
       // per-provider deadlines, but if anything ever hangs past them, the
       // refresh loop must recover rather than freeze all future refreshes.
-      final results = await collectAll().timeout(const Duration(seconds: 45));
-      final routeSummary = loadRoutedRequestSummary();
+      final collection = widget.collector == null
+          ? collectAll()
+          : widget.collector!();
+      final results = await collection.timeout(const Duration(seconds: 45));
+      final routeSummary = widget._hostIntegration
+          ? loadRoutedRequestSummary()
+          : emptyRoutedRequestSummary;
       if (!mounted) return;
-      final det = detectInstalledAgenticTools();
-      final active = visibleProviderRows(results, det);
+      final active = widget._hostIntegration
+          ? visibleProviderRows(results, detectInstalledAgenticTools())
+          : results;
       final setupRows = providerSetupRows(results);
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final burnStats = recentBurnStatsByQuota(active, nowSec);
+      final burnStats = widget._hostIntegration
+          ? recentBurnStatsByQuota(active, nowSec)
+          : <String, BurnStat>{};
       // Track systemic failure...
       final anyLive = active.any(
         (q) => q.ok && q.windows.isNotEmpty && !q.stale,
@@ -1017,26 +1085,34 @@ class _DashboardState extends State<Dashboard>
         _lastRefreshError = null;
         final tz = DateTime.now().timeZoneOffset;
         final rawInsights = <String, Insights>{};
-        for (final q in active) {
-          final key = quotaDisplayKey(q);
-          _history[key] = loadHistory(q.provider, account: q.account);
-          if (!q.isLocal) {
-            final buckets = loadBuckets(q.provider, account: q.account);
-            _buckets[key] = buckets;
-            rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
-            _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
+        if (widget._hostIntegration) {
+          for (final q in active) {
+            final key = quotaDisplayKey(q);
+            _history[key] = loadHistory(q.provider, account: q.account);
+            if (!q.isLocal) {
+              final buckets = loadBuckets(q.provider, account: q.account);
+              _buckets[key] = buckets;
+              rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
+              _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
+            }
           }
         }
         _insights = shrinkInsightsReliability(rawInsights);
       });
-      _checkAndNotify();
+      if (widget._hostIntegration) _checkAndNotify();
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     } on Exception catch (error) {
       // A failed or timed-out refresh keeps the last data on screen; the next
       // poll (scheduled in finally) retries.
       _failStreak += 1;
       if (mounted) {
-        setState(() => _lastRefreshError = refreshFailureMessage(error));
+        setState(() {
+          _loading = false;
+          _lastRefreshError = refreshFailureMessage(
+            error,
+            hasPreviousData: _data.isNotEmpty,
+          );
+        });
       }
     } finally {
       // Always reschedule, so one thrown refresh can never stop auto-polling.
@@ -1116,6 +1192,7 @@ class _DashboardState extends State<Dashboard>
   /// slightly generous so nothing is clipped, and the body is scrollable as a
   /// safety net. Capped at the screen height (see [_maxWindowHeight]).
   void _applySize() {
+    if (!widget._hostIntegration) return;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       // Analytics keeps whatever size the window has (its body scrolls); the
@@ -1271,7 +1348,8 @@ class _DashboardState extends State<Dashboard>
   /// A setup-help dialog tailored to the provider, with an inline "Connect now"
   /// for the two providers that support quotabot's own login.
   void _showProviderSetup(ProviderQuota q) {
-    final canConnect = _canConnectProvider(q.provider);
+    final canConnect =
+        widget._hostIntegration && _canConnectProvider(q.provider);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1391,7 +1469,9 @@ class _DashboardState extends State<Dashboard>
         else
           GestureDetector(
             behavior: HitTestBehavior.translucent,
-            onPanStart: (_) => windowManager.startDragging(),
+            onPanStart: widget._hostIntegration
+                ? (_) => windowManager.startDragging()
+                : null,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
               child: Column(
@@ -1423,7 +1503,9 @@ class _DashboardState extends State<Dashboard>
     final muted = AppChromeTheme.of(context).muted;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onPanStart: (_) => windowManager.startDragging(),
+      onPanStart: widget._hostIntegration
+          ? (_) => windowManager.startDragging()
+          : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
         child: Text(
@@ -1471,7 +1553,9 @@ class _DashboardState extends State<Dashboard>
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
-                onPanStart: (_) => windowManager.startDragging(),
+                onPanStart: widget._hostIntegration
+                    ? (_) => windowManager.startDragging()
+                    : null,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   physics: _shotsMode
@@ -1514,7 +1598,7 @@ class _DashboardState extends State<Dashboard>
             _iconButton(
               Icons.close_rounded,
               muted,
-              windowManager.close,
+              widget._hostIntegration ? windowManager.close : null,
               tooltip: 'Close',
             ),
           ],
@@ -1588,7 +1672,9 @@ class _DashboardState extends State<Dashboard>
     );
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onPanStart: (_) => windowManager.startDragging(),
+      onPanStart: widget._hostIntegration
+          ? (_) => windowManager.startDragging()
+          : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 6, 6),
         child: Column(
@@ -1683,7 +1769,7 @@ class _DashboardState extends State<Dashboard>
                 _iconButton(
                   Icons.close_rounded,
                   muted,
-                  windowManager.close,
+                  widget._hostIntegration ? windowManager.close : null,
                   tooltip: 'Close',
                 ),
               ],
@@ -1722,14 +1808,17 @@ class _DashboardState extends State<Dashboard>
                     ),
                     const SizedBox(width: 5),
                     Expanded(
-                      child: Text(
-                        _lastRefreshError!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: AppType.caption,
-                          fontWeight: FontWeight.w500,
-                          color: warning,
+                      child: Semantics(
+                        liveRegion: true,
+                        child: Text(
+                          _lastRefreshError!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: AppType.caption,
+                            fontWeight: FontWeight.w500,
+                            color: warning,
+                          ),
                         ),
                       ),
                     ),
@@ -1963,7 +2052,7 @@ class _DashboardState extends State<Dashboard>
     final normalized = normalizeProfileName(name);
     if (normalized == null || normalized == _activeProfile.name) return;
     _saveActiveProfileUiState();
-    _profiles = _loadProfiles();
+    if (widget._hostIntegration) _profiles = _loadProfiles();
     final next = _profileByName(normalized);
     setState(() {
       _activeProfile = next;
@@ -1978,7 +2067,7 @@ class _DashboardState extends State<Dashboard>
     final result = await showDialog<ProfileEditorResult>(
       context: context,
       builder: (_) => ProfileEditorDialog(
-        profiles: _loadProfiles(),
+        profiles: widget._hostIntegration ? _loadProfiles() : _profiles,
         providers: _data,
         activeProfile: _activeProfile.name,
         currentSort: _sort,
@@ -1989,11 +2078,13 @@ class _DashboardState extends State<Dashboard>
     if (result.action == ProfileEditorAction.delete) {
       final name = result.deleteName;
       if (name == null) return;
-      deleteProfile(name);
+      if (widget._hostIntegration) deleteProfile(name);
       final next = name == _activeProfile.name
           ? defaultProfileName
           : _activeProfile.name;
-      _profiles = _loadProfiles();
+      _profiles = widget._hostIntegration
+          ? _loadProfiles()
+          : _profiles.where((profile) => profile.name != name).toList();
       final profile = _profileByName(next);
       setState(() {
         _activeProfile = profile;
@@ -2005,15 +2096,19 @@ class _DashboardState extends State<Dashboard>
     }
     final profile = result.profile;
     if (profile == null) return;
-    try {
-      saveProfile(profile);
-    } catch (_) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Could not save profile.')));
-      return;
+    if (widget._hostIntegration) {
+      try {
+        saveProfile(profile);
+      } catch (_) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save profile.')),
+        );
+        return;
+      }
+      _profiles = _loadProfiles();
+    } else {
+      _upsertProfile(profile);
     }
-    _profiles = _loadProfiles();
     final saved = _profileByName(profile.name);
     setState(() {
       _activeProfile = saved;
@@ -2032,77 +2127,17 @@ class _DashboardState extends State<Dashboard>
   /// A non-loopback host needs "allow external" on, so an alert never leaves the
   /// machine without an explicit opt-in.
   Future<void> _showWebhookDialog() async {
-    final controller = TextEditingController(text: _webhookUrl ?? '');
-    var allowExternal = _webhookAllowExternal;
-    final saved = await showDialog<bool>(
+    final result = await showDialog<_WebhookSettings>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) {
-          final url = controller.text.trim();
-          final needsExternal = url.isNotEmpty && !isLoopbackUrl(url);
-          final blocked = needsExternal && !allowExternal;
-          return AlertDialog(
-            title: const Text('Alert webhook'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'POST low-quota alerts as quotabot.alert.v1 JSON (quota '
-                  'metadata only). Leave blank to disable.',
-                  style: TextStyle(fontSize: AppType.caption),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: controller,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    hintText: 'http://127.0.0.1:9000/quota',
-                    isDense: true,
-                  ),
-                  style: const TextStyle(fontSize: AppType.body),
-                  onChanged: (_) => setLocal(() {}),
-                ),
-                CheckboxListTile(
-                  value: allowExternal,
-                  onChanged: (v) => setLocal(() => allowExternal = v ?? false),
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  title: const Text(
-                    'Allow an external (non-loopback) host',
-                    style: TextStyle(fontSize: AppType.caption),
-                  ),
-                ),
-                if (blocked)
-                  const Text(
-                    'This host is not loopback; enable the option above to use it.',
-                    style: TextStyle(
-                      fontSize: AppType.label,
-                      color: Color(0xFFDB6D28),
-                    ),
-                  ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: blocked ? null : () => Navigator.of(ctx).pop(true),
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
+      builder: (_) => _WebhookDialog(
+        initialUrl: _webhookUrl ?? '',
+        initialAllowExternal: _webhookAllowExternal,
       ),
     );
-    final url = controller.text.trim();
-    controller.dispose();
-    if (saved != true) return;
+    if (!mounted || result == null) return;
     setState(() {
-      _webhookUrl = url.isEmpty ? null : url;
-      _webhookAllowExternal = allowExternal;
+      _webhookUrl = result.url.isEmpty ? null : result.url;
+      _webhookAllowExternal = result.allowExternal;
     });
     _persistPrefs();
   }
@@ -2129,13 +2164,13 @@ class _DashboardState extends State<Dashboard>
 
   void _setAlwaysOnTop(bool value) {
     setState(() => _alwaysOnTop = value);
-    windowManager.setAlwaysOnTop(value);
+    if (widget._hostIntegration) windowManager.setAlwaysOnTop(value);
     _persistPrefs();
   }
 
   void _setShowInTaskbar(bool value) {
     setState(() => _showInTaskbar = value);
-    windowManager.setSkipTaskbar(!value);
+    if (widget._hostIntegration) windowManager.setSkipTaskbar(!value);
     _persistPrefs();
   }
 
@@ -2376,7 +2411,8 @@ class _DashboardState extends State<Dashboard>
   ) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final (label, color) = _stateChip(q, now);
-    final canConnect = _canConnectProvider(q.provider);
+    final canConnect =
+        widget._hostIntegration && _canConnectProvider(q.provider);
     final isLive = label == 'live' || label == 'in use';
     final busy = connecting.contains(q.provider);
     return Padding(
@@ -2544,6 +2580,110 @@ class _DashboardState extends State<Dashboard>
     onTap: onTap,
     tooltip: tooltip,
   );
+}
+
+typedef _WebhookSettings = ({String url, bool allowExternal});
+
+class _WebhookDialog extends StatefulWidget {
+  final String initialUrl;
+  final bool initialAllowExternal;
+
+  const _WebhookDialog({
+    required this.initialUrl,
+    required this.initialAllowExternal,
+  });
+
+  @override
+  State<_WebhookDialog> createState() => _WebhookDialogState();
+}
+
+class _WebhookDialogState extends State<_WebhookDialog> {
+  late final TextEditingController _controller;
+  late bool _allowExternal;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialUrl);
+    _allowExternal = widget.initialAllowExternal;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _controller.text.trim();
+    final needsExternal = url.isNotEmpty && !isLoopbackUrl(url);
+    final blocked = needsExternal && !_allowExternal;
+    return AlertDialog(
+      title: const Text('Alert webhook'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'POST low-quota alerts as quotabot.alert.v1 JSON (quota '
+              'metadata only). Leave blank to disable.',
+              style: TextStyle(fontSize: AppType.caption),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'http://127.0.0.1:9000/quota',
+                isDense: true,
+              ),
+              style: const TextStyle(fontSize: AppType.body),
+              onChanged: (_) => setState(() {}),
+            ),
+            CheckboxListTile(
+              value: _allowExternal,
+              onChanged: (value) =>
+                  setState(() => _allowExternal = value ?? false),
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text(
+                'Allow an external (non-loopback) host',
+                style: TextStyle(fontSize: AppType.caption),
+              ),
+            ),
+            if (blocked)
+              Semantics(
+                liveRegion: true,
+                child: const Text(
+                  'This host is not loopback; enable the option above to use it.',
+                  style: TextStyle(
+                    fontSize: AppType.label,
+                    color: Color(0xFFDB6D28),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: blocked
+              ? null
+              : () => Navigator.of(context).pop((
+                  url: _controller.text.trim(),
+                  allowExternal: _allowExternal,
+                )),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
 
 class _AccountGroupHeader extends StatelessWidget {

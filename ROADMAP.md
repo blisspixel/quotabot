@@ -625,9 +625,12 @@ in parallel with the phases above rather than after them:
   bar; a few enforceable elevations remain, ordered by leverage. (1) The strict
   analyzer is on with `strict-casts`; the deliberate follow-up,
   `strict-inference` + `strict-raw-types`, was completed 2026-07-07 with the
-  collector analyzer enforcing all three strict modes, explicit generic JSON
-  and collection boundaries, full collector tests, app tests, and 90.24% line
-  coverage. (2) Turn the core's
+   collector analyzer enforcing all three strict modes, explicit generic JSON
+   and collection boundaries, full collector tests, app tests, and 90.24% line
+   coverage. The desktop app's separate meaningful line-coverage gate was added
+   2026-07-09 at 80%, backed by production-tree widget tests for dashboard,
+   profiles, themes, analytics, terminal rendering, and failure states. (2) Turn
+   the core's
   remaining closed sets from magic strings into the type system so a new value
   cannot be half-handled: `ProviderQuota.kind` (completed 2026-07-07 with
   `ProviderQuotaKind`, `ProviderAdapterClass.quotaKind`, and JSON wire values
