@@ -36,6 +36,7 @@ collector/ (Dart package)
   manual_quota.dart  bounded local self-reported window storage
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
+  expiring_single_flight.dart short-lived MCP live-read coalescing
   leases.dart        local routing leases for parallel-agent reservation and
                      release, backed by file locking in production
   litellm_metrics.dart  bounded parser and summarizer for local LiteLLM
@@ -156,9 +157,9 @@ shows that as "no live data" instead of a gap.
 
 - `tokens.dart`: the `Tokens` model and `TokenStore`, which persists tokens per
   provider, and optionally per provider account, under the config directory,
-  with owner-only permissions attempted best-effort. Account-scoped filenames
+  only after checked owner-only permission hardening. Account-scoped filenames
   use a hash of the account id rather than the raw email. Rotated refresh tokens
-  are saved on every refresh or the next refresh would fail.
+  are saved on every successful refresh or the next refresh would fail.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -167,6 +168,19 @@ shows that as "no live data" instead of a gap.
 
 Each login mints an independent grant, so refreshing never invalidates the host
 CLI's or IDE's credentials. `login`/`logout` are CLI subcommands.
+
+The desktop `prefs.json` may contain an authenticated webhook URL. Its directory
+and any existing file are checked owner-only before read or write; a failure
+returns safe defaults or leaves the previous file unchanged. Permission helpers
+run asynchronously against one shared three-second deadline, request
+termination of a timed-out child process, and expose only a bounded storage
+warning. Every temporary file is restricted before content is written. A legacy file that cannot be
+protected is ignored and retained for explicit user remediation rather than
+deleted automatically. Loads accept only a regular file up to 64 KiB and bound
+the read to one second; protection, malformed-data, unsupported-file, and read
+failures remain distinct. Save bursts retain at most one active and one latest
+snapshot, window movement persists only after a 250 ms quiet period, and normal
+tray Quit flushes the final snapshot before teardown.
 
 ## Collection and caching
 
@@ -213,7 +227,9 @@ the shared routing score when the caller provides them.
 
 `mcp.dart` builds one MCP server definition: tools, resources, output schemas,
 behavior annotations, capability scope, and standard MCP resource subscription
-handlers. Most tools collect a live `collectAll()` snapshot. Collection can
+handlers. Most tools collect a live `collectAll()` snapshot. Concurrent cold
+tool calls share one in-progress collection, and successful snapshots are reused
+for five seconds; failed collections are not cached. Collection can
 refresh local cache, history, and OAuth state; Antigravity may also perform its
 provider-required onboarding request. Those tools are therefore annotated as
 non-read-only and non-idempotent even though they never invoke a model. They can

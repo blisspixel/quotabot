@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -123,6 +124,186 @@ void main() {
     test('formats context tokens compactly', () {
       expect(formatContextTokens(32768), '32K');
       expect(formatContextTokens(512), '512');
+    });
+  });
+
+  group('owner-only permission enforcement', () {
+    test('async hardening bounds a stalled platform command', () async {
+      final temp = File(
+        '${Directory.systemTemp.path}/quotabot_permission_timeout_${pid}_test',
+      )..createSync();
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync();
+      });
+      final stalled = Completer<ProcessResult>();
+      final elapsed = Stopwatch()..start();
+
+      await expectLater(
+        enforceOwnerOnlyFileAsync(
+          temp,
+          timeout: const Duration(milliseconds: 20),
+          run: (_, __, ___) => stalled.future,
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
+    });
+
+    test('checked file hardening rejects a failed platform command', () {
+      final temp = File(
+        '${Directory.systemTemp.path}/quotabot_permission_${pid}_test',
+      )..createSync();
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync();
+      });
+
+      expect(
+        () => enforceOwnerOnlyFile(
+          temp,
+          run: (_, __) => ProcessResult(1, 9, '', 'sensitive command output'),
+          identityLookup: () => ProcessResult(
+            2,
+            0,
+            '"User Name","SID"\n"alice","S-1-5-21-1-2-3-4"\n',
+            '',
+          ),
+        ),
+        throwsA(
+          isA<FileSystemException>().having(
+            (error) => error.toString(),
+            'sanitized error',
+            isNot(contains('sensitive command output')),
+          ),
+        ),
+      );
+    });
+
+    test('best-effort metadata hardening suppresses the same failure', () {
+      final missing = File(
+        '${Directory.systemTemp.path}/quotabot_missing_${pid}_metadata',
+      );
+      expect(() => restrictOwnerOnlyFile(missing), returnsNormally);
+    });
+
+    test('Windows hardening removes an explicit non-owner grant', () {
+      if (!Platform.isWindows) return;
+      final temp = Directory.systemTemp.createTempSync('quotabot_acl_test_');
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync(recursive: true);
+      });
+      final seeded = Process.runSync(
+        'icacls',
+        [temp.path, '/grant', '*S-1-1-0:(R)'],
+      );
+      expect(seeded.exitCode, 0);
+
+      enforceOwnerOnlyDirectory(temp);
+
+      final finalAcl = Process.runSync('icacls', [temp.path]);
+      expect(finalAcl.exitCode, 0);
+      expect(finalAcl.stdout.toString(), isNot(contains('(R)')));
+      final owner = Process.runSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          '[System.IO.Directory]::GetAccessControl('
+              "'${temp.path.replaceAll("'", "''")}'"
+              ').GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
+        ],
+      );
+      expect(owner.exitCode, 0);
+      expect(
+        owner.stdout.toString().trim(),
+        windowsAclPrincipal()!.substring(1),
+      );
+    });
+
+    test('Windows hardening uses one full-descriptor write', () {
+      if (!Platform.isWindows) return;
+      final temp = File(
+        '${Directory.systemTemp.path}/quotabot_acl_command_${pid}_test',
+      )..createSync();
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync();
+      });
+      final calls = <({String executable, List<String> arguments})>[];
+
+      enforceOwnerOnlyFile(
+        temp,
+        run: (executable, arguments) {
+          calls.add((executable: executable, arguments: arguments));
+          return ProcessResult(1, 0, '', '');
+        },
+        identityLookup: () => ProcessResult(
+          2,
+          0,
+          '"User Name","SID"\n"alice","S-1-5-21-1-2-3-4"\n',
+          '',
+        ),
+      );
+
+      expect(calls, hasLength(1));
+      expect(calls.single.executable, 'powershell.exe');
+      expect(calls.single.arguments, contains('-NoProfile'));
+      expect(calls.single.arguments.last, contains('GetAccessControl'));
+      expect(calls.single.arguments.last, contains('SetAccessControl'));
+      expect(calls.single.arguments.last, contains('SetAccessRuleProtection'));
+    });
+
+    test('macOS hardening removes an explicit non-owner ACL', () {
+      if (!Platform.isMacOS) return;
+      final temp = File(
+        '${Directory.systemTemp.path}/quotabot_acl_${pid}_test',
+      )..createSync();
+      final directory =
+          Directory.systemTemp.createTempSync('quotabot_acl_dir_test_');
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync();
+        if (directory.existsSync()) directory.deleteSync(recursive: true);
+      });
+      final seeded = Process.runSync(
+        '/bin/chmod',
+        ['+a', 'everyone allow read', temp.path],
+      );
+      expect(seeded.exitCode, 0);
+      final seededDirectory = Process.runSync(
+        '/bin/chmod',
+        ['+a', 'everyone allow list,search', directory.path],
+      );
+      expect(seededDirectory.exitCode, 0);
+      final initialFileAcl = Process.runSync('/bin/ls', ['-le', temp.path]);
+      final initialDirectoryAcl =
+          Process.runSync('/bin/ls', ['-lde', directory.path]);
+      expect(initialFileAcl.exitCode, 0);
+      expect(initialDirectoryAcl.exitCode, 0);
+      expect(
+        initialFileAcl.stdout.toString().toLowerCase(),
+        contains('everyone allow read'),
+      );
+      expect(
+        initialDirectoryAcl.stdout.toString().toLowerCase(),
+        contains('everyone allow list,search'),
+      );
+
+      enforceOwnerOnlyFile(temp);
+      enforceOwnerOnlyDirectory(directory);
+
+      final finalFileAcl = Process.runSync('/bin/ls', ['-le', temp.path]);
+      final finalDirectoryAcl =
+          Process.runSync('/bin/ls', ['-lde', directory.path]);
+      expect(finalFileAcl.exitCode, 0);
+      expect(finalDirectoryAcl.exitCode, 0);
+      expect(
+        finalFileAcl.stdout.toString().toLowerCase(),
+        isNot(contains('allow read')),
+      );
+      expect(
+        finalDirectoryAcl.stdout.toString().toLowerCase(),
+        isNot(contains('allow list,search')),
+      );
     });
   });
 

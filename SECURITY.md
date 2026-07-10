@@ -28,9 +28,20 @@ reads and writes helps scope any report:
   paid model, chat, image, and content-generation endpoints. Authenticated
   catalog maintenance is limited to model-list endpoints.
 - Any OAuth grant you create with `quotabot login` is stored separately from the
-  host application credentials under your per-user config directory. Owner-only
-  permission narrowing is attempted best-effort on POSIX and Windows; a
-  hardening failure currently does not abort the write.
+  host application credentials under your per-user config directory. New or
+  rotated grants are written only after checked owner-only permission hardening
+  succeeds on POSIX or Windows. If hardening fails for a credential file, that
+  file is not written and login or refresh reports the failure. A multi-slot
+  account save uses separate atomic file writes, not a cross-file transaction.
+- Desktop preferences can contain an authenticated webhook URL. quotabot checks
+  owner-only protection before reading or writing that secret-capable file and
+  falls back to safe defaults if the protection cannot be established. The
+  desktop check is asynchronous and bounded so a stalled platform helper cannot
+  block startup indefinitely. A legacy file that cannot be protected is ignored
+  but left untouched to avoid deleting user settings without approval; the app
+  shows a persistent warning so the user can secure or remove it explicitly.
+  Preference loads reject links, non-regular files, and files larger than 64 KiB
+  before parsing them.
 - The optional local HTTP and MCP servers enforce loopback binding. The shipped
   LiteLLM example binds its separate proxy explicitly to loopback and requires a
   bearer key. LiteLLM is an external process, so removing either safeguard can
@@ -38,7 +49,8 @@ reads and writes helps scope any report:
 - Alert webhooks are loopback-only by default. Enabling an external host is an
   explicit disclosure of alert metadata, which can include provider, account,
   window, remaining percentage, reset, and suggested route. Prompts, source,
-  model output, and credential values are never webhook fields.
+  model output, credential values, and raw transport exceptions are never
+  webhook fields or delivery errors.
 
 ## Scope
 

@@ -578,7 +578,10 @@ class QuotabotRouter(CustomLogger):
         try:
             with _NO_REDIRECT_OPENER.open(url, timeout=2) as resp:  # noqa: S310 (local only)
                 return json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.HTTPError, urllib.error.URLError, OSError, ValueError):
+        except urllib.error.HTTPError as error:
+            error.close()
+            return None
+        except (urllib.error.URLError, OSError, ValueError):
             return None
 
     # -- metrics ------------------------------------------------------------

@@ -20,6 +20,24 @@ Notable changes to quotabot. Newest first.
   registration check, plus a bundle-aware macOS harness for interactive hosts.
 
 ### Fixed
+- Secret-bearing desktop webhook preferences now fail closed before read or
+  write when owner-only storage protection cannot be established. Permission
+  checks are asynchronous and bounded, and storage failures remain visible in
+  expanded and compact desktop views instead of silently losing settings after
+  restart. Saves debounce and coalesce movement bursts, flush on normal Quit,
+  and reject malformed, non-regular, or oversized preference inputs with
+  accurate guidance.
+- The LiteLLM quotabot client now closes rejected HTTP redirect responses,
+  preserving fail-soft behavior without leaking response resources.
+- Concurrent cold MCP reads now share one in-progress quota collection, failed
+  collections remain retryable, the plain HTTP server rejects non-loopback bind
+  addresses, and sanitized operator logs expose internal failure types.
+- quotabot-owned OAuth grants now fail closed before secret persistence when
+  owner-only directory or file permission hardening cannot be applied; cache and
+  history metadata retain their documented fail-soft behavior.
+- Default loopback webhook delivery no longer follows redirects or exposes raw
+  transport exceptions, preventing an allowed local endpoint from redirecting
+  quota alerts externally or leaking secret-bearing error details.
 - The shipped LiteLLM example now binds its proxy explicitly to loopback,
   requires an environment-backed bearer key, sends that key in the client
   example, and has a regression guard for both boundaries.
