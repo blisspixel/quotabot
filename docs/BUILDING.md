@@ -76,28 +76,37 @@ request verifies those platform bundles without publishing release artifacts.
 
 ## Release dry run
 
-Before cutting a public tag, run the current platform's CLI archive helper and
-verify the artifact exactly the way the installer and a maintainer will consume
-it:
+Before cutting a public tag, verify the release exactly the way an installer and
+maintainer will consume it:
 
-1. Run `python tools/check_release_version.py --tag vX.Y.Z`; it must confirm the
-   intended tag and one version for the collector package, CLI, MCP server,
-   desktop package and lockfile, changelog, and roadmap. The release workflow
-   enforces the same exact tag-to-source check before creating a draft.
-2. Build the archive with `tools\package-cli.ps1` on Windows or
-   `tools/package-cli.sh` on macOS/Linux.
+1. Align the collector package, CLI and MCP constants, desktop package and
+   lockfile, changelog release heading, and roadmap current-version line. Run
+   `python tools/check_release_version.py --tag vX.Y.Z`; it must confirm the
+   intended tag and one consistent version. The release workflow enforces the
+   same exact tag-to-source check before creating a draft.
+2. Build the current platform's archive with `tools\package-cli.ps1` on Windows
+   or `tools/package-cli.sh` on macOS/Linux.
 3. Confirm the `.sha256` sidecar contains a 64 character SHA-256 hash and the
    archive filename, then compare it with the archive's actual hash.
-4. Expand the archive in a temporary directory and run the packaged CLI
-   (`bin\quotabot.exe` on Windows or `bin/quotabot` on macOS/Linux) with
+4. Expand the archive in an isolated temporary directory and run the packaged
+   CLI (`bin\quotabot.exe` on Windows or `bin/quotabot` on macOS/Linux) with
    `--version` plus demo-mode `doctor --json` under an isolated config
    directory.
-5. After a tag is published by GitHub Actions, download each release archive and
-   verify its provenance with `gh attestation verify <archive> --repo
-   blisspixel/quotabot`. The release workflow creates artifact attestations for
-   the archives before uploading them with their checksum sidecars.
-6. Confirm GitHub security signals are clear for the release branch: CI, CodeQL,
-   secret scanning, Dependabot alerts, and the dependency-review PR gate.
+5. Commit the release metadata on `main`, push it, and wait for hosted Windows,
+   macOS, and Ubuntu CI plus CodeQL and secret scanning to pass before tagging.
+6. Push an annotated `vX.Y.Z` tag. Wait for both tag-triggered CI and every
+   `Release` workflow job, including all four native build legs, to pass.
+7. Confirm that the published release is neither draft nor prerelease and has
+   exactly these archive and `.sha256` sidecar pairs:
+   `quotabot-windows-x64.zip`, `quotabot-darwin-arm64.tar.gz`,
+   `quotabot-linux-x64.tar.gz`, and `quotabot-linux-arm64.tar.gz`.
+8. Download every archive, compare it with its SHA-256 sidecar, and verify its
+   provenance with `gh attestation verify <archive> --repo blisspixel/quotabot`.
+   The release workflow creates the attestation before uploading each pair.
+9. Install and smoke-test the packaged CLI on clean Windows, macOS, and Linux
+   hosts before promoting a stable release candidate.
+10. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
+    Dependabot alerts, and the dependency-review PR gate.
 
 ## Icon and dev launcher
 
