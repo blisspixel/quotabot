@@ -606,11 +606,13 @@ here is the final one.
     produced Release bundle; published `v0.5.10` assets and checksum sidecars
     were verified; `v0.5.11` shipped the near-zero headroom availability fix;
     the current patch source line is `0.5.14` for the provider-verification,
-    desktop-coverage, and runtime-audit release catch-up; the downloaded Windows
-    archive passed `gh attestation verify`; hosted CI, CodeQL, Secret scan, and
-    the release workflow
-    passed on the release commit and tag; GitHub now has only the `main` branch
-    and no open PRs. Still required before completion: run the
+    desktop-coverage, and runtime-audit release catch-up; published `v0.5.14`
+    archives for Windows x64, macOS arm64, Linux x64, and Linux arm64 passed
+    their SHA-256 sidecars and `gh attestation verify`; the packaged Windows CLI
+    reported `0.5.14` and passed demo-mode `doctor --json`; hosted CI, CodeQL,
+    and Secret scan passed on the release commit, while tag-triggered CI and
+    every Release workflow job passed for `v0.5.14`; GitHub now has only the
+    `main` branch and no open PRs. Still required before completion: run the
     true 1.0 tag-candidate release workflow, install and smoke-test from
     artifacts on clean Windows, macOS, and Linux hosts, and start from a clean
     local worktree.
