@@ -10,6 +10,13 @@ Notable changes to quotabot. Newest first.
   install, upgrades the previous published 0.x release, runs CLI-only and full
   source setup, preserves a persistent-state sentinel, and verifies native
   desktop artifacts plus demo doctor output.
+- Added Windows, macOS, and Linux CI launch gates for packaged desktop window
+  setup and supported tray-registration calls, including an independent Windows
+  shell registration check and native macOS tray bounds.
+
+### Fixed
+- Linux desktop tray initialization no longer calls the dependency's unsupported
+  tooltip method before registering its context menu.
 
 ## 0.5.14 - 2026-07-09
 

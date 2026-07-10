@@ -22,6 +22,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'chrome_controls.dart';
 import 'demo.dart';
+import 'desktop_readiness.dart';
 import 'fleet.dart';
 import 'headroom_colors.dart';
 import 'logos.dart';
@@ -48,6 +49,8 @@ final bool _shotsMode = Platform.environment['QUOTABOT_SHOTS'] == '1';
 final bool _gifFramesMode = Platform.environment['QUOTABOT_GIF_FRAMES'] == '1';
 final bool _demoMode =
     _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
+final DesktopReadinessProbe _desktopReadiness =
+    DesktopReadinessProbe.fromEnvironment();
 
 /// Boundary around the live route, captured for screenshots.
 final GlobalKey _shotBoundaryKey = GlobalKey();
@@ -128,6 +131,7 @@ Future<void> main() async {
       await Future.delayed(const Duration(milliseconds: 120));
       await windowManager.setAlwaysOnTop(prefs.alwaysOnTop);
       await windowManager.focus();
+      _desktopReadiness.recordWindowReady();
     }),
   );
 
@@ -954,7 +958,11 @@ class _DashboardState extends State<Dashboard>
       await trayManager.setIcon(
         Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
       );
-      await trayManager.setToolTip('quotabot');
+      // tray_manager 0.5.3 does not implement setToolTip on Linux. Calling the
+      // unsupported method aborts the rest of tray initialization there.
+      if (!Platform.isLinux) {
+        await trayManager.setToolTip('quotabot');
+      }
       await trayManager.setContextMenu(
         Menu(
           items: [
@@ -966,11 +974,19 @@ class _DashboardState extends State<Dashboard>
           ],
         ),
       );
+      if (_desktopReadiness.enabled && Platform.isMacOS) {
+        final bounds = await trayManager.getBounds();
+        if (bounds == null || bounds.isEmpty) {
+          throw StateError('Native tray bounds are unavailable.');
+        }
+      }
       // Only now that the tray exists do we redirect close to hide: otherwise a
       // platform without a tray would have no way to reopen a hidden window.
       await windowManager.setPreventClose(true);
+      _desktopReadiness.recordTrayReady(true);
     } catch (_) {
       // No tray on this platform/session; the window keeps normal close-to-quit.
+      _desktopReadiness.recordTrayReady(false);
     }
   }
 
