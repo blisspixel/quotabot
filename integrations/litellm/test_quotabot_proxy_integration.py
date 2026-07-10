@@ -7,6 +7,7 @@ server and the OpenAI-compatible model backend are loopback test doubles.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -262,20 +263,16 @@ def _stop_process_tree(process: subprocess.Popen[bytes]) -> None:
             check=False,
         )
     else:
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
         if os.name == "nt":
             process.kill()
         else:
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         process.wait(timeout=10)
 
 

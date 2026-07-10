@@ -47,7 +47,10 @@ jobs:
           cache: true
 
       - name: Coverage checker tests
-        run: python -m unittest tools.test_check_lcov
+        run: python -m unittest tools.test_check_lcov tools.test_check_release_version
+
+      - name: Release version consistency
+        run: python tools/check_release_version.py
 
       - name: Collector dependencies
         working-directory: collector

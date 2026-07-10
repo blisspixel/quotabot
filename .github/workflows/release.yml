@@ -22,13 +22,21 @@ permissions:
   contents: read
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Verify tag matches the source release version
+        run: python tools/check_release_version.py --tag "$GITHUB_REF_NAME"
+
   create-release:
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Create the release as a draft if it does not exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

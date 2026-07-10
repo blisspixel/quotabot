@@ -4,7 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.5.14 - 2026-07-09
+
 ### Added
+- CI now rejects disagreement among the collector package, CLI, MCP server,
+  desktop package, desktop lockfile, changelog, and roadmap release versions;
+  the release workflow also rejects a tag that does not exactly match them.
 - Desktop widget coverage now exercises the production dashboard, profile
   editor, theme, analytics, terminal, demo, logo, and gauge surfaces; CI blocks
   regressions below 80% app line coverage.
@@ -35,6 +40,8 @@ Notable changes to quotabot. Newest first.
   fleet-level zero-token boundary check.
 
 ### Fixed
+- LiteLLM tests now use unambiguous module imports and explicit suppression for
+  expected process-exit races, clearing four test-only CodeQL quality alerts.
 - Lemonade local-runtime discovery and its runtime access manifest now use the
   current server default at loopback port 13305, honor both `LEMONADE_HOST` and
   `LEMONADE_PORT`, and share endpoint resolution so the manifest always names
