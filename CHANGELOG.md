@@ -22,6 +22,9 @@ Notable changes to quotabot. Newest first.
   transport and exception details remain hidden.
 - Operator docs now call out literal MCP token exposure and that the
   unauthenticated plain loopback HTTP endpoint can expose account identifiers.
+- Setup now starts with an install-and-doctor fast path, explains that missing
+  providers are diagnostic rather than fatal, and distinguishes CLI release
+  installers from full source desktop setup.
 
 ## 0.5.14 - 2026-07-09
 
