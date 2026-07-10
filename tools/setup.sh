@@ -84,8 +84,8 @@ if [ "$cli_only" -eq 0 ]; then
     (cd "$app" && flutter build linux --release)
     bundle="$app/build/linux/$arch/release/bundle"
     desktop="$HOME/.local/share/applications/quotabot.desktop"
-    mkdir -p "$(dirname "$desktop")"
-    sed "s#Exec=quotabot#Exec=$bundle/quotabot#" "$script_dir/quotabot.desktop" > "$desktop"
+    bash "$script_dir/write-desktop-entry.sh" \
+      "$script_dir/quotabot.desktop" "$bundle/quotabot" "$desktop"
     ok "Installed a desktop entry: $desktop"
   fi
 fi

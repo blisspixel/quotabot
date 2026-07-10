@@ -44,6 +44,8 @@ $app = Join-Path $root 'app'
 $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
 $installDir = Join-Path $installRoot 'bin'
 . (Join-Path $scriptDir 'windows-build-prereqs.ps1')
+. (Join-Path $scriptDir 'windows-architecture.ps1')
+$windowsArch = Get-QuotabotWindowsArchitecture
 
 # Resolve the Flutter/Dart bin directory from PATH, falling back to common
 # user-owned install locations. The fallbacks are deliberately limited to
@@ -64,12 +66,7 @@ function Resolve-DartBin {
 }
 
 function Resolve-BuiltAppExe {
-  foreach ($arch in @('x64', 'arm64')) {
-    $candidate = Join-Path $app "build\windows\$arch\runner\Release\quotabot.exe"
-    $resolved = Resolve-Path -LiteralPath $candidate -ErrorAction SilentlyContinue
-    if ($resolved) { return $resolved.Path }
-  }
-  return $null
+  Get-QuotabotWindowsBuiltAppExecutable -AppRoot $app -Architecture $windowsArch
 }
 
 function Get-RunningDesktopApp($exePath) {
@@ -102,10 +99,10 @@ try {
   & (Join-Path $scriptDir 'package-cli.ps1')
 } finally { Pop-Location }
 
-# package-cli.ps1 names the asset by host arch (x64 or arm64), so match either
-# rather than assuming x64, which broke the source build on ARM64 Windows.
-$asset = (Get-ChildItem (Join-Path $root 'release') -Filter 'quotabot-windows-*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-if (-not $asset -or -not (Test-Path $asset)) { throw "CLI build did not produce a quotabot-windows-*.zip in release/" }
+$asset = Get-QuotabotWindowsReleaseArchive -RepositoryRoot $root -Architecture $windowsArch
+if (-not (Test-Path -LiteralPath $asset)) {
+  throw "CLI build did not produce $(Split-Path -Leaf $asset) in release/"
+}
 
 Write-Step "Installing the CLI to $installRoot"
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null

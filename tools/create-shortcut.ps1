@@ -6,14 +6,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-architecture.ps1')
 
-# Flutter builds under build\windows\<arch>\runner\Release (x64 or arm64); pick
-# whichever exists rather than assuming x64, so the shortcut works on ARM64.
 if (-not $ExePath) {
-  foreach ($arch in @('x64', 'arm64')) {
-    $candidate = Join-Path $PSScriptRoot "..\app\build\windows\$arch\runner\Release\quotabot.exe"
-    if (Test-Path -LiteralPath $candidate) { $ExePath = $candidate; break }
-  }
+  $appRoot = Join-Path $PSScriptRoot '..\app'
+  $ExePath = Get-QuotabotWindowsBuiltAppExecutable -AppRoot $appRoot
 }
 
 $resolved = if ($ExePath) { Resolve-Path -LiteralPath $ExePath -ErrorAction SilentlyContinue } else { $null }
