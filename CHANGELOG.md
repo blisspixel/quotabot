@@ -20,6 +20,8 @@ Notable changes to quotabot. Newest first.
 - Desktop alert settings now expose bounded webhook delivery status and flag
   notification delivery failures instead of silently discarding them; raw
   transport and exception details remain hidden.
+- Operator docs now call out literal MCP token exposure and that the
+  unauthenticated plain loopback HTTP endpoint can expose account identifiers.
 
 ## 0.5.14 - 2026-07-09
 

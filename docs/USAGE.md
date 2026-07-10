@@ -568,8 +568,9 @@ The HTTP transport binds only to `localhost`, `127.0.0.1`, or `::1`, enables
 DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and uses the
 same tool/resource factory as stdio. Add `--token-file PATH`, `--token-env NAME`,
 or `--token TOKEN` to require `Authorization: Bearer ...`; prefer a local
-owner-only token file for normal use. The endpoint is MCP Streamable HTTP, not
-the plain JSON endpoint below.
+owner-only token file for normal use. A literal `--token TOKEN` can be exposed
+through shell history or process inspection, so reserve it for ephemeral local
+testing. The endpoint is MCP Streamable HTTP, not the plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
 `collector/bin/example_routing_agent.dart` for a Dart routing example, and
@@ -589,7 +590,10 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 recommendation, `GET /suggest?exclude=codex,grok` ignores those providers for
 that recommendation, `GET /suggest?local_first=true` prefers local capacity, and
 `GET /suggest?cost_penalty=codex:2` applies an explicit caller cost penalty.
-Local only, zero tokens.
+The server binds to loopback and spends zero usage tokens, but it has no
+authentication and snapshots can include account identifiers such as email
+addresses. Treat the port as trusted local metadata: run it only on a machine
+whose local processes you trust, and stop it when it is not needed.
 
 ## Demo mode
 
