@@ -115,6 +115,26 @@ void main() {
     expect(flash.available, isFalse);
   });
 
+  test('per-model quota cannot bypass provider integrity rejection', () {
+    final suspect = _cloud(
+      'antigravity',
+      20,
+      modelQuotas: const [
+        ModelQuota(model: 'gemini', usedPercent: 5, resetsAt: _now + 3600),
+      ],
+    ).withSuspect('legacy drift concern');
+    final suggestion = suggestModel(
+      [suspect],
+      _now,
+      catalog: const {
+        'antigravity': [ModelInfo(id: 'gemini-3.5-pro')],
+      },
+    );
+
+    expect(suggestion.recommended, isNull);
+    expect(suggestion.ranked.single.available, isFalse);
+  });
+
   test('unmatched per-model quota does not inherit provider headroom', () {
     final reg = buildModelRegistry(
       [
@@ -643,6 +663,52 @@ void main() {
       );
       expect(s.recommended, isNull);
       expect(s.reason, isNotEmpty);
+    });
+
+    test('provider drift remains visible on unavailable model candidates', () {
+      final drifted = _cloud('claude', 20).withProviderDrift(
+        'weekly reset moved earlier',
+        _now + 30,
+      );
+      final s = suggestModel(
+        [drifted],
+        _now + 60,
+        catalog: catalog,
+        requirements: const ModelRequirements(requireReasoning: true),
+      );
+      final candidate = s.ranked.single;
+      final json = candidate.toJson();
+
+      expect(s.recommended, isNull);
+      expect(s.reason, contains('provider drift'));
+      expect(s.reason, contains('quotabot verify'));
+      expect(candidate.available, isFalse);
+      expect(candidate.stale, isTrue);
+      expect(candidate.driftReason, 'weekly reset moved earlier');
+      expect(candidate.driftObservedAt, _now + 30);
+      expect(json['drift_reason'], 'weekly reset moved earlier');
+      expect(json['drift_observed_at'], _now + 30);
+    });
+
+    test('legacy drift quarantine explains the missing model budget', () {
+      final legacy = _cloud('claude', 20)
+          .withSuspect('legacy drift concern')
+          .asProviderDriftQuarantine(
+            'unresolved legacy provider drift: legacy drift concern',
+            _now + 30,
+          );
+      final suggestion = suggestModel(
+        [legacy],
+        _now + 60,
+        catalog: catalog,
+        requirements: const ModelRequirements(requireReasoning: true),
+      );
+
+      expect(suggestion.recommended, isNull);
+      expect(suggestion.ranked, isEmpty);
+      expect(suggestion.reason, contains('Provider drift'));
+      expect(suggestion.reason, contains('no trusted model-budget evidence'));
+      expect(suggestion.reason, contains('quotabot verify'));
     });
 
     test('the model suggestion JSON names the active budget policy', () {

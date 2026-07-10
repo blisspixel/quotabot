@@ -1746,6 +1746,8 @@ Future<void> _check(
       'headroom_percent': head,
       'resets_at': reset,
       'stale': q.stale,
+      if (q.driftReason != null) 'drift_reason': q.driftReason,
+      if (q.driftObservedAt != null) 'drift_observed_at': q.driftObservedAt,
     }));
     return;
   }
@@ -1756,9 +1758,25 @@ Future<void> _check(
           ? '  ${style.dim('last ${head.round()}% free')}'
           : '  ${style.health(head, '${head.round()}% free')}';
   final rs = reset == null ? '' : style.dim('  resets ${_in(reset, now)}');
-  final staleTag = q.stale ? style.dim(' (cached)') : '';
+  final staleTag = q.driftReason != null
+      ? style.dim(' (provider drift)')
+      : q.stale
+          ? style.dim(' (cached)')
+          : '';
   stdout.writeln('${style.bold(q.displayName)}: $label$pct$rs$staleTag');
+  if (q.driftReason != null) {
+    stdout.writeln(
+      style.red(
+        '  provider drift: ${q.driftReason}; '
+        '${_providerDriftEvidenceSummary(q)}',
+      ),
+    );
+  }
 }
+
+String _providerDriftEvidenceSummary(ProviderQuota quota) => quota.hasWindows
+    ? 'showing last trusted quota'
+    : 'legacy evidence is quarantined; no trusted snapshot is available';
 
 Future<void> _login(String provider) async {
   switch (provider) {
@@ -1815,8 +1833,12 @@ void _logout(String provider) {
 
 /// Pads a state to the column width, then colors it (so the padding stays
 /// outside the ANSI codes and alignment is preserved).
+const _stateColumnWidth = 14;
+
+String _stateColumn(String value) => value.padRight(_stateColumnWidth);
+
 String _stateStyled(String state) {
-  final padded = state.padRight(12);
+  final padded = _stateColumn(state);
   switch (state) {
     case 'live':
       return style.green(padded);
@@ -1826,6 +1848,7 @@ String _stateStyled(String state) {
     case 'cached':
       return style.yellow(padded);
     case 'OUT OF QUOTA':
+    case 'PROVIDER DRIFT':
     case 'ERROR':
       return style.red(padded);
     default: // no live data
@@ -1936,6 +1959,7 @@ ProviderQuota? _findQuota(
 
 String _providerReadStateLabel(String state) => switch (state) {
       'OUT OF QUOTA' => 'live',
+      'PROVIDER DRIFT' => 'provider drift',
       'ERROR' => 'error',
       _ => state,
     };
@@ -1987,15 +2011,17 @@ void _printDoctor(List<ProviderQuota> results) {
     }
     final state = q.isLocal
         ? (q.active ? 'in use' : 'local')
-        : !q.ok
-            ? 'ERROR'
-            : q.windows.isEmpty
-                ? 'no live data'
-                : q.stale
-                    ? 'cached'
-                    : exhausted
-                        ? 'OUT OF QUOTA'
-                        : 'live';
+        : q.driftReason != null
+            ? 'PROVIDER DRIFT'
+            : !q.ok
+                ? 'ERROR'
+                : q.windows.isEmpty
+                    ? 'no live data'
+                    : q.stale
+                        ? 'cached'
+                        : exhausted
+                            ? 'OUT OF QUOTA'
+                            : 'live';
     final detail = q.isLocal
         ? (q.status ?? '')
         : q.windows.isEmpty
@@ -2015,11 +2041,11 @@ void _printDoctor(List<ProviderQuota> results) {
       '$detail $provenance',
     );
     for (final d in q.details) {
-      print('  $indent ${' '.padRight(12)} $d');
+      print('  $indent ${_stateColumn('')} $d');
     }
     if (q.perMachine && !q.isLocal) {
       print(
-        '  $indent ${' '.padRight(12)} '
+        '  $indent ${_stateColumn('')} '
         '${style.dim('note: this machine only; other devices may differ')}',
       );
     }
@@ -2034,16 +2060,26 @@ void _printDoctor(List<ProviderQuota> results) {
       final summary = u <= 0
           ? '$n models tracked, all fresh'
           : '$n models tracked, most used: ${mostUsed.model} $u%';
-      print('  $indent ${'models'.padRight(12)} $summary');
+      print('  $indent ${_stateColumn('models')} $summary');
+    }
+    if (q.driftReason != null) {
+      final detected = q.driftObservedAt == null
+          ? ''
+          : ' ${_ago((now - q.driftObservedAt!).clamp(0, 1 << 31).toInt())}';
+      print(
+        '  $indent ${_stateColumn('')} '
+        '${style.red('! provider drift$detected: ${q.driftReason}; '
+            '${_providerDriftEvidenceSummary(q)}')}',
+      );
     }
     if (q.suspect != null) {
       print(
-        '  $indent ${' '.padRight(12)} '
+        '  $indent ${_stateColumn('')} '
         '${style.yellow('! suspect: ${q.suspect}')}',
       );
     }
     final hint = _doctorHint(q, state);
-    if (hint != null) print('  $indent ${' '.padRight(12)} -> $hint');
+    if (hint != null) print('  $indent ${_stateColumn('')} -> $hint');
   }
 
   // Close the loop: tell the user where to route work next.
@@ -2183,6 +2219,11 @@ String _verifyStateLabel(String state) => switch (state) {
       _ => state,
     };
 
+String _providerVerificationStateLabel(ProviderVerification verification) =>
+    verification.driftReason == null
+        ? _verifyStateLabel(verification.state)
+        : 'PROVIDER DRIFT';
+
 void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
   print(
     '${style.bold('quotabot verify')}  ${style.dim('mechanical honesty checks over one live read, 0 usage tokens')}\n',
@@ -2201,12 +2242,14 @@ void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
         _verificationProvenance(p, snapshot, i, report.generatedAt);
     print(
       '  ${'${p.displayName}$acct'.padRight(28)} '
-      '${_stateStyled(_verifyStateLabel(p.state))} $verdict $provenance',
+      '${_stateStyled(_providerVerificationStateLabel(p))} $verdict $provenance',
     );
     for (final c in _visibleVerifyChecks(p)) {
       final tag =
           c.status == VerifyStatus.fail ? style.red(c.id) : style.dim(c.id);
-      print('  ${' '.padRight(28)} ${' '.padRight(12)} -> $tag: ${c.detail}');
+      print(
+        '  ${' '.padRight(28)} ${_stateColumn('')} -> $tag: ${c.detail}',
+      );
     }
   }
   print('');
@@ -2302,13 +2345,15 @@ ProviderQuota? quotaForVerificationProvenance(
 }
 
 String _verificationProvenanceState(ProviderQuota q, String state) =>
-    switch (state) {
-      'out_of_quota' => 'OUT OF QUOTA',
-      'error' => 'ERROR',
-      'no_data' => 'metadata',
-      'local' => q.active ? 'in use' : 'local',
-      _ => state,
-    };
+    q.driftReason != null
+        ? 'PROVIDER DRIFT'
+        : switch (state) {
+            'out_of_quota' => 'OUT OF QUOTA',
+            'error' => 'ERROR',
+            'no_data' => 'metadata',
+            'local' => q.active ? 'in use' : 'local',
+            _ => state,
+          };
 
 /// A compact "Ns/Nm/Nh ago" age label.
 String _ago(int seconds) {
@@ -2460,7 +2505,11 @@ void _printModels(
 
 String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
   final parts = <String>[
-    e.stale ? 'cached' : 'live',
+    e.driftReason != null
+        ? 'provider drift'
+        : e.stale
+            ? 'cached'
+            : 'live',
     _modelSpendClass(e),
   ];
   if (_modelHasAccountIdentity(e)) parts.add(e.account);
@@ -2521,10 +2570,16 @@ void _printSuggest(RouteSuggestion s) {
         : c.stale
             ? style.dim(pct)
             : style.health(c.headroom!, pct);
-    final qualifier = c.stale ? 'last known' : 'free';
+    final qualifier = c.driftReason != null
+        ? c.headroom == null
+            ? 'no trusted quota'
+            : 'last trusted'
+        : c.stale
+            ? 'last known'
+            : 'free';
     final state = c.available
         ? ''
-        : c.stale
+        : c.driftReason != null || c.stale
             ? style.dim('  unavailable')
             : style.red('  spent');
     final conf = c.confidence == null
@@ -2544,7 +2599,11 @@ String _routeAccountLabel(RouteCandidate c) =>
 
 String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
   final parts = <String>[
-    c.stale ? 'cached' : 'live',
+    c.driftReason != null
+        ? 'provider drift'
+        : c.stale
+            ? 'cached'
+            : 'live',
     c.spendClass,
   ];
   if (_routeHasAccountIdentity(c)) parts.add(c.account);
@@ -2778,6 +2837,9 @@ String _hourLabel(int hour24) {
 /// login are pointed at it; providers with no data are pointed at their app.
 String? _doctorHint(ProviderQuota q, String state) {
   const canLogin = {'grok', 'antigravity'};
+  if (state == 'PROVIDER DRIFT') {
+    return 'run: quotabot verify  (${_providerDriftEvidenceSummary(q)})';
+  }
   if (state == 'cached' && canLogin.contains(q.provider)) {
     return 'run: quotabot login ${q.provider}  (keeps it live without reopening the app)';
   }

@@ -88,6 +88,41 @@ void main() {
     expect(json['headroom_percent'], 48);
   });
 
+  test('check reports provider drift as unavailable trusted cache', () async {
+    final result = await runCli([
+      'check',
+      'claude',
+      '--json',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 69);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['available'], isFalse);
+    expect(json['stale'], isTrue);
+    expect(json['headroom_percent'], 37);
+    expect(json['drift_reason'], contains('usage fell'));
+    expect(json['drift_observed_at'], isA<int>());
+  });
+
+  test('check human output labels provider drift instead of cached data',
+      () async {
+    final result = await runCli([
+      'check',
+      'claude',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 69);
+    final out = result.stdout as String;
+    expect(out, contains('(provider drift)'));
+    expect(out, isNot(contains('(cached)')));
+    expect(out, contains('provider drift:'));
+  });
+
   test('suggest uses the mock snapshot without real burn history', () async {
     final result = await runCli([
       'suggest',
@@ -134,6 +169,38 @@ void main() {
     expect(out, contains('48% last known'));
     expect(out, contains('unavailable'));
     expect(out, isNot(contains('-> grok')));
+  });
+
+  test('suggest never routes provider-drift evidence', () async {
+    final result = await runCli([
+      'suggest',
+      '--json',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['recommended'], isNull);
+    final candidate = (json['ranked'] as List).single as Map<String, dynamic>;
+    expect(candidate['available'], isFalse);
+    expect(candidate['stale'], isTrue);
+  });
+
+  test('suggest human output labels drift and last-trusted headroom', () async {
+    final result = await runCli([
+      'suggest',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('[provider drift, quota plan'));
+    expect(out, contains('37% last trusted'));
+    expect(out, contains('unavailable'));
+    expect(out, isNot(contains('37% last known')));
   });
 
   test('suggest human output avoids calling plan strings account identities',
@@ -217,6 +284,22 @@ void main() {
     final out = result.stdout as String;
     expect(out, contains('[error, quota plan, captured'));
     expect(out, contains('simulated signed-out state'));
+  });
+
+  test('doctor human output explains provider drift and recovery', () async {
+    final result = await runCli([
+      'doctor',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 0);
+    final out = result.stdout as String;
+    expect(out, contains('PROVIDER DRIFT'));
+    expect(out, contains('[provider drift, quota plan, captured 60m ago]'));
+    expect(out, contains('usage fell'));
+    expect(out, contains('quotabot verify'));
   });
 
   test('doctor demo output labels local scope without duplicate badges',

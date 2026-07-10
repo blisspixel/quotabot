@@ -7,6 +7,7 @@ import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/webhook.dart';
 
 Widget _wrap(Widget child, {bool disableAnimations = false}) {
@@ -46,6 +47,18 @@ ProviderQuota _historyPoint(double usedPercent) => ProviderQuota(
   windows: [QuotaWindow(label: '5h', usedPercent: usedPercent)],
 );
 
+double _contrastRatio(Color foreground, Color background) {
+  final foregroundLuminance = foreground.computeLuminance();
+  final backgroundLuminance = background.computeLuminance();
+  final lighter = foregroundLuminance > backgroundLuminance
+      ? foregroundLuminance
+      : backgroundLuminance;
+  final darker = foregroundLuminance > backgroundLuminance
+      ? backgroundLuminance
+      : foregroundLuminance;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 void main() {
   tearDown(() {
     appThemeSpec.value = appThemeSystem;
@@ -66,6 +79,39 @@ void main() {
     expect(
       webhookDeliveryStatus(const WebhookResult(ok: true, statusCode: 204)),
       'Last delivery succeeded',
+    );
+  });
+
+  test('pool headroom excludes stale, drifted, and invalid-time evidence', () {
+    const now = 1782000000;
+    final trusted = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final stale = ProviderQuota.fromJson({...trusted.toJson(), 'stale': true});
+    final drifted = trusted.withProviderDrift(
+      'weekly usage fell without a reset',
+      now,
+    );
+    final missingTime = ProviderQuota.fromJson({
+      ...trusted.toJson(),
+      'as_of': 0,
+    });
+    final future = ProviderQuota.fromJson({
+      ...trusted.toJson(),
+      'as_of': now + kQuotaEvidenceClockSkewSeconds + 1,
+    });
+
+    expect(
+      trustedPoolHeadroom([trusted, stale, drifted, missingTime, future], now),
+      80,
+    );
+    expect(
+      trustedPoolHeadroom([stale, drifted, missingTime, future], now),
+      isNull,
     );
   });
 
@@ -154,6 +200,66 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'setup labels legacy provider drift accessibly in ${brightness.name}',
+      (tester) async {
+        await _useDesktopSurface(tester);
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final legacy =
+            ProviderQuota(
+                  provider: 'claude',
+                  displayName: 'Claude',
+                  account: 'test',
+                  asOf: now - 3600,
+                  windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
+                )
+                .withSuspect('legacy concern')
+                .asProviderDriftQuarantine(
+                  'unresolved legacy provider drift: legacy concern',
+                  now - 30,
+                );
+        final chrome = AppChromeTheme.forSpec(brightness, appThemeSystem);
+        final theme = ThemeData(
+          brightness: brightness,
+        ).copyWith(extensions: [chrome]);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: Dashboard.test(
+              prefs: const Prefs(enableNotifications: false),
+              demoMode: false,
+              collector: () async => [legacy],
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Setup and help'));
+        await tester.pumpAndSettle();
+
+        final label = tester.widget<Text>(find.text('provider drift'));
+        final dialogContext = tester.element(find.byType(Dialog));
+        final dialog = tester.widget<Dialog>(find.byType(Dialog));
+        final background =
+            dialog.backgroundColor ??
+            Theme.of(dialogContext).dialogTheme.backgroundColor ??
+            Theme.of(dialogContext).colorScheme.surface;
+        expect(
+          _contrastRatio(label.style!.color!, background),
+          greaterThanOrEqualTo(4.5),
+        );
+        expect(
+          find.descendant(
+            of: find.byType(Dialog),
+            matching: find.text('no live data'),
+          ),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 
   testWidgets('failed secure preference save stays visible and actionable', (
     tester,

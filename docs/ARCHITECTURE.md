@@ -187,10 +187,25 @@ tray Quit flushes the final snapshot before teardown.
 `collectAll()` runs every adapter concurrently (Antigravity via multi-account
 profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`):
 
-1. Run the adapter.
-2. If it succeeded and has windows, write the snapshot to the local cache and
-   return it.
-3. Otherwise, load the last-known snapshot, mark it stale, and return that.
+1. Capture a local observation generation, then run the adapter. The generation
+   marks when collection began, so an older slow read cannot finish late and
+   overwrite evidence from a newer collection.
+2. Compare a fresh, windowed result with the last trusted snapshot when provider,
+   account, plan, kind, source, and machine scope describe the same evidence
+   class. A changed evidence class establishes a new baseline.
+3. Admit a plausible result into the last-known cache, history, and measured
+   analytics, and clear any earlier drift diagnostic for that identity.
+4. If a trusted window or model pool disappears, reset time moves earlier,
+   usage falls without a completed reset, a window lacks derivable usage, or a
+   capture timestamp is missing or materially future, reject the fresh values.
+   Keep the trusted cache unchanged, persist a bounded sanitized drift
+   diagnostic separately, and return the prior snapshot as stale evidence.
+5. If collection otherwise fails or has no windows, load the last-known trusted
+   snapshot, mark it stale, and return that.
+6. If an upgraded cache contains only a legacy `suspect` snapshot, retain it as
+   an admission baseline but remove its windows from every public result. An
+   identical fresh read remains quarantined; only a materially advanced reset
+   or a changed evidence class can establish a new trusted baseline.
 
 The cache lives under the platform application-data directory
 (`%LOCALAPPDATA%/quotabot/cache` on Windows). This is what keeps a transient
@@ -200,6 +215,21 @@ metadata. Cache-only routing reads only canonical snapshot filenames that match
 the parsed provider/account identity and rejects snapshots dated materially in
 the future, so a stray JSON file in the cache directory cannot become a fresh
 routing recommendation.
+Drift diagnostics use separate per-provider/account records in the cache
+directory. They remain attached to cache-only and failed-read fallbacks so a
+process restart or transient provider failure cannot silently clear the warning.
+Canonical cache and drift records carry internal microsecond observation
+generations. Admission, generation comparison, cache write, and diagnostic
+update run under one per-provider/account interprocess lock. A clean writer
+clears only an older drift record, and a late older writer cannot hide a newer
+warning or baseline even when both provider timestamps fall in the same second.
+Baseline reads reject a mismatched provider, a mismatched scoped account, a
+negative or materially future capture time, and a materially future internal
+generation. If the admission lock cannot be acquired, the result fails closed
+as stale last-trusted evidence, legacy quarantine, or an unavailable no-window
+record. The next clean admitted provider result newer than the warning clears it.
+Neither rejected values nor a drift-marked fallback can enter
+cache/history/analytics as trusted evidence or become routable capacity.
 For multi-account providers, stale per-account snapshots are appended only when
 the account is still present in that provider's current local account index and
 the live adapter did not already return it. This is the signed-out auto-hide

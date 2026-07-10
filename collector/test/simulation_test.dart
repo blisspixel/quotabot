@@ -46,6 +46,22 @@ void main() {
     expect(bindingWindow(q, now)?.label, 'weekly');
   });
 
+  test('provider-drift simulation exposes trusted stale evidence only', () {
+    final q = simulateProvider(
+      provider: 'claude',
+      state: 'provider-drift',
+      now: now,
+    )!;
+
+    expect(q.stale, isTrue);
+    expect(q.driftReason, contains('usage fell'));
+    expect(q.driftObservedAt, now - 30);
+    expect(q.error, contains('last trusted snapshot'));
+    final suggestion = suggestRoute([q], now);
+    expect(suggestion.recommended, isNull);
+    expect(suggestion.ranked.single.available, isFalse);
+  });
+
   test('invalid state and invalid provider are rejected', () {
     expect(normalizeSimulationState('missing'), isNull);
     expect(

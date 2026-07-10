@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'drift.dart';
 import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
@@ -33,6 +34,10 @@ double? providerHeadroom(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return null;
   double minRemaining = 100;
   for (final w in q.windows) {
+    final percent = w.percent;
+    if (percent == null || !percent.isFinite || percent < 0 || percent > 100) {
+      return null;
+    }
     final remaining = windowHeadroom(w, now);
     if (remaining < minRemaining) minRemaining = remaining;
   }
@@ -41,14 +46,14 @@ double? providerHeadroom(ProviderQuota q, int now) {
 
 /// The provider with the most remaining headroom, for choosing where to route
 /// work. Local runtimes are excluded (they read 100% and would always win; use
-/// [suggestRoute] for fallback logic). Stale cached snapshots and providers at
-/// or below the spent floor are excluded: they are evidence, not current usable
-/// capacity.
+/// [suggestRoute] for fallback logic). Stale or integrity-rejected snapshots
+/// and providers at or below the spent floor are excluded: they are evidence,
+/// not current usable capacity.
 ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   ProviderQuota? best;
   double bestHeadroom = -1;
   for (final q in quotas) {
-    if (q.isLocal || q.stale) continue;
+    if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) continue;
     final h = providerHeadroom(q, now);
     if (h != null && h > kSpentHeadroomFloor && h > bestHeadroom) {
       bestHeadroom = h;
@@ -71,7 +76,7 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   final h = providerHeadroom(q, now);
   if (h == null) return (available: false, headroom: null, resetsAt: null);
   return (
-    available: !q.stale && h > kSpentHeadroomFloor,
+    available: isTrustedQuotaEvidenceAt(q, now) && h > kSpentHeadroomFloor,
     headroom: h,
     resetsAt: bindingWindow(q, now)?.resetsAt,
   );
@@ -102,7 +107,9 @@ bool anyProviderUsable(List<ProviderQuota> quotas, int now) {
 /// reset is treated as furthest out, since its clear time is genuinely unknown.
 QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return null;
-  final spent = (providerHeadroom(q, now) ?? 100) <= kSpentHeadroomFloor;
+  final headroom = providerHeadroom(q, now);
+  if (headroom == null) return null;
+  final spent = headroom <= kSpentHeadroomFloor;
   if (spent) {
     QuotaWindow? latest;
     for (final w in q.windows) {
@@ -218,6 +225,13 @@ class RouteCandidate {
 
   final bool stale;
 
+  /// Why fresh provider evidence was rejected. Headroom is last-trusted and
+  /// stale when available, or null for a migrated legacy quarantine.
+  final String? driftReason;
+
+  /// Epoch seconds when [driftReason] was observed.
+  final int? driftObservedAt;
+
   /// True when usable right now: local, or fresh cloud headroom above the
   /// "spent" floor. Stale cached cloud quotas are last-known evidence and are
   /// not available.
@@ -236,6 +250,8 @@ class RouteCandidate {
     required this.resetsAt,
     required this.stale,
     required this.available,
+    this.driftReason,
+    this.driftObservedAt,
     this.leaseDiscount = 0,
     this.pipeDiscount = 0,
     this.burnPerHour,
@@ -280,6 +296,8 @@ class RouteCandidate {
         if (capabilityBudgetLimited) 'capability_budget_limited': true,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
+        if (driftReason != null) 'drift_reason': driftReason,
+        if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         'available': available,
       };
 
@@ -465,6 +483,23 @@ String _effectiveHeadroomNote(RouteCandidate c) {
     if (c.pipeDiscount > 0) 'pipe',
   ];
   return ', ~${e.round()}% after ${causes.join('/')}';
+}
+
+String _localFallbackSubscriptionNote(RouteCandidate? candidate) {
+  if (candidate == null) return '';
+  final headroom = candidate.headroom?.round();
+  if (candidate.driftReason != null) {
+    return headroom == null
+        ? ' (${candidate.provider} provider drift has no trusted headroom)'
+        : ' (${candidate.provider} provider drift; last-trusted headroom '
+            '$headroom%)';
+  }
+  if (candidate.stale) {
+    return ' (best subscription ${candidate.provider} has cached last-known '
+        'headroom ${headroom ?? 0}%)';
+  }
+  return ' (best subscription ${candidate.provider} only '
+      '${headroom ?? 0}% free)';
 }
 
 /// Floor burn, in percent of quota per hour, used to convert headroom into a
@@ -715,8 +750,8 @@ WindowForecast? classifyForecast({
 /// half-trusted, and a metered provider's burn estimate is weighted by sample
 /// adequacy `n / (n + 4)` (a shrinkage prior, so a two-point fit is not trusted
 /// like a twenty-point one). Local runtimes need no burn, so only freshness.
-double _confidence(ProviderQuota q, double? burnSe, int samples) {
-  final fresh = q.stale ? 0.5 : 1.0;
+double _confidence(ProviderQuota q, double? burnSe, int samples, int now) {
+  final fresh = q.isLocal || isTrustedQuotaEvidenceAt(q, now) ? 1.0 : 0.5;
   if (q.isLocal) return fresh;
   if (q.isManual) return fresh * 0.35;
   final adequacy = burnSe == null ? 0.6 : samples / (samples + 4);
@@ -803,7 +838,9 @@ RouteSuggestion suggestRoute(
 }) {
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
-    if (q.isLocal || q.isManual || q.windows.isEmpty) continue;
+    if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
+      continue;
+    }
     measuredProviderCounts[q.provider] =
         (measuredProviderCounts[q.provider] ?? 0) + 1;
   }
@@ -855,7 +892,7 @@ RouteSuggestion suggestRoute(
     final strand = headroom == null
         ? null
         : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
-    final confidence = _confidence(q, burnSe, samples);
+    final confidence = _confidence(q, burnSe, samples, now);
     final wasteBurn = accountStat ??
         ((measuredProviderCounts[q.provider] ?? 0) == 1 ? providerStat : null);
     final projectedWaste = _projectedWastePercent(
@@ -916,6 +953,8 @@ RouteSuggestion suggestRoute(
           score == null || score.costDiscount >= 1 ? null : score.costDiscount,
       resetsAt: candidateResetsAt,
       stale: q.stale,
+      driftReason: q.driftReason,
+      driftObservedAt: q.driftObservedAt,
       available: q.isLocal || (a.available && !capabilityBlocked),
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
@@ -928,7 +967,14 @@ RouteSuggestion suggestRoute(
   // providers stay in the ranked evidence with available=false, but later
   // recommendation branches only choose fresh candidates.
   final usable = quotas
-      .where((q) => q.isLocal || providerHeadroom(q, now) != null)
+      .where(
+        (q) =>
+            q.isLocal ||
+            q.driftReason != null ||
+            (q.suspect == null &&
+                (q.stale || isTrustedQuotaEvidenceAt(q, now)) &&
+                providerHeadroom(q, now) != null),
+      )
       .map(toCandidate)
       .toList();
 
@@ -1014,9 +1060,7 @@ RouteSuggestion suggestRoute(
   if (locals.isNotEmpty) {
     final best = locals.first;
     final tightest = subs.isNotEmpty ? subs.first : null;
-    final subNote = tightest == null
-        ? ''
-        : ' (best subscription ${tightest.provider} only ${(tightest.headroom ?? 0).round()}% free)';
+    final subNote = _localFallbackSubscriptionNote(tightest);
     return result(
       best,
       'Subscriptions are low - fall back to local ${best.provider}$subNote.',
@@ -1051,6 +1095,21 @@ RouteSuggestion suggestRoute(
     );
   }
 
+  final drifted =
+      subs.where((candidate) => candidate.driftReason != null).toList();
+  final driftOnly = drifted.isNotEmpty && drifted.length == subs.length;
+  if (driftOnly) {
+    final best = drifted.first;
+    final evidence = best.headroom == null
+        ? 'legacy evidence is quarantined and no trusted quota snapshot is available'
+        : 'last-trusted headroom is ${best.headroom!.round()}%';
+    return result(
+      null,
+      'Provider drift rejected the only quota evidence; ${best.provider} is '
+      'not routable because $evidence. Run quotabot verify and compare the '
+      'provider view.',
+    );
+  }
   final staleWithLastKnown =
       subs.where((c) => c.stale && c.headroom != null).toList();
   if (staleWithLastKnown.isNotEmpty) {

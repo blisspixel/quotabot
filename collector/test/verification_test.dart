@@ -65,6 +65,15 @@ void main() {
       );
       expect(
         verifyState(
+          healthy().withProviderDrift('5h usage fell with no reset', now - 30),
+          now,
+        ),
+        'cached',
+        reason: 'the state describes the trusted windows; the additive check '
+            'describes why they are stale',
+      );
+      expect(
+        verifyState(
           ProviderQuota(
             provider: 'codex',
             displayName: 'Codex',
@@ -96,6 +105,78 @@ void main() {
       expect(p.crossCheck, contains('/usage'));
       expect(checkById(p, 'reset_sanity').status, VerifyStatus.pass);
       expect(report.passed, isTrue);
+    });
+
+    test('provider drift fails distinctly while preserving trusted windows',
+        () {
+      final drifted = healthy().withProviderDrift(
+        '5h usage fell 60% to 10% with no reset',
+        now - 30,
+      );
+      final report = buildVerificationReport(
+        [drifted],
+        now,
+        os: 'windows',
+        filtered: true,
+      );
+
+      final provider = report.providers.single;
+      expect(provider.state, 'cached');
+      expect(provider.driftReason, contains('usage fell'));
+      expect(provider.driftObservedAt, now - 30);
+      expect(provider.windows, hasLength(2));
+      expect(provider.passed, isFalse);
+      final check = checkById(provider, 'provider_drift');
+      expect(check.status, VerifyStatus.fail);
+      expect(check.detail, contains('last trusted snapshot'));
+      expect(report.passed, isFalse);
+    });
+
+    test('legacy provider drift fails with no trusted windows', () {
+      final quarantined = healthy()
+          .withSuspect('legacy usage concern')
+          .asProviderDriftQuarantine(
+            'unresolved legacy provider drift: legacy usage concern',
+            now - 30,
+          );
+      final report = buildVerificationReport(
+        [quarantined],
+        now,
+        os: 'windows',
+        filtered: true,
+      );
+
+      final provider = report.providers.single;
+      final check = checkById(provider, 'provider_drift');
+      expect(provider.state, 'error');
+      expect(provider.windows, isEmpty);
+      expect(provider.passed, isFalse);
+      expect(check.detail, contains('no trusted snapshot is available'));
+    });
+
+    test('blank provider drift reason fails instead of passing silently', () {
+      final malformed = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'work@example.com',
+        asOf: now,
+        stale: true,
+        error: 'provider drift detected',
+        driftReason: '   ',
+        driftObservedAt: now - 30,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
+      );
+      final report = buildVerificationReport(
+        [malformed],
+        now,
+        os: 'windows',
+        filtered: true,
+      );
+
+      final check = checkById(report.providers.single, 'provider_drift');
+      expect(check.status, VerifyStatus.fail);
+      expect(check.detail, contains('reason is blank'));
+      expect(report.passed, isFalse);
     });
 
     test('a truthful failure passes read_or_reason', () {
@@ -130,6 +211,28 @@ void main() {
       final p = report.providers.single;
       expect(p.passed, isFalse);
       expect(checkById(p, 'read_or_reason').status, VerifyStatus.fail);
+    });
+
+    test('a label-only quota window fails usable-percent verification', () {
+      final report = buildVerificationReport(
+        [
+          ProviderQuota(
+            provider: 'codex',
+            displayName: 'Codex',
+            account: 'default',
+            asOf: now,
+            windows: [QuotaWindow(label: 'weekly', resetsAt: now + 3600)],
+          ),
+        ],
+        now,
+        os: 'windows',
+        filtered: true,
+      );
+
+      final check = checkById(report.providers.single, 'percent_bounds');
+      expect(check.status, VerifyStatus.fail);
+      expect(check.detail, contains('no usable percent'));
+      expect(report.passed, isFalse);
     });
 
     test('an ok subscription with no windows and no reason fails', () {
