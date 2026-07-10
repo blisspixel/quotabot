@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/lemonade.dart';
+import 'package:quotabot_collector/local_runtime_config.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('LemonadeAdapter', () {
     test('reports installed models from an OpenAI-style listing', () async {
       final mock = MockClient((req) async {
+        expect(req.url.port, lemonadeDefaultPort);
         expect(req.url.path, contains('models'));
         return http.Response(
           jsonEncode({
@@ -25,6 +27,22 @@ void main() {
       expect(q.isLocal, isTrue);
       expect(q.ok, isTrue);
       expect(q.account, contains('2'));
+    });
+
+    test('uses the current default port and honors host overrides', () {
+      expect(
+        LemonadeAdapter.baseUrl(environment: const {}),
+        'http://127.0.0.1:13305',
+      );
+      expect(
+        LemonadeAdapter.baseUrl(
+          environment: const {
+            'LEMONADE_HOST': 'localhost',
+            'LEMONADE_PORT': '14000',
+          },
+        ),
+        'http://localhost:14000',
+      );
     });
 
     test('is not-running when the server is unreachable', () async {

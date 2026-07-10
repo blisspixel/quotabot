@@ -56,8 +56,10 @@ installed but do not see it, start its server:
 - **LM Studio:** loading a model in the chat window is not enough; you must start
   the **local server** (the Developer tab, toggle "Start Server", or run
   `lms server start`). It listens on port 1234.
-- **Lemonade:** start the server (`lemonade-server serve`); it listens on port
-  8000. Honors `LEMONADE_HOST`.
+- **Lemonade:** desktop packages start the service automatically; confirm it
+  with `lemonade status`. Headless installations run `lemond`. The server
+  listens on port 13305 by default and honors `LEMONADE_HOST` and
+  `LEMONADE_PORT`.
 
 Any other OpenAI-compatible server works the same way once it is serving.
 

@@ -61,6 +61,16 @@ void main() {
       antigravityNetwork.any((r) => r['path'] == '/v1internal:onboardUser'),
       isTrue,
     );
+    final lemonade = providers.firstWhere((p) => p['provider'] == 'lemonade');
+    final lemonadeNetwork =
+        (lemonade['network'] as List).cast<Map<String, dynamic>>();
+    expect(
+      lemonadeNetwork.every(
+        (record) =>
+            (record['target'] as String).startsWith('http://127.0.0.1:13305/'),
+      ),
+      isTrue,
+    );
   });
 
   test('runtime access report honors profile and exclusions', () {
@@ -98,6 +108,39 @@ void main() {
     expect(
         ollama.network.first.target, 'https://ollama.internal:9443/api/tags');
     expect(ollama.network.first.target, isNot(contains('token=secret')));
+  });
+
+  test('local runtime manifest shares HTTPS and Lemonade port resolution', () {
+    final report = buildRuntimeAccessReport(
+      generatedAt: 1,
+      includeReads: false,
+      includeNetwork: true,
+      environment: const {
+        'HOME': '/home/tester',
+        'OLLAMA_HOST': 'https://ollama.internal',
+        'LMSTUDIO_HOST': 'https://lmstudio.internal',
+        'LEMONADE_HOST': 'lemonade.internal',
+        'LEMONADE_PORT': '14000',
+      },
+      os: 'linux',
+    );
+
+    List<String> targets(String provider) => report.providers
+        .firstWhere((entry) => entry.provider == provider)
+        .network
+        .map((record) => record.target)
+        .toList();
+
+    expect(targets('ollama'),
+        everyElement(startsWith('https://ollama.internal/')));
+    expect(
+      targets('lmstudio'),
+      everyElement(startsWith('https://lmstudio.internal/')),
+    );
+    expect(
+      targets('lemonade'),
+      everyElement(startsWith('http://lemonade.internal:14000/')),
+    );
   });
 
   test('runtime access manifest never lists generation endpoints', () {

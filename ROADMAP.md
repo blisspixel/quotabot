@@ -516,7 +516,18 @@ here is the final one.
     `quotabot.verify.v1` record with `--json`, exits 65 on any failure, and
     names each provider's own usage surface for the human cross-check. The
     matrix itself is filled from date-stamped verify records per OS; the first
-    Windows column is recorded, macOS and Linux remain.
+    Windows column is recorded, macOS and Linux remain. Windows was rerun at
+    commit `24631ce` on 2026-07-09: 11 provider adapters passed snapshot schema,
+    account uniqueness, and no-prompt/no-source/no-token/no-generation runtime
+    boundary checks. An isolated manual-quota matrix also passed healthy, low,
+    exhausted, four-account, and reset-edge states; Ollama's 12-model result was
+    independently confirmed with `ollama list` and its idle state with
+    `ollama ps`. LM Studio's two-model inventory was independently confirmed
+    through its CLI and native API. Starting Lemonade exposed a default-port
+    drift from its current 13305 release; the adapter, access manifest, tests,
+    and docs were corrected, then its one-model inventory was confirmed through
+    its CLI and API. Remaining work is the native macOS/Linux columns and human
+    provider-view cross-checks for the unconfirmed cloud cells.
 23. [x] Re-audit no-surprise billing end to end. Confirm runtime sources still
     avoid paid model, chat, image, and content-generation APIs; confirm LiteLLM
     paid API routes stay opt-in; confirm `--budget=quota` excludes manual,

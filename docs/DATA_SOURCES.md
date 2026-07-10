@@ -196,8 +196,8 @@ actually down).
   `http://127.0.0.1:1234`. The LM Studio local server must be started (Developer
   tab, or `lms server start`).
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
-  (falling back to `/v1/models`). Honors `LEMONADE_HOST`, default
-  `http://127.0.0.1:8000`.
+  (falling back to `/v1/models`). Honors `LEMONADE_HOST` and `LEMONADE_PORT`;
+  the default is `http://127.0.0.1:13305`.
 - Other runtimes: anything exposing an OpenAI-style `/v1/models` endpoint (Jan,
   llama.cpp / llamafile, GPT4All, text-generation-webui, KoboldCpp) can be added
   with the same shared `localRuntimeQuota` helper; only the discovery URL and

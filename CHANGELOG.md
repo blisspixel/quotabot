@@ -35,6 +35,13 @@ Notable changes to quotabot. Newest first.
   fleet-level zero-token boundary check.
 
 ### Fixed
+- Lemonade local-runtime discovery and its runtime access manifest now use the
+  current server default at loopback port 13305, honor both `LEMONADE_HOST` and
+  `LEMONADE_PORT`, and share endpoint resolution so the manifest always names
+  the destination used by collection.
+- The four-process manual-quota CLI integration test now has an explicit
+  integration-test timeout budget, preventing false failures under full-suite
+  coverage instrumentation on slower runners.
 - Profile editing no longer permits a non-empty provider catalog to be saved
   with every provider deselected, which previously reloaded as unrestricted.
 - An initial desktop refresh failure now leaves the loading state and exposes a
