@@ -424,7 +424,9 @@ RouteFallback _fallbackFor(
     return RouteFallback(
       kind: RouteFallbackKind.local,
       provider: l.provider,
-      reason: 'Skip the pick? Use local ${l.provider} - free and always on.',
+      reason: 'Skip the pick? ${l.provider} is reachable through a '
+          'local-runtime adapter; execution location and cost are not '
+          'independently verified.',
     );
   }
   final resetting = subs
@@ -759,8 +761,9 @@ int _compareSubscriptionCandidates(RouteCandidate a, RouteCandidate b) {
 /// Policy: prefer the metered subscription with the strongest risk-adjusted
 /// runway score, as long as it clears [comfortThreshold] percent after burn and
 /// leases (so we don't burn the last sliver of a cap). If no subscription clears
-/// the threshold, recommend any available local runtime as a free, always-on
-/// fallback. If there is no local fallback either, recommend the least-bad
+/// the threshold, recommend an available runtime-classified fallback. Adapter
+/// reachability alone does not prove execution location or cost. If there is no
+/// local fallback either, recommend the least-bad
 /// fresh subscription that still has headroom above the spent floor; otherwise
 /// the one that resets soonest. Cached stale windows remain visible in ranked
 /// evidence but are never recommended as usable capacity.

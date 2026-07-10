@@ -6,8 +6,8 @@
 **htop for your agentic-AI quota plans.**
 
 See how much quota you have left across your agentic AI coding subscriptions, in
-one place, and route the next request to whichever one has budget, so you never
-stall mid-flow on a spent cap or leave paid quota sitting unspent.
+one place, and route the next request to whichever one has budget, so you can
+reduce quota-related stalls and avoid leaving included quota unused.
 
 > Early and under active development (0.x). The core works and is in daily use;
 > expect changes on the road to 1.0. See [ROADMAP.md](ROADMAP.md).
@@ -16,14 +16,14 @@ quotabot does two things:
 
 1. **Shows your remaining quota** for the rolling-window subscriptions you pay
    for: Claude (Pro/Max), Codex (OpenAI), Antigravity / Gemini (Google), and
-   Grok (xAI). It also surfaces what your **local LLM runtimes** (Ollama, LM
-   Studio, Lemonade) have loaded, so a free local model is always in view.
+   Grok (xAI). It also surfaces what supported **local LLM runtimes** (Ollama,
+   LM Studio, Lemonade) have loaded while their daemon is reachable.
 2. **Recommends where to send the next request.** `quotabot suggest` (and the
    same logic over MCP) ranks your subscriptions by confidence-weighted runway
    with a small use-it-or-lose-it boost for measured quota that would otherwise
-   expire unused, and falls back to a local model when subscriptions are low, so
-   AI tools and agents can route across your accounts instead of stalling on a
-   spent cap.
+   expire unused, and can fall back to a reachable local model when subscriptions
+   are low, so AI tools and agents can route across accounts instead of guessing
+   from a spent short-window bar.
 
 It reuses the tokens your tools already store, so most providers need no setup:
 Claude and Codex read live when their apps are signed in, Antigravity reads from
@@ -45,19 +45,22 @@ Highlights:
   strip.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, smoothed and reset-aware best times to
-  run). Only quota metadata is ever read, never prompts, code, or other content.
-- **Zero usage tokens.** Only quota metadata is ever read, never a model or
-  inference call, so quotabot never spends a usage token.
+  run). Outputs contain quota and routing metadata, never prompts, code, model
+  output, or other user content.
+- **Zero usage tokens.** quotabot makes no model or inference call, so its quota
+  and routing operations never spend a usage token.
 - **Advisor, not a proxy.** quotabot suggests where to send the next request;
   your own tools and agents make the call. It stays out of your request path, so
   there is nothing new to route through and nothing new to trust with your
-  traffic - just a read-only signal that helps you get the most out of the
+  traffic - just a content-blind metadata signal that helps you use the
   subscriptions you already pay for.
-- **Local-first, your data is yours.** No account, no cloud, no telemetry; your
-  tokens, history, and preferences stay on your machine. Most reads are local
-  files; for a few providers quotabot makes a minimal call to the provider's own
-  quota endpoint (reusing a token their app already stored) only when needed, and
-  sends none of your prompts, code, or content.
+- **Local-first, your data is yours.** No quotabot account, hosted service, or
+  telemetry. Tokens, history, cache, preferences, profiles, and leases stay on
+  your machine. Some live adapters send credentials and quota metadata to that
+  provider's own metadata endpoint; Antigravity can also perform its provider-
+  required account onboarding step before reading quota. External alert webhooks remain
+  loopback-only unless you explicitly allow an external host. No path sends
+  prompts, code, model output, or other user content.
 
 ## What it shows
 
@@ -97,8 +100,8 @@ Google's consumer Gemini CLI has been superseded by Antigravity, so Google
 coverage runs through the Antigravity adapter. Its live Cloud Code quota read is
 preferred; local Antigravity settings are only used for account discovery and
 offline last-known fallback, where the result is marked "(this machine)". Any
-OpenAI-compatible local server (Lemonade, Jan, llama.cpp, GPT4All, and similar)
-is detected the same way. NVIDIA NIM is an optional free trial signal when
+supported OpenAI-compatible local server uses the same normalized local-runtime
+shape. NVIDIA NIM is an optional free trial signal when
 `NVIDIA_API_KEY` or `nvapi` is present: quotabot confirms the key with a
 model-list metadata read, but does not invent a numeric balance because NVIDIA
 does not expose one without using the service. Because no quota windows are
@@ -125,6 +128,11 @@ curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh
 irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 ```
 
+These convenience commands trust the bootstrap script delivered by GitHub over
+TLS; the downloaded release archive is then checksum-verified. For an
+inspect-before-run path and provenance verification, see
+[docs/SETUP.md](docs/SETUP.md#inspect-before-running-the-installer).
+
 Restart your terminal, then run `quotabot doctor`. Claude and Codex should read
 live immediately when their host apps are signed in. Full getting-started guide,
 including which providers need a one-time login: [docs/SETUP.md](docs/SETUP.md).
@@ -136,9 +144,11 @@ CLI). Details in [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Keeping Antigravity and Grok live
 
-Antigravity and Grok are live for the account their app is signed into, and
-quotabot refreshes that token on its own. To pin a specific account, or if an app
-is signed out, connect quotabot's own login once (no Google Cloud setup needed):
+Antigravity and Grok can use the account their app has made discoverable. A
+quotabot login creates a separate refreshable grant for that discovered account,
+which is useful for account pinning or when the host credential is short-lived.
+Run the provider app on this machine first; the grant does not replace local
+account discovery. No Google Cloud setup is needed:
 
 ```bash
 quotabot login grok          # device-code flow
@@ -147,68 +157,51 @@ quotabot doctor              # confirm it reads live
 ```
 
 quotabot stores its own refresh token under your per-user config directory
-(owner-only on POSIX), independent of the app's credentials. Details in
-[docs/SETUP.md](docs/SETUP.md#4-keep-grok-and-antigravity-live-optional).
+(with owner-only permissions attempted best-effort), independent of the app's
+credentials. Details in
+[docs/SETUP.md](docs/SETUP.md#4-keep-grok-and-antigravity-live-or-pin-an-account-optional).
 
 ## Routing for tools and agents
 
 ```bash
-quotabot suggest          # recommended provider + ranked alternatives
-quotabot suggest --json   # the same decision for scripts and agents
-quotabot suggest --local-first  # prefer local runtime before subscription quota
-quotabot suggest --cost-penalty=codex:2  # explicit caller cost penalty
-quotabot models           # every model you can route to now, with budget + caps
-quotabot models --budget=quota  # no-surprise routing: local + measured included quota
-quotabot models --budget=local  # hard cap to free local-runtime models
-quotabot watch            # alert when a window goes low, naming where to route
-quotabot watch --waste-threshold=35  # alert when quota is projected to expire unused
-quotabot top --exclude=codex  # hide a provider from this quota read only
-quotabot suggest --use-expiring-quota  # model pick may use included quota before reset
-quotabot stats --tier-plan=Lite:50:10,Current:100:20 --current-price=20  # explicit tier fit
-quotabot report           # weekly quota-health markdown export
-quotabot verify           # honesty checks over one live read (exit 65 on failure)
-quotabot verify --json    # includes runtime access observation for that read
-quotabot explain --reads --network  # dry-run manifest of local reads and hosts
+quotabot suggest              # balanced provider recommendation
+quotabot suggest --local-first  # prefer a reachable local runtime
+quotabot suggest --task=hard  # one concrete model for supplied requirements
+quotabot models               # current registry entries, availability, budget, capabilities
+quotabot watch                # alert on a low binding window and name the next route
+quotabot verify               # test one live read for truthful behavior
 ```
 
-`quotabot watch` polls in the background and raises a low-quota alert the moment
-a window is spent or nearly so, naming where to send work next. Add
-`--waste-threshold=N` to also raise a `projected_waste` alert when the current
-burn pace would leave at least N percent of a renewing paid window unused at
-reset. Add `--webhook` to POST each alert (loopback unless `--allow-external`)
-so it can reach a tray toast, a shell, or chat. Quota-reading CLI commands accept
-`--exclude=A,B` after `--profile` for one-off provider avoidance without changing
-saved profiles. The default provider recommendation uses the model catalog as a
-capability floor for agentic coding, so a provider with broad account headroom
-does not win when its capable model pool is exhausted. Add
-`--provider-route --task=simple` (or the other model filters) when you still want
-a provider-level answer but the next task has different capability needs. The
-same recommendation is
-available over MCP stdio or
-opt-in MCP Streamable HTTP (`suggest_provider`, cache-only `decide_now`,
-`reserve_provider`/`release_provider` leases, `list_models`, `suggest_model`,
-with optional `profile`/`account` filters, one-request `exclude` lists, and
-`local_first` routing, explicit `cost_penalties`, provider-route task filters,
-model `budget` filters
-(`local` or measured `quota`), and
-model `use_expiring_quota`, local model readiness (`loaded` versus `cold`), and
-`quotas://alerts` subscriptions) and a
-plain loopback HTTP JSON server (`GET /suggest?exclude=codex,grok` or
-`GET /suggest?local_first=true`, plus `cost_penalty=codex:2` when the caller
-explicitly wants cost-aware ranking, and `task=simple` or `require_vision=true`
-when the provider route should use a caller-supplied capability floor). Use model `budget=quota` when a caller
-must avoid credit-backed or request-metered spend; temporary included-quota
-models stop qualifying for that policy after their documented cutoff. For how an agent should call quotabot and route, see
-[AGENTS.md](AGENTS.md). For a turnkey fleet setup, see the LiteLLM proxy plugin
-in [integrations/litellm/](integrations/litellm/), which routes each request to
-a deployment with budget, writes optional local routed-request metrics, and
-defaults to no-surprise-billing guardrails: normal API-key deployments are
-treated as paid API spend and skipped unless explicitly enabled, while true
-included quota-plan deployments must be labeled separately and explicitly marked
-with overages disabled. The analytics view surfaces those metrics, including
-local/quota/paid API spend-class counts, when the plugin writes the default
-`~/.quotabot/litellm-metrics.jsonl` file. For
-language-client adoption, see the Python and TypeScript MCP snippets in
+The defaults are deliberate:
+
+| Intent | Command | Default ordering and budget |
+|---|---|---|
+| Pick a provider | `quotabot suggest` | measured subscriptions first, reachable local fallback |
+| Prefer local execution | `quotabot suggest --local-first` | reachable local runtime before subscriptions |
+| Pick a model | `quotabot suggest --task=hard` | available first; local-runtime, loaded, lighter provider tier, then headroom |
+| Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; not proof of execution location or cost |
+| Restrict to quota-plan and runtime classes | `quotabot suggest --task=hard --budget=quota` | measured included quota plus local-runtime entries; excludes catalogued manual and paid API classes |
+| Inspect candidates | `quotabot models` | entries for providers represented in the current registry, ordered by routability with availability explicit |
+
+Known 0.5.14 limit: Ollama can offload cloud models through its local daemon,
+and quotabot does not yet have authoritative execution-location evidence for
+those entries. Do not use an installed Ollama cloud model to satisfy a strict
+local-only policy; conservative classification is a 1.0 release gate.
+
+`--use-expiring-quota` applies only to a model suggestion and lets measured
+included quota beat local when local history projects meaningful quota would
+expire unused soon. `--exclude=A,B` avoids providers for one read. Advanced
+capability, profile, account, alert, cost-policy, report, calibration, and
+provenance commands are documented in [docs/USAGE.md](docs/USAGE.md).
+
+For agent integration, use the MCP server described in [AGENTS.md](AGENTS.md).
+It exposes live and cache-only decisions, model filters, resources, and expiring
+local reservations over stdio or opt-in loopback HTTP with bearer auth available.
+A smaller
+plain loopback JSON endpoint is available for clients that do not speak MCP.
+For an execution handoff, the [LiteLLM example](integrations/litellm/) consumes
+quotabot's advice with explicit loopback authentication and no-surprise spend
+classes. Python and TypeScript MCP examples live in
 [integrations/mcp_clients/](integrations/mcp_clients/).
 
 ## Project layout
@@ -218,12 +211,18 @@ quotabot/
   app/           Flutter desktop application (Windows, macOS, Linux)
   collector/     Dart package: adapters, normalized model, auth, CLI, MCP server
   integrations/  LiteLLM proxy plugin and MCP client snippets
-  docs/          Setup, usage, building, architecture, routing math, data sources
+  docs/          Setup, usage, trust, architecture, strategy, and reference
   tools/         Packaging, icon, and developer helper scripts
 ```
 
 The app and the collector are both Dart; the app imports the collector directly.
-For design and internals see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Use the [documentation index](docs/README.md) to find setup, usage, trust, and
+integration guides. For product direction see
+[docs/PRODUCT-STRATEGY.md](docs/PRODUCT-STRATEGY.md); for design and internals see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Security issues should be reported privately through [SECURITY.md](SECURITY.md).
+Development and validation guidance is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer and terms of service
 
@@ -233,11 +232,16 @@ Codeium/Windsurf, or any other provider. All product names, logos, and trademark
 are the property of their respective owners and are used here only to identify the
 service whose quota is being displayed.
 
-quotabot reads only quota and usage metadata. It prefers local state, and for some
-providers it makes a minimal call to the provider's own quota/usage endpoint -
-reusing a token that provider's CLI or app already stored on your machine - to read
-live numbers. It makes no model or inference calls, sends none of your prompts,
-code, or content, and keeps your data on your machine. Even so:
+quotabot produces quota and routing metadata only. It prefers local state and,
+for some providers, makes a bounded authenticated call to that provider's own
+quota or model-list endpoint. Antigravity collection can also perform the
+provider-required account onboarding request that makes its quota endpoint
+available. Normal operation can read credential material and
+write local cache, history, preferences, grants, manual entries, and leases; the
+credential values are never included in outputs. It makes no model or inference
+calls and sends no prompts, code, model output, or other user content. Data stays
+local except for provider metadata requests and alert metadata sent to an
+external webhook only when the user explicitly enables that host. Even so:
 
 - **You are solely responsible for ensuring your use complies with the Terms of
   Service and acceptable-use policies of every provider you connect to it.**

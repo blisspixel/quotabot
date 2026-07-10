@@ -11,8 +11,9 @@ quotabot has two parts, and you can use either on its own:
 quotabot reads quota metadata from the safest source each provider exposes. Most
 reads come from local files your existing AI tools already wrote; live providers
 may call their own quota or model-list metadata endpoint with an existing local
-token or key. quotabot makes no model calls, so every command here costs zero
-usage tokens.
+token or key. Antigravity may also perform its provider-required account
+onboarding request before reading quota. quotabot makes no model calls, so every
+command here costs zero usage tokens.
 
 ## Fastest path: install, inspect, then repair
 
@@ -33,21 +34,22 @@ desktop widget, and routing.
 
 ---
 
-## 1. Sign in to the tools you use (once)
+## 1. Make provider evidence available
 
-quotabot does not log in to providers for you; it reads what their own apps have
-already saved. So before running quotabot, make sure you have used each tool at
-least once on this machine:
+quotabot normally reuses the account state each provider's own app has already
+saved. Grok and Antigravity also support an optional quotabot-owned OAuth grant
+for longer-lived reads or account pinning. There is no quotabot account.
 
-- **Live when their app is signed in:** Codex CLI, Claude Code.
-- **Live while their app is fresh:** Grok CLI, Antigravity IDE (step 4 keeps
-  these live longer). Antigravity uses the live Cloud Code quota read when
-  available; local settings are only an offline fallback.
-- **Optional key-based status:** NVIDIA NIM trial access appears when
-  `NVIDIA_API_KEY` or `nvapi` is set. It reports availability only because
-  NVIDIA does not expose a zero-cost numeric quota window.
-- **Detected automatically, no setup:** Kiro, Cursor, Windsurf, and a local
-  runtime (Ollama, LM Studio, or Lemonade) while its server is running.
+| Provider class | Default evidence | Optional quotabot action | Refresh and scope |
+|---|---|---|---|
+| Claude | Claude Code OAuth token | none | live while the host credential is valid |
+| Codex | Codex OAuth token, then newest local session snapshot | none | live when possible; fallback is visibly this-machine |
+| Grok | current Grok CLI token and account file | `quotabot login grok` | own grant refreshes a matching locally discovered account and can pin it |
+| Antigravity | signed-in IDE account and refresh material, then local state fallback | `quotabot login antigravity` | own grant refreshes a matching locally discovered account and can pin it |
+| Cursor, Windsurf/Devin, Kiro | passive local application state | none | opportunistic this-machine evidence |
+| NVIDIA NIM | `NVIDIA_API_KEY` or `nvapi` | set the environment key | status-only; numeric quota remains unknown |
+| Ollama, LM Studio, Lemonade | reachable local server | start the runtime server | live inventory only; never served from cache |
+| Manual entries | user-supplied local window | `quotabot manual set` | self-reported and never refreshed automatically |
 
 If a tool has never run here, that provider simply shows "no live data" until you
 use it once.
@@ -67,7 +69,9 @@ because quotabot reads its models over a local HTTP API. If you have one
 installed but do not see it, start its server:
 
 - **Ollama:** runs as a background service once installed (port 11434). Honors
-  `OLLAMA_HOST`.
+  `OLLAMA_HOST`. Ollama cloud models can be reached through the local daemon;
+  version 0.5.14 does not yet treat those as proof of local-only execution, so do
+  not use them to satisfy a strict local budget.
 - **LM Studio:** loading a model in the chat window is not enough; you must start
   the **local server** (the Developer tab, toggle "Start Server", or run
   `lms server start`). It listens on port 1234.
@@ -76,7 +80,8 @@ installed but do not see it, start its server:
   listens on port 13305 by default and honors `LEMONADE_HOST` and
   `LEMONADE_PORT`.
 
-Any other OpenAI-compatible server works the same way once it is serving.
+Additional OpenAI-compatible runtimes can use the same normalized adapter shape,
+but they must have a supported discovery adapter before quotabot will list them.
 
 ## 2. Install the quotabot CLI
 
@@ -97,6 +102,35 @@ The installer downloads a prebuilt CLI bundle, verifies its checksum, and expose
 `quotabot` on your PATH from `~/.local/bin` (macOS/Linux) or
 `%LOCALAPPDATA%\quotabot\bin` (Windows). To install from a fork, set
 `QUOTABOT_REPO=owner/quotabot` first.
+
+### Inspect before running the installer
+
+The one-line commands trust the mutable bootstrap script delivered from GitHub
+over TLS. The script then verifies the downloaded release archive against its
+published SHA-256 sidecar. If you prefer to inspect the bootstrap first:
+
+```bash
+curl -fsSLo install.sh https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh
+less install.sh
+bash install.sh
+```
+
+PowerShell:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 -OutFile install.ps1
+Get-Content .\install.ps1
+& .\install.ps1
+```
+
+Release archives also carry GitHub artifact attestations. After downloading an
+archive from the release page, verify it, for example, with `gh attestation
+verify quotabot-windows-x64.zip --repo blisspixel/quotabot`. Use the matching
+archive name on macOS or Linux. The checksum proves the archive matches the
+published sidecar; this basic attestation command verifies repository provenance
+but does not by itself constrain the signer workflow or expected tag. The release
+smoke workflow adds `--signer-workflow`, `--source-ref`, `--source-digest`, and
+`--deny-self-hosted-runners` for the strict release gate.
 
 > No prebuilt binary for your platform yet, or you would rather not run one? Skip
 > to [Run everything from source](#run-everything-from-source) at the bottom.
@@ -131,14 +165,15 @@ quotabot stats            # per-provider history and analytics
 quotabot suggest          # where to send the next request (step 6)
 ```
 
-## 4. Keep Grok and Antigravity live (optional)
+## 4. Keep Grok and Antigravity live or pin an account (optional)
 
-Claude and Codex read live when their host apps have valid signed-in
-credentials. Codex can fall back to this-machine session snapshots if its live
-read is unavailable. Antigravity and Grok are live for the account their app is
-signed into, and quotabot refreshes that token on its own. Two cases call for a
-one-time `login`: the app is signed out, or you use several accounts and want a
-specific one shown.
+Claude and Codex read with their host credentials and do not have a quotabot
+login flow. Codex can fall back to this-machine session snapshots. Grok can use
+the CLI's current token, and Antigravity can use refresh material from a signed-
+in IDE. A one-time quotabot login creates a separate refreshable grant when the
+host credential is too short-lived or a specific account must be pinned. It does
+not replace initial account discovery: run the provider app on this machine
+first, and retain its local account identity state.
 
 ```bash
 quotabot login grok          # device-code flow; confirm in the browser
@@ -198,19 +233,85 @@ route eligible. It runs the same on all three platforms.
 
 ---
 
+## Update, uninstall, and rollback
+
+### Update the release CLI
+
+Re-run the same one-line installer. It replaces the CLI bundle and preserves
+quotabot's separate config, history, grants, profiles, and manual entries. Close
+`quotabot top`, MCP, and other running quotabot processes first on Windows so the
+executable can be replaced. Then run `quotabot --version` and `quotabot doctor`.
+
+### Uninstall the release CLI but preserve data
+
+macOS and Linux:
+
+```bash
+rm -f "$HOME/.local/bin/quotabot"
+rm -rf "$HOME/.local/share/quotabot"
+```
+
+Windows PowerShell removes only the installed bundle and its user PATH entry,
+leaving other `%LOCALAPPDATA%\quotabot` metadata intact:
+
+```powershell
+$installDir = Join-Path $env:LOCALAPPDATA 'quotabot\bin'
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$kept = @($userPath -split ';' | Where-Object { $_ -and $_ -ne $installDir })
+[Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
+Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\bin') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\lib') -Recurse -Force -ErrorAction SilentlyContinue
+```
+
+Open a new terminal after uninstalling. Source-built desktop shortcuts and app
+bundles are separate from the release CLI. Source setup does not yet provide a
+single cross-platform uninstaller; [BUILDING.md](BUILDING.md) describes its
+build outputs and launcher behavior.
+
+### Roll back
+
+Version 0.5.14 has no automatic rollback command. Download the previous release
+archive and its `.sha256` sidecar from GitHub Releases, verify both, stop running
+quotabot processes, and restore that bundle in the same install location. Keep
+the local metadata directory: public cache and profile formats are additive
+within the 0.5 line. Run `quotabot --version` and `quotabot doctor` after the
+replacement.
+
+### Reset all local quotabot data
+
+This is destructive and is not required for uninstall. Sign out any quotabot-
+owned provider grants if possible. On macOS or Linux, remove the per-user data
+directory in the table below. On Windows, the same root also contains the
+release CLI, so preserve `bin` and `lib` when resetting data in place:
+
+```powershell
+$root = Join-Path $env:LOCALAPPDATA 'quotabot'
+Get-ChildItem -LiteralPath $root -Force |
+  Where-Object { $_.Name -notin @('bin', 'lib') } |
+  Remove-Item -Recurse -Force
+```
+
+This deletes cache, history, preferences, profiles, manual entries, grants,
+leases, and alert state while leaving the Windows CLI on PATH. For a complete
+Windows removal, run the PATH-aware uninstall first, then remove the remaining
+`%LOCALAPPDATA%\quotabot` directory.
+
 ## Where quotabot stores its data
 
-quotabot writes only its own cache, history, preferences, and any login tokens
-you create. Everything is local and per-user:
+quotabot writes bounded local metadata: cache, history, preferences, profiles,
+manual entries, OAuth grants and rotations, routing leases, and alert state.
+Everything is per-user:
 
 | OS      | Location                                              |
 |---------|------------------------------------------------------|
-| Windows | `%LOCALAPPDATA%\quotabot`                             |
+| Windows | `%LOCALAPPDATA%\quotabot` (shared data and release root) |
 | macOS   | `~/.config/quotabot`                                  |
 | Linux   | `$XDG_CONFIG_HOME/quotabot` (or `~/.config/quotabot`) |
 
-Login tokens are owner-only on macOS/Linux and ACL-restricted on Windows. Delete
-that folder to reset quotabot completely.
+Owner-only login-token permissions are attempted best-effort on macOS, Linux,
+and Windows. A permission-hardening failure currently does not abort the write.
+The Windows directory also contains the release `bin` and `lib` folders, so
+reset and uninstall require the separate procedures above.
 
 ## Troubleshooting
 
@@ -245,6 +346,8 @@ cd app
 flutter run -d windows    # or: macos, linux
 ```
 
-Every command in this guide is a quota metadata read and costs zero usage
-tokens. Some live providers contact their own metadata endpoint, but quotabot
-never sends prompts, code, or inference requests.
+Quota and routing reads cost zero usage tokens. Login, logout, manual-entry,
+preference, cache/history, and lease operations can write bounded local metadata.
+Some live providers contact their own metadata endpoint, and Antigravity may
+perform its provider-required account onboarding request. quotabot never sends
+prompts, source code, model output, or inference requests.

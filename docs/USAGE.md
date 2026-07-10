@@ -76,7 +76,9 @@ quotabot keeps two tiers of local history, both zero-token: a short raw buffer o
 recent checks (the "usually ~X% free" line and sparkline) and compact hourly
 buckets retained 90 days (the analytics, sampled-day streaks, and contribution
 calendar, best-time windows, and reset-aware schedule hints). No raw points are
-kept long term, and only quota metadata is ever stored, never prompts or code.
+kept long term. Those history files store quota metadata only, never prompts or
+code; other bounded local stores such as grants, profiles, and leases are
+documented below.
 
 For an explicit tier-fit check, pass candidate plan caps as percentages of your
 current plan. Prices are optional and caller-supplied:
@@ -91,16 +93,17 @@ write a spend ledger, or change routing from this advisory.
 
 ## CLI reference
 
-Run `quotabot help` for the live list. Every command is a quota metadata read and
-costs no usage tokens. Most providers read local files; live providers may call
-their own metadata endpoint with an existing local token or key. Add `--json` to
-any read command for machine output.
+Run `quotabot help` for the live list. Quota and routing reads cost no usage
+tokens. Most providers read local files; live providers may call their own
+metadata endpoint with an existing local token or key. Login, logout, manual-
+entry, cache/history, preference, and lease operations can write bounded local
+metadata. Add `--json` to any read command for machine output.
 
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
 | `top`                  | Live dashboard that redraws in place (q quit, r now, s sort). |
-| `models`               | Every model you can route to now, with budget + caps. |
+| `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
 | `calibration`          | How often quotabot's predictions come true (history). |
 | `manual`               | List, set, or remove self-reported quota entries.     |
 | `check <provider>`     | Whether one provider is usable now, and its reset.    |
@@ -214,8 +217,9 @@ routing confidence is lower than for live provider telemetry.
 `quotabot top` is the htop view of your plans: one bar per rolling window for
 every provider, each colored on the headroom scale (green healthy, amber
 tightening, orange low, red spent) with a live reset countdown, your local
-runtimes as always-on fallbacks (with their VRAM, context, installed models, and
-disk detail), and a route line that names where to send the next request. When
+runtimes as reachable fallback candidates (with their VRAM, context, installed
+models, and disk detail), and a route line that names where to send the next
+request. When
 recent history shows a window being drawn down, the binding window also carries a
 forward-looking note:
 a strand probability (the chance it is spent before it resets) when that is
@@ -334,11 +338,16 @@ route only when Claude is spent.
 
 ### Models, calibration, and risk
 
-`quotabot models` lists every model you can route to now across providers and
-local runtimes, each with the live budget that gates it (headroom, window, reset),
-capability hints (context window, tools, vision, reasoning), and the provider's own
-tier (light/standard/flagship), most routable first. Local-runtime models are read
-live; cloud capability hints come from a refreshable catalog. Human `models` and
+`quotabot models` lists models for providers represented in the current registry,
+ordered by routability. Within a provider that has a quota window or a local
+inventory, known entries can retain explicit `available: false` state when their
+budget is unavailable. A non-local provider with no quota windows is omitted, so
+absence can still mean that its snapshot or catalog entry is unavailable. Each
+row carries the budget that gates it
+(headroom, window, reset), capability hints (context window, tools, vision,
+reasoning), and the provider's own tier (light/standard/flagship). Local-runtime
+models are read live; cloud capability hints come from a refreshable catalog.
+Human `models` and
 task-profiled `suggest` rows label live versus cached reads, spend class, real
 account identity when the provider exposes one, per-machine scope, and capture
 age; JSON keeps stable machine fields such as `local_readiness` (`loaded` or
@@ -351,7 +360,7 @@ explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
-Add `--budget=local` for a hard cap to free local-runtime models, or
+Add `--budget=local` for a hard cap to models classified as local-runtime, or
 `--budget=quota` to allow local runtimes plus measured built-in quota plans while
 excluding self-reported manual quotas. `quota` is not permission to use
 request-metered paid APIs; those remain blocked by the LiteLLM guardrails unless
@@ -361,6 +370,10 @@ status views but do not become `models` candidates. If a provider model is only
 temporarily included in a plan, quotabot marks it quota-backed only until the
 documented cutoff; after that point `--budget=quota` excludes it rather than
 drifting into credit-backed usage.
+Ollama can expose cloud-offloaded models through its local daemon. Version 0.5.14
+does not yet have authoritative execution-location evidence for those entries,
+so do not treat an installed Ollama cloud model as proof of local-only or free
+execution; conservative classification is a 1.0 release gate.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only
@@ -399,6 +412,23 @@ MCP uses `cost_penalties: {"codex": 2}` and optional `cost_weight`, while
 loopback HTTP uses `GET /suggest?cost_penalty=codex:2`. These numbers are
 caller-supplied penalty units, not prices inferred by quotabot; they never enable
 request-metered paid API routes.
+
+### Routing intent matrix
+
+| Intent | CLI trigger | Output | Default ordering | Spend envelope |
+|---|---|---|---|---|
+| Choose a provider | `suggest` | provider recommendation and ranked alternatives | measured subscription runway, then reachable local fallback | does not enable catalogued paid API routes |
+| Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; the Ollama caveat still applies |
+| Inspect model candidates | `models` | matching entries represented by the current snapshot and catalog | most routable first; known unavailable entries remain explicit within represented providers | `any` shows the normal catalog policy |
+| Choose one model | `suggest --task=PROFILE` or capability flags | concrete model recommendation | available first; local-runtime, loaded, lighter provider tier, then headroom | `--use-expiring-quota` may let measured included quota beat local |
+| Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud and manual entries, but does not prove execution location; see the Ollama caveat above |
+| Restrict to quota-plan and runtime classes | add `--budget=quota` to a model command | filtered list or concrete model | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; the Ollama caveat still applies |
+| Keep model requirements but return a provider | add `--provider-route` | `quotabot.suggest.v1` provider result | provider ranking after the caller-supplied capability gate | does not enable catalogued paid API routes; the Ollama caveat still applies |
+
+MCP `suggest_provider`, `list_models`, and `suggest_model` expose the same
+policies through explicit arguments. The plain loopback HTTP surface exposes the
+provider subset only. Budget policy constrains eligibility; it does not grant
+permission to spend.
 
 For catalog maintenance, run the audit tool from the collector package:
 
@@ -485,8 +515,9 @@ measured included quota near reset can win a close tie before it expires unused,
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/
-`--min-context`/`--budget` filters) returns the cheapest model that meets the need
-and has budget, local-first. Add `--provider-route` when you want those same
+`--min-context`/`--budget` filters) returns an available qualifying model,
+preferring local-runtime entries, loaded readiness, the provider-declared lighter
+tier, and then headroom. Add `--provider-route` when you want those same
 filters to keep provider-level output instead. With `--use-expiring-quota`, a qualifying measured
 quota-backed model may outrank local when the reset is soon and the included
 quota would otherwise expire unused. The MCP `suggest_model` tool does the same
@@ -506,7 +537,7 @@ and exposes nine tools plus two resources:
   alternatives and a local fallback when subscriptions are low. Pass
   `local_first: true` to prefer a local runtime before subscription quota. Pass
   `cost_penalties` only when the caller already has an explicit cost policy.
-- `decide_now` - the same routing decision from the cheapest cached snapshot,
+- `decide_now` - the same routing decision from the latest cached snapshot,
   with explicit snapshot source, age, and staleness. It never forces a live
   collect, and accepts the same `local_first` and explicit cost policies.
 - `reserve_provider` - create a short local quota lease for a cloud provider
@@ -514,8 +545,9 @@ and exposes nine tools plus two resources:
 - `release_provider` - idempotently release a local routing lease when the
   caller finishes or abandons the dispatch.
 - `check_provider_availability` - whether a named provider is usable now.
-- `list_models` - every model you can route to now (cloud + local), each with its
-  gating provider's live budget and capability hints.
+- `list_models` - matching models (cloud + local) for providers represented in
+  the current registry, ordered by routability with explicit availability,
+  gating budget, and capability hints.
 - `suggest_model` - one concrete model that meets the supplied capability filter
   and has budget. Add `use_expiring_quota: true` to let soon-resetting included
   quota outrank local capacity when projected waste is high.
@@ -536,9 +568,11 @@ clients that only consume MCP resources.
 
 `suggest_provider` and `decide_now` include active local leases in the response
 and expose each candidate's `lease_discount_percent` when a concurrent caller has
-reserved the same provider/account. `reserve_provider` and `release_provider`
-write only local metadata under quotabot's application-data directory. They do
-not contact a model provider, read prompts, or enter the request data path.
+reserved the same provider/account. `reserve_provider` selects its target from a
+live metadata collection, which may contact provider quota endpoints, refresh
+local cache or OAuth state, and perform Antigravity onboarding; the resulting
+lease write is local. `release_provider` only updates the local lease ledger.
+Neither operation calls a model, reads prompts, or enters the request data path.
 Both routing responses include `routing_policy`, so clients can verify whether a
 decision used the default `balanced` mode or the opt-in `local_first` mode.
 

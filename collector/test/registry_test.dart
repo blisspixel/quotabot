@@ -531,7 +531,7 @@ void main() {
     ModelSuggestion sg(ModelRequirements r) =>
         suggestModel(providers, _now, catalog: catalog, requirements: r);
 
-    test('a simple task prefers the free local model', () {
+    test('a simple task prefers the local-runtime model', () {
       final s = sg(taskProfile('simple'));
       expect(s.recommended?.local, isTrue);
       expect(s.recommended?.model.id, 'qwen');

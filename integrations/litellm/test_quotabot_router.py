@@ -24,6 +24,17 @@ class _Key:
 
 
 class RouterTests(unittest.TestCase):
+    def test_shipped_proxy_example_requires_auth_and_loopback(self):
+        root = Path(__file__).resolve().parent
+        config = (root / "config.example.yaml").read_text(encoding="utf-8")
+        readme = (root / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("master_key: os.environ/LITELLM_MASTER_KEY", config)
+        self.assertIn("litellm --config config.yaml --host 127.0.0.1", config)
+        self.assertIn("litellm --config config.yaml --host 127.0.0.1", readme)
+        self.assertIn("Authorization: Bearer $LITELLM_MASTER_KEY", readme)
+        self.assertNotIn("\n   litellm --config config.yaml\n", readme)
+
     def test_key_alias_wins_over_client_metadata(self):
         data = {"metadata": {"agent": "spoofed-agent"}}
         self.assertEqual(QuotabotRouter._agent_id(data, _Key()), "trusted-agent")

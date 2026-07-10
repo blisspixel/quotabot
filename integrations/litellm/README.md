@@ -69,23 +69,47 @@ so routing here stays consistent with the desktop widget and the MCP server.
    request-metered API keys. Quota-plan candidates also need
    `overages_disabled: true` or `overages: disabled`.
 
-3. Launch the proxy with that config:
+3. Generate a local bearer key, then launch the proxy explicitly on loopback.
+   The example config reads `LITELLM_MASTER_KEY` and refuses unauthenticated
+   requests. Do not remove `--host 127.0.0.1`: authentication is defense in
+   depth, not a reason to expose provider-backed routes on the network.
 
-   ```
-   litellm --config config.yaml
+   ```bash
+   export LITELLM_MASTER_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+   litellm --config config.yaml --host 127.0.0.1
    ```
 
-4. Point any OpenAI-compatible client at the proxy and call a logical model:
+   PowerShell:
 
+   ```powershell
+   $env:LITELLM_MASTER_KEY = python -c "import secrets; print(secrets.token_urlsafe(32))"
+   litellm --config config.yaml --host 127.0.0.1
    ```
+
+4. Point any OpenAI-compatible client at the proxy and call a logical model.
+   Bash:
+
+   ```bash
    curl http://127.0.0.1:4000/v1/chat/completions \
+     -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
      -H "Content-Type: application/json" \
      -d '{"model":"frontier-coder","messages":[{"role":"user","content":"hi"}]}'
    ```
 
+   PowerShell:
+
+   ```powershell
+   $headers = @{ Authorization = "Bearer $env:LITELLM_MASTER_KEY" }
+   $body = @{ model = 'frontier-coder'; messages = @(@{ role = 'user'; content = 'hi' }) } | ConvertTo-Json -Depth 4
+   Invoke-RestMethod http://127.0.0.1:4000/v1/chat/completions -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+   ```
+
    The hook rewrites `frontier-coder` to whichever candidate currently has
    budget and is allowed by the spend policy. When all safe subscription
-   candidates are low or unavailable it uses the `local: true` candidate.
+   candidates are low or unavailable it tries the configured `local: true`
+   candidate. When quotabot is unavailable, the hook does not preflight that
+   backend; LiteLLM reports the normal backend failure if its daemon is down.
+   Declare a route local only when its execution is known to stay on the machine.
 
 ## Spend policy
 
@@ -142,10 +166,11 @@ model, served model, gated provider/account when known, selected spend class,
 callback event, HTTP status, Retry-After seconds, callback latency, sanitized
 exception class, tokens, and cost. They never contain prompts, responses,
 exception messages, or source code. The path is constrained to `~/.quotabot`;
-relative paths are placed there. The plugin applies owner-only permissions to
-the metrics directory and file before writing local usage metadata. This closes
-the loop: LiteLLM pipe health, spend, and quotabot subscription headroom in one
-place.
+relative paths are placed there. The plugin attempts owner-only permissions on
+the metrics directory and file before writing local usage metadata, but does not
+abort metrics writes if the operating system rejects that hardening. Keep the
+path inside a protected per-user directory. This closes the loop: LiteLLM pipe
+health, spend, and quotabot subscription headroom in one place.
 
 Use the default `~/.quotabot/litellm-metrics.jsonl` path when you want the
 desktop Quota Analytics screen to show the routed-request summary. The widget
@@ -165,7 +190,9 @@ the default no-surprise-billing policy is stricter: if quotabot is unreachable
 and no local fallback is configured, or every configured route is `paid_api`
 while `allow_paid_api` is false, the hook fails closed before a provider call.
 The proxy keeps working for other routes, but that managed request is rejected
-rather than silently spending API money.
+rather than silently spending API money. A configured local fallback is attempted
+without a separate health probe when quotabot cannot answer, so its daemon can
+still fail at request time.
 
 ## Testing
 
@@ -178,7 +205,8 @@ no model tokens and never leaves the machine.
 
 ## Using it from coding agents
 
-Any OpenAI-compatible coding tool can sit in front of this proxy:
+Any OpenAI-compatible coding tool can sit in front of this proxy. Configure it
+to send `LITELLM_MASTER_KEY` as its API key:
 
 - OpenCode / Claude Code / aider: set the API base to the proxy
   (`http://127.0.0.1:4000`) and call the logical model names.

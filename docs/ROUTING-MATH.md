@@ -1,8 +1,11 @@
 # The mathematics of quotabot routing and quota analytics
 
-Design note (forward-looking; the shipped subset is marked as such). The aim is to
-turn quotabot's local history into routing decisions with stated assumptions and
-honest uncertainty, rather than an opaque heuristic. Everything here is grounded in
+Design note combining implemented equations and research directions. Only rows
+marked `shipped` in the code map describe current behavior. Classical models in
+the research sections are analogies and hypotheses until their assumptions are
+derived and an outcome benchmark validates them; this document makes no
+optimality guarantee. The aim is to turn quotabot's local history into routing
+decisions with stated assumptions and honest uncertainty. Everything here uses
 data we
 already collect (`insights.dart`: burn, pace, reliability, percentiles, trend,
 week-hour heatmap) and the routing primitive we already ship (`analysis.dart`:
@@ -10,8 +13,8 @@ week-hour heatmap) and the routing primitive we already ship (`analysis.dart`:
 how it reduces to the shipped heuristic, so nothing is a rewrite, only a deepening.
 
 The shipped `effectiveHeadroom = clamp(headroom - max(0, burn) * lead, 0, 100)` is
-the linchpin. By the end of this note it is revealed as the first-order (mean,
-risk-neutral) term of a principled forecast, and we extend it carefully outward.
+the starting heuristic. The sections below identify careful extensions and the
+evidence each would need before becoming product behavior.
 
 ---
 
@@ -23,8 +26,8 @@ requirements; the math is how we grant all of them at once.
 **Maya, operations researcher (efficiency).** "Two failure modes, and they are not
 symmetric. Stalling mid-flow on a spent cap is expensive; leaving paid quota
 unspent at reset is pure waste I already paid for. I want an objective that prices
-both and a policy that is optimal against it, not a vibe. Show me the marginal
-value of one more request on each provider and route to the maximum."
+both and a policy evaluated against it, not a vibe. Show me the marginal value of
+one more request on each provider and test whether routing to the maximum helps."
 
 **Dev, the SRE (reliability).** "I think in tail risk and capacity. Don't tell me
 the mean; tell me P(this provider strands me before its reset). When several
@@ -34,14 +37,15 @@ so a stale or thin estimate is never trusted like a fresh one."
 
 **Sol, decision theory / ML.** "This is sequential decision-making under
 uncertainty with replenishing resources and deadlines: a restless multi-armed
-bandit with knapsack constraints. There is a clean index policy hiding in here.
-And we should forecast with predictive intervals, not point estimates - quantify
-what we don't know."
+bandit with knapsack constraints. That may suggest useful index policies, but we
+should prove the assumptions and compare them against simpler policies. Forecast
+with predictive intervals, not point estimates - quantify what we don't know."
 
 **Pip, broke hobbyist coder.** "I have almost no money and barely any history.
-Free and local first, always; only spend paid quota when the task truly needs it
-or the window is about to reset and would be wasted anyway. And please don't make
-me collect a month of data before the tool is smart - borrow strength from the
+Verified zero-cost capacity first; only spend quota when the task truly needs it
+or the window is about to reset and would be wasted anyway. A local-daemon label
+is not enough without execution and cost evidence. And please don't make me
+collect a month of data before the tool is smart - borrow strength from the
 providers that do have history."
 
 Synthesis of requirements:
@@ -49,11 +53,11 @@ Synthesis of requirements:
 | Want | Owner | Math that delivers it |
 |---|---|---|
 | Price stall vs waste | Maya | utility / expected-loss objective (S5) |
-| Marginal value, route to max | Maya | water-filling, Whittle index (S6) |
+| Marginal value, route to max | Maya | auditable runway score; water-filling as research (S6) |
 | Tail risk, P(strand) | Dev | first-passage / survival (S4) |
-| No dogpile | Dev | leases via newsvendor + Erlang (S9) |
+| No dogpile | Dev | expiring local leases; queueing models as research (S9) |
 | Confidence on everything | Dev, Sol | predictive intervals, shrinkage (S3, S11) |
-| Bandit/knapsack policy | Sol | restless RMAB, Lagrangian index (S6) |
+| Sequential allocation | Sol | offline policy comparison and replay (S6) |
 | Free-first, spend only when needed | Pip | cost term + reset-aware pacing (S5, S7) |
 | Smart with little data | Pip | hierarchical Bayes shrinkage (S11) |
 
@@ -185,44 +189,39 @@ turning on the other weights is a smooth generalization.
 
 ---
 
-## 6. Allocation across providers: water-filling and a Whittle index
+## 6. Allocation across providers: shipped heuristic and research analogies
 
-When work is a stream (fan-out, a long session), routing is not one pick but an
-allocation `{x_i}` of request rate across providers. Sol's framing.
+For one decision, the shipped policy ranks eligible providers with an auditable
+confidence-weighted runway score. When work is a stream, an offline model can
+also study an allocation `{x_i}` across providers, but quotabot does not split a
+live request stream itself.
 
-**Water-filling.** Maximize total served subject to each provider's depletion not
-crossing its reset. The Lagrangian optimum equalizes the marginal value of rate
-across all active providers: pour load into the provider whose marginal "time
-bought per unit risk" is highest until its risk rises to meet the next, exactly
-like water finding its level. Concretely, allocate to equalize the index below.
+Water-filling and restless-bandit models are useful research analogies because
+provider capacity depletes, resets, and competes for work. They do not establish
+that the current system is indexable or that the shipped score is a Whittle
+index. Establishing either claim would require a formal state/action model,
+transition assumptions, an indexability derivation, and replay against simpler
+policies.
 
-**Restless multi-armed bandit.** Each provider is an arm whose state (headroom)
-depletes when pulled and replenishes at reset - a restless bandit. The optimal
-policy for restless bandits is intractable in general, but the **Whittle index**
-is the principled, near-optimal relaxation (Lagrangian decomposition of the
-per-arm subsidy-for-passivity). The quotabot index per provider:
+The shipped score has this conceptual shape:
 
 ```
-I_i = ( h_risk_i / max(beta_i, beta_floor) )    # hours of runway, risk-adjusted
-      * freshness_i                             # decay stale data toward 0
-      * (1 + W_reset * waste_fraction_i)        # boost near-wasted flat-rate quota
-      / (1 + C_money * cost_penalty_i).         # explicit caller cost discount
+score_i = ( h_risk_i / max(beta_i, beta_floor) ) # hours of runway, risk-adjusted
+          * confidence_i                         # bounded evidence quality
+          * (1 + W_reset * waste_fraction_i)     # bounded near-reset boost
+          / (1 + C_money * cost_penalty_i).      # explicit caller cost discount
 ```
 
-Route to `argmax_i I_i`; for streaming work, split rate proportionally to a
-softmax of `I_i` (a smooth water-filling). `I_i` has units of risk-adjusted
-runway-hours, is comparable across providers, degrades gracefully as data thins
-(via `freshness_i` and the shrinkage of S11), and reduces to "most headroom first"
-when burn, caller cost penalties, and waste terms are neutral. `cost_penalty_i`
-is explicit caller policy rather than a price quotabot infers, preserving the
-no-cost-ledger boundary. This single index is the mathematical heart of
-"routing as a primitive."
+Route one request to the eligible maximum. `score_i` is derived from projected
+runway and bounded multipliers, degrades as evidence weakens, and reduces toward
+headroom ordering when history and optional policy inputs are absent.
+`cost_penalty_i` is explicit caller policy rather than a price quotabot infers,
+preserving the no-cost-ledger boundary.
 
-**Knapsack with deadlines.** Over a horizon spanning multiple resets, choosing
-which requests to place where to maximize served-before-deadline is a
-multiple-knapsack / job-scheduling problem (resets are deadlines, headroom is
-capacity). The greedy `argmax I_i` is the standard 1 - 1/e-competitive heuristic;
-exact DP is available offline for the optimizer/report view.
+Over a horizon spanning multiple resets, an offline evaluator can formulate
+allocation as a deadline and capacity problem. No competitive ratio is claimed
+for the current greedy policy. Dynamic programming or other oracle policies may
+serve as replay baselines when their assumptions match the recorded data.
 
 ---
 
@@ -292,22 +291,23 @@ use a Beta-Binomial posterior (S11) so `A_i` is a credible interval, not a britt
 ratio. Reliability enters the index as a multiplier on `V_served`.
 
 **Leases for the dogpile (Dev's headline).** N agents reading the same snapshot
-all pick the same freshest provider and collectively breach it - a thundering
-herd. Model concurrent in-flight requests as an M/M/c-style system; the chance an
-arriving request finds the provider already saturated is Erlang-C in the offered
-load. The fix is a `reserve`/`release` lease: each route provisionally debits an
-estimate `c_hat` of capacity. How much to reserve is a **newsvendor** problem -
-under-reserve and you dogpile (stall cost `C_stall`), over-reserve and you idle
-quota (waste cost `W_reset`):
+can pick the same provider and collectively overcommit it. The shipped fix is a
+bounded `reserve`/`release` lease with idempotency and TTL expiry. The caller
+chooses an explicit bounded reservation amount; quotabot does not infer job size
+because it does not read the task.
+
+Queueing or newsvendor models could help choose a reservation policy in future,
+but only after arrival, service, and consumption assumptions are measured. One
+candidate research form is:
 
 ```
 reserve_quantile = C_stall / (C_stall + W_reset),
 c_reserve = F_consumption^{-1}( reserve_quantile ).
 ```
 
-Leases are decremented from `h_i` before the next routing decision, so concurrent
-deciders see each other's intent and water-fill instead of dogpiling. This is the
-biggest dependability gap and it has a clean, classical answer.
+Leases are decremented from effective headroom before the next routing decision,
+so concurrent deciders see each other's intent. Today that behavior is a local
+coordination heuristic, not an Erlang-C or newsvendor implementation.
 
 ---
 
@@ -407,8 +407,9 @@ Properties we can state and defend:
   applies confidence, the first `W_reset` projected-waste multiplier, and an
   optional caller-supplied cost discount.
 - **Risk-monotone.** `dscore/dz <= 0`: more caution never increases a pick's score.
-- **Fail-soft.** Missing data -> `freshness -> 0` -> the provider sinks below the
-  guaranteed fallback, never above it. The invariant holds by construction.
+- **Fail-soft.** Stale cloud snapshots are ineligible for live routing, and every
+  decision carries fallback or explicit no-safe-route behavior. Policy tests,
+  not the formula alone, pin this invariant.
 - **Units.** `score` is risk-adjusted, reliability-weighted runway-hours after
   explicit waste and cost-policy multipliers: a quantity a board can interrogate,
   not an arbitrary index.
@@ -428,12 +429,13 @@ Two paid providers and a local runtime, `L = 1h`, `z = 1.28` (10th-pctile cautio
 - Claude: `h_risk = 0.25 - 0.20*1 - 1.28*s ~= 0.02`; `p_strand ~ Phi((0.20*3 -
   0.25)/s_T)` is high -> low runway, high strand risk.
 - Codex: `h_risk ~= 0.60 - 0.05 - 1.28*small ~= 0.53`; runway `~10.6h` -> clear winner.
-- Ollama stays the always-on floor; it only wins if both paid providers fall below
-  the feasibility floor.
+- A reachable, locally executed Ollama model can be the fallback; cloud-offloaded
+  Ollama models require separate classification and cannot be assumed free.
 
 Mean-only (`z=0`) would still pick Codex here, but near a boundary (Claude at
-0.35 instead of 0.25) the risk term flips the pick before a real stall happens -
-the measurable improvement over the shipped heuristic.
+0.35 instead of 0.25) the risk term can flip the pick. This illustrates an
+expected effect; replay and calibration must establish whether it improves
+realized outcomes.
 
 ---
 
@@ -446,7 +448,7 @@ the measurable improvement over the shipped heuristic.
 | confidence + provenance | `RouteCandidate.confidence`, `as_of`/`risk_z` | shipped (suggest, top, widget route signal) |
 | `p_strand` surfaced in `top` | `top.dart` `_forecast` (strand % / time-to-empty) | shipped |
 | `--risk` opt-in | `analysis.dart` `suggestRoute` riskZ | shipped |
-| unified `score_i` (Whittle) | `analysis.dart` `suggestRoute` | shipped |
+| auditable `score_i` heuristic | `analysis.dart` `suggestRoute` | shipped |
 | score component provenance | `analysis.dart` `RoutingScoreBreakdown` -> `runway_hours` | first optimizer hook shipped |
 | projected-waste route boost | `analysis.dart` `RoutingScoreBreakdown` -> `waste_boost` | first waste-weight hook shipped |
 | explicit cost discount | `analysis.dart` `RoutingScoreBreakdown` -> `cost_discount` | opt-in caller policy shipped |
@@ -473,18 +475,20 @@ one-knob, reduces-to-previous change with its own tests.
 
 ## 15. Design principles
 
-- Every estimator carries an error bar (EWMA variance, Wald/credible intervals, MAD).
-- The objective is stated, and the policy is optimal or near-optimal against it
-  (expected-utility argmax; Whittle index for the restless bandit; newsvendor for
-  leases; empirical Bayes for small samples) - named, classical results rather than
-  ad hoc rules.
+- Every shipped uncertainty adjustment exposes its evidence, bounds, or
+  confidence where the implementation can support it. Missing bounds stay
+  unknown rather than implied.
+- Classical models motivate hypotheses, not guarantees. A policy earns a product
+  claim through declared assumptions, invariant tests, and replay or outcome
+  evaluation.
+- No optimality or competitive-ratio claim is made for the shipped routing score.
 - The shipped heuristic is recovered as an explicit limit, so each deepening is
   non-regressive.
 - It stays honest under uncertainty: confidence is an output, missing data fails
   soft, and a stale 99% never beats a live 80%.
 
-The point is not to be clever; it is that "route to whichever has budget" becomes a
-precise statement - maximize risk-adjusted, reliability-weighted, cost-discounted
-runway, with leases preventing self-interference and shrinkage covering the
-cold-start - that holds up to scrutiny and still collapses to the simple, fast
-thing we already ship when the data is thin.
+The point is not to be clever. "Route to whichever has budget" becomes an
+auditable policy: filter unsafe candidates, compare projected runway with bounded
+evidence and caller policy adjustments, and coordinate concurrent callers with
+expiring leases. Replay and calibration, not mathematical naming, determine
+whether a deeper policy is actually better.

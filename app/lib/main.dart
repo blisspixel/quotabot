@@ -2186,8 +2186,7 @@ class _DashboardState extends State<Dashboard>
     if (!mounted || result == null) return;
     final nextUrl = result.url.isEmpty ? null : result.url;
     final configurationChanged =
-        nextUrl != _webhookUrl ||
-        result.allowExternal != _webhookAllowExternal;
+        nextUrl != _webhookUrl || result.allowExternal != _webhookAllowExternal;
     setState(() {
       _webhookUrl = nextUrl;
       _webhookAllowExternal = result.allowExternal;

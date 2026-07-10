@@ -2,8 +2,9 @@
 
 This plugin lets a LiteLLM proxy route each request to whichever AI subscription
 still has budget, reading live headroom from a locally running quotabot. When
-every metered subscription is low it falls back to a local runtime (Ollama, LM
-Studio) so work keeps flowing for free instead of failing on a spent cap.
+every metered subscription is low it can try a configured local-runtime
+deployment. That request still depends on the backend being reachable and known
+to execute locally; the plugin does not prove either property on its own.
 
 It plugs into two LiteLLM extension points (see https://docs.litellm.ai):
 
@@ -19,8 +20,11 @@ Design goals, in priority order:
      pass through unchanged.
   2. Reuse quotabot's decision logic. Availability and headroom come from
      quotabot's ``/suggest`` endpoint, so the binding-window rules live in one
-     place (the Dart collector) rather than being reimplemented here.
-  3. Zero usage tokens to decide. quotabot reads only local metadata.
+     place (the Dart collector) rather than being reimplemented here. If
+     quotabot is unavailable, a configured local candidate can be attempted as
+     a fail-soft fallback, with reachability left to LiteLLM's backend call.
+  3. Zero usage tokens to decide. quotabot may read local or provider metadata,
+     but it makes no inference request and never receives the task content.
 
 It is pure-stdlib apart from LiteLLM itself and PyYAML (already a LiteLLM
 dependency), so it runs unchanged on Windows, macOS, and Linux.
@@ -178,8 +182,9 @@ class Candidate:
     ``provider`` is the quotabot provider id whose headroom gates this candidate
     (codex, claude, grok, antigravity, ...). ``account`` optionally narrows that
     gate to one quotabot account for multi-account setups. ``local`` marks an
-    always-available local runtime that is never gated by headroom. ``spend`` is
-    a safety label: ``quota_plan`` means an included quota plan;
+    configured local-runtime candidate that is not quota-gated. The router does
+    not preflight its backend, so reachability is determined by the LiteLLM call.
+    ``spend`` is a safety label: ``quota_plan`` means an included quota plan;
     ``overages_disabled`` is the separate proof bit that lets that plan route.
     ``paid_api`` means request-metered API spend that must be explicitly enabled.
     """

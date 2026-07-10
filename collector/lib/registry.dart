@@ -1,5 +1,7 @@
-/// The model registry: a normalized, cross-provider list of the models you can
-/// route to right now, each tagged with the live budget that gates it.
+/// The model registry: normalized candidates for providers represented in the
+/// current snapshot, each tagged with the known budget gate that controls it.
+/// It is not an exhaustive catalog: non-local providers without quota windows
+/// and providers without catalog models are omitted.
 ///
 /// [buildModelRegistry] is pure. Local-runtime models come from the snapshot
 /// (filled live by the adapters); cloud models come from an injected [catalog]
@@ -99,10 +101,11 @@ int _tierRank(String? tier) {
 
 /// Caller-selected budget envelope for concrete-model routing.
 ///
-/// `any` preserves the historic registry behavior. `local` is a hard local-only
-/// cap. `quota` allows local runtimes and measured built-in quota plans, but
-/// rejects self-reported manual quotas because quotabot cannot verify that those
-/// plans have overages disabled.
+/// `any` preserves the historic registry behavior. `local` keeps entries
+/// classified as local runtimes, but current Ollama inventory cannot prove that
+/// a reachable model is not cloud-offloaded. `quota` allows local-runtime entries
+/// and measured built-in quota plans, but rejects self-reported manual quotas
+/// because quotabot cannot verify that those plans have overages disabled.
 enum ModelBudgetPolicy {
   any('any'),
   quota('quota'),
@@ -556,11 +559,8 @@ String _quotaSignalKey(String provider, String account) =>
     '$provider\u0000$account';
 
 /// Recommendation order for picking one model: usable now first, then optionally
-/// soon-expiring included quota, then local (free) before cloud, then the
-/// lightest provider tier (cheapest-capable), then the most remaining headroom.
-/// This is the "cheapest model that meets the need with budget, escalating only
-/// when forced or when included quota would expire unused" policy from the
-/// routing-by-complexity design.
+/// soon-expiring included quota, then local-runtime before cloud, then loaded
+/// local readiness, the lightest provider-declared tier, and remaining headroom.
 int _recommendCompare(
   ModelEntry a,
   ModelEntry b, {
@@ -598,9 +598,10 @@ String _recommendReason(
         ? 'loaded and ready now'
         : 'installed locally; cold start may be required';
     final evidence = _localModelEvidence(e.model);
-    return '${e.model.id} (local, free) is $readiness'
+    return '${e.model.id} (local-runtime entry) is $readiness'
         '${evidence.isEmpty ? '' : ' (${evidence.join(', ')})'} '
-        'and keeps your paid quota.';
+        'and has no tracked subscription window; verify execution location and '
+        'cost separately.';
   }
   final h = e.headroomPercent?.round();
   final tier = e.model.tier ?? 'available';
@@ -682,9 +683,9 @@ class ModelSuggestion {
       };
 }
 
-/// Recommends one concrete model for a task: the cheapest model that meets
-/// [requirements] and has budget (local-first, then lightest tier, then most
-/// headroom). Pure.
+/// Recommends one concrete model for a task: available first, optional expiring
+/// included quota, local-runtime readiness, provider-declared tier, then
+/// headroom. Pure.
 ModelSuggestion suggestModel(
   List<ProviderQuota> snapshot,
   int now, {

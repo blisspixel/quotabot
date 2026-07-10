@@ -122,19 +122,34 @@ void main() {
         'suggest_model',
       ]),
     );
+    const liveCollectionTools = {
+      'list_quotas',
+      'provider_with_most_headroom',
+      'suggest_provider',
+      'reserve_provider',
+      'list_models',
+      'suggest_model',
+      'check_provider_availability',
+    };
     for (final tool in tools.tools) {
       expect(tool.title, isNotEmpty, reason: tool.name);
       expect(tool.description, isNotEmpty, reason: tool.name);
-      if (tool.name == 'reserve_provider') {
+      if (liveCollectionTools.contains(tool.name)) {
         expect(tool.annotations?.readOnlyHint, isFalse, reason: tool.name);
         expect(tool.annotations?.idempotentHint, isFalse, reason: tool.name);
+        expect(tool.annotations?.openWorldHint, isTrue, reason: tool.name);
       } else if (tool.name == 'release_provider') {
         expect(tool.annotations?.readOnlyHint, isFalse, reason: tool.name);
         expect(tool.annotations?.idempotentHint, isTrue, reason: tool.name);
+        expect(tool.annotations?.openWorldHint, isFalse, reason: tool.name);
+      } else if (tool.name == 'decide_now') {
+        expect(tool.annotations?.readOnlyHint, isFalse, reason: tool.name);
+        expect(tool.annotations?.idempotentHint, isFalse, reason: tool.name);
+        expect(tool.annotations?.openWorldHint, isFalse, reason: tool.name);
       } else {
-        expect(tool.annotations?.readOnlyHint, isTrue, reason: tool.name);
-        expect(tool.annotations?.idempotentHint, isTrue, reason: tool.name);
+        fail('unclassified MCP tool annotations: ${tool.name}');
       }
+      expect(tool.annotations?.destructiveHint, isFalse, reason: tool.name);
       expect(tool.outputSchema, isNotNull, reason: tool.name);
     }
 

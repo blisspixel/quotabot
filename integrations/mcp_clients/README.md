@@ -41,15 +41,28 @@ cd collector
 dart run bin/mcp_server.dart --http --port 8722 --path /mcp
 ```
 
-With bearer auth:
+With bearer auth, keep the secret in an environment variable rather than a
+literal command argument or an undocumented scratch file:
 
 ```bash
 cd collector
-dart run bin/mcp_server.dart --http --port 8722 --path /mcp --token-file ../.agent/local-mcp-token
+export QUOTABOT_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+dart run bin/mcp_server.dart --http --port 8722 --path /mcp --token-env QUOTABOT_MCP_TOKEN
 ```
 
-Then set `QUOTABOT_MCP_TOKEN` for the snippets. The token is sent only as an
-`Authorization: Bearer` header and is never printed.
+PowerShell:
+
+```powershell
+Set-Location collector
+$env:QUOTABOT_MCP_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(32))"
+dart run bin/mcp_server.dart --http --port 8722 --path /mcp --token-env QUOTABOT_MCP_TOKEN
+```
+
+Start the client snippet from a process that inherits the same
+`QUOTABOT_MCP_TOKEN`. The token is sent only as an `Authorization: Bearer`
+header and is never printed. A token file is also supported for service
+managers, but it should live in a private per-user config location with
+owner-only permissions, not under the repository.
 
 ## Python
 

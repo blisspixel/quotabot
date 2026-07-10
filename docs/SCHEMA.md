@@ -159,7 +159,9 @@ quota-backed path for it. Local-runtime entries also include
 `local_readiness` (`loaded` or `cold`), `size_bytes`, loaded-model
 `vram_bytes`, and `quant` when the runtime exposes them, so routers can
 distinguish ready-now models from installed models that may need a cold start.
-`budget_policy` is `any`, `quota`, or `local`.
+`budget_policy` is `any`, `quota`, or `local`. These are entry-classification
+filters, not proof of execution location or cost. In 0.5.14, an Ollama model
+reached through the local daemon may still be cloud-offloaded.
 
 `quotabot suggest --json` with a model profile and MCP `suggest_model` emit
 `quotabot.suggest_model.v1` with `schema`, `generated_at`, `budget_policy`,

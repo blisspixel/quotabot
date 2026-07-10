@@ -3,6 +3,24 @@
 Exactly where each provider's numbers come from. Paths are shown for Windows;
 the adapters resolve the user home directory cross-platform.
 
+## Source classes
+
+Treat the class as part of every number. It defines what quotabot can claim and
+how the result participates in routing.
+
+| Class | Typical examples | Routing treatment | Failure or drift treatment |
+|---|---|---|---|
+| Authoritative live | Claude, live Codex, live Grok, live Antigravity | Eligible while fresh and its binding quota is usable | Preserve the last good snapshot as stale evidence; never call stale cloud quota available |
+| This-machine fallback | Codex session snapshot, Antigravity local state | Eligible only under the normal freshness and binding rules, with lower confidence and visible machine scope | State that another device can make the value incomplete |
+| Passive local evidence | Cursor, Windsurf/Devin, Kiro | A measured normalized window can participate; detection-only state cannot | Show no live data or reader-drift evidence instead of inventing quota |
+| Local runtime | Ollama, LM Studio, Lemonade | Version 0.5.14 admits reachable runtime-classified entries; it does not yet prove execution location | Never cache availability; do not treat ambiguous Ollama cloud offload as proof of local-only or free execution |
+| Status-only | NVIDIA NIM | Visible for access diagnostics, never a model-budget route without measured quota | Show availability with numeric quota unknown |
+| Manual | User-defined entries | Visible and lower-confidence; excluded by `budget=quota` | Never refresh or reinterpret what the user entered |
+
+Source class is separate from freshness. For example, authoritative data can be
+cached and stale, while a this-machine snapshot can be freshly captured but
+still incomplete across devices.
+
 ## Manual entries
 
 - Source: the user's own local entries under quotabot's per-user config
@@ -118,8 +136,9 @@ Codex reuses the OAuth access token Codex stores locally for the ChatGPT usage
 endpoint and falls back to local session snapshots when unavailable. Claude
 reuses the token Claude Code stores. Grok and Antigravity can run two ways:
 
-- Opportunistic: reuse the token the CLI or IDE currently holds, read-only. This
-  is live only while that app keeps the token fresh.
+- Opportunistic: reuse the token the CLI or IDE currently holds for the bounded
+  provider operations documented above. This is live only while the credential
+  remains usable.
 - Connected: after `login grok` or `login antigravity`, quotabot holds its own
   OAuth grant and refreshes silently. Both work with no cloud setup. Grok uses
   the device-code flow; Antigravity uses a loopback plus PKCE authorization-code
@@ -127,12 +146,19 @@ reuses the token Claude Code stores. Grok and Antigravity can run two ways:
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET` to use your own).
   These grants are independent of the host apps, so they never invalidate the
   CLI's or IDE's credentials. quotabot's tokens live under the per-user config
-  directory, owner-only on POSIX and ACL-restricted on Windows. A grant can be
+  directory. Owner-only permissions are attempted best-effort on POSIX and
+  Windows; a permission-hardening failure does not currently abort the write. A grant can be
   stored as the provider default or in an account-scoped slot; the account slot
   filename uses a hash rather than the raw email. Grok derives the account slot
   from the device-login id token when present; Antigravity resolves it from
   Google's userinfo endpoint after OAuth exchange. Rotated refresh tokens are
   persisted on every refresh.
+
+Connected grants do not replace provider account discovery. Grok still
+discovers accounts from its local auth file, and Antigravity discovers accounts
+from local IDE/profile state. Run the provider on this machine first and retain
+that local identity state; a quotabot grant is selected only after a matching
+account has been discovered.
 
 ## Kiro (agentic CLI + IDE)
 
@@ -178,12 +204,13 @@ reuses the token Claude Code stores. Grok and Antigravity can run two ways:
 
 ## Local runtimes (Ollama, LM Studio, ...)
 
-Local runtimes have no remaining-budget to spend, so they carry no quota
-windows and are never shown as a usage bar. Instead the adapter reports what the
-runtime has: the number of installed models, which models are loaded in memory,
-and an in-use flag (a model being loaded is the available proxy for activity).
-They are marked `kind: local`, sort below the cloud services, and are used as an
-always-available routing fallback while the daemon is up. A local runtime is
+Locally executed runtimes have no remaining budget to spend, so they carry no
+quota windows and are never shown as a usage bar. Instead the adapter reports
+what the runtime has: the number of installed models, which models are loaded in
+memory, and an in-use flag (a model being loaded is the available proxy for
+activity).
+They are marked `kind: local`, sort below the cloud services, and are used as a
+reachable routing fallback while the daemon is up. A local runtime is
 shown only when reachable; when it is off the provider is dropped, and it is
 never served from cache (a cached "available" would mislead when the daemon is
 actually down).
@@ -202,6 +229,17 @@ actually down).
   llama.cpp / llamafile, GPT4All, text-generation-webui, KoboldCpp) can be added
   with the same shared `localRuntimeQuota` helper; only the discovery URL and
   load-state field differ.
+
+Current compatibility limits:
+
+- Ollama now offers cloud-offloaded models through its local daemon. Version
+  0.5.14 does not yet have authoritative execution-location evidence for those
+  entries. Do not treat an installed Ollama cloud model as proof of local-only or
+  free execution; conservative classification is a 1.0 release blocker.
+- LM Studio's current native contract is `GET /api/v1/models`, which exposes
+  richer loaded-instance, context, size, quantization, and capability evidence.
+  Version 0.5.14 still prefers v0 and falls back to `/v1/models`; v1-first support
+  is a planned compatibility correction, not current behavior.
 
 ## Cloud model catalog audit
 

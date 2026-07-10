@@ -6,8 +6,10 @@ contributions that keep it simple and correct are very welcome.
 ## Ways to help
 
 - **Report a bug or request a feature** via [issues](https://github.com/blisspixel/quotabot/issues).
-  For a provider that reads wrong, include the output of `quotabot doctor --json`
-  with any tokens or emails redacted.
+  For a provider that reads wrong, run `quotabot verify --json` and
+  `quotabot explain --reads --network`. Review the files before attaching them;
+  redact account identifiers and local paths. Credential values and user content
+  should never appear, but reports can still contain private machine metadata.
 - **Add or fix a provider adapter.** Adapters are thin I/O shells over pure
   parsing; see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
   [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md).
@@ -18,7 +20,7 @@ For security issues, do not open a public issue; see [SECURITY.md](SECURITY.md).
 ## Development setup
 
 You need the Flutter SDK (it includes Dart). See
-[Building from source](README.md#building-from-source) in the README.
+[Building from source](docs/BUILDING.md).
 
 ```bash
 # Collector (CLI, MCP, HTTP, adapters)

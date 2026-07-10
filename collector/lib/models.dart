@@ -590,8 +590,8 @@ class BurnStat {
   const BurnStat({this.perHour, this.sePerHour, this.samples = 0});
 }
 
-/// One model the user can route to, normalized across cloud providers and local
-/// runtimes. Capability fields are hints, null when unknown; local-only fields
+/// One normalized model candidate represented by the current provider snapshot
+/// and catalog. Capability fields are hints, null when unknown; local-only fields
 /// ([loaded], [sizeBytes], [vramBytes], [quant]) are null/false for cloud models.
 class ModelInfo {
   /// Provider-native model id, e.g. "claude-opus-4-8" or "llama3.1:8b".

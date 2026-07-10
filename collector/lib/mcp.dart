@@ -795,7 +795,7 @@ final _modelFilterInputSchema = JsonSchema.object(
     ),
     'budget': JsonSchema.string(
       description:
-          'Budget envelope: any, quota, or local. quota allows measured built-in quota plans plus local runtimes, but not self-reported manual quota.',
+          'Classification filter: any, quota, or local. quota allows measured built-in quota plans plus local-runtime entries, but not self-reported manual quota. Runtime classification does not prove execution location or cost.',
     ),
     'use_expiring_quota': JsonSchema.boolean(
       description:
@@ -863,7 +863,7 @@ final _routingInputSchema = JsonSchema.object(
     ),
     'budget': JsonSchema.string(
       description:
-          'Provider-route model budget envelope: any, quota, or local. Defaults to quota when any capability filter is supplied.',
+          'Provider-route model classification filter: any, quota, or local. Defaults to quota when any capability filter is supplied; runtime classification does not prove execution location or cost.',
     ),
     'cost_penalties': JsonSchema.object(
       description:
@@ -907,7 +907,8 @@ final suggestModelOutputSchema = JsonSchema.object(
 /// Output schema for `list_models`.
 final listModelsOutputSchema = JsonSchema.object(
   description:
-      'Every model the user can route to now, with the budget gate for each model.',
+      'Model candidates represented in the current registry, with the known '
+      'budget gate for each entry.',
   properties: {
     ..._profileMetaProperties,
     'schema': JsonSchema.string(),
@@ -988,16 +989,19 @@ McpServer buildQuotabotMcpServer({
   return server;
 }
 
-/// Shared read-only annotations for every quotabot tool: each reads provider
-/// metadata, modifies nothing, is safe to repeat, and reaches external services.
-const _readOnly = ToolAnnotations(
-  readOnlyHint: true,
-  idempotentHint: true,
+/// Live collection can refresh local cache, history, and OAuth state. The
+/// Antigravity adapter may also perform provider-required account onboarding,
+/// so these tools must not advertise read-only or retry-safe behavior.
+const _liveCollection = ToolAnnotations(
+  readOnlyHint: false,
+  idempotentHint: false,
   destructiveHint: false,
   openWorldHint: true,
 );
 
-const _localWrite = ToolAnnotations(
+/// The cache-only decision avoids provider I/O, but reading active leases can
+/// compact expired records in the local lease ledger.
+const _localMaintenance = ToolAnnotations(
   readOnlyHint: false,
   idempotentHint: false,
   destructiveHint: false,
@@ -1440,7 +1444,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'that are spent are the binding constraint.',
     inputSchema: _profileAndAccountInputSchema,
     outputSchema: quotasSnapshotOutputSchema,
-    annotations: _readOnly,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       return CallToolResult.fromStructuredContent(
@@ -1467,7 +1471,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'window that is spent blocks use even if shorter windows show headroom.',
     inputSchema: _profileAndAccountInputSchema,
     outputSchema: mostHeadroomOutputSchema,
-    annotations: _readOnly,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       return CallToolResult.fromStructuredContent(
@@ -1496,7 +1500,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'headroom unless local_first is explicitly set.',
     inputSchema: _routingInputSchema,
     outputSchema: suggestOutputSchema,
-    annotations: _readOnly,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final results = profiled.providers;
@@ -1548,8 +1552,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'cache source, snapshot_as_of, snapshot_age_seconds, and snapshot_stale '
         'so a router can decide whether the answer is fresh enough for a '
         'per-request path. Active temporary leases are applied to effective '
-        'headroom. Accepts the same local_first and explicit cost_penalties '
-        'routing policy as suggest_provider.',
+        'headroom; reading them may compact expired records in the local lease '
+        'ledger. Accepts the same local_first and explicit cost_penalties routing '
+        'policy as suggest_provider.',
     inputSchema: JsonSchema.object(
       properties: {
         'profile': JsonSchema.string(
@@ -1592,7 +1597,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         ),
         'budget': JsonSchema.string(
           description:
-              'Provider-route model budget envelope: any, quota, or local. Defaults to quota when any capability filter is supplied.',
+              'Provider-route model classification filter: any, quota, or local. Defaults to quota when any capability filter is supplied; runtime classification does not prove execution location or cost.',
         ),
         'cost_penalties': JsonSchema.object(
           description:
@@ -1605,7 +1610,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       },
     ),
     outputSchema: decideNowOutputSchema,
-    annotations: _readOnly,
+    annotations: _localMaintenance,
     callback: (args, extra) async {
       final cached = await cachedSnapshot();
       final profiled = await _profiledSnapshot(
@@ -1676,8 +1681,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'Create a short local routing lease for the current best subscription, '
         'or for an explicit provider/account. The lease reduces that account'
         "'s effective headroom for later suggestions so parallel agents do not all "
-        'choose the same provider at once. This writes only local metadata and '
-        'expires automatically.',
+        'choose the same provider at once. The lease write is local and expires '
+        'automatically. Target selection performs live metadata collection, '
+        'which can contact provider endpoints, refresh local state, and run '
+        'Antigravity onboarding, but never calls a model.',
     inputSchema: JsonSchema.object(
       properties: {
         'provider': JsonSchema.string(
@@ -1712,7 +1719,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       },
     ),
     outputSchema: reserveProviderOutputSchema,
-    annotations: _localWrite,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
@@ -1888,17 +1895,18 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     'list_models',
     title: 'List models',
     description:
-        'Return every model the user can route to right now, across all cloud '
-        'providers and local runtimes, each tagged with the live budget that '
-        'gates it (headroom percent, binding window, reset) and capability hints '
-        '(context length, tools, vision) where known. Local-runtime models are '
-        'read live; cloud models come from a refreshable capability catalog. Use '
-        'this to pick a concrete model with budget, not just a provider. Add '
-        'budget=local for a hard local-only cap or budget=quota for measured '
-        'quota plans plus local runtimes.',
+        'Return model candidates for providers represented in the current '
+        'registry, each tagged with its known budget gate and capability hints. '
+        'Non-local providers without quota windows and providers without catalog '
+        'models are omitted; known entries may remain with available=false. '
+        'Local-runtime inventory is read live and cloud capability hints come '
+        'from a refreshable catalog. budget=local limits results to entries '
+        'classified as local runtimes, but does not prove on-device execution or '
+        'zero cost because reachable Ollama models may be cloud-offloaded. '
+        'budget=quota allows measured quota plans plus local-runtime entries.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,
-    annotations: _readOnly,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final requirements = _requirementsFromArgs(args);
@@ -1929,17 +1937,16 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     'suggest_model',
     title: 'Suggest model',
     description:
-        'Recommend one concrete model for a task: the cheapest model that meets '
-        'the given requirements and has budget, local-first, escalating to a '
-        'heavier or paid tier only when the requirements force it. Takes the same '
-        'filter as list_models, including budget=local or budget=quota. quotabot '
-        'never reads the task; the caller supplies the profile, and tiers are the '
-        "provider's own, not a quality ranking. Pass use_expiring_quota=true to "
-        'let soon-resetting measured included quota outrank local capacity when '
-        'projected waste is high.',
+        'Recommend one concrete model that meets caller-supplied requirements '
+        'and has budget. Available entries lead; optional expiring-quota policy '
+        'can override local preference, otherwise local-runtime entries lead, '
+        'loaded before cold, then provider-declared tier and headroom. quotabot '
+        'does not compare model prices or infer quality, and never reads the task. '
+        'Takes the same filter as list_models, including budget=local or '
+        'budget=quota.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: suggestModelOutputSchema,
-    annotations: _readOnly,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
@@ -2001,7 +2008,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       required: ['provider'],
     ),
     outputSchema: availabilityOutputSchema,
-    annotations: _readOnly,
+    annotations: _liveCollection,
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       return CallToolResult.fromStructuredContent(
