@@ -17,6 +17,9 @@ Notable changes to quotabot. Newest first.
 ### Fixed
 - Linux desktop tray initialization no longer calls the dependency's unsupported
   tooltip method before registering its context menu.
+- Desktop alert settings now expose bounded webhook delivery status and flag
+  notification delivery failures instead of silently discarding them; raw
+  transport and exception details remain hidden.
 
 ## 0.5.14 - 2026-07-09
 

@@ -7,6 +7,7 @@ import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/webhook.dart';
 
 Widget _wrap(Widget child, {bool disableAnimations = false}) {
   final chrome = AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
@@ -49,6 +50,84 @@ void main() {
   tearDown(() {
     appThemeSpec.value = appThemeSystem;
     textScale.value = 1;
+  });
+
+  test('webhook delivery status never exposes raw transport errors', () {
+    expect(
+      webhookDeliveryStatus(
+        const WebhookResult(ok: false, error: 'secret-bearing-url'),
+      ),
+      'Last delivery failed',
+    );
+    expect(
+      webhookDeliveryStatus(const WebhookResult(ok: false, statusCode: 503)),
+      'Last delivery failed (HTTP 503)',
+    );
+    expect(
+      webhookDeliveryStatus(const WebhookResult(ok: true, statusCode: 204)),
+      'Last delivery succeeded',
+    );
+  });
+
+  testWidgets('dashboard exposes a bounded webhook delivery failure', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    var posts = 0;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            enableNotifications: false,
+            webhookUrl: 'http://127.0.0.1:9000/quota',
+          ),
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'claude',
+              displayName: 'Claude',
+              account: 'test',
+              asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+              windows: [QuotaWindow(label: '5h', usedPercent: 100)],
+            ),
+          ],
+          alertPoster: (url, payload, {required allowExternal}) async {
+            posts++;
+            return const WebhookResult(
+              ok: false,
+              statusCode: 503,
+              error: 'secret-bearing-url',
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(posts, 1);
+    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
+
+    await tester.tap(find.text('Alert webhook: delivery failed'));
+    await tester.pumpAndSettle();
+    expect(find.text('Last delivery failed (HTTP 503)'), findsOneWidget);
+    expect(find.textContaining('secret-bearing-url'), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Semantics && widget.properties.liveRegion == true,
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('demo dashboard exercises quota, compact, and analytics views', (

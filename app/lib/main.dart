@@ -461,6 +461,22 @@ String refreshFailureMessage(Object error, {required bool hasPreviousData}) {
       : 'Refresh failed; $outcome';
 }
 
+typedef AlertPoster =
+    Future<WebhookResult> Function(
+      String url,
+      Map<String, dynamic> payload, {
+      required bool allowExternal,
+    });
+
+@visibleForTesting
+String webhookDeliveryStatus(WebhookResult result) {
+  if (result.ok) return 'Last delivery succeeded';
+  final statusCode = result.statusCode;
+  return statusCode == null
+      ? 'Last delivery failed'
+      : 'Last delivery failed (HTTP $statusCode)';
+}
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   final bool _hostIntegration;
@@ -469,12 +485,15 @@ class Dashboard extends StatefulWidget {
   final Future<List<ProviderQuota>> Function()? collector;
   @visibleForTesting
   final List<QuotaProfile>? testProfiles;
+  @visibleForTesting
+  final AlertPoster? alertPoster;
 
   const Dashboard({super.key, required this.prefs})
     : _hostIntegration = true,
       _demoModeOverride = null,
       collector = null,
-      testProfiles = null;
+      testProfiles = null,
+      alertPoster = null;
 
   /// Builds a deterministic dashboard without desktop plugin or preference
   /// side effects. This exercises the production widget tree while keeping
@@ -486,6 +505,7 @@ class Dashboard extends StatefulWidget {
     bool demoMode = true,
     this.collector,
     this.testProfiles,
+    this.alertPoster,
   }) : _hostIntegration = false,
        _demoModeOverride = demoMode,
        assert(
@@ -668,6 +688,9 @@ class _DashboardState extends State<Dashboard>
   Map<String, BurnStat> _burnStats = {};
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   String? _lastRefreshError;
+  String? _lastWebhookDeliveryStatus;
+  bool? _lastWebhookDeliveryFailed;
+  bool _notificationDeliveryFailed = false;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
   // Analytics renders as a body inside this dashboard (same header, same
@@ -1115,7 +1138,9 @@ class _DashboardState extends State<Dashboard>
         }
         _insights = shrinkInsightsReliability(rawInsights);
       });
-      if (widget._hostIntegration) _checkAndNotify();
+      if (widget._hostIntegration || widget.alertPoster != null) {
+        _checkAndNotify();
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     } on Exception catch (error) {
       // A failed or timed-out refresh keeps the last data on screen; the next
@@ -1959,14 +1984,20 @@ class _DashboardState extends State<Dashboard>
           value: 'notifications',
           checked: _enableNotifications,
           child: Text(
-            'Notifications',
+            _notificationDeliveryFailed
+                ? 'Notifications: delivery failed'
+                : 'Notifications',
             style: const TextStyle(fontSize: AppType.subtitle),
           ),
         ),
         PopupMenuItem(
           value: 'webhook',
           child: Text(
-            _webhookUrl == null ? 'Alert webhook...' : 'Alert webhook: on',
+            _webhookUrl == null
+                ? 'Alert webhook...'
+                : _lastWebhookDeliveryFailed ?? false
+                ? 'Alert webhook: delivery failed'
+                : 'Alert webhook: on',
             style: const TextStyle(fontSize: AppType.subtitle),
           ),
         ),
@@ -2148,12 +2179,22 @@ class _DashboardState extends State<Dashboard>
       builder: (_) => _WebhookDialog(
         initialUrl: _webhookUrl ?? '',
         initialAllowExternal: _webhookAllowExternal,
+        lastDeliveryStatus: _lastWebhookDeliveryStatus,
+        lastDeliveryFailed: _lastWebhookDeliveryFailed,
       ),
     );
     if (!mounted || result == null) return;
+    final nextUrl = result.url.isEmpty ? null : result.url;
+    final configurationChanged =
+        nextUrl != _webhookUrl ||
+        result.allowExternal != _webhookAllowExternal;
     setState(() {
-      _webhookUrl = result.url.isEmpty ? null : result.url;
+      _webhookUrl = nextUrl;
       _webhookAllowExternal = result.allowExternal;
+      if (configurationChanged) {
+        _lastWebhookDeliveryStatus = null;
+        _lastWebhookDeliveryFailed = null;
+      }
     });
     _persistPrefs();
   }
@@ -2231,14 +2272,25 @@ class _DashboardState extends State<Dashboard>
               body: a.message,
               notificationDetails: _buildDetails(a.displayName),
             );
-          } catch (_) {}
+            _setNotificationDeliveryFailed(false);
+          } catch (_) {
+            _setNotificationDeliveryFailed(true);
+          }
         }
         if (webhookUrl != null) {
-          await postAlert(
-            webhookUrl,
-            a.toJson(),
-            allowExternal: _webhookAllowExternal,
-          );
+          final poster = widget.alertPoster;
+          final result = poster == null
+              ? await postAlert(
+                  webhookUrl,
+                  a.toJson(),
+                  allowExternal: _webhookAllowExternal,
+                )
+              : await poster(
+                  webhookUrl,
+                  a.toJson(),
+                  allowExternal: _webhookAllowExternal,
+                );
+          _setWebhookDeliveryStatus(result);
         }
       }
 
@@ -2269,7 +2321,10 @@ class _DashboardState extends State<Dashboard>
                     androidScheduleMode:
                         AndroidScheduleMode.exactAllowWhileIdle,
                   );
-                } catch (_) {}
+                  _setNotificationDeliveryFailed(false);
+                } catch (_) {
+                  _setNotificationDeliveryFailed(true);
+                }
               }
             }
           }
@@ -2278,6 +2333,19 @@ class _DashboardState extends State<Dashboard>
     } catch (_) {
       // ignore notif errors
     }
+  }
+
+  void _setWebhookDeliveryStatus(WebhookResult result) {
+    if (!mounted) return;
+    setState(() {
+      _lastWebhookDeliveryStatus = webhookDeliveryStatus(result);
+      _lastWebhookDeliveryFailed = !result.ok;
+    });
+  }
+
+  void _setNotificationDeliveryFailed(bool failed) {
+    if (!mounted || _notificationDeliveryFailed == failed) return;
+    setState(() => _notificationDeliveryFailed = failed);
   }
 
   bool _shouldNotify(String key, DateTime now) {
@@ -2603,10 +2671,14 @@ typedef _WebhookSettings = ({String url, bool allowExternal});
 class _WebhookDialog extends StatefulWidget {
   final String initialUrl;
   final bool initialAllowExternal;
+  final String? lastDeliveryStatus;
+  final bool? lastDeliveryFailed;
 
   const _WebhookDialog({
     required this.initialUrl,
     required this.initialAllowExternal,
+    required this.lastDeliveryStatus,
+    required this.lastDeliveryFailed,
   });
 
   @override
@@ -2669,6 +2741,21 @@ class _WebhookDialogState extends State<_WebhookDialog> {
                 style: TextStyle(fontSize: AppType.caption),
               ),
             ),
+            if (widget.lastDeliveryStatus != null) ...[
+              const SizedBox(height: 4),
+              Semantics(
+                liveRegion: true,
+                child: Text(
+                  widget.lastDeliveryStatus!,
+                  style: TextStyle(
+                    fontSize: AppType.label,
+                    color: widget.lastDeliveryFailed ?? false
+                        ? const Color(0xFFDB6D28)
+                        : null,
+                  ),
+                ),
+              ),
+            ],
             if (blocked)
               Semantics(
                 liveRegion: true,
