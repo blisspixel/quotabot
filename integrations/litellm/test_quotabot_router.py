@@ -3,12 +3,11 @@ import json
 import os
 import tempfile
 import unittest
-from unittest import mock
+import unittest.mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
-import quotabot_router
 from quotabot_router import (
     AgentRule,
     Candidate,
@@ -652,14 +651,14 @@ models:
             router.policy = Policy()
             router.policy.metrics_path = str(path)
             open_modes = []
-            original_open = quotabot_router.os.open
+            original_open = os.open
 
             def capture_open(*args, **kwargs):
                 if Path(args[0]) == path:
                     open_modes.append(args[2] if len(args) >= 3 else kwargs.get("mode"))
                 return original_open(*args, **kwargs)
 
-            with mock.patch("quotabot_router.os.open", capture_open):
+            with unittest.mock.patch("quotabot_router.os.open", capture_open):
                 asyncio.run(
                     router.async_log_success_event(
                         {

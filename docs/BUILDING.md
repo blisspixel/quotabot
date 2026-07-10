@@ -80,19 +80,23 @@ Before cutting a public tag, run the current platform's CLI archive helper and
 verify the artifact exactly the way the installer and a maintainer will consume
 it:
 
-1. Build the archive with `tools\package-cli.ps1` on Windows or
+1. Run `python tools/check_release_version.py --tag vX.Y.Z`; it must confirm the
+   intended tag and one version for the collector package, CLI, MCP server,
+   desktop package and lockfile, changelog, and roadmap. The release workflow
+   enforces the same exact tag-to-source check before creating a draft.
+2. Build the archive with `tools\package-cli.ps1` on Windows or
    `tools/package-cli.sh` on macOS/Linux.
-2. Confirm the `.sha256` sidecar contains a 64 character SHA-256 hash and the
+3. Confirm the `.sha256` sidecar contains a 64 character SHA-256 hash and the
    archive filename, then compare it with the archive's actual hash.
-3. Expand the archive in a temporary directory and run the packaged CLI
+4. Expand the archive in a temporary directory and run the packaged CLI
    (`bin\quotabot.exe` on Windows or `bin/quotabot` on macOS/Linux) with
    `--version` plus demo-mode `doctor --json` under an isolated config
    directory.
-4. After a tag is published by GitHub Actions, download each release archive and
+5. After a tag is published by GitHub Actions, download each release archive and
    verify its provenance with `gh attestation verify <archive> --repo
    blisspixel/quotabot`. The release workflow creates artifact attestations for
    the archives before uploading them with their checksum sidecars.
-5. Confirm GitHub security signals are clear for the release branch: CI, CodeQL,
+6. Confirm GitHub security signals are clear for the release branch: CI, CodeQL,
    secret scanning, Dependabot alerts, and the dependency-review PR gate.
 
 ## Icon and dev launcher
