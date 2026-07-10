@@ -30,14 +30,34 @@ def host_platform() -> str:
     raise RuntimeError(f"Unsupported desktop smoke-test platform: {sys.platform}")
 
 
-def launch_command(executable: Path, platform: str) -> list[str]:
+def launch_command(
+    executable: Path,
+    platform: str,
+    readiness_file: Path,
+) -> list[str]:
     if platform == "linux":
         for dependency in ("dbus-run-session", "xvfb-run"):
             if shutil.which(dependency) is None:
                 raise RuntimeError(
                     f"Required desktop smoke dependency not found: {dependency}"
-                )
+            )
         return ["dbus-run-session", "--", "xvfb-run", "-a", str(executable)]
+    if platform == "macos":
+        app_bundle = executable.parent.parent.parent
+        if app_bundle.suffix != ".app":
+            raise RuntimeError(
+                f"macOS desktop executable is not inside an app bundle: {executable}"
+            )
+        return [
+            "/usr/bin/open",
+            "-n",
+            "-W",
+            "--env",
+            f"{READINESS_ENV}={readiness_file}",
+            "--env",
+            "QUOTABOT_DEMO=1",
+            str(app_bundle),
+        ]
     return [str(executable)]
 
 
@@ -241,6 +261,36 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=5)
 
 
+def macos_app_process_ids(process_table: str, executable: Path) -> list[int]:
+    command_prefix = f"{executable} "
+    process_ids: list[int] = []
+    for line in process_table.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        raw_process_id, command = fields
+        if command == str(executable) or command.startswith(command_prefix):
+            try:
+                process_ids.append(int(raw_process_id))
+            except ValueError:
+                continue
+    return process_ids
+
+
+def stop_macos_app(executable: Path) -> None:
+    process_table = subprocess.run(
+        ["ps", "-axo", "pid=,command="],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for process_id in macos_app_process_ids(process_table.stdout, executable):
+        try:
+            os.kill(process_id, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", required=True, type=Path)
@@ -257,11 +307,11 @@ def main() -> int:
         raise RuntimeError("Desktop readiness timeout must be positive")
 
     platform = host_platform()
-    command = launch_command(executable, platform)
     with tempfile.TemporaryDirectory(prefix="quotabot-desktop-readiness-") as raw_temp:
         temporary_directory = Path(raw_temp)
         readiness_file = temporary_directory / "readiness.json"
         log_file = temporary_directory / "desktop.log"
+        command = launch_command(executable, platform, readiness_file)
         environment = os.environ.copy()
         environment[READINESS_ENV] = str(readiness_file)
         environment["QUOTABOT_DEMO"] = "1"
@@ -293,7 +343,11 @@ def main() -> int:
                     raise RuntimeError(f"{error}\nDesktop log tail:\n{log_tail}") from error
                 raise
             finally:
-                stop_process(process)
+                try:
+                    if platform == "macos":
+                        stop_macos_app(executable)
+                finally:
+                    stop_process(process)
 
     print(f"Desktop window and tray readiness passed on {platform}.")
     return 0

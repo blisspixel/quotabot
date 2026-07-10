@@ -1,6 +1,6 @@
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import signal
 import subprocess
 import sys
@@ -13,6 +13,8 @@ from unittest import mock
 from tools.desktop_readiness_smoke import (
     SCHEMA,
     await_readiness,
+    launch_command,
+    macos_app_process_ids,
     stop_process,
     valid_windows_tray_rect,
     validate_payload,
@@ -20,6 +22,37 @@ from tools.desktop_readiness_smoke import (
 
 
 class DesktopReadinessTests(unittest.TestCase):
+    def test_launches_macos_through_the_app_bundle(self) -> None:
+        executable = PurePosixPath("/tmp/quotabot.app/Contents/MacOS/quotabot")
+        readiness_file = PurePosixPath("/tmp/readiness.json")
+
+        self.assertEqual(
+            launch_command(executable, "macos", readiness_file),
+            [
+                "/usr/bin/open",
+                "-n",
+                "-W",
+                "--env",
+                "QUOTABOT_DESKTOP_READINESS_FILE=/tmp/readiness.json",
+                "--env",
+                "QUOTABOT_DEMO=1",
+                "/tmp/quotabot.app",
+            ],
+        )
+
+    def test_selects_only_the_exact_macos_bundle_executable(self) -> None:
+        executable = PurePosixPath(
+            "/tmp/build with spaces/quotabot.app/Contents/MacOS/quotabot"
+        )
+        process_table = """
+          101 /tmp/build with spaces/quotabot.app/Contents/MacOS/quotabot
+          102 /tmp/build with spaces/quotabot.app/Contents/MacOS/quotabot --flag
+          103 /Applications/quotabot.app/Contents/MacOS/quotabot
+          104 /tmp/build with spaces/quotabot.app/Contents/MacOS/quotabot-helper
+        """
+
+        self.assertEqual(macos_app_process_ids(process_table, executable), [101, 102])
+
     def test_accepts_exact_ready_payload(self) -> None:
         self.assertTrue(
             validate_payload(
