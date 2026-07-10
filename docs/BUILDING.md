@@ -123,7 +123,10 @@ maintainer will consume it:
    `quotabot-windows-x64.zip`, `quotabot-darwin-arm64.tar.gz`,
    `quotabot-linux-x64.tar.gz`, and `quotabot-linux-arm64.tar.gz`.
 8. Download every archive, compare it with its SHA-256 sidecar, and verify its
-   provenance with `gh attestation verify <archive> --repo blisspixel/quotabot`.
+   repository provenance with `gh attestation verify <archive> --repo
+   blisspixel/quotabot`. That basic command does not constrain the signer or tag;
+   the install-smoke workflow adds signer-workflow, source-ref, source-digest,
+   and self-hosted-runner restrictions for the release gate.
    The release workflow creates the attestation before uploading each pair.
 9. Install and smoke-test the packaged CLI on clean Windows, macOS, and Linux
    hosts before promoting a stable release candidate.

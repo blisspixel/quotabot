@@ -1,27 +1,24 @@
-# quotabot app
+# quotabot desktop app
 
-Flutter desktop widget (Windows first; cross-platform design) for the quotabot
-collector. See root README.md for usage, build, and architecture.
+Flutter desktop application for Windows, macOS, and Linux. It imports the
+collector package directly, so desktop cards, routing summaries, analytics,
+alerts, profiles, and local preferences use the same normalized quota and
+routing core as the CLI and MCP server.
 
-The app imports the collector package directly, renders the normalized quota
-model with frameless UI (always on top, taskbar entry, notifications, an "Alert
-webhook", and "Show account names" are configurable via menu), adaptive refresh,
-compact/expanded views, history averages, and persisted preferences. Each card
-carries a glance-layer forward-looking forecast on its binding window in plain
-language ("about an hour of usage left", or "likely to run out before it
-resets"), the same forecast `quotabot top` shows, only when there is a real burn
-signal. Low-quota alerts fire once when a window crosses into red, naming where
-to route next, and can POST to a webhook (loopback unless external is allowed). Account names auto-hide for
-single-account providers and appear only when a provider has more than one
-account on screen; the "Show account names" menu toggle applies on top (off
-hides all). The header shows a dynamic radial "pool gauge" plus the "Quota"
-wordmark, the gauge filling clockwise with the average remaining headroom across
-visible providers and colored on the card scale. Time labels use
-minute-resolution "as of HH:MM AM" format. Claude weekly shows reset times; Antigravity
-shows "free tier". The OS/desktop application icon (app_icon.ico) is the custom
-rune-style monochrome icon (light/dark friendly), separate from the in-app
-header mark. The body is scrollable and the window height comes from a
-deterministic content estimate capped at the screen height (no overflow banner
-when many providers show); broad drag support. See root README.md for usage,
-build (quotabot-gui for source; release exe is the default shortcut target), and
-architecture.
+This file is intentionally developer-specific. Canonical behavior and product
+claims live in:
+
+- [../README.md](../README.md): product overview and acquisition;
+- [../docs/USAGE.md](../docs/USAGE.md): widget, analytics, profile, alert, and
+  accessibility behavior;
+- [../docs/BUILDING.md](../docs/BUILDING.md): prerequisites, build, packaging,
+  and launch paths;
+- [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md): app-to-collector
+  boundaries;
+- [../docs/DATA_SOURCES.md](../docs/DATA_SOURCES.md): provider evidence and
+  limitations.
+
+Run from the repository root with the platform target documented in
+[../docs/BUILDING.md](../docs/BUILDING.md). Keep platform-specific shell and
+window integration thin; product state and decision logic belong in the
+collector or in pure app helpers with tests.

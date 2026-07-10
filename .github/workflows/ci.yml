@@ -56,7 +56,7 @@ jobs:
         run: bash tools/test-write-desktop-entry.sh
 
       - name: Coverage checker tests
-        run: python -m unittest tools.test_check_lcov tools.test_check_release_version tools.test_desktop_readiness_smoke
+        run: python -m unittest tools.test_check_lcov tools.test_check_release_version tools.test_desktop_readiness_smoke tools.test_installer_security
 
       - name: Release version consistency
         run: python tools/check_release_version.py

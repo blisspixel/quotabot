@@ -64,23 +64,20 @@ cleanup() {
 trap cleanup EXIT
 
 curl -fsSL "$URL" -o "$tmpfile"
-if curl -fsSL "${URL}.sha256" -o "$checksum_file"; then
-  expected=$(awk 'NR==1 {print tolower($1)}' "$checksum_file")
-  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "Invalid checksum file for ${ASSET}" >&2
-    exit 1
-  fi
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual=$(sha256sum "$tmpfile" | awk '{print tolower($1)}')
-  else
-    actual=$(shasum -a 256 "$tmpfile" | awk '{print tolower($1)}')
-  fi
-  if [[ "$actual" != "$expected" ]]; then
-    echo "Checksum mismatch for ${ASSET}" >&2
-    exit 1
-  fi
+curl -fsSL "${URL}.sha256" -o "$checksum_file"
+expected=$(awk 'NR==1 {print tolower($1)}' "$checksum_file")
+if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "Invalid checksum file for ${ASSET}" >&2
+  exit 1
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  actual=$(sha256sum "$tmpfile" | awk '{print tolower($1)}')
 else
-  echo "No checksum asset found at ${URL}.sha256; continuing with HTTPS verification only."
+  actual=$(shasum -a 256 "$tmpfile" | awk '{print tolower($1)}')
+fi
+if [[ "$actual" != "$expected" ]]; then
+  echo "Checksum mismatch for ${ASSET}" >&2
+  exit 1
 fi
 tar -xzf "$tmpfile" -C "$extract_dir"
 if [[ ! -x "$extract_dir/bin/quotabot" ]]; then

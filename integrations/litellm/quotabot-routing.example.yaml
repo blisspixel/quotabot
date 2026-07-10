@@ -10,8 +10,8 @@
 # Must be a loopback HTTP URL.
 quotabot_url: "http://127.0.0.1:8721"
 
-# How long a quota snapshot is reused before re-reading (seconds). Reads are
-# local and free, but caching avoids hitting the server on every request.
+# How long a quota snapshot is reused before re-reading (seconds). This is a
+# loopback metadata read, but caching avoids hitting the server on every request.
 snapshot_ttl_seconds: 45
 
 # Headroom percent below which a subscription is considered "low" and the next
@@ -49,7 +49,7 @@ models:
       - deployment: grok-code
         provider: grok
         spend: paid_api             # skipped unless allow_paid_api: true
-      - deployment: ollama-qwen     # always-available local fallback
+      - deployment: ollama-qwen     # configured local fallback; backend checks reachability
         local: true
 
   cheap-bulk:

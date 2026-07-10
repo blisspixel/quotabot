@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Added a dated product-strategy document and documentation index, and replaced
+  the historical roadmap narrative with evidence-based 1.0 gates, dependency-
+  ordered work, provider admission criteria, and explicit product measures.
+- Added inspect-before-run installation guidance plus distinct update,
+  data-preserving uninstall, rollback, and destructive reset documentation.
 - Added a scheduled and manually dispatchable three-OS install smoke workflow
   that verifies release checksums and provenance, exercises a clean one-line
   install, upgrades the previous published 0.x release, runs CLI-only and full
@@ -15,6 +20,30 @@ Notable changes to quotabot. Newest first.
   registration check, plus a bundle-aware macOS harness for interactive hosts.
 
 ### Fixed
+- The shipped LiteLLM example now binds its proxy explicitly to loopback,
+  requires an environment-backed bearer key, sends that key in the client
+  example, and has a regression guard for both boundaries.
+- Trust documentation now distinguishes zero-inference quota reads from bounded
+  credential reads and local metadata writes, documents the explicit external-
+  webhook exception, aligns provider authentication guidance, and avoids
+  treating reachable, cloud-offloaded Ollama models as proven local capacity.
+- Routing documentation now labels the shipped score as an auditable heuristic
+  rather than an unproven Whittle index or near-optimal policy, and separates
+  implemented behavior from research analogies.
+- Local-runtime model recommendations no longer call every reachable model
+  free; the result now tells callers to verify execution location and cost
+  separately when no subscription window is tracked.
+- MCP tools that perform live collection now advertise non-read-only,
+  non-idempotent behavior because collection can refresh local metadata, rotate
+  OAuth state, or perform Antigravity onboarding. Cache-only `decide_now` also
+  reports local mutation accurately because reading leases can compact expired
+  ledger records.
+- The Windows installer no longer recommends deleting the entire quotabot data
+  root during uninstall; it links to the data-preserving PATH and bundle cleanup
+  procedure instead.
+- Release installers now fail closed when a checksum sidecar is missing instead
+  of silently continuing with transport security alone; a CI regression test
+  pins the required-sidecar policy on Windows, macOS, and Linux scripts.
 - Linux desktop tray initialization no longer calls the dependency's unsupported
   tooltip method before registering its context menu.
 - Desktop alert settings now expose bounded webhook delivery status and flag

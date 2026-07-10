@@ -186,7 +186,9 @@ def _write_proxy_files(
             }.items()
         )
         + "\nlitellm_settings:\n"
-        + "  callbacks: quotabot_router.proxy_handler_instance\n",
+        + "  callbacks: quotabot_router.proxy_handler_instance\n"
+        + "\ngeneral_settings:\n"
+        + "  master_key: os.environ/LITELLM_MASTER_KEY\n",
         encoding="utf-8",
     )
     routing.write_text(
@@ -217,6 +219,7 @@ def _wait_for_proxy(
     base_url: str,
     process: subprocess.Popen[bytes],
     log_path: Path,
+    token: str,
 ) -> None:
     deadline = time.monotonic() + 60
     last_error: Exception | None = None
@@ -227,10 +230,11 @@ def _wait_for_proxy(
                 f"LiteLLM proxy exited early with {process.returncode}:\n{output}"
             )
         try:
-            with urllib.request.urlopen(
+            request = urllib.request.Request(
                 f"{base_url}/health/liveness",
-                timeout=2,
-            ) as response:
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(request, timeout=2) as response:
                 if response.status == 200:
                     return
         except (OSError, urllib.error.URLError) as error:
@@ -240,12 +244,20 @@ def _wait_for_proxy(
     raise AssertionError(f"LiteLLM proxy did not become ready: {last_error!r}\n{output}")
 
 
-def _post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    *,
+    token: str | None = None,
+) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -292,6 +304,7 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
             log_path = Path(temp) / "litellm-proxy.log"
             proxy_port = _free_port()
             proxy_url = f"http://127.0.0.1:{proxy_port}"
+            master_key = "quotabot-integration-auth-value"
             env = os.environ.copy()
             env["QUOTABOT_ROUTING"] = str(routing)
             env["PYTHONPATH"] = (
@@ -299,6 +312,7 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
             )
             env["LITELLM_LOG"] = "ERROR"
             env["LITELLM_DONT_SHOW_FEEDBACK_BOX"] = "true"
+            env["LITELLM_MASTER_KEY"] = master_key
             env["NO_PROXY"] = "127.0.0.1,localhost"
             env["no_proxy"] = "127.0.0.1,localhost"
             env["PYTHONIOENCODING"] = "utf-8"
@@ -330,13 +344,40 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
                     start_new_session=os.name != "nt",
                 )
                 try:
-                    _wait_for_proxy(proxy_url, process, log_path)
+                    _wait_for_proxy(proxy_url, process, log_path, master_key)
+                    with self.assertRaises(urllib.error.HTTPError) as denied:
+                        _post_json(
+                            f"{proxy_url}/v1/chat/completions",
+                            {
+                                "model": "frontier-coder",
+                                "messages": [{"role": "user", "content": "hello"}],
+                            },
+                        )
+                    denied_body = denied.exception.read().decode(
+                        "utf-8",
+                        errors="replace",
+                    )
+                    proxy_log = log_path.read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    )[-6000:]
+                    # LiteLLM 1.91.0 can turn its missing-key response into 500
+                    # when the optional Prisma package is absent. Both outcomes
+                    # must fail closed before the routing hook or model backend.
+                    self.assertIn(
+                        denied.exception.code,
+                        {401, 500},
+                        f"{denied_body}\n{proxy_log}",
+                    )
+                    self.assertEqual(0, _FakeQuotabotHandler.requests_seen)
+                    self.assertFalse(_FakeOpenAIHandler.bodies_seen)
                     response = _post_json(
                         f"{proxy_url}/v1/chat/completions",
                         {
                             "model": "frontier-coder",
                             "messages": [{"role": "user", "content": "hello"}],
                         },
+                        token=master_key,
                     )
                 finally:
                     _stop_process_tree(process)

@@ -319,7 +319,7 @@ void main() {
       await server.close();
     });
 
-    test('every tool is read-only and declares an output schema', () async {
+    test('tool annotations reflect live collection and local writes', () async {
       await connect(_fixture());
       final tools = await client.listTools();
       final byName = {for (final t in tools.tools) t.name: t};
@@ -335,17 +335,32 @@ void main() {
           'check_provider_availability',
         ]),
       );
+      const liveCollectionTools = {
+        'list_quotas',
+        'provider_with_most_headroom',
+        'suggest_provider',
+        'reserve_provider',
+        'list_models',
+        'suggest_model',
+        'check_provider_availability',
+      };
       for (final t in tools.tools) {
-        if (t.name == 'reserve_provider') {
+        if (liveCollectionTools.contains(t.name)) {
           expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
           expect(t.annotations?.idempotentHint, isFalse, reason: t.name);
+          expect(t.annotations?.openWorldHint, isTrue, reason: t.name);
         } else if (t.name == 'release_provider') {
           expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
           expect(t.annotations?.idempotentHint, isTrue, reason: t.name);
+          expect(t.annotations?.openWorldHint, isFalse, reason: t.name);
+        } else if (t.name == 'decide_now') {
+          expect(t.annotations?.readOnlyHint, isFalse, reason: t.name);
+          expect(t.annotations?.idempotentHint, isFalse, reason: t.name);
+          expect(t.annotations?.openWorldHint, isFalse, reason: t.name);
         } else {
-          expect(t.annotations?.readOnlyHint, isTrue, reason: t.name);
-          expect(t.annotations?.idempotentHint, isTrue, reason: t.name);
+          fail('unclassified MCP tool annotations: ${t.name}');
         }
+        expect(t.annotations?.destructiveHint, isFalse, reason: t.name);
         expect(t.outputSchema, isNotNull, reason: t.name);
       }
       final listModelsProperties = byName['list_models']!
@@ -361,6 +376,29 @@ void main() {
       expect(
         suggestModelProperties.keys,
         containsAll(['use_expiring_quota', 'expiring_quota']),
+      );
+      expect(
+        byName['list_models']!.description,
+        allOf(
+          contains('providers represented in the current registry'),
+          contains('does not prove on-device execution or zero cost'),
+          isNot(contains('every model')),
+        ),
+      );
+      expect(
+        byName['suggest_model']!.description,
+        allOf(
+          contains('does not compare model prices'),
+          isNot(contains('cheapest model')),
+        ),
+      );
+      expect(
+        byName['reserve_provider']!.description,
+        allOf(
+          contains('Target selection performs live metadata collection'),
+          contains('never calls a model'),
+          isNot(contains('writes only local metadata')),
+        ),
       );
       final suggestProviderInput = byName['suggest_provider']!
           .inputSchema

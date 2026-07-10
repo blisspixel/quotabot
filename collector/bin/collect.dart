@@ -1335,7 +1335,7 @@ void _printHelp() {
     '  check <provider>    whether one provider is usable now, and its reset',
   );
   stdout.writeln(
-    '  models              every model you can route to now, with budget + caps',
+    '  models              known model candidates, with budget + capabilities',
   );
   stdout.writeln(
     '  calibration         how often quotabot\'s predictions come true (history)',
@@ -1433,7 +1433,7 @@ void _printHelp() {
     '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',
   );
   stdout.writeln(
-    '  --budget=POLICY     models/suggest: any|quota|local spend envelope',
+    '  --budget=POLICY     models/suggest: any|quota|local class filter',
   );
   stdout.writeln(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
@@ -2399,14 +2399,14 @@ String _ctxLabel(int tokens) => tokens >= 1000000
     ? '${(tokens / 1000000).round()}M'
     : '${(tokens / 1000).round()}K';
 
-/// Prints the model registry: every model you can route to now, with the live
-/// budget that gates it and its capability hints.
+/// Prints the represented model registry with each known budget gate and its
+/// capability hints.
 void _printModels(
   List<ModelEntry> reg,
   int now, {
   bool filtersActive = false,
 }) {
-  print('quotabot models  (what you can route to now, 0 usage tokens)\n');
+  print('quotabot models  (known candidates, 0 usage tokens)\n');
   if (reg.isEmpty) {
     // Distinguish "nothing to route to" from "your filters excluded everything",
     // so a too-strict flag does not read as a missing runtime.
@@ -2490,7 +2490,7 @@ void _printSuggest(RouteSuggestion s) {
   if (r == null) {
     print('  no provider to route to right now');
   } else {
-    final tag = r.isLocal ? style.dim(' (local fallback)') : '';
+    final tag = r.isLocal ? style.dim(' (runtime-classified fallback)') : '';
     final account = _routeAccountLabel(r);
     final provenance = _routeCandidateProvenance(r, s.asOf);
     print(
@@ -2505,9 +2505,10 @@ void _printSuggest(RouteSuggestion s) {
   for (final c in s.ranked) {
     final provenance = _routeCandidateProvenance(c, s.asOf);
     if (c.isLocal) {
-      // Local runtimes have no quota; show them as the always-on fallback.
+      // Runtime-classified entries have no tracked subscription window. Do not
+      // imply that adapter reachability proves execution location or cost.
       print(
-        '    ${c.provider.padRight(12)} ${style.cyan('local fallback')}  '
+        '    ${c.provider.padRight(12)} ${style.cyan('runtime fallback')}  '
         '$provenance',
       );
       continue;
