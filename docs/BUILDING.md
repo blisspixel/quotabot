@@ -73,6 +73,14 @@ Notes:
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners, using `--no-archive` for macOS and Linux, so every pull
 request verifies those platform bundles without publishing release artifacts.
+It then launches each packaged app and requires native window setup plus every
+supported tray-registration call to complete. Windows verifies the native
+`Shell_NotifyIconGetRect` result and rectangle independently of the tray plugin;
+macOS requires non-empty native tray bounds from the plugin. The app exposes
+that integration-only signal when `QUOTABOT_DESKTOP_READINESS_FILE` names an
+output path; normal application runs do not write a readiness file. This
+automated startup gate does not replace the release-candidate's interactive
+launcher and visible-tray check on clean desktop sessions.
 
 ## Release dry run
 

@@ -56,7 +56,7 @@ jobs:
         run: bash tools/test-write-desktop-entry.sh
 
       - name: Coverage checker tests
-        run: python -m unittest tools.test_check_lcov tools.test_check_release_version
+        run: python -m unittest tools.test_check_lcov tools.test_check_release_version tools.test_desktop_readiness_smoke
 
       - name: Release version consistency
         run: python tools/check_release_version.py
@@ -110,19 +110,31 @@ jobs:
         shell: pwsh
         run: ./tools/package-windows.ps1
 
+      - name: Verify Windows desktop window and tray readiness
+        if: runner.os == 'Windows'
+        run: python tools/desktop_readiness_smoke.py --executable app/build/windows/x64/runner/Release/quotabot.exe
+
       - name: Linux desktop build prerequisites
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev dbus-x11 xvfb
 
       - name: Verify Linux desktop package build
         if: runner.os == 'Linux'
         run: bash tools/package-linux.sh --no-archive
 
+      - name: Verify Linux desktop window and tray readiness
+        if: runner.os == 'Linux'
+        run: python tools/desktop_readiness_smoke.py --executable app/build/linux/x64/release/bundle/quotabot
+
       - name: Verify macOS desktop package build
         if: runner.os == 'macOS'
         run: bash tools/package-macos.sh --no-archive
+
+      - name: Verify macOS desktop window and tray readiness
+        if: runner.os == 'macOS'
+        run: python tools/desktop_readiness_smoke.py --executable app/build/macos/Build/Products/Release/quotabot.app/Contents/MacOS/quotabot
 
       - name: MCP client snippet tests
         working-directory: integrations/mcp_clients
