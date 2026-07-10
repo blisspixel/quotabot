@@ -1,5 +1,6 @@
 import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/adapters/ollama.dart';
+import 'package:quotabot_collector/local_runtime_config.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
@@ -245,6 +246,17 @@ void main() {
 
     test('respects https without forcing the local port', () {
       expect(localBaseUrl('https://remote', 11434), 'https://remote');
+    });
+
+    test('applies a valid separate port override', () {
+      expect(
+        localBaseUrl('https://remote:443', 13305, rawPort: '14000'),
+        'https://remote:14000',
+      );
+      expect(
+        localBaseUrl('remote', 13305, rawPort: '70000'),
+        'http://remote:13305',
+      );
     });
   });
 }

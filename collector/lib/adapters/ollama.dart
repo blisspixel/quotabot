@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../local_runtime_config.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -37,7 +38,7 @@ class OllamaAdapter {
   static const name = ollamaProviderName;
 
   static String baseUrl() =>
-      localBaseUrl(Platform.environment['OLLAMA_HOST'], 11434);
+      localBaseUrl(Platform.environment['OLLAMA_HOST'], ollamaDefaultPort);
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
@@ -81,20 +82,6 @@ class OllamaAdapter {
         ok: false,
         error: 'not running',
       );
-}
-
-/// Resolves a local runtime base URL from a raw host value (often an env var
-/// like OLLAMA_HOST or LMSTUDIO_HOST). Accepts a bare host, host:port, or full
-/// URL, defaults the scheme to http, and supplies [defaultPort] when none is
-/// given (except https, which keeps its default 443). Pure for testing.
-String localBaseUrl(String? raw, int defaultPort) {
-  if (raw == null || raw.trim().isEmpty) return 'http://127.0.0.1:$defaultPort';
-  var h = raw.trim();
-  if (!h.startsWith('http://') && !h.startsWith('https://')) h = 'http://$h';
-  final uri = Uri.parse(h);
-  if (uri.hasPort) return '${uri.scheme}://${uri.host}:${uri.port}';
-  if (uri.scheme == 'https') return '${uri.scheme}://${uri.host}';
-  return '${uri.scheme}://${uri.host}:$defaultPort';
 }
 
 /// Parses an Ollama `/api/tags` or `/api/ps` response body into [LocalModel]s.

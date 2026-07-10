@@ -3,10 +3,11 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../local_runtime_config.dart';
 import '../models.dart';
 import '../provider_ids.dart';
 import '../util.dart';
-import 'ollama.dart' show LocalModel, localBaseUrl, localRuntimeQuota;
+import 'ollama.dart' show LocalModel, localRuntimeQuota;
 
 /// Detects a local LM Studio server and reports installed and loaded models,
 /// the same way the Ollama adapter does (no quota; a local runtime has nothing
@@ -21,7 +22,7 @@ class LmStudioAdapter {
   static const name = lmStudioProviderName;
 
   static String baseUrl() =>
-      localBaseUrl(Platform.environment['LMSTUDIO_HOST'], 1234);
+      localBaseUrl(Platform.environment['LMSTUDIO_HOST'], lmStudioDefaultPort);
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();

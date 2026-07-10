@@ -3,19 +3,20 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../local_runtime_config.dart';
 import '../models.dart';
 import '../provider_ids.dart';
 import '../util.dart';
 import 'lmstudio.dart' show lmStudioCompatFromJson;
-import 'ollama.dart' show LocalModel, localBaseUrl, localRuntimeQuota;
+import 'ollama.dart' show LocalModel, localRuntimeQuota;
 
 /// Detects a local Lemonade Server (the AMD/lemonade-sdk OpenAI-compatible
 /// runtime) and reports its installed models, like the other local runtimes.
 ///
 /// Lemonade exposes an OpenAI-compatible API; quotabot lists models from
 /// `GET /api/v1/models`, falling back to `/v1/models`. The server defaults to
-/// 127.0.0.1:8000; honors LEMONADE_HOST. No quota: a local runtime has nothing
-/// to spend, so it acts as an always-available routing fallback.
+/// 127.0.0.1:13305; honors LEMONADE_HOST and LEMONADE_PORT. No quota: a local
+/// runtime has nothing to spend, so it acts as an always-available fallback.
 class LemonadeAdapter {
   static const id = lemonadeProviderId;
   static const name = lemonadeProviderName;
@@ -23,8 +24,14 @@ class LemonadeAdapter {
   final http.Client _http;
   LemonadeAdapter({http.Client? client}) : _http = client ?? http.Client();
 
-  static String baseUrl() =>
-      localBaseUrl(Platform.environment['LEMONADE_HOST'], 8000);
+  static String baseUrl({Map<String, String>? environment}) {
+    final env = environment ?? Platform.environment;
+    return localBaseUrl(
+      env['LEMONADE_HOST'],
+      lemonadeDefaultPort,
+      rawPort: env['LEMONADE_PORT'],
+    );
+  }
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();

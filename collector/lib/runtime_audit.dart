@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'local_runtime_config.dart';
 import 'profiles.dart';
 import 'provider_ids.dart';
 import 'util.dart';
@@ -379,9 +380,9 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: ollamaProviderName,
       kind: 'local',
       network: [
-        _localRuntime(env, 'OLLAMA_HOST', 11434, '/api/tags',
+        _localRuntime(env, 'OLLAMA_HOST', ollamaDefaultPort, '/api/tags',
             'Ollama installed model metadata'),
-        _localRuntime(env, 'OLLAMA_HOST', 11434, '/api/ps',
+        _localRuntime(env, 'OLLAMA_HOST', ollamaDefaultPort, '/api/ps',
             'Ollama loaded model metadata'),
       ],
     ),
@@ -390,9 +391,9 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: lmStudioProviderName,
       kind: 'local',
       network: [
-        _localRuntime(env, 'LMSTUDIO_HOST', 1234, '/api/v0/models',
-            'LM Studio native model metadata'),
-        _localRuntime(env, 'LMSTUDIO_HOST', 1234, '/v1/models',
+        _localRuntime(env, 'LMSTUDIO_HOST', lmStudioDefaultPort,
+            '/api/v0/models', 'LM Studio native model metadata'),
+        _localRuntime(env, 'LMSTUDIO_HOST', lmStudioDefaultPort, '/v1/models',
             'LM Studio OpenAI-compatible model metadata fallback'),
       ],
     ),
@@ -401,10 +402,12 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: lemonadeProviderName,
       kind: 'local',
       network: [
-        _localRuntime(env, 'LEMONADE_HOST', 8000, '/api/v1/models',
-            'Lemonade model metadata'),
-        _localRuntime(env, 'LEMONADE_HOST', 8000, '/v1/models',
-            'Lemonade OpenAI-compatible model metadata fallback'),
+        _localRuntime(env, 'LEMONADE_HOST', lemonadeDefaultPort,
+            '/api/v1/models', 'Lemonade model metadata',
+            portVariable: 'LEMONADE_PORT'),
+        _localRuntime(env, 'LEMONADE_HOST', lemonadeDefaultPort, '/v1/models',
+            'Lemonade OpenAI-compatible model metadata fallback',
+            portVariable: 'LEMONADE_PORT'),
       ],
     ),
     ProviderRuntimeAccess(
@@ -520,38 +523,15 @@ RuntimeAccessRecord _localRuntime(
   String variable,
   int defaultPort,
   String path,
-  String purpose,
-) {
-  final endpoint = _runtimeEndpoint(env[variable], defaultPort, path);
-  return _http('GET', endpoint.host, endpoint.path, purpose,
-      scheme: endpoint.scheme);
-}
-
-({String scheme, String host, String path}) _runtimeEndpoint(
-  String? raw,
-  int defaultPort,
-  String path,
-) {
-  final trimmed = raw?.trim();
-  if (trimmed == null || trimmed.isEmpty) {
-    return (scheme: 'http', host: '127.0.0.1:$defaultPort', path: path);
-  }
-  final withScheme =
-      trimmed.startsWith('http://') || trimmed.startsWith('https://')
-          ? trimmed
-          : 'http://$trimmed';
-  try {
-    final uri = Uri.parse(withScheme);
-    final host = uri.host.isEmpty ? '127.0.0.1' : uri.host;
-    final port = uri.hasPort ? uri.port : defaultPort;
-    return (
-      scheme: uri.scheme.isEmpty ? 'http' : uri.scheme,
-      host: '$host:$port',
-      path: path,
-    );
-  } catch (_) {
-    return (scheme: 'http', host: '127.0.0.1:$defaultPort', path: path);
-  }
+  String purpose, {
+  String? portVariable,
+}) {
+  final origin = resolveLocalRuntimeOrigin(
+    env[variable],
+    defaultPort,
+    rawPort: portVariable == null ? null : env[portVariable],
+  );
+  return _http('GET', origin.authority, path, purpose, scheme: origin.scheme);
 }
 
 String _home(Map<String, String> env) =>

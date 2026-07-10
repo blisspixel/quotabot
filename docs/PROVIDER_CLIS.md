@@ -83,4 +83,6 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
   quotabot lists installed and loaded models from the local API. There is no
   quota to spend, so they act as an always-available routing fallback. LM Studio
   must have its local server started (Developer tab, or `lms server start`);
-  Lemonade defaults to port 8000 and honors `LEMONADE_HOST`.
+  Lemonade desktop packages start their service automatically, default to port
+  13305, and honor `LEMONADE_HOST` and `LEMONADE_PORT`. Use `lemonade status`
+  to check it; headless installations run `lemond`.
