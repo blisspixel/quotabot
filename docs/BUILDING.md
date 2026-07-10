@@ -108,6 +108,17 @@ maintainer will consume it:
 10. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
 
+The `Install smoke` workflow automates the post-release clean-host portion of
+this checklist on native Windows, macOS, and Linux runners. It resolves the
+latest published release and prior 0.x release, pins checkout to the release-tag
+commit, verifies checksums and provenance, exercises a clean one-line install,
+then tests the prior-release upgrade plus CLI-only and full source setup with a
+persistent-state sentinel. Its final checks cover the packaged CLI, demo doctor
+schema, Windows shortcut target, macOS app bundle, and Linux desktop entry. It
+runs weekly and can be dispatched with explicit tags for repeatable published
+release regression evidence. A pre-publication candidate dry run and interactive
+tray-readiness check remain separate release-candidate requirements.
+
 ## Icon and dev launcher
 
 The application icon (`app/windows/runner/resources/app_icon.ico` on Windows,

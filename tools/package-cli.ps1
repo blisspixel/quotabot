@@ -8,6 +8,7 @@ $root = Split-Path -Parent $scriptDir
 $collectorDir = Join-Path $root 'collector'
 $releaseDir = Join-Path $root 'release'
 $buildDir = Join-Path $collectorDir 'build\quotabot_cli_release'
+. (Join-Path $scriptDir 'windows-architecture.ps1')
 
 $dart = (Get-Command dart -ErrorAction SilentlyContinue).Source
 if (-not $dart) {
@@ -23,11 +24,7 @@ if (-not $dart) {
   throw "dart not found on PATH. Install Flutter or Dart and add it to PATH."
 }
 
-$arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-  'X64' { 'x64' }
-  'Arm64' { 'arm64' }
-  default { throw "Unsupported architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
-}
+$arch = Get-QuotabotWindowsArchitecture
 
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 $asset = "quotabot-windows-$arch.zip"

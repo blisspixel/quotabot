@@ -1,0 +1,547 @@
+name: Install smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: Latest published tag to install, or blank to auto-detect
+        required: false
+        type: string
+      previous_tag:
+        description: Prior 0.x tag to upgrade from, or blank to auto-detect
+        required: false
+        type: string
+  schedule:
+    - cron: "17 8 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-releases:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      target_tag: ${{ steps.releases.outputs.target_tag }}
+      previous_tag: ${{ steps.releases.outputs.previous_tag }}
+      target_sha: ${{ steps.releases.outputs.target_sha }}
+      previous_sha: ${{ steps.releases.outputs.previous_sha }}
+    steps:
+      - name: Resolve latest and previous releases
+        id: releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TARGET_TAG: ${{ inputs.target_tag }}
+          INPUT_PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          set -euo pipefail
+          mapfile -t tags < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
+          )
+          if [[ ${#tags[@]} -lt 2 ]]; then
+            echo "At least two published releases are required." >&2
+            exit 1
+          fi
+
+          latest="${tags[0]}"
+          target="${INPUT_TARGET_TAG:-$latest}"
+          if [[ "$target" != "$latest" ]]; then
+            echo "target_tag must equal the latest published release ($latest)." >&2
+            exit 1
+          fi
+          if [[ ! "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid target tag: $target" >&2
+            exit 1
+          fi
+
+          previous="${INPUT_PREVIOUS_TAG:-}"
+          if [[ -z "$previous" ]]; then
+            for tag in "${tags[@]:1}"; do
+              if [[ "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+                previous="$tag"
+                break
+              fi
+            done
+          fi
+          if [[ ! "$previous" =~ ^v0\.[0-9]+\.[0-9]+$ || "$previous" == "$target" ]]; then
+            echo "Invalid previous 0.x tag: $previous" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$previous" >/dev/null
+
+          resolve_tag_commit() {
+            local tag="$1"
+            local object_type object_sha
+            object_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type')"
+            object_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
+            for _ in 1 2 3 4; do
+              [[ "$object_type" == tag ]] || break
+              object_type="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" --jq '.object.type')"
+              object_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" --jq '.object.sha')"
+            done
+            if [[ "$object_type" != commit || ! "$object_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Tag $tag does not resolve to one commit." >&2
+              return 1
+            fi
+            printf '%s\n' "$object_sha"
+          }
+          target_sha="$(resolve_tag_commit "$target")"
+          previous_sha="$(resolve_tag_commit "$previous")"
+
+          echo "target_tag=$target" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$previous" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "previous_sha=$previous_sha" >> "$GITHUB_OUTPUT"
+          echo "Target: $target"
+          echo "Target commit: $target_sha"
+          echo "Upgrade from: $previous"
+          echo "Previous commit: $previous_sha"
+
+  clean-install:
+    needs: resolve-releases
+    permissions:
+      contents: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_TAG: ${{ needs.resolve-releases.outputs.target_tag }}
+      TARGET_SHA: ${{ needs.resolve-releases.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.resolve-releases.outputs.target_sha }}
+
+      - name: Verify and clean-install Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asset = 'quotabot-windows-x64.zip'
+          $root = Join-Path $env:RUNNER_TEMP 'quotabot-current'
+          $archive = Join-Path $root $asset
+          $sidecar = "$archive.sha256"
+          $served = Join-Path $root 'install.ps1'
+          $expanded = Join-Path $root 'expanded'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TARGET_TAG/$asset" -OutFile $archive
+          Invoke-WebRequest -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:TARGET_TAG/$asset.sha256" -OutFile $sidecar
+          $sidecarText = (Get-Content -LiteralPath $sidecar -Raw).Trim()
+          if ($sidecarText.Length -lt 64) { throw 'Target checksum sidecar is too short.' }
+          $expected = $sidecarText.Substring(0, 64).ToLowerInvariant()
+          if ($expected -notmatch '^[0-9a-f]{64}$') { throw 'Target checksum sidecar is malformed.' }
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -ne $actual) { throw 'Target release checksum mismatch.' }
+          gh attestation verify $archive --repo $env:GITHUB_REPOSITORY --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref "refs/tags/$env:TARGET_TAG" --source-digest $env:TARGET_SHA --deny-self-hosted-runners | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Target release attestation verification failed.' }
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:TARGET_SHA/install.ps1" -OutFile $served
+          $crlf = [string][char]13 + [char]10
+          $lf = [string][char]10
+          $cr = [string][char]13
+          $trackedText = (Get-Content -LiteralPath install.ps1 -Raw).Replace($crlf, $lf).Replace($cr, $lf)
+          $servedText = (Get-Content -LiteralPath $served -Raw).Replace($crlf, $lf).Replace($cr, $lf)
+          if ($trackedText -cne $servedText) { throw 'Served installer differs from the target commit.' }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File $served
+          if ($LASTEXITCODE -ne 0) { throw "Installer exited $LASTEXITCODE" }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
+          $expectedPayload = @{}
+          Get-ChildItem -LiteralPath $expanded -Recurse -File | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($expanded, $_.FullName)
+            $expectedPayload[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+          }
+          $actualPayload = @{}
+          foreach ($directory in 'bin', 'lib') {
+            $payloadRoot = Join-Path $installRoot $directory
+            Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | ForEach-Object {
+              $relative = [IO.Path]::GetRelativePath($installRoot, $_.FullName)
+              $actualPayload[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            }
+          }
+          if ($expectedPayload.Count -ne $actualPayload.Count) { throw 'Installed payload file count differs from the verified archive.' }
+          foreach ($relative in $expectedPayload.Keys) {
+            if (-not $actualPayload.ContainsKey($relative) -or $actualPayload[$relative] -ne $expectedPayload[$relative]) {
+              throw "Installed payload differs from the verified archive: $relative"
+            }
+          }
+
+          $installed = Join-Path $env:LOCALAPPDATA 'quotabot/bin/quotabot.exe'
+          $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
+          $actualVersion = & $installed --version
+          if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+          $doctor = & $installed --demo doctor --json | ConvertFrom-Json
+          if ($doctor.schema -ne 'quotabot.v1') { throw "Unexpected doctor schema: $($doctor.schema)" }
+
+      - name: Verify and clean-install macOS or Linux release
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) asset_os=darwin ;;
+            Linux) asset_os=linux ;;
+            *) echo "Unsupported operating system." >&2; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64 | amd64) asset_arch=x64 ;;
+            arm64 | aarch64) asset_arch=arm64 ;;
+            *) echo "Unsupported architecture." >&2; exit 1 ;;
+          esac
+          asset="quotabot-${asset_os}-${asset_arch}.tar.gz"
+          root="$RUNNER_TEMP/quotabot-current"
+          archive="$root/$asset"
+          sidecar="$archive.sha256"
+          served="$root/install.sh"
+          expanded="$root/expanded"
+          mkdir -p "$root" "$expanded"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$TARGET_TAG/$asset" -o "$archive"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$TARGET_TAG/$asset.sha256" -o "$sidecar"
+          expected="$(awk 'NR == 1 { print tolower($1) }' "$sidecar")"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo 'Target checksum sidecar is malformed.' >&2; exit 1; }
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "$archive" | awk '{ print tolower($1) }')"
+          else
+            actual="$(shasum -a 256 "$archive" | awk '{ print tolower($1) }')"
+          fi
+          [[ "$expected" == "$actual" ]] || { echo 'Target release checksum mismatch.' >&2; exit 1; }
+          gh attestation verify "$archive" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$TARGET_TAG" \
+            --source-digest "$TARGET_SHA" \
+            --deny-self-hosted-runners >/dev/null
+          tar -xzf "$archive" -C "$expanded"
+
+          curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TARGET_SHA/install.sh" -o "$served"
+          cmp install.sh "$served"
+          bash "$served"
+          diff -qr "$expanded/bin" "$HOME/.local/share/quotabot/bin"
+          diff -qr "$expanded/lib" "$HOME/.local/share/quotabot/lib"
+          executable="$HOME/.local/bin/quotabot"
+          expected_version="quotabot ${TARGET_TAG#v}"
+          actual_version="$($executable --version)"
+          [[ "$actual_version" == "$expected_version" ]] || { echo "Expected $expected_version, got $actual_version" >&2; exit 1; }
+          "$executable" --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+
+      - name: Preserve verified current release archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-current-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/quotabot-current/quotabot-*
+          if-no-files-found: error
+          retention-days: 1
+
+  upgrade-and-setup:
+    needs:
+      - resolve-releases
+      - clean-install
+    permissions:
+      contents: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+          - ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_TAG: ${{ needs.resolve-releases.outputs.target_tag }}
+      PREVIOUS_TAG: ${{ needs.resolve-releases.outputs.previous_tag }}
+      TARGET_SHA: ${{ needs.resolve-releases.outputs.target_sha }}
+      PREVIOUS_SHA: ${{ needs.resolve-releases.outputs.previous_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.resolve-releases.outputs.target_sha }}
+
+      - name: Restore verified current release archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: verified-current-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/quotabot-current
+
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Verify target version matches source
+        shell: bash
+        run: python tools/check_release_version.py --tag "$TARGET_TAG"
+
+      - name: Linux desktop prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev
+
+      - name: Install previous Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asset = 'quotabot-windows-x64.zip'
+          $root = Join-Path $env:RUNNER_TEMP 'quotabot-previous'
+          $archive = Join-Path $root $asset
+          $sidecar = "$archive.sha256"
+          $expanded = Join-Path $root 'expanded'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:PREVIOUS_TAG/$asset" -OutFile $archive
+          Invoke-WebRequest -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:PREVIOUS_TAG/$asset.sha256" -OutFile $sidecar
+          $expected = (Get-Content -LiteralPath $sidecar -Raw).Trim().Substring(0, 64).ToLowerInvariant()
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -ne $actual) { throw 'Previous release checksum mismatch.' }
+          gh attestation verify $archive --repo $env:GITHUB_REPOSITORY --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref "refs/tags/$env:PREVIOUS_TAG" --source-digest $env:PREVIOUS_SHA --deny-self-hosted-runners | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Previous release attestation verification failed.' }
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
+          New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+          Copy-Item -LiteralPath (Join-Path $expanded 'bin') -Destination $installRoot -Recurse
+          Copy-Item -LiteralPath (Join-Path $expanded 'lib') -Destination $installRoot -Recurse
+          $installBin = Join-Path $installRoot 'bin'
+          $installBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+          $expectedVersion = 'quotabot ' + $env:PREVIOUS_TAG.TrimStart('v')
+          $actualVersion = & (Join-Path $installBin 'quotabot.exe') --version
+          if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+
+          $sentinel = Join-Path $installRoot 'manual/install-smoke-sentinel'
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sentinel) | Out-Null
+          New-Item -ItemType File -Force -Path $sentinel | Out-Null
+
+      - name: Install previous macOS or Linux release
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            Darwin) asset_os=darwin ;;
+            Linux) asset_os=linux ;;
+            *) echo "Unsupported operating system." >&2; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64 | amd64) asset_arch=x64 ;;
+            arm64 | aarch64) asset_arch=arm64 ;;
+            *) echo "Unsupported architecture." >&2; exit 1 ;;
+          esac
+          asset="quotabot-${asset_os}-${asset_arch}.tar.gz"
+          root="$RUNNER_TEMP/quotabot-previous"
+          archive="$root/$asset"
+          sidecar="$archive.sha256"
+          expanded="$root/expanded"
+          mkdir -p "$expanded" "$HOME/.local/bin" "$HOME/.local/share/quotabot"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$PREVIOUS_TAG/$asset" -o "$archive"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$PREVIOUS_TAG/$asset.sha256" -o "$sidecar"
+          expected="$(awk 'NR == 1 { print tolower($1) }' "$sidecar")"
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "$archive" | awk '{ print tolower($1) }')"
+          else
+            actual="$(shasum -a 256 "$archive" | awk '{ print tolower($1) }')"
+          fi
+          [[ "$expected" == "$actual" ]] || { echo 'Previous release checksum mismatch.' >&2; exit 1; }
+          gh attestation verify "$archive" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$PREVIOUS_TAG" \
+            --source-digest "$PREVIOUS_SHA" \
+            --deny-self-hosted-runners >/dev/null
+          tar -xzf "$archive" -C "$expanded"
+          cp -R "$expanded/bin" "$expanded/lib" "$HOME/.local/share/quotabot/"
+          printf '#!/usr/bin/env bash\nexec "%s/bin/quotabot" "$@"\n' \
+            "$HOME/.local/share/quotabot" > "$HOME/.local/bin/quotabot"
+          chmod +x "$HOME/.local/bin/quotabot"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+          expected_version="quotabot ${PREVIOUS_TAG#v}"
+          actual_version="$($HOME/.local/bin/quotabot --version)"
+          [[ "$actual_version" == "$expected_version" ]] || { echo "Expected $expected_version, got $actual_version" >&2; exit 1; }
+
+          config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
+          mkdir -p "$config_root/quotabot/manual"
+          touch "$config_root/quotabot/manual/install-smoke-sentinel"
+
+      - name: Upgrade with served Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $served = Join-Path $env:RUNNER_TEMP 'install.ps1'
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:TARGET_SHA/install.ps1" -OutFile $served
+          $crlf = [string][char]13 + [char]10
+          $lf = [string][char]10
+          $cr = [string][char]13
+          $trackedText = (Get-Content -LiteralPath install.ps1 -Raw).Replace($crlf, $lf).Replace($cr, $lf)
+          $servedText = (Get-Content -LiteralPath $served -Raw).Replace($crlf, $lf).Replace($cr, $lf)
+          if ($trackedText -cne $servedText) { throw 'Served installer differs from the checked-out script.' }
+          & pwsh -NoProfile -ExecutionPolicy Bypass -File $served
+          if ($LASTEXITCODE -ne 0) { throw "Installer exited $LASTEXITCODE" }
+
+          $verifiedRoot = Join-Path $env:RUNNER_TEMP 'quotabot-current'
+          $verifiedArchive = Join-Path $verifiedRoot 'quotabot-windows-x64.zip'
+          $verifiedSidecar = "$verifiedArchive.sha256"
+          $sidecarText = (Get-Content -LiteralPath $verifiedSidecar -Raw).Trim()
+          if ($sidecarText.Length -lt 64) { throw 'Target checksum sidecar is too short.' }
+          $verifiedHash = (Get-FileHash -LiteralPath $verifiedArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sidecarText.Substring(0, 64).ToLowerInvariant() -ne $verifiedHash) { throw 'Restored target archive checksum mismatch.' }
+          $verifiedExpanded = Join-Path $verifiedRoot 'upgrade-expanded'
+          Expand-Archive -LiteralPath $verifiedArchive -DestinationPath $verifiedExpanded
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
+          $expectedPayload = @{}
+          Get-ChildItem -LiteralPath $verifiedExpanded -Recurse -File | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($verifiedExpanded, $_.FullName)
+            $expectedPayload[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+          }
+          $actualPayload = @{}
+          foreach ($directory in 'bin', 'lib') {
+            $payloadRoot = Join-Path $installRoot $directory
+            Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | ForEach-Object {
+              $relative = [IO.Path]::GetRelativePath($installRoot, $_.FullName)
+              $actualPayload[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            }
+          }
+          if ($expectedPayload.Count -ne $actualPayload.Count) { throw 'Upgraded payload file count differs from the verified archive.' }
+          foreach ($relative in $expectedPayload.Keys) {
+            if (-not $actualPayload.ContainsKey($relative) -or $actualPayload[$relative] -ne $expectedPayload[$relative]) {
+              throw "Upgraded payload differs from the verified archive: $relative"
+            }
+          }
+
+          $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
+          $actualVersion = quotabot --version
+          if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+          $sentinel = Join-Path $env:LOCALAPPDATA 'quotabot/manual/install-smoke-sentinel'
+          if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Upgrade removed persistent state.' }
+
+      - name: Upgrade with served macOS or Linux installer
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          served="$RUNNER_TEMP/install.sh"
+          curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TARGET_SHA/install.sh" -o "$served"
+          cmp install.sh "$served"
+          bash "$served"
+          case "$(uname -s)" in
+            Darwin) asset_os=darwin ;;
+            Linux) asset_os=linux ;;
+            *) echo "Unsupported operating system." >&2; exit 1 ;;
+          esac
+          case "$(uname -m)" in
+            x86_64 | amd64) asset_arch=x64 ;;
+            arm64 | aarch64) asset_arch=arm64 ;;
+            *) echo "Unsupported architecture." >&2; exit 1 ;;
+          esac
+          verified_root="$RUNNER_TEMP/quotabot-current"
+          verified_archive="$verified_root/quotabot-${asset_os}-${asset_arch}.tar.gz"
+          verified_sidecar="$verified_archive.sha256"
+          expected="$(awk 'NR == 1 { print tolower($1) }' "$verified_sidecar")"
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "$verified_archive" | awk '{ print tolower($1) }')"
+          else
+            actual="$(shasum -a 256 "$verified_archive" | awk '{ print tolower($1) }')"
+          fi
+          [[ "$expected" == "$actual" ]] || { echo 'Restored target archive checksum mismatch.' >&2; exit 1; }
+          verified_expanded="$verified_root/upgrade-expanded"
+          mkdir -p "$verified_expanded"
+          tar -xzf "$verified_archive" -C "$verified_expanded"
+          diff -qr "$verified_expanded/bin" "$HOME/.local/share/quotabot/bin"
+          diff -qr "$verified_expanded/lib" "$HOME/.local/share/quotabot/lib"
+          expected_version="quotabot ${TARGET_TAG#v}"
+          actual_version="$(quotabot --version)"
+          [[ "$actual_version" == "$expected_version" ]] || { echo "Expected $expected_version, got $actual_version" >&2; exit 1; }
+          config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
+          test -f "$config_root/quotabot/manual/install-smoke-sentinel"
+
+      - name: Run Windows CLI-only source setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools/setup.ps1 -CliOnly -Yes
+
+      - name: Run macOS or Linux CLI-only source setup
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash tools/setup.sh --cli-only
+
+      - name: Run full Windows source setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tools/setup.ps1 -Yes
+
+      - name: Run full macOS or Linux source setup
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash tools/setup.sh
+
+      - name: Verify Windows install and desktop shortcut
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
+          $actualVersion = quotabot --version
+          if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+          $doctor = quotabot --demo doctor --json | ConvertFrom-Json
+          if ($doctor.schema -ne 'quotabot.v1') { throw "Unexpected doctor schema: $($doctor.schema)" }
+
+          $sentinel = Join-Path $env:LOCALAPPDATA 'quotabot/manual/install-smoke-sentinel'
+          if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Source setup removed persistent state.' }
+          $link = Join-Path ([Environment]::GetFolderPath('Desktop')) 'quotabot.lnk'
+          if (-not (Test-Path -LiteralPath $link)) { throw 'Desktop shortcut was not created.' }
+          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
+          $target = [IO.Path]::GetFullPath($shortcut.TargetPath)
+          $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
+          if (-not $target.StartsWith($workspace, [StringComparison]::OrdinalIgnoreCase) -or
+              -not (Test-Path -LiteralPath $target)) {
+            throw "Desktop shortcut target is invalid: $target"
+          }
+
+      - name: Verify macOS install and app bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(quotabot --version)" == "quotabot ${TARGET_TAG#v}" ]]
+          quotabot --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+          config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
+          test -f "$config_root/quotabot/manual/install-smoke-sentinel"
+          test -x "app/build/macos/Build/Products/Release/quotabot.app/Contents/MacOS/quotabot"
+
+      - name: Verify Linux install and desktop entry
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(quotabot --version)" == "quotabot ${TARGET_TAG#v}" ]]
+          quotabot --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+          config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
+          test -f "$config_root/quotabot/manual/install-smoke-sentinel"
+          desktop="$HOME/.local/share/applications/quotabot.desktop"
+          test -f "$desktop"
+          target="$(sed -n 's/^Exec=//p' "$desktop")"
+          if [[ "$target" == \"*\" ]]; then
+            target="${target#\"}"
+            target="${target%\"}"
+          fi
+          test -n "$target"
+          test -x "$target"

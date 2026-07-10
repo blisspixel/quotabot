@@ -4,6 +4,13 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Added a scheduled and manually dispatchable three-OS install smoke workflow
+  that verifies release checksums and provenance, exercises a clean one-line
+  install, upgrades the previous published 0.x release, runs CLI-only and full
+  source setup, preserves a persistent-state sentinel, and verifies native
+  desktop artifacts plus demo doctor output.
+
 ## 0.5.14 - 2026-07-09
 
 ### Added

@@ -46,6 +46,15 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Windows architecture helper tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/test-windows-architecture.ps1
+
+      - name: Linux desktop entry tests
+        if: runner.os == 'Linux'
+        run: bash tools/test-write-desktop-entry.sh
+
       - name: Coverage checker tests
         run: python -m unittest tools.test_check_lcov tools.test_check_release_version
 
