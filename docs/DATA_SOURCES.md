@@ -146,8 +146,8 @@ reuses the token Claude Code stores. Grok and Antigravity can run two ways:
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET` to use your own).
   These grants are independent of the host apps, so they never invalidate the
   CLI's or IDE's credentials. quotabot's tokens live under the per-user config
-  directory. Owner-only permissions are attempted best-effort on POSIX and
-  Windows; a permission-hardening failure does not currently abort the write. A grant can be
+  directory. A new or rotated grant is not written unless owner-only directory
+  and file permission hardening succeeds on POSIX or Windows. A grant can be
   stored as the provider default or in an account-scoped slot; the account slot
   filename uses a hash rather than the raw email. Grok derives the account slot
   from the device-login id token when present; Antigravity resolves it from

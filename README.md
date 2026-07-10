@@ -156,9 +156,9 @@ quotabot login antigravity   # opens a browser; sign in with the account you wan
 quotabot doctor              # confirm it reads live
 ```
 
-quotabot stores its own refresh token under your per-user config directory
-(with owner-only permissions attempted best-effort), independent of the app's
-credentials. Details in
+quotabot stores its own refresh token under your per-user config directory,
+independent of the app's credentials. A new or rotated grant is not written
+unless owner-only permission hardening succeeds. Details in
 [docs/SETUP.md](docs/SETUP.md#4-keep-grok-and-antigravity-live-or-pin-an-account-optional).
 
 ## Routing for tools and agents

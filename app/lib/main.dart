@@ -67,10 +67,40 @@ final ValueNotifier<String> appThemeSpec = ValueNotifier<String>(
   appThemeSystem,
 );
 
+@visibleForTesting
+String? preferenceLoadWarning(
+  PrefsLoadResult result,
+) => switch (result.failure) {
+  null => null,
+  PrefsLoadFailure.protection =>
+    result.retainedExistingFile
+        ? 'Saved settings were ignored because prefs.json could not be '
+              'protected. Secure or remove that file before retrying.'
+        : 'Saved settings are unavailable because secure local storage could '
+              'not be prepared.',
+  PrefsLoadFailure.invalidData =>
+    'Saved settings are invalid. Safe defaults are active; repair or remove '
+        'prefs.json before retrying.',
+  PrefsLoadFailure.unsupportedFile =>
+    'Saved settings must be a regular file smaller than 64 KiB. Safe defaults '
+        'are active; replace or remove prefs.json before retrying.',
+  PrefsLoadFailure.readFailure =>
+    'Saved settings could not be read. Safe defaults are active; check '
+        'prefs.json before retrying.',
+};
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
-  final prefs = Prefs.load();
+  final prefsResult = await Prefs.load();
+  final prefs = prefsResult.prefs;
+  final startupStorageWarning = preferenceLoadWarning(prefsResult);
+  if (startupStorageWarning != null) {
+    stderr.writeln(
+      'quotabot: preference load failed (${prefsResult.failure!.name}); '
+      'safe defaults active',
+    );
+  }
   textScale.value = prefs.textSize.scale;
 
   // Keep startup resilient when a platform notification backend is unavailable.
@@ -135,20 +165,28 @@ Future<void> main() async {
     }),
   );
 
-  runApp(QuotaBotApp(prefs: prefs));
+  runApp(
+    QuotaBotApp(prefs: prefs, startupStorageWarning: startupStorageWarning),
+  );
 }
 
 class QuotaBotApp extends StatelessWidget {
   final Prefs prefs;
+  final String? startupStorageWarning;
   @visibleForTesting
   final Widget? testHome;
 
-  const QuotaBotApp({super.key, required this.prefs}) : testHome = null;
+  const QuotaBotApp({
+    super.key,
+    required this.prefs,
+    this.startupStorageWarning,
+  }) : testHome = null;
 
   @visibleForTesting
   const QuotaBotApp.test({
     super.key,
     required this.prefs,
+    this.startupStorageWarning,
     this.testHome = const SizedBox(),
   });
 
@@ -173,7 +211,12 @@ class QuotaBotApp extends StatelessWidget {
             ),
           ),
         ),
-        home: testHome ?? Dashboard(prefs: prefs),
+        home:
+            testHome ??
+            Dashboard(
+              prefs: prefs,
+              startupStorageWarning: startupStorageWarning,
+            ),
       ),
     );
   }
@@ -477,8 +520,11 @@ String webhookDeliveryStatus(WebhookResult result) {
       : 'Last delivery failed (HTTP $statusCode)';
 }
 
+typedef PrefsSaver = Future<void> Function(Prefs prefs);
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
+  final String? startupStorageWarning;
   final bool _hostIntegration;
   final bool? _demoModeOverride;
   @visibleForTesting
@@ -487,13 +533,16 @@ class Dashboard extends StatefulWidget {
   final List<QuotaProfile>? testProfiles;
   @visibleForTesting
   final AlertPoster? alertPoster;
+  @visibleForTesting
+  final PrefsSaver? prefsSaver;
 
-  const Dashboard({super.key, required this.prefs})
+  const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
     : _hostIntegration = true,
       _demoModeOverride = null,
       collector = null,
       testProfiles = null,
-      alertPoster = null;
+      alertPoster = null,
+      prefsSaver = null;
 
   /// Builds a deterministic dashboard without desktop plugin or preference
   /// side effects. This exercises the production widget tree while keeping
@@ -506,6 +555,8 @@ class Dashboard extends StatefulWidget {
     this.collector,
     this.testProfiles,
     this.alertPoster,
+    this.prefsSaver,
+    this.startupStorageWarning,
   }) : _hostIntegration = false,
        _demoModeOverride = demoMode,
        assert(
@@ -691,6 +742,7 @@ class _DashboardState extends State<Dashboard>
   String? _lastWebhookDeliveryStatus;
   bool? _lastWebhookDeliveryFailed;
   bool _notificationDeliveryFailed = false;
+  late String? _preferenceStorageWarning = widget.startupStorageWarning;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
   // Analytics renders as a body inside this dashboard (same header, same
@@ -703,6 +755,8 @@ class _DashboardState extends State<Dashboard>
   DateTime _updated = DateTime.now();
   Timer? _refreshTimer;
   Timer? _tick;
+  Timer? _windowMovePersistTimer;
+  int _windowMoveRevision = 0;
   final GlobalKey _contentKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
 
@@ -963,14 +1017,21 @@ class _DashboardState extends State<Dashboard>
     }
     _refreshTimer?.cancel();
     _tick?.cancel();
+    _windowMovePersistTimer?.cancel();
     _scroll.dispose();
     super.dispose();
   }
 
   @override
   void onWindowMoved() async {
-    _windowPos = await windowManager.getPosition();
-    _persistPrefs();
+    final revision = ++_windowMoveRevision;
+    final position = await windowManager.getPosition();
+    if (!mounted || revision != _windowMoveRevision) return;
+    _windowPos = position;
+    _windowMovePersistTimer?.cancel();
+    _windowMovePersistTimer = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_persistPrefs());
+    });
   }
 
   // System tray: keep quotabot one click away, and let the window close to the
@@ -1019,6 +1080,10 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<void> _quit() async {
+    _windowMoveRevision++;
+    _windowMovePersistTimer?.cancel();
+    await _persistPrefs();
+    await Prefs.flush();
     await windowManager.setPreventClose(false);
     await trayManager.destroy();
     await windowManager.destroy();
@@ -1052,10 +1117,12 @@ class _DashboardState extends State<Dashboard>
     unawaited(windowManager.hide());
   }
 
-  void _persistPrefs({bool saveProfileUiState = false}) {
-    if (!widget._hostIntegration) return;
-    if (saveProfileUiState) _saveActiveProfileUiState();
-    Prefs(
+  Future<bool> _persistPrefs({bool saveProfileUiState = false}) async {
+    if (!widget._hostIntegration && widget.prefsSaver == null) return true;
+    if (saveProfileUiState && widget._hostIntegration) {
+      _saveActiveProfileUiState();
+    }
+    final next = Prefs(
       hidden: _defaultHidden,
       compact: _compact,
       cadence: _cadence,
@@ -1071,7 +1138,30 @@ class _DashboardState extends State<Dashboard>
       setupDone: widget.prefs.setupDone,
       windowX: _windowPos?.dx,
       windowY: _windowPos?.dy,
-    ).save();
+    );
+    try {
+      await (widget.prefsSaver?.call(next) ?? next.save());
+      _setPreferenceStorageWarning(null);
+      return true;
+    } catch (_) {
+      _setPreferenceStorageWarning(
+        'Settings are active for this session only; secure local storage is '
+        'unavailable.',
+      );
+      return false;
+    }
+  }
+
+  void _setPreferenceStorageWarning(String? warning) {
+    if (!mounted || _preferenceStorageWarning == warning) return;
+    setState(() => _preferenceStorageWarning = warning);
+    if (warning != null && widget._hostIntegration) {
+      stderr.writeln(
+        'quotabot: settings were not saved because secure storage is '
+        'unavailable',
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
   Future<void> _refresh() async {
@@ -1324,7 +1414,7 @@ class _DashboardState extends State<Dashboard>
       if (_compact) _showingAnalytics = false;
     });
     _applySize();
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   void _toggleHidden(String target) {
@@ -1332,7 +1422,7 @@ class _DashboardState extends State<Dashboard>
       if (!_hidden.remove(target)) _hidden.add(target);
     });
     _applySize();
-    _persistPrefs(saveProfileUiState: true);
+    unawaited(_persistPrefs(saveProfileUiState: true));
   }
 
   void _toggleQuotaHidden(ProviderQuota quota) {
@@ -1354,7 +1444,7 @@ class _DashboardState extends State<Dashboard>
       }
     });
     _applySize();
-    _persistPrefs(saveProfileUiState: true);
+    unawaited(_persistPrefs(saveProfileUiState: true));
   }
 
   /// Right-click / long-press menu on a provider card: quick set-up help and
@@ -1630,6 +1720,22 @@ class _DashboardState extends State<Dashboard>
                 ),
               ),
             ),
+            if (_preferenceStorageWarning != null)
+              Tooltip(
+                message: _preferenceStorageWarning!,
+                child: Semantics(
+                  label: _preferenceStorageWarning,
+                  liveRegion: true,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(
+                      Icons.warning_amber_rounded,
+                      size: 16,
+                      color: Color(0xFFD29922),
+                    ),
+                  ),
+                ),
+              ),
             _iconButton(
               Icons.open_in_full_rounded,
               muted,
@@ -1837,40 +1943,43 @@ class _DashboardState extends State<Dashboard>
                   ],
                 ),
               ),
+            if (_preferenceStorageWarning != null)
+              _warningLine(_preferenceStorageWarning!, warning),
             if (_lastRefreshError != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, right: 4),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.warning_amber_rounded,
-                      size: 12,
-                      color: warning,
-                    ),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Semantics(
-                        liveRegion: true,
-                        child: Text(
-                          _lastRefreshError!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: AppType.caption,
-                            fontWeight: FontWeight.w500,
-                            color: warning,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _warningLine(_lastRefreshError!, warning),
           ],
         ),
       ),
     );
   }
+
+  Widget _warningLine(String message, Color warning) => Padding(
+    padding: const EdgeInsets.only(top: 4, right: 4),
+    child: Row(
+      children: [
+        Icon(Icons.warning_amber_rounded, size: 12, color: warning),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Semantics(
+            liveRegion: true,
+            child: Tooltip(
+              message: message,
+              child: Text(
+                message,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppType.caption,
+                  fontWeight: FontWeight.w500,
+                  color: warning,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _menuButton(Color muted) {
     final counts = _providerCounts(_profiledData);
@@ -2106,7 +2215,7 @@ class _DashboardState extends State<Dashboard>
       _applyProfileUiState(next);
     });
     _applySize();
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   Future<void> _showProfileEditor() async {
@@ -2137,7 +2246,7 @@ class _DashboardState extends State<Dashboard>
         _activeProfile = profile;
         _applyProfileUiState(profile);
       });
-      _persistPrefs();
+      unawaited(_persistPrefs());
       _applySize();
       return;
     }
@@ -2161,13 +2270,13 @@ class _DashboardState extends State<Dashboard>
       _activeProfile = saved;
       _applyProfileUiState(saved);
     });
-    _persistPrefs();
+    unawaited(_persistPrefs());
     _applySize();
   }
 
   void _setShowAccounts(bool value) {
     setState(() => _showAccounts = value);
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   /// Prompts for the optional low-quota alert webhook. An empty URL clears it.
@@ -2195,39 +2304,49 @@ class _DashboardState extends State<Dashboard>
         _lastWebhookDeliveryFailed = null;
       }
     });
-    _persistPrefs();
+    final persisted = await _persistPrefs();
+    if (!persisted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Webhook is active for this session only; settings could not be '
+            'saved securely.',
+          ),
+        ),
+      );
+    }
   }
 
   void _setTextSize(TextSize t) {
     setState(() => _textSize = t);
     textScale.value = t.scale; // applied app-wide by the MaterialApp builder
-    _persistPrefs();
+    unawaited(_persistPrefs());
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
   void _setCadence(Cadence c) {
     setState(() => _cadence = c);
     _scheduleNext(); // apply the new cadence immediately
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   void _setSort(ProviderSort s) {
     if (_sort == s) return;
     setState(() => _sort = s);
     _applySize();
-    _persistPrefs(saveProfileUiState: true);
+    unawaited(_persistPrefs(saveProfileUiState: true));
   }
 
   void _setAlwaysOnTop(bool value) {
     setState(() => _alwaysOnTop = value);
     if (widget._hostIntegration) windowManager.setAlwaysOnTop(value);
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   void _setShowInTaskbar(bool value) {
     setState(() => _showInTaskbar = value);
     if (widget._hostIntegration) windowManager.setSkipTaskbar(!value);
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   Future<void> _checkAndNotify() async {
@@ -2370,7 +2489,7 @@ class _DashboardState extends State<Dashboard>
 
   void _toggleNotifications() {
     setState(() => _enableNotifications = !_enableNotifications);
-    _persistPrefs();
+    unawaited(_persistPrefs());
   }
 
   void _showHelp() => _showSetup();

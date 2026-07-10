@@ -69,6 +69,31 @@ void main() {
     );
   });
 
+  test('preference load warnings preserve the actual failure class', () {
+    final invalid = preferenceLoadWarning(
+      const PrefsLoadResult(
+        prefs: Prefs(),
+        failure: PrefsLoadFailure.invalidData,
+        retainedExistingFile: true,
+      ),
+    );
+    final unsupported = preferenceLoadWarning(
+      const PrefsLoadResult(
+        prefs: Prefs(),
+        failure: PrefsLoadFailure.unsupportedFile,
+        retainedExistingFile: true,
+      ),
+    );
+
+    expect(invalid, contains('invalid'));
+    expect(invalid, isNot(contains('protected')));
+    expect(unsupported, contains('regular file'));
+    expect(
+      preferenceLoadWarning(const PrefsLoadResult(prefs: Prefs())),
+      isNull,
+    );
+  });
+
   testWidgets('dashboard exposes a bounded webhook delivery failure', (
     tester,
   ) async {
@@ -128,6 +153,84 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('failed secure preference save stays visible and actionable', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    var saveAttempts = 0;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          prefsSaver: (_) async {
+            saveAttempts++;
+            throw const PrefsStorageException();
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await _selectMenuValue(tester, 'webhook');
+    await tester.enterText(
+      find.byType(TextField),
+      'http://127.0.0.1:9000/quota',
+    );
+    await tester.tap(find.widgetWithText(TextButton, 'Save'));
+    await tester.pumpAndSettle();
+
+    expect(saveAttempts, 1);
+    expect(
+      find.text(
+        'Webhook is active for this session only; settings could not be '
+        'saved securely.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        'Settings are active for this session only; secure local storage is '
+        'unavailable.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('compact mode keeps a failed preference save visible', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          prefsSaver: (_) async => throw const PrefsStorageException(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Collapse'));
+    await tester.pumpAndSettle();
+
+    const warning =
+        'Settings are active for this session only; secure local storage is '
+        'unavailable.';
+    final warningTooltip = find.byWidgetPredicate(
+      (widget) => widget is Tooltip && widget.message == warning,
+    );
+    expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(warningTooltip, findsOneWidget);
+    expect(
+      find.descendant(
+        of: warningTooltip,
+        matching: find.byIcon(Icons.warning_amber_rounded),
+      ),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(warning), findsOneWidget);
   });
 
   testWidgets('demo dashboard exercises quota, compact, and analytics views', (

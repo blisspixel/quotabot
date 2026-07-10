@@ -24,8 +24,15 @@ Future<HttpServer> startLocalQuotabotServer({
   int Function() now = nowEpoch,
   void Function(String message)? log,
 }) async {
-  final server =
-      await HttpServer.bind(address ?? InternetAddress.loopbackIPv4, port);
+  final bindAddress = address ?? InternetAddress.loopbackIPv4;
+  if (!bindAddress.isLoopback) {
+    throw ArgumentError.value(
+      bindAddress.address,
+      'address',
+      'local server must bind to a loopback address',
+    );
+  }
+  final server = await HttpServer.bind(bindAddress, port);
   log?.call(
     'quotabot local server listening on http://localhost:${server.port}/',
   );
@@ -272,8 +279,11 @@ Future<HttpServer> startLocalQuotabotServer({
         } else {
           writeJson(request, {'error': 'not found'}, HttpStatus.notFound);
         }
-      } catch (_) {
+      } catch (error) {
         // Do not leak internal exception detail to the client.
+        log?.call(
+          'local server ${request.method} $path failed: ${error.runtimeType}',
+        );
         writeJson(
           request,
           {'error': 'internal error'},

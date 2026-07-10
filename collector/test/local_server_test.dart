@@ -64,6 +64,18 @@ Future<Map<String, dynamic>> _getJson(
 }
 
 void main() {
+  test('rejects a non-loopback bind address before opening a socket', () async {
+    await expectLater(
+      startLocalQuotabotServer(
+        port: 0,
+        address: InternetAddress.anyIPv4,
+        snapshotProvider: () async => [_q('claude', 20)],
+        now: () => _now,
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('local server serves snapshot, health, providers, and errors', () async {
     var collections = 0;
     final logs = <String>[];
@@ -363,10 +375,12 @@ void main() {
   });
 
   test('local server hides internal errors from clients', () async {
+    final logs = <String>[];
     final server = await startLocalQuotabotServer(
       port: 0,
       snapshotProvider: () async => throw StateError('secret detail'),
       now: () => _now,
+      log: logs.add,
     );
     try {
       final json = await _getJson(
@@ -376,6 +390,8 @@ void main() {
 
       expect(json['error'], 'internal error');
       expect(json.toString(), isNot(contains('secret detail')));
+      expect(logs, contains('local server GET / failed: StateError'));
+      expect(logs.join('\n'), isNot(contains('secret detail')));
     } finally {
       await server.close(force: true);
     }

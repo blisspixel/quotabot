@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 import unittest.mock
+import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -564,7 +565,13 @@ class RouterTests(unittest.TestCase):
 
         router = QuotabotRouter()
         router.policy = Policy(quotabot_url=f"http://127.0.0.1:{server.server_port}")
-        self.assertIsNone(router._fetch_suggest())
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", ResourceWarning)
+            self.assertIsNone(router._fetch_suggest())
+        self.assertFalse(
+            any(item.category is ResourceWarning for item in caught),
+            "redirect response must be closed explicitly",
+        )
 
     def test_metrics_path_is_constrained_to_quotabot_home(self):
         inside = Policy(metrics_path="~/.quotabot/routing.jsonl")
