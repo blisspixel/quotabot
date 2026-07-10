@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Downloads the latest Windows CLI release asset from GitHub.
-    If the release publishes a .sha256 sidecar, the installer verifies it.
+    Requires and verifies the release asset's .sha256 sidecar.
 
 .EXAMPLE
     # From PowerShell (run as normal user):
@@ -42,30 +42,21 @@ try {
     Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
     Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
     $checksumUrl = "$downloadUrl.sha256"
-    # Only the checksum download itself is allowed to fail (asset genuinely
-    # absent). Once the sidecar is present, every parse and hash step is fatal
-    # on failure, so a lock, IO error, or malformed file cannot be misread as
-    # "no checksum" and let an unverified bundle install.
-    $checksumFound = $true
+    # A release without a valid checksum sidecar is incomplete. Fail closed
+    # instead of silently degrading a security boundary in the convenience
+    # installer.
+    Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
     try {
-        Invoke-WebRequest -Uri $checksumUrl -OutFile $checksumPath -UseBasicParsing
-    } catch {
-        $checksumFound = $false
-        Write-Host "No checksum asset found at $checksumUrl; continuing with HTTPS verification only."
-    }
-    if ($checksumFound) {
-        try {
-            $expected = ((Get-Content $checksumPath -Raw) -split '\s+')[0].ToLowerInvariant()
-            if ($expected -notmatch '^[0-9a-f]{64}$') {
-                throw "Invalid checksum file for $assetName"
-            }
-            $actual = (Get-FileHash -Algorithm SHA256 $downloadPath).Hash.ToLowerInvariant()
-            if ($actual -ne $expected) {
-                throw "Checksum mismatch for $assetName"
-            }
-        } finally {
-            Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
+        $expected = ((Get-Content $checksumPath -Raw) -split '\s+')[0].ToLowerInvariant()
+        if ($expected -notmatch '^[0-9a-f]{64}$') {
+            throw "Invalid checksum file for $assetName"
         }
+        $actual = (Get-FileHash -Algorithm SHA256 $downloadPath).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+            throw "Checksum mismatch for $assetName"
+        }
+    } finally {
+        Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
     }
     Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractPath -Force
     $downloadedExe = Join-Path $extractPath "bin\quotabot.exe"
@@ -94,10 +85,11 @@ try {
 } catch {
     Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Error "Download failed: $($_.Exception.Message). Make sure a release with '$assetName' exists at https://github.com/$repo/releases"
+    Write-Error "Install failed: $($_.Exception.Message). Make sure the release publishes '$assetName' and its required .sha256 sidecar at https://github.com/$repo/releases"
     exit 1
 } finally {
     Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -121,5 +113,5 @@ Write-Host "  quotabot doctor"
 Write-Host "  quotabot login grok"
 Write-Host "  quotabot login antigravity  # optional, keeps Antigravity live"
 Write-Host ""
-Write-Host "To uninstall, delete the folder:"
-Write-Host "  Remove-Item -Recurse -Force '$installRoot'"
+Write-Host "To uninstall without deleting local history, grants, or profiles, see:"
+Write-Host "  https://github.com/$repo/blob/main/docs/SETUP.md#uninstall-the-release-cli-but-preserve-data"

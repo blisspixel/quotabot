@@ -7,7 +7,7 @@ These tools change often. Treat this as a starting point and verify against each
 vendor's official docs (linked per provider). For exactly where quotabot reads
 each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
-**Last updated: 2026-06-27.**
+**Last updated: 2026-07-10.**
 
 ## Claude (Claude Code)
 
@@ -44,11 +44,13 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 - Windows: per-model-group Weekly and Five Hour limits (Gemini models; Claude and
   GPT models), depending on plan (free, AI Pro, Ultra).
 - quotabot reads: the Cloud Code API (`loadCodeAssist`, `onboardUser`,
-  `fetchAvailableModels`) using Antigravity's own public OAuth client. Run
-  `quotabot login antigravity` once and sign in with the account you want shown;
-  no Google Cloud setup is required. The live read is preferred; local
-  Antigravity state is only used for account discovery and offline fallback,
-  where quotabot marks the result `per_machine`.
+  `fetchAvailableModels`). It can reuse refresh material from a signed-in
+  Antigravity IDE; `quotabot login antigravity` is optional when a discovered
+  account needs a separate refreshable grant or should be pinned. The IDE must
+  have run on this machine so its account remains discoverable. No Google Cloud
+  setup is required. The live read is preferred; local Antigravity state is used for
+  account discovery and offline fallback, where quotabot marks the result
+  `per_machine`.
 
 ## Grok (xAI)
 
@@ -60,7 +62,8 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
   Imagine, Chat, and Build percentages are category breakdowns inside that
   shared pool (SuperGrok / Premium+ raise the limits).
 - quotabot reads: the gRPC-web billing endpoint, reusing the token the Grok CLI
-  stores. Live while that token is fresh; `quotabot login grok` keeps it live.
+  stores. `quotabot login grok` can keep a matching account live with a separate
+  grant, but the local Grok account file must still exist for discovery.
 
 ## NVIDIA NIM
 
@@ -80,9 +83,11 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 - **Cursor, Windsurf, Kiro:** detected from their local state files; no usage
   command needed. quotabot reports what it can read opportunistically.
 - **Ollama, LM Studio, Lemonade (and other OpenAI-compatible runtimes):**
-  quotabot lists installed and loaded models from the local API. There is no
-  quota to spend, so they act as an always-available routing fallback. LM Studio
-  must have its local server started (Developer tab, or `lms server start`);
-  Lemonade desktop packages start their service automatically, default to port
-  13305, and honor `LEMONADE_HOST` and `LEMONADE_PORT`. Use `lemonade status`
-  to check it; headless installations run `lemond`.
+  quotabot lists installed and loaded models from the local API. Locally
+  executed models have no quota to spend, so a supported runtime is a fallback
+  while its daemon is reachable. LM Studio must have its local server started
+  (Developer tab, or `lms server start`); Lemonade desktop packages start their
+  service automatically, default to port 13305, and honor `LEMONADE_HOST` and
+  `LEMONADE_PORT`. Use `lemonade status` to check it; headless installations run
+  `lemond`. Ollama cloud models are offloaded despite the loopback daemon and
+  must not be assumed to satisfy a local-only budget.

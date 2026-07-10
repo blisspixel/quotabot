@@ -5,6 +5,9 @@ desktop app. The app depends on the collector by path and calls it directly, so
 there is a single code path and no subprocess or IPC. The collector also ships
 two binaries: a CLI and an MCP server.
 
+The map below is selective. It names architectural boundaries and public entry
+points, not every helper or command.
+
 ```
 collector/ (Dart package)
   models.dart        normalized ProviderQuota / QuotaWindow / ModelInfo / BurnStat
@@ -27,7 +30,10 @@ collector/ (Dart package)
   catalog_audit.dart pure/provider-owned model-list diffing for catalog currency
   schema_contracts.dart frozen quotabot.v1 JSON Schema and validator
   provider_adapters.dart compile-time adapter and fixture registry
+  provider_filters.dart shared profile/account/exclusion filtering
+  local_runtime_config.dart loopback runtime endpoint resolution and audit parity
   profiles.dart      named local profile schema, storage, and filtering
+  manual_quota.dart  bounded local self-reported window storage
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
   leases.dart        local routing leases for parallel-agent reservation and
@@ -42,6 +48,9 @@ collector/ (Dart package)
                      keyboard helpers (moveSelection, osc52Copy clipboard)
   demo.dart          synthetic fleet + burn stats for QUOTABOT_DEMO previews
   simulation.dart    exact one-provider snapshots for deterministic CLI tests
+  verification.dart  pure provider honesty and contract checks
+  runtime_audit.dart dry-run and observed local/network trust-boundary records
+  report.dart        pure markdown and quotabot.report.v1 assembly
   mcp.dart           MCP tool shapes, output schemas, shared server factory
   mcp_http.dart      Opt-in Streamable HTTP MCP wrapper with loopback guards
   collector.dart     collectAll(): run adapters, apply cache; package exports
@@ -49,9 +58,9 @@ collector/ (Dart package)
                      ollama, lmstudio, lemonade (thin I/O shells)
   auth/              tokens + store, PKCE/loopback util, xai + google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
-  bin/collect.dart        CLI: status/doctor, top, watch, models, calibration,
-                          check, suggest, stats, json, login, logout
-                          (stable exit codes 0/64/69)
+  bin/collect.dart        CLI: status/doctor, top, watch, models, suggest,
+                          verify/explain, stats/report/calibration, manual,
+                          json, login/logout (stable exit codes 0/64/65/69)
   bin/mcp_server.dart     MCP server over stdio or opt-in Streamable HTTP
                           (tools, local leases, quotas://current and
                           quotas://alerts resources)
@@ -70,6 +79,9 @@ app/ (Flutter desktop)
   demo.dart   synthetic data for QUOTABOT_DEMO previews/screenshots
   logos.dart  vector provider logos (CustomPainter)
   prefs.dart  persisted UI preferences
+  profile_editor.dart / profile_ui.dart  profile editing and presentation
+  desktop_readiness.dart  native launch and tray readiness boundary
+  theme_spec.dart / headroom_colors.dart  semantic theme and quota colors
   typography.dart  shared text-size scale (AppType) used by both screens
 ```
 
@@ -144,9 +156,9 @@ shows that as "no live data" instead of a gap.
 
 - `tokens.dart`: the `Tokens` model and `TokenStore`, which persists tokens per
   provider, and optionally per provider account, under the config directory,
-  owner-only on POSIX. Account-scoped filenames use a hash of the account id
-  rather than the raw email. Rotated refresh tokens are saved on every refresh or
-  the next refresh would fail.
+  with owner-only permissions attempted best-effort. Account-scoped filenames
+  use a hash of the account id rather than the raw email. Rotated refresh tokens
+  are saved on every refresh or the next refresh would fail.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -200,16 +212,21 @@ relative policy inputs, not prices inferred by quotabot, and they only discount
 the shared routing score when the caller provides them.
 
 `mcp.dart` builds one MCP server definition: tools, resources, output schemas,
-read-only/idempotent annotations, capability scope, and standard MCP resource
-subscription handlers. Most tools read a live `collectAll()` snapshot. They can
+behavior annotations, capability scope, and standard MCP resource subscription
+handlers. Most tools collect a live `collectAll()` snapshot. Collection can
+refresh local cache, history, and OAuth state; Antigravity may also perform its
+provider-required onboarding request. Those tools are therefore annotated as
+non-read-only and non-idempotent even though they never invoke a model. They can
 also apply exact `account` filters after named profile filters for routers that
 need one provider account without creating a profile. `decide_now` is
 deliberately different: it reads the in-memory or disk last-known snapshot only,
 returns `source`, `snapshot_as_of`, age, and staleness, and never forces a live
-collect. `suggest_provider` and `decide_now` both accept `local_first` for
-cost-sensitive dispatch plus explicit `cost_penalties` for caller-owned cost
-policy. `reserve_provider` and `release_provider` are the only local-write tools,
-and their annotations mark that distinction for MCP clients.
+collect. It can still compact expired records while reading the local lease
+ledger, so it is not annotated read-only or idempotent. `suggest_provider` and
+`decide_now` both accept `local_first` for cost-sensitive dispatch plus explicit
+`cost_penalties` for caller-owned cost policy. `reserve_provider` and
+`release_provider` explicitly mutate the local lease ledger; release is local
+and idempotent, while reserve also collects live metadata.
 `quotas://current` remains the unfiltered live snapshot resource.
 `quotas://alerts` stores the last `quotabot.alert.v1` objects fired by the MCP
 subscription loop. Clients subscribe with `resources/subscribe`; on an amber/red
@@ -239,14 +256,18 @@ meaning and type of existing fields stable until a new schema id is introduced.
 The model registry (`registry.dart`, `model_catalog.dart`) assembles a normalized,
 cross-provider list of models with per-model budget, surfaced as `quotabot models`
 and the MCP `list_models` tool. Model budget filters are applied in the registry:
-`local` admits only local-runtime models, while `quota` admits local runtimes and
+`local` is intended to admit only locally executed runtime models, while `quota`
+admits local runtimes and
 measured built-in quota plans but excludes self-reported manual quotas because
 quotabot cannot verify their overage settings. Local-runtime entries surface
 `local_readiness` (`loaded` or `cold`), and model recommendations rank loaded
 local models ahead of cold installed models when both satisfy the same profile.
 Recommendations also echo available local memory/context evidence so callers can
-see why "free" is ready now versus merely installed without forcing a model
-call.
+see why a model is loaded versus merely installed without forcing a model call.
+Ollama now exposes cloud-offloaded models through the local daemon; version
+0.5.14 does not yet have authoritative execution-location classification for
+those entries, so this is a declared 1.0 correction before `budget=local` can be
+treated as a complete execution-location guarantee.
 Concrete-model suggestions can opt into `use_expiring_quota`, which computes a
 pure `ExpiringQuotaSignal` from existing headroom, reset, and local burn
 statistics. The signal is intentionally narrow: measured quota-backed providers
@@ -410,4 +431,10 @@ the menu instead of the smart schedule.
 
 ## Packaging
 
-Code is cross platform (platform-aware paths and sqlite in collector; Flutter desktop + window_manager in app). Windows release build verified (build/windows/x64/runner/Release). See README + tools/package-*.ps1/sh + .desktop for build and packaging. macOS: codesign + notarize; Linux: AppImage + .desktop. Build on target OS.
+The CLI release workflow builds native archives for Windows x64, macOS arm64,
+Linux x64, and Linux arm64, with checksums and provenance attestations. The
+Flutter desktop app builds on native Windows, macOS, and Linux CI hosts; source
+setup installs its launcher or shortcut. A normal prebuilt desktop acquisition
+path remains an explicit 1.0 product gate, so the docs do not claim one exists
+yet. Platform prerequisites, current artifacts, and the native verification gap
+are documented in [BUILDING.md](BUILDING.md) and [../ROADMAP.md](../ROADMAP.md).

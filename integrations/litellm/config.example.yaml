@@ -1,6 +1,7 @@
 # Example LiteLLM proxy config wired to the quotabot router.
 #
-# Run with:  litellm --config config.yaml
+# Set LITELLM_MASTER_KEY to a strong local secret, then run with:
+#   litellm --config config.yaml --host 127.0.0.1
 #
 # `model_list` declares the concrete deployments. The `model_name` values here
 # are what quotabot-routing.yaml refers to as `deployment`. Clients call the
@@ -30,7 +31,9 @@ model_list:
       model: xai/grok-code
       api_key: os.environ/XAI_API_KEY
 
-  # Local fallback via Ollama. No key, no cost, always available.
+  # Configured Ollama fallback. The router does not preflight this backend when
+  # quotabot is unavailable, so keep the daemon reachable and do not use an
+  # Ollama cloud-offloaded model for a route declared local.
   - model_name: ollama-qwen
     litellm_params:
       model: ollama/qwen3-coder
@@ -40,3 +43,9 @@ model_list:
 # the proxy from this folder (or add it to PYTHONPATH).
 litellm_settings:
   callbacks: quotabot_router.proxy_handler_instance
+
+# Require bearer authentication even on loopback. Loopback binding is the
+# primary network boundary; this key is defense in depth against other local
+# processes and browser-originated requests.
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
