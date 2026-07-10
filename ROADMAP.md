@@ -580,7 +580,16 @@ here is the final one.
     Desktop Entry executable. Still required before completion: verify
     interactive shortcut/tray launch readiness in clean GUI sessions; hosted
     runners prove the installed artifacts and targets, not user-visible tray
-    behavior.
+    behavior. Additional automation 2026-07-09: packaged-app launch gates now
+    pass on clean hosted Windows and Linux. Windows independently requires a
+    successful `Shell_NotifyIconGetRect` result with non-empty native bounds;
+    Linux requires native window setup and all supported tray-registration
+    calls. This work also fixed Linux tray initialization, which previously
+    stopped at the dependency's unsupported tooltip method. Direct and
+    LaunchServices bundle launches on clean hosted macOS produced no app-authored
+    readiness transition, so that environment is not treated as interactive
+    evidence. The clean interactive macOS launcher, visible status item,
+    close-to-tray, and reopen check remains required.
 26. [x] Final contract audit. Review `quotabot.v1`, model JSON, report JSON,
     MCP tools/resources, profile storage, leases, cache files, exit codes, and
     docs for accidental churn before declaring the surface stable.
