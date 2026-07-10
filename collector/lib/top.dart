@@ -319,6 +319,10 @@ String _topTrustTag(ProviderQuota q, int now) {
 }
 
 String _topReadState(ProviderQuota q, int now) {
+  if (q.driftReason != null) {
+    final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
+    return 'provider drift$age';
+  }
   if (!q.ok) return 'error';
   if (q.isLocal) return q.active ? 'in use' : 'local';
   if (q.stale) {
@@ -430,7 +434,11 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     String trustTag = '',
     String accountTag = ''}) {
   if (!q.ok) {
-    final text = q.error?.isNotEmpty == true ? q.error! : 'read failed';
+    final text = q.driftReason != null
+        ? 'legacy evidence quarantined'
+        : q.error?.isNotEmpty == true
+            ? q.error!
+            : 'read failed';
     final visibleTags = _visibleInlineTags(
       width: width,
       text: text,

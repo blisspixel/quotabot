@@ -45,6 +45,13 @@ class ModelEntry {
   /// True when the gating provider's data is cached/stale.
   final bool stale;
 
+  /// Why fresh provider evidence was rejected, when this model is gated by a
+  /// stale last-trusted provider snapshot.
+  final String? driftReason;
+
+  /// Epoch seconds when [driftReason] was observed.
+  final int? driftObservedAt;
+
   /// Unix epoch seconds when the gating provider snapshot was captured.
   final int asOf;
 
@@ -65,6 +72,8 @@ class ModelEntry {
     required this.stale,
     required this.asOf,
     required this.perMachine,
+    this.driftReason,
+    this.driftObservedAt,
   });
 
   String? get localReadiness =>
@@ -77,6 +86,8 @@ class ModelEntry {
         'local': local,
         'available': available,
         'stale': stale,
+        if (driftReason != null) 'drift_reason': driftReason,
+        if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         'quota_backed': quotaBacked,
         if (localReadiness != null) 'local_readiness': localReadiness,
         if (source != null) 'source': source,
@@ -438,6 +449,8 @@ List<ModelEntry> buildModelRegistry(
         gatingWindow: budget?.gatingWindow,
         available: q.isLocal ? q.ok : budget?.available ?? false,
         stale: q.stale,
+        driftReason: q.driftReason,
+        driftObservedAt: q.driftObservedAt,
         asOf: q.asOf,
         perMachine: q.perMachine,
       ));
@@ -489,7 +502,8 @@ List<ModelEntry> buildModelRegistry(
     headroomPercent: headroom,
     resetsAt: reset,
     gatingWindow: reset == null ? null : resetLabel(reset, q.asOf),
-    available: !q.stale && headroom != null && headroom > kSpentHeadroomFloor,
+    available:
+        providerAvailable && headroom != null && headroom > kSpentHeadroomFloor,
   );
 }
 
@@ -712,8 +726,15 @@ ModelSuggestion suggestModel(
   }
   final reason = pick == null
       ? (ranked.isEmpty
-          ? 'No model meets the requirements; relax them or connect a provider.'
-          : 'Models match but none has budget right now; wait for a reset.')
+          ? snapshot.any((quota) => quota.driftReason != null)
+              ? 'Provider drift leaves no trusted model-budget evidence; run '
+                  'quotabot verify before routing.'
+              : 'No model meets the requirements; relax them or connect a provider.'
+          : ranked.every((entry) => entry.driftReason != null)
+              ? 'Models match, but provider drift leaves only stale '
+                  'last-trusted quota evidence; run quotabot verify before '
+                  'routing.'
+              : 'Models match but none has budget right now; wait for a reset.')
       : _recommendReason(
           pick,
           expiringQuota: _entryExpiringSignal(

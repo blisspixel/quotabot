@@ -50,7 +50,16 @@ void main() {
         () {
       final prev = snap(claudeProviderId, [win('5h', 90, 1000)]);
       final fresh = snap(claudeProviderId, [win('5h', 0, 5000)]);
-      expect(detectQuotaDrift(fresh, prev), isNull);
+      expect(detectQuotaDrift(fresh, prev, observedAt: 1001), isNull);
+    });
+
+    test('a forward reset cannot hide a usage drop before the prior reset', () {
+      final prev = snap(claudeProviderId, [win('5h', 90, 5000)]);
+      final fresh = snap(claudeProviderId, [win('5h', 0, 9000)]);
+      expect(
+        detectQuotaDrift(fresh, prev, observedAt: 200),
+        contains('before the prior reset'),
+      );
     });
 
     test('Grok pool re-rating (usage drops, no reset) is accepted, not flagged',
@@ -81,9 +90,19 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), isNull);
     });
 
-    test('a window with no counterpart in the previous read is skipped', () {
+    test('a previously trusted window cannot disappear', () {
       final prev = snap(claudeProviderId, [win('5h', 40, 1000)]);
       final fresh = snap(claudeProviderId, [win('weekly', 5, 9000)]);
+      expect(detectQuotaDrift(fresh, prev),
+          contains('5h quota window disappeared'));
+    });
+
+    test('an additive window does not invalidate retained evidence', () {
+      final prev = snap(claudeProviderId, [win('5h', 40, 1000)]);
+      final fresh = snap(claudeProviderId, [
+        win('5h', 45, 1000),
+        win('weekly', 5, 9000),
+      ]);
       expect(detectQuotaDrift(fresh, prev), isNull);
     });
 
@@ -133,6 +152,237 @@ void main() {
     });
   });
 
+  group('admitQuotaEvidence', () {
+    ProviderQuota evidence({
+      required double used,
+      required int asOf,
+      String account = 'a',
+      String? source,
+      bool stale = false,
+      String? suspect,
+      String plan = 'pro',
+      List<ModelInfo> models = const [],
+      int reset = 5000,
+    }) =>
+        ProviderQuota(
+          provider: codexProviderId,
+          displayName: 'Codex',
+          account: account,
+          plan: plan,
+          source: source,
+          asOf: asOf,
+          stale: stale,
+          suspect: suspect,
+          models: models,
+          windows: [win('5h', used, reset)],
+        );
+
+    test('admits a consistent fresh reading for persistence', () {
+      final previous = evidence(used: 20, asOf: 100);
+      final fresh = evidence(used: 35, asOf: 200);
+
+      final admission = admitQuotaEvidence(
+        fresh,
+        previous,
+        observedAt: 210,
+      );
+
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.snapshot, same(fresh));
+      expect(admission.driftReason, isNull);
+    });
+
+    test('rejects drift and returns only the exact last trusted evidence', () {
+      final previous = evidence(
+        used: 60,
+        asOf: 100,
+        models: const [ModelInfo(id: 'trusted-model')],
+      );
+      final fresh = evidence(
+        used: 10,
+        asOf: 200,
+        models: const [ModelInfo(id: 'rejected-model')],
+      );
+
+      final admission = admitQuotaEvidence(
+        fresh,
+        previous,
+        observedAt: 210,
+      );
+
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('usage fell'));
+      expect(admission.snapshot.stale, isTrue);
+      expect(admission.snapshot.asOf, previous.asOf);
+      expect(admission.snapshot.windows.single.usedPercent, 60);
+      expect(admission.snapshot.models.single.id, 'trusted-model');
+      expect(admission.snapshot.driftObservedAt, 210);
+      expect(admission.snapshot.error, contains('last trusted snapshot'));
+      expect(previous.stale, isFalse, reason: 'the baseline stays immutable');
+    });
+
+    test('identity and evidence-class changes establish a new baseline', () {
+      final previous = evidence(used: 60, asOf: 100);
+      final changedAccount = evidence(
+        used: 10,
+        asOf: 200,
+        account: 'other',
+      );
+      final changedSource = evidence(
+        used: 10,
+        asOf: 200,
+        source: providerQuotaManualSource,
+      );
+
+      for (final fresh in [changedAccount, changedSource]) {
+        final admission = admitQuotaEvidence(
+          fresh,
+          previous,
+          observedAt: 210,
+        );
+        expect(admission.shouldPersist, isTrue);
+        expect(admission.snapshot, same(fresh));
+      }
+    });
+
+    test('legacy suspect evidence cannot be laundered by a repeated read', () {
+      final legacy = evidence(used: 10, asOf: 100)
+          .withSuspect('5h usage fell without a reset');
+      final repeated = evidence(used: 10, asOf: 200);
+
+      final admission = admitQuotaEvidence(
+        repeated,
+        legacy,
+        observedAt: 210,
+      );
+
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.snapshot.ok, isFalse);
+      expect(admission.snapshot.windows, isEmpty);
+      expect(admission.snapshot.driftReason, contains('unresolved legacy'));
+      expect(admission.snapshot.driftObservedAt, 210);
+      expect(admission.snapshot.error, contains('no trusted snapshot'));
+    });
+
+    test('a materially advanced reset recovers from legacy quarantine', () {
+      final legacy = evidence(used: 10, asOf: 100, reset: 5000)
+          .withSuspect('5h usage fell without a reset');
+      final afterReset = evidence(used: 12, asOf: 6000, reset: 9000);
+
+      final admission = admitQuotaEvidence(
+        afterReset,
+        legacy,
+        observedAt: 6010,
+      );
+
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.snapshot, same(afterReset));
+      expect(admission.driftReason, isNull);
+    });
+
+    test('an unrelated short reset cannot clear legacy quarantine', () {
+      final legacy = ProviderQuota(
+        provider: codexProviderId,
+        displayName: 'Codex',
+        account: 'a',
+        plan: 'pro',
+        asOf: 100,
+        windows: [
+          win('5h', 10, 5000),
+          win('weekly', 70, 10000),
+        ],
+        suspect: 'weekly usage fell without a reset',
+      );
+      final shortWindowRolled = ProviderQuota(
+        provider: codexProviderId,
+        displayName: 'Codex',
+        account: 'a',
+        plan: 'pro',
+        asOf: 6000,
+        windows: [
+          win('5h', 5, 9000),
+          win('weekly', 70, 10000),
+        ],
+      );
+
+      final admission = admitQuotaEvidence(
+        shortWindowRolled,
+        legacy,
+        observedAt: 6000,
+      );
+
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.snapshot.windows, isEmpty);
+      expect(admission.driftReason, contains('unresolved legacy'));
+    });
+
+    test('live drift diagnostics are sanitized and bounded', () {
+      final longLabel = '\x1b[31m${List.filled(700, 'x').join()}';
+      final previous = ProviderQuota(
+        provider: codexProviderId,
+        displayName: 'Codex',
+        account: 'a',
+        plan: 'pro',
+        asOf: 100,
+        windows: [win(longLabel, 60, 5000)],
+      );
+      final fresh = ProviderQuota(
+        provider: codexProviderId,
+        displayName: 'Codex',
+        account: 'a',
+        plan: 'pro',
+        asOf: 200,
+        windows: [win(longLabel, 10, 5000)],
+      );
+
+      final admission = admitQuotaEvidence(
+        fresh,
+        previous,
+        observedAt: 210,
+      );
+
+      expect(admission.driftReason, isNot(contains('\x1b')));
+      expect(
+        admission.driftReason!.length,
+        lessThanOrEqualTo(kMaxQuotaDriftReasonCharacters),
+      );
+      expect(admission.snapshot.driftReason, admission.driftReason);
+    });
+
+    test('stale, suspect, and drift-marked evidence is never trusted', () {
+      final trusted = evidence(used: 20, asOf: 100);
+      expect(isTrustedQuotaEvidence(trusted), isTrue);
+      expect(
+        isTrustedQuotaEvidence(evidence(used: 20, asOf: 100, stale: true)),
+        isFalse,
+      );
+      expect(
+        isTrustedQuotaEvidence(
+          evidence(used: 20, asOf: 100, suspect: 'legacy concern'),
+        ),
+        isFalse,
+      );
+      expect(
+        isTrustedQuotaEvidence(
+          trusted.withProviderDrift('usage fell', 120),
+        ),
+        isFalse,
+      );
+      expect(
+        isTrustedQuotaEvidence(
+          ProviderQuota(
+            provider: codexProviderId,
+            displayName: 'Codex',
+            account: 'a',
+            asOf: 100,
+            windows: [QuotaWindow(label: 'weekly', resetsAt: 5000)],
+          ),
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('ProviderQuota.suspect', () {
     test('withSuspect annotates without hiding the reading', () {
       final q = snap(claudeProviderId, [win('5h', 40, 1000)]);
@@ -151,5 +401,50 @@ void main() {
       expect(back.suspect, q.suspect);
       expect(back.asStale('cached').suspect, q.suspect);
     });
+
+    test('stale fallback never grafts untrusted per-model quota', () {
+      final trusted = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: 100,
+        windows: [win('5h', 40, 1000)],
+        modelQuotas: const [
+          ModelQuota(model: 'Gemini', usedPercent: 40, resetsAt: 1000),
+        ],
+      );
+      final failed = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: 200,
+        ok: false,
+        error: 'partial read failed',
+        modelQuotas: const [
+          ModelQuota(model: 'Gemini', usedPercent: 0, resetsAt: 9000),
+        ],
+      );
+
+      final fallback = trusted.asStale('cached', metadataFrom: failed);
+      expect(fallback.modelQuotas.single.usedPercent, 40);
+      expect(fallback.modelQuotas.single.resetsAt, 1000);
+    });
+  });
+
+  test('provider drift fields round-trip without changing suspect semantics',
+      () {
+    final trusted = snap(codexProviderId, [win('5h', 40, 1000)]);
+    final drifted = trusted.withProviderDrift(
+      '5h usage fell 60% to 10% with no reset',
+      1234,
+    );
+    final back = ProviderQuota.fromJson(
+      jsonDecode(jsonEncode(drifted.toJson())) as Map<String, dynamic>,
+    );
+
+    expect(back.stale, isTrue);
+    expect(back.driftReason, drifted.driftReason);
+    expect(back.driftObservedAt, 1234);
+    expect(back.suspect, isNull);
   });
 }

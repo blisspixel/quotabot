@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
+import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -391,6 +392,7 @@ String desktopProviderTrustLine(ProviderQuota quota, int now) {
 
 String _desktopProviderReadState(ProviderQuota quota) {
   if (quota.isLocal) return quota.active ? 'in use' : 'local';
+  if (quota.driftReason != null) return 'provider drift';
   if (!quota.ok) return 'error';
   if (quota.stale) return 'cached';
   if (quota.windows.isEmpty && (quota.status ?? '').isEmpty) {
@@ -405,6 +407,10 @@ String _desktopProviderReadState(ProviderQuota quota) {
 String _desktopProviderSpendClass(ProviderQuota quota) {
   if (quota.isLocal) return quota.active ? 'local loaded' : 'local cold';
   if (quota.isManual) return 'manual';
+  if (quota.driftReason != null &&
+      kQuotaPlanProviders.contains(quota.provider)) {
+    return 'quota plan';
+  }
   if (quota.windows.isEmpty) return 'metadata only';
   return kQuotaPlanProviders.contains(quota.provider)
       ? 'quota plan'
@@ -521,6 +527,20 @@ String webhookDeliveryStatus(WebhookResult result) {
 }
 
 typedef PrefsSaver = Future<void> Function(Prefs prefs);
+
+@visibleForTesting
+double? trustedPoolHeadroom(Iterable<ProviderQuota> quotas, int now) {
+  double sum = 0;
+  int count = 0;
+  for (final quota in quotas) {
+    if (!isTrustedQuotaEvidenceAt(quota, now)) continue;
+    final headroom = providerHeadroom(quota, now);
+    if (headroom == null) continue;
+    sum += headroom;
+    count++;
+  }
+  return count == 0 ? null : sum / count;
+}
 
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
@@ -1779,6 +1799,7 @@ class _DashboardState extends State<Dashboard>
     final base = _shouldShowAccount(q, counts)
         ? '${q.displayName} (${q.account})'
         : q.displayName;
+    if (q.driftReason != null) return '$base (provider drift)';
     return q.stale ? '$base (cached)' : base;
   }
 
@@ -1794,16 +1815,7 @@ class _DashboardState extends State<Dashboard>
   /// the header gauge fills to.
   double? _poolHeadroom() {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    double sum = 0;
-    int n = 0;
-    for (final q in _visible) {
-      final h = providerHeadroom(q, now);
-      if (h != null) {
-        sum += h;
-        n++;
-      }
-    }
-    return n == 0 ? null : sum / n;
+    return trustedPoolHeadroom(_visible, now);
   }
 
   Widget _header() {
@@ -2612,7 +2624,11 @@ class _DashboardState extends State<Dashboard>
     StateSetter setDlg,
   ) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final (label, color) = _stateChip(q, now);
+    final (label, color) = _stateChip(
+      q,
+      now,
+      errorColor: Theme.of(ctx).colorScheme.error,
+    );
     final canConnect =
         widget._hostIntegration && _canConnectProvider(q.provider);
     final isLive = label == 'live' || label == 'in use';
@@ -2753,13 +2769,17 @@ class _DashboardState extends State<Dashboard>
   }
 
   /// Short status label and color for the setup list.
-  (String, Color) _stateChip(ProviderQuota q, int now) {
+  (String, Color) _stateChip(
+    ProviderQuota q,
+    int now, {
+    required Color errorColor,
+  }) {
     const green = Color(0xFF3FB950),
         amber = Color(0xFFD29922),
-        red = Color(0xFFF85149),
         grey = Color(0xFF8A91A0),
         blue = Color(0xFF58A6FF);
     if (q.isLocal) return q.active ? ('in use', green) : ('idle', blue);
+    if (q.driftReason != null) return ('provider drift', errorColor);
     if (!q.ok) return ('no live data', grey);
     if (q.windows.isEmpty && (q.status ?? '').isNotEmpty) {
       return ('available', green);
@@ -2767,7 +2787,7 @@ class _DashboardState extends State<Dashboard>
     if (q.windows.isEmpty) return ('no live data', grey);
     if (q.stale) return ('cached', amber);
     final h = providerHeadroom(q, now) ?? 100;
-    if (h <= kSpentHeadroomFloor) return ('spent', red);
+    if (h <= kSpentHeadroomFloor) return ('spent', errorColor);
     return ('live', green);
   }
 
@@ -2985,11 +3005,19 @@ class ProviderTile extends StatelessWidget {
       binding = _view(bindingWin, now);
     }
     final blocked = binding != null && binding.exhausted;
-    final statusColor = binding == null
+    final driftColor = _providerDriftForeground(cardColor);
+    final statusColor = quota.driftReason != null
+        ? driftColor
+        : binding == null
         ? muted
         : _availColor(binding.remaining);
     final hasInsights = insights != null && insights!.samples > 0;
     final trustLine = desktopProviderTrustLine(quota, now);
+    final evidenceLabel = quota.driftReason != null
+        ? 'last trusted'
+        : quota.stale
+        ? 'last known'
+        : null;
 
     // A glance-layer forward-looking note on the binding window, in plain
     // language backed by the calibrated forecast and matching what `quotabot
@@ -2997,7 +3025,11 @@ class ProviderTile extends StatelessWidget {
     // invents one. The strand probability needs the burn standard error, so it
     // appears once there is enough history; otherwise the runway estimate does.
     final forecast =
-        (quota.isLocal || blocked || binding == null || !hasInsights)
+        (quota.isLocal ||
+            quota.stale ||
+            blocked ||
+            binding == null ||
+            !hasInsights)
         ? null
         : classifyForecast(
             strandProbability: strandProbability(
@@ -3113,6 +3145,12 @@ class ProviderTile extends StatelessWidget {
                 ),
               ),
             ),
+            if (quota.driftReason != null)
+              _providerDriftRow(
+                quota.driftReason!,
+                driftColor,
+                hasTrustedWindows: quota.hasWindows,
+              ),
             const SizedBox(height: 10),
             if (quota.isLocal)
               _localRow(quota, muted, fg)
@@ -3121,12 +3159,17 @@ class ProviderTile extends StatelessWidget {
                   ? _statusOnlyRow(quota, muted, fg)
                   : _noData(quota.error, muted))
             else if (blocked)
-              _blockedRow(binding, now, muted)
+              _blockedRow(binding, now, muted, evidenceLabel: evidenceLabel)
             else
               ...views.map(
                 (v) => Padding(
                   padding: const EdgeInsets.only(bottom: 6),
-                  child: WindowBar(view: v, muted: muted, fg: fg),
+                  child: WindowBar(
+                    view: v,
+                    muted: muted,
+                    fg: fg,
+                    evidenceLabel: evidenceLabel,
+                  ),
                 ),
               ),
             if (forecast != null) _forecastRow(forecast, muted),
@@ -3163,6 +3206,77 @@ class ProviderTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Widget _providerDriftRow(
+    String reason,
+    Color color, {
+    required bool hasTrustedWindows,
+  }) {
+    final summary = hasTrustedWindows
+        ? 'Provider drift detected. Showing the last trusted quota; routing is disabled.'
+        : 'Provider drift detected. Legacy quota evidence is quarantined; no trusted snapshot is available.';
+    const recovery =
+        'Run quotabot verify, then compare with the provider view.';
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      excludeSemantics: true,
+      label: '$summary $recovery Reason: $reason',
+      child: Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.error_outline_rounded, size: 13, color: color),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    summary,
+                    style: TextStyle(
+                      fontSize: AppType.caption,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    recovery,
+                    style: TextStyle(
+                      fontSize: AppType.caption,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Reason: $reason',
+                    style: TextStyle(
+                      fontSize: AppType.small,
+                      fontWeight: FontWeight.w500,
+                      color: color,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Warning foregrounds chosen for the actual tile surface rather than the
+  /// ambient theme, because previews and tests may render a tile on a surface
+  /// from the opposite brightness. Both official app surfaces exceed WCAG's
+  /// 4.5:1 normal-text contrast threshold with their selected color.
+  Color _providerDriftForeground(Color background) {
+    return background.computeLuminance() > 0.5
+        ? const Color(0xFFB42318)
+        : const Color(0xFFFF7B72);
   }
 
   /// Glance-layer forward-looking note on the binding window, phrased in plain
@@ -3221,21 +3335,26 @@ class ProviderTile extends StatelessWidget {
   }
 
   /// Single collapsed line shown when the binding window is exhausted.
-  Widget _blockedRow(WinView v, int now, Color muted) {
+  Widget _blockedRow(WinView v, int now, Color muted, {String? evidenceLabel}) {
     const red = Color(0xFFF85149);
+    final status = evidenceLabel == null
+        ? '${v.label} spent'
+        : '${v.label} spent ($evidenceLabel)';
     return Row(
       children: [
         const _Dot(red),
         const SizedBox(width: 8),
-        Text(
-          '${v.label} spent',
-          style: const TextStyle(
-            fontSize: AppType.body,
-            fontWeight: FontWeight.w600,
-            color: red,
+        Expanded(
+          child: Text(
+            status,
+            style: const TextStyle(
+              fontSize: AppType.body,
+              fontWeight: FontWeight.w600,
+              color: red,
+            ),
           ),
         ),
-        const Spacer(),
+        const SizedBox(width: 8),
         Text(
           'resets ${_resetLabel(v.resetsAt, now)}',
           style: TextStyle(
@@ -3380,11 +3499,13 @@ class WindowBar extends StatelessWidget {
   final WinView view;
   final Color muted;
   final Color fg;
+  final String? evidenceLabel;
   const WindowBar({
     super.key,
     required this.view,
     required this.muted,
     required this.fg,
+    this.evidenceLabel,
   });
 
   @override
@@ -3397,6 +3518,15 @@ class WindowBar extends StatelessWidget {
     // the font instead of overflowing the meter. This is identity at the
     // default (medium = 1.0), so it never changes the normal-scale layout.
     final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final value = evidenceLabel != null
+        ? view.rolledOver
+              ? 'reset passed ($evidenceLabel)'
+              : '${remaining.round()}% $evidenceLabel'
+        : view.rolledOver
+        ? 'ready'
+        : view.resetsAt != null
+        ? '${remaining.round()}% free  ${_resetLabel(view.resetsAt, now)}'
+        : '${remaining.round()}% free';
 
     return Row(
       children: [
@@ -3430,11 +3560,7 @@ class WindowBar extends StatelessWidget {
         SizedBox(
           width: 96 * textScale,
           child: Text(
-            view.rolledOver
-                ? 'ready'
-                : view.resetsAt != null
-                ? '${remaining.round()}% free  ${_resetLabel(view.resetsAt, now)}'
-                : '${remaining.round()}% free',
+            value,
             textAlign: TextAlign.end,
             style: TextStyle(
               fontSize: AppType.small,

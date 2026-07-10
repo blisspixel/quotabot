@@ -11,6 +11,13 @@ void main() {
       expect(quotabotV1JsonSchema['additionalProperties'], isTrue);
       expect(quotabotV1JsonSchema['required'],
           containsAll(['schema', 'generated_at', 'providers']));
+      final defs = quotabotV1JsonSchema[r'$defs'] as Map<String, Object?>;
+      final provider = defs['providerQuota'] as Map<String, Object?>;
+      final properties = provider['properties'] as Map<String, Object?>;
+      expect(properties, contains('drift_reason'));
+      expect(properties, contains('drift_observed_at'));
+      final driftReason = properties['drift_reason'] as Map<String, Object?>;
+      expect(driftReason['pattern'], r'\S');
     });
 
     test('accepts additive fields while enforcing stable required fields', () {
@@ -58,6 +65,17 @@ void main() {
             ],
           ).toJson(),
           ProviderQuota(
+            provider: 'codex',
+            displayName: 'Codex',
+            account: 'work@example.com',
+            asOf: 1782000000,
+            windows: [
+              QuotaWindow(label: 'weekly', usedPercent: 55),
+            ],
+          )
+              .withProviderDrift('weekly reset moved earlier', 1782000060)
+              .toJson(),
+          ProviderQuota(
             provider: 'antigravity',
             displayName: 'Antigravity',
             account: 'work@example.com',
@@ -73,6 +91,29 @@ void main() {
       };
 
       expect(validateQuotabotV1Snapshot(snapshot), isEmpty);
+    });
+
+    test('rejects a present but blank provider drift reason', () {
+      final snapshot = {
+        'schema': quotabotV1SchemaId,
+        'generated_at': 1782000000,
+        'providers': [
+          ProviderQuota(
+            provider: 'codex',
+            displayName: 'Codex',
+            account: 'default',
+            asOf: 1782000000,
+            windows: [QuotaWindow(label: 'weekly', usedPercent: 50)],
+            driftReason: '   ',
+            driftObservedAt: 1782000010,
+          ).toJson(),
+        ],
+      };
+
+      expect(
+        validateQuotabotV1Snapshot(snapshot),
+        contains(r'$.providers[0].drift_reason must not be blank'),
+      );
     });
 
     test('rejects contract-breaking snapshots with precise paths', () {
@@ -127,6 +168,9 @@ void main() {
             'pipe_health': 'overheated',
             'http_status': 99,
             'retry_after_seconds': -1,
+            'suspect': false,
+            'drift_reason': 42,
+            'drift_observed_at': -1,
             'windows': 'bad-windows',
             'models': 'bad-models',
           },
@@ -178,6 +222,9 @@ void main() {
           r'$.providers[0] must be an object',
           r'$.providers[1].windows must be an array',
           r'$.providers[1].models must be an array',
+          r'$.providers[1].suspect must be a string',
+          r'$.providers[1].drift_reason must be a string',
+          r'$.providers[1].drift_observed_at must be a non-negative integer',
           r'$.providers[1].pipe_health must be one of healthy, throttled, degraded, no_data',
           r'$.providers[1].http_status must be an integer from 100 to 599',
           r'$.providers[1].retry_after_seconds must be a non-negative integer',

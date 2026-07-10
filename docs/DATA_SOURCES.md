@@ -10,9 +10,9 @@ how the result participates in routing.
 
 | Class | Typical examples | Routing treatment | Failure or drift treatment |
 |---|---|---|---|
-| Authoritative live | Claude, live Codex, live Grok, live Antigravity | Eligible while fresh and its binding quota is usable | Preserve the last good snapshot as stale evidence; never call stale cloud quota available |
+| Authoritative live | Claude, live Codex, live Grok, live Antigravity | Eligible while fresh and its binding quota is usable | Preserve the last trusted snapshot as stale evidence; reject implausible changes and never call stale cloud quota available |
 | This-machine fallback | Codex session snapshot, Antigravity local state | Eligible only under the normal freshness and binding rules, with lower confidence and visible machine scope | State that another device can make the value incomplete |
-| Passive local evidence | Cursor, Windsurf/Devin, Kiro | A measured normalized window can participate; detection-only state cannot | Show no live data or reader-drift evidence instead of inventing quota |
+| Passive local evidence | Cursor, Windsurf/Devin, Kiro | A measured normalized window can participate; detection-only state cannot | Show no live data or last-trusted reader-drift evidence instead of inventing quota |
 | Local runtime | Ollama, LM Studio, Lemonade | Version 0.5.14 admits reachable runtime-classified entries; it does not yet prove execution location | Never cache availability; do not treat ambiguous Ollama cloud offload as proof of local-only or free execution |
 | Status-only | NVIDIA NIM | Visible for access diagnostics, never a model-budget route without measured quota | Show availability with numeric quota unknown |
 | Manual | User-defined entries | Visible and lower-confidence; excluded by `budget=quota` | Never refresh or reinterpret what the user entered |
@@ -20,6 +20,25 @@ how the result participates in routing.
 Source class is separate from freshness. For example, authoritative data can be
 cached and stale, while a this-machine snapshot can be freshly captured but
 still incomplete across devices.
+
+Across measured source classes, the drift admission boundary compares only the
+same provider/account evidence class. A reset that moves earlier, or usage that
+falls without a completed reset, rejects the fresh observation. So does a
+previously trusted window or model pool disappearing. A window with no
+derivable percentage is no-data evidence, never free capacity. A missing,
+non-positive, or materially future capture time is likewise rejected at live
+admission and by direct routing guards. The last trusted windows stay visible as
+stale evidence with additive `drift_reason` and
+`drift_observed_at`; rejected values do not overwrite cache, enter measured
+history or analytics, or participate in routing. A bounded local diagnostic
+survives restarts and ordinary failed reads until a later clean observation for
+the same identity establishes recovery. A migrated legacy `suspect` record has
+no provable last-known-good windows, so quotabot exposes a non-routable error
+quarantine until every retained quota reset advances or the evidence class
+changes. `quotabot
+verify` reports both forms as a failed `provider_drift` check: normal
+last-trusted fallback keeps state `cached`, while the no-window legacy form uses
+the existing `error` state.
 
 ## Manual entries
 

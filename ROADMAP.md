@@ -68,7 +68,7 @@ the remaining 1.0 trust gates close.
 |---|---|---|---|
 | Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
 | Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; the LiteLLM example now requires a bearer key and an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fixtures, `verify`, source docs, cache provenance, and a Windows live record exist | Close identity aliases, fragile-reader signaling, and current local-runtime compatibility gaps |
+| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, and a Windows live record exist | Close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
 | Native provider evidence | Partial | Windows evidence exists; WSL covers truthful Linux failure behavior | Confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
 | Installation and update | Partial | CLI archives, required checksums, attestations, one-line installers, source setup, lifecycle docs, and a three-OS smoke workflow exist | Record green clean-host lifecycle runs, automate remaining rollback/uninstall checks, and close desktop acquisition |
 | First-run and recommendation comprehension | Partial | `doctor`, compact route lines, structured reasons, and setup recovery guidance exist | Prove a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
@@ -131,9 +131,14 @@ evidence is collected.
 - Add the source-class contract to verification and user-facing documentation.
 - Add provider identity aliases for current renames without losing profiles,
   hidden-provider choices, cache, or history.
-- Distinguish a reader that likely drifted from signed-out, exhausted, offline,
-  and unsupported states. Pin every supported response shape with sanitized
-  fixtures.
+- **Completed 2026-07-10:** distinguish a reader that likely drifted from
+  signed-out, exhausted, offline, and unsupported states. The deterministic
+  `provider-drift` fixture, failed `provider_drift` verification check, stale
+  last-trusted fallback, non-overwriting cache admission, persistent recovery
+  diagnostic, cross-process observation ordering, legacy-cache quarantine, and
+  explicit provider/model routing diagnostics pin routing/history/analytics
+  exclusions without changing the stable verification state enum.
+- Pin every remaining supported response shape with sanitized fixtures.
 - Resolve Antigravity weekly-window versus baseline-credit semantics from
   provider evidence. If the API does not expose a stable mapping, keep baseline
   credits explicitly unsupported and unknown rather than inferring a window.

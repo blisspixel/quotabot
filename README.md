@@ -71,6 +71,19 @@ collapses the card to a single "weekly spent - resets in 2d" line rather than
 showing a green 5 hour bar you cannot use. Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
 
+If a fresh provider read moves in a way that contradicts the last trusted read,
+quotabot does not replace that trusted cache with the rejected values. The
+desktop and `doctor` show **provider drift** with last-trusted quota marked stale
+when it exists. Routing excludes that provider from selection, and measured
+analytics records no new sample until a clean read establishes recovery.
+`quotabot verify` names the failed drift check so the number can be compared with
+the provider's own usage view. When an upgrade finds only an older `suspect`
+cache record, quotabot cannot prove those windows were ever trusted. It
+quarantines them without headroom instead of laundering them through the next
+identical read. A later read establishes a new baseline only after every retained
+quota reset has
+advanced, or after an evidence-class transition.
+
 The same view is available live in the terminal with `quotabot top`, a small
 dashboard that redraws in place and, when it has enough history, notes which
 window is likely to run out first. Full walkthrough of the widget, analytics, and

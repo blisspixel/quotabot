@@ -21,15 +21,33 @@ Provider snapshots keep these stable fields:
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
 - Optional `plan`, `source`, `status`, `active`, `details`, `error`, `models`,
-  `model_quotas`, `suspect`, `per_machine`, `pipe_health`, `http_status`, and
-  `retry_after_seconds`.
+  `model_quotas`, `suspect`, `drift_reason`, `drift_observed_at`, `per_machine`,
+  `pipe_health`, `http_status`, and `retry_after_seconds`.
 - `kind` is `subscription` or `local`.
+- `as_of` is the evidence capture time. Structurally the frozen schema retains
+  its non-negative integer type, but live quota is trusted for routing only when
+  the value is positive and no more than 60 seconds ahead of local admission
+  time. Missing, zero, negative, or materially future live provenance fails
+  closed before persistence or routing.
 - `source` is an additive hint. When set to `manual`, the provider window is a
   local self-reported quota entry, not measured adapter telemetry.
-- `suspect`, when present, is a non-fatal plausibility note from the drift
-  canary: the fresh read was implausible versus the last cached one (a reset
-  that moved earlier, or usage that fell with no reset). The reading is still
-  shown; `suspect` only flags it for a human or agent to cross-check.
+- `suspect`, when present, retains its original compatibility meaning: a
+  non-fatal plausibility note on the fresh reading produced by the earlier
+  drift canary. The reading remains in that snapshot for a human or agent to
+  cross-check. Current versions do not emit new drift this way and
+  conservatively quarantine a legacy `suspect` disk snapshot rather than
+  admitting it as last-known-good cache, routing, history, or analytics
+  evidence.
+- `drift_reason`, when present, says why a fresh provider observation was
+  rejected, such as a reset moving earlier or usage falling without a reset.
+  It must contain non-whitespace text; only an absent field means no active
+  drift diagnostic.
+  The provider is `stale: true` and unavailable for routing. Its windows, when
+  present, are the last trusted snapshot, not the rejected values. A migrated
+  legacy `suspect` cache has `ok: false` and no windows because no trusted
+  baseline can be proven. `drift_observed_at` is the Unix epoch second at which
+  the rejection or quarantine was observed. It is separate from `as_of`, which
+  remains the capture time of the underlying evidence.
 - `per_machine`, when true, means the read reflects only this machine's local
   usage (Cursor, Windsurf, Kiro, or the Codex session fallback) rather than the
   account across every device, so it can undercount when the account is used
@@ -92,7 +110,10 @@ emit `quotabot.suggest.v1` with:
   `runway_hours`, optional `projected_waste_percent`, optional `waste_boost`,
   optional `cost_penalty`, optional `cost_discount`,
   optional `capability_limited`, optional `capability_budget_limited`,
-  `routing_score`, `resets_at`, `stale`, and `available`.
+  optional `drift_reason`, optional `drift_observed_at`, `routing_score`,
+  `resets_at`, `stale`, and `available`. Drift candidates are unavailable;
+  `headroom_percent` is last-trusted when present and null for a legacy
+  no-window quarantine.
   `runway_hours` is the risk-adjusted runway before confidence is applied;
   `projected_waste_percent` is included only when measured burn and a near reset
   show included quota would otherwise expire unused; `routing_score` is the
@@ -123,11 +144,16 @@ same routing fields (including `active_leases`) plus `source`,
 `quotabot check <provider> --json` and MCP `check_provider_availability` emit
 `quotabot.check.v1`: `schema`, `as_of`, `provider`, then either `found: false`
 (CLI, unknown name), an `error` note (MCP, unknown provider/account), or
-`account`, `available`, `headroom_percent`, `resets_at`, and `stale`. This is
+`account`, `available`, `headroom_percent`, `resets_at`, and `stale`, with
+optional `drift_reason` and `drift_observed_at`. This is
 deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
 no `providers` array. `available` means usable from current evidence and above
 the practical spent floor; stale cached cloud quota has `available: false` even
-when `headroom_percent` still carries a last-known value. For metered providers,
+when `headroom_percent` still carries a last-known value. A drift result follows
+the same rule: its percentage, when present, is last-trusted evidence, not
+current capacity. A migrated legacy quarantine returns null headroom because no
+trusted baseline exists.
+For metered providers,
 1.5% or less remaining headroom is treated as unavailable so rounded near-zero
 reads do not route work into an already exhausted cap.
 
@@ -144,7 +170,9 @@ problems.
 Each model entry includes provider/account, `local`, `available`, `stale`,
 `quota_backed`, capability hints where known, and the gating quota budget when
 the model is remote: `headroom_percent`, `resets_at`, and the `gating_window`
-label. When a provider exposes per-model or provider-family quotas, those
+label. A model gated by drifted last-trusted quota also carries `drift_reason`
+and `drift_observed_at` and is unavailable. When a provider exposes per-model
+or provider-family quotas, those
 matched values gate the entry instead of account-wide provider headroom; an
 unmatched model-specific quota is not treated as available by inference.
 Stale remote entries keep last-known quota fields, and remote entries at or
@@ -228,27 +256,37 @@ optional `error`, `catalog_models`, `endpoint_models`,
 - `providers`: one record per provider account, with `provider`,
   `display_name`, `account`, `state` (`live`, `cached`, `out_of_quota`,
   `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`,
-  `as_of`, and `staleness_seconds`, `stale`, a window summary (label, used
-  percent, effective used percent, reset time, and seconds to reset), a
-  `passed` verdict, `checks`, and an optional `cross_check` naming the
-  provider's own usage surface to confirm the numbers against.
+  `as_of`, `staleness_seconds`, `stale`, `drift_reason`, and
+  `drift_observed_at`, a window summary (label, used percent, effective used
+  percent, reset time, and seconds to reset), a `passed` verdict, `checks`, and
+  an optional `cross_check` naming the provider's own usage surface to confirm
+  the numbers against. Provider drift with last-trusted windows keeps `state:
+  "cached"` for compatibility; a migrated legacy quarantine with no trusted
+  windows uses the existing `error` state. The additive drift fields and failed
+  check distinguish both conditions without expanding the state enum.
 - `runtime_access`: optional `quotabot.explain.v1` object attached by the CLI
   for the read. Real reads use `mode: "runtime_access_observation"` and
   `collection_executed: true`; simulations use the dry-run manifest form.
 - `checks` entries carry `id`, `status` (`pass`, `fail`, or `info`), and a
   plain-language `detail`. Provider check ids are `identity`,
-  `read_or_reason`, `percent_bounds`, `as_of_sane`, `stale_honesty`, and
-  `reset_sanity`; fleet check ids are `schema_contract`, `unique_accounts`,
-  `manual_entries`, `claimed_coverage`, and `runtime_access_boundary`. An
-  undetected claimed provider carries `claimed_coverage` as its single
-  provider-level check as well.
+  `provider_drift`, `read_or_reason`, `percent_bounds`, `as_of_sane`,
+  `stale_honesty`, and `reset_sanity`; fleet check ids are `schema_contract`,
+  `unique_accounts`, `manual_entries`, `claimed_coverage`, and
+  `runtime_access_boundary`. An active drift diagnostic makes
+  `provider_drift` fail and names the rejected evidence plus either the
+  last-trusted fallback or the absence of any trusted baseline. An undetected
+  claimed provider carries `claimed_coverage` as its
+  single provider-level check as well. Check ids are additive: consumers should
+  match the ids they understand and ignore unknown future ids rather than
+  treating this list as a closed enum.
 - `fleet_checks`: run-level checks, including validation of the live snapshot
   against the frozen `quotabot.v1` contract above.
 
 The record is quota metadata only and follows the same additive rule as every
 other contract here. A truthful absence (a signed-out account or a local
 runtime that is not running) passes; the failing states are lying numbers,
-silent failures, and contract drift. The CLI exits 65 when any check fails.
+silent failures, provider drift, and contract drift. The CLI exits 65 when any
+check fails.
 
 ## `quotabot.explain.v1`
 

@@ -75,7 +75,10 @@ of one normalized evidence and decision core.
 
 Every number has a source class, scope, capture time, and failure mode. A missing
 truthful value is better than a precise-looking guess. Provider drift becomes an
-explicit state, not an empty card.
+explicit diagnostic over stale last-trusted evidence when that evidence exists,
+not an empty card or a routable precise-looking value. A legacy cache with no
+provable trusted baseline is quarantined with null headroom. Drift clears only
+after clean recovery evidence.
 
 ### One understandable recommendation
 

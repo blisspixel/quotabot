@@ -17,6 +17,7 @@ const simulationStates = {
   'blocked',
   'signed-out',
   'stale',
+  'provider-drift',
   'metadata',
 };
 
@@ -82,18 +83,32 @@ ProviderQuota? simulateProvider({
         window('5h', 39, 2 * 60 * 60),
         window('weekly', 52, 3 * 24 * 60 * 60),
       ],
+    'provider-drift' => [
+        window('5h', 63, 2 * 60 * 60),
+        window('weekly', 52, 3 * 24 * 60 * 60),
+      ],
     'metadata' => const <QuotaWindow>[],
     _ => const <QuotaWindow>[],
   };
 
+  final cached = {'stale', 'provider-drift'}.contains(normalizedState);
   return ProviderQuota(
     provider: id,
     displayName: displayName,
     account: 'simulated',
     plan: 'simulation',
-    asOf: normalizedState == 'stale' ? now - 3600 : now,
-    stale: normalizedState == 'stale',
-    error: normalizedState == 'stale' ? 'simulated stale cache' : null,
+    asOf: cached ? now - 3600 : now,
+    stale: cached,
+    error: switch (normalizedState) {
+      'stale' => 'simulated stale cache',
+      'provider-drift' =>
+        'provider drift detected; showing last trusted snapshot',
+      _ => null,
+    },
+    driftReason: normalizedState == 'provider-drift'
+        ? '5h usage fell 63% to 10% with no reset'
+        : null,
+    driftObservedAt: normalizedState == 'provider-drift' ? now - 30 : null,
     status:
         normalizedState == 'metadata' ? 'simulated metadata-only state' : null,
     windows: windows,

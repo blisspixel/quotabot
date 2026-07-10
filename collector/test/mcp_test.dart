@@ -221,6 +221,25 @@ void main() {
       expect(r['headroom_percent'], 34);
     });
 
+    test('availabilityResponse carries additive provider-drift evidence', () {
+      final trusted = _q(
+        'claude',
+        [QuotaWindow(label: 'weekly', usedPercent: 40)],
+      );
+      final r = availabilityResponse(
+        [trusted.withProviderDrift('weekly reset moved earlier', _now - 30)],
+        _now,
+        'claude',
+        null,
+      );
+
+      expect(r['available'], isFalse);
+      expect(r['stale'], isTrue);
+      expect(r['headroom_percent'], 60);
+      expect(r['drift_reason'], 'weekly reset moved earlier');
+      expect(r['drift_observed_at'], _now - 30);
+    });
+
     test(
       'availabilityResponse treats rounded-one-percent headroom as unavailable',
       () {
@@ -368,8 +387,26 @@ void main() {
           .toJson()['properties'] as Map<String, dynamic>;
       final modelProperties = (((listModelsProperties['models'] as Map)['items']
           as Map)['properties'] as Map);
-      expect(modelProperties.keys,
-          containsAll(['size_bytes', 'vram_bytes', 'quant']));
+      expect(
+        modelProperties.keys,
+        containsAll([
+          'size_bytes',
+          'vram_bytes',
+          'quant',
+          'drift_reason',
+          'drift_observed_at',
+        ]),
+      );
+      final quotaProperties = byName['list_quotas']!
+          .outputSchema!
+          .toJson()['properties'] as Map<String, dynamic>;
+      final providerProperties =
+          (((quotaProperties['providers'] as Map)['items'] as Map)['properties']
+              as Map);
+      expect(
+        providerProperties.keys,
+        containsAll(['drift_reason', 'drift_observed_at']),
+      );
       final suggestModelProperties = byName['suggest_model']!
           .outputSchema!
           .toJson()['properties'] as Map<String, dynamic>;
@@ -418,6 +455,12 @@ void main() {
           .outputSchema!
           .toJson()['properties'] as Map<String, dynamic>;
       expect(suggestProviderOutput.keys, contains('cost_weight'));
+      final candidateProperties = (((suggestProviderOutput['ranked']
+          as Map)['items'] as Map)['properties'] as Map);
+      expect(
+        candidateProperties.keys,
+        containsAll(['drift_reason', 'drift_observed_at']),
+      );
     });
 
     // A schema/payload mismatch makes the server (and the client) raise, so a
@@ -523,6 +566,99 @@ void main() {
 
       // Back-compat: structured tools also serialize a text content block.
       expect(quotas.content, isNotEmpty);
+    });
+
+    test('list_quotas schema accepts additive provider-drift evidence',
+        () async {
+      final trusted = _q(
+        'claude',
+        [QuotaWindow(label: 'weekly', usedPercent: 40)],
+      );
+      await connect([
+        trusted.withProviderDrift('weekly reset moved earlier', _now - 30),
+      ]);
+
+      final quotas = await client.callTool(
+        const CallToolRequest(name: 'list_quotas'),
+      );
+
+      expect(quotas.isError, isFalse);
+      final provider =
+          (quotas.structuredContent?['providers'] as List).single as Map;
+      expect(provider['stale'], isTrue);
+      expect(provider['drift_reason'], 'weekly reset moved earlier');
+      expect(provider['drift_observed_at'], _now - 30);
+    });
+
+    test('agent routing tools preserve provider-drift evidence', () async {
+      final trusted = ProviderQuota(
+        provider: 'claude',
+        displayName: 'claude',
+        account: 'a',
+        asOf: _now - 60,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 40),
+        ],
+      );
+      final drifted = trusted.withProviderDrift(
+        'weekly reset moved earlier',
+        _now - 30,
+      );
+      await connect(
+        [drifted],
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: [drifted],
+          asOf: drifted.asOf,
+          source: 'disk',
+        ),
+      );
+
+      final suggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+      expect(suggestion.isError, isFalse);
+      expect(suggestion.structuredContent?['recommended'], isNull);
+      expect(
+          suggestion.structuredContent?['reason'], contains('Provider drift'));
+      final route =
+          (suggestion.structuredContent?['ranked'] as List).single as Map;
+      expect(route['available'], isFalse);
+      expect(route['drift_reason'], 'weekly reset moved earlier');
+      expect(route['drift_observed_at'], _now - 30);
+
+      final decision = await client.callTool(
+        const CallToolRequest(name: 'decide_now'),
+      );
+      expect(decision.isError, isFalse);
+      expect(decision.structuredContent?['recommended'], isNull);
+      expect(decision.structuredContent?['reason'], contains('Provider drift'));
+      final cachedRoute =
+          (decision.structuredContent?['ranked'] as List).single as Map;
+      expect(cachedRoute['drift_reason'], 'weekly reset moved earlier');
+      expect(cachedRoute['drift_observed_at'], _now - 30);
+
+      final models = await client.callTool(
+        const CallToolRequest(name: 'list_models'),
+      );
+      expect(models.isError, isFalse);
+      final model = (models.structuredContent?['models'] as List).single as Map;
+      expect(model['available'], isFalse);
+      expect(model['drift_reason'], 'weekly reset moved earlier');
+      expect(model['drift_observed_at'], _now - 30);
+
+      final modelSuggestion = await client.callTool(
+        const CallToolRequest(name: 'suggest_model'),
+      );
+      expect(modelSuggestion.isError, isFalse);
+      expect(modelSuggestion.structuredContent?['recommended'], isNull);
+      expect(
+        modelSuggestion.structuredContent?['reason'],
+        contains('provider drift'),
+      );
+      final rankedModel =
+          (modelSuggestion.structuredContent?['ranked'] as List).single as Map;
+      expect(rankedModel['drift_reason'], 'weekly reset moved earlier');
+      expect(rankedModel['drift_observed_at'], _now - 30);
     });
 
     test('suggest_provider applies explicit cost policy', () async {

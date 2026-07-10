@@ -1,4 +1,5 @@
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
@@ -14,6 +15,9 @@ ProviderQuota _q(
   bool perMachine = false,
   String? pipeHealth,
   int? retryAfterSeconds,
+  String? suspect,
+  String? driftReason,
+  int? driftObservedAt,
 }) =>
     ProviderQuota(
       provider: id,
@@ -27,6 +31,9 @@ ProviderQuota _q(
       perMachine: perMachine,
       pipeHealth: pipeHealth,
       retryAfterSeconds: retryAfterSeconds,
+      suspect: suspect,
+      driftReason: driftReason,
+      driftObservedAt: driftObservedAt,
     );
 
 // A local runtime carries no quota windows; it is available simply by running.
@@ -56,6 +63,27 @@ void main() {
     expect(anyProviderUsable([cached], _now), isFalse);
   });
 
+  test('non-positive and future snapshot timestamps cannot route directly', () {
+    for (final invalidAsOf in [
+      -1,
+      0,
+      _now + kQuotaEvidenceClockSkewSeconds + 1,
+    ]) {
+      final quota = _q(
+        'codex',
+        [QuotaWindow(label: 'weekly', usedPercent: 5)],
+        asOf: invalidAsOf,
+      );
+
+      expect(providerAvailability(quota, _now).available, isFalse);
+      expect(providerWithMostHeadroom([quota], _now), isNull);
+      final suggestion = suggestRoute([quota], _now);
+      expect(suggestion.recommended, isNull);
+      expect(suggestion.ranked, isEmpty);
+      expect(suggestion.reason, contains('No live quota data'));
+    }
+  });
+
   test('window helpers treat reached resets as fresh', () {
     final w = QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now);
     expect(windowHasRolledOver(w, _now), isTrue);
@@ -75,6 +103,16 @@ void main() {
 
   test('providerHeadroom is null without windows', () {
     expect(providerHeadroom(_q('grok', const []), _now), isNull);
+  });
+
+  test('providerHeadroom is null when a binding percentage is unknown', () {
+    final quota = _q('codex', [
+      QuotaWindow(label: '5h', usedPercent: 20),
+      QuotaWindow(label: 'weekly', resetsAt: _now + 3600),
+    ]);
+    expect(providerHeadroom(quota, _now), isNull);
+    expect(providerAvailability(quota, _now).available, isFalse);
+    expect(bindingWindow(quota, _now), isNull);
   });
 
   test('providerWithMostHeadroom picks the freest live provider', () {
@@ -129,6 +167,22 @@ void main() {
     final a = providerAvailability(q, _now);
     expect(a.available, isFalse);
     expect(a.headroom, 34);
+  });
+
+  test('integrity-marked evidence is unavailable even if not marked stale', () {
+    final suspect = _q(
+      'codex',
+      [QuotaWindow(label: 'weekly', usedPercent: 10)],
+      suspect: 'legacy provider drift',
+    );
+
+    expect(providerAvailability(suspect, _now).available, isFalse);
+    expect(anyProviderUsable([suspect], _now), isFalse);
+    expect(providerWithMostHeadroom([suspect], _now), isNull);
+    final suggestion = suggestRoute([suspect], _now);
+    expect(suggestion.recommended, isNull);
+    expect(suggestion.ranked, isEmpty);
+    expect(suggestion.reason, contains('No live quota data'));
   });
 
   test('bindingWindow returns the most constrained window', () {
@@ -379,6 +433,75 @@ void main() {
       expect(s.ranked.single.headroom, 95);
       expect(s.reason, contains('Only cached quota evidence is present'));
       expect(s.reason, contains('last-known headroom was 95%'));
+    });
+
+    test('routing candidates expose provider drift and explain the block', () {
+      final drifted = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'a',
+        asOf: _now - 60,
+        stale: true,
+        error: 'provider drift detected; showing last trusted snapshot',
+        driftReason: 'weekly reset moved earlier',
+        driftObservedAt: _now - 30,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 5)],
+      );
+
+      final suggestion = suggestRoute([drifted], _now);
+      final candidate = suggestion.ranked.single;
+      final json = candidate.toJson();
+
+      expect(suggestion.recommended, isNull);
+      expect(suggestion.reason, contains('Provider drift'));
+      expect(suggestion.reason, contains('quotabot verify'));
+      expect(candidate.available, isFalse);
+      expect(candidate.driftReason, 'weekly reset moved earlier');
+      expect(candidate.driftObservedAt, _now - 30);
+      expect(json['drift_reason'], 'weekly reset moved earlier');
+      expect(json['drift_observed_at'], _now - 30);
+    });
+
+    test('local fallback qualifies drift headroom as last trusted', () {
+      final drifted = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'a',
+        asOf: _now - 60,
+        stale: true,
+        error: 'provider drift detected; showing last trusted snapshot',
+        driftReason: 'weekly reset moved earlier',
+        driftObservedAt: _now - 30,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 5)],
+      );
+
+      final suggestion = suggestRoute([drifted, _local('ollama')], _now);
+
+      expect(suggestion.recommended?.provider, 'ollama');
+      expect(suggestion.usingLocalFallback, isTrue);
+      expect(suggestion.reason, contains('provider drift'));
+      expect(suggestion.reason, contains('last-trusted headroom 95%'));
+      expect(suggestion.reason, isNot(contains('95% free')));
+    });
+
+    test('legacy drift quarantine remains explicit without quota windows', () {
+      final legacy = _q(
+        'codex',
+        [QuotaWindow(label: 'weekly', usedPercent: 5)],
+      ).withSuspect('legacy drift concern').asProviderDriftQuarantine(
+            'unresolved legacy provider drift: legacy drift concern',
+            _now - 30,
+          );
+
+      final suggestion = suggestRoute([legacy], _now);
+      final candidate = suggestion.ranked.single;
+
+      expect(suggestion.recommended, isNull);
+      expect(suggestion.reason, contains('legacy evidence is quarantined'));
+      expect(suggestion.reason, contains('no trusted quota snapshot'));
+      expect(candidate.available, isFalse);
+      expect(candidate.headroom, isNull);
+      expect(candidate.driftReason, contains('unresolved legacy'));
     });
 
     test('manual entries carry lower routing confidence', () {

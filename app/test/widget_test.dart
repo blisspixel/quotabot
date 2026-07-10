@@ -570,6 +570,20 @@ void main() {
       expect(line, 'cached | manual | captured 1h ago');
     });
 
+    test('labels provider drift separately from ordinary cached data', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        _quota(
+          'claude',
+          'Claude',
+          'pro',
+        ).withProviderDrift('5h usage fell with no reset', now - 30),
+        now,
+      );
+
+      expect(line, 'provider drift | quota plan | captured 0s ago');
+    });
+
     test('labels local loaded scope explicitly', () {
       const now = 1782046566;
       final line = desktopProviderTrustLine(

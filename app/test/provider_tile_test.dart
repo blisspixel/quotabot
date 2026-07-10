@@ -31,6 +31,16 @@ Insights _ins({double? burn, double? burnSe}) => Insights(
 
 Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
+double _contrastRatio(Color foreground, Color background) {
+  final lighter = foreground.computeLuminance() > background.computeLuminance()
+      ? foreground.computeLuminance()
+      : background.computeLuminance();
+  final darker = foreground.computeLuminance() > background.computeLuminance()
+      ? background.computeLuminance()
+      : foreground.computeLuminance();
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 void main() {
   testWidgets(
     'shows a plain-language runway when burning without a strand error',
@@ -87,6 +97,154 @@ void main() {
 
     expect(find.textContaining('usage left'), findsNothing);
     expect(find.textContaining('run out'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final surface in <(String, Color)>[
+    ('light', Colors.white),
+    ('dark', const Color(0xFF1C1F25)),
+  ]) {
+    testWidgets(
+      'shows accessible provider drift with contrast on ${surface.$1}',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        final drifted = _q(60).withProviderDrift(
+          '5h usage fell 60% to 10% with no reset',
+          DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        );
+        await tester.pumpWidget(
+          _wrap(
+            ProviderTile(
+              quota: drifted,
+              cardColor: surface.$2,
+              insights: _ins(burn: 20),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        const summary =
+            'Provider drift detected. Showing the last trusted quota; routing is disabled.';
+        const recovery =
+            'Run quotabot verify, then compare with the provider view.';
+        expect(find.text(summary), findsOneWidget);
+        expect(find.text(recovery), findsOneWidget);
+        expect(
+          find.text('Reason: 5h usage fell 60% to 10% with no reset'),
+          findsOneWidget,
+        );
+        expect(
+          find.bySemanticsLabel(
+            RegExp('Provider drift detected.*quotabot verify.*usage fell'),
+          ),
+          findsOneWidget,
+        );
+        final warning = tester.widget<Text>(find.text(summary));
+        expect(
+          _contrastRatio(warning.style!.color!, surface.$2),
+          greaterThanOrEqualTo(4.5),
+        );
+        expect(find.textContaining('usage left'), findsNothing);
+        expect(find.textContaining('run out'), findsNothing);
+        expect(find.text('40% last trusted'), findsOneWidget);
+        expect(find.textContaining('% free'), findsNothing);
+        expect(tester.takeException(), isNull);
+        semantics.dispose();
+      },
+    );
+  }
+
+  testWidgets('provider drift guidance wraps without narrow overflow', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(210, 560));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final drifted = _q(60).withProviderDrift(
+      'weekly reset moved earlier after the provider changed its response',
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: 190,
+            child: ProviderTile(
+              quota: drifted,
+              cardColor: Colors.white,
+              insights: _ins(burn: 20),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('Run quotabot verify'), findsOneWidget);
+    expect(find.textContaining('Reason: weekly reset'), findsOneWidget);
+    expect(find.textContaining('provider drift | quota plan'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('legacy drift quarantine never claims trusted quota exists', (
+    tester,
+  ) async {
+    final quarantined = _q(60)
+        .withSuspect('legacy drift concern')
+        .asProviderDriftQuarantine(
+          'unresolved legacy provider drift: legacy drift concern',
+          DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quarantined, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(
+      find.text(
+        'Provider drift detected. Legacy quota evidence is quarantined; no trusted snapshot is available.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Showing the last trusted quota'), findsNothing);
+    expect(find.textContaining('provider drift | quota plan'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('qualifies a spent drift window as last trusted evidence', (
+    tester,
+  ) async {
+    final future = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600;
+    final drifted = _q(100, resetsAt: future).withProviderDrift(
+      '5h reset moved earlier',
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: drifted, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('5h spent (last trusted)'), findsOneWidget);
+    expect(find.text('5h spent'), findsNothing);
+    expect(find.textContaining('% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('qualifies stale quota windows as last-known evidence', (
+    tester,
+  ) async {
+    final stale = ProviderQuota.fromJson({..._q(60).toJson(), 'stale': true});
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: stale, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('40% last known'), findsOneWidget);
+    expect(find.textContaining('% free'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

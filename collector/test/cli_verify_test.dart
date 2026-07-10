@@ -85,6 +85,29 @@ void main() {
     expect(readOrReason['detail'], contains('simulated signed-out state'));
   });
 
+  test('verify fails a provider-drift simulation with additive evidence',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--json',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 65);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['passed'], isFalse);
+    final provider = (json['providers'] as List).single as Map<String, dynamic>;
+    expect(provider['state'], 'cached');
+    expect(provider['stale'], isTrue);
+    expect(provider['drift_reason'], contains('usage fell'));
+    expect(provider['drift_observed_at'], isA<int>());
+    final checks = (provider['checks'] as List).cast<Map<String, dynamic>>();
+    final drift = checks.firstWhere((check) => check['id'] == 'provider_drift');
+    expect(drift['status'], 'fail');
+    expect(drift['detail'], contains('not routable'));
+  });
+
   test('verify prints a human summary with cross-check pointers', () async {
     final result = await runCli([
       'verify',
@@ -142,6 +165,24 @@ void main() {
     expect(out, contains('[cached, quota plan, captured 60m ago]'));
     expect(out, contains('stale_honesty'));
     expect(out, contains('simulated stale cache'));
+  });
+
+  test('verify human output names provider drift and trusted provenance',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 65);
+    final out = result.stdout as String;
+    expect(out, contains('PROVIDER DRIFT'));
+    expect(out, contains('FAIL'));
+    expect(out, contains('provider_drift'));
+    expect(out, contains('usage fell'));
+    expect(out, contains('[provider drift, quota plan, captured 60m ago]'));
   });
 
   test('verify human output explains metadata-only snapshots', () async {

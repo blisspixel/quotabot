@@ -130,6 +130,12 @@ else:
     wait for the soonest reset (check_provider_availability) or use the default
 ```
 
+If a provider snapshot carries `drift_reason`, treat it as non-routable evidence:
+`available` is false, measured analytics records no new sample, and `quotabot
+verify` exits 65 until recovery. Its windows, when present, are the stale last
+trusted snapshot, not the rejected fresh values. A migrated legacy quarantine
+has no trusted windows or headroom at all.
+
 ## Output schema
 
 Snapshot, routing, and availability JSON outputs carry a versioned `schema` id
@@ -138,14 +144,19 @@ map with no envelope); treat unknown fields as additive. Headroom is a
 remaining-percent value (0..100); higher means more budget left. The shapes:
 
 - The snapshot is `quotabot.v1` (`generated_at`, `providers`, each provider's
-  `windows` and, when known, `models`).
+  `windows` and, when known, `models`). A drifted provider remains `stale: true`
+  and adds `drift_reason` plus `drift_observed_at`; it preserves last-trusted
+  windows when they exist, while a migrated legacy quarantine uses an empty
+  window list and `ok: false`.
 - `suggest` is `quotabot.suggest.v1`: `recommended`, `ranked`, `reason`, a
   guaranteed `fallback`, `routing_policy`, and `as_of`/`risk_z` provenance. Each
   candidate carries
   `headroom_percent`, `effective_headroom_percent` (headroom after discounting
   recent burn and active local leases), optional `lease_discount_percent`, and,
   when estimable, `burn_se_percent_per_hour`, `strand_probability` (0..1), and
-  `confidence` (0..1). Rank on `effective_headroom_percent`; treat low
+  `confidence` (0..1). Drift candidates also carry `drift_reason` and
+  `drift_observed_at`, and are never available. Rank on
+  `effective_headroom_percent`; treat low
   `confidence` or high `strand_probability` with appropriate caution.
 - `decide_now` is `quotabot.decision.v1`: a cache-only routing decision with
   `source`, `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`,
@@ -159,7 +170,8 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
 - `release_provider` is `quotabot.release.v1`: an idempotent local release result
   for a lease id.
 - `list_models` is `quotabot.models.v1`: represented model candidates with each
-  known provider budget gate and capability hints.
+  known provider budget gate and capability hints. A model gated by drifted
+  last-trusted quota carries the same drift fields and is unavailable.
 - `quotabot watch` emits `quotabot.alert.v1`: `kind` (`low_quota` or
   `projected_waste`), `provider`, `window`, `severity` (`amber`/`red`),
   `free_percent`, `as_of`, and, when a better route exists, `route_to` with
