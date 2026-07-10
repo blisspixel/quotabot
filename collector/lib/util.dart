@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 Directory? _quotabotDirOverrideForTesting;
@@ -58,11 +59,149 @@ Directory quotabotDir(String sub) {
   return dir;
 }
 
-/// Best-effort owner-only permissions for local metadata files.
+typedef PermissionCommandRunner = ProcessResult Function(
+  String executable,
+  List<String> arguments,
+);
+
+typedef AsyncPermissionCommandRunner = Future<ProcessResult> Function(
+  String executable,
+  List<String> arguments,
+  Duration timeout,
+);
+
+ProcessResult _runPermissionCommand(
+  String executable,
+  List<String> arguments,
+) =>
+    Process.runSync(executable, arguments);
+
+Future<ProcessResult> _runPermissionCommandAsync(
+  String executable,
+  List<String> arguments,
+  Duration timeout,
+) async {
+  Process? process;
+  final elapsed = Stopwatch()..start();
+  try {
+    process = await Process.start(executable, arguments).timeout(timeout);
+    final stdout = process.stdout.transform(systemEncoding.decoder).join();
+    final stderr = process.stderr.transform(systemEncoding.decoder).join();
+    final remaining = timeout - elapsed.elapsed;
+    if (remaining.inMicroseconds <= 0) throw TimeoutException('permission');
+    final results = await Future.wait<Object>([
+      process.exitCode,
+      stdout,
+      stderr,
+    ]).timeout(remaining);
+    return ProcessResult(
+      process.pid,
+      results[0] as int,
+      results[1] as String,
+      results[2] as String,
+    );
+  } on TimeoutException {
+    process?.kill();
+    throw const _PermissionHardeningFailed();
+  }
+}
+
+Duration _remainingPermissionTime(Stopwatch elapsed, Duration timeout) {
+  final remaining = timeout - elapsed.elapsed;
+  if (remaining.inMicroseconds <= 0) {
+    throw const _PermissionHardeningFailed();
+  }
+  return remaining;
+}
+
+/// Enforces owner-only permissions on [file] or throws without exposing command
+/// output. Credential stores use this checked boundary before writing secrets.
+void enforceOwnerOnlyFile(
+  File file, {
+  PermissionCommandRunner? run,
+  WindowsIdentityLookup? identityLookup,
+}) {
+  final execute = run ?? _runPermissionCommand;
+  try {
+    if (Platform.isWindows) {
+      final user = windowsAclPrincipal(lookup: identityLookup);
+      if (user == null) throw const _PermissionHardeningFailed();
+      _enforceWindowsOwnerOnly(
+        execute,
+        file.path,
+        user,
+        isDirectory: false,
+      );
+    } else {
+      _requirePermissionCommand(execute('chmod', ['600', file.path]));
+      if (Platform.isMacOS) {
+        _requirePermissionCommand(execute('chmod', ['-N', file.path]));
+      }
+      if (file.statSync().mode & 0x3f != 0) {
+        throw const _PermissionHardeningFailed();
+      }
+    }
+  } on FileSystemException {
+    rethrow;
+  } catch (_) {
+    throw FileSystemException(
+      'could not enforce owner-only file permissions',
+      file.path,
+    );
+  }
+}
+
+/// Asynchronously enforces owner-only permissions on [file] within [timeout].
+/// Desktop startup uses this boundary so a stalled platform helper cannot block
+/// the first window indefinitely.
+Future<void> enforceOwnerOnlyFileAsync(
+  File file, {
+  Duration timeout = const Duration(seconds: 3),
+  AsyncPermissionCommandRunner? run,
+}) async {
+  final execute = run ?? _runPermissionCommandAsync;
+  final elapsed = Stopwatch()..start();
+  try {
+    if (Platform.isWindows) {
+      final remaining = _remainingPermissionTime(elapsed, timeout);
+      await _enforceWindowsOwnerOnlyAsync(
+        execute,
+        file.path,
+        isDirectory: false,
+        timeout: remaining,
+      ).timeout(remaining);
+    } else {
+      Future<void> checked(String executable, List<String> arguments) async {
+        final remaining = _remainingPermissionTime(elapsed, timeout);
+        final result = await execute(
+          executable,
+          arguments,
+          remaining,
+        ).timeout(remaining);
+        _requirePermissionCommand(result);
+      }
+
+      await checked('chmod', ['600', file.path]);
+      if (Platform.isMacOS) await checked('chmod', ['-N', file.path]);
+      if (file.statSync().mode & 0x3f != 0) {
+        throw const _PermissionHardeningFailed();
+      }
+    }
+  } on FileSystemException {
+    rethrow;
+  } catch (_) {
+    throw FileSystemException(
+      'could not enforce owner-only file permissions',
+      file.path,
+    );
+  }
+}
+
+/// Best-effort owner-only permissions for non-secret local metadata files.
 ///
-/// On POSIX this is `chmod 600`. On Windows it removes inherited ACEs and grants
-/// full control only to the current user. Failures are intentionally ignored so
-/// metadata writes stay fail-soft on locked-down enterprise machines.
+/// Failures are intentionally ignored so cache and history writes stay
+/// fail-soft on locked-down enterprise machines. Credential stores must call
+/// [enforceOwnerOnlyFile] instead.
 void restrictOwnerOnlyFile(File file) {
   try {
     if (Platform.isWindows) {
@@ -72,14 +211,95 @@ void restrictOwnerOnlyFile(File file) {
       Process.runSync('icacls', [file.path, '/grant:r', '$user:F']);
     } else {
       Process.runSync('chmod', ['600', file.path]);
+      if (Platform.isMacOS) Process.runSync('chmod', ['-N', file.path]);
     }
   } catch (_) {}
 }
 
-/// Best-effort owner-only permissions for local metadata directories.
-///
-/// On POSIX this is `chmod 700`. On Windows it removes inherited ACEs and grants
-/// recursive full control only to the current user.
+/// Enforces owner-only permissions on [dir] or throws without exposing command
+/// output. Credential stores use this checked boundary before creating files.
+void enforceOwnerOnlyDirectory(
+  Directory dir, {
+  PermissionCommandRunner? run,
+  WindowsIdentityLookup? identityLookup,
+}) {
+  final execute = run ?? _runPermissionCommand;
+  try {
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    if (Platform.isWindows) {
+      final user = windowsAclPrincipal(lookup: identityLookup);
+      if (user == null) throw const _PermissionHardeningFailed();
+      _enforceWindowsOwnerOnly(
+        execute,
+        dir.path,
+        user,
+        isDirectory: true,
+      );
+    } else {
+      _requirePermissionCommand(execute('chmod', ['700', dir.path]));
+      if (Platform.isMacOS) {
+        _requirePermissionCommand(execute('chmod', ['-N', dir.path]));
+      }
+      if (dir.statSync().mode & 0x3f != 0) {
+        throw const _PermissionHardeningFailed();
+      }
+    }
+  } on FileSystemException {
+    rethrow;
+  } catch (_) {
+    throw FileSystemException(
+      'could not enforce owner-only directory permissions',
+      dir.path,
+    );
+  }
+}
+
+/// Asynchronously enforces owner-only permissions on [dir] within [timeout].
+Future<void> enforceOwnerOnlyDirectoryAsync(
+  Directory dir, {
+  Duration timeout = const Duration(seconds: 3),
+  AsyncPermissionCommandRunner? run,
+}) async {
+  final execute = run ?? _runPermissionCommandAsync;
+  final elapsed = Stopwatch()..start();
+  try {
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    if (Platform.isWindows) {
+      final remaining = _remainingPermissionTime(elapsed, timeout);
+      await _enforceWindowsOwnerOnlyAsync(
+        execute,
+        dir.path,
+        isDirectory: true,
+        timeout: remaining,
+      ).timeout(remaining);
+    } else {
+      Future<void> checked(String executable, List<String> arguments) async {
+        final remaining = _remainingPermissionTime(elapsed, timeout);
+        final result = await execute(
+          executable,
+          arguments,
+          remaining,
+        ).timeout(remaining);
+        _requirePermissionCommand(result);
+      }
+
+      await checked('chmod', ['700', dir.path]);
+      if (Platform.isMacOS) await checked('chmod', ['-N', dir.path]);
+      if (dir.statSync().mode & 0x3f != 0) {
+        throw const _PermissionHardeningFailed();
+      }
+    }
+  } on FileSystemException {
+    rethrow;
+  } catch (_) {
+    throw FileSystemException(
+      'could not enforce owner-only directory permissions',
+      dir.path,
+    );
+  }
+}
+
+/// Best-effort owner-only permissions for non-secret metadata directories.
 void restrictOwnerOnlyDirectory(Directory dir) {
   try {
     if (!dir.existsSync()) dir.createSync(recursive: true);
@@ -90,8 +310,95 @@ void restrictOwnerOnlyDirectory(Directory dir) {
       Process.runSync('icacls', [dir.path, '/grant:r', '$user:(OI)(CI)F']);
     } else {
       Process.runSync('chmod', ['700', dir.path]);
+      if (Platform.isMacOS) Process.runSync('chmod', ['-N', dir.path]);
     }
   } catch (_) {}
+}
+
+void _requirePermissionCommand(ProcessResult result) {
+  if (result.exitCode != 0) throw const _PermissionHardeningFailed();
+}
+
+void _enforceWindowsOwnerOnly(
+  PermissionCommandRunner execute,
+  String path,
+  String user, {
+  required bool isDirectory,
+}) {
+  // Ownership carries implicit WRITE_DAC on Windows. Reject a foreign owner,
+  // then apply one complete protected DACL so a crash cannot leave a partially
+  // reset ACL around existing credentials.
+  final sid = user.startsWith('*') ? user.substring(1) : user;
+  final command = _windowsOwnerOnlyCommand(
+    path,
+    isDirectory: isDirectory,
+    knownSid: sid,
+  );
+  _requirePermissionCommand(
+    execute('powershell.exe', [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      command,
+    ]),
+  );
+}
+
+Future<void> _enforceWindowsOwnerOnlyAsync(
+  AsyncPermissionCommandRunner execute,
+  String path, {
+  required bool isDirectory,
+  required Duration timeout,
+}) async {
+  final command = _windowsOwnerOnlyCommand(path, isDirectory: isDirectory);
+  final result = await execute(
+      'powershell.exe',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        command,
+      ],
+      timeout);
+  _requirePermissionCommand(result);
+}
+
+String _windowsOwnerOnlyCommand(
+  String path, {
+  required bool isDirectory,
+  String? knownSid,
+}) {
+  final securityClass = isDirectory ? 'DirectorySecurity' : 'FileSecurity';
+  final ioClass = isDirectory ? 'Directory' : 'File';
+  final inheritance = isDirectory ? 'ContainerInherit, ObjectInherit' : 'None';
+  final sidSetup = knownSid == null
+      ? '\$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;'
+      : "\$sid=[System.Security.Principal.SecurityIdentifier]::new('$knownSid');";
+  return "\$ErrorActionPreference='Stop';$sidSetup"
+      "\$owner=[System.IO.$ioClass]::GetAccessControl("
+      "'${path.replaceAll("'", "''")}').GetOwner("
+      '[System.Security.Principal.SecurityIdentifier]);'
+      "if(\$owner.Value -ne \$sid.Value){throw 'owner mismatch'};"
+      "\$acl=[System.Security.AccessControl.$securityClass]::new();"
+      '\$acl.SetAccessRuleProtection(\$true,\$false);'
+      '\$rule=[System.Security.AccessControl.FileSystemAccessRule]::new('
+      '\$sid,[System.Security.AccessControl.FileSystemRights]::FullControl,'
+      "[System.Security.AccessControl.InheritanceFlags]'$inheritance',"
+      '[System.Security.AccessControl.PropagationFlags]::None,'
+      '[System.Security.AccessControl.AccessControlType]::Allow);'
+      '\$acl.AddAccessRule(\$rule);'
+      "[System.IO.$ioClass]::SetAccessControl("
+      "'${path.replaceAll("'", "''")}',\$acl);"
+      "\$finalOwner=[System.IO.$ioClass]::GetAccessControl("
+      "'${path.replaceAll("'", "''")}').GetOwner("
+      '[System.Security.Principal.SecurityIdentifier]);'
+      "if(\$finalOwner.Value -ne \$sid.Value){throw 'owner changed'};";
+}
+
+class _PermissionHardeningFailed implements Exception {
+  const _PermissionHardeningFailed();
 }
 
 typedef WindowsIdentityLookup = ProcessResult Function();

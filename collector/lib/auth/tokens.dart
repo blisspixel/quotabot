@@ -5,6 +5,31 @@ import 'package:crypto/crypto.dart';
 
 import '../util.dart';
 
+typedef TokenDirectoryHardener = void Function(Directory directory);
+typedef TokenFileHardener = void Function(File file);
+
+TokenDirectoryHardener _hardenTokenDirectory = enforceOwnerOnlyDirectory;
+TokenFileHardener _hardenTokenFile = enforceOwnerOnlyFile;
+
+/// Overrides credential permission enforcement for deterministic failure tests.
+/// Production code must leave this unset.
+void setTokenPermissionHardeningForTesting({
+  TokenDirectoryHardener? directoryHardener,
+  TokenFileHardener? fileHardener,
+}) {
+  var assertsEnabled = false;
+  assert(() {
+    assertsEnabled = true;
+    return true;
+  }());
+  if (!assertsEnabled) {
+    throw UnsupportedError(
+        'test permission override is unavailable in release');
+  }
+  _hardenTokenDirectory = directoryHardener ?? enforceOwnerOnlyDirectory;
+  _hardenTokenFile = fileHardener ?? enforceOwnerOnlyFile;
+}
+
 /// An OAuth token set for one provider.
 class Tokens {
   final String? accessToken;
@@ -131,19 +156,27 @@ class TokenStore {
     // concurrent read never leaves a truncated grant: losing a rotated refresh
     // token this way would break every later refresh. Lock the temp down BEFORE
     // the secret lands so it is never briefly world-readable under the default
-    // umask, then re-lock after the rename.
-    restrictOwnerOnlyDirectory(f.parent);
+    // umask. The same-directory rename preserves that checked descriptor.
+    _hardenTokenDirectory(f.parent);
     final tmp = File('${f.path}.$pid.tmp');
-    if (!tmp.existsSync()) {
-      tmp.createSync(recursive: true);
+    try {
+      if (!tmp.existsSync()) {
+        tmp.createSync(recursive: true);
+      }
+      _hardenTokenFile(tmp);
+      tmp.writeAsStringSync(jsonEncode({
+        ...tokens.toJson(),
+        if (ownerStamp != null) _accountKey: ownerStamp,
+      }));
+      tmp.renameSync(f.path);
+      // A same-directory rename preserves the checked temporary file's security
+      // descriptor. Do not reset permissions after the secret has been written.
+    } catch (_) {
+      try {
+        if (tmp.existsSync()) tmp.deleteSync();
+      } catch (_) {}
+      rethrow;
     }
-    restrictOwnerOnlyFile(tmp);
-    tmp.writeAsStringSync(jsonEncode({
-      ...tokens.toJson(),
-      if (ownerStamp != null) _accountKey: ownerStamp,
-    }));
-    tmp.renameSync(f.path);
-    restrictOwnerOnlyFile(f);
   }
 
   /// The account a provider-default grant is stamped for, or null when the

@@ -308,8 +308,18 @@ Everything is per-user:
 | macOS   | `~/.config/quotabot`                                  |
 | Linux   | `$XDG_CONFIG_HOME/quotabot` (or `~/.config/quotabot`) |
 
-Owner-only login-token permissions are attempted best-effort on macOS, Linux,
-and Windows. A permission-hardening failure currently does not abort the write.
+New and rotated quotabot-owned login tokens are written only after owner-only
+directory and file permission hardening succeeds on macOS, Linux, or Windows.
+If hardening fails for a credential file, that file is not written and login or
+refresh reports the failure. Default and account-scoped slots are separate
+atomic writes, not one cross-file transaction. Non-secret cache and history
+metadata retain best-effort permission hardening. The desktop's secret-capable
+webhook preferences use a bounded, asynchronous fail-closed storage boundary.
+If an existing `prefs.json` cannot be protected, the desktop ignores it, uses
+safe defaults, and shows a warning. It does not delete the file automatically;
+secure or remove that file before retrying. The same warning distinguishes an
+invalid, unreadable, non-regular, or oversized preferences file instead of
+misreporting every load failure as a permission problem.
 The Windows directory also contains the release `bin` and `lib` folders, so
 reset and uninstall require the separate procedures above.
 

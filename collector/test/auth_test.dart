@@ -17,9 +17,11 @@ void main() {
   setUp(() {
     tempConfig = Directory.systemTemp.createTempSync('quotabot_auth_test_');
     setQuotabotDirOverrideForTesting(tempConfig);
+    setTokenPermissionHardeningForTesting();
   });
 
   tearDown(() {
+    setTokenPermissionHardeningForTesting();
     setQuotabotDirOverrideForTesting(null);
     if (tempConfig.existsSync()) tempConfig.deleteSync(recursive: true);
   });
@@ -102,6 +104,49 @@ void main() {
       expect(leftover, isEmpty);
       // The rename must have produced a readable grant.
       expect(TokenStore.load(provider)!.refreshToken, 'r');
+    });
+
+    test('save fails before writing when file hardening fails', () {
+      setTokenPermissionHardeningForTesting(
+        fileHardener: (_) => throw const FileSystemException(
+          'simulated permission failure',
+        ),
+      );
+
+      expect(
+        () => TokenStore.save(
+          provider,
+          Tokens(accessToken: 'access', refreshToken: 'refresh'),
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(TokenStore.exists(provider), isFalse);
+      expect(quotabotDir('auth').listSync().whereType<File>(), isEmpty);
+    });
+
+    test('saved token and directory are owner-only', () {
+      final directory = quotabotDir('auth');
+      if (Platform.isWindows) {
+        final seeded = Process.runSync(
+          'icacls',
+          [directory.path, '/grant', '*S-1-1-0:(R)'],
+        );
+        expect(seeded.exitCode, 0);
+      }
+
+      TokenStore.save(provider, Tokens(accessToken: 'a', refreshToken: 'r'));
+      final file = File('${directory.path}/$provider.json');
+      if (Platform.isWindows) {
+        final directoryAcl = Process.runSync('icacls', [directory.path]);
+        final fileAcl = Process.runSync('icacls', [file.path]);
+        expect(directoryAcl.exitCode, 0);
+        expect(fileAcl.exitCode, 0);
+        expect(directoryAcl.stdout.toString(), isNot(contains('(R)')));
+        expect(fileAcl.stdout.toString(), isNot(contains('(R)')));
+      } else {
+        expect(directory.statSync().mode & 0x3f, 0);
+        expect(file.statSync().mode & 0x3f, 0);
+      }
     });
 
     test('rejects path-like provider ids', () {

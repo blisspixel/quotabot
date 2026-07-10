@@ -57,17 +57,16 @@ Future<WebhookResult> postAlert(
   }
   final c = client ?? http.Client();
   try {
-    final resp = await c
-        .post(
-          uri,
-          headers: const {'content-type': 'application/json'},
-          body: jsonEncode(payload),
-        )
-        .timeout(timeout);
+    final request = http.Request('POST', uri)
+      ..followRedirects = allowExternal
+      ..headers['content-type'] = 'application/json'
+      ..body = jsonEncode(payload);
+    final resp =
+        await c.send(request).then(http.Response.fromStream).timeout(timeout);
     final ok = resp.statusCode >= 200 && resp.statusCode < 300;
     return WebhookResult(ok: ok, statusCode: resp.statusCode);
-  } catch (e) {
-    return WebhookResult(ok: false, error: e.toString());
+  } catch (_) {
+    return const WebhookResult(ok: false, error: 'transport failure');
   } finally {
     if (client == null) c.close();
   }

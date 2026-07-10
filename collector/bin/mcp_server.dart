@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/expiring_single_flight.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/mcp_http.dart';
 import 'package:quotabot_collector/mcp_server_options.dart';
@@ -30,15 +31,11 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  List<ProviderQuota>? cached;
-  var cachedAt = 0;
-  Future<List<ProviderQuota>> snapshot() async {
-    final now = nowEpoch();
-    if (cached != null && now - cachedAt < 5) return cached!;
-    cached = await collectAll();
-    cachedAt = now;
-    return cached!;
-  }
+  final liveSnapshots = ExpiringSingleFlight<List<ProviderQuota>>(
+    load: collectAll,
+    now: nowEpoch,
+  );
+  Future<List<ProviderQuota>> snapshot() => liveSnapshots.read();
 
   int? newestSnapshotAsOf(List<ProviderQuota> providers) {
     int? newest;
@@ -50,11 +47,11 @@ Future<void> main(List<String> args) async {
   }
 
   Future<CachedQuotaSnapshot> cachedDecisionSnapshot() async {
-    final current = cached;
+    final current = liveSnapshots.value;
     if (current != null) {
       return CachedQuotaSnapshot(
         providers: current,
-        asOf: cachedAt,
+        asOf: liveSnapshots.cachedAt,
         source: 'memory',
       );
     }
