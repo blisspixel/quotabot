@@ -41,20 +41,25 @@ def launch_command(executable: Path, platform: str) -> list[str]:
     return [str(executable)]
 
 
-def validate_payload(payload: Any, expected_platform: str) -> None:
+def validate_payload(payload: Any, expected_platform: str) -> bool:
     if not isinstance(payload, dict):
         raise RuntimeError("Desktop readiness payload must be a JSON object")
-    expected = {
-        "schema": SCHEMA,
-        "window_ready": True,
-        "tray_ready": True,
-        "platform": expected_platform,
-    }
-    if payload != expected:
+    if set(payload) != {"schema", "window_ready", "tray_ready", "platform"}:
+        raise RuntimeError("Desktop readiness payload fields are invalid")
+    if payload["schema"] != SCHEMA or payload["platform"] != expected_platform:
+        raise RuntimeError("Desktop readiness schema or platform is invalid")
+    window_ready = payload["window_ready"]
+    tray_ready = payload["tray_ready"]
+    if type(window_ready) is not bool or (
+        tray_ready is not None and type(tray_ready) is not bool
+    ):
+        raise RuntimeError("Desktop readiness states must be boolean or null")
+    if tray_ready is False:
         raise RuntimeError(
-            "Desktop readiness payload did not report a ready native window and tray: "
+            "Desktop app reported failed tray initialization: "
             f"{json.dumps(payload, sort_keys=True)}"
         )
+    return window_ready and tray_ready is True
 
 
 def valid_windows_tray_rect(result_code: int, rect: Any) -> bool:
@@ -158,24 +163,56 @@ def await_readiness(
     timeout_seconds: float,
 ) -> None:
     deadline = time.monotonic() + timeout_seconds
+    progress: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        if readiness_file.is_file():
+        try:
+            payload_text = readiness_file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            payload_text = None
+        except OSError as error:
+            raise RuntimeError("Desktop readiness file could not be read") from error
+        if payload_text is not None:
             try:
-                payload = json.loads(readiness_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as error:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError as error:
                 raise RuntimeError(
                     "Desktop readiness file is not valid UTF-8 JSON"
                 ) from error
-            validate_payload(payload, expected_platform)
-            return
+            if validate_payload(payload, expected_platform):
+                return
+            raise RuntimeError("Desktop readiness file contains an incomplete state")
+        for component in ("window", "tray"):
+            progress_file = Path(f"{readiness_file}.{component}.json")
+            try:
+                progress_text = progress_file.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                raise RuntimeError(
+                    f"Desktop {component} progress file could not be read"
+                ) from error
+            try:
+                component_payload = json.loads(progress_text)
+            except json.JSONDecodeError as error:
+                raise RuntimeError(
+                    f"Desktop {component} progress file is not valid UTF-8 JSON"
+                ) from error
+            validate_payload(component_payload, expected_platform)
+            progress[component] = component_payload
         return_code = process.poll()
         if return_code is not None:
             raise RuntimeError(
                 f"Desktop app exited before reporting readiness with code {return_code}"
             )
         time.sleep(0.2)
+    detail = (
+        "no readiness state was published"
+        if not progress
+        else f"progress was {json.dumps(progress, sort_keys=True)}"
+    )
     raise RuntimeError(
-        f"Desktop app did not report readiness within {timeout_seconds:g} seconds"
+        f"Desktop app did not report readiness within {timeout_seconds:g} seconds; "
+        f"{detail}"
     )
 
 

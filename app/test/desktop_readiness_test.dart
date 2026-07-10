@@ -19,7 +19,7 @@ void main() {
     temporaryDirectory.deleteSync(recursive: true);
   });
 
-  test('waits for both the native window and tray result', () {
+  test('publishes immutable progress and the complete readiness result', () {
     final probe = DesktopReadinessProbe(
       outputPath: readinessFile.path,
       platform: 'test',
@@ -28,6 +28,13 @@ void main() {
     expect(probe.enabled, isTrue);
     probe.recordWindowReady();
     expect(readinessFile.existsSync(), isFalse);
+    final windowProgress = File('${readinessFile.path}.window.json');
+    expect(jsonDecode(windowProgress.readAsStringSync()), <String, Object?>{
+      'schema': desktopReadinessSchema,
+      'window_ready': true,
+      'tray_ready': null,
+      'platform': 'test',
+    });
 
     probe.recordTrayReady(true);
     expect(jsonDecode(readinessFile.readAsStringSync()), <String, Object>{
@@ -46,6 +53,13 @@ void main() {
 
     probe.recordTrayReady(false);
     expect(readinessFile.existsSync(), isFalse);
+    final trayProgress = File('${readinessFile.path}.tray.json');
+    expect(jsonDecode(trayProgress.readAsStringSync()), <String, Object>{
+      'schema': desktopReadinessSchema,
+      'window_ready': false,
+      'tray_ready': false,
+      'platform': 'test',
+    });
     probe.recordWindowReady();
 
     final payload = jsonDecode(readinessFile.readAsStringSync());

@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -20,18 +21,33 @@ from tools.desktop_readiness_smoke import (
 
 class DesktopReadinessTests(unittest.TestCase):
     def test_accepts_exact_ready_payload(self) -> None:
-        validate_payload(
-            {
-                "schema": SCHEMA,
-                "window_ready": True,
-                "tray_ready": True,
-                "platform": "linux",
-            },
-            "linux",
+        self.assertTrue(
+            validate_payload(
+                {
+                    "schema": SCHEMA,
+                    "window_ready": True,
+                    "tray_ready": True,
+                    "platform": "linux",
+                },
+                "linux",
+            )
+        )
+
+    def test_accepts_incomplete_progress_without_declaring_ready(self) -> None:
+        self.assertFalse(
+            validate_payload(
+                {
+                    "schema": SCHEMA,
+                    "window_ready": False,
+                    "tray_ready": None,
+                    "platform": "macos",
+                },
+                "macos",
+            )
         )
 
     def test_rejects_failed_tray_initialization(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "ready native window and tray"):
+        with self.assertRaisesRegex(RuntimeError, "failed tray initialization"):
             validate_payload(
                 {
                     "schema": SCHEMA,
@@ -75,6 +91,48 @@ class DesktopReadinessTests(unittest.TestCase):
             try:
                 await_readiness(process, readiness_file, "windows", 1)
             finally:
+                process.terminate()
+                process.wait(timeout=5)
+
+    def test_polls_from_immutable_progress_to_complete_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            readiness_file = Path(raw_temp) / "readiness.json"
+            progress_file = Path(f"{readiness_file}.window.json")
+            progress_file.write_text(
+                json.dumps(
+                    {
+                        "schema": SCHEMA,
+                        "window_ready": True,
+                        "tray_ready": None,
+                        "platform": "linux",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            complete_payload = json.dumps(
+                {
+                    "schema": SCHEMA,
+                    "window_ready": True,
+                    "tray_ready": True,
+                    "platform": "linux",
+                }
+            )
+            writer = threading.Timer(
+                0.05,
+                readiness_file.write_text,
+                args=(complete_payload,),
+                kwargs={"encoding": "utf-8"},
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            writer.start()
+            try:
+                await_readiness(process, readiness_file, "linux", 1)
+            finally:
+                writer.join(timeout=1)
                 process.terminate()
                 process.wait(timeout=5)
 
