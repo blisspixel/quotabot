@@ -568,7 +568,19 @@ here is the final one.
     `install.ps1` verified against the live v0.5.5 artifacts (checksum,
     upgrade over a source install, correct version, verify passes) and
     `install.sh` verified in WSL Ubuntu with a truthful signed-out `verify`.
-    Native macOS and Linux hosts remain.
+    Native-host progress 2026-07-09: Install smoke run `29070156564` passed all
+    six native matrix jobs plus its release resolver on clean Windows, macOS,
+    and Linux runners. It bound `v0.5.14`
+    and `v0.5.13` archives to their exact tag commits and Release workflow
+    attestations, enforced checksum sidecars, compared complete installed
+    `v0.5.14` payloads with the verified archives before execution, exercised
+    clean one-line installs and 0.5.13 to 0.5.14 upgrades, preserved persistent
+    state, and passed CLI-only plus full source setup and demo doctor checks.
+    Windows verified the shortcut target, macOS the app bundle, and Linux the
+    Desktop Entry executable. Still required before completion: verify
+    interactive shortcut/tray launch readiness in clean GUI sessions; hosted
+    runners prove the installed artifacts and targets, not user-visible tray
+    behavior.
 26. [x] Final contract audit. Review `quotabot.v1`, model JSON, report JSON,
     MCP tools/resources, profile storage, leases, cache files, exit codes, and
     docs for accidental churn before declaring the surface stable.
