@@ -430,6 +430,19 @@ GLM remains the best researched first candidate because its official coding plan
 publishes five-hour and weekly limits, but its time and model weighting means the
 typed shared-pool work comes first.
 
+Market survey, 2026-07-11: GLM, Kimi, Qwen (Alibaba ModelStudio), and MiniMax now
+all sell subscription coding plans on exactly quotabot's native five-hour rolling
+window plus a weekly cap - GLM at 4x the five-hour limit, Kimi 5x, Alibaba/Volcano
+7.5x - so the windowing model already fits them. The complication that still gates
+GLM is real: GLM-5 consumes quota at 3x GLM-4.7 and there are peak/off-peak
+multipliers, which is precisely why quota-as-a-typed-shared-pool must land before
+GLM rather than after. GitHub Copilot moved to usage-based AI Credits plus a weekly
+token cap on 2026-06-01, so if it is ever added it is a credit-pool provider like
+Cursor, never an included-quota plan. Amazon Q Developer is retiring (no new
+signups from 2026-05-15) and migrating users to Kiro, which quotabot already
+supports, so Q needs no separate adapter. None of this changes the 1.0 scope;
+these remain post-1.0, admission-gated, and behind the typed shared-pool work.
+
 ## Product measures
 
 quotabot has no telemetry. These are release and local evaluation measures, not

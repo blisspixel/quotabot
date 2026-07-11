@@ -395,4 +395,39 @@ void main() {
     );
     expect(report.catalogAgeDays, 0);
   });
+
+  test('flags an elapsed included-quota fact, not future or unset ones', () {
+    final now = _epochUtc(2026, 7, 11);
+    final catalog = {
+      'claude': [
+        ModelInfo(id: 'past', quotaIncludedUntil: _epochUtc(2026, 7, 7)),
+        ModelInfo(id: 'future', quotaIncludedUntil: _epochUtc(2026, 12, 1)),
+        const ModelInfo(id: 'normal'),
+      ],
+    };
+    final facts = elapsedIncludedQuotaFacts(catalog, now);
+    expect(facts.map((e) => e.modelId), ['past']);
+    expect(facts.single.provider, 'claude');
+  });
+
+  test('surfaces elapsed included-quota facts in json and text', () {
+    final report = CatalogAuditReport(
+      generatedAt: _epochUtc(2026, 7, 11),
+      catalogUpdated: '2026-07-10',
+      providers: const [],
+      elapsedIncludedQuota: [
+        ElapsedIncludedQuota(
+          provider: 'claude',
+          modelId: 'claude-fable-5',
+          includedUntil: _epochUtc(2026, 7, 7),
+        ),
+      ],
+    );
+    expect(report.hasElapsedIncludedQuota, isTrue);
+    expect(report.toJson()['elapsed_included_quota'], hasLength(1));
+    final text = formatCatalogAuditReport(report);
+    expect(text, contains('stale included-quota facts'));
+    expect(text, contains('claude-fable-5'));
+    expect(text, contains('2026-07-07'));
+  });
 }

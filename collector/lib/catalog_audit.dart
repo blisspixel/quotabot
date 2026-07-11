@@ -105,20 +105,52 @@ class ProviderCatalogAudit {
       };
 }
 
+/// A curated `quotaIncludedUntil` date-fact that has elapsed: the model is past
+/// its promised included-quota window, so the catalog entry is a stale claim a
+/// maintainer should re-verify. Routing already treats a passed date as expired
+/// (the model stops being quota-backed); this is the freshness signal to update
+/// the data itself, not a routing bug.
+class ElapsedIncludedQuota {
+  final String provider;
+  final String modelId;
+  final int includedUntil;
+
+  const ElapsedIncludedQuota({
+    required this.provider,
+    required this.modelId,
+    required this.includedUntil,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'provider': provider,
+        'model': modelId,
+        'included_until': includedUntil,
+      };
+}
+
 class CatalogAuditReport {
   final int generatedAt;
   final String catalogUpdated;
   final List<ProviderCatalogAudit> providers;
 
+  /// Curated included-quota date-facts that have already passed as of
+  /// [generatedAt]. A freshness prompt, not an error.
+  final List<ElapsedIncludedQuota> elapsedIncludedQuota;
+
   const CatalogAuditReport({
     required this.generatedAt,
     required this.catalogUpdated,
     required this.providers,
+    this.elapsedIncludedQuota = const [],
   });
 
   bool get hasDrift => providers.any((p) => p.hasDrift);
 
   bool get hasErrors => providers.any((p) => !p.ok && !p.skipped);
+
+  /// True when at least one curated included-quota window has elapsed. A prompt
+  /// to re-verify the catalog, surfaced separately from drift and errors.
+  bool get hasElapsedIncludedQuota => elapsedIncludedQuota.isNotEmpty;
 
   /// Whole days between the catalog's `kCatalogUpdated` date and when the audit
   /// ran, or null when the date does not parse. A dev/CI freshness signal: the
@@ -143,8 +175,34 @@ class CatalogAuditReport {
         'generated_at': generatedAt,
         'catalog_updated': catalogUpdated,
         if (catalogAgeDays != null) 'catalog_age_days': catalogAgeDays,
+        if (elapsedIncludedQuota.isNotEmpty)
+          'elapsed_included_quota':
+              elapsedIncludedQuota.map((e) => e.toJson()).toList(),
         'providers': providers.map((p) => p.toJson()).toList(),
       };
+}
+
+/// Curated included-quota windows in [catalog] whose end date is at or before
+/// [now]. Pure and network-free, so it runs even when every provider audit is
+/// skipped for lack of an API key.
+List<ElapsedIncludedQuota> elapsedIncludedQuotaFacts(
+  Map<String, List<ModelInfo>> catalog,
+  int now,
+) {
+  final out = <ElapsedIncludedQuota>[];
+  catalog.forEach((provider, models) {
+    for (final m in models) {
+      final until = m.quotaIncludedUntil;
+      if (until != null && now >= until) {
+        out.add(ElapsedIncludedQuota(
+          provider: provider,
+          modelId: m.id,
+          includedUntil: until,
+        ));
+      }
+    }
+  });
+  return out;
 }
 
 String formatCatalogAuditReport(
@@ -191,6 +249,15 @@ String formatCatalogAuditReport(
       }
     }
   }
+  if (report.elapsedIncludedQuota.isNotEmpty) {
+    lines.add('');
+    lines
+        .add('stale included-quota facts (re-verify and refresh the catalog):');
+    for (final e in report.elapsedIncludedQuota) {
+      lines.add('  ${e.provider} ${e.modelId}: included-quota window ended '
+          '${_isoDate(e.includedUntil)}');
+    }
+  }
   lines.add('');
   if (includeModelIds) {
     lines.add('Use --json for a machine-readable quotabot.catalog_audit.v1 '
@@ -211,6 +278,14 @@ String _auditDiffLine({
   if (includeModelIds) return '  $label: ${values.join(', ')}';
   return '  $label: ${values.length}';
 }
+
+/// UTC calendar date (`YYYY-MM-DD`) for an epoch second, for human-readable
+/// stale-fact lines.
+String _isoDate(int epochSeconds) =>
+    DateTime.fromMillisecondsSinceEpoch(epochSeconds * 1000, isUtc: true)
+        .toIso8601String()
+        .split('T')
+        .first;
 
 Future<CatalogAuditReport> auditModelCatalog({
   required int now,
@@ -237,6 +312,7 @@ Future<CatalogAuditReport> auditModelCatalog({
       generatedAt: now,
       catalogUpdated: kCatalogUpdated,
       providers: providerAudits,
+      elapsedIncludedQuota: elapsedIncludedQuotaFacts(catalog, now),
     );
   } finally {
     if (ownedClient) httpClient.close();
