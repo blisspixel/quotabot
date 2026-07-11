@@ -71,7 +71,7 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.5.16**, is best
+The current line, **0.5.17**, is best
 understood as a feature-complete beta in release hardening. The core product
 surface exists: CLI, `top`, desktop, analytics, MCP, loopback HTTP, model
 registry, profiles, alerts, reports, leases, LiteLLM integration, verification
@@ -261,6 +261,13 @@ complete; affected persona and accessibility checks pass.
   the first-load animation no longer stalls (with a main-isolate fallback so
   collection always works). Remaining: confirm clean tray teardown on quit across
   all three OSes.
+- Glance-surface legibility. **Completed 2026-07-11 (0.5.17):** the desktop "Next"
+  routing line is now a concise one-line glance with the full detail on hover
+  instead of an overflowing line, and a spent window leads with when it is usable
+  again (a precise countdown near term, an absolute day and clock time for a
+  weekly cap days out) instead of a terse "resets 2d7h". This is the human view of
+  the routing suggestion; the deeper preference and when-back work is tracked in
+  the routing-suggestion design note.
 - Exercise the documented inspect-before-run, update, data-preserving uninstall,
   destructive reset, and rollback paths. Automate the checks that can run safely
   on hosted clean machines.

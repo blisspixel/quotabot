@@ -2,6 +2,20 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.5.17 - 2026-07-11
+
+### Changed
+- The desktop "Next" routing line is now a concise glance ("Next: Claude - 80%
+  free") that fits on one line, with the full pipe-joined detail (source class,
+  scope, runway) moved to the hover tooltip. It previously overflowed the card
+  with a long single line the user could not read on screen.
+- A spent window's card now leads with when it is usable again. A near-term
+  recovery reads as a precise countdown ("available in 59m") and a far-out cap
+  (a weekly window days out) reads as its absolute day and clock time
+  ("available Mon 5:00 PM", with the date added beyond a week), instead of a
+  terse "resets 2d7h" that was harder to act on. The dense `quotabot top`
+  terminal table keeps its compact countdown, where horizontal space is scarce.
+
 ## 0.5.16 - 2026-07-11
 
 ### Fixed

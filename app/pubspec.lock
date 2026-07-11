@@ -329,7 +329,7 @@ packages:
       path: "../collector"
       relative: true
     source: path
-    version: "0.5.16"
+    version: "0.5.17"
   record_use:
     dependency: transitive
     description:
