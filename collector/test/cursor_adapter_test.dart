@@ -67,6 +67,7 @@ void main() {
     expect(q.windows.single.label, 'monthly');
     expect(q.windows.single.usedPercent, closeTo(62.5, 0.1));
     expect(q.windows.single.resetsAt, isNotNull);
+    expect(q.sourceClass.wireName, 'passive_local_evidence');
   });
 
   test('reads account and plan from separate string rows', () async {

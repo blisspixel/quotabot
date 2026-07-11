@@ -9,6 +9,14 @@ each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
 **Last updated: 2026-07-10.**
 
+The provider command is only one part of the trust statement. quotabot also
+emits a normalized `source_class`: Claude and live Codex, Grok, and Antigravity
+are `authoritative_live`; Codex session and Antigravity local fallbacks are
+`this_machine_fallback`; Cursor, Windsurf/Devin, and Kiro are
+`passive_local_evidence`; Ollama, LM Studio, and Lemonade are `local_runtime`;
+NVIDIA NIM is `status_only`; and user entries are `manual`. The exact routing
+and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
+
 ## Claude (Claude Code)
 
 - Official docs: https://platform.claude.com/docs and the rate-limit reference at

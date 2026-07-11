@@ -1,4 +1,5 @@
 import 'package:quotabot_collector/demo.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -11,6 +12,12 @@ void main() {
     final locals = fleet.where((q) => q.isLocal).toList();
     expect(subs, isNotEmpty);
     expect(locals, isNotEmpty);
+    for (final quota in fleet) {
+      expect(quota.sourceClassViolation, isNull, reason: quota.provider);
+    }
+    final cursor = fleet.singleWhere((q) => q.provider == 'cursor');
+    expect(cursor.sourceClass, ProviderSourceClass.passiveLocalEvidence);
+    expect(cursor.perMachine, isTrue);
     // Every metered provider has at least one window with a future reset.
     for (final q in subs) {
       expect(q.windows, isNotEmpty, reason: q.provider);

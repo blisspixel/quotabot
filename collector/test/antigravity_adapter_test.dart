@@ -186,6 +186,10 @@ void main() {
     ]);
     expect(q.map((p) => p.windows.single.usedPercent).toList(), [25, 25, 75]);
     expect(q.every((p) => !p.perMachine), isTrue);
+    expect(
+      q.every((p) => p.sourceClass == ProviderSourceClass.authoritativeLive),
+      isTrue,
+    );
     expect(tokenCalls, [
       'a@example.com:true',
       'b@example.com:false',
@@ -349,6 +353,7 @@ void main() {
       'no live quota (this machine only) - run: quotabot login antigravity (then sign in with this account)',
     );
     expect(q.single.perMachine, isTrue);
+    expect(q.single.sourceClass, ProviderSourceClass.thisMachineFallback);
   });
 
   test('explicit local status is not overwritten by a mismatched token',
@@ -649,6 +654,7 @@ void main() {
     expect(q.single.modelQuotas.single.model, 'gemini');
     expect(q.single.modelQuotas.single.usedPercent, closeTo(60, 1e-9));
     expect(q.single.perMachine, isFalse);
+    expect(q.single.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
   test('a live read does not merge this-machine local cache', () async {

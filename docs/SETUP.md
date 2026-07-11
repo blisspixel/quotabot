@@ -151,12 +151,27 @@ Each row shows a state and, when useful, the exact next step:
 | `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
 | `OUT OF QUOTA`  | The binding window is spent; the row shows when it resets.     |
 
-Rows can also include compact trust context: live versus cached state, spend
-class, account label when the provider exposes one, this-machine scope for
-local-only fallback data, and capture age. Treat those labels as part of the
-number; a cached or this-machine read can still be useful, but it is not the
-same evidence as a fresh account-level live read. Cached cloud quota is shown as
-last-known evidence and is not treated as currently available for routing.
+Rows can also include compact trust context: live versus cached state, normalized
+source class, spend class, account label when the provider exposes one, and
+capture age. Treat those labels as part of the number; a cached or
+machine-scoped read can still be useful, but it is not the same evidence as a
+fresh account-level live read. Cached cloud quota is shown as last-known evidence
+and is not treated as currently available for routing.
+
+| Source label | What it proves |
+|---|---|
+| `authoritative` | A provider-owned account-level quota read; freshness is reported separately |
+| `this-machine fallback` | A local fallback that can miss use on another device |
+| `passive local` | Opportunistic evidence from a local IDE or CLI state store |
+| `local runtime` | A supported loopback runtime is reachable; not proof that every model executes locally |
+| `status only` | Access can be checked, but no numeric quota window is known |
+| `manual` | The user entered the quota; it is not measured provider telemetry |
+
+Machine-readable outputs use the corresponding `source_class` values documented
+in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes). `quotabot verify` checks
+that the class is valid for the provider and consistent with the data shape;
+`quotabot check PROVIDER --json` returns the same class for a single-provider
+decision.
 
 `doctor` ends with a one-line routing suggestion. Other useful commands:
 

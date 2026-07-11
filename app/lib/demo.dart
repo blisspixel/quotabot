@@ -14,16 +14,26 @@ ProviderQuota _p(
   List<QuotaWindow> windows, {
   bool stale = false,
   String? note,
-}) => ProviderQuota(
-  provider: id,
-  displayName: name,
-  account: account,
-  plan: plan,
-  asOf: _now(),
-  stale: stale,
-  error: note,
-  windows: windows,
-);
+}) {
+  final sourceClass = inferProviderSourceClass(
+    provider: id,
+    source: null,
+    isLocal: false,
+    perMachine: false,
+  );
+  return ProviderQuota(
+    provider: id,
+    displayName: name,
+    account: account,
+    plan: plan,
+    asOf: _now(),
+    stale: stale,
+    error: note,
+    windows: windows,
+    sourceClass: sourceClass,
+    perMachine: sourceClass.isMachineScoped,
+  );
+}
 
 ProviderQuota _local(
   String id,

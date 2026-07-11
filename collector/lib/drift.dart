@@ -50,6 +50,7 @@ const _reRatingProviders = {grokProviderId};
 bool isTrustedQuotaEvidence(ProviderQuota quota) =>
     quota.ok &&
     quota.hasWindows &&
+    quota.sourceClassViolation == null &&
     quota.windows.every((window) {
       final percent = window.percent;
       return percent != null &&
@@ -86,6 +87,10 @@ String? unusableQuotaEvidenceDriftReason(
       quota.driftReason != null ||
       !quota.hasWindows) {
     return null;
+  }
+  final sourceClassViolation = quota.sourceClassViolation;
+  if (sourceClassViolation != null) {
+    return boundedQuotaDriftReason(sourceClassViolation);
   }
   if (observedAt != null) {
     if (quota.asOf <= 0) {
@@ -147,6 +152,7 @@ bool isComparableQuotaEvidence(
     fresh.kind == previous.kind &&
     fresh.plan == previous.plan &&
     fresh.source == previous.source &&
+    fresh.sourceClass == previous.sourceClass &&
     fresh.perMachine == previous.perMachine;
 
 /// Pure result of applying the quota-evidence admission policy.
@@ -168,15 +174,19 @@ QuotaEvidenceAdmission admitQuotaEvidence(
   ProviderQuota fresh,
   ProviderQuota? previous, {
   required int observedAt,
+  String? rejectionReason,
 }) {
-  final unusableReason = unusableQuotaEvidenceDriftReason(
-    fresh,
-    observedAt: observedAt,
-  );
+  final forcedRejection = rejectionReason != null;
+  final unusableReason = forcedRejection
+      ? boundedQuotaDriftReason(rejectionReason)
+      : unusableQuotaEvidenceDriftReason(
+          fresh,
+          observedAt: observedAt,
+        );
   if (unusableReason != null) {
     if (previous != null &&
         isTrustedQuotaEvidenceAt(previous, observedAt) &&
-        isComparableQuotaEvidence(fresh, previous)) {
+        (forcedRejection || isComparableQuotaEvidence(fresh, previous))) {
       return QuotaEvidenceAdmission(
         snapshot: previous.withProviderDrift(unusableReason, observedAt),
         shouldPersist: false,
@@ -185,7 +195,7 @@ QuotaEvidenceAdmission admitQuotaEvidence(
     }
     if (previous != null &&
         isLegacySuspectQuotaEvidence(previous) &&
-        isComparableQuotaEvidence(fresh, previous)) {
+        (forcedRejection || isComparableQuotaEvidence(fresh, previous))) {
       final quarantine = quarantineLegacyQuotaEvidence(
         previous,
         observedAt: observedAt,
@@ -270,6 +280,7 @@ ProviderQuota quarantineUnusableQuotaEvidence(
     asOf: validTimestamp ? fresh.asOf : observedAt,
     plan: fresh.plan,
     source: fresh.source,
+    sourceClass: fresh.sourceClass,
     ok: false,
     error: 'provider drift detected; fresh quota evidence is unusable and '
         'no trusted snapshot is available',

@@ -81,6 +81,7 @@ Map<String, dynamic> mostHeadroomResponse(
     'as_of': now,
     'provider': best.provider,
     'account': best.account,
+    'source_class': best.sourceClass.wireName,
     'headroom_percent': a.headroom,
     'resets_at': a.resetsAt,
     'stale': best.stale,
@@ -335,7 +336,8 @@ Map<String, dynamic> availabilityResponse(
     'as_of': now,
     'provider': q.provider,
     'account': q.account,
-    'available': a.available,
+    'source_class': q.sourceClass.wireName,
+    'available': q.isLocal ? isLocalRuntimeAvailableAt(q, now) : a.available,
     'headroom_percent': a.headroom,
     'resets_at': a.resetsAt,
     'stale': q.stale,
@@ -377,6 +379,11 @@ final _modelQuotaSchema = JsonSchema.object(
   required: ['model'],
 );
 
+final _sourceClassSchema = JsonSchema.string(
+  description: 'Normalized provenance class for the provider observation.',
+  enumValues: ProviderSourceClass.wireValues,
+);
+
 /// One provider entry inside a snapshot.
 final _providerSchema = JsonSchema.object(
   description: 'A provider snapshot. Unlisted fields may be added over time.',
@@ -385,6 +392,7 @@ final _providerSchema = JsonSchema.object(
     'display_name': JsonSchema.string(description: 'Human display name.'),
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
+    'source_class': _sourceClassSchema,
     'kind': JsonSchema.string(description: '"subscription" or "local".'),
     'ok': JsonSchema.boolean(description: 'False when the read failed.'),
     'error': JsonSchema.string(description: 'Why a read failed, when it did.'),
@@ -408,7 +416,7 @@ final _providerSchema = JsonSchema.object(
     'windows': JsonSchema.array(items: _windowSchema),
     'model_quotas': JsonSchema.array(items: _modelQuotaSchema),
   },
-  required: ['provider', 'account'],
+  required: ['provider', 'account', 'source_class'],
 );
 
 /// Output schema for `list_quotas` and the `quotas://current` resource.
@@ -464,6 +472,7 @@ final mostHeadroomOutputSchema = JsonSchema.object(
       description: 'Provider id, or null when none is usable.',
     )),
     'account': JsonSchema.string(),
+    'source_class': _sourceClassSchema,
     'headroom_percent': _nullable(JsonSchema.number(
       description: 'Remaining percent (0..100) of the binding window.',
     )),
@@ -484,6 +493,7 @@ final _candidateSchema = JsonSchema.object(
     'provider': JsonSchema.string(),
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
+    'source_class': _sourceClassSchema,
     'local': JsonSchema.boolean(description: 'True for a local runtime.'),
     'headroom_percent': _nullable(JsonSchema.number(
       description:
@@ -508,8 +518,8 @@ final _candidateSchema = JsonSchema.object(
       description: 'Probability (0..1) the window is spent before it resets.',
     ),
     'confidence': JsonSchema.number(
-      description:
-          'Trust in this candidate (0..1): freshness x sample adequacy.',
+      description: 'Trust in this candidate (0..1): freshness x sample '
+          'adequacy x provenance confidence.',
     ),
     'routing_score': JsonSchema.number(
       description:
@@ -554,7 +564,14 @@ final _candidateSchema = JsonSchema.object(
     ),
     'available': JsonSchema.boolean(),
   },
-  required: ['provider', 'account', 'local', 'stale', 'available'],
+  required: [
+    'provider',
+    'account',
+    'source_class',
+    'local',
+    'stale',
+    'available'
+  ],
 );
 
 final _leaseDiscountSchema = JsonSchema.object(
@@ -768,6 +785,7 @@ final _modelEntrySchema = JsonSchema.object(
       description: 'Data source of the gating provider, e.g. "manual" for '
           'self-reported entries. Absent for built-in adapters.',
     ),
+    'source_class': _sourceClassSchema,
     'headroom_percent': _nullable(JsonSchema.number(
       description:
           'Remaining percent for the model gate: provider-wide, model-specific, or provider-family.',
@@ -786,7 +804,7 @@ final _modelEntrySchema = JsonSchema.object(
       description: 'Epoch seconds when provider drift was detected.',
     ),
   },
-  required: ['id', 'provider', 'local', 'available'],
+  required: ['id', 'provider', 'source_class', 'local', 'available'],
 );
 
 /// Shared capability filter for `list_models` and `suggest_model`. quotabot never
@@ -956,6 +974,7 @@ final availabilityOutputSchema = JsonSchema.object(
     'as_of': JsonSchema.integer(description: 'Epoch seconds when produced.'),
     'provider': _nullable(JsonSchema.string()),
     'account': JsonSchema.string(),
+    'source_class': _sourceClassSchema,
     'available': JsonSchema.boolean(),
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': _nullable(JsonSchema.integer()),

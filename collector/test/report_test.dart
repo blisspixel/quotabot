@@ -55,6 +55,7 @@ void main() {
     expect(json['recommended_provider'], 'claude');
     expect(json['providers'], hasLength(2));
     final claude = (json['providers'] as List).first as Map<String, dynamic>;
+    expect(claude['source_class'], 'authoritative_live');
     expect(claude.containsKey('trust'), isFalse);
     expect(claude.containsKey('as_of'), isFalse);
     expect(claude['weekly_sampled_days'], 3);
@@ -92,11 +93,12 @@ void main() {
     expect(
       markdown,
       contains(
-        '| claude | work | available | live, quota plan, captured 0s ago | 80.0% |',
+        '| claude | work | available | live, authoritative, quota plan, captured 0s ago | 80.0% |',
       ),
     );
     expect(markdown, contains('live, manual, captured 0s ago'));
-    expect(markdown, contains('local ready, local cold, captured 0s ago'));
+    expect(
+        markdown, contains('available, local runtime, cold, captured 0s ago'));
     expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
     expect(markdown, contains('Local runtimes are fallback capacity'));
@@ -149,7 +151,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Codex | unknown | unavailable | error, quota plan, captured 0s ago |'),
+          '| Codex | unknown | unavailable | error, authoritative, quota plan, captured 0s ago |'),
     );
   });
 
@@ -172,7 +174,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-        '| Codex | unknown | unknown | metadata, metadata only, captured 0s ago |',
+        '| Codex | unknown | unknown | metadata, authoritative, captured 0s ago |',
       ),
     );
   });
@@ -197,7 +199,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Cursor | work@example.com | available | live, metered plan, this machine, captured 0s ago |'),
+          '| Cursor | work@example.com | available | live, passive local, metered plan, captured 0s ago |'),
     );
   });
 
@@ -222,7 +224,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Ollama | installed | unavailable | error, local cold, captured 0s ago |'),
+          '| Ollama | installed | unavailable | error, local runtime, cold, captured 0s ago |'),
     );
   });
 }

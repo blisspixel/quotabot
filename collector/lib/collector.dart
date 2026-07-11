@@ -72,6 +72,7 @@ Future<List<ProviderQuota>> _listWithDeadline(
               ok: false,
               error: 'timed out after ${kAdapterDeadline.inSeconds}s',
               kind: entry.adapterClass.quotaKind,
+              sourceClass: entry.sourceClasses.first,
             ),
           ],
         );
@@ -135,7 +136,7 @@ Future<List<ProviderQuota>> _collectAllProviders({
   final results = [
     for (final group in collected) ...group,
     ...manual,
-  ].where((q) => !(q.isLocal && !q.ok)).map(sanitizeProviderQuota).toList();
+  ].where(retainCollectedProviderQuota).map(sanitizeProviderQuota).toList();
   _recordAnalytics(results);
   return results;
 }
@@ -165,13 +166,15 @@ Future<List<ProviderQuota>> _collectRegistered(
   // later fast request and overwrite the genuinely newer observation.
   final evidenceGenerationMicros = DateTime.now().microsecondsSinceEpoch;
   final collected = await _listWithDeadline(entry);
-  if (!entry.cached) return collected;
   final results = <ProviderQuota>[];
   for (final q in collected) {
-    results.add(_cacheResult(
-      q,
-      evidenceGenerationMicros: evidenceGenerationMicros,
-    ));
+    results.add(
+      admitRegisteredProviderObservation(
+        entry,
+        q,
+        evidenceGenerationMicros: evidenceGenerationMicros,
+      ),
+    );
   }
   if (entry.accountScopedCache) {
     results.addAll(currentAccountFallbacks(
@@ -183,19 +186,82 @@ Future<List<ProviderQuota>> _collectRegistered(
   return results;
 }
 
+/// Applies one adapter registration's identity and provenance contract before
+/// evidence can touch cache, history, analytics, or routing.
+///
+/// An adapter that emits another provider id is represented under the expected
+/// registration identity. This makes the failure visible without allowing the
+/// untrusted id to read or poison an unrelated provider's cache.
+ProviderQuota admitRegisteredProviderObservation(
+  ProviderAdapterRegistration entry,
+  ProviderQuota quota, {
+  required int evidenceGenerationMicros,
+  int? observedAt,
+}) {
+  final violation = registeredSourceClassViolation(
+    quota,
+    entry,
+    allowManual: false,
+  );
+  final rejectionReason =
+      violation == null ? null : 'invalid provider source class: $violation';
+  final evidence = quota.provider == entry.id
+      ? quota
+      : _expectedAdapterIdentityFailure(entry, quota, observedAt ?? nowEpoch());
+  if (entry.cached) {
+    return _cacheResult(
+      evidence,
+      evidenceGenerationMicros: evidenceGenerationMicros,
+      rejectionReason: rejectionReason,
+      observedAt: observedAt,
+    );
+  }
+  if (rejectionReason == null) return evidence;
+  return quarantineUnusableQuotaEvidence(
+    evidence,
+    rejectionReason,
+    observedAt ?? nowEpoch(),
+  );
+}
+
+ProviderQuota _expectedAdapterIdentityFailure(
+  ProviderAdapterRegistration entry,
+  ProviderQuota emitted,
+  int observedAt,
+) {
+  final account = entry.accountScopedCache &&
+          entry.currentAccounts!().contains(emitted.account)
+      ? emitted.account
+      : 'unknown';
+  return ProviderQuota(
+    provider: entry.id,
+    displayName: entry.displayName,
+    account: account,
+    asOf: emitted.asOf > 0 ? emitted.asOf : observedAt,
+    ok: false,
+    error: 'adapter returned a noncanonical provider identity',
+    kind: entry.adapterClass.quotaKind,
+    sourceClass: entry.sourceClasses.first,
+  );
+}
+
 ProviderQuota _cacheResult(
   ProviderQuota result, {
   required int evidenceGenerationMicros,
+  String? rejectionReason,
+  int? observedAt,
 }) {
-  if (isTrustedQuotaEvidence(result) ||
+  if (rejectionReason != null ||
+      isTrustedQuotaEvidence(result) ||
       unusableQuotaEvidenceDriftReason(result) != null) {
     // Only admitted fresh evidence may replace last-known-good cache or enter
     // burn history. A drifted read returns the prior trusted snapshot stale and
     // records its diagnostic separately without storing rejected quota values.
     return admitAndCacheQuotaEvidence(
       result,
-      observedAt: nowEpoch(),
+      observedAt: observedAt ?? nowEpoch(),
       observedAtMicros: evidenceGenerationMicros,
+      rejectionReason: rejectionReason,
     );
   }
   // Read failed, returned no windows, or supplied already-stale/untrusted
@@ -226,6 +292,11 @@ ProviderQuota _cacheResult(
   }
   return result;
 }
+
+/// Keeps actionable provenance failures visible while hiding ordinary offline
+/// local runtimes from the product surface.
+bool retainCollectedProviderQuota(ProviderQuota quota) =>
+    !quota.isLocal || quota.ok || quota.sourceClassViolation != null;
 
 /// Loads the last-known snapshot for [result]'s provider and account.
 /// Account-scoped providers are loaded by account rather than from the generic

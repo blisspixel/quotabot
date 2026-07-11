@@ -84,6 +84,19 @@ identical read. A later read establishes a new baseline only after every retaine
 quota reset has
 advanced, or after an evidence-class transition.
 
+Every observation also carries a normalized provenance class. Machine output
+uses `source_class` with one of six values: `authoritative_live`,
+`this_machine_fallback`, `passive_local_evidence`, `local_runtime`,
+`status_only`, or `manual`. Human views use the shorter labels
+`authoritative`, `this-machine fallback`, `passive local`, `local runtime`,
+`status only`, and `manual`. This class is separate from freshness: a live
+machine-scoped read can still omit activity from another device, while an
+authoritative account read can become cached. Routing discounts measured
+machine-scoped evidence by a `0.7` confidence factor without changing the raw
+quota number. `quotabot verify` rejects a class that conflicts with its provider
+or data shape. The exact assignments and verification methods are documented in
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md#source-classes).
+
 The same view is available live in the terminal with `quotabot top`, a small
 dashboard that redraws in place and, when it has enough history, notes which
 window is likely to run out first. Full walkthrough of the widget, analytics, and
@@ -126,8 +139,8 @@ command, [docs/PROVIDER_CLIS.md](docs/PROVIDER_CLIS.md).
 
 For a tool quotabot does not read yet, `quotabot manual set` adds a local
 self-reported quota window. Manual entries appear in the same views and JSON
-snapshots with `source: "manual"`, but they are not treated as measured provider
-telemetry.
+snapshots with `source_class: "manual"` and the legacy `source: "manual"` hint,
+but they are not treated as measured provider telemetry.
 
 ## Install
 

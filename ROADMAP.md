@@ -128,7 +128,17 @@ The order below is dependency order, not an estimate.
 **Outcome:** every advertised route means what it says before more release
 evidence is collected.
 
-- Add the source-class contract to verification and user-facing documentation.
+- **Completed 2026-07-10:** add the source-class contract to verification and
+  user-facing documentation. Every built-in adapter now declares its allowed
+  provenance classes; current snapshots, routing and model candidates, alerts,
+  reports, checks, MCP schemas, and verification records emit the normalized
+  six-value `source_class`. Contradictory class/data shapes and unregistered
+  cache identities fail closed before routing or measured history,
+  machine-scoped evidence has a documented `0.7` confidence factor, legacy
+  `source` compatibility remains explicit, and concise human labels plus
+  source/verification tables expose the same semantics as the code. Registry,
+  schema, verification, routing, CLI, MCP, and desktop regressions pin the
+  contract and presentation.
 - Add provider identity aliases for current renames without losing profiles,
   hidden-provider choices, cache, or history.
 - **Completed 2026-07-10:** distinguish a reader that likely drifted from

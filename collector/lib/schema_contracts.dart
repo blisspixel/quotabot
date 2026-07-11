@@ -62,6 +62,10 @@ const quotabotV1JsonSchema = <String, Object?>{
         'account': {'type': 'string', 'minLength': 1},
         'plan': {'type': 'string'},
         'source': {'type': 'string'},
+        'source_class': {
+          'type': 'string',
+          'enum': ProviderSourceClass.wireValues,
+        },
         'kind': {
           'type': 'string',
           'enum': ['subscription', 'local'],
@@ -183,6 +187,14 @@ void _validateProvider(
   _checkNonEmptyString(provider, 'account', path, errors);
   _checkOptionalString(provider, 'plan', path, errors);
   _checkOptionalString(provider, 'source', path, errors);
+  _checkStringEnum(
+    provider,
+    'source_class',
+    path,
+    ProviderSourceClass.wireValues.toSet(),
+    errors,
+    required: false,
+  );
   _checkStringEnum(provider, 'kind', path, {'subscription', 'local'}, errors);
   _checkOptionalString(provider, 'status', path, errors);
   _checkBool(provider, 'active', path, errors, required: false);

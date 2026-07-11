@@ -6,12 +6,12 @@ import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/provider_ids.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 void main() {
-  // Use a provider id unlikely to collide with a real snapshot.
-  const id = '__test_provider__';
+  const id = claudeProviderId;
   late Directory tempConfig;
 
   setUp(() {
@@ -274,7 +274,7 @@ void main() {
     expect(loadSnapshot(id), isNull);
     expect(admitFresh().windows.single.usedPercent, 60);
 
-    final futureAsOf = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 61;
+    final futureAsOf = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 120;
     file.writeAsStringSync(
         jsonEncode(quota(asOf: futureAsOf, used: 10).toJson()));
     expect(loadSnapshot(id), isNull);
@@ -568,6 +568,47 @@ void main() {
     expect(loadSnapshot(id)!.windows.single.usedPercent, 40);
   });
 
+  test('forced admission rejection preserves cache and persists diagnostic',
+      () {
+    final trusted = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
+    );
+    saveSnapshot(
+      trusted,
+      observedAtMicros: 1782000000000100,
+    );
+    final invalidFresh = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782000100,
+      sourceClass: ProviderSourceClass.passiveLocalEvidence,
+      perMachine: true,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 45)],
+    );
+
+    final rejected = admitAndCacheQuotaEvidence(
+      invalidFresh,
+      observedAt: 1782000100,
+      observedAtMicros: 1782000100000200,
+      rejectionReason:
+          'invalid provider source class: passive local is not admitted',
+    );
+
+    expect(rejected.stale, isTrue);
+    expect(rejected.sourceClass, ProviderSourceClass.authoritativeLive);
+    expect(rejected.windows.single.usedPercent, 40);
+    expect(rejected.driftReason, contains('invalid provider source class'));
+    final persisted = loadCachedSnapshots(now: 1782000200)
+        .singleWhere((quota) => quota.provider == id);
+    expect(persisted.driftReason, rejected.driftReason);
+    expect(loadSnapshot(id)!.windows.single.usedPercent, 40);
+  });
+
   test('unusable successful evidence without a baseline is quarantined', () {
     final unusable = ProviderQuota(
       provider: id,
@@ -756,6 +797,67 @@ void main() {
     expect(loadSnapshot('future-kind'), isNull);
   });
 
+  test('loadCachedSnapshots rejects unknown source-class cache entries', () {
+    final q = ProviderQuota(
+      provider: 'future-source',
+      displayName: 'Future Source',
+      account: 'default',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 5)],
+    ).toJson()
+      ..['source_class'] = 'future_class';
+    File('${cacheDir().path}/future-source.json').writeAsStringSync(
+      jsonEncode(q),
+    );
+
+    final cached = loadCachedSnapshots(now: 1782000000);
+
+    expect(cached.any((provider) => provider.provider == 'future-source'),
+        isFalse);
+    expect(loadSnapshot('future-source'), isNull);
+  });
+
+  test('loadCachedSnapshots rejects unclassified legacy custom providers', () {
+    const provider = 'legacy-unregistered';
+    File('${cacheDir().path}/$provider.json').writeAsStringSync(jsonEncode({
+      'provider': provider,
+      'display_name': 'Legacy unregistered',
+      'account': 'default',
+      'kind': providerQuotaSubscriptionKind,
+      'ok': true,
+      'as_of': 1782000000,
+      'windows': [
+        {'label': 'weekly', 'used_percent': 5},
+      ],
+    }));
+
+    final cached = loadCachedSnapshots(now: 1782000100);
+
+    expect(cached.any((quota) => quota.provider == provider), isFalse);
+  });
+
+  test('loadCachedSnapshots rejects registered-looking custom providers', () {
+    const provider = 'explicit-unregistered';
+    final forged = ProviderQuota(
+      provider: provider,
+      displayName: 'Explicit unregistered',
+      account: 'default',
+      sourceClass: ProviderSourceClass.authoritativeLive,
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 5)],
+    );
+    File('${cacheDir().path}/$provider.json')
+        .writeAsStringSync(jsonEncode(forged.toJson()));
+    File('${cacheDir().path}/history_$provider.jsonl')
+        .writeAsStringSync('${jsonEncode(forged.toJson())}\n');
+
+    final cached = loadCachedSnapshots(now: 1782000100);
+
+    expect(cached.any((quota) => quota.provider == provider), isFalse);
+    expect(loadSnapshot(provider), isNull);
+    expect(loadHistory(provider), isEmpty);
+  });
+
   test('recordHeadroomSample accumulates into one hourly bucket', () {
     final now = 1782000000;
     recordHeadroomSample(id, 80, now);
@@ -839,6 +941,7 @@ void main() {
       provider: '../escape',
       displayName: 'Test',
       account: 'acct',
+      source: providerQuotaManualSource,
       asOf: 1,
       windows: [QuotaWindow(label: '5h', usedPercent: 10)],
     );
@@ -890,7 +993,7 @@ void main() {
   });
 
   group('generic per-account snapshots', () {
-    const ap = '__test_acct__';
+    const ap = grokProviderId;
 
     ProviderQuota aq(String account, double used) => ProviderQuota(
           provider: ap,

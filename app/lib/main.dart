@@ -346,10 +346,12 @@ String? desktopRouteSignalLine(
           quotaShouldShowAccountLabel(quota, counts)
       ? ' (${quota.account})'
       : '';
-  final machineNote = (quota?.perMachine ?? false) ? ' (this machine)' : '';
-  final parts = <String>['Next: $display$accountLabel$machineNote'];
+  final parts = <String>[
+    'Next: $display$accountLabel',
+    candidate.sourceClass.label,
+  ];
   if (candidate.isLocal) {
-    parts.add('local fallback');
+    parts.add('fallback');
   } else if (candidate.headroom != null) {
     final prefix = candidate.stale ? 'cached ' : '';
     parts.add('$prefix${candidate.headroom!.round()}% free');
@@ -382,36 +384,34 @@ String? desktopRouteSignalLine(
 String desktopProviderTrustLine(ProviderQuota quota, int now) {
   final parts = <String>[
     _desktopProviderReadState(quota),
-    _desktopProviderSpendClass(quota),
+    quota.sourceClass.label,
   ];
-  if (quota.perMachine) parts.add('this machine');
+  final spendClass = _desktopProviderSpendClass(quota);
+  if (spendClass != null) parts.add(spendClass);
   final captured = _desktopCaptureAgeLabel(quota.asOf, now);
   if (captured.isNotEmpty) parts.add(captured);
   return parts.join(' | ');
 }
 
 String _desktopProviderReadState(ProviderQuota quota) {
-  if (quota.isLocal) return quota.active ? 'in use' : 'local';
+  if (quota.isLocal) {
+    if (!quota.ok) return 'error';
+    return quota.active ? 'in use' : 'available';
+  }
   if (quota.driftReason != null) return 'provider drift';
   if (!quota.ok) return 'error';
   if (quota.stale) return 'cached';
   if (quota.windows.isEmpty && (quota.status ?? '').isEmpty) {
     return 'no live data';
   }
-  if (quota.windows.isEmpty) {
-    return quota.perMachine ? 'local fallback' : 'metadata';
-  }
+  if (quota.windows.isEmpty) return 'metadata';
   return 'live';
 }
 
-String _desktopProviderSpendClass(ProviderQuota quota) {
-  if (quota.isLocal) return quota.active ? 'local loaded' : 'local cold';
-  if (quota.isManual) return 'manual';
-  if (quota.driftReason != null &&
-      kQuotaPlanProviders.contains(quota.provider)) {
-    return 'quota plan';
+String? _desktopProviderSpendClass(ProviderQuota quota) {
+  if (!quota.sourceClass.carriesMeasuredQuota || quota.windows.isEmpty) {
+    return null;
   }
-  if (quota.windows.isEmpty) return 'metadata only';
   return kQuotaPlanProviders.contains(quota.provider)
       ? 'quota plan'
       : 'metered plan';

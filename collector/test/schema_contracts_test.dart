@@ -14,6 +14,9 @@ void main() {
       final defs = quotabotV1JsonSchema[r'$defs'] as Map<String, Object?>;
       final provider = defs['providerQuota'] as Map<String, Object?>;
       final properties = provider['properties'] as Map<String, Object?>;
+      expect(properties, contains('source_class'));
+      final sourceClass = properties['source_class'] as Map<String, Object?>;
+      expect(sourceClass['enum'], ProviderSourceClass.wireValues);
       expect(properties, contains('drift_reason'));
       expect(properties, contains('drift_observed_at'));
       final driftReason = properties['drift_reason'] as Map<String, Object?>;
@@ -113,6 +116,37 @@ void main() {
       expect(
         validateQuotabotV1Snapshot(snapshot),
         contains(r'$.providers[0].drift_reason must not be blank'),
+      );
+    });
+
+    test('keeps source class additive but rejects unknown present values', () {
+      final legacy = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: 1782000000,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 50)],
+      ).toJson()
+        ..remove('source_class');
+      expect(
+        validateQuotabotV1Snapshot({
+          'schema': quotabotV1SchemaId,
+          'generated_at': 1782000000,
+          'providers': [legacy],
+        }),
+        isEmpty,
+      );
+
+      legacy['source_class'] = 'future_class';
+      expect(
+        validateQuotabotV1Snapshot({
+          'schema': quotabotV1SchemaId,
+          'generated_at': 1782000000,
+          'providers': [legacy],
+        }),
+        contains(
+          r'$.providers[0].source_class must be one of authoritative_live, this_machine_fallback, passive_local_evidence, local_runtime, status_only, manual',
+        ),
       );
     });
 

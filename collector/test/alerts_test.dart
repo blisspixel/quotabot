@@ -11,6 +11,8 @@ ProviderQuota _q(
   double usedPercent, {
   bool stale = false,
   ProviderQuotaKind kind = ProviderQuotaKind.subscription,
+  ProviderSourceClass? sourceClass,
+  bool perMachine = false,
   int? resetsAt,
   String account = 'default',
 }) =>
@@ -21,6 +23,8 @@ ProviderQuota _q(
       asOf: _now,
       stale: stale,
       kind: kind,
+      sourceClass: sourceClass,
+      perMachine: perMachine,
       windows: [
         QuotaWindow(label: '5h', usedPercent: usedPercent, resetsAt: resetsAt),
       ],
@@ -89,6 +93,7 @@ void main() {
         provider: 'claude',
         displayName: 'Claude',
         account: 'max',
+        sourceClass: ProviderSourceClass.authoritativeLive,
         window: 'weekly',
         severity: AlertSeverity.red,
         freePercent: 4,
@@ -96,6 +101,7 @@ void main() {
         routeTo: 'codex',
         routeDisplayName: 'Codex',
         routeAccount: 'pro',
+        routeSourceClass: ProviderSourceClass.authoritativeLive,
         routeFreePercent: 55,
       );
 
@@ -103,6 +109,32 @@ void main() {
       expect(alert.message, contains('route next to Codex (55% free)'));
       expect(alert.message, isNot(contains('(max)')));
       expect(alert.message, isNot(contains('(pro)')));
+    });
+
+    test('route provenance is enforced outside debug assertions', () {
+      QuotaAlert invalid({
+        String? routeTo,
+        ProviderSourceClass? routeSourceClass,
+      }) =>
+          QuotaAlert(
+            provider: 'claude',
+            displayName: 'Claude',
+            sourceClass: ProviderSourceClass.authoritativeLive,
+            window: 'weekly',
+            severity: AlertSeverity.red,
+            freePercent: 4,
+            asOf: _now,
+            routeTo: routeTo,
+            routeSourceClass: routeSourceClass,
+          );
+
+      expect(() => invalid(routeTo: 'codex'), throwsArgumentError);
+      expect(
+        () => invalid(
+          routeSourceClass: ProviderSourceClass.authoritativeLive,
+        ),
+        throwsArgumentError,
+      );
     });
 
     test('does not re-fire while it stays red', () {
@@ -152,6 +184,25 @@ void main() {
       expect(r.armed, {'codex'}); // preserved, not re-fired
     });
 
+    test('integrity-rejected source evidence holds state and never fires', () {
+      final invalid = _q(
+        'codex',
+        98,
+        sourceClass: ProviderSourceClass.statusOnly,
+      );
+      expect(invalid.sourceClassViolation, isNotNull);
+
+      final r = computeAlerts(
+        snapshot: [invalid],
+        suggestion: _suggestion([invalid]),
+        now: _now,
+        armed: const {'codex'},
+      );
+
+      expect(r.fired, isEmpty);
+      expect(r.armed, {'codex'});
+    });
+
     test('local runtimes are never alerted on', () {
       final snap = [_q('ollama', 100, kind: ProviderQuotaKind.local)];
       final r = computeAlerts(
@@ -187,9 +238,11 @@ void main() {
       expect(json['kind'], 'low_quota');
       expect(json['provider'], 'codex');
       expect(json['account'], 'default');
+      expect(json['source_class'], 'authoritative_live');
       expect(json['severity'], 'red');
       expect(json['route_to'], 'claude');
       expect(json['route_account'], 'default');
+      expect(json['route_source_class'], 'authoritative_live');
       expect(json['as_of'], _now);
     });
   });
@@ -308,6 +361,34 @@ void main() {
       expect(r.armed, isEmpty);
     });
 
+    test('skips integrity-rejected source evidence projections', () {
+      final reset = _now + 10 * 3600;
+      final invalid = _q(
+        'claude',
+        10,
+        resetsAt: reset,
+        sourceClass: ProviderSourceClass.statusOnly,
+      );
+      final pace = computePace(
+        headroom: 90,
+        resetsAt: reset,
+        burnPerHour: 2,
+        now: _now,
+      )!;
+      expect(invalid.sourceClassViolation, isNotNull);
+
+      final r = computeProjectedWasteAlerts(
+        snapshot: [invalid],
+        paceByProvider: {'claude': pace},
+        now: _now,
+        thresholdPercent: 50,
+        armed: const {'claude'},
+      );
+
+      expect(r.fired, isEmpty);
+      expect(r.armed, {'claude'});
+    });
+
     test('re-arms after projected waste falls below threshold', () {
       final reset = _now + 10 * 3600;
       final snap = [_q('claude', 50, resetsAt: reset)];
@@ -347,9 +428,11 @@ void main() {
       expect(json['schema'], 'quotabot.alert.v1');
       expect(json['kind'], 'projected_waste');
       expect(json['account'], 'default');
+      expect(json['source_class'], 'authoritative_live');
       expect(json['projected_waste_percent'], 70.0);
       expect(json['burn_percent_per_hour'], 2.0);
       expect(json['route_to'], isNull);
+      expect(json['route_source_class'], isNull);
     });
   });
 }
