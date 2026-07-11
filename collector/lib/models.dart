@@ -813,6 +813,13 @@ class ModelInfo {
   /// True for a local-runtime model (Ollama/LM Studio/Lemonade).
   final bool local;
 
+  /// True when a model reached through a local runtime actually executes in the
+  /// provider's cloud rather than on this machine (e.g. an Ollama `-cloud`
+  /// model). It is still [local] in the sense of being reached via the local
+  /// daemon, but it is not on-device and not free, so budget policies that
+  /// promise local-only or free execution must exclude it.
+  final bool cloudOffloaded;
+
   /// Local only: currently loaded into memory.
   final bool loaded;
 
@@ -836,6 +843,7 @@ class ModelInfo {
     this.tier,
     this.quotaIncludedUntil,
     this.local = false,
+    this.cloudOffloaded = false,
     this.loaded = false,
     this.sizeBytes,
     this.vramBytes,
@@ -854,6 +862,7 @@ class ModelInfo {
         if (quotaIncludedUntil != null)
           'quota_included_until': quotaIncludedUntil,
         if (local) 'local': local,
+        if (cloudOffloaded) 'cloud_offloaded': cloudOffloaded,
         if (loaded) 'loaded': loaded,
         if (sizeBytes != null) 'size_bytes': sizeBytes,
         if (vramBytes != null) 'vram_bytes': vramBytes,
@@ -871,6 +880,7 @@ class ModelInfo {
         tier: j['tier'] as String?,
         quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),
         local: j['local'] as bool? ?? false,
+        cloudOffloaded: j['cloud_offloaded'] as bool? ?? false,
         loaded: j['loaded'] as bool? ?? false,
         sizeBytes: (j['size_bytes'] as num?)?.toInt(),
         vramBytes: (j['vram_bytes'] as num?)?.toInt(),

@@ -12,6 +12,7 @@ LocalModel _m(
   int? vramBytes,
   int? expiresAt,
   int? context,
+  bool cloud = false,
 }) =>
     (
       name: name,
@@ -21,6 +22,7 @@ LocalModel _m(
       vramBytes: vramBytes,
       expiresAt: expiresAt,
       context: context,
+      cloud: cloud,
     );
 
 void main() {

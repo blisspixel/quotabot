@@ -74,6 +74,7 @@ List<ProviderQuota> demoProviders(int now) {
         vramBytes: vram,
         expiresAt: null,
         context: ctx,
+        cloud: false,
       );
 
   const gb = 1024 * 1024 * 1024;

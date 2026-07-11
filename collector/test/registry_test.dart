@@ -484,6 +484,45 @@ void main() {
       expect(reg.map((e) => e.model.id).toList(), ['local-m']);
     });
 
+    test('a local budget excludes a cloud-offloaded local model', () {
+      // An Ollama `-cloud` model is reachable via the local daemon but runs in
+      // the provider cloud, so a local-only budget must drop it while keeping
+      // the on-device model.
+      final reg = buildModelRegistry(
+        [
+          _local('ollama', const [
+            ModelInfo(id: 'on-device', local: true),
+            ModelInfo(id: 'qwen:480b-cloud', local: true, cloudOffloaded: true),
+          ]),
+        ],
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.local,
+        ),
+      );
+      expect(reg.map((e) => e.model.id).toList(), ['on-device']);
+    });
+
+    test('a quota budget also excludes a cloud-offloaded local model', () {
+      // budget=quota admits on-device local plus measured quota plans; a
+      // cloud-offloaded local model is neither, so it must not slip through.
+      final reg = buildModelRegistry(
+        [
+          _local('ollama', const [
+            ModelInfo(id: 'on-device', local: true),
+            ModelInfo(id: 'qwen:480b-cloud', local: true, cloudOffloaded: true),
+          ]),
+        ],
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.quota,
+        ),
+      );
+      expect(reg.map((e) => e.model.id).toList(), ['on-device']);
+    });
+
     test('a quota budget rejects self-reported manual cloud quotas', () {
       final reg = buildModelRegistry(
         [

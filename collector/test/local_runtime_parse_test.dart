@@ -60,8 +60,30 @@ void main() {
       expect(r.length, 1);
       expect(r.first.param, '8B');
       expect(r.first.quant, 'Q4');
+      expect(r.first.cloud, isFalse);
       expect(ollamaModelsFromJson('x'), isEmpty);
       expect(ollamaModelsFromJson({'models': 'no'}), isEmpty);
+    });
+
+    test('reads the running context window from an /api/ps entry', () {
+      // /api/ps reports context_length per loaded model; /api/tags does not.
+      final r = ollamaModelsFromJson({
+        'models': [
+          {'name': 'llama:8b', 'size': 1000, 'context_length': 8192},
+        ],
+      });
+      expect(r.single.context, 8192);
+    });
+
+    test('flags a -cloud model as cloud-offloaded, not on-device', () {
+      final r = ollamaModelsFromJson({
+        'models': [
+          {'name': 'qwen3-coder:480b-cloud', 'size': 0},
+          {'name': 'llama3.2:3b', 'size': 1000},
+        ],
+      });
+      expect(r[0].cloud, isTrue);
+      expect(r[1].cloud, isFalse);
     });
   });
 
@@ -80,6 +102,7 @@ void main() {
             quant: null,
             expiresAt: null,
             context: null,
+            cloud: false,
           ),
         ],
         loaded: const [],
@@ -100,6 +123,7 @@ void main() {
           quant: 'Q4',
           expiresAt: null,
           context: null,
+          cloud: false,
         ),
         (
           name: 'b',
@@ -109,6 +133,7 @@ void main() {
           quant: null,
           expiresAt: null,
           context: null,
+          cloud: false,
         ),
       ];
       final loaded = <LocalModel>[
@@ -120,6 +145,7 @@ void main() {
           quant: 'Q4',
           expiresAt: now + 1800,
           context: 8192,
+          cloud: false,
         ),
         installed[1],
       ];
@@ -138,6 +164,42 @@ void main() {
       expect(q.details.any((d) => d.contains('unloads in')), isTrue);
       expect(q.details.any((d) => d.contains('models loaded')), isTrue);
       expect(q.details.any((d) => d.contains('on disk')), isTrue);
+    });
+
+    test('carries cloud-offload through to the model inventory', () {
+      final q = localRuntimeQuota(
+        id: 'ollama',
+        name: 'Ollama',
+        asOf: 0,
+        installed: const [
+          (
+            name: 'qwen3-coder:480b-cloud',
+            bytes: null,
+            vramBytes: null,
+            param: null,
+            quant: null,
+            expiresAt: null,
+            context: null,
+            cloud: true,
+          ),
+          (
+            name: 'llama3.2:3b',
+            bytes: 1000,
+            vramBytes: null,
+            param: null,
+            quant: null,
+            expiresAt: null,
+            context: null,
+            cloud: false,
+          ),
+        ],
+        loaded: const [],
+      );
+      final cloud = q.models.firstWhere((m) => m.id.endsWith('-cloud'));
+      final onDevice = q.models.firstWhere((m) => m.id == 'llama3.2:3b');
+      expect(cloud.cloudOffloaded, isTrue);
+      expect(cloud.local, isTrue); // reachable via the local daemon
+      expect(onDevice.cloudOffloaded, isFalse);
     });
   });
 }

@@ -320,10 +320,14 @@ bool meetsRequirements(ModelEntry e, ModelRequirements r) {
 }
 
 bool meetsBudgetPolicy(ModelEntry e, ModelBudgetPolicy policy) {
+  // A model reached through a local daemon but executed in the provider's cloud
+  // is neither on-device nor free, so it cannot satisfy a local-only or a
+  // free-or-metered budget promise even though it is nominally local.
+  final localFree = e.local && !e.model.cloudOffloaded;
   return switch (policy) {
     ModelBudgetPolicy.any => true,
-    ModelBudgetPolicy.local => e.local,
-    ModelBudgetPolicy.quota => e.local || e.quotaBacked,
+    ModelBudgetPolicy.local => localFree,
+    ModelBudgetPolicy.quota => localFree || e.quotaBacked,
   };
 }
 
