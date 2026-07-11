@@ -201,6 +201,36 @@ void main() {
       expect(antigravityWindows(null, now), isEmpty);
     });
 
+    test('does not infer a weekly window from a far-future baseline reset', () {
+      final resp = {
+        'models': {
+          'weekly-real': {
+            'quotaInfo': {
+              'remainingFraction': 0.4, // 60% used
+              'resetTime': now + 5 * 86400, // a genuine ~weekly cadence
+            },
+          },
+          'baseline': {
+            'quotaInfo': {
+              'remainingFraction': 0.2, // 80% used - would win the bucket
+              'resetTime': now + 30 * 86400, // a month out: not weekly
+            },
+          },
+        },
+      };
+      final w = antigravityWindows(resp, now);
+      // The far-future, higher-usage balance must not hijack the weekly bucket;
+      // only the genuine ~weekly reset is asserted as a window.
+      expect(w.map((e) => e.label), ['weekly']);
+      expect(w.single.resetsAt, now + 5 * 86400);
+      expect(w.single.usedPercent, closeTo(60, 0.01));
+      // The baseline balance stays visible per-model, without a claimed cadence.
+      expect(
+        antigravityModelQuotasFromLive(resp).map((q) => q.model),
+        containsAll(<String>['weekly-real', 'baseline']),
+      );
+    });
+
     test('resetLabel and parseReset', () {
       expect(resetLabel(now + 3600, now), '5h');
       expect(resetLabel(now + 30 * 3600, now), 'daily');

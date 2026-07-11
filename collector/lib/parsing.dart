@@ -128,8 +128,21 @@ int? parseIsoToEpoch(dynamic v) {
 
 // --- Antigravity ------------------------------------------------------------
 
+/// The furthest a reset can be and still credibly represent a resettable weekly
+/// cadence. Antigravity's live response carries only `{remainingFraction,
+/// resetTime}` per model with no field distinguishing a resettable window from a
+/// persistent/baseline balance, so a reset beyond a week (plus a day of buffer)
+/// is treated as an indeterminate balance rather than inferred to be a "weekly"
+/// window with a concrete reset it may not really have. Such balances still
+/// surface per-model via [antigravityModelQuotasFromLive]; they are just not
+/// asserted as a plan-level window.
+const _antigravityMaxWindowHorizon = 8 * 86400;
+
 /// Buckets per-model Cloud Code quota into sprint/daily/weekly windows, keeping
-/// the most constrained model per bucket.
+/// the most constrained model per bucket. A reset beyond
+/// [_antigravityMaxWindowHorizon] is not bucketed into a window, because the API
+/// exposes no stable weekly-versus-baseline mapping and inferring a far-future
+/// "weekly" window would misrepresent a static balance as a resetting one.
 List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
   final models = resp?['models'];
   if (models is! Map) return const [];
@@ -142,6 +155,7 @@ List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
     final frac = _fraction(qi['remainingFraction']);
     final reset = parseReset(qi['resetTime']);
     if (frac == null || reset == null) return;
+    if (reset - now > _antigravityMaxWindowHorizon) return;
     final used = ((1 - frac) * 100).clamp(0, 100).toDouble();
     final label = resetLabel(reset, now);
     final existing = buckets[label];
