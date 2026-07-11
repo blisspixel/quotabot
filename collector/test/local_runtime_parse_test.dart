@@ -24,6 +24,9 @@ void main() {
       expect(r.loaded.first.name, 'a');
       expect(r.loaded.first.quant, 'Q4');
       expect(r.loaded.first.context, 4096);
+      // arch ("llama") is not a parameter size, so it must not fill the param
+      // slot; LM Studio's v0 shape exposes no parameter count.
+      expect(r.loaded.first.param, isNull);
     });
 
     test('native rejects an unexpected shape', () {
