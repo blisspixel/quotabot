@@ -104,7 +104,10 @@ class LmStudioAdapter {
     final model = (
       name: m['id'] as String,
       bytes: null,
-      param: m['arch'] as String?,
+      // LM Studio's v0 model shape carries `arch` (architecture, e.g. "llama"),
+      // not a parameter size, and no parameter-count field. Leave param null
+      // rather than mislabel the architecture as the model's size.
+      param: null,
       quant: m['quantization'] as String?,
       vramBytes: null,
       expiresAt: null,
