@@ -71,26 +71,19 @@ final ValueNotifier<String> appThemeSpec = ValueNotifier<String>(
 );
 
 @visibleForTesting
-String? preferenceLoadWarning(
-  PrefsLoadResult result,
-) => switch (result.failure) {
-  null => null,
-  PrefsLoadFailure.protection =>
-    result.retainedExistingFile
-        ? 'Saved settings were ignored because prefs.json could not be '
-              'protected. Secure or remove that file before retrying.'
-        : 'Saved settings are unavailable because secure local storage could '
-              'not be prepared.',
-  PrefsLoadFailure.invalidData =>
-    'Saved settings are invalid. Safe defaults are active; repair or remove '
-        'prefs.json before retrying.',
-  PrefsLoadFailure.unsupportedFile =>
-    'Saved settings must be a regular file smaller than 64 KiB. Safe defaults '
-        'are active; replace or remove prefs.json before retrying.',
-  PrefsLoadFailure.readFailure =>
-    'Saved settings could not be read. Safe defaults are active; check '
-        'prefs.json before retrying.',
-};
+String? preferenceLoadWarning(PrefsLoadResult result) =>
+    switch (result.failure) {
+      null => null,
+      PrefsLoadFailure.protection =>
+        result.retainedExistingFile
+            ? 'Saved settings ignored (prefs.json unprotected)'
+            : 'Saved settings unavailable (storage not ready)',
+      PrefsLoadFailure.invalidData => 'Saved settings invalid; using defaults',
+      PrefsLoadFailure.unsupportedFile =>
+        'Saved settings file unsupported; using defaults',
+      PrefsLoadFailure.readFailure =>
+        'Saved settings unreadable; using defaults',
+    };
 
 final SingleInstanceGuard _singleInstance = SingleInstanceGuard();
 
@@ -1187,10 +1180,7 @@ class _DashboardState extends State<Dashboard>
       _setPreferenceStorageWarning(null);
       return true;
     } catch (_) {
-      _setPreferenceStorageWarning(
-        'Settings are active for this session only; secure local storage is '
-        'unavailable.',
-      );
+      _setPreferenceStorageWarning('Settings not saved (storage unavailable)');
       return false;
     }
   }
@@ -2359,10 +2349,7 @@ class _DashboardState extends State<Dashboard>
     if (!persisted && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Webhook is active for this session only; settings could not be '
-            'saved securely.',
-          ),
+          content: Text('Webhook not saved (storage unavailable)'),
         ),
       );
     }
@@ -3266,57 +3253,44 @@ class ProviderTile extends StatelessWidget {
     Color color, {
     required bool hasTrustedWindows,
   }) {
-    final summary = hasTrustedWindows
-        ? 'Provider drift detected. Showing the last trusted quota; routing is disabled.'
-        : 'Provider drift detected. Legacy quota evidence is quarantined; no trusted snapshot is available.';
-    const recovery =
-        'Run quotabot verify, then compare with the provider view.';
-    return Semantics(
-      container: true,
-      liveRegion: true,
-      excludeSemantics: true,
-      label: '$summary $recovery Reason: $reason',
-      child: Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.error_outline_rounded, size: 13, color: color),
-            const SizedBox(width: 5),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    summary,
-                    style: TextStyle(
-                      fontSize: AppType.caption,
-                      fontWeight: FontWeight.w600,
-                      color: color,
-                    ),
+    // Keep the glance surface calm: one short label, with the full explanation
+    // (and the reason) on hover and for screen readers. The drift diagnostic
+    // clears itself on the next clean read, so there is no call to action here.
+    final label = hasTrustedWindows
+        ? 'provider drift - showing last trusted'
+        : 'provider drift - quarantined';
+    final detail = hasTrustedWindows
+        ? 'Provider drift detected. Showing the last trusted quota; routing is '
+              'disabled until a clean read recovers. Reason: $reason'
+        : 'Provider drift detected. Legacy quota evidence is quarantined; no '
+              'trusted snapshot is available. Reason: $reason';
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Semantics(
+        container: true,
+        liveRegion: true,
+        excludeSemantics: true,
+        label: detail,
+        child: Tooltip(
+          message: detail,
+          child: Row(
+            children: [
+              Icon(Icons.error_outline_rounded, size: 13, color: color),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.caption,
+                    fontWeight: FontWeight.w600,
+                    color: color,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    recovery,
-                    style: TextStyle(
-                      fontSize: AppType.caption,
-                      fontWeight: FontWeight.w600,
-                      color: color,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Reason: $reason',
-                    style: TextStyle(
-                      fontSize: AppType.small,
-                      fontWeight: FontWeight.w500,
-                      color: color,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
