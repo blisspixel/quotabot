@@ -77,6 +77,22 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), contains('reset moved earlier'));
     });
 
+    test('Codex weekly re-rating (usage drops, no reset) is accepted', () {
+      // OpenAI's Codex weekly window is non-monotonic; a used-percent drop is
+      // the latest truth to show, not drift, so the fresh lower value must be
+      // admitted rather than replaced with a stale higher one.
+      final prev = snap(codexProviderId, [win('weekly', 59, 1000)]);
+      final fresh = snap(codexProviderId, [win('weekly', 34, 1000)]);
+      expect(detectQuotaDrift(fresh, prev), isNull);
+    });
+
+    test('a Codex reset that moved earlier is still flagged', () {
+      // The re-rating exemption covers usage drops, not an implausible reset.
+      final prev = snap(codexProviderId, [win('weekly', 20, 2000)]);
+      final fresh = snap(codexProviderId, [win('weekly', 20, 1000)]);
+      expect(detectQuotaDrift(fresh, prev), contains('reset moved earlier'));
+    });
+
     test('Antigravity is exempt: its window is a max over a changing set', () {
       final prev = snap(antigravityProviderId, [win('5h', 80, 2000)]);
       // Both a headroom gain and a reset regression, yet not flagged.
@@ -107,8 +123,8 @@ void main() {
     });
 
     test('the flagged reason names the window', () {
-      final prev = snap(codexProviderId, [win('weekly', 50, 1000)]);
-      final fresh = snap(codexProviderId, [win('weekly', 5, 1000)]);
+      final prev = snap(claudeProviderId, [win('weekly', 50, 1000)]);
+      final fresh = snap(claudeProviderId, [win('weekly', 5, 1000)]);
       expect(detectQuotaDrift(fresh, prev), startsWith('weekly '));
     });
 

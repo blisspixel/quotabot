@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- Codex's weekly quota window no longer trips provider-drift detection when its
+  used-percent legitimately falls without a hard reset (a rolling or re-rated
+  window). The fresh lower value is shown as the latest quota and routing stays
+  enabled, instead of holding a stale higher value and disabling the provider.
+  The exemption is window-specific: Codex's 5 hour window is unchanged and still
+  flags a genuine unexplained drop.
+
 ### Changed
 - Quieted the desktop provider-drift indicator. It now shows a single compact
   line ("provider drift - showing last trusted") with the full explanation and
