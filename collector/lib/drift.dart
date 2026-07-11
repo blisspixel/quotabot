@@ -38,10 +38,27 @@ const int _maxQuotaDriftDimensionCharacters = 96;
 /// non-monotonically; its real signal is per-model quota, checked elsewhere.
 const _syntheticWindowProviders = {antigravityProviderId};
 
-/// Providers whose pool total can legitimately be re-rated downward mid-window,
-/// so a used-percent drop is expected rather than drift. xAI does this to the
-/// Grok credit pool (observed 100 -> 73 under an unchanged reset).
+/// Providers whose every window can be re-rated downward mid-window, so a
+/// used-percent drop is expected rather than drift and the fresh (lower) number
+/// is the latest truth to show. xAI does this to the whole Grok credit pool
+/// (observed 100 -> 73 under an unchanged reset).
 const _reRatingProviders = {grokProviderId};
+
+/// Specific windows that can legitimately fall without a reset even though the
+/// provider's other windows are normal consume-then-reset pools. Codex's weekly
+/// window is non-monotonic (its used-percent is observed to fall without a hard
+/// reset, consistent with a rolling window or a re-rated allowance), so holding a
+/// stale higher value there would defeat the goal of showing current quota; its
+/// 5 hour window stays a normal window whose unexplained drop is genuine drift.
+const _reRatingWindows = <String, Set<String>>{
+  codexProviderId: {'weekly'},
+};
+
+/// Whether a used-percent drop in [label] for [provider] is expected re-rating
+/// rather than drift.
+bool _isReRatingWindow(String provider, String? label) =>
+    _reRatingProviders.contains(provider) ||
+    (label != null && (_reRatingWindows[provider]?.contains(label) ?? false));
 
 /// Whether [quota]'s status and window shape are structurally eligible for
 /// trusted evidence. Time-aware persistence and routing must use
@@ -392,6 +409,7 @@ String? detectQuotaDrift(
         p.percent,
         p.resetsAt,
         observation,
+        windowLabel: w.label,
       );
       if (reason != null) {
         return boundedQuotaDriftReason('${w.label} $reason');
@@ -436,8 +454,10 @@ String? _pairDrift(
   int? freshReset,
   double? prevUsed,
   int? prevReset,
-  int observedAt,
-) {
+  int observedAt, {
+  String? windowLabel,
+}) {
+  final reRating = _isReRatingWindow(provider, windowLabel);
   final fr = freshReset;
   final pr = prevReset;
   // (1) A reset only ever advances or holds; one that moved earlier by more
@@ -449,7 +469,7 @@ String? _pairDrift(
   // (2) Within one window instance (same reset, none passed) usage can only
   // rise: you consume, you do not regain - unless the provider re-rates its
   // pool, which is accepted, not drift.
-  if (!_reRatingProviders.contains(provider) &&
+  if (!reRating &&
       ((fr == null && pr == null) ||
           (fr != null &&
               pr != null &&
@@ -461,7 +481,7 @@ String? _pairDrift(
           'with no reset';
     }
   }
-  if (!_reRatingProviders.contains(provider) &&
+  if (!reRating &&
       fr != null &&
       pr != null &&
       fr > pr + _resetRegressToleranceSeconds &&
