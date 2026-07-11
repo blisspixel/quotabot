@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:quotabot_collector/auth/anthropic_auth.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/oauth_util.dart';
+import 'package:quotabot_collector/auth/openai_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/util.dart';
@@ -421,6 +423,105 @@ void main() {
       // adapter's cross-account lending guard silently reopens.
       expect(TokenStore.defaultOwner(provider), 'a@example.com');
       expect(TokenStore.load(provider)!.accessToken, 'fresh');
+    });
+  });
+
+  group('AnthropicAuth', () {
+    test('refresh maps the token response and posts the client id', () async {
+      final mock = MockClient((req) async {
+        expect(req.url.toString(), contains('console.anthropic.com'));
+        expect(req.body, contains('grant_type=refresh_token'));
+        expect(req.headers['anthropic-beta'], 'oauth-2025-04-20');
+        return http.Response(
+          jsonEncode({'access_token': 'AT', 'expires_in': 3600}),
+          200,
+        );
+      });
+      final t = await AnthropicAuth(client: mock).refresh('R1');
+      expect(t!.accessToken, 'AT');
+      expect(t.refreshToken, 'R1'); // carried forward
+    });
+
+    test('freshAccessToken returns a still-fresh grant without network',
+        () async {
+      const provider = AnthropicAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        Tokens(
+            accessToken: 'AT',
+            refreshToken: 'RT',
+            expiresAt: nowEpoch() + 3600),
+      );
+      final auth = AnthropicAuth(
+        client: MockClient((_) async => throw StateError('unexpected network')),
+      );
+      expect(await auth.freshAccessToken(), 'AT');
+    });
+
+    test('freshAccessToken refreshes and persists the rotated token', () async {
+      const provider = AnthropicAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
+      );
+      final mock = MockClient((req) async {
+        expect(req.body, contains('refresh_token=R0'));
+        return http.Response(
+          jsonEncode({
+            'access_token': 'new',
+            'refresh_token': 'R1',
+            'expires_in': 3600
+          }),
+          200,
+        );
+      });
+      expect(await AnthropicAuth(client: mock).freshAccessToken(), 'new');
+      // The rotated single-use refresh token must be persisted or the next
+      // refresh fails.
+      expect(TokenStore.load(provider)!.refreshToken, 'R1');
+    });
+  });
+
+  group('OpenAiAuth', () {
+    test('refresh maps the token response and keeps rotation', () async {
+      final mock = MockClient((req) async {
+        expect(req.url.toString(), contains('auth.openai.com/oauth/token'));
+        expect(req.body, contains('grant_type=refresh_token'));
+        return http.Response(
+          jsonEncode({'access_token': 'AT', 'expires_in': 3600}),
+          200,
+        );
+      });
+      final t = await OpenAiAuth(client: mock).refresh('R1');
+      expect(t!.accessToken, 'AT');
+      expect(t.refreshToken, 'R1');
+    });
+
+    test('freshAccessToken refreshes and persists the rotated token', () async {
+      const provider = OpenAiAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
+      );
+      final mock = MockClient((req) async => http.Response(
+            jsonEncode({
+              'access_token': 'new',
+              'refresh_token': 'R1',
+              'expires_in': 3600
+            }),
+            200,
+          ));
+      expect(await OpenAiAuth(client: mock).freshAccessToken(), 'new');
+      expect(TokenStore.load(provider)!.refreshToken, 'R1');
+    });
+
+    test('freshAccessToken returns null with no stored grant', () async {
+      const provider = OpenAiAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      expect(await OpenAiAuth().freshAccessToken(), isNull);
     });
   });
 

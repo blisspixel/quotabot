@@ -120,10 +120,29 @@ class CatalogAuditReport {
 
   bool get hasErrors => providers.any((p) => !p.ok && !p.skipped);
 
+  /// Whole days between the catalog's `kCatalogUpdated` date and when the audit
+  /// ran, or null when the date does not parse. A dev/CI freshness signal: the
+  /// curated capability fields (context, tier, output caps) age silently between
+  /// hand updates, so a large age is a prompt to re-verify - not a user-facing
+  /// error.
+  int? get catalogAgeDays {
+    final parsed = DateTime.tryParse(catalogUpdated);
+    if (parsed == null) return null;
+    // Rebuild as a UTC calendar date so a bare `YYYY-MM-DD` (parsed as local
+    // midnight) is compared against the UTC generation time without a
+    // timezone-offset day being lost.
+    final updated = DateTime.utc(parsed.year, parsed.month, parsed.day);
+    final generated =
+        DateTime.fromMillisecondsSinceEpoch(generatedAt * 1000, isUtc: true);
+    final days = generated.difference(updated).inDays;
+    return days < 0 ? 0 : days;
+  }
+
   Map<String, dynamic> toJson() => {
         'schema': 'quotabot.catalog_audit.v1',
         'generated_at': generatedAt,
         'catalog_updated': catalogUpdated,
+        if (catalogAgeDays != null) 'catalog_age_days': catalogAgeDays,
         'providers': providers.map((p) => p.toJson()).toList(),
       };
 }
@@ -132,9 +151,13 @@ String formatCatalogAuditReport(
   CatalogAuditReport report, {
   bool includeModelIds = true,
 }) {
+  final age = report.catalogAgeDays;
   final lines = <String>[
     'quotabot model catalog audit',
-    'catalog updated ${report.catalogUpdated}',
+    age == null
+        ? 'catalog updated ${report.catalogUpdated}'
+        : 'catalog updated ${report.catalogUpdated} ($age day'
+            '${age == 1 ? '' : 's'} ago)',
     '',
   ];
   for (final provider in report.providers) {

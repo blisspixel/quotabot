@@ -489,7 +489,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       trustTag: trustTag,
       accountTag: accountTag,
     );
-    return [
+    final rows = <String>[
       _line([
         ..._rowHead(q.displayName, binding.label,
             selected: selected, palette: p),
@@ -499,6 +499,25 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
     ];
+    // A spent short window clears soon; if a longer window still has room, show
+    // it so the glance answers "is it worth waiting?" instead of hiding the
+    // weekly cap behind the spent 5-hour line.
+    final secondary = secondaryVisibleWindow(q, now);
+    if (secondary != null) {
+      final used = windowUsedPercent(secondary, now);
+      final remaining = 100 - used;
+      final secReset = secondary.resetsAt == null
+          ? ''
+          : '   resets ${_eta(secondary.resetsAt!, now)}';
+      rows.add(_line([
+        ..._rowHead('', secondary.label, palette: p),
+        _Cell(
+            '${remaining.round().toString().padLeft(3)}% '
+            '${q.stale ? 'last' : 'free'}$secReset',
+            (s, t) => s.dim(t)),
+      ], width, s));
+    }
+    return rows;
   }
 
   final lines = <String>[];

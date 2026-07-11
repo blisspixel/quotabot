@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-07-01';
+const String kCatalogUpdated = '2026-07-10';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -72,7 +72,7 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       id: 'claude-haiku-4-5',
       displayName: 'Claude Haiku 4.5',
       contextTokens: 200000,
-      maxOutputTokens: 32000,
+      maxOutputTokens: 64000,
       tools: true,
       vision: true,
       tier: 'light',

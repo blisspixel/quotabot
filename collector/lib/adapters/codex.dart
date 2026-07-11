@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../auth/openai_auth.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -10,12 +11,20 @@ import '../util.dart';
 
 typedef CodexUsageFetcher = Future<Map<String, dynamic>?> Function();
 
+/// Fetches a fresh access token from quotabot's own Codex grant, or null when
+/// no grant is connected. Injectable for tests.
+typedef CodexGrantToken = Future<String?> Function();
+
 /// Reads Codex (OpenAI) usage. Prefers the authoritative live usage endpoint
 /// (`/backend-api/wham/usage`, the same data the CLI's own status view polls),
-/// which is cross-device, reusing the access token Codex already stores in
-/// ~/.codex/auth.json. Falls back to the rate_limits events Codex writes to its
-/// local session rollout files - a this-machine-only view that undercounts when
-/// the account is used on another device - when the live read is unavailable.
+/// which is cross-device. It resolves auth in priority order:
+///   1. the access token Codex stores in ~/.codex/auth.json (zero-setup path);
+///   2. quotabot's own refreshable grant from `quotabot login codex` - the
+///      idle-machine path that keeps the account-wide read live when the CLI
+///      has not refreshed its token here.
+/// Falls back to the rate_limits events Codex writes to its local session
+/// rollout files - a this-machine-only view that undercounts when the account
+/// is used on another device - only when every live read is unavailable.
 ///
 /// Codex meters different models against separate limit buckets, and each
 /// session only records the bucket it used, so the session fallback reads the
@@ -28,14 +37,18 @@ class CodexAdapter {
   final Directory? _sessionsDir;
   final CodexUsageFetcher? _usageFetcher;
   final http.Client? _http;
+  final CodexGrantToken _grantToken;
 
   CodexAdapter({
     Directory? sessionsDir,
     CodexUsageFetcher? usageFetcher,
     http.Client? client,
+    CodexGrantToken? grantToken,
   })  : _sessionsDir = sessionsDir,
         _usageFetcher = usageFetcher,
-        _http = client;
+        _http = client,
+        _grantToken =
+            grantToken ?? (() => OpenAiAuth(client: client).freshAccessToken());
 
   /// How many recent rollout files to scan for per-bucket snapshots. Enough to
   /// catch buckets touched across a normal working window without reading the
@@ -77,19 +90,29 @@ class CodexAdapter {
     }
   }
 
-  // A metadata GET that reuses the token Codex already stores and keeps fresh;
-  // it spends no usage tokens. auth.json sits beside the sessions directory.
+  // A metadata GET that reuses the account-wide usage endpoint; it spends no
+  // usage tokens. Tries the host token first, then quotabot's own grant so an
+  // idle machine (where the CLI has not refreshed its token) still reads live.
+  // The account id is read from auth.json regardless of which token is used - it
+  // is a stable identifier that does not expire.
   Future<Map<String, dynamic>?> _fetchUsage() async {
     final base = _sessionsDir?.parent.path ?? '${home()}/.codex';
-    final authFile = File('$base/auth.json');
-    if (!authFile.existsSync()) return null;
-    final auth = jsonDecode(authFile.readAsStringSync());
-    if (auth is! Map) return null;
-    final tokens = auth['tokens'];
-    if (tokens is! Map) return null;
-    final token = tokens['access_token'] as String?;
-    final acct = tokens['account_id'] as String?;
-    if (token == null || token.isEmpty) return null;
+    final tokens = _readHostTokens(File('$base/auth.json'));
+    final acct = tokens?.accountId;
+    final grantToken = await _grantToken();
+    final ordered = <String>[
+      if (tokens?.accessToken != null && tokens!.accessToken!.isNotEmpty)
+        tokens.accessToken!,
+      if (grantToken != null && grantToken.isNotEmpty) grantToken,
+    ];
+    for (final token in ordered) {
+      final body = await _usageWith(token, acct);
+      if (body != null) return body;
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _usageWith(String token, String? acct) async {
     final get = _http?.get ?? http.get;
     final resp = await get(
       Uri.parse(_usageEndpoint),
@@ -101,6 +124,18 @@ class CodexAdapter {
     if (resp.statusCode != 200) return null;
     final body = jsonDecode(resp.body);
     return body is Map<String, dynamic> ? body : null;
+  }
+
+  _HostTokens? _readHostTokens(File authFile) {
+    if (!authFile.existsSync()) return null;
+    final auth = jsonDecode(authFile.readAsStringSync());
+    if (auth is! Map) return null;
+    final tokens = auth['tokens'];
+    if (tokens is! Map) return null;
+    return _HostTokens(
+      accessToken: tokens['access_token'] as String?,
+      accountId: tokens['account_id'] as String?,
+    );
   }
 
   Future<ProviderQuota> _fromSessions(int asOf) async {
@@ -218,4 +253,12 @@ class _Snapshot {
   final Map<String, dynamic> rl;
   final int capturedAt;
   _Snapshot(this.rl, this.capturedAt);
+}
+
+/// The host `auth.json` token fields quotabot reuses: the access token (may be
+/// expired) and the stable ChatGPT account id used for the usage header.
+class _HostTokens {
+  final String? accessToken;
+  final String? accountId;
+  _HostTokens({this.accessToken, this.accountId});
 }

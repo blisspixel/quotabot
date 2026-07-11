@@ -57,7 +57,7 @@ graceful behavior when providers change, and boring installation and updates.
 
 ## Current state
 
-The current line, **0.5.14**, is best
+The current line, **0.5.15**, is best
 understood as a feature-complete beta in release hardening. The core product
 surface exists: CLI, `top`, desktop, analytics, MCP, loopback HTTP, model
 registry, profiles, alerts, reports, leases, LiteLLM integration, verification

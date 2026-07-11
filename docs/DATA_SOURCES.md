@@ -97,8 +97,12 @@ PROV-DM conformance.
 
 - Source (authoritative, cross-device): `GET
   https://chatgpt.com/backend-api/wham/usage`, the same endpoint the CLI's own
-  status view polls, reusing the OAuth access token Codex stores in
-  `~/.codex/auth.json` (with a `chatgpt-account-id` header). The response's
+  status view polls. Auth is tried in priority order: the OAuth access token
+  Codex stores in `~/.codex/auth.json`, then quotabot's own refreshable grant
+  from `quotabot login codex` when that token is expired (the idle-machine path).
+  The `chatgpt-account-id` header is read from `auth.json` either way - it is a
+  stable identifier that does not expire - and quotabot never writes that file.
+  The response's
   `rate_limit.primary_window` is the 5 hour window and `secondary_window` the
   weekly, each with `used_percent` and `reset_at`; `plan_type` and `email`
   identify the account. This is a metadata read, so it costs no tokens.
@@ -114,14 +118,21 @@ PROV-DM conformance.
 ## Claude (Anthropic)
 
 - Source: `GET https://api.anthropic.com/api/oauth/usage`.
-- Auth: the OAuth access token Claude Code stores in
-  `~/.claude/.credentials.json` under `claudeAiOauth.accessToken`, sent as a
-  bearer token with the `anthropic-beta: oauth-2025-04-20` header.
+- Auth, in priority order: the OAuth access token Claude Code stores in
+  `~/.claude/.credentials.json` under `claudeAiOauth.accessToken` (used while its
+  `claudeAiOauth.expiresAt` is still in the future), then quotabot's own
+  refreshable grant from `quotabot login claude` when the host token is missing
+  or expired. Both are sent as a bearer token with the
+  `anthropic-beta: oauth-2025-04-20` header. quotabot never writes the host
+  credentials file.
 - Response provides `five_hour` and `seven_day` blocks (plus per-model weekly
   blocks) with a `utilization` percent and an ISO `resets_at`.
 - This is live, and is the same data the in-CLI `/usage` command shows.
-- The token can expire; Claude Code refreshes it during normal use. On a 401 the
-  adapter reports the token as expired and the cache serves the last value.
+- The host token only refreshes while Claude Code runs on this machine, so on an
+  idle machine it eventually expires. quotabot then refreshes its own grant if
+  connected; if neither token works it reports the token as expired (pointing at
+  `claude` or `quotabot login claude`) and the cache serves the last trusted
+  value marked stale.
 
 ## Grok (xAI)
 
@@ -197,18 +208,25 @@ State lives in the Antigravity globalStorage SQLite database at
 
 Codex reuses the OAuth access token Codex stores locally for the ChatGPT usage
 endpoint and falls back to local session snapshots when unavailable. Claude
-reuses the token Claude Code stores. Grok and Antigravity can run two ways:
+reuses the token Claude Code stores. All four of Claude, Codex, Grok, and
+Antigravity can run two ways:
 
 - Opportunistic: reuse the token the CLI or IDE currently holds for the bounded
   provider operations documented above. This is live only while the credential
   remains usable.
-- Connected: after `login grok` or `login antigravity`, quotabot holds its own
-  OAuth grant and refreshes silently. Both work with no cloud setup. Grok uses
-  the device-code flow; Antigravity uses a loopback plus PKCE authorization-code
-  flow against Antigravity's public client (override with
-  `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET` to use your own).
-  These grants are independent of the host apps, so they never invalidate the
-  CLI's or IDE's credentials. quotabot's tokens live under the per-user config
+- Connected: after `login claude`, `login codex`, `login grok`, or
+  `login antigravity`, quotabot holds its own OAuth grant and refreshes silently.
+  All work with no cloud setup. Grok uses the device-code flow; Antigravity and
+  Codex use a loopback plus PKCE authorization-code flow against the provider's
+  public client (Codex on a fixed loopback port); Claude uses a PKCE
+  authorization-code flow whose console callback shows a code to paste back.
+  Override the public client id with `QUOTABOT_ANTHROPIC_CLIENT_ID`,
+  `QUOTABOT_OPENAI_CLIENT_ID`, or
+  `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET`. Claude and Codex
+  both rotate single-use refresh tokens, and these grants are independent of the
+  host apps: quotabot refreshes only its own grant and never writes the host
+  credential files, so a refresh here never consumes or invalidates the host
+  app's token. quotabot's tokens live under the per-user config
   directory. A new or rotated grant is not written unless owner-only directory
   and file permission hardening succeeds on POSIX or Windows. A grant can be
   stored as the provider default or in an account-scoped slot; the account slot
