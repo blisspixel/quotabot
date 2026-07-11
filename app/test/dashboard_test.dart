@@ -133,7 +133,7 @@ void main() {
 
     expect(invalid, contains('invalid'));
     expect(invalid, isNot(contains('protected')));
-    expect(unsupported, contains('regular file'));
+    expect(unsupported, contains('unsupported'));
     expect(
       preferenceLoadWarning(const PrefsLoadResult(prefs: Prefs())),
       isNull,
@@ -289,17 +289,11 @@ void main() {
 
     expect(saveAttempts, 1);
     expect(
-      find.text(
-        'Webhook is active for this session only; settings could not be '
-        'saved securely.',
-      ),
+      find.text('Webhook not saved (storage unavailable)'),
       findsOneWidget,
     );
     expect(
-      find.text(
-        'Settings are active for this session only; secure local storage is '
-        'unavailable.',
-      ),
+      find.text('Settings not saved (storage unavailable)'),
       findsOneWidget,
     );
   });
@@ -321,9 +315,7 @@ void main() {
     await tester.tap(find.byTooltip('Collapse'));
     await tester.pumpAndSettle();
 
-    const warning =
-        'Settings are active for this session only; secure local storage is '
-        'unavailable.';
+    const warning = 'Settings not saved (storage unavailable)';
     final warningTooltip = find.byWidgetPredicate(
       (widget) => widget is Tooltip && widget.message == warning,
     );

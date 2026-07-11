@@ -123,23 +123,24 @@ void main() {
         );
         await tester.pump();
 
-        const summary =
-            'Provider drift detected. Showing the last trusted quota; routing is disabled.';
-        const recovery =
-            'Run quotabot verify, then compare with the provider view.';
-        expect(find.text(summary), findsOneWidget);
-        expect(find.text(recovery), findsOneWidget);
+        // Compact glance label; the full explanation and reason live in the
+        // tooltip and semantics, not as a wall of visible text, and there is no
+        // call to action (drift self-clears on the next clean read).
+        const label = 'provider drift - showing last trusted';
+        expect(find.text(label), findsOneWidget);
+        expect(find.textContaining('Run quotabot verify'), findsNothing);
+        expect(find.textContaining('routing is disabled'), findsNothing);
         expect(
           find.text('Reason: 5h usage fell 60% to 10% with no reset'),
-          findsOneWidget,
+          findsNothing,
         );
         expect(
           find.bySemanticsLabel(
-            RegExp('Provider drift detected.*quotabot verify.*usage fell'),
+            RegExp('Provider drift detected.*last trusted.*usage fell'),
           ),
           findsOneWidget,
         );
-        final warning = tester.widget<Text>(find.text(summary));
+        final warning = tester.widget<Text>(find.text(label));
         expect(
           _contrastRatio(warning.style!.color!, surface.$2),
           greaterThanOrEqualTo(4.5),
@@ -181,8 +182,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.textContaining('Run quotabot verify'), findsOneWidget);
-    expect(find.textContaining('Reason: weekly reset'), findsOneWidget);
+    expect(find.text('provider drift - showing last trusted'), findsOneWidget);
+    expect(find.textContaining('Run quotabot verify'), findsNothing);
     expect(
       find.textContaining('provider drift | authoritative | quota plan'),
       findsOneWidget,
@@ -205,11 +206,10 @@ void main() {
     );
     await tester.pump();
 
+    expect(find.text('provider drift - quarantined'), findsOneWidget);
     expect(
-      find.text(
-        'Provider drift detected. Legacy quota evidence is quarantined; no trusted snapshot is available.',
-      ),
-      findsOneWidget,
+      find.textContaining('Legacy quota evidence is quarantined'),
+      findsNothing,
     );
     expect(find.textContaining('Showing the last trusted quota'), findsNothing);
     expect(
