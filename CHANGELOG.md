@@ -2,6 +2,18 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Changed
+- Quieted the desktop provider-drift indicator. It now shows a single compact
+  line ("provider drift - showing last trusted") with the full explanation and
+  reason on hover, instead of a multi-line banner that told the user to run a
+  command. The drift diagnostic already clears itself on the next clean read, so
+  no action is required.
+- Shortened the desktop storage and webhook "settings not saved" warnings to
+  compact one-liners, so a rare secure-storage failure no longer floods a clean
+  UI with a paragraph of text.
+
 ## 0.5.15 - 2026-07-10
 
 ### Added
