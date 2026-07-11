@@ -71,7 +71,7 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.5.17**, is best
+The current line, **0.5.18**, is best
 understood as a feature-complete beta in release hardening. The core product
 surface exists: CLI, `top`, desktop, analytics, MCP, loopback HTTP, model
 registry, profiles, alerts, reports, leases, LiteLLM integration, verification
@@ -267,7 +267,9 @@ complete; affected persona and accessibility checks pass.
   again (a precise countdown near term, an absolute day and clock time for a
   weekly cap days out) instead of a terse "resets 2d7h". This is the human view of
   the routing suggestion; the deeper preference and when-back work is tracked in
-  the routing-suggestion design note.
+  the routing-suggestion design note. **Refined 2026-07-11 (0.5.18):** the
+  absolute reset renders as one unit so a long time wraps cleanly beneath the
+  headroom instead of orphaning "PM", with a little more room in the reset column.
 - Exercise the documented inspect-before-run, update, data-preserving uninstall,
   destructive reset, and rollback paths. Automate the checks that can run safely
   on hosted clean machines.

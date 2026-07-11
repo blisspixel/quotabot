@@ -3637,7 +3637,7 @@ class WindowBar extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         SizedBox(
-          width: 96 * textScale,
+          width: 104 * textScale,
           child: Text(
             value,
             textAlign: TextAlign.end,
@@ -3959,8 +3959,13 @@ String _resetLabel(int? resetsAt, int now) {
   final dt = DateTime.fromMillisecondsSinceEpoch(resetsAt * 1000);
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   final wd = days[dt.weekday - 1];
-  final time = _formatTime(dt);
-  return s < 7 * 86400 ? '$wd $time' : '$wd ${dt.month}/${dt.day} $time';
+  // Join the day and clock time with a non-breaking space so the whole reset
+  // renders as one unit in a narrow right-hand column. When the row runs out of
+  // width it then breaks cleanly after the label ("37% free" over "Fri 11:14
+  // PM") instead of dropping a lone "PM" onto the next line.
+  const nb = '\u00A0';
+  final time = _formatTime(dt).replaceAll(' ', nb);
+  return s < 7 * 86400 ? '$wd$nb$time' : '$wd$nb${dt.month}/${dt.day}$nb$time';
 }
 
 /// When a spent window becomes usable again, phrased for a spent card: a

@@ -2,6 +2,16 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.5.18 - 2026-07-11
+
+### Fixed
+- A long absolute reset in a provider card's right column no longer wraps
+  mid-value and drops a lone "PM" onto the next line. The day and clock time now
+  render as one unit, so a spacious reset like "Fri 11:14 PM" either fits beside
+  the headroom or wraps cleanly beneath it ("37% free" over "Fri 11:14 PM"),
+  while a compact countdown such as "100% free  4h53m" stays on one line as
+  before. The reset column also gained a little breathing room.
+
 ## 0.5.17 - 2026-07-11
 
 ### Changed

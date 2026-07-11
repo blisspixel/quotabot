@@ -326,13 +326,43 @@ void main() {
     await tester.pump();
 
     // A weekly cap days out reads as its day and clock time, not "in 2d7h".
+    // The day and time are joined by a non-breaking space (matched by \s) so the
+    // reset never splits mid-value in a narrow column.
     expect(
       find.textContaining(
-        RegExp(r'available (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d'),
+        RegExp(r'available (Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d'),
       ),
       findsOneWidget,
     );
     expect(find.textContaining('available in'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('healthy window keeps its far reset intact beside the headroom', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final far = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3 * 86400;
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(63, resetsAt: far), // 37% free, resets days out
+          cardColor: const Color(0xFF1A1A1A),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // The headroom and the absolute reset share the right column; the day and
+    // time stay whole (matched by \s across the non-breaking space) so a long
+    // reset wraps cleanly under the headroom instead of orphaning "PM".
+    expect(
+      find.textContaining(
+        RegExp(r'37% free\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d.*[AP]M'),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
