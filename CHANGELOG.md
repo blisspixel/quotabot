@@ -2,7 +2,7 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.5.16 - 2026-07-11
 
 ### Fixed
 - Codex's weekly quota window no longer trips provider-drift detection when its

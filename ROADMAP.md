@@ -71,7 +71,7 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.5.15**, is best
+The current line, **0.5.16**, is best
 understood as a feature-complete beta in release hardening. The core product
 surface exists: CLI, `top`, desktop, analytics, MCP, loopback HTTP, model
 registry, profiles, alerts, reports, leases, LiteLLM integration, verification
