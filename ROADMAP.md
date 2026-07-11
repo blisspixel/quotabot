@@ -257,9 +257,10 @@ complete; affected persona and accessibility checks pass.
 - Ship native desktop bundles or explicitly narrow the 1.0 desktop promise.
 - Desktop robustness. **Completed 2026-07-10 (0.5.15):** enforce single-instance
   launch so a second launch surfaces the existing window instead of adding a
-  duplicate tray icon. Remaining: keep the first-load view smooth by moving the
-  collect off the UI isolate so the loading animation never stalls, and confirm
-  clean tray teardown on quit across all three OSes.
+  duplicate tray icon, and move the provider collect onto a background isolate so
+  the first-load animation no longer stalls (with a main-isolate fallback so
+  collection always works). Remaining: confirm clean tray teardown on quit across
+  all three OSes.
 - Exercise the documented inspect-before-run, update, data-preserving uninstall,
   destructive reset, and rollback paths. Automate the checks that can run safely
   on hosted clean machines.
