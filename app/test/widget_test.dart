@@ -517,12 +517,23 @@ void main() {
         showAccounts: true,
       );
 
+      // Compact glance line: route and headroom only, so it never truncates.
       expect(line, contains('Next: Claude'));
-      expect(line, contains('authoritative'));
       expect(line, contains('80% free'));
-      expect(line, contains('60% after burn'));
-      expect(line, contains('medium confidence (67%)'));
+      expect(line, isNot(contains('confidence')));
+      expect(line, isNot(contains('after burn')));
       expect(line, isNot(contains('solo@example.com')));
+
+      // The provenance, burn, and confidence detail is on the hover line.
+      final detail = desktopRouteDetailLine(
+        suggestion,
+        [claude],
+        now,
+        showAccounts: true,
+      );
+      expect(detail, contains('authoritative'));
+      expect(detail, contains('60% after burn'));
+      expect(detail, contains('medium confidence (67%)'));
     });
 
     test('uses account labels only to disambiguate duplicate providers', () {
@@ -539,7 +550,13 @@ void main() {
       );
 
       expect(line, contains('Next: Codex (work@example.com)'));
-      expect(line, contains('authoritative'));
+      final detail = desktopRouteDetailLine(
+        suggestion,
+        [work, home],
+        now,
+        showAccounts: true,
+      );
+      expect(detail, contains('authoritative'));
     });
 
     test('names machine fallback provenance without a duplicate scope tag', () {
@@ -554,12 +571,12 @@ void main() {
         windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
       );
 
-      final line = desktopRouteSignalLine(suggestRoute([codex], now), [
+      final detail = desktopRouteDetailLine(suggestRoute([codex], now), [
         codex,
       ], now);
 
-      expect(line, contains('this-machine fallback'));
-      expect(line, isNot(contains('(this machine)')));
+      expect(detail, contains('this-machine fallback'));
+      expect(detail, isNot(contains('(this machine)')));
     });
 
     test('labels a local route without repeating local runtime', () {
@@ -572,14 +589,13 @@ void main() {
         kind: ProviderQuotaKind.local,
       );
 
-      final line = desktopRouteSignalLine(
-        suggestRoute([ollama], now, preferLocal: true),
-        [ollama],
-        now,
-      );
+      final suggestion = suggestRoute([ollama], now, preferLocal: true);
+      final line = desktopRouteSignalLine(suggestion, [ollama], now);
+      expect(line, 'Next: Ollama - local fallback');
 
-      expect(line, startsWith('Next: Ollama | local runtime | fallback'));
-      expect(line, isNot(contains('local runtime | local fallback')));
+      final detail = desktopRouteDetailLine(suggestion, [ollama], now);
+      expect(detail, startsWith('Next: Ollama | local runtime | fallback'));
+      expect(detail, isNot(contains('local runtime | local fallback')));
     });
   });
 

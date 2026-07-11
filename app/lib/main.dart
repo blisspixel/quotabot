@@ -335,15 +335,11 @@ List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
   ];
 }
 
-@visibleForTesting
-String? desktopRouteSignalLine(
-  RouteSuggestion suggestion,
+(ProviderQuota?, String, String) _routeDisplay(
+  RouteCandidate candidate,
   List<ProviderQuota> snapshot,
-  int now, {
-  bool showAccounts = false,
-}) {
-  final candidate = suggestion.recommended;
-  if (candidate == null) return null;
+  bool showAccounts,
+) {
   ProviderQuota? quota;
   for (final q in snapshot) {
     if (q.provider == candidate.provider && q.account == candidate.account) {
@@ -362,6 +358,53 @@ String? desktopRouteSignalLine(
           quotaShouldShowAccountLabel(quota, counts)
       ? ' (${quota.account})'
       : '';
+  return (quota, display, accountLabel);
+}
+
+/// The compact glance line: just the route and how much is free (or that it is a
+/// local fallback), so it never truncates mid-word. The provenance, burn, and
+/// confidence detail lives in [desktopRouteDetailLine], shown on hover.
+@visibleForTesting
+String? desktopRouteSignalLine(
+  RouteSuggestion suggestion,
+  List<ProviderQuota> snapshot,
+  int now, {
+  bool showAccounts = false,
+}) {
+  final candidate = suggestion.recommended;
+  if (candidate == null) return null;
+  final (_, display, accountLabel) = _routeDisplay(
+    candidate,
+    snapshot,
+    showAccounts,
+  );
+  final buf = StringBuffer('Next: $display$accountLabel');
+  if (candidate.isLocal) {
+    buf.write(' - local fallback');
+  } else if (candidate.headroom != null) {
+    final prefix = candidate.stale ? 'cached ' : '';
+    buf.write(' - $prefix${candidate.headroom!.round()}% free');
+  }
+  return buf.toString();
+}
+
+/// The full route detail (provenance, burn-adjusted headroom, confidence, age),
+/// kept off the compact glance line so it never overflows. Shown on hover and
+/// carried into machine-readable surfaces.
+@visibleForTesting
+String? desktopRouteDetailLine(
+  RouteSuggestion suggestion,
+  List<ProviderQuota> snapshot,
+  int now, {
+  bool showAccounts = false,
+}) {
+  final candidate = suggestion.recommended;
+  if (candidate == null) return null;
+  final (_, display, accountLabel) = _routeDisplay(
+    candidate,
+    snapshot,
+    showAccounts,
+  );
   final parts = <String>[
     'Next: $display$accountLabel',
     candidate.sourceClass.label,
@@ -1858,6 +1901,12 @@ class _DashboardState extends State<Dashboard>
       now,
       showAccounts: _showAccounts,
     );
+    final routeDetail = desktopRouteDetailLine(
+      _routeSuggestion(now),
+      _visible,
+      now,
+      showAccounts: _showAccounts,
+    );
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: widget._hostIntegration
@@ -1970,14 +2019,17 @@ class _DashboardState extends State<Dashboard>
                     Icon(Icons.alt_route_rounded, size: 12, color: muted),
                     const SizedBox(width: 5),
                     Expanded(
-                      child: Text(
-                        routeLine,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: AppType.caption,
-                          fontWeight: FontWeight.w500,
-                          color: muted,
+                      child: Tooltip(
+                        message: routeDetail ?? routeLine,
+                        child: Text(
+                          routeLine,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppType.caption,
+                            fontWeight: FontWeight.w500,
+                            color: muted,
+                          ),
                         ),
                       ),
                     ),
@@ -3383,10 +3435,10 @@ class ProviderTile extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text(
-          'resets ${_resetLabel(v.resetsAt, now)}',
+          v.resetsAt == null ? '' : 'available ${_backLabel(v.resetsAt, now)}',
           style: TextStyle(
             fontSize: AppType.caption,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
             color: muted,
           ),
         ),
@@ -3893,16 +3945,33 @@ int _notificationId(String key) {
 /// Compact "3h12m" / "2d4h" reset label.
 String _resetLabel(int? resetsAt, int now) {
   if (resetsAt == null) return '';
-  var s = resetsAt - now;
+  final s = resetsAt - now;
   if (s <= 0) return 'now';
-  final d = s ~/ 86400;
-  s %= 86400;
-  final h = s ~/ 3600;
-  s %= 3600;
-  final m = s ~/ 60;
-  if (d > 0) return '${d}d${h}h';
-  if (h > 0) return '${h}h${m}m';
-  return '${m}m';
+  // Near-term: a precise countdown is what you act on ("59m", "3h58m").
+  if (s < 18 * 3600) {
+    final h = s ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+    if (h == 0) return '${m}m';
+    return m == 0 ? '${h}h' : '${h}h${m}m';
+  }
+  // Far-out (a weekly cap, say): an absolute day and time reads far clearer than
+  // a "2d7h" countdown - "Mon 5:00 PM", with the date added beyond a week out.
+  final dt = DateTime.fromMillisecondsSinceEpoch(resetsAt * 1000);
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  final wd = days[dt.weekday - 1];
+  final time = _formatTime(dt);
+  return s < 7 * 86400 ? '$wd $time' : '$wd ${dt.month}/${dt.day} $time';
+}
+
+/// When a spent window becomes usable again, phrased for a spent card: a
+/// near-term countdown reads "in 59m", a far-out reset reads as its absolute day
+/// and time ("Mon 5:00 PM").
+String _backLabel(int? resetsAt, int now) {
+  if (resetsAt == null) return '';
+  final s = resetsAt - now;
+  if (s <= 0) return 'now';
+  final label = _resetLabel(resetsAt, now);
+  return s < 18 * 3600 ? 'in $label' : label;
 }
 
 String _ago(DateTime t) {

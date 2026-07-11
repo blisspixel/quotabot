@@ -292,6 +292,50 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('spent window shows a near-term countdown to when it is back', (
+    tester,
+  ) async {
+    final soon = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600;
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(100, resetsAt: soon),
+          cardColor: const Color(0xFF1A1A1A),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('available in 1h'), findsOneWidget);
+    expect(find.textContaining('resets'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('spent window shows an absolute day and time for a far reset', (
+    tester,
+  ) async {
+    final far = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3 * 86400;
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(100, resetsAt: far),
+          cardColor: const Color(0xFF1A1A1A),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // A weekly cap days out reads as its day and clock time, not "in 2d7h".
+    expect(
+      find.textContaining(
+        RegExp(r'available (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('available in'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('long account labels stay inside the provider tile header', (
     tester,
   ) async {
