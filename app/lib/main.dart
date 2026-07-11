@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -1206,6 +1207,23 @@ class _DashboardState extends State<Dashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
+  /// Collects provider quota, off the UI isolate in production so the
+  /// synchronous parts of a collect (SQLite reads, protobuf decode, JSON
+  /// parsing) do not block the main isolate and stall the loading animation.
+  ///
+  /// Falls back to the main isolate if the background isolate cannot run the
+  /// collector (for example a native-library initialization failure), so
+  /// collection always works, just less smoothly. Test injection bypasses the
+  /// isolate entirely.
+  Future<List<ProviderQuota>> _collectProviders() async {
+    if (widget.collector != null) return widget.collector!();
+    try {
+      return await Isolate.run(collectAll);
+    } catch (_) {
+      return collectAll();
+    }
+  }
+
   Future<void> _refresh() async {
     if (_isRefreshing) return;
     if (widget._demoModeOverride ?? _demoMode) {
@@ -1217,10 +1235,9 @@ class _DashboardState extends State<Dashboard>
       // A hard deadline over the whole collect: adapters carry their own
       // per-provider deadlines, but if anything ever hangs past them, the
       // refresh loop must recover rather than freeze all future refreshes.
-      final collection = widget.collector == null
-          ? collectAll()
-          : widget.collector!();
-      final results = await collection.timeout(const Duration(seconds: 45));
+      final results = await _collectProviders().timeout(
+        const Duration(seconds: 45),
+      );
       final routeSummary = widget._hostIntegration
           ? loadRoutedRequestSummary()
           : emptyRoutedRequestSummary;

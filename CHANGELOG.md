@@ -45,6 +45,11 @@ Notable changes to quotabot. Newest first.
 - The desktop app now enforces a single running instance. A second launch
   surfaces the existing window instead of starting another process and adding a
   duplicate tray icon.
+- The desktop first-load animation no longer stalls. The provider collect now
+  runs on a background isolate so its synchronous work (SQLite reads, protobuf
+  decode, JSON parsing) does not block the UI isolate and freeze the loading
+  spinner; it falls back to the main isolate if the background isolate cannot
+  run the collector, so collection always works.
 - Corrected the committed Claude Haiku 4.5 model catalog output-token cap, and
   the model catalog audit now reports how many days old the committed catalog is
   as a maintenance signal.
