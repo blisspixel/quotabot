@@ -144,6 +144,7 @@ void main() {
     expect(q.windows.firstWhere((w) => w.label == '5h').usedPercent, 0);
     expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 100);
     expect(q.perMachine, isFalse); // authoritative, cross-device
+    expect(q.sourceClass.wireName, 'authoritative_live');
   });
 
   test('falls back to local sessions when the live read is unavailable',
@@ -163,6 +164,7 @@ void main() {
     expect(q.ok, isTrue);
     expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 15);
     expect(q.perMachine, isTrue); // this-machine session fallback
+    expect(q.sourceClass.wireName, 'this_machine_fallback');
   });
 
   test('codexUsageWindows maps the live rate_limit windows', () {

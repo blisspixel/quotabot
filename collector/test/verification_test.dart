@@ -104,7 +104,84 @@ void main() {
       expect(p.stalenessSeconds, 5);
       expect(p.crossCheck, contains('/usage'));
       expect(checkById(p, 'reset_sanity').status, VerifyStatus.pass);
+      expect(checkById(p, 'source_class').status, VerifyStatus.pass);
+      expect(p.sourceClass, ProviderSourceClass.authoritativeLive);
       expect(report.passed, isTrue);
+    });
+
+    test('source-class contradictions fail verification', () {
+      final invalid = <ProviderQuota>[
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'a',
+          asOf: now,
+          perMachine: true,
+          sourceClass: ProviderSourceClass.authoritativeLive,
+          windows: [QuotaWindow(label: '5h', usedPercent: 10)],
+        ),
+        ProviderQuota(
+          provider: 'codex',
+          displayName: 'Codex',
+          account: 'a',
+          asOf: now,
+          sourceClass: ProviderSourceClass.thisMachineFallback,
+          windows: [QuotaWindow(label: '5h', usedPercent: 10)],
+        ),
+        ProviderQuota(
+          provider: 'nvidia',
+          displayName: 'NVIDIA NIM',
+          account: 'a',
+          asOf: now,
+          sourceClass: ProviderSourceClass.statusOnly,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: 10)],
+        ),
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'a',
+          asOf: now,
+          source: providerQuotaManualSource,
+          sourceClass: ProviderSourceClass.authoritativeLive,
+          windows: [QuotaWindow(label: '5h', usedPercent: 10)],
+        ),
+      ];
+
+      for (final quota in invalid) {
+        final provider = buildVerificationReport(
+          [quota],
+          now,
+          os: 'windows',
+          filtered: true,
+        ).providers.single;
+        expect(checkById(provider, 'source_class').status, VerifyStatus.fail,
+            reason: quota.sourceClass.wireName);
+        expect(provider.passed, isFalse);
+      }
+    });
+
+    test('rejects a source class not admitted by the adapter registry', () {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'a',
+        asOf: now,
+        sourceClass: ProviderSourceClass.passiveLocalEvidence,
+        perMachine: true,
+        windows: [QuotaWindow(label: '5h', usedPercent: 10)],
+      );
+      final check = checkById(
+        buildVerificationReport(
+          [quota],
+          now,
+          os: 'windows',
+          filtered: true,
+        ).providers.single,
+        'source_class',
+      );
+
+      expect(check.status, VerifyStatus.fail);
+      expect(check.detail, contains('not admitted for claude'));
     });
 
     test('provider drift fails distinctly while preserving trusted windows',
@@ -492,6 +569,7 @@ void main() {
       expect(json['passed'], isTrue);
       final provider = (json['providers'] as List).single as Map;
       expect(provider['provider'], 'claude');
+      expect(provider['source_class'], 'authoritative_live');
       expect(provider['state'], 'live');
       expect(provider['passed'], isTrue);
       expect(provider['cross_check'], isNotEmpty);

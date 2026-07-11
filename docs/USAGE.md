@@ -28,8 +28,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   names still appear only when needed to distinguish multiple accounts.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
 - **Trust line:** each provider card carries a compact line for live, cached, or
-  provider-drift state, spend class, per-machine scope when relevant, and
-  capture age, so the number is not separated from where it came from. Drift
+  provider-drift state, normalized source class, spend class, and capture age,
+  so the number is not separated from where it came from. The source labels are
+  `authoritative`, `this-machine fallback`, `passive local`, `local runtime`,
+  `status only`, and `manual`; they replace redundant scope tags. Drift
   also adds a visible, screen-reader-announced warning and suppresses forecasts
   from stale evidence.
 - **Forecast at a glance:** when a provider is visibly burning, the card adds a
@@ -121,8 +123,10 @@ metadata. Add `--json` to any read command for machine output.
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
 Human `doctor` rows include a compact provenance tag with read state, spend
-class, real account identity when the provider exposes one, local-only scope,
-and capture age.
+class, normalized source class, real account identity when the provider exposes
+one, and capture age. The source class already communicates machine scope,
+manual origin, or runtime classification, so those ideas are not repeated as
+separate tags.
 The frozen `quotabot.v1` contract is documented in [SCHEMA.md](SCHEMA.md).
 
 ### Deterministic simulation
@@ -152,11 +156,23 @@ does not read analytics buckets.
 live read: every window percentage finite and in bounds, every snapshot
 carrying a sane capture time, every failure carrying a plain reason, cached
 data labeled stale with a note, reset times plausible, provider/account pairs
-unique, the emitted snapshot conforming to the frozen `quotabot.v1` contract,
+unique, every source class allowed by its adapter and consistent with the data
+shape, the emitted snapshot conforming to the frozen `quotabot.v1` contract,
 and the runtime access boundary staying free of prompts, source code, token
 spend, and generation endpoints. A provider that is out of quota, signed out,
 or not running still passes when it says so truthfully; the failure mode
 `verify` hunts is a lying or silent number, not an empty one.
+
+The provider-level `source_class` check validates the six-value contract from
+[DATA_SOURCES.md](DATA_SOURCES.md#source-classes). It rejects an authoritative
+read marked machine-scoped; a measured machine fallback or passive local read
+without `per_machine`; a local runtime with subscription kind or quota windows;
+a status-only record with quota windows; a manual record without the legacy
+`source: "manual"` marker; or any class not allowed by the provider registry.
+Such evidence is also unavailable to routing and measured history. The human
+verification line shows the concise source label; `verify --json` emits the
+exact wire value on each detected provider record. Exit code `65` covers a
+failed `source_class` check just like any other honesty failure.
 
 Provider drift is a distinct failing check, not a new value in the stable
 `state` enum. Its verification record remains `state: "cached"` when the
@@ -224,9 +240,10 @@ quotabot manual remove z-ai
 `manual set` is an upsert, so rerun it with a new `--used` value whenever you
 want to refresh the entry. These entries are stored only on your machine under
 quotabot's config directory, appear in `status`, `json`, `top`, the widget, and
-`suggest`, and carry `source: "manual"` in JSON. They are intentionally marked as
-self-reported: quotabot does not record them into measured analytics history, and
-routing confidence is lower than for live provider telemetry.
+`suggest`, and carry `source_class: "manual"` plus the legacy
+`source: "manual"` hint in JSON. They are intentionally marked as self-reported:
+quotabot does not record them into measured analytics history, and routing
+confidence is lower than for live provider telemetry.
 
 ### Live view (`quotabot top`)
 
@@ -242,9 +259,8 @@ a strand probability (the chance it is spent before it resets) when that is
 material, otherwise a time-to-empty estimate. It redraws in place on the alternate
 screen and repaints countdowns every second.
 Each provider row also carries a compact trust tag with live, cached, or
-provider-drift state, spend class, stale age when relevant, account identity
-when needed to disambiguate duplicate providers, and local-only scope for
-this-machine fallback data.
+provider-drift state, normalized source class, spend class, stale age when
+relevant, and account identity when needed to disambiguate duplicate providers.
 
 ```bash
 quotabot top                # adaptive refresh (the default)
@@ -311,10 +327,13 @@ window never spams. Alerts carry quota metadata only, never prompts or content.
 Add `--waste-threshold=N` to also alert when the recent burn pace projects that
 at least N percent of a paid window will expire unused at reset.
 Human alert lines include the same compact provenance tags as `doctor`: live
-state, spend class, true account identity when safe, per-machine scope, and
-capture age. When a provider exposes account identity, both low-quota and
+state, normalized source class, spend class, true account identity when safe,
+and capture age. When a provider exposes account identity, both low-quota and
 projected-waste alerts are keyed and serialized by that provider/account pair,
-including same-provider sibling routes.
+including same-provider sibling routes. Machine-readable alerts carry
+`source_class` for the threshold observation and `route_source_class` when a
+route is named. Stale, failed, drifted, or source-class-invalid evidence does
+not fire an alert.
 
 ```bash
 quotabot watch                                   # print alerts, adaptive cadence
@@ -355,6 +374,11 @@ already exhausted cap.
 For example, `quotabot check claude || quotabot suggest --json` falls through to a
 route only when Claude is spent.
 
+The human `check` line appends one concise provenance label such as
+`(authoritative)` or `(this-machine fallback)`. Its JSON form emits the exact
+`source_class` wire value. The normalized label is not another freshness state:
+`cached` and `provider drift` can apply independently.
+
 ### Models, calibration, and risk
 
 `quotabot models` lists models for providers represented in the current registry,
@@ -368,10 +392,11 @@ reasoning), and the provider's own tier (light/standard/flagship). Local-runtime
 models are read live; cloud capability hints come from a refreshable catalog.
 Human `models` and
 task-profiled `suggest` rows label live versus cached reads, spend class, real
-account identity when the provider exposes one, per-machine scope, and capture
-age; JSON keeps stable machine fields such as `local_readiness` (`loaded` or
-`cold`). Concrete model suggestions prefer loaded local models before
-installed-but-cold local models when both meet the requested profile.
+account identity when the provider exposes one, source class, and capture age;
+JSON carries `source_class` and stable machine fields such as
+`local_readiness` (`loaded` or `cold`). Concrete model suggestions prefer loaded
+local models before installed-but-cold local models when both meet the requested
+profile.
 
 Filter to what a task needs with a coarse `--task=simple|standard|hard` profile or
 explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
@@ -423,9 +448,10 @@ context: `quotabot suggest --provider-route --task=simple`, MCP
 caller-supplied model requirement instead of the default floor while still
 returning `quotabot.suggest.v1`, not a concrete model pick.
 The human `quotabot suggest` view labels each candidate with live/cached state,
-provider-drift state, spend class, account identity when it is a real account,
-and capture age, so a route is never just a bare provider name. Machine-readable
-provider and model candidates carry `drift_reason` and `drift_observed_at` when
+provider-drift state, source class, spend class, account identity when it is a
+real account, and capture age, so a route is never just a bare provider name.
+Machine-readable provider and model candidates carry `source_class`, and carry
+`drift_reason` and `drift_observed_at` when
 their budget evidence was rejected; those candidates are unavailable.
 When a caller has its own relative cost policy, provider suggestions also accept
 explicit cost penalties such as `quotabot suggest --cost-penalty=codex:2`.
@@ -513,7 +539,8 @@ Before ranking, recent burn estimates from thin local histories are conservative
 shrunk toward the current fleet burn mean so a two-sample spike does not dominate
 the route.
 The suggestion JSON carries, per candidate, `effective_headroom_percent`,
-`runway_hours`, `routing_score`, `confidence`, `strand_probability`, and, when
+`source_class`, `runway_hours`, `routing_score`, `confidence`,
+`strand_probability`, and, when
   measurable, `projected_waste_percent` plus `waste_boost`, and, when the caller
   supplies a cost policy, `cost_penalty` plus `cost_discount`. Candidates may also
   include `pipe_discount_percent` when recent local LiteLLM or native pipe health
@@ -535,6 +562,11 @@ measured included quota near reset can win a close tie before it expires unused,
   route, the default provider route avoids a provider whose capable model pool is
   exhausted, and a caller can down-rank a provider it knows is more expensive
   without turning quotabot into a spend ledger.
+
+For `this_machine_fallback` and `passive_local_evidence`, routing multiplies the
+normal freshness and sample-adequacy confidence by `0.7`. This provenance factor
+does not alter raw or effective headroom. It reflects the narrower observation
+scope, not a measured probability that the provider value is correct.
 
 Pass a task profile to `suggest` and it recommends a concrete model instead of a
 provider: `quotabot suggest --task=hard` (or any of the `--require-*`/`--tier-*`/

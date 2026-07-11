@@ -1732,7 +1732,9 @@ Future<void> _check(
   final head = providerHeadroom(q, now);
   final binding = bindingWindow(q, now);
   final availability = providerAvailability(q, now);
-  final available = q.isLocal ? q.ok : availability.available;
+  final available = q.isLocal
+      ? q.ok && q.sourceClassViolation == null
+      : availability.available;
   // Stable exit code so a script can branch on usability without parsing output.
   exitCode = available ? 0 : _exitUnavailable;
   final reset = binding?.resetsAt;
@@ -1742,6 +1744,7 @@ Future<void> _check(
       'as_of': now,
       'provider': q.provider,
       'account': q.account,
+      'source_class': q.sourceClass.wireName,
       'available': available,
       'headroom_percent': head,
       'resets_at': reset,
@@ -1763,7 +1766,9 @@ Future<void> _check(
       : q.stale
           ? style.dim(' (cached)')
           : '';
-  stdout.writeln('${style.bold(q.displayName)}: $label$pct$rs$staleTag');
+  final sourceTag = style.dim(' (${q.sourceClass.label})');
+  stdout.writeln(
+      '${style.bold(q.displayName)}: $label$pct$rs$staleTag$sourceTag');
   if (q.driftReason != null) {
     stdout.writeln(
       style.red(
@@ -1843,6 +1848,7 @@ String _stateStyled(String state) {
     case 'live':
       return style.green(padded);
     case 'in use':
+    case 'available':
     case 'local':
       return style.cyan(padded);
     case 'cached':
@@ -1877,12 +1883,13 @@ List<String> _providerProvenanceParts(
 }) {
   final parts = <String>[
     _providerReadStateLabel(state),
-    _providerSpendClass(q),
+    q.sourceClass.label,
   ];
+  final spendClass = _providerSpendClass(q);
+  if (spendClass != null) parts.add(spendClass);
   if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
     parts.add(q.account);
   }
-  if (q.perMachine) parts.add('this machine');
   final captured = routeCaptureAgeLabel(q.asOf, now);
   if (captured.isNotEmpty) parts.add(captured);
   return parts;
@@ -1932,7 +1939,7 @@ String _quotaAlertFallback(RouteFallback fallback, int now) {
 }
 
 String _providerAlertState(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'in use' : 'local';
+  if (q.isLocal) return q.active ? 'in use' : 'available';
   return q.stale ? 'cached' : 'live';
 }
 
@@ -1964,11 +1971,13 @@ String _providerReadStateLabel(String state) => switch (state) {
       _ => state,
     };
 
-String _providerSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'local loaded' : 'local cold';
-  if (q.isManual) return 'manual';
+String? _providerSpendClass(ProviderQuota q) {
+  if (q.isLocal) return q.active ? 'loaded' : 'cold';
+  if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
+    return null;
+  }
   if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  if (q.windows.isEmpty) return 'metadata only';
+  if (q.windows.isEmpty) return null;
   return kQuotaPlanProviders.contains(q.provider)
       ? 'quota plan'
       : 'metered plan';
@@ -2010,7 +2019,7 @@ void _printDoctor(List<ProviderQuota> results) {
       exhausted = minRem <= 0.5;
     }
     final state = q.isLocal
-        ? (q.active ? 'in use' : 'local')
+        ? (q.active ? 'in use' : 'available')
         : q.driftReason != null
             ? 'PROVIDER DRIFT'
             : !q.ok
@@ -2042,12 +2051,6 @@ void _printDoctor(List<ProviderQuota> results) {
     );
     for (final d in q.details) {
       print('  $indent ${_stateColumn('')} $d');
-    }
-    if (q.perMachine && !q.isLocal) {
-      print(
-        '  $indent ${_stateColumn('')} '
-        '${style.dim('note: this machine only; other devices may differ')}',
-      );
     }
     if (q.modelQuotas.isNotEmpty) {
       // Compact human summary; the full per-model table is in `quotabot json`
@@ -2351,7 +2354,7 @@ String _verificationProvenanceState(ProviderQuota q, String state) =>
             'out_of_quota' => 'OUT OF QUOTA',
             'error' => 'ERROR',
             'no_data' => 'metadata',
-            'local' => q.active ? 'in use' : 'local',
+            'local' => q.active ? 'in use' : 'available',
             _ => state,
           };
 
@@ -2510,21 +2513,22 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
         : e.stale
             ? 'cached'
             : 'live',
-    _modelSpendClass(e),
+    e.sourceClass.label,
   ];
+  final spendClass = _modelSpendClass(e);
+  if (spendClass != null) parts.add(spendClass);
   if (_modelHasAccountIdentity(e)) parts.add(e.account);
-  if (e.perMachine) parts.add('this machine');
   final captured = routeCaptureAgeLabel(e.asOf, decisionAsOf);
   if (captured.isNotEmpty) parts.add(captured);
   return style.dim('[${parts.join(', ')}]');
 }
 
-String _modelSpendClass(ModelEntry e) {
+String? _modelSpendClass(ModelEntry e) {
   if (e.local) {
     final readiness = e.localReadiness;
-    return readiness == null ? 'local' : 'local $readiness';
+    return readiness;
   }
-  if (e.source == providerQuotaManualSource) return 'manual';
+  if (e.sourceClass == ProviderSourceClass.manual) return null;
   return e.quotaBacked ? 'quota plan' : 'metered plan';
 }
 
@@ -2604,10 +2608,12 @@ String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
         : c.stale
             ? 'cached'
             : 'live',
-    c.spendClass,
+    c.sourceClass.label,
   ];
+  if (!c.isLocal && c.sourceClass != ProviderSourceClass.manual) {
+    parts.add(c.spendClass);
+  }
   if (_routeHasAccountIdentity(c)) parts.add(c.account);
-  if (c.perMachine) parts.add('this machine');
   final captured = routeCaptureAgeLabel(c.asOf, decisionAsOf);
   if (captured.isNotEmpty) parts.add(captured);
   return style.dim('[${parts.join(', ')}]');

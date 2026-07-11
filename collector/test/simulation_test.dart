@@ -1,4 +1,5 @@
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/simulation.dart';
 import 'package:test/test.dart';
 
@@ -60,6 +61,36 @@ void main() {
     final suggestion = suggestRoute([q], now);
     expect(suggestion.recommended, isNull);
     expect(suggestion.ranked.single.available, isFalse);
+  });
+
+  test('every synthetic observation has coherent source provenance', () {
+    const providers = [
+      'antigravity',
+      'claude',
+      'codex',
+      'cursor',
+      'grok',
+      'kiro',
+      'windsurf',
+    ];
+    const passiveProviders = {'cursor', 'kiro', 'windsurf'};
+
+    for (final provider in providers) {
+      for (final state in simulationStates) {
+        final quota = simulateProvider(
+          provider: provider,
+          state: state,
+          now: now,
+        )!;
+        expect(quota.sourceClassViolation, isNull,
+            reason: '$provider in $state');
+        if (passiveProviders.contains(provider)) {
+          expect(quota.sourceClass, ProviderSourceClass.passiveLocalEvidence,
+              reason: '$provider in $state');
+          expect(quota.perMachine, isTrue, reason: '$provider in $state');
+        }
+      }
+    }
   });
 
   test('invalid state and invalid provider are rejected', () {

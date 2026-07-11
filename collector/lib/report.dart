@@ -11,6 +11,7 @@ class QuotaHealthProviderLine {
   final String account;
   final ProviderQuotaKind kind;
   final String? source;
+  final ProviderSourceClass sourceClass;
   final String state;
   final int asOf;
   final bool perMachine;
@@ -32,6 +33,7 @@ class QuotaHealthProviderLine {
     required this.account,
     required this.kind,
     required this.source,
+    required this.sourceClass,
     required this.state,
     required this.asOf,
     required this.perMachine,
@@ -56,6 +58,7 @@ class QuotaHealthProviderLine {
         'account': account,
         'kind': kind.wireName,
         if (source != null) 'source': source,
+        'source_class': sourceClass.wireName,
         'state': state,
         'headroom_percent': headroomPercent,
         'resets_at': resetsAt,
@@ -256,6 +259,7 @@ QuotaHealthProviderLine _providerLine(
     account: provider.account,
     kind: provider.kind,
     source: provider.source,
+    sourceClass: provider.sourceClass,
     state: state,
     asOf: provider.asOf,
     perMachine: provider.perMachine,
@@ -286,9 +290,10 @@ String _state(ProviderQuota provider, double? headroom) {
 String _trustContext(QuotaHealthProviderLine provider, int generatedAt) {
   final parts = <String>[
     _trustReadState(provider),
-    _trustSpendClass(provider),
+    provider.sourceClass.label,
   ];
-  if (provider.perMachine) parts.add('this machine');
+  final spendClass = _trustSpendClass(provider);
+  if (spendClass != null) parts.add(spendClass);
   final captured = _captureAgeLabel(provider.asOf, generatedAt);
   if (captured.isNotEmpty) parts.add(captured);
   return parts.join(', ');
@@ -296,7 +301,9 @@ String _trustContext(QuotaHealthProviderLine provider, int generatedAt) {
 
 String _trustReadState(QuotaHealthProviderLine provider) {
   if (provider.state == 'unavailable') return 'error';
-  if (provider.kind.isLocal) return provider.state;
+  if (provider.kind.isLocal) {
+    return provider.state == 'local active' ? 'in use' : 'available';
+  }
   return switch (provider.state) {
     'cached' => 'cached',
     'unknown' => 'metadata',
@@ -304,16 +311,19 @@ String _trustReadState(QuotaHealthProviderLine provider) {
   };
 }
 
-String _trustSpendClass(QuotaHealthProviderLine provider) {
+String? _trustSpendClass(QuotaHealthProviderLine provider) {
   if (provider.kind.isLocal) {
-    return provider.state == 'local active' ? 'local loaded' : 'local cold';
+    return provider.state == 'local active' ? 'loaded' : 'cold';
   }
-  if (provider.isManual) return 'manual';
+  if (provider.sourceClass == ProviderSourceClass.manual ||
+      provider.sourceClass == ProviderSourceClass.statusOnly) {
+    return null;
+  }
   if (provider.headroomPercent == null) {
     return provider.state == 'unavailable' &&
             kQuotaPlanProviders.contains(provider.provider)
         ? 'quota plan'
-        : 'metadata only';
+        : null;
   }
   return kQuotaPlanProviders.contains(provider.provider)
       ? 'quota plan'

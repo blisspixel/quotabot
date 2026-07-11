@@ -65,6 +65,7 @@ void main() {
       expect(q.ok, isTrue);
       expect(q.plan, 'free trial');
       expect(q.status, contains('balance unknown'));
+      expect(q.sourceClass, ProviderSourceClass.statusOnly);
       expect(q.windows, isEmpty);
     });
 

@@ -76,6 +76,7 @@ class ProviderVerification {
 
   final String? plan;
   final String? source;
+  final ProviderSourceClass? sourceClass;
   final int? asOf;
   final int? stalenessSeconds;
   final bool stale;
@@ -95,6 +96,7 @@ class ProviderVerification {
     required this.checks,
     this.plan,
     this.source,
+    this.sourceClass,
     this.asOf,
     this.stalenessSeconds,
     this.stale = false,
@@ -113,6 +115,7 @@ class ProviderVerification {
         'state': state,
         if (plan != null) 'plan': plan,
         if (source != null) 'source': source,
+        if (sourceClass != null) 'source_class': sourceClass!.wireName,
         if (asOf != null) 'as_of': asOf,
         if (stalenessSeconds != null) 'staleness_seconds': stalenessSeconds,
         'stale': stale,
@@ -175,7 +178,12 @@ VerificationReport buildVerificationReport(
   RuntimeAccessReport? runtimeAccess,
 }) {
   final providers = <ProviderVerification>[
-    for (final q in results) _verifyProvider(q, now),
+    for (final q in results)
+      _verifyProvider(
+        q,
+        now,
+        registry.where((entry) => entry.id == q.provider).firstOrNull,
+      ),
   ];
   if (!filtered) {
     final present = results.map((q) => q.provider).toSet();
@@ -206,6 +214,13 @@ ProviderVerification _undetected(ProviderAdapterRegistration entry) {
     state: 'undetected',
     checks: [
       VerifyCheck(
+        'source_class',
+        entry.sourceClasses.isEmpty ? VerifyStatus.fail : VerifyStatus.pass,
+        entry.sourceClasses.isEmpty
+            ? 'adapter registry declares no allowed source class'
+            : 'adapter allows ${entry.sourceClasses.map((value) => value.label).join(' or ')}',
+      ),
+      VerifyCheck(
         'claimed_coverage',
         entry.localRuntime ? VerifyStatus.info : VerifyStatus.fail,
         detail,
@@ -215,9 +230,14 @@ ProviderVerification _undetected(ProviderAdapterRegistration entry) {
   );
 }
 
-ProviderVerification _verifyProvider(ProviderQuota q, int now) {
+ProviderVerification _verifyProvider(
+  ProviderQuota q,
+  int now,
+  ProviderAdapterRegistration? registration,
+) {
   final checks = <VerifyCheck>[
     _identityCheck(q),
+    _sourceClassCheck(q, registration),
     _providerDriftCheck(q, now),
     _readOrReasonCheck(q),
     _percentBoundsCheck(q),
@@ -232,6 +252,7 @@ ProviderVerification _verifyProvider(ProviderQuota q, int now) {
     state: verifyState(q, now),
     plan: q.plan,
     source: q.source,
+    sourceClass: q.sourceClass,
     asOf: q.asOf,
     stalenessSeconds: q.asOf > 0 ? (q.asOf > now ? 0 : now - q.asOf) : null,
     stale: q.stale,
@@ -249,6 +270,28 @@ ProviderVerification _verifyProvider(ProviderQuota q, int now) {
     ],
     checks: checks,
     crossCheck: kProviderCrossChecks[q.provider],
+  );
+}
+
+VerifyCheck _sourceClassCheck(
+  ProviderQuota q,
+  ProviderAdapterRegistration? registration,
+) {
+  final violation = registeredSourceClassViolation(q, registration);
+  if (violation != null) {
+    return VerifyCheck('source_class', VerifyStatus.fail, violation);
+  }
+  if (q.sourceClass == ProviderSourceClass.manual) {
+    return const VerifyCheck(
+      'source_class',
+      VerifyStatus.pass,
+      'manual quota is explicitly labeled self-reported',
+    );
+  }
+  return VerifyCheck(
+    'source_class',
+    VerifyStatus.pass,
+    '${q.sourceClass.label} provenance matches the adapter and data shape',
   );
 }
 

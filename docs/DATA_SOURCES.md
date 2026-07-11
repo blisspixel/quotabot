@@ -5,21 +5,47 @@ the adapters resolve the user home directory cross-platform.
 
 ## Source classes
 
-Treat the class as part of every number. It defines what quotabot can claim and
-how the result participates in routing.
+Treat the class as part of every number. It defines what quotabot can claim,
+how the observation is verified, and how it participates in routing. Every
+current producer emits the normalized `source_class` field. Its six wire values
+are a stable additive contract:
 
-| Class | Typical examples | Routing treatment | Failure or drift treatment |
-|---|---|---|---|
-| Authoritative live | Claude, live Codex, live Grok, live Antigravity | Eligible while fresh and its binding quota is usable | Preserve the last trusted snapshot as stale evidence; reject implausible changes and never call stale cloud quota available |
-| This-machine fallback | Codex session snapshot, Antigravity local state | Eligible only under the normal freshness and binding rules, with lower confidence and visible machine scope | State that another device can make the value incomplete |
-| Passive local evidence | Cursor, Windsurf/Devin, Kiro | A measured normalized window can participate; detection-only state cannot | Show no live data or last-trusted reader-drift evidence instead of inventing quota |
-| Local runtime | Ollama, LM Studio, Lemonade | Version 0.5.14 admits reachable runtime-classified entries; it does not yet prove execution location | Never cache availability; do not treat ambiguous Ollama cloud offload as proof of local-only or free execution |
-| Status-only | NVIDIA NIM | Visible for access diagnostics, never a model-budget route without measured quota | Show availability with numeric quota unknown |
-| Manual | User-defined entries | Visible and lower-confidence; excluded by `budget=quota` | Never refresh or reinterpret what the user entered |
+| Human label | `source_class` | Current assignment | Routing treatment | Verification method | Failure or drift treatment |
+|---|---|---|---|---|---|
+| Authoritative | `authoritative_live` | Claude; live Codex; live Grok; live Antigravity | Eligible while fresh and its binding quota is usable | The provider registry permits the class; `quotabot verify` checks its account-wide shape, time, bounds, resets, drift, and provider-owned cross-check target | Preserve the last trusted snapshot as stale evidence; reject implausible changes and never call stale cloud quota available |
+| This-machine fallback | `this_machine_fallback` | Codex session snapshot; Antigravity local state | Eligible only under normal freshness and binding rules; routing confidence is multiplied by `0.7`, and machine scope stays visible | The registry permits the fallback path; a successful measured window must carry `per_machine: true`, then passes the normal time, bounds, reset, and drift checks | State that another device can make the value incomplete |
+| Passive local | `passive_local_evidence` | Cursor; Windsurf/Devin; Kiro | A measured normalized window can participate with routing confidence multiplied by `0.7`; detection-only state cannot | The registry and sanitized parser fixture pin the source; a successful measured window must carry `per_machine: true`, and `verify` checks its shape and honesty | Show no live data or last-trusted reader-drift evidence instead of inventing quota |
+| Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Version 0.5.14 admits reachable runtime-classified entries; the class alone does not prove execution location | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; do not treat ambiguous Ollama cloud offload as proof of local-only or free execution |
+| Status only | `status_only` | NVIDIA NIM model-list access check | Visible for access diagnostics, never a model-budget route without measured quota | The registry requires a subscription observation with no quota windows; `verify` rejects quota or provider-drift claims on this class | Show access state with numeric quota unknown |
+| Manual | `manual` | User-defined entries | Visible with the existing `0.35` self-reported confidence factor; excluded by `budget=quota` | The entry must carry both `source_class: "manual"` and the legacy `source: "manual"` marker; it cannot claim local-runtime, machine-scoped, or drift evidence | Never refresh or reinterpret what the user entered |
+
+`source_class` is the normalized provenance contract. The older optional
+`source` field remains a narrow origin hint and currently uses `"manual"` only;
+it is not a substitute for `source_class`. Current snapshots, routing
+candidates, model candidates, reports, checks, and verification records carry
+the normalized class. Human surfaces use the concise labels in the first
+column, without stacking redundant `this machine`, `local`, or `manual` tags.
+
+The frozen `quotabot.v1` schema keeps `source_class` optional so snapshots from
+earlier 0.5 releases remain valid. When reading one of those legacy documents,
+quotabot deterministically infers the class from provider, `kind`, `source`, and
+`per_machine`; that compatibility path does not admit a new provider. An
+explicit unknown value is invalid. Every built-in adapter declares its allowed
+class set in the compile-time registry, and `quotabot verify` fails its
+`source_class` check when the class is missing from that registry, disallowed
+for the provider, or inconsistent with the observation shape. Structurally
+invalid class evidence is unavailable to routing and excluded from measured
+history.
 
 Source class is separate from freshness. For example, authoritative data can be
 cached and stale, while a this-machine snapshot can be freshly captured but
 still incomplete across devices.
+
+The `0.7` machine-scoped factor is multiplicative, not a fabricated probability
+that the number is correct. It discounts the routing confidence produced from
+freshness and sample adequacy because this-machine fallback and passive local
+evidence can miss usage on another device. It does not change raw headroom,
+availability, or the provider's reported percentage.
 
 Across measured source classes, the drift admission boundary compares only the
 same provider/account evidence class. A reset that moves earlier, or usage that
@@ -35,10 +61,26 @@ survives restarts and ordinary failed reads until a later clean observation for
 the same identity establishes recovery. A migrated legacy `suspect` record has
 no provable last-known-good windows, so quotabot exposes a non-routable error
 quarantine until every retained quota reset advances or the evidence class
-changes. `quotabot
-verify` reports both forms as a failed `provider_drift` check: normal
+changes. `quotabot verify` reports both forms as a failed `provider_drift`
+check: normal
 last-trusted fallback keeps state `cached`, while the no-window legacy form uses
 the existing `error` state.
+
+A source-class transition starts a new drift baseline rather than comparing
+unlike evidence. This prevents an account-wide live read and a machine-scoped
+fallback from being treated as interchangeable history.
+
+### Provenance design basis
+
+This contract follows the W3C PROV guidance to make provenance explicit and
+machine-readable, then apply domain-specific validation constraints. quotabot
+uses a deliberately smaller quota-specific vocabulary and does not claim full
+PROV-DM conformance.
+
+- [W3C PROV Overview](https://www.w3.org/TR/prov-overview/), W3C Working Group
+  Note, published 2013-04-30, accessed 2026-07-10.
+- [W3C PROV Primer](https://www.w3.org/TR/prov-primer/), W3C Working Group Note,
+  published 2013-04-30, accessed 2026-07-10.
 
 ## Manual entries
 
@@ -48,8 +90,8 @@ the existing `error` state.
   fields include display name, account, plan, and window label.
 - These entries are self-reported. quotabot never invents or refreshes them, does
   not write them into measured analytics history, and marks their snapshots with
-  `source: "manual"` so routers can treat their confidence differently from live
-  adapter telemetry.
+  `source_class: "manual"` plus the legacy `source: "manual"` hint so routers
+  can treat their confidence differently from live adapter telemetry.
 
 ## Codex (OpenAI)
 
@@ -64,7 +106,8 @@ the existing `error` state.
   `~/.codex/sessions/<date>/`, where the CLI writes a `rate_limits` object with
   `primary` (5 hour) and `secondary` (weekly) buckets on every turn. Used only
   when the live read is signed out or offline. It reflects this machine's
-  sessions alone, so its snapshot is marked `per_machine` and can undercount
+  sessions alone, so its snapshot is classified `this_machine_fallback`, marked
+  `per_machine`, and can undercount
   when the account is used on another device; a reset time in the past means
   that window has rolled over since the last session here.
 
@@ -136,7 +179,8 @@ State lives in the Antigravity globalStorage SQLite database at
 - The local `userStatus` cache is this-machine state. It is used for account and
   plan discovery, and as an offline last-known fallback when live quota is
   unavailable. A successful live read is preferred and is not overridden by local
-  settings data; local fallback snapshots are marked `per_machine`.
+  settings data; local fallback snapshots are classified
+  `this_machine_fallback` and marked `per_machine`.
 - The Code Assist tier field reports `free-tier` even for paid accounts, so it is
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
@@ -181,6 +225,7 @@ account has been discovered.
 
 ## Kiro (agentic CLI + IDE)
 
+- Source class: `passive_local_evidence`.
 - Credit-based (interactions/credits). Local state in ~/.kiro or platform
   globalStorage (state.vscdb / data.sqlite3 like other VS Code forks).
 - Opportunistic read of local credits/usage. Passive "installed" report even
@@ -189,6 +234,7 @@ account has been discovered.
 
 ## Cursor (agentic IDE)
 
+- Source class: `passive_local_evidence`.
 - Current paid plans expose a monthly included-usage pool with optional
   pay-as-you-go overage; quotabot surfaces that pool as a `monthly` window when
   local state provides used/included values and a period reset.
@@ -203,6 +249,7 @@ account has been discovered.
 
 ## Windsurf / Devin (Codeium / Cognition)
 
+- Source class: `passive_local_evidence`.
 - Now branded Devin Desktop (IDE) and Devin CLI. Agentic Cascade uses daily +
   weekly quota.
 - Local passive (IDE/Desktop): ItemTable key
@@ -232,7 +279,8 @@ They are marked `kind: local`, sort below the cloud services, and are used as a
 reachable routing fallback while the daemon is up. A local runtime is
 shown only when reachable; when it is off the provider is dropped, and it is
 never served from cache (a cached "available" would mislead when the daemon is
-actually down).
+actually down). All three built-in runtime adapters emit
+`source_class: "local_runtime"`.
 
 - Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). Honors
   `OLLAMA_HOST`, default `http://127.0.0.1:11434`.
@@ -311,7 +359,8 @@ build.nvidia.com. The API is OpenAI-compatible at
 
 - Source: when `NVIDIA_API_KEY` or `nvapi` is present, quotabot performs
   `GET https://integrate.api.nvidia.com/v1/models` to confirm the key works.
-  This is model discovery only, not inference.
+  This is model discovery only, not inference, and is classified
+  `source_class: "status_only"`.
 - Numeric quota: no local state file or zero-cost API endpoint for remaining
   trial balance/rate-limit headroom is known. NVIDIA now describes trial usage
   as model-specific rate limits rather than a published credit counter, so
