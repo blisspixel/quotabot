@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/claude.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -72,4 +73,92 @@ void main() {
     expect(expired.pipeHealth, isNull);
     expect(expired.httpStatus, 401);
   });
+
+  void writeCreds({required int expiresAtMs}) {
+    credentials.writeAsStringSync(jsonEncode({
+      'claudeAiOauth': {
+        'accessToken': 'host-token',
+        'subscriptionType': 'max',
+        'expiresAt': expiresAtMs,
+      },
+    }));
+  }
+
+  test('uses a fresh host token first without touching the grant', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    var grantCalled = false;
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async {
+        grantCalled = true;
+        return 'grant-token';
+      },
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer host-token');
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.hasWindows, isTrue);
+    expect(q.perMachine, isFalse);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+    expect(grantCalled, isTrue,
+        reason: 'grant is fetched up front but the fresh host token wins');
+  });
+
+  test('falls through to the grant when the host token is expired', () async {
+    writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => 'grant-token',
+      client: MockClient((request) async {
+        // The expired host token is demoted below the grant, so the grant is
+        // the first token tried.
+        expect(request.headers['Authorization'], 'Bearer grant-token');
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+  });
+
+  test('falls through to the grant on a 401 from a fresh host token', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final tried = <String>[];
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => 'grant-token',
+      client: MockClient((request) async {
+        final auth = request.headers['Authorization']!;
+        tried.add(auth);
+        if (auth == 'Bearer grant-token') {
+          return http.Response(_usageBody(), 200);
+        }
+        return http.Response('{}', 401);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(tried, ['Bearer host-token', 'Bearer grant-token']);
+  });
+
+  test('points at both recovery paths when expired with no grant', () async {
+    writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => null,
+      client: MockClient((_) async => http.Response('{}', 401)),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.error, contains('re-run claude'));
+    expect(q.error, contains('quotabot login claude'));
+  });
 }
+
+String _usageBody() => jsonEncode({
+      'five_hour': {'utilization': 30, 'resets_at': '2030-01-01T00:00:00Z'},
+      'seven_day': {'utilization': 20, 'resets_at': '2030-01-02T00:00:00Z'},
+    });

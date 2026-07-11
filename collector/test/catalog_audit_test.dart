@@ -3,8 +3,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/catalog_audit.dart';
+import 'package:quotabot_collector/model_catalog.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
+
+int _epochUtc(int y, int m, int d) =>
+    DateTime.utc(y, m, d).millisecondsSinceEpoch ~/ 1000;
 
 const _now = 1782000000;
 
@@ -362,5 +366,33 @@ void main() {
     final grok = sources.firstWhere((s) => s.provider == 'grok').includeModel;
     expect(grok('grok-4.3', null), isTrue);
     expect(grok('grok-imagine-image', null), isFalse);
+  });
+
+  test('Haiku 4.5 output cap matches the current provider spec', () {
+    final haiku =
+        kModelCatalog['claude']!.firstWhere((m) => m.id == 'claude-haiku-4-5');
+    // Regression guard: the catalog previously hardcoded a stale 32000 cap.
+    expect(haiku.maxOutputTokens, 64000);
+    expect(haiku.contextTokens, 200000);
+  });
+
+  test('reports catalog age in whole days', () {
+    final report = CatalogAuditReport(
+      generatedAt: _epochUtc(2026, 1, 11),
+      catalogUpdated: '2026-01-01',
+      providers: const [],
+    );
+    expect(report.catalogAgeDays, 10);
+    expect(report.toJson()['catalog_age_days'], 10);
+    expect(formatCatalogAuditReport(report), contains('10 days ago'));
+  });
+
+  test('clamps a future catalog date to zero age', () {
+    final report = CatalogAuditReport(
+      generatedAt: _epochUtc(2026, 1, 1),
+      catalogUpdated: '2026-02-01',
+      providers: const [],
+    );
+    expect(report.catalogAgeDays, 0);
   });
 }

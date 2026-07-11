@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/codex.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/util.dart';
@@ -15,6 +17,56 @@ void main() {
 
   tearDown(() {
     if (temp.existsSync()) temp.deleteSync(recursive: true);
+  });
+
+  Directory writeAuth(String accessToken) {
+    final sessions = Directory('${temp.path}/sessions')..createSync();
+    File('${temp.path}/auth.json').writeAsStringSync(jsonEncode({
+      'tokens': {'access_token': accessToken, 'account_id': 'acct-1'},
+    }));
+    return sessions;
+  }
+
+  test('uses the host auth.json token for the live read', () async {
+    final sessions = writeAuth('host-tok');
+    final q = await CodexAdapter(
+      sessionsDir: sessions,
+      grantToken: () async => null,
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer host-tok');
+        expect(request.headers['chatgpt-account-id'], 'acct-1');
+        return http.Response(
+            jsonEncode(_wham(primary: 20, secondary: 50)), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.perMachine, isFalse, reason: 'the live read is account-wide');
+    expect(q.hasWindows, isTrue);
+  });
+
+  test('falls through to the quotabot grant when the host token 401s',
+      () async {
+    final sessions = writeAuth('stale-host-tok');
+    final tried = <String>[];
+    final q = await CodexAdapter(
+      sessionsDir: sessions,
+      grantToken: () async => 'grant-tok',
+      client: MockClient((request) async {
+        final auth = request.headers['Authorization']!;
+        tried.add(auth);
+        // The account id still rides along from auth.json even on the grant.
+        expect(request.headers['chatgpt-account-id'], 'acct-1');
+        if (auth == 'Bearer grant-tok') {
+          return http.Response(
+              jsonEncode(_wham(primary: 20, secondary: 50)), 200);
+        }
+        return http.Response('{}', 401);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(tried, ['Bearer stale-host-tok', 'Bearer grant-tok']);
   });
 
   test('reports a missing sessions directory plainly', () async {

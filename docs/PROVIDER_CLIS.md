@@ -26,7 +26,9 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
 - Windows: a rolling 5-hour window plus a weekly cap, shared across Claude Code,
   Claude.ai, and related products.
 - quotabot reads: the OAuth usage endpoint, reusing the token Claude Code stores.
-  Live when Claude Code has a valid signed-in token; no quotabot login.
+  Live with no quotabot login when Claude Code has a valid signed-in token here;
+  `quotabot login claude` adds a self-refreshing grant so the account-wide read
+  stays live on a machine you have not opened Claude Code on recently.
 
 ## Codex (OpenAI)
 
@@ -36,9 +38,10 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
 - Windows: message quotas that reset every 5 hours, with weekly limits on some
   plans. Plus/Pro/Business plans get higher limits.
 - quotabot reads: the ChatGPT usage endpoint, reusing the OAuth access token
-  Codex stores locally. If the live read is unavailable, it falls back to the
-  newest local session `rate_limits` snapshot and marks that data as this
-  machine.
+  Codex stores locally, or a self-refreshing grant from `quotabot login codex`
+  when that token is expired (keeps an idle machine live). If no live read
+  succeeds, it falls back to the newest local session `rate_limits` snapshot and
+  marks that data as this machine.
 
 ## Antigravity / Gemini (Google)
 

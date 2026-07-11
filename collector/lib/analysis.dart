@@ -153,6 +153,40 @@ QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   return worst;
 }
 
+/// When a provider has collapsed to a spent binding window, the still-usable
+/// longer window whose status the user still needs, or null.
+///
+/// A spent *short* window (a 5-hour cap) clears soon, so the real question is
+/// whether a *longer* window (the weekly cap) still has room after it resets.
+/// Returning that window lets the display show "5h spent, resets 3h" alongside
+/// "weekly 42% used" instead of hiding the weekly entirely. The reverse case - a
+/// spent weekly with a healthy 5-hour - returns null, because a green short
+/// window under a spent long one is unusable and must stay hidden (the same
+/// reason [bindingWindow] collapses it).
+///
+/// "Longer" is judged by reset time, and requires *both* resets to be known:
+/// the candidate must be non-spent and reset strictly later than the spent
+/// binding window. An unknown reset is not evidence of a longer period (unlike
+/// in [bindingWindow], where an unknown clear time is conservatively the longest
+/// wait), so a null-reset healthy window is never resurfaced under a spent one.
+/// When several qualify, the latest-resetting one wins.
+QuotaWindow? secondaryVisibleWindow(ProviderQuota q, int now) {
+  final binding = bindingWindow(q, now);
+  final bindingReset = binding?.resetsAt;
+  if (binding == null || bindingReset == null) return null;
+  final headroom = providerHeadroom(q, now);
+  if (headroom == null || headroom > kSpentHeadroomFloor) return null;
+  QuotaWindow? best;
+  for (final w in q.windows) {
+    if (identical(w, binding)) continue;
+    if (windowHeadroom(w, now) <= kSpentHeadroomFloor) continue;
+    final wr = w.resetsAt;
+    if (wr == null || wr <= bindingReset) continue;
+    if (best == null || wr > best.resetsAt!) best = w;
+  }
+  return best;
+}
+
 /// A ranked candidate in a routing suggestion.
 class RouteCandidate {
   final String provider;

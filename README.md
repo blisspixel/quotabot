@@ -120,8 +120,12 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 Claude and Codex are live with no quotabot login when their host apps have valid
 signed-in credentials. Codex reads the ChatGPT usage endpoint using the token
 Codex stores locally and falls back to this-machine session snapshots when the
-live read is unavailable. Antigravity and Grok are live for the account their app
-is signed into; quotabot refreshes that token on its own.
+live read is unavailable. Because that host token only refreshes while the app
+runs on a given machine, a one-time `quotabot login claude` or
+`quotabot login codex` adds a separate refreshable grant so the account-wide read
+stays live on a machine where you have not opened the host app recently.
+Antigravity and Grok are live for the account their app is signed into; quotabot
+refreshes that token on its own.
 Google's consumer Gemini CLI has been superseded by Antigravity, so Google
 coverage runs through the Antigravity adapter. Its live Cloud Code quota read is
 preferred; local Antigravity settings are only used for account discovery and
@@ -168,23 +172,28 @@ Desktop shortcut), run `pwsh tools/setup.ps1` on Windows or
 `bash tools/setup.sh` on macOS/Linux (add `-CliOnly` / `--cli-only` for just the
 CLI). Details in [docs/BUILDING.md](docs/BUILDING.md).
 
-## Keeping Antigravity and Grok live
+## Keeping providers live on an idle machine
 
-Antigravity and Grok can use the account their app has made discoverable. A
-quotabot login creates a separate refreshable grant for that discovered account,
-which is useful for account pinning or when the host credential is short-lived.
-Run the provider app on this machine first; the grant does not replace local
-account discovery. No Google Cloud setup is needed:
+Every provider works with no login on a machine where you actively use its app.
+A one-time `quotabot login` adds a separate refreshable grant so the same live
+read keeps working on a machine you have not opened the app on recently (or when
+the host credential is short-lived, or to pin a specific account). The grant does
+not replace local account discovery; run the provider app on this machine first.
+No cloud project setup is needed:
 
 ```bash
+quotabot login claude        # opens a browser; paste the code it shows back
+quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow
 quotabot login antigravity   # opens a browser; sign in with the account you want
 quotabot doctor              # confirm it reads live
 ```
 
-quotabot stores its own refresh token under your per-user config directory,
-independent of the app's credentials. A new or rotated grant is not written
-unless owner-only permission hardening succeeds. Details in
+Claude and Codex read the same zero-cost account-wide usage endpoints either way;
+the grant only changes how the token stays fresh. quotabot stores its own refresh
+token under your per-user config directory, independent of the app's credentials,
+and never writes the host app's credential files. A new or rotated grant is not
+written unless owner-only permission hardening succeeds. Details in
 [docs/SETUP.md](docs/SETUP.md#4-keep-grok-and-antigravity-live-or-pin-an-account-optional).
 
 ## Routing for tools and agents

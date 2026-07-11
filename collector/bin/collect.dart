@@ -5,7 +5,9 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
+import 'package:quotabot_collector/auth/anthropic_auth.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
+import 'package:quotabot_collector/auth/openai_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
@@ -17,7 +19,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
 /// local metadata lookup, not a model call, so it costs no usage tokens.
 
-const _version = '0.5.14';
+const _version = '0.5.15';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -1364,7 +1366,8 @@ void _printHelp() {
   stdout.writeln('');
   stdout.writeln(head('CONNECT'));
   stdout.writeln(
-    '  login <provider>    connect grok or antigravity (keeps it live)',
+    '  login <provider>    connect grok, antigravity, claude, or codex '
+    '(keeps it live on an idle machine)',
   );
   stdout.writeln('  logout <provider>   disconnect a provider');
   stdout.writeln(
@@ -1817,14 +1820,61 @@ Future<void> _login(String provider) async {
         exitCode = 64;
       }
       break;
+    case 'claude':
+      try {
+        await AnthropicAuth().loginManual(
+          showUrl: (url) {
+            stderr.writeln('');
+            stderr.writeln('Opening your browser to sign in with Anthropic...');
+            stderr.writeln(
+              'If the browser does not open, manually visit this URL:',
+            );
+            stderr.writeln(url);
+            stderr.writeln('');
+            stderr.write(
+              'After authorizing, paste the code shown by the browser here: ',
+            );
+          },
+          promptCode: () async => stdin.readLineSync() ?? '',
+        );
+        stderr.writeln(
+          'Claude connected. You can now run "quotabot doctor" to verify live data.',
+        );
+      } catch (e) {
+        stderr.writeln('Claude login failed: $e');
+        exitCode = 64;
+      }
+      break;
+    case 'codex':
+      try {
+        await OpenAiAuth().loginLoopback(
+          showUrl: (url) {
+            stderr.writeln('');
+            stderr.writeln('Opening your browser to sign in with ChatGPT...');
+            stderr.writeln(
+              'If the browser does not open or you see an error, manually visit this URL:',
+            );
+            stderr.writeln(url);
+            stderr.writeln('');
+          },
+        );
+        stderr.writeln(
+          'Codex connected. You can now run "quotabot doctor" to verify live data.',
+        );
+      } catch (e) {
+        stderr.writeln('Codex login failed: $e');
+        exitCode = 64;
+      }
+      break;
     default:
-      stderr.writeln('usage: quotabot login <grok|antigravity>');
+      stderr.writeln('usage: quotabot login <grok|antigravity|claude|codex>');
   }
 }
 
 void _logout(String provider) {
-  if (provider != 'grok' && provider != 'antigravity') {
-    stderr.writeln('usage: quotabot logout <grok|antigravity>');
+  const known = {'grok', 'antigravity', 'claude', 'codex'};
+  if (!known.contains(provider)) {
+    stderr.writeln('usage: quotabot logout <grok|antigravity|claude|codex>');
     return;
   }
   // Login persists both a provider-default grant and an account-scoped grant
@@ -2842,7 +2892,7 @@ String _hourLabel(int hour24) {
 /// Turns the status table into a guided setup: cached providers that support a
 /// login are pointed at it; providers with no data are pointed at their app.
 String? _doctorHint(ProviderQuota q, String state) {
-  const canLogin = {'grok', 'antigravity'};
+  const canLogin = {'grok', 'antigravity', 'claude', 'codex'};
   if (state == 'PROVIDER DRIFT') {
     return 'run: quotabot verify  (${_providerDriftEvidenceSummary(q)})';
   }
@@ -2853,6 +2903,10 @@ String? _doctorHint(ProviderQuota q, String state) {
     return q.error;
   }
   if (state == 'no live data' && !q.isLocal) {
+    if (canLogin.contains(q.provider)) {
+      return 'open the ${q.displayName} app on this machine, '
+          'or run: quotabot login ${q.provider}';
+    }
     return 'open the ${q.displayName} app once so it writes local state, then re-run';
   }
   return null;
