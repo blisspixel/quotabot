@@ -37,13 +37,14 @@ desktop widget, and routing.
 ## 1. Make provider evidence available
 
 quotabot normally reuses the account state each provider's own app has already
-saved. Grok and Antigravity also support an optional quotabot-owned OAuth grant
-for longer-lived reads or account pinning. There is no quotabot account.
+saved. Claude, Codex, Grok, and Antigravity also support an optional
+quotabot-owned OAuth grant for longer-lived reads on an idle machine or account
+pinning. There is no quotabot account.
 
 | Provider class | Default evidence | Optional quotabot action | Refresh and scope |
 |---|---|---|---|
-| Claude | Claude Code OAuth token | none | live while the host credential is valid |
-| Codex | Codex OAuth token, then newest local session snapshot | none | live when possible; fallback is visibly this-machine |
+| Claude | Claude Code OAuth token | `quotabot login claude` | live while the host credential is valid; the grant keeps the account-wide read live on an idle machine |
+| Codex | Codex OAuth token, then newest local session snapshot | `quotabot login codex` | live when possible; the grant keeps the account-wide read live on an idle machine; local snapshot fallback is visibly this-machine |
 | Grok | current Grok CLI token and account file | `quotabot login grok` | own grant refreshes a matching locally discovered account and can pin it |
 | Antigravity | signed-in IDE account and refresh material, then local state fallback | `quotabot login antigravity` | own grant refreshes a matching locally discovered account and can pin it |
 | Cursor, Windsurf/Devin, Kiro | passive local application state | none | opportunistic this-machine evidence |
@@ -181,21 +182,24 @@ quotabot stats            # per-provider history and analytics
 quotabot suggest          # where to send the next request (step 6)
 ```
 
-## 4. Keep Grok and Antigravity live or pin an account (optional)
+## 4. Keep a provider live on an idle machine or pin an account (optional)
 
-Claude and Codex read with their host credentials and do not have a quotabot
-login flow. Codex can fall back to this-machine session snapshots. Grok can use
-the CLI's current token, and Antigravity can use refresh material from a signed-
-in IDE. A one-time quotabot login creates a separate refreshable grant when the
-host credential is too short-lived or a specific account must be pinned. It does
-not replace initial account discovery: run the provider app on this machine
-first, and retain its local account identity state.
+Every provider reads with its host credentials on a machine you actively use its
+app on. Because a host token only refreshes while its app runs on that machine,
+Claude and Codex can show a stale number on a machine you have not opened the app
+on recently (Codex can also fall back to this-machine session snapshots). A
+one-time quotabot login creates a separate refreshable grant that keeps the
+account-wide read live there, or pins a specific account, or covers a short-lived
+host credential. It does not replace initial account discovery: run the provider
+app on this machine first, and retain its local account identity state.
 
 ```bash
+quotabot login claude        # opens a browser; paste back the code it shows
+quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow; confirm in the browser
 quotabot login antigravity   # opens a browser; sign in with the account you want
 quotabot doctor              # confirm they now read "live"
-quotabot logout grok         # or: quotabot logout antigravity
+quotabot logout claude       # or: codex | grok | antigravity
 ```
 
 Neither needs any cloud setup. quotabot stores its own refreshing grant for the

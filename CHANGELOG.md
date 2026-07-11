@@ -2,9 +2,17 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.5.15 - 2026-07-10
 
 ### Added
+- Added `quotabot login claude` and `quotabot login codex` connected grants.
+  Claude and Codex already read account-wide usage endpoints, but the host app's
+  token only refreshes while its app runs on a given machine, so an idle machine
+  could show a frozen number. Each adapter now resolves auth in order: the host
+  token while unexpired, then quotabot's own refreshable grant, then the last
+  trusted cache marked stale. The grants self-refresh (both providers rotate
+  single-use refresh tokens) without reading or writing the host apps' credential
+  files, and remain zero-cost metadata reads.
 - Added a normalized six-value provider provenance contract across snapshots,
   routing and model candidates, alerts, reports, single-provider checks, MCP
   schemas, and verification records. Every built-in adapter declares its
@@ -28,6 +36,18 @@ Notable changes to quotabot. Newest first.
   registration check, plus a bundle-aware macOS harness for interactive hosts.
 
 ### Fixed
+- A spent short quota window no longer hides a healthy longer window. When a
+  five-hour window is spent under a weekly cap that still has room, `quotabot
+  top` and the desktop provider card now show the weekly window's remaining
+  percent and reset alongside the collapsed "spent" line, so the difference
+  between "wait a few hours" and "the weekly cap is gone" is visible. A spent
+  long window still correctly hides a healthy shorter one.
+- The desktop app now enforces a single running instance. A second launch
+  surfaces the existing window instead of starting another process and adding a
+  duplicate tray icon.
+- Corrected the committed Claude Haiku 4.5 model catalog output-token cap, and
+  the model catalog audit now reports how many days old the committed catalog is
+  as a maintenance signal.
 - Provider drift now fails closed at the evidence-admission boundary: an
   implausible fresh read cannot overwrite last-known-good cache or enter routing,
   history, or measured analytics. Missing quota dimensions, unknown usage, and

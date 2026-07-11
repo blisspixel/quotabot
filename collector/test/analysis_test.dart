@@ -164,6 +164,47 @@ void main() {
     expect(a.headroom, isNull);
   });
 
+  group('secondaryVisibleWindow', () {
+    test('surfaces the longer window when a short window is spent', () {
+      final q = _q('codex', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 42, resetsAt: _now + 5 * 86400),
+      ]);
+      // The card collapses on the spent 5h; the healthy weekly is the constraint
+      // the user still faces after 3h, so it must stay visible.
+      expect(bindingWindow(q, _now)?.label, '5h');
+      expect(secondaryVisibleWindow(q, _now)?.label, 'weekly');
+    });
+
+    test('hides a healthy short window under a spent long window', () {
+      final q = _q('codex', [
+        QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 100, resetsAt: _now + 2 * 86400),
+      ]);
+      // A green 5h under a spent weekly is unusable; do not resurface it.
+      expect(bindingWindow(q, _now)?.label, 'weekly');
+      expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+
+    test('returns null when both windows are spent', () {
+      final q = _q('codex', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 3600),
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now + 86400),
+      ]);
+      expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+
+    test('returns null while the provider still has headroom', () {
+      final q = _q('codex', [
+        QuotaWindow(label: '5h', usedPercent: 30, resetsAt: _now + 3600),
+        QuotaWindow(label: 'weekly', usedPercent: 42, resetsAt: _now + 86400),
+      ]);
+      expect(secondaryVisibleWindow(q, _now), isNull);
+    });
+  });
+
   test('providerAvailability keeps stale headroom but marks it unavailable',
       () {
     final q = _q(

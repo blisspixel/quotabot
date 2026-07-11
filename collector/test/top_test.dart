@@ -105,6 +105,25 @@ void main() {
     expect(lines.any((l) => _plain(l).contains('5h')), isFalse);
   });
 
+  test('a spent short window still shows the healthy longer window', () {
+    final lines = _frame([
+      _q('codex', [
+        QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 3600),
+        QuotaWindow(
+            label: 'weekly', usedPercent: 42, resetsAt: _now + 5 * 86400),
+      ]),
+    ]);
+    // The 5h collapses to a spent line...
+    final spent = lines.firstWhere((l) => _plain(l).contains('spent'));
+    expect(_plain(spent), contains('codex'));
+    expect(_plain(spent), contains('5h'));
+    // ...but the weekly cap the user faces after 3h stays visible.
+    final weekly = lines.where((l) => _plain(l).contains('weekly')).toList();
+    expect(weekly, hasLength(1));
+    expect(_plain(weekly.first), contains('58% free'));
+    expect(_plain(weekly.first), contains('resets'));
+  });
+
   test('rounded-one-percent headroom renders as spent, not free', () {
     final lines = _frame([
       _q('claude', [

@@ -30,6 +30,7 @@ import 'logos.dart';
 import 'prefs.dart';
 import 'profile_editor.dart';
 import 'profile_ui.dart';
+import 'single_instance.dart';
 import 'termshot.dart';
 import 'theme_spec.dart';
 import 'typography.dart';
@@ -90,9 +91,30 @@ String? preferenceLoadWarning(
         'prefs.json before retrying.',
 };
 
+final SingleInstanceGuard _singleInstance = SingleInstanceGuard();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
+
+  // Enforce a single instance so a second launch surfaces the existing window
+  // instead of spawning another process and a duplicate tray icon.
+  final isPrimary = await _singleInstance.tryBecomePrimary(
+    onShowRequested: () async {
+      try {
+        await windowManager.setSkipTaskbar(false);
+        await windowManager.show();
+        await windowManager.focus();
+      } catch (_) {}
+    },
+  );
+  if (!isPrimary) {
+    // Another instance is already running and has been asked to surface. Exit
+    // before creating any window or tray icon.
+    await _singleInstance.dispose();
+    exit(0);
+  }
+
   final prefsResult = await Prefs.load();
   final prefs = prefsResult.prefs;
   final startupStorageWarning = preferenceLoadWarning(prefsResult);
@@ -3005,6 +3027,10 @@ class ProviderTile extends StatelessWidget {
       binding = _view(bindingWin, now);
     }
     final blocked = binding != null && binding.exhausted;
+    // When a spent short window blocks the card, a longer window that still has
+    // room is the constraint the user faces after the short one resets - show it
+    // instead of hiding it behind the "spent" line.
+    final secondaryWin = blocked ? secondaryVisibleWindow(quota, now) : null;
     final driftColor = _providerDriftForeground(cardColor);
     final statusColor = quota.driftReason != null
         ? driftColor
@@ -3158,9 +3184,19 @@ class ProviderTile extends StatelessWidget {
               ((quota.status ?? '').isNotEmpty
                   ? _statusOnlyRow(quota, muted, fg)
                   : _noData(quota.error, muted))
-            else if (blocked)
-              _blockedRow(binding, now, muted, evidenceLabel: evidenceLabel)
-            else
+            else if (blocked) ...[
+              _blockedRow(binding, now, muted, evidenceLabel: evidenceLabel),
+              if (secondaryWin != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: WindowBar(
+                    view: _view(secondaryWin, now),
+                    muted: muted,
+                    fg: fg,
+                    evidenceLabel: evidenceLabel,
+                  ),
+                ),
+            ] else
               ...views.map(
                 (v) => Padding(
                   padding: const EdgeInsets.only(bottom: 6),
