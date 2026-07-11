@@ -19,6 +19,14 @@ The quality target is not the largest provider list or the most analytics. It is
 the fastest path to a truthful answer, the clearest reason for a recommendation,
 graceful behavior when providers change, and boring installation and updates.
 
+1.0 means **exceptional and rock-solid: it just works** across every supported
+service, on Windows, macOS, and Linux, with at least one quota-based service or
+local runtime present. "Just works" includes the realistic case that a person
+uses the same account on more than one machine: the quota a user sees must
+reflect account-wide truth, not a single machine's stale local copy. Meeting
+people where they are with what they have is the point; the product earns trust
+by being correct, quiet, and predictable, not by being large.
+
 ## Non-negotiable boundaries
 
 - **Zero inference and content-blind.** Runtime code never calls generation
@@ -42,6 +50,12 @@ graceful behavior when providers change, and boring installation and updates.
 - **Honest uncertainty.** Staleness, this-machine scope, manual input, passive
   detection, weighted consumption, and unknown balances stay visible. A spent
   binding window overrides a healthier shorter window.
+- **Correct across a user's machines.** When a provider exposes an account-wide
+  usage read, that read is the source of truth even on a machine the user has
+  not actively used the tool on recently; quotabot keeps it live by refreshing
+  its own credentials rather than depending on the host app to have run here. A
+  machine-scoped fallback is only ever shown when nothing account-wide is
+  available, and it is always labeled as this-machine.
 - **Fail soft.** If quotabot is unavailable or lacks a safe route, callers keep
   their original behavior or receive an explicit no-safe-route result. Routing
   is an optimization, not a dependency.
@@ -68,7 +82,7 @@ the remaining 1.0 trust gates close.
 |---|---|---|---|
 | Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
 | Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; the LiteLLM example now requires a bearer key and an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, and a Windows live record exist | Close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
+| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, cross-machine account-wide live reads via self-refreshing Claude/Codex grants, and a Windows live record exist | Validate the connected-grant login flows on real accounts; close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
 | Native provider evidence | Partial | Windows evidence exists; WSL covers truthful Linux failure behavior | Confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
 | Installation and update | Partial | CLI archives, required checksums, attestations, one-line installers, source setup, lifecycle docs, and a three-OS smoke workflow exist | Record green clean-host lifecycle runs, automate remaining rollback/uninstall checks, and close desktop acquisition |
 | First-run and recommendation comprehension | Partial | `doctor`, compact route lines, structured reasons, and setup recovery guidance exist | Prove a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
@@ -78,6 +92,33 @@ the remaining 1.0 trust gates close.
 Version numbers are not project phases. Continue small corrective 0.5.x patches
 as needed, then cut 1.0 when the evidence gates pass. Do not manufacture 0.6,
 0.7, 0.8, and 0.9 releases to represent work already completed.
+
+## Version plan
+
+A short map so the milestones are unambiguous. The non-negotiable boundaries
+above hold at every version; they are the constitution, not a milestone, and a
+release that would break one is wrong regardless of its number.
+
+- **0.5.x, now (release hardening).** Feature-complete beta. Only corrective
+  patches: provider truth, cross-machine correctness, install and update,
+  desktop robustness, and documentation. No new provider breadth. 0.5.15 added
+  cross-machine live reads (self-refreshing Claude and Codex grants that keep an
+  idle machine's account-wide read live), kept a healthy longer window visible
+  under a spent shorter one, enforced single-instance desktop launch, and
+  corrected a model-catalog output cap.
+- **1.0, the bar.** Cut only when every evidence gate below passes: exceptional
+  and rock-solid, just-works across all supported services on Windows, macOS,
+  and Linux, correct across a user's machines, honest under provider change, and
+  boring to install and update. Defined precisely in "1.0 definition of done".
+- **1.x, stabilization then ranked outcomes.** The first 30 days after 1.0 are
+  stabilization only (below). After that, the P1 outcomes (decision receipt,
+  typed shared-pool quota, deliberate MCP revision, multi-agent reservations)
+  and P2 (distribution, admission-gated providers), added additively without
+  breaking a published 1.x contract.
+- **2.0, only to change an invariant or a stable contract.** No 2.0 is planned;
+  it exists solely as the escape hatch if a non-negotiable boundary or a public
+  JSON/MCP/CLI/profile/cache/lease contract must change. Provider count and
+  analytics breadth never justify a major version.
 
 ## 1.0 definition of done
 
@@ -118,6 +159,12 @@ as needed, then cut 1.0 when the evidence gates pass. Do not manufacture 0.6,
     cannot guarantee.
 13. No known release-blocking correctness, billing, credential, data-loss,
     installation, accessibility, or security issue remains open.
+14. For every provider with an account-wide usage read, that read stays live on
+    a machine the user has not actively used the host app on recently, by
+    refreshing quotabot's own credentials without reading or writing the host
+    app's credential files. When it cannot, the number is shown stale with an
+    actionable next step, never as a confident current value, and any machine-
+    scoped fallback is labeled this-machine.
 
 ## Work remaining before 1.0
 
@@ -128,6 +175,16 @@ The order below is dependency order, not an estimate.
 **Outcome:** every advertised route means what it says before more release
 evidence is collected.
 
+- **Completed 2026-07-10 (0.5.15):** keep account-wide reads live across a user's
+  machines. The Claude and Codex adapters resolve auth as host token (while
+  unexpired), then quotabot's own self-refreshing grant from `login claude` /
+  `login codex`, then the last trusted cache marked stale. Both providers rotate
+  single-use refresh tokens, so quotabot refreshes only its own grant and never
+  reads or writes the host apps' credential files; the reads stay zero-cost
+  metadata. A spent shorter window no longer hides a healthy longer one in `top`
+  and the desktop card, so waiting out a five-hour cap is distinguishable from a
+  spent weekly one. Remaining: validate the connected-grant login flows on real
+  accounts and add fixtures for the expired-host-token fall-through.
 - **Completed 2026-07-10:** add the source-class contract to verification and
   user-facing documentation. Every built-in adapter now declares its allowed
   provenance classes; current snapshots, routing and model candidates, alerts,
@@ -198,6 +255,11 @@ complete; affected persona and accessibility checks pass.
 - Run the three-OS clean install, previous-version upgrade, required-checksum,
   attestation, persistent-state, and source-setup matrix.
 - Ship native desktop bundles or explicitly narrow the 1.0 desktop promise.
+- Desktop robustness. **Completed 2026-07-10 (0.5.15):** enforce single-instance
+  launch so a second launch surfaces the existing window instead of adding a
+  duplicate tray icon. Remaining: keep the first-load view smooth by moving the
+  collect off the UI isolate so the loading animation never stalls, and confirm
+  clean tray teardown on quit across all three OSes.
 - Exercise the documented inspect-before-run, update, data-preserving uninstall,
   destructive reset, and rollback paths. Automate the checks that can run safely
   on hosted clean machines.
