@@ -5,6 +5,14 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Added a normalized six-value provider provenance contract across snapshots,
+  routing and model candidates, alerts, reports, single-provider checks, MCP
+  schemas, and verification records. Every built-in adapter declares its
+  allowed `source_class`; contradictory evidence and unregistered cache
+  identities fail closed before routing or measured history, machine-scoped
+  telemetry receives an explicit `0.7` confidence factor, and concise human
+  labels distinguish authoritative, fallback, passive, runtime, status-only,
+  and manual evidence without duplicating scope tags.
 - Added a dated product-strategy document and documentation index, and replaced
   the historical roadmap narrative with evidence-based 1.0 gates, dependency-
   ordered work, provider admission criteria, and explicit product measures.

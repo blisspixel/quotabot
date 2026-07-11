@@ -67,6 +67,7 @@ void main() {
 
     expect(q.windows.single.label, 'credit');
     expect(q.windows.single.usedPercent, 100);
+    expect(q.sourceClass.wireName, 'passive_local_evidence');
     expect(q.error, startsWith('out of quota (resets '));
   });
 

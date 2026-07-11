@@ -51,9 +51,24 @@ ProviderQuota? simulateProvider({
   final normalizedState = normalizeSimulationState(state);
   if (id == null || normalizedState == null) return null;
   final displayName = _displayNames[id] ?? _title(id);
+  final sourceClass = inferProviderSourceClass(
+    provider: id,
+    source: null,
+    isLocal: false,
+    perMachine: false,
+  );
+  final perMachine = sourceClass.isMachineScoped;
   if (normalizedState == 'signed-out') {
-    return ProviderQuota.error(
-        id, displayName, 'simulated signed-out state', now);
+    return ProviderQuota(
+      provider: id,
+      displayName: displayName,
+      account: 'unknown',
+      asOf: now,
+      ok: false,
+      error: 'simulated signed-out state',
+      sourceClass: sourceClass,
+      perMachine: perMachine,
+    );
   }
 
   QuotaWindow window(String label, double used, int resetIn) => QuotaWindow(
@@ -112,6 +127,8 @@ ProviderQuota? simulateProvider({
     status:
         normalizedState == 'metadata' ? 'simulated metadata-only state' : null,
     windows: windows,
+    sourceClass: sourceClass,
+    perMachine: perMachine,
   );
 }
 

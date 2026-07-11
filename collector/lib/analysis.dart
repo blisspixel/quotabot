@@ -7,6 +7,11 @@ import 'models.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
 
+/// Provenance discount for measured quota derived from one machine rather than
+/// an authoritative account-wide endpoint. The value is intentionally shared
+/// by passive IDE state and explicit local fallback evidence.
+const double kMachineScopedEvidenceConfidenceFactor = 0.7;
+
 /// Whether a quota window has reached its reset boundary.
 bool windowHasRolledOver(QuotaWindow w, int now) =>
     w.resetsAt != null && w.resetsAt! <= now;
@@ -82,13 +87,24 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   );
 }
 
+/// Whether a local-runtime observation proves that the runtime is reachable
+/// now. Local availability is never served from stale evidence and requires the
+/// same timestamp and provenance integrity used by cloud routing.
+bool isLocalRuntimeAvailableAt(ProviderQuota quota, int now) =>
+    quota.isLocal &&
+    quota.ok &&
+    !quota.stale &&
+    quota.asOf > 0 &&
+    quota.asOf <= now + kQuotaEvidenceClockSkewSeconds &&
+    quota.sourceClassViolation == null;
+
 /// Whether any provider can take work right now: a running local runtime, or a
 /// metered subscription with headroom left. Lets a shell or agent branch on "is
 /// there anywhere to route?" through the CLI exit code.
 bool anyProviderUsable(List<ProviderQuota> quotas, int now) {
   for (final q in quotas) {
     if (q.isLocal) {
-      if (q.ok) return true;
+      if (isLocalRuntimeAvailableAt(q, now)) return true;
     } else if (providerAvailability(q, now).available) {
       return true;
     }
@@ -143,6 +159,7 @@ class RouteCandidate {
   final String account;
   final String? plan;
   final String? source;
+  final ProviderSourceClass sourceClass;
   final bool isLocal;
   final int asOf;
   final bool perMachine;
@@ -242,6 +259,7 @@ class RouteCandidate {
     required this.account,
     required this.plan,
     required this.source,
+    required this.sourceClass,
     required this.isLocal,
     required this.asOf,
     required this.perMachine,
@@ -272,6 +290,7 @@ class RouteCandidate {
         'provider': provider,
         'account': account,
         if (plan != null) 'plan': plan,
+        'source_class': sourceClass.wireName,
         'local': isLocal,
         'headroom_percent': headroom,
         'effective_headroom_percent': effectiveHeadroom,
@@ -755,7 +774,10 @@ double _confidence(ProviderQuota q, double? burnSe, int samples, int now) {
   if (q.isLocal) return fresh;
   if (q.isManual) return fresh * 0.35;
   final adequacy = burnSe == null ? 0.6 : samples / (samples + 4);
-  return (fresh * adequacy).clamp(0.0, 1.0).toDouble();
+  final provenance = q.sourceClass.isMachineScoped
+      ? kMachineScopedEvidenceConfidenceFactor
+      : 1.0;
+  return (fresh * adequacy * provenance).clamp(0.0, 1.0).toDouble();
 }
 
 /// Standard normal CDF via the Abramowitz & Stegun 7.1.26 erf approximation
@@ -934,6 +956,7 @@ RouteSuggestion suggestRoute(
       account: q.account,
       plan: q.plan,
       source: q.source,
+      sourceClass: q.sourceClass,
       isLocal: q.isLocal,
       asOf: q.asOf,
       perMachine: q.perMachine,
@@ -955,7 +978,9 @@ RouteSuggestion suggestRoute(
       stale: q.stale,
       driftReason: q.driftReason,
       driftObservedAt: q.driftObservedAt,
-      available: q.isLocal || (a.available && !capabilityBlocked),
+      available: q.isLocal
+          ? isLocalRuntimeAvailableAt(q, now)
+          : a.available && !capabilityBlocked,
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
       capabilityLimited: capabilityLimited,
@@ -969,7 +994,7 @@ RouteSuggestion suggestRoute(
   final usable = quotas
       .where(
         (q) =>
-            q.isLocal ||
+            isLocalRuntimeAvailableAt(q, now) ||
             q.driftReason != null ||
             (q.suspect == null &&
                 (q.stale || isTrustedQuotaEvidenceAt(q, now)) &&

@@ -25,6 +25,7 @@ class ModelEntry {
   final String account;
   final bool local;
   final String? source;
+  final ProviderSourceClass sourceClass;
   final bool quotaBacked;
 
   /// Remaining headroom percent of the gating quota (null for local runtimes or
@@ -64,6 +65,7 @@ class ModelEntry {
     required this.account,
     required this.local,
     required this.source,
+    required this.sourceClass,
     required this.quotaBacked,
     required this.headroomPercent,
     required this.resetsAt,
@@ -91,6 +93,7 @@ class ModelEntry {
         'quota_backed': quotaBacked,
         if (localReadiness != null) 'local_readiness': localReadiness,
         if (source != null) 'source': source,
+        'source_class': sourceClass.wireName,
         if (headroomPercent != null) 'headroom_percent': headroomPercent,
         if (resetsAt != null) 'resets_at': resetsAt,
         if (gatingWindow != null) 'gating_window': gatingWindow,
@@ -443,11 +446,14 @@ List<ModelEntry> buildModelRegistry(
         account: q.account,
         local: q.isLocal,
         source: q.source,
+        sourceClass: q.sourceClass,
         quotaBacked: quotaBacked,
         headroomPercent: budget?.headroomPercent,
         resetsAt: budget?.resetsAt,
         gatingWindow: budget?.gatingWindow,
-        available: q.isLocal ? q.ok : budget?.available ?? false,
+        available: q.isLocal
+            ? isLocalRuntimeAvailableAt(q, now)
+            : budget?.available ?? false,
         stale: q.stale,
         driftReason: q.driftReason,
         driftObservedAt: q.driftObservedAt,

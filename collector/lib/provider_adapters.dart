@@ -52,6 +52,7 @@ class ProviderAdapterRegistration {
   final String id;
   final String displayName;
   final ProviderAdapterClass adapterClass;
+  final Set<ProviderSourceClass> sourceClasses;
   final ProviderCollector collect;
   final bool multiAccount;
   final bool cached;
@@ -63,6 +64,7 @@ class ProviderAdapterRegistration {
     required this.id,
     required this.displayName,
     required this.adapterClass,
+    required this.sourceClasses,
     required this.collect,
     required this.fixtureKind,
     required this.fixtureFile,
@@ -74,6 +76,9 @@ class ProviderAdapterRegistration {
   bool get localRuntime => adapterClass.quotaKind.isLocal;
 
   bool get accountScopedCache => multiAccount && currentAccounts != null;
+
+  bool allowsSourceClass(ProviderSourceClass value) =>
+      sourceClasses.contains(value);
 }
 
 const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
@@ -81,6 +86,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: claudeProviderId,
     displayName: claudeProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: _collectClaude,
     fixtureKind: ProviderFixtureKind.claudeUsage,
     fixtureFile: 'claude_usage.json',
@@ -89,6 +95,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: codexProviderId,
     displayName: codexProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kLiveOrMachineFallbackSourceClasses,
     collect: _collectCodex,
     fixtureKind: ProviderFixtureKind.codexRateLimits,
     fixtureFile: 'codex_rate_limits.json',
@@ -97,6 +104,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: cursorProviderId,
     displayName: cursorProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kPassiveLocalSourceClasses,
     collect: _collectCursor,
     fixtureKind: ProviderFixtureKind.cursorState,
     fixtureFile: 'cursor_state.json',
@@ -105,6 +113,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: windsurfProviderId,
     displayName: windsurfProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kPassiveLocalSourceClasses,
     collect: _collectWindsurf,
     fixtureKind: ProviderFixtureKind.windsurfState,
     fixtureFile: 'windsurf_state.json',
@@ -113,6 +122,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: kiroProviderId,
     displayName: kiroProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kPassiveLocalSourceClasses,
     collect: _collectKiro,
     fixtureKind: ProviderFixtureKind.kiroUsageState,
     fixtureFile: 'kiro_usage_state.json',
@@ -121,6 +131,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: ollamaProviderId,
     displayName: ollamaProviderName,
     adapterClass: ProviderAdapterClass.localRuntime,
+    sourceClasses: kLocalRuntimeSourceClasses,
     collect: _collectOllama,
     cached: false,
     fixtureKind: ProviderFixtureKind.ollamaTags,
@@ -130,6 +141,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: lmStudioProviderId,
     displayName: lmStudioProviderName,
     adapterClass: ProviderAdapterClass.localRuntime,
+    sourceClasses: kLocalRuntimeSourceClasses,
     collect: _collectLmStudio,
     cached: false,
     fixtureKind: ProviderFixtureKind.lmStudioNativeModels,
@@ -139,6 +151,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: lemonadeProviderId,
     displayName: lemonadeProviderName,
     adapterClass: ProviderAdapterClass.localRuntime,
+    sourceClasses: kLocalRuntimeSourceClasses,
     collect: _collectLemonade,
     cached: false,
     fixtureKind: ProviderFixtureKind.lemonadeModels,
@@ -148,6 +161,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: nvidiaProviderId,
     displayName: nvidiaProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kStatusOnlySourceClasses,
     collect: _collectNvidia,
     cached: false,
     fixtureKind: ProviderFixtureKind.nvidiaModels,
@@ -157,6 +171,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: grokProviderId,
     displayName: grokProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: _collectGrok,
     multiAccount: true,
     currentAccounts: _grokCurrentAccounts,
@@ -167,6 +182,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: antigravityProviderId,
     displayName: antigravityProviderName,
     adapterClass: ProviderAdapterClass.subscription,
+    sourceClasses: kLiveOrMachineFallbackSourceClasses,
     collect: _collectAntigravity,
     multiAccount: true,
     currentAccounts: _antigravityCurrentAccounts,
@@ -179,6 +195,36 @@ ProviderAdapterRegistration? providerAdapterById(String id) {
   final normalized = id.trim().toLowerCase();
   for (final entry in kProviderAdapterRegistry) {
     if (entry.id == normalized) return entry;
+  }
+  return null;
+}
+
+/// A plain reason when a provider observation is structurally invalid or not
+/// admitted by its adapter registration. Manual user entries may be allowed by
+/// verification callers, but built-in adapter collection must set
+/// [allowManual] false.
+String? registeredSourceClassViolation(
+  ProviderQuota quota,
+  ProviderAdapterRegistration? registration, {
+  bool allowManual = true,
+}) {
+  if (registration != null && quota.provider != registration.id) {
+    return 'provider ${quota.provider} does not match registered adapter '
+        '${registration.id}';
+  }
+  final shapeViolation = quota.sourceClassViolation;
+  if (shapeViolation != null) return shapeViolation;
+  if (quota.sourceClass == ProviderSourceClass.manual) {
+    return allowManual ? null : 'built-in adapters cannot emit manual quota';
+  }
+  if (registration == null) {
+    return '${quota.sourceClass.label} is not backed by a registered provider adapter';
+  }
+  if (!registration.allowsSourceClass(quota.sourceClass)) {
+    final allowed =
+        registration.sourceClasses.map((value) => value.label).join(' or ');
+    return '${quota.sourceClass.label} is not allowed for '
+        '${registration.displayName}; expected $allowed';
   }
   return null;
 }

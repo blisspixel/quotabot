@@ -127,7 +127,24 @@ void main() {
     final row = lines.firstWhere((l) => _plain(l).contains('ollama'));
     expect(_plain(row), contains('local'));
     expect(_plain(row), contains('llama3'));
-    expect(_plain(row), contains('(in use, local loaded, this machine)'));
+    expect(_plain(row), contains('(in use, local runtime, loaded)'));
+    expect(_plain(row), isNot(contains('this machine')));
+  });
+
+  test('an idle local runtime uses available without repeating local', () {
+    final lines = _frame([
+      _q(
+        'lemonade',
+        const [],
+        kind: ProviderQuotaKind.local,
+        status: '1 installed, idle',
+      ),
+    ], width: 100);
+    final row =
+        _plain(lines.firstWhere((line) => _plain(line).contains('lemonade')));
+
+    expect(row, contains('(available, local runtime, cold)'));
+    expect(row, isNot(contains('(local, local runtime')));
   });
 
   test('a failed local runtime shows the error and trust state', () {
@@ -140,7 +157,8 @@ void main() {
     ], width: 100);
     final row = _plain(lines.firstWhere((l) => _plain(l).contains('ollama')));
     expect(row, contains('runtime offline'));
-    expect(row, contains('(error, local cold, this machine)'));
+    expect(row, contains('(error, local runtime, cold)'));
+    expect(row, isNot(contains('this machine')));
   });
 
   test('a failed read says so instead of faking a bar', () {
@@ -148,7 +166,7 @@ void main() {
         _frame([_q('grok', const [], ok: false, error: 'token expired')]);
     final row = lines.firstWhere((l) => _plain(l).contains('grok'));
     expect(_plain(row), contains('token expired'));
-    expect(_plain(row), contains('(error, quota plan)'));
+    expect(_plain(row), contains('(error, authoritative, quota plan)'));
     expect(row, isNot(contains('█')));
   });
 
@@ -158,7 +176,9 @@ void main() {
           stale: true),
     ], width: 90);
     expect(
-      lines.any((l) => _plain(l).contains('(cached, quota plan)')),
+      lines.any(
+        (l) => _plain(l).contains('(cached, authoritative, quota plan)'),
+      ),
       isTrue,
     );
     expect(_plain(lines.join('\n')), contains('80% last'));
@@ -177,8 +197,8 @@ void main() {
     );
 
     expect(
-      lines.any(
-          (line) => _plain(line).contains('(provider drift 2h, quota plan)')),
+      lines.any((line) => _plain(line)
+          .contains('(provider drift 2h, authoritative, quota plan)')),
       isTrue,
     );
     expect(_plain(lines.join('\n')), contains('80% last'));
@@ -197,39 +217,83 @@ void main() {
     final lines = _frame([legacy], width: 100);
 
     expect(
-      lines.any(
-          (line) => _plain(line).contains('(provider drift 2h, quota plan)')),
+      lines.any((line) => _plain(line)
+          .contains('(provider drift 2h, authoritative, quota plan)')),
       isTrue,
     );
     expect(_plain(lines.join('\n')), isNot(contains('(error,')));
   });
 
-  test('top rows label live quota plans, manual quota, and metadata-only reads',
-      () {
+  test('top rows label all six normalized provider source classes', () {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+      _q(
+        'codex',
+        [QuotaWindow(label: 'weekly', usedPercent: 25)],
+        perMachine: true,
+      ),
+      _q(
+        'cursor',
+        [QuotaWindow(label: 'monthly', usedPercent: 30)],
+        perMachine: true,
+      ),
+      _q(
+        'ollama',
+        const [],
+        kind: ProviderQuotaKind.local,
+        status: 'llama3 loaded',
+        active: true,
+        perMachine: true,
+      ),
+      _q('nvidia', const [], status: 'free trial available; balance unknown'),
       _q(
         'manual-ai',
         [QuotaWindow(label: 'monthly', usedPercent: 45)],
         source: providerQuotaManualSource,
       ),
-      _q('nvidia', const [], status: 'free trial available; balance unknown'),
-    ], width: 120);
+    ], width: 140);
 
-    expect(lines.any((l) => _plain(l).contains('(live, quota plan)')), isTrue);
-    expect(lines.any((l) => _plain(l).contains('(live, manual)')), isTrue);
     expect(
-      lines.any((l) => _plain(l).contains('(metadata, metadata only)')),
+      lines.any(
+        (l) => _plain(l).contains('(live, authoritative, quota plan)'),
+      ),
       isTrue,
     );
+    expect(
+      lines.any(
+        (l) => _plain(l).contains('(live, this-machine fallback, quota plan)'),
+      ),
+      isTrue,
+    );
+    expect(
+      lines.any(
+        (l) => _plain(l).contains('(live, passive local, metered plan)'),
+      ),
+      isTrue,
+    );
+    expect(
+      lines.any(
+        (l) => _plain(l).contains('(in use, local runtime, loaded)'),
+      ),
+      isTrue,
+    );
+    expect(
+      lines.any((l) => _plain(l).contains('(metadata, status only)')),
+      isTrue,
+    );
+    expect(lines.any((l) => _plain(l).contains('(live, manual)')), isTrue);
+    final plain = _plain(lines.join('\n'));
+    expect(plain, isNot(contains('local runtime, loaded, this machine')));
+    expect(plain, isNot(contains('passive local, metered plan, this machine')));
   });
 
-  test('a status-only quota-plan provider is labeled metadata-only', () {
+  test('an authoritative metadata snapshot keeps its normalized provenance',
+      () {
     final lines = _frame([
       _q('claude', const [], status: 'quota endpoint unavailable'),
     ], width: 100);
     final row = _plain(lines.firstWhere((l) => _plain(l).contains('claude')));
-    expect(row, contains('(metadata, metadata only)'));
+    expect(row, contains('(metadata, authoritative)'));
     expect(row, isNot(contains('quota plan')));
   });
 
@@ -599,7 +663,9 @@ void main() {
     );
     final lines = _frame([q], width: 90);
     expect(
-      lines.any((l) => _plain(l).contains('(cached 8h, quota plan)')),
+      lines.any(
+        (l) => _plain(l).contains('(cached 8h, authoritative, quota plan)'),
+      ),
       isTrue,
     );
     expect(_plain(lines.join('\n')), contains('56% last'));
@@ -676,7 +742,7 @@ void main() {
       width: 86,
     );
     final spentRow = _plain(lines.firstWhere((l) => l.contains('spent')));
-    expect(spentRow, contains('(live, quota plan)'));
+    expect(spentRow, contains('(live, authoritative, quota plan)'));
     expect(spentRow, contains('@work@example.com'));
   });
 
@@ -762,14 +828,13 @@ void main() {
     final wide = _frame([q], width: 110);
     final narrow = _frame([q], width: 60);
     expect(
-      wide.any(
-          (l) => _plain(l).contains('(in use, local loaded, this machine)')),
+      wide.any((l) => _plain(l).contains('(in use, local runtime, loaded)')),
       isTrue,
     );
     final row =
         _plain(narrow.firstWhere((l) => _plain(l).contains('qwen2.5-coder')));
-    expect(row, isNot(contains('local loaded')));
-    expect(row, isNot(contains('local lo')), reason: 'no clipped tag');
+    expect(row, isNot(contains('local runtime')));
+    expect(row, isNot(contains('local run')), reason: 'no clipped tag');
     expect(row, contains('loaded'));
   });
 

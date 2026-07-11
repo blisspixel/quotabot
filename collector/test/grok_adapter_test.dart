@@ -312,6 +312,7 @@ void main() {
 
     expect(q.single.windows.single.usedPercent, 17);
     expect(q.single.windows.single.resetsAt, now + 3600);
+    expect(q.single.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
   test('non-ok Grok billing responses are plain account-only notes', () async {

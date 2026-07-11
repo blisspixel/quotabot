@@ -174,9 +174,10 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   last-trusted quota carries the same drift fields and is unavailable.
 - `quotabot watch` emits `quotabot.alert.v1`: `kind` (`low_quota` or
   `projected_waste`), `provider`, `window`, `severity` (`amber`/`red`),
-  `free_percent`, `as_of`, and, when a better route exists, `route_to` with
-  `route_free_percent`/`route_is_local`. Projected-waste alerts add
-  `projected_waste_percent` and `burn_percent_per_hour`. Metadata only.
+  `source_class`, `free_percent`, `as_of`, and, when a better route exists,
+  `route_to` with `route_source_class`, `route_free_percent`, and
+  `route_is_local`. Projected-waste alerts add `projected_waste_percent` and
+  `burn_percent_per_hour`. Metadata only; untrusted evidence cannot fire.
 - `quotas://alerts` is `quotabot.alerts.v1`: `generated_at`, `last_alert_at`,
   and the last fired `quotabot.alert.v1` objects. Subscribe to it to react to
   amber/red crossings without polling.

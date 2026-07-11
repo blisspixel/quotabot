@@ -518,6 +518,7 @@ void main() {
       );
 
       expect(line, contains('Next: Claude'));
+      expect(line, contains('authoritative'));
       expect(line, contains('80% free'));
       expect(line, contains('60% after burn'));
       expect(line, contains('medium confidence (67%)'));
@@ -538,6 +539,47 @@ void main() {
       );
 
       expect(line, contains('Next: Codex (work@example.com)'));
+      expect(line, contains('authoritative'));
+    });
+
+    test('names machine fallback provenance without a duplicate scope tag', () {
+      const now = 1782046566;
+      final codex = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        asOf: now,
+        sourceClass: ProviderSourceClass.thisMachineFallback,
+        perMachine: true,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+
+      final line = desktopRouteSignalLine(suggestRoute([codex], now), [
+        codex,
+      ], now);
+
+      expect(line, contains('this-machine fallback'));
+      expect(line, isNot(contains('(this machine)')));
+    });
+
+    test('labels a local route without repeating local runtime', () {
+      const now = 1782046566;
+      final ollama = ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'local',
+        asOf: now,
+        kind: ProviderQuotaKind.local,
+      );
+
+      final line = desktopRouteSignalLine(
+        suggestRoute([ollama], now, preferLocal: true),
+        [ollama],
+        now,
+      );
+
+      expect(line, startsWith('Next: Ollama | local runtime | fallback'));
+      expect(line, isNot(contains('local runtime | local fallback')));
     });
   });
 
@@ -549,7 +591,7 @@ void main() {
         now,
       );
 
-      expect(line, 'live | quota plan | captured 0s ago');
+      expect(line, 'live | authoritative | quota plan | captured 0s ago');
     });
 
     test('labels cached manual quota without plan identity noise', () {
@@ -581,10 +623,13 @@ void main() {
         now,
       );
 
-      expect(line, 'provider drift | quota plan | captured 0s ago');
+      expect(
+        line,
+        'provider drift | authoritative | quota plan | captured 0s ago',
+      );
     });
 
-    test('labels local loaded scope explicitly', () {
+    test('labels an active local runtime once', () {
       const now = 1782046566;
       final line = desktopProviderTrustLine(
         ProviderQuota(
@@ -599,7 +644,24 @@ void main() {
         now,
       );
 
-      expect(line, 'in use | local loaded | this machine | captured 0s ago');
+      expect(line, 'in use | local runtime | captured 0s ago');
+    });
+
+    test('labels an idle local runtime without claiming it is active', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: '2 models',
+          kind: ProviderQuotaKind.local,
+          perMachine: true,
+          asOf: now,
+        ),
+        now,
+      );
+
+      expect(line, 'available | local runtime | captured 0s ago');
     });
 
     test('labels status-only metadata without claiming live quota', () {
@@ -615,10 +677,10 @@ void main() {
         now,
       );
 
-      expect(line, 'metadata | metadata only | captured 0s ago');
+      expect(line, 'metadata | status only | captured 0s ago');
     });
 
-    test('labels status-only per-machine fallback explicitly', () {
+    test('labels this-machine fallback without repeated scope', () {
       const now = 1782046566;
       final line = desktopProviderTrustLine(
         ProviderQuota(
@@ -632,10 +694,24 @@ void main() {
         now,
       );
 
-      expect(
-        line,
-        'local fallback | metadata only | this machine | captured 0s ago',
+      expect(line, 'metadata | this-machine fallback | captured 0s ago');
+    });
+
+    test('labels passive local evidence without repeating machine scope', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'cursor',
+          displayName: 'Cursor',
+          account: 'user@example.com',
+          asOf: now,
+          perMachine: true,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: 20)],
+        ),
+        now,
       );
+
+      expect(line, 'live | passive local | metered plan | captured 0s ago');
     });
   });
 }

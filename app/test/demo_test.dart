@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/demo.dart';
+import 'package:quotabot_collector/models.dart';
 
 void main() {
   test('demo fleet is complete, synthetic, and internally consistent', () {
@@ -20,6 +21,7 @@ void main() {
     expect(data.where((quota) => !quota.isLocal), hasLength(5));
 
     for (final quota in data) {
+      expect(quota.sourceClassViolation, isNull, reason: quota.provider);
       expect(quota.asOf, inInclusiveRange(before, after));
       expect(quota.account, isNotEmpty);
       if (quota.isLocal) {
@@ -35,6 +37,9 @@ void main() {
         }
       }
     }
+    final cursor = data.singleWhere((quota) => quota.provider == 'cursor');
+    expect(cursor.sourceClass, ProviderSourceClass.passiveLocalEvidence);
+    expect(cursor.perMachine, isTrue);
   });
 
   test('demo analytics are bounded, deterministic, and textured', () {

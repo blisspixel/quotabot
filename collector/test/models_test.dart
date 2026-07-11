@@ -206,6 +206,81 @@ void main() {
       expect(ProviderQuota.fromJson(q.toJson()).isManual, isTrue);
     });
 
+    test('round-trips every normalized source class', () {
+      expect(
+        ProviderSourceClass.values.map((value) => value.wireName),
+        ProviderSourceClass.wireValues,
+      );
+      for (final sourceClass in ProviderSourceClass.values) {
+        final isLocal = sourceClass == ProviderSourceClass.localRuntime;
+        final isManual = sourceClass == ProviderSourceClass.manual;
+        final machineScoped = sourceClass.isMachineScoped;
+        final q = ProviderQuota(
+          provider: isLocal ? 'ollama' : 'custom',
+          displayName: 'Provider',
+          account: 'default',
+          asOf: 1,
+          source: isManual ? providerQuotaManualSource : null,
+          sourceClass: sourceClass,
+          kind: isLocal
+              ? ProviderQuotaKind.local
+              : ProviderQuotaKind.subscription,
+          perMachine: machineScoped,
+        );
+
+        expect(q.toJson()['source_class'], sourceClass.wireName);
+        expect(ProviderQuota.fromJson(q.toJson()).sourceClass, sourceClass);
+      }
+    });
+
+    test('infers legacy source classes without upgrading weak evidence', () {
+      ProviderQuota legacy(String provider,
+              {String? source,
+              String kind = providerQuotaSubscriptionKind,
+              bool perMachine = false}) =>
+          ProviderQuota.fromJson({
+            'provider': provider,
+            'display_name': provider,
+            'account': 'default',
+            'source': source,
+            'kind': kind,
+            'per_machine': perMachine,
+            'as_of': 1,
+            'windows': const <Map<String, Object?>>[],
+          });
+
+      expect(
+          legacy('claude').sourceClass, ProviderSourceClass.authoritativeLive);
+      expect(legacy('codex', perMachine: true).sourceClass,
+          ProviderSourceClass.thisMachineFallback);
+      expect(legacy('cursor').sourceClass,
+          ProviderSourceClass.passiveLocalEvidence);
+      expect(legacy('ollama', kind: providerQuotaLocalKind).sourceClass,
+          ProviderSourceClass.localRuntime);
+      expect(legacy('nvidia').sourceClass, ProviderSourceClass.statusOnly);
+      expect(legacy('custom', source: providerQuotaManualSource).sourceClass,
+          ProviderSourceClass.manual);
+      expect(
+        () => legacy('custom'),
+        throwsFormatException,
+        reason: 'legacy inference must not admit an unregistered provider',
+      );
+    });
+
+    test('rejects an explicit unknown source class', () {
+      expect(
+        () => ProviderQuota.fromJson({
+          'provider': 'claude',
+          'display_name': 'Claude',
+          'account': 'default',
+          'source_class': 'future_class',
+          'as_of': 1,
+          'windows': const <Map<String, Object?>>[],
+        }),
+        throwsFormatException,
+      );
+    });
+
     test('round-trips through json', () {
       final q = ProviderQuota(
         provider: 'claude',

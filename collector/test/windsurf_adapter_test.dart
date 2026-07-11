@@ -91,6 +91,7 @@ void main() {
     expect(q.windows.firstWhere((w) => w.label == 'daily').usedPercent, 80);
     expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 75);
     expect(q.windows.every((w) => w.resetsAt != null), isTrue);
+    expect(q.sourceClass.wireName, 'passive_local_evidence');
   });
 
   test('reads direct quota percent strings and separate account rows',

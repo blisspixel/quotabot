@@ -66,6 +66,7 @@ void main() {
     expect(json['schema'], 'quotabot.check.v1');
     expect(json['as_of'], isA<int>());
     expect(json['provider'], 'claude');
+    expect(json['source_class'], 'authoritative_live');
     expect(json['available'], isFalse);
     expect(json['headroom_percent'], 0);
   });
@@ -83,6 +84,7 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.check.v1');
     expect(json['provider'], 'grok');
+    expect(json['source_class'], 'authoritative_live');
     expect(json['available'], isFalse);
     expect(json['stale'], isTrue);
     expect(json['headroom_percent'], 48);
@@ -99,6 +101,7 @@ void main() {
 
     expectExitCode(result, 69);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['source_class'], 'authoritative_live');
     expect(json['available'], isFalse);
     expect(json['stale'], isTrue);
     expect(json['headroom_percent'], 37);
@@ -119,7 +122,9 @@ void main() {
     expectExitCode(result, 69);
     final out = result.stdout as String;
     expect(out, contains('(provider drift)'));
+    expect(out, contains('(authoritative)'));
     expect(out, isNot(contains('(cached)')));
+    expect(out, isNot(contains('authoritative, authoritative')));
     expect(out, contains('provider drift:'));
   });
 
@@ -197,7 +202,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[provider drift, quota plan'));
+    expect(out, contains('[provider drift, authoritative, quota plan'));
     expect(out, contains('37% last trusted'));
     expect(out, contains('unavailable'));
     expect(out, isNot(contains('37% last known')));
@@ -214,7 +219,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[live, quota plan, captured'));
+    expect(out, contains('[live, authoritative, quota plan, captured'));
     expect(out, isNot(contains('claude (simulated)')));
   });
 
@@ -226,10 +231,11 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[live, quota plan'));
+    expect(out, contains('[live, authoritative, quota plan'));
     expect(out, contains('you@example.com'));
-    expect(out, contains('local loaded'));
-    expect(out, contains('local cold'));
+    expect(out, contains('local runtime, loaded'));
+    expect(out, contains('local runtime, cold'));
+    expect(out, isNot(contains('this machine')));
     expect(out, contains('captured'));
   });
 
@@ -241,7 +247,8 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('on grok [live, quota plan, you@example.com'));
+    expect(out,
+        contains('on grok [live, authoritative, quota plan, you@example.com'));
     expect(out, contains('captured'));
   });
 
@@ -268,7 +275,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[live, quota plan, captured'));
+    expect(out, contains('[live, authoritative, quota plan, captured'));
     expect(out, isNot(contains('Claude (simulated)')));
   });
 
@@ -282,7 +289,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[error, quota plan, captured'));
+    expect(out, contains('[error, authoritative, quota plan, captured'));
     expect(out, contains('simulated signed-out state'));
   });
 
@@ -297,7 +304,12 @@ void main() {
     expectExitCode(result, 0);
     final out = result.stdout as String;
     expect(out, contains('PROVIDER DRIFT'));
-    expect(out, contains('[provider drift, quota plan, captured 60m ago]'));
+    expect(
+      out,
+      contains(
+        '[provider drift, authoritative, quota plan, captured 60m ago]',
+      ),
+    );
     expect(out, contains('usage fell'));
     expect(out, contains('quotabot verify'));
   });
@@ -311,10 +323,16 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[live, quota plan, you@example.com'));
-    expect(out, contains('[in use, local loaded, this machine'));
+    expect(
+      out,
+      contains('[live, authoritative, quota plan, you@example.com'),
+    );
+    expect(out, contains('[live, passive local, metered plan, captured'));
+    expect(out, contains('[in use, local runtime, loaded, captured'));
+    expect(out, contains('[available, local runtime, cold, captured'));
     expect(out, isNot(contains('note: this machine only')));
     expect(out, isNot(contains('local fallback; other devices may differ')));
+    expect(out, isNot(contains('local runtime, loaded, this machine')));
   });
 
   test('doctor provenance does not call plan strings account identities', () {
@@ -413,7 +431,7 @@ void main() {
     final out = result.stdout as String;
     expect(out, contains('[red] Claude 5h at 0% free'));
     expect(out, contains('fallback: wait for claude'));
-    expect(out, contains('[live, quota plan, captured'));
+    expect(out, contains('[live, authoritative, quota plan, captured'));
     expect(out, isNot(contains('simulated')));
   });
 
@@ -425,6 +443,7 @@ void main() {
       provider: 'codex',
       displayName: 'Codex',
       account: 'work@example.com',
+      sourceClass: ProviderSourceClass.authoritativeLive,
       window: 'weekly',
       severity: AlertSeverity.red,
       freePercent: 4,
@@ -432,6 +451,7 @@ void main() {
       routeTo: 'claude',
       routeDisplayName: 'Claude',
       routeAccount: 'home@example.com',
+      routeSourceClass: ProviderSourceClass.authoritativeLive,
       routeFreePercent: 70,
     );
     final provenance = cli.quotaAlertProvenance(
@@ -458,8 +478,9 @@ void main() {
 
     expect(alert.message, contains('work@example.com'));
     expect(alert.message, contains('home@example.com'));
-    expect(provenance, contains('live'));
+    expect(provenance, contains('live, authoritative, quota plan'));
     expect(provenance, contains('route cached'));
+    expect(provenance, contains('route authoritative'));
     expect(provenance, contains('route captured 10m ago'));
     expect(provenance, isNot(contains('work@example.com')));
     expect(provenance, isNot(contains('home@example.com')));

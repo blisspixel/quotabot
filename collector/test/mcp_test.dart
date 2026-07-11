@@ -98,6 +98,7 @@ void main() {
       final providers = snap['providers'] as List;
       expect(providers, hasLength(3));
       expect((providers.first as Map)['provider'], 'claude');
+      expect((providers.first as Map)['source_class'], 'authoritative_live');
       expect(validateQuotabotV1Snapshot(snap), isEmpty);
     });
 
@@ -109,6 +110,7 @@ void main() {
     test('mostHeadroomResponse names the freest provider', () {
       final r = mostHeadroomResponse(_fixture(), _now);
       expect(r['provider'], 'claude');
+      expect(r['source_class'], 'authoritative_live');
       expect(r['headroom_percent'], 80);
       expect(r['stale'], isFalse);
     });
@@ -147,7 +149,9 @@ void main() {
       final r = suggestResponse(_fixture(), _now);
       expect(r['schema'], 'quotabot.suggest.v1');
       expect(r['routing_policy'], 'balanced');
-      expect((r['recommended'] as Map<String, dynamic>)['provider'], 'claude');
+      final recommended = r['recommended'] as Map<String, dynamic>;
+      expect(recommended['provider'], 'claude');
+      expect(recommended['source_class'], 'authoritative_live');
       expect(r['fallback'], isA<Map<String, dynamic>>());
       expect(r['ranked'], isA<List<Object?>>());
     });
@@ -203,6 +207,7 @@ void main() {
     test('availabilityResponse answers for a known provider', () {
       final r = availabilityResponse(_fixture(), _now, 'CLAUDE', null);
       expect(r['provider'], 'claude');
+      expect(r['source_class'], 'authoritative_live');
       expect(r['available'], isTrue);
       expect(r['headroom_percent'], 80);
     });
@@ -219,6 +224,17 @@ void main() {
       expect(r['available'], isFalse);
       expect(r['stale'], isTrue);
       expect(r['headroom_percent'], 34);
+    });
+
+    test('availabilityResponse does not treat stale local runtime as available',
+        () {
+      final stale = _local('ollama').asStale('runtime not rechecked');
+
+      final r = availabilityResponse([stale], _now, 'ollama', null);
+
+      expect(r['provider'], 'ollama');
+      expect(r['available'], isFalse);
+      expect(r['stale'], isTrue);
     });
 
     test('availabilityResponse carries additive provider-drift evidence', () {

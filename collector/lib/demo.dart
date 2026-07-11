@@ -39,15 +39,24 @@ List<ProviderQuota> demoProviders(int now) {
     String account,
     String plan,
     List<QuotaWindow> windows,
-  ) =>
-      ProviderQuota(
-        provider: id,
-        displayName: name,
-        account: account,
-        plan: plan,
-        asOf: now,
-        windows: windows,
-      );
+  ) {
+    final sourceClass = inferProviderSourceClass(
+      provider: id,
+      source: null,
+      isLocal: false,
+      perMachine: false,
+    );
+    return ProviderQuota(
+      provider: id,
+      displayName: name,
+      account: account,
+      plan: plan,
+      asOf: now,
+      windows: windows,
+      sourceClass: sourceClass,
+      perMachine: sourceClass.isMachineScoped,
+    );
+  }
 
   LocalModel m(
     String name, {

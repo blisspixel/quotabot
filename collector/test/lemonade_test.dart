@@ -27,6 +27,7 @@ void main() {
       expect(q.isLocal, isTrue);
       expect(q.ok, isTrue);
       expect(q.account, contains('2'));
+      expect(q.sourceClass.wireName, 'local_runtime');
     });
 
     test('uses the current default port and honors host overrides', () {

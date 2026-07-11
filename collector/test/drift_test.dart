@@ -158,6 +158,8 @@ void main() {
       required int asOf,
       String account = 'a',
       String? source,
+      ProviderSourceClass? sourceClass,
+      bool perMachine = false,
       bool stale = false,
       String? suspect,
       String plan = 'pro',
@@ -170,6 +172,8 @@ void main() {
           account: account,
           plan: plan,
           source: source,
+          sourceClass: sourceClass,
+          perMachine: perMachine,
           asOf: asOf,
           stale: stale,
           suspect: suspect,
@@ -233,8 +237,14 @@ void main() {
         asOf: 200,
         source: providerQuotaManualSource,
       );
+      final changedSourceClass = evidence(
+        used: 10,
+        asOf: 200,
+        sourceClass: ProviderSourceClass.thisMachineFallback,
+        perMachine: true,
+      );
 
-      for (final fresh in [changedAccount, changedSource]) {
+      for (final fresh in [changedAccount, changedSource, changedSourceClass]) {
         final admission = admitQuotaEvidence(
           fresh,
           previous,
@@ -243,6 +253,35 @@ void main() {
         expect(admission.shouldPersist, isTrue);
         expect(admission.snapshot, same(fresh));
       }
+    });
+
+    test('invalid source-class evidence is quarantined and never trusted', () {
+      final invalid = evidence(
+        used: 20,
+        asOf: 100,
+        sourceClass: ProviderSourceClass.thisMachineFallback,
+      );
+
+      expect(isTrustedQuotaEvidence(invalid), isFalse);
+      final admission = admitQuotaEvidence(invalid, null, observedAt: 110);
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.snapshot.ok, isFalse);
+      expect(admission.snapshot.windows, isEmpty);
+      expect(admission.driftReason, contains('machine-scoped'));
+
+      final disallowed = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'a',
+        asOf: 100,
+        sourceClass: ProviderSourceClass.passiveLocalEvidence,
+        perMachine: true,
+        windows: [win('5h', 20, 5000)],
+      );
+      expect(isTrustedQuotaEvidence(disallowed), isFalse);
+      final rejected = admitQuotaEvidence(disallowed, null, observedAt: 110);
+      expect(rejected.shouldPersist, isFalse);
+      expect(rejected.driftReason, contains('not admitted for claude'));
     });
 
     test('legacy suspect evidence cannot be laundered by a repeated read', () {

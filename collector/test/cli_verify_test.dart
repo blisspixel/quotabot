@@ -40,8 +40,17 @@ void main() {
     expect(providers, hasLength(1));
     final claude = providers.single as Map<String, dynamic>;
     expect(claude['provider'], 'claude');
+    expect(claude['source_class'], 'authoritative_live');
     expect(claude['state'], 'live');
     expect(claude['passed'], isTrue);
+    final providerChecks =
+        (claude['checks'] as List).cast<Map<String, dynamic>>();
+    expect(
+      providerChecks.any(
+        (check) => check['id'] == 'source_class' && check['status'] == 'pass',
+      ),
+      isTrue,
+    );
     final fleet = (json['fleet_checks'] as List).cast<Map<String, dynamic>>();
     expect(
       fleet.any((c) => c['id'] == 'schema_contract' && c['status'] == 'pass'),
@@ -77,6 +86,7 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['passed'], isTrue);
     final grok = (json['providers'] as List).single as Map<String, dynamic>;
+    expect(grok['source_class'], 'authoritative_live');
     expect(grok['state'], 'error');
     expect(grok['passed'], isTrue);
     final checks = (grok['checks'] as List).cast<Map<String, dynamic>>();
@@ -134,7 +144,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[live, quota plan, captured'));
+    expect(out, contains('[live, authoritative, quota plan, captured'));
   });
 
   test('verify human output labels truthful read failures', () async {
@@ -147,7 +157,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[error, quota plan, captured'));
+    expect(out, contains('[error, authoritative, quota plan, captured'));
     expect(out, contains('read_or_reason'));
     expect(out, contains('simulated signed-out state'));
   });
@@ -162,7 +172,10 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
-    expect(out, contains('[cached, quota plan, captured 60m ago]'));
+    expect(
+      out,
+      contains('[cached, authoritative, quota plan, captured 60m ago]'),
+    );
     expect(out, contains('stale_honesty'));
     expect(out, contains('simulated stale cache'));
   });
@@ -182,7 +195,12 @@ void main() {
     expect(out, contains('FAIL'));
     expect(out, contains('provider_drift'));
     expect(out, contains('usage fell'));
-    expect(out, contains('[provider drift, quota plan, captured 60m ago]'));
+    expect(
+      out,
+      contains(
+        '[provider drift, authoritative, quota plan, captured 60m ago]',
+      ),
+    );
   });
 
   test('verify human output explains metadata-only snapshots', () async {
@@ -203,10 +221,12 @@ void main() {
     expectExitCode(quotaPlanResult, 0);
     final cursorOut = cursorResult.stdout as String;
     final quotaPlanOut = quotaPlanResult.stdout as String;
+    expect(cursorOut, contains('[metadata, passive local, captured'));
+    expect(quotaPlanOut, contains('[metadata, authoritative, captured'));
     for (final out in [cursorOut, quotaPlanOut]) {
-      expect(out, contains('[metadata, metadata only, captured'));
       expect(out, contains('read_or_reason'));
       expect(out, contains('simulated metadata-only state'));
+      expect(out, isNot(contains('metadata only')));
     }
   });
 

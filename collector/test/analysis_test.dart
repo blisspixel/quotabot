@@ -11,8 +11,9 @@ ProviderQuota _q(
   bool stale = false,
   ProviderQuotaKind kind = ProviderQuotaKind.subscription,
   String? source,
+  ProviderSourceClass? sourceClass,
   int asOf = _now,
-  bool perMachine = false,
+  bool? perMachine,
   String? pipeHealth,
   int? retryAfterSeconds,
   String? suspect,
@@ -28,7 +29,9 @@ ProviderQuota _q(
       stale: stale,
       kind: kind,
       source: source,
-      perMachine: perMachine,
+      sourceClass: sourceClass,
+      perMachine:
+          perMachine ?? const {'cursor', 'windsurf', 'kiro'}.contains(id),
       pipeHealth: pipeHealth,
       retryAfterSeconds: retryAfterSeconds,
       suspect: suspect,
@@ -61,6 +64,10 @@ void main() {
     final cached = _q('grok', [QuotaWindow(label: 'weekly', usedPercent: 20)],
         stale: true);
     expect(anyProviderUsable([cached], _now), isFalse);
+
+    final staleLocal = _local('ollama').asStale('runtime not rechecked');
+    expect(anyProviderUsable([staleLocal], _now), isFalse);
+    expect(suggestRoute([staleLocal], _now).recommended, isNull);
   });
 
   test('non-positive and future snapshot timestamps cannot route directly', () {
@@ -517,6 +524,31 @@ void main() {
       expect(s.recommended?.confidence, 0.35);
     });
 
+    test('machine-scoped evidence carries the documented confidence factor',
+        () {
+      final authoritative = suggestRoute([
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+      ], _now)
+          .recommended!;
+      final passive = suggestRoute([
+        _q('cursor', [QuotaWindow(label: 'monthly', usedPercent: 20)]),
+      ], _now)
+          .recommended!;
+      final fallback = suggestRoute([
+        _q(
+          'codex',
+          [QuotaWindow(label: 'weekly', usedPercent: 20)],
+          sourceClass: ProviderSourceClass.thisMachineFallback,
+          perMachine: true,
+        ),
+      ], _now)
+          .recommended!;
+
+      expect(authoritative.confidence, 0.6);
+      expect(passive.confidence, 0.6 * kMachineScopedEvidenceConfidenceFactor);
+      expect(fallback.confidence, 0.6 * kMachineScopedEvidenceConfidenceFactor);
+    });
+
     test('candidates retain trust provenance for human route surfaces', () {
       final s = suggestRoute([
         _q(
@@ -524,16 +556,17 @@ void main() {
           [QuotaWindow(label: 'monthly', usedPercent: 10)],
           source: providerQuotaManualSource,
           stale: true,
-          perMachine: true,
           asOf: _now - 600,
         ),
       ], _now);
 
       final candidate = s.ranked.single;
       expect(candidate.source, providerQuotaManualSource);
+      expect(candidate.sourceClass, ProviderSourceClass.manual);
+      expect(candidate.toJson()['source_class'], 'manual');
       expect(candidate.spendClass, 'manual');
       expect(candidate.asOf, _now - 600);
-      expect(candidate.perMachine, isTrue);
+      expect(candidate.perMachine, isFalse);
       expect(candidate.stale, isTrue);
       expect(candidate.available, isFalse);
       expect(candidate.toJson(), isNot(contains('spend_class')));

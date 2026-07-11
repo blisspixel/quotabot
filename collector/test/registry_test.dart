@@ -12,7 +12,7 @@ ProviderQuota _cloud(
   String? source,
   int? resetsAt,
   String account = 'a',
-  bool perMachine = false,
+  bool? perMachine,
   List<ModelQuota> modelQuotas = const [],
 }) =>
     ProviderQuota(
@@ -20,7 +20,8 @@ ProviderQuota _cloud(
       displayName: id,
       account: account,
       asOf: _now,
-      perMachine: perMachine,
+      perMachine:
+          perMachine ?? const {'cursor', 'windsurf', 'kiro'}.contains(id),
       stale: stale,
       source: source,
       modelQuotas: modelQuotas,
@@ -56,11 +57,46 @@ void main() {
     expect(reg, hasLength(1));
     final e = reg.first;
     expect(e.provider, 'claude');
+    expect(e.sourceClass, ProviderSourceClass.authoritativeLive);
+    expect(e.toJson()['source_class'], 'authoritative_live');
     expect(e.local, isFalse);
     expect(e.headroomPercent, 80);
     expect(e.gatingWindow, 'weekly');
     expect(e.available, isTrue);
     expect(e.model.contextTokens, 200000);
+  });
+
+  test('invalid local provenance cannot make a model available', () {
+    final invalid = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: 'local',
+      asOf: _now,
+      kind: ProviderQuotaKind.local,
+      sourceClass: ProviderSourceClass.authoritativeLive,
+      models: const [ModelInfo(id: 'unsafe-local', local: true)],
+    );
+
+    final registry = buildModelRegistry([invalid], _now);
+    final suggestion = suggestModel([invalid], _now);
+
+    expect(registry, hasLength(1));
+    expect(registry.single.available, isFalse);
+    expect(suggestion.recommended, isNull);
+    expect(suggestion.ranked.single.available, isFalse);
+  });
+
+  test('stale local runtime evidence cannot make a model available', () {
+    final stale = _local(
+      'ollama',
+      const [ModelInfo(id: 'stale-local', local: true)],
+    ).asStale('runtime not rechecked');
+
+    final registry = buildModelRegistry([stale], _now);
+    final suggestion = suggestModel([stale], _now);
+
+    expect(registry.single.available, isFalse);
+    expect(suggestion.recommended, isNull);
   });
 
   test('model quotas gate entries and exact matches beat family quotas', () {
@@ -865,6 +901,7 @@ void main() {
     expect(json['id'], 'claude-opus');
     expect(json['tools'], isTrue);
     expect(json['provider'], 'claude');
+    expect(json['source_class'], 'authoritative_live');
     expect(json['headroom_percent'], 80);
     expect(json['gating_window'], 'weekly');
     expect(json['quota_backed'], isTrue);

@@ -159,11 +159,14 @@ ProviderQuota admitAndCacheQuotaEvidence(
   ProviderQuota fresh, {
   required int observedAt,
   required int observedAtMicros,
+  String? rejectionReason,
 }) {
-  final unusableReason = unusableQuotaEvidenceDriftReason(
-    fresh,
-    observedAt: observedAt,
-  );
+  final unusableReason = rejectionReason == null
+      ? unusableQuotaEvidenceDriftReason(
+          fresh,
+          observedAt: observedAt,
+        )
+      : boundedQuotaDriftReason(rejectionReason);
   if ((!isTrustedQuotaEvidence(fresh) && unusableReason == null) ||
       observedAtMicros < 0) {
     return fresh;
@@ -204,6 +207,7 @@ ProviderQuota admitAndCacheQuotaEvidence(
         fresh,
         baseline,
         observedAt: observedAt,
+        rejectionReason: rejectionReason,
       );
       if (admission.shouldPersist) {
         _writeTrustedSnapshotUnlocked(admission.snapshot, observedAtMicros);
@@ -242,6 +246,7 @@ ProviderQuota admitAndCacheQuotaEvidence(
       fresh,
       baseline,
       observedAt: observedAt,
+      rejectionReason: rejectionReason,
     );
   }
 }
@@ -250,7 +255,15 @@ ProviderQuota _lockUnavailableAdmissionResult(
   ProviderQuota fresh,
   ProviderQuota? baseline, {
   required int observedAt,
+  String? rejectionReason,
 }) {
+  if (rejectionReason != null) {
+    final reason = boundedQuotaDriftReason(rejectionReason);
+    if (baseline != null && isTrustedQuotaEvidence(baseline)) {
+      return baseline.withProviderDrift(reason, observedAt);
+    }
+    return quarantineUnusableQuotaEvidence(fresh, reason, observedAt);
+  }
   if (baseline != null && isLegacySuspectQuotaEvidence(baseline)) {
     return quarantineLegacyQuotaEvidence(
       baseline,
@@ -273,6 +286,7 @@ ProviderQuota _lockUnavailableAdmissionResult(
     account: fresh.account,
     plan: fresh.plan,
     source: fresh.source,
+    sourceClass: fresh.sourceClass,
     ok: false,
     error: 'quota evidence admission unavailable; no trusted snapshot is '
         'available',
@@ -355,6 +369,7 @@ ProviderQuota? _readCanonicalSnapshotEvidence(
   final quota = _readSnapshotEvidence(file);
   if (quota == null ||
       quota.provider != provider ||
+      !_isRegisteredCacheEvidence(quota) ||
       quota.asOf <= 0 ||
       quota.asOf > newestAllowedAsOf) {
     return null;
@@ -366,6 +381,13 @@ ProviderQuota? _readCanonicalSnapshotEvidence(
   }
   return quota;
 }
+
+bool _isRegisteredCacheEvidence(ProviderQuota quota) =>
+    registeredSourceClassViolation(
+      quota,
+      providerAdapterById(quota.provider),
+    ) ==
+    null;
 
 ProviderQuota? loadSnapshot(String provider) {
   final quota = _readCanonicalSnapshotEvidence(
@@ -448,6 +470,7 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
         if (q.provider == provider &&
+            _isRegisteredCacheEvidence(q) &&
             q.asOf > 0 &&
             q.asOf <= nowEpoch() + kQuotaEvidenceClockSkewSeconds &&
             entity.uri.pathSegments.last ==
@@ -489,6 +512,7 @@ List<ProviderQuota> loadCachedSnapshots({int? now}) {
         final q = ProviderQuota.fromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
+        if (!_isRegisteredCacheEvidence(q)) continue;
         final trusted = isTrustedQuotaEvidence(q);
         final legacySuspect = isLegacySuspectQuotaEvidence(q);
         if (!trusted && !legacySuspect) continue;
@@ -929,7 +953,10 @@ List<ProviderQuota> loadHistory(String provider, {String? account}) {
       if (line.trim().isEmpty) continue;
       final content = jsonDecode(line) as Map<String, dynamic>;
       final quota = ProviderQuota.fromJson(content);
-      if (isTrustedQuotaEvidenceAt(quota, observedAt)) results.add(quota);
+      if (_isRegisteredCacheEvidence(quota) &&
+          isTrustedQuotaEvidenceAt(quota, observedAt)) {
+        results.add(quota);
+      }
     }
   } catch (_) {}
   return results.reversed.toList();

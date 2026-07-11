@@ -1,4 +1,5 @@
 import 'analysis.dart';
+import 'drift.dart';
 import 'insights.dart';
 import 'models.dart';
 
@@ -47,6 +48,7 @@ class QuotaAlert {
   final String provider;
   final String displayName;
   final String account;
+  final ProviderSourceClass sourceClass;
 
   /// Label of the binding window that crossed (for example `5h` or `weekly`).
   final String window;
@@ -59,17 +61,19 @@ class QuotaAlert {
   final String? routeTo;
   final String? routeDisplayName;
   final String? routeAccount;
+  final ProviderSourceClass? routeSourceClass;
   final double? routeFreePercent;
   final bool routeIsLocal;
   final double? projectedWastePercent;
   final double? burnPercentPerHour;
   final int asOf;
 
-  const QuotaAlert({
+  QuotaAlert({
     this.kind = QuotaAlertKind.lowQuota,
     required this.provider,
     required this.displayName,
     this.account = 'default',
+    required this.sourceClass,
     required this.window,
     required this.severity,
     required this.freePercent,
@@ -77,11 +81,18 @@ class QuotaAlert {
     this.routeTo,
     this.routeDisplayName,
     this.routeAccount,
+    this.routeSourceClass,
     this.routeFreePercent,
     this.routeIsLocal = false,
     this.projectedWastePercent,
     this.burnPercentPerHour,
-  });
+  }) {
+    if ((routeTo == null) != (routeSourceClass == null)) {
+      throw ArgumentError(
+        'routeSourceClass must identify the route when and only when routeTo is set',
+      );
+    }
+  }
 
   /// A one-line human message, e.g.
   /// "Claude 5h at 8% free - route next to Grok (74% free)".
@@ -112,12 +123,15 @@ class QuotaAlert {
         'kind': kind.wireName,
         'provider': provider,
         'account': account,
+        'source_class': sourceClass.wireName,
         'window': window,
         'severity': severity.label,
         'free_percent': double.parse(freePercent.toStringAsFixed(1)),
         if (routeTo != null) 'route_to': routeTo,
         if (routeDisplayName != null) 'route_display_name': routeDisplayName,
         if (routeAccount != null) 'route_account': routeAccount,
+        if (routeSourceClass != null)
+          'route_source_class': routeSourceClass!.wireName,
         if (routeFreePercent != null)
           'route_free_percent':
               double.parse(routeFreePercent!.toStringAsFixed(1)),
@@ -137,9 +151,9 @@ class QuotaAlert {
 /// identities already alerting ([armed]), it returns the alerts that newly
 /// crossed into a triggering severity this cycle and the updated armed set. An
 /// identity fires once on the crossing and re-arms only after it recovers, so a
-/// steady spent window never re-fires. A stale identity holds its prior armed
-/// state without firing (a cached red is not a fresh crossing). Local runtimes
-/// are never alerted on; they have no quota to spend.
+/// steady spent window never re-fires. A stale or integrity-rejected identity
+/// holds its prior armed state without firing because it is not trusted current
+/// evidence. Local runtimes are never alerted on; they have no quota to spend.
 ({List<QuotaAlert> fired, Set<String> armed}) computeAlerts({
   required List<ProviderQuota> snapshot,
   required RouteSuggestion suggestion,
@@ -152,14 +166,14 @@ class QuotaAlert {
   final rec = suggestion.recommended;
   for (final q in snapshot) {
     if (q.isLocal) continue;
-    final bw = bindingWindow(q, now);
-    final free = providerHeadroom(q, now);
-    if (bw == null || free == null) continue;
     final key = quotaIdentityKeyFor(q);
-    if (q.stale) {
+    if (!isTrustedQuotaEvidenceAt(q, now)) {
       if (armed.contains(key)) next.add(key);
       continue;
     }
+    final bw = bindingWindow(q, now);
+    final free = providerHeadroom(q, now);
+    if (bw == null || free == null) continue;
     final sev = alertSeverity(free);
     if (!alertOn.contains(sev)) continue; // calm or recovered: disarm
     next.add(key);
@@ -172,6 +186,7 @@ class QuotaAlert {
       provider: q.provider,
       displayName: q.displayName,
       account: q.account,
+      sourceClass: q.sourceClass,
       window: bw.label,
       severity: sev,
       freePercent: free,
@@ -181,6 +196,7 @@ class QuotaAlert {
           ? null
           : _displayNameOf(snapshot, route.provider, route.account),
       routeAccount: route?.account,
+      routeSourceClass: route?.sourceClass,
       routeFreePercent: route?.headroom,
       routeIsLocal: route?.isLocal ?? false,
     ));
@@ -190,10 +206,10 @@ class QuotaAlert {
 
 /// A pure, edge-triggered projected-waste alert pass. A provider fires when its
 /// projected unused quota at reset is at or above [thresholdPercent], then stays
-/// armed until the projection falls below the threshold. Stale providers hold
-/// their prior state without firing because an old projection is not a fresh
-/// crossing. Local runtimes are never alerted on; they have no paid quota to
-/// lose at reset.
+/// armed until the projection falls below the threshold. Stale or
+/// integrity-rejected providers hold their prior state without firing because
+/// they are not trusted current evidence. Local runtimes are never alerted on;
+/// they have no paid quota to lose at reset.
 ({List<QuotaAlert> fired, Set<String> armed}) computeProjectedWasteAlerts({
   required List<ProviderQuota> snapshot,
   required Map<String, Pace> paceByProvider,
@@ -206,14 +222,14 @@ class QuotaAlert {
   final next = <String>{};
   for (final q in snapshot) {
     if (q.isLocal || q.isManual) continue;
-    final bw = bindingWindow(q, now);
-    final free = providerHeadroom(q, now);
-    if (bw == null || bw.resetsAt == null || free == null) continue;
     final key = quotaIdentityKeyFor(q);
-    if (q.stale) {
+    if (!isTrustedQuotaEvidenceAt(q, now)) {
       if (armed.contains(key)) next.add(key);
       continue;
     }
+    final bw = bindingWindow(q, now);
+    final free = providerHeadroom(q, now);
+    if (bw == null || bw.resetsAt == null || free == null) continue;
     final pace = paceByProvider[key] ?? paceByProvider[q.provider];
     final waste = pace?.wastedAtReset;
     if (waste == null || waste < threshold) continue;
@@ -224,12 +240,14 @@ class QuotaAlert {
       provider: q.provider,
       displayName: q.displayName,
       account: q.account,
+      sourceClass: q.sourceClass,
       window: bw.label,
       severity: AlertSeverity.amber,
       freePercent: free,
       projectedWastePercent: waste,
       burnPercentPerHour: pace!.burnPerHour,
       asOf: q.asOf,
+      routeSourceClass: null,
     ));
   }
   return (fired: fired, armed: next);

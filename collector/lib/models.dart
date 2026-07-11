@@ -1,6 +1,10 @@
 /// Normalized quota model shared by every provider adapter and the UI.
 library;
 
+import 'provider_source.dart';
+
+export 'provider_source.dart';
+
 /// Conservative defaults for use-it-or-lose-it quota signals. These defaults
 /// are shared by provider routing and concrete-model routing so both surfaces
 /// agree on what counts as meaningful projected waste.
@@ -137,7 +141,6 @@ class ModelQuota {
 /// One provider account's quota snapshot.
 const providerQuotaSubscriptionKind = 'subscription';
 const providerQuotaLocalKind = 'local';
-const providerQuotaManualSource = 'manual';
 const providerPipeHealthHealthy = 'healthy';
 const providerPipeHealthThrottled = 'throttled';
 const providerPipeHealthDegraded = 'degraded';
@@ -226,6 +229,11 @@ class ProviderQuota {
   /// the snapshot; [providerQuotaManualSource] means the user entered the quota
   /// themselves.
   final String? source;
+
+  /// Normalized provenance class describing what this observation proves.
+  /// Unlike [source], this is present for every current producer and survives
+  /// routing, caching, and verification as a machine-readable trust boundary.
+  final ProviderSourceClass sourceClass;
 
   /// Provider class. [ProviderQuotaKind.subscription] is a metered paid/free
   /// account whose headroom governs routing. [ProviderQuotaKind.local] is an
@@ -331,7 +339,14 @@ class ProviderQuota {
     this.pipeHealth,
     this.httpStatus,
     this.retryAfterSeconds,
-  });
+    ProviderSourceClass? sourceClass,
+  }) : sourceClass = sourceClass ??
+            inferProviderSourceClass(
+              provider: provider,
+              source: source,
+              isLocal: kind.isLocal,
+              perMachine: perMachine,
+            );
 
   /// True when this is a local, always-available runtime rather than a metered
   /// remote subscription.
@@ -339,6 +354,61 @@ class ProviderQuota {
 
   /// True when this is a self-reported manual quota entry, not measured data.
   bool get isManual => source == providerQuotaManualSource;
+
+  /// A plain reason when provenance contradicts the observation shape.
+  ///
+  /// This check is independent of the provider registry so routing, cache, and
+  /// analytics can fail closed even when they do not load adapter code.
+  String? get sourceClassViolation {
+    final classifiedManual = sourceClass == ProviderSourceClass.manual;
+    if (isManual != classifiedManual) {
+      return classifiedManual
+          ? 'manual source class requires source=manual'
+          : 'source=manual requires the manual source class';
+    }
+    final allowed = builtInProviderSourceClasses(provider);
+    if (!classifiedManual &&
+        allowed != null &&
+        !allowed.contains(sourceClass)) {
+      return '${sourceClass.label} is not admitted for $provider';
+    }
+    switch (sourceClass) {
+      case ProviderSourceClass.authoritativeLive:
+        if (isLocal) return 'authoritative live evidence cannot be local';
+        if (perMachine) {
+          return 'authoritative live evidence cannot be machine-scoped';
+        }
+      case ProviderSourceClass.thisMachineFallback:
+        if (isLocal) return 'this-machine fallback cannot be a local runtime';
+        if (ok && hasWindows && !perMachine) {
+          return 'this-machine fallback quota must be machine-scoped';
+        }
+      case ProviderSourceClass.passiveLocalEvidence:
+        if (isLocal) return 'passive local evidence cannot be a local runtime';
+        if (ok && hasWindows && !perMachine) {
+          return 'passive local quota must be machine-scoped';
+        }
+      case ProviderSourceClass.localRuntime:
+        if (!isLocal) return 'local runtime evidence requires kind=local';
+        if (hasWindows) return 'local runtime evidence cannot carry quota';
+        if (driftReason != null) {
+          return 'local runtime evidence cannot carry provider drift';
+        }
+      case ProviderSourceClass.statusOnly:
+        if (isLocal) return 'status-only evidence cannot be a local runtime';
+        if (hasWindows) return 'status-only evidence cannot carry quota';
+        if (driftReason != null) {
+          return 'status-only evidence cannot carry provider drift';
+        }
+      case ProviderSourceClass.manual:
+        if (isLocal) return 'manual quota cannot be a local runtime';
+        if (perMachine) return 'manual quota cannot claim machine scope';
+        if (driftReason != null) {
+          return 'manual quota cannot carry provider drift';
+        }
+    }
+    return null;
+  }
 
   factory ProviderQuota.error(
     String provider,
@@ -370,6 +440,7 @@ class ProviderQuota {
         'account': account,
         if (plan != null) 'plan': plan,
         if (source != null) 'source': source,
+        'source_class': sourceClass.wireName,
         'kind': kind.wireName,
         if (status != null) 'status': status,
         if (active) 'active': active,
@@ -397,6 +468,7 @@ class ProviderQuota {
         account: j['account'] as String,
         plan: j['plan'] as String?,
         source: j['source'] as String?,
+        sourceClass: _providerSourceClassFromJson(j),
         ok: j['ok'] as bool? ?? true,
         error: j['error'] as String?,
         asOf: j['as_of'] as int? ?? 0,
@@ -433,6 +505,7 @@ class ProviderQuota {
         account: _staleMetadataAccount(metadataFrom, account),
         plan: metadataFrom?.plan ?? plan,
         source: metadataFrom?.source ?? source,
+        sourceClass: sourceClass,
         ok: true,
         error: note,
         asOf: asOf,
@@ -471,6 +544,7 @@ class ProviderQuota {
         asOf: asOf,
         plan: plan,
         source: source,
+        sourceClass: sourceClass,
         ok: ok,
         error: error,
         windows: windows,
@@ -501,6 +575,7 @@ class ProviderQuota {
         asOf: asOf,
         plan: plan,
         source: source,
+        sourceClass: sourceClass,
         ok: true,
         error: 'provider drift detected; showing last trusted snapshot',
         windows: windows,
@@ -539,6 +614,7 @@ class ProviderQuota {
             : asOf,
         plan: metadataFrom?.plan ?? plan,
         source: metadataFrom?.source ?? source,
+        sourceClass: sourceClass,
         ok: false,
         error: 'provider drift detected; legacy quota evidence is quarantined '
             'because no trusted snapshot is available',
@@ -555,6 +631,28 @@ class ProviderQuota {
 
   /// True when this snapshot carries usable quota windows.
   bool get hasWindows => windows.isNotEmpty;
+}
+
+ProviderSourceClass _providerSourceClassFromJson(Map<String, dynamic> json) {
+  if (json.containsKey('source_class')) {
+    return ProviderSourceClass.fromWire(json['source_class'] as String?);
+  }
+  final provider = json['provider'] as String;
+  final source = json['source'] as String?;
+  if (source != providerQuotaManualSource &&
+      builtInProviderSourceClasses(provider) == null) {
+    throw FormatException(
+      'legacy provider source class is required for unregistered provider: '
+      '$provider',
+    );
+  }
+  final kind = ProviderQuotaKind.fromWire(json['kind'] as String?);
+  return inferProviderSourceClass(
+    provider: provider,
+    source: source,
+    isLocal: kind.isLocal,
+    perMachine: json['per_machine'] as bool? ?? false,
+  );
 }
 
 String _staleMetadataAccount(
@@ -591,6 +689,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     account: t(q.account),
     plan: q.plan == null ? null : t(q.plan!),
     source: q.source == null ? null : t(q.source!),
+    sourceClass: q.sourceClass,
     ok: q.ok,
     error: q.error == null ? null : t(q.error!),
     asOf: q.asOf,

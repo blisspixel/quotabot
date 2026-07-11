@@ -20,17 +20,28 @@ Provider snapshots keep these stable fields:
 
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
-- Optional `plan`, `source`, `status`, `active`, `details`, `error`, `models`,
-  `model_quotas`, `suspect`, `drift_reason`, `drift_observed_at`, `per_machine`,
-  `pipe_health`, `http_status`, and `retry_after_seconds`.
+- Optional `plan`, `source`, `source_class`, `status`, `active`, `details`,
+  `error`, `models`, `model_quotas`, `suspect`, `drift_reason`,
+  `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`, and
+  `retry_after_seconds`.
 - `kind` is `subscription` or `local`.
 - `as_of` is the evidence capture time. Structurally the frozen schema retains
   its non-negative integer type, but live quota is trusted for routing only when
   the value is positive and no more than 60 seconds ahead of local admission
   time. Missing, zero, negative, or materially future live provenance fails
   closed before persistence or routing.
-- `source` is an additive hint. When set to `manual`, the provider window is a
-  local self-reported quota entry, not measured adapter telemetry.
+- `source_class` is the normalized provenance class. Current producers always
+  emit one of `authoritative_live`, `this_machine_fallback`,
+  `passive_local_evidence`, `local_runtime`, `status_only`, or `manual`.
+  The field remains optional in the frozen schema so legacy 0.5 snapshots stay
+  valid. When loading such a snapshot, quotabot infers it deterministically from
+  provider, `kind`, `source`, and `per_machine`; an explicit unknown value is
+  invalid. Current verification also requires the class to match the provider
+  registry and the observation shape.
+- `source` is the older additive origin hint, not the normalized class. When set
+  to `manual`, the provider window is a local self-reported quota entry, not
+  measured adapter telemetry. Current manual entries carry both
+  `source: "manual"` and `source_class: "manual"`.
 - `suspect`, when present, retains its original compatibility meaning: a
   non-fatal plausibility note on the fresh reading produced by the earlier
   drift canary. The reading remains in that snapshot for a human or agent to
@@ -52,7 +63,9 @@ Provider snapshots keep these stable fields:
   usage (Cursor, Windsurf, Kiro, or the Codex session fallback) rather than the
   account across every device, so it can undercount when the account is used
   elsewhere. Authoritative server-side reads (Claude, Grok, Antigravity, Codex
-  live) omit it.
+  live) omit it. Successful measured `this_machine_fallback` and
+  `passive_local_evidence` observations require it; it remains a scope detail,
+  not a replacement for `source_class`.
 - `pipe_health` is an optional native adapter diagnostic for metadata endpoint
   failures. It is one of `healthy`, `throttled`, `degraded`, or `no_data`;
   current native adapters set it only when a reliable HTTP response distinguishes
@@ -103,7 +116,7 @@ emit `quotabot.suggest.v1` with:
   to ranked candidates. The CLI and loopback HTTP forms of the same schema id
   omit it (the lease ledger is local to the MCP server).
 - Each candidate carries identity (`provider`, `account`, optional `plan`,
-  `local`) and budget fields such as `headroom_percent`,
+  `source_class`, `local`) and budget fields such as `headroom_percent`,
   `effective_headroom_percent`, optional `lease_discount_percent`,
   optional `pipe_discount_percent`, `burn_percent_per_hour`,
   `burn_se_percent_per_hour`, `strand_probability`, `confidence`,
@@ -121,7 +134,9 @@ emit `quotabot.suggest.v1` with:
   caller-supplied cost discount. `cost_penalty` is never inferred by quotabot;
   it appears only when a caller provided a cost policy. Local runtimes may omit
   these score fields because their placement is governed by the explicit fallback
-  or local-first policy.
+  or local-first policy. For measured machine-scoped classes, the displayed
+  confidence is the normal freshness and sample-adequacy confidence multiplied
+  by `0.7`; raw and effective headroom keep their documented meanings.
   `pipe_discount_percent` is a recent local LiteLLM or native metadata
   pipe-health discount applied to `effective_headroom_percent` for ranking. It
   does not change `headroom_percent` or `available`; those remain quota
@@ -144,8 +159,8 @@ same routing fields (including `active_leases`) plus `source`,
 `quotabot check <provider> --json` and MCP `check_provider_availability` emit
 `quotabot.check.v1`: `schema`, `as_of`, `provider`, then either `found: false`
 (CLI, unknown name), an `error` note (MCP, unknown provider/account), or
-`account`, `available`, `headroom_percent`, `resets_at`, and `stale`, with
-optional `drift_reason` and `drift_observed_at`. This is
+`account`, `source_class`, `available`, `headroom_percent`, `resets_at`, and
+`stale`, with optional `drift_reason` and `drift_observed_at`. This is
 deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
 no `providers` array. `available` means usable from current evidence and above
 the practical spent floor; stale cached cloud quota has `available: false` even
@@ -159,7 +174,8 @@ reads do not route work into an already exhausted cap.
 
 MCP `provider_with_most_headroom` emits `quotabot.headroom.v1`: `schema`,
 `as_of`, then `provider` (null with a `reason` when nothing is usable) plus
-`account`, `headroom_percent`, `resets_at`, and `stale` for a pick.
+`account`, `source_class`, `headroom_percent`, `resets_at`, and `stale` for a
+pick.
 
 Profile-aware MCP tools also echo `profile` and `account_filter` when the
 caller supplied them, and set `error` for profile, filter, or argument
@@ -167,10 +183,11 @@ problems.
 
 `quotabot models --json` and MCP `list_models` emit `quotabot.models.v1` with
 `schema`, `generated_at`, `catalog_updated`, `budget_policy`, and `models`.
-Each model entry includes provider/account, `local`, `available`, `stale`,
-`quota_backed`, capability hints where known, and the gating quota budget when
-the model is remote: `headroom_percent`, `resets_at`, and the `gating_window`
-label. A model gated by drifted last-trusted quota also carries `drift_reason`
+Each model entry includes provider/account, `source_class`, `local`,
+`available`, `stale`, `quota_backed`, capability hints where known, and the
+gating quota budget when the model is remote: `headroom_percent`, `resets_at`,
+and the `gating_window` label. A model gated by drifted last-trusted quota also
+carries `drift_reason`
 and `drift_observed_at` and is unavailable. When a provider exposes per-model
 or provider-family quotas, those
 matched values gate the entry instead of account-wide provider headroom; an
@@ -178,8 +195,9 @@ unmatched model-specific quota is not treated as available by inference.
 Stale remote entries keep last-known quota fields, and remote entries at or
 below the spent floor keep their measured quota fields, but both set
 `available: false`. Entries gated by a self-reported manual quota carry
-`source: "manual"`. Status-only cloud providers with no measured quota windows
-stay visible in `quotabot.v1` snapshots but do not contribute `models` entries.
+`source_class: "manual"` and the legacy `source: "manual"` hint. Status-only
+cloud providers with no measured quota windows stay visible in `quotabot.v1`
+snapshots but do not contribute `models` entries.
 Some provider models with temporary included-quota terms can include
 `quota_included_until`; after that epoch, quotabot no longer marks the model
 `quota_backed` for `--budget=quota` routing unless the provider exposes a normal
@@ -214,8 +232,9 @@ described below.
 
 `quotabot report --json` emits `quotabot.report.v1` with `schema`,
 `generated_at`, `recommended_provider`, `recommendation_reason`,
-`fallback_kind`, and `providers`. Provider rows include state, headroom/reset metadata, weekly p50
-free percent, weekly reliability, weekly sampled-day counts, current
+`fallback_kind`, and `providers`. Provider rows include `source_class`, state,
+headroom/reset metadata, weekly p50 free percent, weekly reliability, weekly
+sampled-day counts, current
 usable/spent day streaks, `weekly_contribution_calendar`,
 `weekly_best_time_windows`, optional `weekly_schedule_hint`, and pace when
 history is available. Calendar entries are sampled local days with `day_start`,
@@ -255,8 +274,8 @@ optional `error`, `catalog_models`, `endpoint_models`,
 - `generated_at`, `os`, and the run-level `passed` verdict.
 - `providers`: one record per provider account, with `provider`,
   `display_name`, `account`, `state` (`live`, `cached`, `out_of_quota`,
-  `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`,
-  `as_of`, `staleness_seconds`, `stale`, `drift_reason`, and
+  `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`, and
+  `source_class`, plus `as_of`, `staleness_seconds`, `stale`, `drift_reason`, and
   `drift_observed_at`, a window summary (label, used percent, effective used
   percent, reset time, and seconds to reset), a `passed` verdict, `checks`, and
   an optional `cross_check` naming the provider's own usage surface to confirm
@@ -269,10 +288,12 @@ optional `error`, `catalog_models`, `endpoint_models`,
   `collection_executed: true`; simulations use the dry-run manifest form.
 - `checks` entries carry `id`, `status` (`pass`, `fail`, or `info`), and a
   plain-language `detail`. Provider check ids are `identity`,
-  `provider_drift`, `read_or_reason`, `percent_bounds`, `as_of_sane`,
-  `stale_honesty`, and `reset_sanity`; fleet check ids are `schema_contract`,
-  `unique_accounts`, `manual_entries`, `claimed_coverage`, and
-  `runtime_access_boundary`. An active drift diagnostic makes
+  `source_class`, `provider_drift`, `read_or_reason`, `percent_bounds`,
+  `as_of_sane`, `stale_honesty`, and `reset_sanity`; fleet check ids are
+  `schema_contract`, `unique_accounts`, `manual_entries`, `claimed_coverage`, and
+  `runtime_access_boundary`. The `source_class` check requires every built-in
+  provider to use a class allowed by its adapter registry and rejects class or
+  shape contradictions. An active drift diagnostic makes
   `provider_drift` fail and names the rejected evidence plus either the
   last-trusted fallback or the absence of any trusted baseline. An undetected
   claimed provider carries `claimed_coverage` as its
@@ -328,16 +349,21 @@ endpoints.
 
 - `schema`: always `quotabot.alert.v1`.
 - `kind`: `low_quota` or `projected_waste`.
-- `provider`, `account`, `window`, `severity`, `free_percent`, `as_of`, and
-  `route_is_local`.
+- `provider`, `account`, `source_class`, `window`, `severity`, `free_percent`,
+  `as_of`, and `route_is_local`. `source_class` identifies the trusted
+  observation that crossed the alert threshold.
 - For `low_quota`, optional `route_to`, `route_display_name`,
-  `route_account`, and `route_free_percent`.
+  `route_account`, `route_source_class`, and `route_free_percent`.
+  `route_source_class` identifies the evidence behind the recommended route and
+  is present whenever `route_to` is present.
 - For `projected_waste`, optional `projected_waste_percent` and
   `burn_percent_per_hour`.
 
 Alerts are edge-triggered by provider/account identity when a provider exposes a
 specific account label, so two accounts on the same provider can warn and
-recover independently.
+recover independently. Stale, failed, drifted, or source-class-invalid evidence
+cannot fire an alert and holds any existing edge-trigger state until trusted
+current evidence returns.
 
 The MCP `quotas://alerts` resource wraps the last fired alert objects in a
 `quotabot.alerts.v1` envelope with `schema`, `generated_at`, `last_alert_at`,
@@ -389,13 +415,15 @@ prompts, responses, exception messages, or source code.
 
 Every built-in adapter has one compile-time row in
 `collector/lib/provider_adapters.dart`. Each row names the provider id, display
-name, adapter class, cache behavior, multi-account behavior, fixture parser kind,
-and required sanitized fixture file under
+name, adapter class, allowed source classes, cache behavior, multi-account
+behavior, fixture parser kind, and required sanitized fixture file under
 `collector/test/fixtures/provider_shapes/`.
 
 The registry tests enforce:
 
 - Every built-in adapter appears exactly once.
+- Every built-in adapter declares at least one allowed source class, and the
+  exact current provider/path assignment is pinned.
 - Every adapter owns exactly one committed provider-shape fixture.
 - Every fixture file is claimed by the registry.
 - The provider-shape parser test iterates the registry, so adding a provider

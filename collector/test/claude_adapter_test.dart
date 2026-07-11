@@ -46,6 +46,7 @@ void main() {
     expect(q.pipeHealth, providerPipeHealthThrottled);
     expect(q.httpStatus, 429);
     expect(q.retryAfterSeconds, 120);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
   test(

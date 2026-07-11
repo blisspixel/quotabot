@@ -313,8 +313,9 @@ String _ageTerse(int seconds) {
 /// and is included in width planning, so spend class, stale age, and local scope
 /// are visible without wrapping the dashboard.
 String _topTrustTag(ProviderQuota q, int now) {
-  final parts = <String>[_topReadState(q, now), _topSpendClass(q)];
-  if (q.perMachine) parts.add('this machine');
+  final parts = <String>[_topReadState(q, now), q.sourceClass.label];
+  final spendClass = _topSpendClass(q);
+  if (spendClass != null) parts.add(spendClass);
   return ' (${parts.join(', ')})';
 }
 
@@ -324,21 +325,23 @@ String _topReadState(ProviderQuota q, int now) {
     return 'provider drift$age';
   }
   if (!q.ok) return 'error';
-  if (q.isLocal) return q.active ? 'in use' : 'local';
+  if (q.isLocal) return q.active ? 'in use' : 'available';
   if (q.stale) {
     final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
     return 'cached$age';
   }
   if (q.windows.isEmpty && (q.status ?? '').isEmpty) return 'no live data';
-  if (q.windows.isEmpty) return q.perMachine ? 'local fallback' : 'metadata';
+  if (q.windows.isEmpty) return 'metadata';
   return 'live';
 }
 
-String _topSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'local loaded' : 'local cold';
-  if (q.isManual) return 'manual';
+String? _topSpendClass(ProviderQuota q) {
+  if (q.isLocal) return q.active ? 'loaded' : 'cold';
+  if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
+    return null;
+  }
   if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  if (q.windows.isEmpty) return 'metadata only';
+  if (q.windows.isEmpty) return null;
   if (kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
   return 'metered plan';
 }
