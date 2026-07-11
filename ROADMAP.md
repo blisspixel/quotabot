@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-10. This file is the forward plan. Shipped work belongs in
+Updated 2026-07-11. This file is the forward plan. Shipped work belongs in
 [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
 the plan belongs in [docs/PRODUCT-STRATEGY.md](docs/PRODUCT-STRATEGY.md).
@@ -95,27 +95,63 @@ as needed, then cut 1.0 when the evidence gates pass. Do not manufacture 0.6,
 
 ## Version plan
 
-A short map so the milestones are unambiguous. The non-negotiable boundaries
-above hold at every version; they are the constitution, not a milestone, and a
-release that would break one is wrong regardless of its number.
+The milestones below are a logical order of operations, not a schedule. There are
+no time estimates. Each version is one coherent capability that the next builds on,
+and the order is dependency order: make the inputs truthful, unify them into one
+forecast, teach that forecast to grade itself, make its recommendation legible and
+opinionated, then make the whole thing boring to install everywhere. The
+non-negotiable boundaries above hold at every version; they are the constitution,
+not a milestone, and a release that would break one is wrong regardless of its
+number.
 
-- **0.5.x, now (release hardening).** Feature-complete beta. Only corrective
-  patches: provider truth, cross-machine correctness, install and update,
-  desktop robustness, and documentation. No new provider breadth. 0.5.15 added
-  cross-machine live reads (self-refreshing Claude and Codex grants that keep an
-  idle machine's account-wide read live), kept a healthy longer window visible
-  under a spent shorter one, enforced single-instance desktop launch, and
-  corrected a model-catalog output cap.
-- **1.0, the bar.** Cut only when every evidence gate below passes: exceptional
-  and rock-solid, just-works across all supported services on Windows, macOS,
-  and Linux, correct across a user's machines, honest under provider change, and
-  boring to install and update. Defined precisely in "1.0 definition of done".
-- **1.x, stabilization then ranked outcomes.** The first 30 days after 1.0 are
-  stabilization only (below). After that, the P1 outcomes (decision receipt,
-  typed shared-pool quota, deliberate MCP revision, multi-agent reservations)
-  and P2 (distribution, admission-gated providers), added additively without
-  breaking a published 1.x contract.
-- **2.0, only to change an invariant or a stable contract.** No 2.0 is planned;
+The ladder follows from what quotabot actually is. Under the meter it is one
+object: a calibrated, honest forecast of each resource's availability over time,
+shown as two faces from a single local, zero-token, advisor-never-proxy engine -
+SEE (the glance) and ROUTE (the suggestion). The meter is commodity and a routing
+heuristic is copyable in an afternoon; the durable moat is a calibrated,
+self-tuning decision engine grounded in longitudinal local history no competitor
+keeps. An exceptional 1.0 therefore ships that engine, not only a hardened meter,
+which is why calibration lands before 1.0 rather than after it.
+
+- **0.5.x, now - release hardening.** Feature-complete beta receiving only
+  corrective patches: provider truth, cross-machine correctness, install and
+  update, desktop robustness, and documentation. No new breadth. This line ends
+  when 0.6 opens.
+- **0.6 - Truthful substrate.** Every advertised route means exactly what it says,
+  on every claimed provider, before anything is built on top. Close the remaining
+  observation-layer gaps so the data feeding the forecast is trustworthy. A
+  forecast built on untrustworthy observations is worse than no forecast, so this
+  is first.
+- **0.7 - One forecast, one engine.** Refactor the decision and windowing spine
+  into a single pure, replayable core that every surface is a view of, and ship the
+  deterministic replay and simulation harness it makes possible. The structural
+  keystone: calibration, the decision receipt, and self-tuning are all impossible
+  to do well until one forecast object exists, and cheap once it does. Mostly
+  invisible by design.
+- **0.8 - The moat: a forecast that grades itself.** On the forecast core, add the
+  calibration ledger - log every prediction with the outcome later snapshots
+  reveal, score it (Brier, reliability), and tune the free parameters on the user's
+  own history - and surface it at the hood as "~94% calibrated over your last 30
+  days". A predictor that publishes its own calibration cannot bluff. The only
+  durable moat and the deepest honesty; it silently makes the glance truer.
+- **0.9 - The self-explanatory, opinionated advisor.** With routing resting on a
+  calibrated forecast, make it legible and aligned to the user: one plain-language
+  explanation shared by every surface, one unified decision receipt, an explicit
+  spend-order and provider-preference policy, local-first QOL, and multi-account.
+  The visible product payoff, resting on an engine that has earned trust.
+- **1.0 - Exceptional and rock-solid: it just works.** The quality bar in "1.0
+  definition of done": native prebuilt desktop acquisition on every claimed OS,
+  real native macOS and Linux evidence, accessibility smoke on native hosts, a
+  boring clean-host install / update / uninstall / rollback lifecycle, every gate
+  green on the frozen candidate, honest docs, and no known blocker - then rehearse
+  until the cut is boring, and cut.
+- **1.x - stabilization, then ranked outcomes.** The first 30 days are
+  stabilization only (below). After that, the remaining ranked outcomes land
+  additively without breaking a published 1.x contract: the next final MCP revision
+  adopted deliberately, quota modeled as a typed shared pool before any weighted
+  coding plan, multi-agent reservations hardened at volume, then distribution
+  channels and admission-gated providers.
+- **2.0 - only to change an invariant or a stable contract.** No 2.0 is planned;
   it exists solely as the escape hatch if a non-negotiable boundary or a public
   JSON/MCP/CLI/profile/cache/lease contract must change. Provider count and
   analytics breadth never justify a major version.
@@ -166,132 +202,157 @@ release that would break one is wrong regardless of its number.
     actionable next step, never as a confident current value, and any machine-
     scoped fallback is labeled this-machine.
 
-## Work remaining before 1.0
+## The path to 1.0, in detail
 
-The order below is dependency order, not an estimate.
+Dependency order, not a schedule. Each subsection is a milestone from the version
+plan with its concrete work and its acceptance test. Items already shipped on the
+0.5.x line are noted where they complete part of a milestone; the full history is
+in the changelog.
 
-### P0. Close truth and compatibility gaps
+### 0.6 - Truthful substrate
 
-**Outcome:** every advertised route means what it says before more release
-evidence is collected.
+**Outcome:** every advertised route means exactly what it says, on every claimed
+provider, before a forecast is built on top of it.
 
-- **Completed 2026-07-10 (0.5.15):** keep account-wide reads live across a user's
-  machines. The Claude and Codex adapters resolve auth as host token (while
-  unexpired), then quotabot's own self-refreshing grant from `login claude` /
-  `login codex`, then the last trusted cache marked stale. Both providers rotate
-  single-use refresh tokens, so quotabot refreshes only its own grant and never
-  reads or writes the host apps' credential files; the reads stay zero-cost
-  metadata. A spent shorter window no longer hides a healthy longer one in `top`
-  and the desktop card, so waiting out a five-hour cap is distinguishable from a
-  spent weekly one. Remaining: validate the connected-grant login flows on real
-  accounts and add fixtures for the expired-host-token fall-through.
-- **Completed 2026-07-10:** add the source-class contract to verification and
-  user-facing documentation. Every built-in adapter now declares its allowed
-  provenance classes; current snapshots, routing and model candidates, alerts,
-  reports, checks, MCP schemas, and verification records emit the normalized
-  six-value `source_class`. Contradictory class/data shapes and unregistered
-  cache identities fail closed before routing or measured history,
-  machine-scoped evidence has a documented `0.7` confidence factor, legacy
-  `source` compatibility remains explicit, and concise human labels plus
-  source/verification tables expose the same semantics as the code. Registry,
-  schema, verification, routing, CLI, MCP, and desktop regressions pin the
-  contract and presentation.
 - Add provider identity aliases for current renames without losing profiles,
   hidden-provider choices, cache, or history.
-- **Completed 2026-07-10:** distinguish a reader that likely drifted from
-  signed-out, exhausted, offline, and unsupported states. The deterministic
-  `provider-drift` fixture, failed `provider_drift` verification check, stale
-  last-trusted fallback, non-overwriting cache admission, persistent recovery
-  diagnostic, cross-process observation ordering, legacy-cache quarantine, and
-  explicit provider/model routing diagnostics pin routing/history/analytics
-  exclusions without changing the stable verification state enum.
 - Pin every remaining supported response shape with sanitized fixtures.
-- Resolve Antigravity weekly-window versus baseline-credit semantics from
-  provider evidence. If the API does not expose a stable mapping, keep baseline
-  credits explicitly unsupported and unknown rather than inferring a window.
+- Resolve Antigravity weekly-window versus baseline-credit semantics from provider
+  evidence. If the API exposes no stable mapping, keep baseline credits explicitly
+  unsupported and unknown rather than inferring a window.
 - Prefer LM Studio's current `GET /api/v1/models` contract, preserving v0 and
-  OpenAI-compatible fallbacks. Parse loaded instances, context, size,
-  quantization, and capability evidence without loading or invoking a model.
+  OpenAI-compatible fallbacks. Parse loaded instances, context, size, quantization,
+  and capability evidence without loading or invoking a model.
 - Parse Ollama's documented loaded `context_length`. Detect or conservatively
   exclude cloud-offloaded Ollama models from policies that promise local-only or
-  free execution. Do not estimate throughput by generating content.
+  free execution. Never estimate throughput by generating content.
+- Validate the connected-grant login flows (`login claude` / `login codex`) on real
+  accounts, and add fixtures for the expired-host-token fall-through.
 - Keep the LiteLLM loopback, bearer-auth, and unauthenticated-denial regression
   green as its pinned dependency changes.
+- Already shipped on 0.5.x: cross-machine account-wide live reads via
+  self-refreshing grants; the normalized six-value `source_class` contract across
+  every surface; deterministic provider-drift admission with stale last-trusted
+  fallback and legacy-cache quarantine.
 
 Acceptance: targeted parser, policy, schema, integration, and regression tests
 pass; docs state the same source and spend semantics as the code; no ambiguous
 runtime can satisfy a local-only budget.
 
-### P0. Make the recommendation self-explanatory
+### 0.7 - One forecast, one engine
 
-**Outcome:** the simple surface is clearer because of the advanced engine, not
-burdened by it.
+**Outcome:** SEE, ROUTE, and ALERT are three views of a single pure object, and
+that object can be replayed and simulated deterministically.
 
-- Define one plain human explanation shared by desktop, `doctor`, `suggest`, and
-  `top`: winner, binding evidence, freshness/source, spend class, and fallback.
-- Validate and keep the compact routing-intent matrix covering provider
-  suggestion, local-first provider suggestion, model listing, model suggestion,
-  `budget=local`, `budget=quota`, and expiring-quota behavior.
-- Reserve terms such as strand probability, shrinkage, pipe discount, and cost
-  weight for expanded or machine-readable detail. Replace unexplained phrases
-  such as "thin data" on the glance surface.
-- Verify loading, empty, stale, auth, provider-drift, no-safe-route, alert, and
-  integration failure states with first-time user and operator checks.
-- Complete the native accessibility smoke for widget, analytics, profiles,
-  dialogs, tray, and terminal navigation.
+- Consolidate the decision and windowing spine into one pure function,
+  `decide(observations, now) -> (forecast, decision)`, with provider I/O kept in
+  thin adapters. The code already leans this way; this finishes it.
+- The forecast carries honest uncertainty as first-class data (a distribution or
+  bounded interval, not a bare point), so a downstream view can render a word or a
+  dot without re-deriving it.
+- Build the replay harness: run the pure core over recorded local history, plus a
+  `--mock-provider` simulation mode that drives it from fixtures. This is both the
+  test bed for everything after and the substrate for the oracle benchmark.
+- No public contract change and no visible behavior change beyond equal-or-better
+  routes; existing SEE / ROUTE / `suggest` / `top` output stays stable, now sourced
+  from the unified core.
+
+Acceptance: the pure core has no I/O; SEE, ROUTE, and ALERT are all expressed as
+views of its output; a recorded-history replay reproduces current decisions; the
+simulation mode drives the full pipeline from fixtures with no network.
+
+### 0.8 - The moat: a forecast that grades itself
+
+**Outcome:** the number is not only shown, it is measured against what actually
+happened, and it improves on the user's own data.
+
+- Calibration ledger: log every prediction (strand probability, runway, "usable
+  until X") with the outcome later snapshots reveal.
+- Grade with proper scoring rules: Brier score and a reliability diagram - when the
+  engine says 20% strand, does it happen about 20% of the time?
+- Surface it at the hood: `quotabot calibration` and a deep `doctor` view
+  ("predictions ~94% calibrated over your last 30 days"), so a skeptic can verify
+  the glance is honest. Never assert calibration without enough local observations
+  to support it.
+- Self-tuning: fit the free parameters (EWMA half-life, comfort threshold, risk z,
+  lead time) to minimize realized regret on local history, reducing to the shipped
+  defaults when data is thin.
+- The plain-language layer generates every casual sentence from the calibrated
+  number underneath, so "about an hour left" is always backed and inspectable one
+  layer down.
+
+Acceptance: predictions and outcomes are logged and replayable; Brier and
+reliability are computed and exposed only when observations suffice; a documented
+metric shows the tuned parameters beat the shipped defaults on recorded history
+without breaking a safety invariant; thin-data cases degrade to the defaults.
+
+### 0.9 - The self-explanatory, opinionated advisor
+
+**Outcome:** the simple surface is clearer because of the engine under it, and the
+recommendation is aligned to what the user actually wants.
+
+- One plain human explanation shared by desktop, `doctor`, `suggest`, and `top`:
+  winner, binding evidence, freshness and source, spend class, and fallback.
+  Replace unexplained glance phrases such as "thin data"; reserve strand
+  probability, shrinkage, pipe discount, and cost weight for expanded or
+  machine-readable detail.
+- One unified, low-cardinality decision receipt across CLI, desktop, MCP, HTTP, and
+  LiteLLM: decision id, snapshot source and age, binding pool, raw headroom, every
+  adjustment, confidence reasons, lease and pipe-health effects, spend policy,
+  winner qualification, and each rejected alternative's reason. Content-free.
+- An explicit user spend-order and provider-preference policy, per profile, applied
+  among viable candidates only: it never overrides availability or the
+  no-surprise-spend envelope, and it always shows in the reason ("Codex first by
+  your preference").
+- Local-first QOL: local model capability (context, size, quantization, loaded
+  state), a hardware-fit signal (which installed models comfortably fit this RAM or
+  VRAM, metadata only, never a throughput probe), and local-first stretch behavior
+  when cloud quota is low.
+- Multi-account: a work-and-home account per provider visible in one dashboard,
+  generalizing the existing per-account model, without cross-contaminating
+  profiles, cache, or history.
+- Validate loading, empty, stale, auth, provider-drift, no-safe-route, alert, and
+  integration states with first-time-user and operator checks.
+- Already shipped on 0.5.x: the concise desktop route line with detail on hover,
+  and the when-back emphasis on cards (a precise near-term countdown, an absolute
+  day and time for a far reset).
 
 Acceptance: a first-time user can answer the five recommendation questions in
-definition-of-done item 4 from the default surface; machine detail remains
-complete; affected persona and accessibility checks pass.
+definition-of-done item 4 from the default surface; the receipt is present and
+low-cardinality on every listed surface; preference reorders only viable candidates
+and is always explained; machine detail stays complete.
 
-### P0. Complete native evidence and acquisition
+### 1.0 - Exceptional and rock-solid, then rehearse and cut
 
-**Outcome:** a user can install and verify the final product on every claimed OS.
+**Outcome:** the whole product is boring to install, verify, and update on every
+claimed OS, and 1.0 is a version change rather than a discovery exercise.
 
-- Re-run provider verification after P0 truth and recommendation changes.
 - Complete native macOS and Linux records for naturally available providers and
-  local runtimes. Human cross-check live numbers against provider-owned views.
-- Keep simulated rare states separate from real-account evidence.
+  local runtimes; human cross-check live numbers against provider-owned views; keep
+  simulated rare states separate from real-account evidence.
+- Ship native prebuilt desktop bundles on every claimed OS with no Flutter SDK
+  required for normal use, or explicitly narrow the 1.0 desktop promise to a labeled
+  source-built preview (the prebuilt outcome is preferred). Confirm clean tray
+  teardown on quit across all three OSes.
+- Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
+  tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
+  motion, and basic screen reader.
 - Run the three-OS clean install, previous-version upgrade, required-checksum,
-  attestation, persistent-state, and source-setup matrix.
-- Ship native desktop bundles or explicitly narrow the 1.0 desktop promise.
-- Desktop robustness. **Completed 2026-07-10 (0.5.15):** enforce single-instance
-  launch so a second launch surfaces the existing window instead of adding a
-  duplicate tray icon, and move the provider collect onto a background isolate so
-  the first-load animation no longer stalls (with a main-isolate fallback so
-  collection always works). Remaining: confirm clean tray teardown on quit across
-  all three OSes.
-- Glance-surface legibility. **Completed 2026-07-11 (0.5.17):** the desktop "Next"
-  routing line is now a concise one-line glance with the full detail on hover
-  instead of an overflowing line, and a spent window leads with when it is usable
-  again (a precise countdown near term, an absolute day and clock time for a
-  weekly cap days out) instead of a terse "resets 2d7h". This is the human view of
-  the routing suggestion; the deeper preference and when-back work is tracked in
-  the routing-suggestion design note. **Refined 2026-07-11 (0.5.18):** the
-  absolute reset renders as one unit so a long time wraps cleanly beneath the
-  headroom instead of orphaning "PM", with a little more room in the reset column.
-- Exercise the documented inspect-before-run, update, data-preserving uninstall,
-  destructive reset, and rollback paths. Automate the checks that can run safely
-  on hosted clean machines.
+  attestation, persistent-state, and source-setup matrix; exercise the
+  inspect-before-run, update, data-preserving uninstall, destructive reset, and
+  rollback paths, automating what can run safely on hosted clean machines.
+- Rehearse and cut: freeze the exact candidate from a clean main worktree; run all
+  local and hosted gates; build the tag artifacts and verify checksums and
+  attestations; install and smoke on clean native Windows, macOS, and Linux; repeat
+  native provider, recommendation, accessibility, and operator-failure evidence on
+  the frozen candidate; confirm notes, docs, version agreement, support path,
+  rollback, and GitHub security status; cut 1.0 only when the run is boring and
+  repeatable.
 
-Acceptance: each matrix cell has dated evidence or an explicit fixture/not-
-applicable reason; every artifact installs and starts on a clean native host;
-update preserves a sentinel; uninstall does not leave a broken PATH entry; data
-reset does not remove a Windows CLI that remains on PATH.
-
-### P0. Rehearse and cut
-
-**Outcome:** 1.0 is a version change, not a discovery exercise.
-
-1. Freeze the exact candidate and start from a clean main worktree.
-2. Run all local and hosted quality gates.
-3. Build the candidate tag artifacts and verify checksums and attestations.
-4. Install and smoke the candidate on clean native Windows, macOS, and Linux.
-5. Repeat native provider, recommendation, accessibility, and operator-failure
-   evidence on the frozen candidate.
-6. Confirm release notes, docs, version agreement, support path, rollback, and
-   GitHub security status.
-7. Cut 1.0 only when the run is boring and repeatable.
+Acceptance: every definition-of-done item is met with dated evidence or an explicit
+fixture / not-applicable reason; every artifact installs and starts on a clean
+native host; update preserves a sentinel; uninstall leaves no broken PATH entry;
+the candidate run is boring and repeatable.
 
 ## First 30 days after 1.0
 
@@ -310,17 +371,16 @@ work enters this window.
 
 ## Ranked outcomes after stabilization
 
-### P1. A unified decision receipt and routing evaluation
+### P1. Grow the routing-evaluation corpus
 
-Expose one bounded receipt across CLI, desktop, MCP, HTTP, and LiteLLM: decision
-id, snapshot source/age, binding pool, raw headroom, every adjustment, confidence
-reasons, lease and pipe-health effects, spend policy, winner qualification, and
-rejected-alternative reason. Keep it content-free and low-cardinality.
-
-Build an offline conformance and replay corpus that measures policy invariants,
-stalls avoided, quota stranded at reset, fallback use, and calibration honesty.
-Do not claim optimality. A routing-math change must beat the current policy on a
-declared metric without breaking a safety invariant.
+The engine and its legibility land pre-1.0: the pure forecast core and replay
+harness in 0.7, the calibration ledger and oracle benchmark in 0.8, and the
+unified decision receipt in 0.9. What remains after 1.0 is to keep growing the
+offline conformance and replay corpus that measures policy invariants, stalls
+avoided, quota stranded at reset, fallback use, and calibration honesty across
+more recorded histories and provider shapes. Do not claim optimality. A
+routing-math change must beat the current policy on a declared metric without
+breaking a safety invariant.
 
 ### P1. Adopt the next final MCP revision deliberately
 

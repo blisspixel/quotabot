@@ -110,6 +110,7 @@ class LmStudioAdapter {
       expiresAt: null,
       context: finiteOrNull(m['loaded_context_length'])?.toInt() ??
           finiteOrNull(m['max_context_length'])?.toInt(),
+      cloud: false,
     );
     installed.add(model);
     if (m['state'] == 'loaded') loaded.add(model);
@@ -133,6 +134,7 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
           vramBytes: null,
           expiresAt: null,
           context: null,
+          cloud: false,
         ),
   ];
 }

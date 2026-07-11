@@ -20,6 +20,10 @@ typedef LocalModel = ({
   int? vramBytes,
   int? expiresAt,
   int? context,
+  // True when the runtime executes this model in its cloud, not on-device. Only
+  // Ollama exposes such models today (a `-cloud` name suffix); other runtimes
+  // are always on-device and leave this false.
+  bool cloud,
 });
 
 /// Detects a local Ollama runtime and reports what it has, not a quota.
@@ -93,8 +97,9 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
   for (final m in models) {
     if (m is! Map || m['name'] is! String) continue;
     final details = m['details'];
+    final name = m['name'] as String;
     out.add((
-      name: m['name'] as String,
+      name: name,
       // finiteOrNull: a rogue localhost server sending a non-finite size would
       // otherwise throw in .toInt() (Infinity has no int form).
       bytes: finiteOrNull(m['size'])?.toInt(),
@@ -102,7 +107,12 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
       param: details is Map ? details['parameter_size'] as String? : null,
       quant: details is Map ? details['quantization_level'] as String? : null,
       expiresAt: parseIsoToEpoch(m['expires_at']),
-      context: null,
+      // `/api/ps` reports the running model's context window directly; `/api/tags`
+      // omits it (stays null there). No `/api/show` call is needed.
+      context: finiteOrNull(m['context_length'])?.toInt(),
+      // Ollama cloud models carry a `-cloud` tag suffix (e.g.
+      // `qwen3-coder:480b-cloud`); they run on ollama.com, not on-device.
+      cloud: name.endsWith('-cloud'),
     ));
   }
   return out;
@@ -163,6 +173,7 @@ ProviderQuota localRuntimeQuota({
       ModelInfo(
         id: m.name,
         local: true,
+        cloudOffloaded: m.cloud,
         loaded: loadedByName.containsKey(m.name),
         sizeBytes: m.bytes,
         quant: m.quant,

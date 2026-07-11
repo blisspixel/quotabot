@@ -434,7 +434,8 @@ void main() {
         byName['list_models']!.description,
         allOf(
           contains('providers represented in the current registry'),
-          contains('does not prove on-device execution or zero cost'),
+          contains('cloud-offloaded local model'),
+          contains('excluded'),
           isNot(contains('every model')),
         ),
       );
