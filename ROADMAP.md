@@ -251,22 +251,31 @@ runtime can satisfy a local-only budget.
 **Outcome:** SEE, ROUTE, and ALERT are three views of a single pure object, and
 that object can be replayed and simulated deterministically.
 
-- Consolidate the decision and windowing spine into one pure function,
-  `decide(observations, now) -> (forecast, decision)`, with provider I/O kept in
-  thin adapters. The code already leans this way; this finishes it.
-- The forecast carries honest uncertainty as first-class data (a distribution or
-  bounded interval, not a bare point), so a downstream view can render a word or a
-  dot without re-deriving it.
-- Build the replay harness: run the pure core over recorded local history, plus a
-  `--mock-provider` simulation mode that drives it from fixtures. This is both the
-  test bed for everything after and the substrate for the oracle benchmark.
-- No public contract change and no visible behavior change beyond equal-or-better
-  routes; existing SEE / ROUTE / `suggest` / `top` output stays stable, now sourced
-  from the unified core.
+- **Shipped:** `decide(observations, now, context) -> Decision` in
+  `collector/lib/decision.dart` is the single pure front door. It recomputes
+  nothing - the routing core already produced the whole forward forecast, so
+  `Decision.forecasts` (the ranked candidates, each carrying headroom, recent
+  burn and its standard error, strand probability, confidence, and runway) is
+  the SEE view, `Decision.recommended` is ROUTE, and `alertsBelow` is ALERT: one
+  object, three views, pinned by test. `DecisionContext` bundles the bounded
+  caller inputs so a decision is one recordable value. The MCP, HTTP, and CLI
+  suggest surfaces now source from `decide` (behaviour-identical).
+- **Shipped:** the forecast already carries honest uncertainty as first-class
+  data - burn standard error, strand probability, and confidence per candidate -
+  so a view renders a word or a dot without re-deriving it.
+- **Shipped:** `replay(frames)` folds the pure core over recorded observation
+  frames deterministically; the `--mock-provider` simulation (`simulateFleet`)
+  drives the whole pipeline through `decide` with no network. Both pinned by test.
+- **Remaining:** migrate the secondary route surfaces (`top`, the remaining MCP
+  tools) to source from `decide` too, and wire `replay` to real recorded history
+  in the impure shell (it drives the 0.8 calibration ledger and oracle benchmark).
+- No public contract change and no visible behavior change: existing SEE / ROUTE /
+  `suggest` output stays stable, `decide().route` equals `suggestRoute()`.
 
-Acceptance: the pure core has no I/O; SEE, ROUTE, and ALERT are all expressed as
-views of its output; a recorded-history replay reproduces current decisions; the
-simulation mode drives the full pipeline from fixtures with no network.
+Acceptance (met by the pure core and its tests; surface migration finishing):
+the pure core has no I/O; SEE, ROUTE, and ALERT are all expressed as views of its
+output; a recorded-history replay reproduces current decisions; the simulation
+mode drives the full pipeline from fixtures with no network.
 
 ### 0.8 - The moat: a forecast that grades itself
 

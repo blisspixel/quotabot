@@ -238,9 +238,21 @@ state no longer lists it.
 
 ## Routing helpers and the MCP server
 
+`decision.dart` is the one engine's front door: `decide(observations, now,
+context) -> Decision` is the single pure entry point every suggest surface
+(CLI, MCP, HTTP) sources from. It recomputes nothing - the routing core already
+produces the whole forward forecast, so `Decision.forecasts` (the ranked
+candidates, each carrying headroom, burn and its standard error, strand
+probability, confidence, and runway) is the SEE view, `Decision.recommended` is
+ROUTE, and `alertsBelow` is ALERT: one object, three views. `DecisionContext`
+bundles the bounded caller inputs so a decision is one recordable value, and
+`replay(frames)` folds `decide` over recorded observation frames
+deterministically - the substrate for calibration and the oracle benchmark.
+
 `analysis.dart` exposes `providerHeadroom`, `providerWithMostHeadroom`,
 `providerAvailability`, `bindingWindow`, `averageRecentHeadroom`, and the
-forecast helpers `riskAdjustedHeadroom`, `strandProbability`, and `suggestRoute`.
+forecast helpers `riskAdjustedHeadroom`, `strandProbability`, and `suggestRoute`
+(the decision core `decide` wraps).
 `suggestRoute` can accept active local lease discounts so concurrent routers see
 reduced effective headroom for the provider/account another caller already
 reserved. `leases.dart` owns those reservations: production uses a small

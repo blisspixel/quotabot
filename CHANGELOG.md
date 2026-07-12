@@ -4,8 +4,20 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-Work toward 0.6 (truthful substrate), the first milestone of the reframed
-version ladder to 1.0 (see ROADMAP.md).
+Work toward 0.6 (truthful substrate) and 0.7 (one forecast, one engine), the
+first milestones of the reframed version ladder to 1.0 (see ROADMAP.md).
+
+### Added
+- Provider identity aliases: a rename that changes a provider's id no longer
+  silently orphans profiles, hidden-provider choices, filters, manual entries,
+  leases, or routing resolution. A one-way alias map (empty until a real rename
+  ships, so identity today) is funnelled through every identity seam and guarded
+  by tests.
+- A single pure decision core, `decide(observations, now, context) -> Decision`,
+  that the MCP, HTTP, and CLI suggest surfaces now source from. SEE, ROUTE, and
+  ALERT are views of one object, and `replay(frames)` folds the core over
+  recorded history deterministically. Behaviour is unchanged; this makes the
+  engine one named, replayable object (the substrate for calibration).
 
 ### Fixed
 - An Ollama cloud model (a `-cloud` tag suffix, e.g. `qwen3-coder:480b-cloud`)
