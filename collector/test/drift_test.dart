@@ -241,6 +241,28 @@ void main() {
       expect(previous.stale, isFalse, reason: 'the baseline stays immutable');
     });
 
+    test('restored capacity after a reset is admitted, not held as drift', () {
+      // The real Codex case behind "after the reset, quotabot should show the
+      // capacity": the 5h window was nearly spent, then a reset advanced its
+      // window and restored headroom. Because the reset moved forward, the drop
+      // in used-percent is a legitimate refill, not a suspicious fall, so the
+      // fresh higher-headroom reading must be admitted and shown - never held
+      // back as "usage fell with no reset".
+      final previous = evidence(used: 92, asOf: 100, reset: 5000);
+      final restored = evidence(used: 15, asOf: 6000, reset: 11000);
+
+      final admission = admitQuotaEvidence(
+        restored,
+        previous,
+        observedAt: 6000,
+      );
+
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.driftReason, isNull);
+      expect(admission.snapshot.windows.single.usedPercent, 15);
+      expect(admission.snapshot.stale, isFalse);
+    });
+
     test('identity and evidence-class changes establish a new baseline', () {
       final previous = evidence(used: 60, asOf: 100);
       final changedAccount = evidence(
