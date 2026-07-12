@@ -224,9 +224,12 @@ provider, before a forecast is built on top of it.
   snapshots, history, and analytics buckets written under the old id carry
   forward rather than regenerating from live reads after a rename.
 - Pin every remaining supported response shape with sanitized fixtures.
-- Resolve Antigravity weekly-window versus baseline-credit semantics from provider
-  evidence. If the API exposes no stable mapping, keep baseline credits explicitly
-  unsupported and unknown rather than inferring a window.
+- **Done:** Antigravity weekly-window semantics resolved from live evidence. The
+  Cloud Code endpoint reports each model's single binding limit with no window
+  type; quotabot surfaces the account's most-constrained one as a single weekly
+  window with its true reset, rather than a reset-delta guess that mislabeled a
+  near-term weekly as "5h". The separate burst limit and per-model-group
+  breakdown are not exposed by this endpoint and stay in the per-model quotas.
 - Prefer LM Studio's current `GET /api/v1/models` contract, preserving v0 and
   OpenAI-compatible fallbacks. Parse loaded instances, context, size, quantization,
   and capability evidence without loading or invoking a model.

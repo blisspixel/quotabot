@@ -2110,7 +2110,7 @@ void _printDoctor(List<ProviderQuota> results) {
         ? (q.status ?? '')
         : q.windows.isEmpty
             ? (q.error ?? '')
-            : q.windows.map((w) {
+            : visibleWindows(q.windows, now).map((w) {
                 final pct = windowUsedPercent(w, now).round();
                 final reset = w.resetsAt == null
                     ? ''

@@ -195,14 +195,17 @@ State lives in the Antigravity globalStorage SQLite database at
 - The Code Assist tier field reports `free-tier` even for paid accounts, so it is
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
-- Antigravity also exposes AI Premium credits and baseline quota concepts in its
-  own CLI/docs. The live response carries only `{remainingFraction, resetTime}`
-  per model with no field distinguishing a resettable weekly window from a
-  persistent baseline balance, so quotabot bounds the window horizon: a reset
-  more than eight days out (a week plus a day of buffer) is not asserted as a
-  weekly window. That balance still surfaces per-model, without inferring a reset
-  cadence the provider never declared. Per-model quota remains the measured live
-  signal.
+- Antigravity's Cloud Code endpoint reports each model's single binding limit -
+  `{remainingFraction, resetTime}`, its tightest cap across the plan's weekly
+  allowance and its short-term burst limit - with no field naming which window
+  that is. quotabot surfaces the account's most-constrained binding limit as a
+  single weekly window (the cap a subscription user tracks) with its true reset,
+  rather than guessing the window type from the reset delta, which mislabeled a
+  weekly whose reset happened to fall within a few hours as a "5h" window. The
+  separate burst limit and the per-model-group breakdown that Antigravity's own
+  CLI shows are not exposed by this endpoint; per-model detail is carried by the
+  model quotas. A reset beyond eight days out (a week plus a day of buffer) is
+  treated as an indeterminate balance and not asserted as a window.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
   Library, Linux XDG) and scans Antigravity profile directories. Each active
   account gets its own live read when a matching account grant, active CLI token,
