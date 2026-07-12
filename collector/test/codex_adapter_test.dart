@@ -225,6 +225,43 @@ void main() {
     expect(w.firstWhere((x) => x.label == 'weekly').usedPercent, 100);
     expect(codexUsageWindows(const {}), isEmpty);
   });
+
+  test('surfaces redeemable reset credits as an actionable detail', () async {
+    final q = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async =>
+          _wham(primary: 95, secondary: 40, resetCredits: 2),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(
+      q.details.single,
+      allOf(contains('2 rate-limit reset credits'), contains('redeem')),
+    );
+  });
+
+  test('reset-credit detail is pluralized and omitted when none are available',
+      () async {
+    final one = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async =>
+          _wham(primary: 95, secondary: 40, resetCredits: 1),
+    ).collect();
+    expect(one.details.single, contains('1 rate-limit reset credit '));
+
+    final none = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async =>
+          _wham(primary: 95, secondary: 40, resetCredits: 0),
+    ).collect();
+    expect(none.details, isEmpty);
+
+    final absent = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async => _wham(primary: 95, secondary: 40),
+    ).collect();
+    expect(absent.details, isEmpty);
+  });
 }
 
 void _writeRollout(
@@ -266,7 +303,11 @@ Map<String, dynamic> _limits(
 }
 
 /// The live `/backend-api/wham/usage` response shape (sanitized).
-Map<String, dynamic> _wham({required num primary, required num secondary}) {
+Map<String, dynamic> _wham({
+  required num primary,
+  required num secondary,
+  int? resetCredits,
+}) {
   final now = nowEpoch();
   return {
     'email': 'blisspixel@example.com',
@@ -285,6 +326,8 @@ Map<String, dynamic> _wham({required num primary, required num secondary}) {
         'reset_at': now + 604800,
       },
     },
+    if (resetCredits != null)
+      'rate_limit_reset_credits': {'available_count': resetCredits},
   };
 }
 

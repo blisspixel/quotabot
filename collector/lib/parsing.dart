@@ -95,6 +95,20 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) {
   return out;
 }
 
+/// The number of rate-limit reset credits Codex reports as available to redeem,
+/// or null when the field is absent. Codex exposes these under
+/// `rate_limit_reset_credits.available_count`; each one lets the account refresh
+/// its rate limit early, out of the normal cycle. Returning null (rather than 0)
+/// for an absent field keeps "the provider did not report credits" distinct from
+/// "the provider reported zero available".
+int? codexResetCredits(Map<String, dynamic>? resp) {
+  final credits = resp?['rate_limit_reset_credits'];
+  if (credits is! Map) return null;
+  final count = credits['available_count'];
+  if (count is! num || !count.isFinite || count < 0) return null;
+  return count.toInt();
+}
+
 // --- Claude -----------------------------------------------------------------
 
 /// Builds windows from the Anthropic OAuth usage response.

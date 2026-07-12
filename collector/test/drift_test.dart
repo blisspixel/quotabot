@@ -93,6 +93,30 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), contains('reset moved earlier'));
     });
 
+    test('a Codex window disappearing is a restructure, not drift', () {
+      // OpenAI collapsed Codex Pro's separate 5h and weekly buckets into a
+      // single weekly window. The vanished 5h must not pin the pre-restructure
+      // snapshot; the fresh single-window read is the current truth to show.
+      final prev = snap(codexProviderId, [
+        win('5h', 40, 1000),
+        win('weekly', 93, 2000),
+      ]);
+      final fresh = snap(codexProviderId, [win('weekly', 4, 600000)]);
+      expect(detectQuotaDrift(fresh, prev), isNull);
+    });
+
+    test('the disappeared-window exemption is scoped to Codex', () {
+      // A non-variable provider losing a window is still genuine drift, so the
+      // Codex restructure carve-out cannot mask a parser regression elsewhere.
+      final prev = snap(claudeProviderId, [
+        win('5h', 40, 1000),
+        win('weekly', 30, 2000),
+      ]);
+      final fresh = snap(claudeProviderId, [win('weekly', 30, 2000)]);
+      expect(detectQuotaDrift(fresh, prev),
+          contains('5h quota window disappeared'));
+    });
+
     test('Antigravity is exempt: its window is a max over a changing set', () {
       final prev = snap(antigravityProviderId, [win('5h', 80, 2000)]);
       // Both a headroom gain and a reset regression, yet not flagged.
@@ -261,6 +285,40 @@ void main() {
       expect(admission.driftReason, isNull);
       expect(admission.snapshot.windows.single.usedPercent, 15);
       expect(admission.snapshot.stale, isFalse);
+    });
+
+    test('an off-cycle Codex restructure admits the fresh single window', () {
+      // The exact live case: a nearly-spent 5h+weekly snapshot, then OpenAI
+      // restructures to one fresh weekly window at 4% used. The old 5h vanishes,
+      // so the pre-restructure guard would otherwise pin the stale 93% weekly
+      // and tell the user they are nearly out when they have full headroom.
+      final previous = ProviderQuota(
+        provider: codexProviderId,
+        displayName: 'Codex',
+        account: 'a',
+        plan: 'pro',
+        asOf: 100,
+        windows: [win('5h', 40, 1000), win('weekly', 93, 2000)],
+      );
+      final restructured = ProviderQuota(
+        provider: codexProviderId,
+        displayName: 'Codex',
+        account: 'a',
+        plan: 'pro',
+        asOf: 6000,
+        windows: [win('weekly', 4, 600000)],
+      );
+
+      final admission = admitQuotaEvidence(
+        restructured,
+        previous,
+        observedAt: 6000,
+      );
+
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.driftReason, isNull);
+      expect(admission.snapshot.windows.single.label, 'weekly');
+      expect(admission.snapshot.windows.single.usedPercent, 4);
     });
 
     test('identity and evidence-class changes establish a new baseline', () {
