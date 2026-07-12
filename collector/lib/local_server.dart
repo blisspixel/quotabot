@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'analysis.dart';
 import 'cache.dart';
+import 'decision.dart';
 import 'litellm_metrics.dart';
 import 'mcp_http.dart' show isLoopbackMcpHost;
 import 'model_catalog.dart';
@@ -242,24 +243,26 @@ Future<HttpServer> startLocalQuotabotServer({
             );
             writeJson(
               request,
-              suggestRoute(
+              decide(
                 snap,
                 current,
-                burnStatsByProvider: recentBurnStatsByQuota(snap, current),
-                preferLocal:
-                    queryFlag(request.uri, 'local_first', 'local-first'),
-                costPenaltyByProvider: costPenalties.penalties,
-                costWeight: costWeight.weight,
-                pipePenaltyByProvider:
-                    routeSummaryProvider().pipePenaltyByProvider(
-                  now: current,
+                context: DecisionContext(
+                  burnStatsByProvider: recentBurnStatsByQuota(snap, current),
+                  preferLocal:
+                      queryFlag(request.uri, 'local_first', 'local-first'),
+                  costPenaltyByProvider: costPenalties.penalties,
+                  costWeight: costWeight.weight,
+                  pipePenaltyByProvider:
+                      routeSummaryProvider().pipePenaltyByProvider(
+                    now: current,
+                  ),
+                  capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+                  capabilityAvailableQuotaKeys:
+                      capabilityGates.availableQuotaKeys,
+                  capabilityBudgetResetByQuotaKey:
+                      capabilityGates.budgetResetByQuotaKey,
                 ),
-                capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-                capabilityAvailableQuotaKeys:
-                    capabilityGates.availableQuotaKeys,
-                capabilityBudgetResetByQuotaKey:
-                    capabilityGates.budgetResetByQuotaKey,
-              ).toJson(),
+              ).route.toJson(),
             );
           }
         } else if (path == '/health') {
