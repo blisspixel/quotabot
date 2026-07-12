@@ -31,6 +31,11 @@ Work toward 0.6 (truthful substrate), 0.7 (one forecast, one engine), and 0.8
   engine one named, replayable object (the substrate for calibration).
 
 ### Fixed
+- The recent-burn estimate is now reset-aware: it fits only the current draw-down
+  run, segmenting at a window refill (a large single-step headroom jump, a
+  scheduled or redeemed reset). Previously a reset inside the lookback could make
+  the burn read as "recovering" and skew the runway. A rolling window's gradual
+  give-back stays well under the threshold and is not segmented.
 - An Ollama cloud model (a `-cloud` tag suffix, e.g. `qwen3-coder:480b-cloud`)
   runs on ollama.com, not on-device, but was tagged plain local, so it could
   satisfy `--budget=local` and free budgets. Such models are now flagged
