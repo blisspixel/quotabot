@@ -23,6 +23,7 @@ import 'package:mcp_dart/mcp_dart.dart';
 
 import 'alerts.dart';
 import 'analysis.dart';
+import 'decision.dart';
 import 'leases.dart';
 import 'litellm_metrics.dart';
 import 'model_catalog.dart';
@@ -109,20 +110,22 @@ Map<String, dynamic> suggestResponse(
     catalog: catalog,
     requirements: routeRequirements,
   );
-  final response = suggestRoute(
+  final response = decide(
     providers,
     now,
-    burnStatsByProvider: burnStatsByProvider,
-    leaseDiscountFor: (provider, account) =>
-        leaseDiscountFor(activeLeases, provider, account),
-    preferLocal: preferLocal,
-    costPenaltyByProvider: costPenaltyByProvider,
-    costWeight: costWeight,
-    pipePenaltyByProvider: pipePenaltyByProvider,
-    capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-    capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
-    capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
-  ).toJson();
+    context: DecisionContext(
+      burnStatsByProvider: burnStatsByProvider,
+      leaseDiscountFor: (provider, account) =>
+          leaseDiscountFor(activeLeases, provider, account),
+      preferLocal: preferLocal,
+      costPenaltyByProvider: costPenaltyByProvider,
+      costWeight: costWeight,
+      pipePenaltyByProvider: pipePenaltyByProvider,
+      capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+      capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+      capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
+    ),
+  ).route.toJson();
   response['active_leases'] = leaseDiscounts(activeLeases)
       .map((discount) => discount.toJson())
       .toList();
