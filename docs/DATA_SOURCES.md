@@ -309,12 +309,16 @@ actually down). All three built-in runtime adapters emit
   reports each running model's `context_length`, which quotabot reads for the
   loaded model's context window, so no `/api/show` call is needed. Honors
   `OLLAMA_HOST`, default `http://127.0.0.1:11434`.
-- LM Studio: `GET /api/v0/models` (native REST, includes a per-model `state` of
-  loaded or not-loaded), falling back to the OpenAI-compatible `GET /v1/models`
-  when the native API is unavailable. Honors `LMSTUDIO_HOST`, default
-  `http://127.0.0.1:1234`. The LM Studio local server must be started (Developer
-  tab, or `lms server start`). The v0 shape carries `arch` (architecture), not a
-  parameter count, so quotabot does not fill the parameter-size slot from it.
+- LM Studio: `GET /api/v1/models` (the current native REST API, 0.4.0+), which
+  reports loaded instances with the running context length, on-disk size,
+  object-shaped quantization, a real parameter size (`params_string`), and
+  capabilities. Falls back to the older native `GET /api/v0/models` (a per-model
+  loaded/not-loaded `state`), then the OpenAI-compatible `GET /v1/models` (names
+  only, no load state). Honors `LMSTUDIO_HOST`, default `http://127.0.0.1:1234`.
+  The LM Studio local server must be started (Developer tab, or `lms server
+  start`); loading a model in the chat window does not start it. Metadata only;
+  never loads or invokes a model. The v0 shape carries `arch` (architecture), not
+  a parameter count, so quotabot does not fill the parameter-size slot from it.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`). Honors `LEMONADE_HOST` and `LEMONADE_PORT`;
   the default is `http://127.0.0.1:13305`.
@@ -331,11 +335,11 @@ Current compatibility limits:
   excludes it from `--budget=local` and free budgets, so a cloud model reached
   through the local daemon is never treated as local-only or free. It stays
   listed (reachable via the local runtime) but only under `--budget=any`.
-- LM Studio released its native `GET /api/v1/models` contract in 0.4.0 and
-  deprecated `/api/v0/models`. quotabot currently reads `/api/v0/models` (falling
-  back to the OpenAI-compatible `/v1/models`); adopting the v1 endpoint and its
-  richer capability array is pending a captured v1 response body and is tracked as
-  a 0.6 compatibility correction, not current behavior.
+- LM Studio's native `GET /api/v1/models` (0.4.0+) is now the preferred read,
+  with `/api/v0/models` and the OpenAI-compatible `/v1/models` as fallbacks. The
+  v1 shape is pinned by a fixture captured from a real 0.4.0+ server. Remaining:
+  thread v1's `capabilities` (vision, tool use) onto local model entries so the
+  capability gates apply to local models too.
 
 ## Cloud model catalog audit
 
