@@ -392,7 +392,9 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       kind: 'local',
       network: [
         _localRuntime(env, 'LMSTUDIO_HOST', lmStudioDefaultPort,
-            '/api/v0/models', 'LM Studio native model metadata'),
+            '/api/v1/models', 'LM Studio native model metadata'),
+        _localRuntime(env, 'LMSTUDIO_HOST', lmStudioDefaultPort,
+            '/api/v0/models', 'LM Studio native model metadata (older API)'),
         _localRuntime(env, 'LMSTUDIO_HOST', lmStudioDefaultPort, '/v1/models',
             'LM Studio OpenAI-compatible model metadata fallback'),
       ],

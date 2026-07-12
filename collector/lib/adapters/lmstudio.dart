@@ -13,10 +13,14 @@ import 'ollama.dart' show LocalModel, localRuntimeQuota;
 /// the same way the Ollama adapter does (no quota; a local runtime has nothing
 /// to spend).
 ///
-/// Prefers LM Studio's native REST API (`GET /api/v0/models`), which reports a
-/// per-model `state` of "loaded" or "not-loaded". Falls back to the
-/// OpenAI-compatible `GET /v1/models`, which lists models without load state.
-/// LM Studio's local server defaults to 127.0.0.1:1234; honors LMSTUDIO_HOST.
+/// Prefers LM Studio's current native REST API (`GET /api/v1/models`, released
+/// in 0.4.0), which reports richer per-model evidence (loaded instances with the
+/// running context length, on-disk size, quantization, parameter size, and
+/// capabilities). Falls back to the older native `GET /api/v0/models` (a
+/// per-model loaded/not-loaded `state`), then the OpenAI-compatible
+/// `GET /v1/models`, which lists models without load state. LM Studio's local
+/// server defaults to 127.0.0.1:1234; honors LMSTUDIO_HOST. Reads model metadata
+/// only; never loads or invokes a model.
 class LmStudioAdapter {
   static const id = lmStudioProviderId;
   static const name = lmStudioProviderName;
@@ -27,7 +31,7 @@ class LmStudioAdapter {
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
-      final native = await _nativeModels();
+      final native = await _v1Models() ?? await _nativeModels();
       if (native != null) {
         return localRuntimeQuota(
           id: id,
@@ -49,6 +53,19 @@ class LmStudioAdapter {
       );
     } catch (_) {
       return _notRunning(asOf);
+    }
+  }
+
+  Future<({List<LocalModel> installed, List<LocalModel> loaded})?>
+      _v1Models() async {
+    try {
+      final resp = await http
+          .get(Uri.parse('${baseUrl()}/api/v1/models'))
+          .timeout(const Duration(seconds: 2));
+      if (resp.statusCode != 200) return null;
+      return lmStudioV1FromJson(jsonDecode(resp.body));
+    } catch (_) {
+      return null;
     }
   }
 
@@ -87,6 +104,46 @@ class LmStudioAdapter {
         ok: false,
         error: 'not running',
       );
+}
+
+/// Parses LM Studio's current native `/api/v1/models` body (0.4.0+) into
+/// installed/loaded model lists, or null when the shape is unexpected. Loaded
+/// models carry one or more `loaded_instances`; the running context length comes
+/// from the loaded instance's config, otherwise the model's max. Unlike v0, v1
+/// exposes a real parameter size (`params_string`) and object-shaped
+/// quantization. Pure for testing; reads metadata only.
+({List<LocalModel> installed, List<LocalModel> loaded})? lmStudioV1FromJson(
+  dynamic data,
+) {
+  final list = data is Map ? data['models'] : null;
+  if (list is! List) return null;
+  final installed = <LocalModel>[];
+  final loaded = <LocalModel>[];
+  for (final m in list) {
+    if (m is! Map || m['key'] is! String) continue;
+    final instances = m['loaded_instances'];
+    final isLoaded = instances is List && instances.isNotEmpty;
+    final firstInstance =
+        isLoaded && instances.first is Map ? instances.first as Map : null;
+    final loadedConfig = firstInstance?['config'];
+    final loadedContext = loadedConfig is Map
+        ? finiteOrNull(loadedConfig['context_length'])?.toInt()
+        : null;
+    final quant = m['quantization'];
+    final model = (
+      name: m['key'] as String,
+      bytes: finiteOrNull(m['size_bytes'])?.toInt(),
+      param: m['params_string'] as String?,
+      quant: quant is Map ? quant['name'] as String? : null,
+      vramBytes: null,
+      expiresAt: null,
+      context: loadedContext ?? finiteOrNull(m['max_context_length'])?.toInt(),
+      cloud: false,
+    );
+    installed.add(model);
+    if (isLoaded) loaded.add(model);
+  }
+  return (installed: installed, loaded: loaded);
 }
 
 /// Parses LM Studio's native `/api/v0/models` body into installed/loaded model

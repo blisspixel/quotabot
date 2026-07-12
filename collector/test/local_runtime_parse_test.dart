@@ -34,6 +34,51 @@ void main() {
       expect(lmStudioNativeFromJson('nope'), isNull);
     });
 
+    test('v1 reads params, object quant, and the loaded instance context', () {
+      final r = lmStudioV1FromJson({
+        'models': [
+          {
+            'key': 'example/coder-8b',
+            'size_bytes': 6326938154,
+            'params_string': '7.5B',
+            'quantization': {'name': 'Q4_K_M', 'bits_per_weight': 4},
+            'max_context_length': 131072,
+            'loaded_instances': [
+              {
+                'id': 'example/coder-8b',
+                'config': {'context_length': 8192},
+              },
+            ],
+          },
+          {
+            'key': 'example/embed-v1',
+            'size_bytes': 84106624,
+            'quantization': {'name': 'Q4_K_M'},
+            'max_context_length': 2048,
+            'loaded_instances': <Object>[],
+          },
+          {'no': 'key'}, // skipped
+        ],
+      });
+      expect(r!.installed.length, 2);
+      expect(r.loaded.length, 1);
+      final loaded = r.loaded.single;
+      expect(loaded.name, 'example/coder-8b');
+      expect(loaded.param, '7.5B'); // a real parameter size, unlike v0
+      expect(loaded.quant, 'Q4_K_M'); // from the object-shaped quantization
+      expect(loaded.bytes, 6326938154);
+      expect(loaded.context, 8192); // the loaded instance's running context
+      // The not-loaded model falls back to its max context.
+      final notLoaded =
+          r.installed.firstWhere((m) => m.name == 'example/embed-v1');
+      expect(notLoaded.context, 2048);
+    });
+
+    test('v1 rejects an unexpected shape', () {
+      expect(lmStudioV1FromJson({'data': <Object>[]}), isNull);
+      expect(lmStudioV1FromJson('nope'), isNull);
+    });
+
     test('compat lists model names without load state', () {
       final r = lmStudioCompatFromJson({
         'data': [

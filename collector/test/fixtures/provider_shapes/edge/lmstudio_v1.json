@@ -1,0 +1,54 @@
+{
+  "models": [
+    {
+      "type": "llm",
+      "publisher": "example",
+      "key": "example/coder-8b",
+      "display_name": "Coder 8B",
+      "architecture": "llama",
+      "quantization": {
+        "name": "Q4_K_M",
+        "bits_per_weight": 4
+      },
+      "size_bytes": 6326938154,
+      "params_string": "7.5B",
+      "loaded_instances": [
+        {
+          "id": "example/coder-8b",
+          "config": {
+            "context_length": 8192,
+            "flash_attention": true
+          }
+        }
+      ],
+      "max_context_length": 131072,
+      "format": "gguf",
+      "capabilities": {
+        "vision": true,
+        "trained_for_tool_use": true,
+        "reasoning": {
+          "allowed_options": ["off", "on"],
+          "default": "on"
+        }
+      },
+      "description": null,
+      "variants": ["example/coder-8b@q4_k_m"],
+      "selected_variant": "example/coder-8b@q4_k_m"
+    },
+    {
+      "type": "embedding",
+      "publisher": "example",
+      "key": "example/embed-text-v1",
+      "display_name": "Embed Text v1",
+      "quantization": {
+        "name": "Q4_K_M",
+        "bits_per_weight": 4
+      },
+      "size_bytes": 84106624,
+      "params_string": null,
+      "loaded_instances": [],
+      "max_context_length": 2048,
+      "format": "gguf"
+    }
+  ]
+}

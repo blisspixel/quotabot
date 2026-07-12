@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/provider_adapters.dart';
 import 'package:test/test.dart';
@@ -32,6 +33,19 @@ void main() {
       final windows = codexWindows(_edge('codex_primary_only.json'));
       expect(windows.map((w) => w.label), ['5h']);
       expect(windows.single.usedPercent, 45);
+    });
+  });
+
+  group('lm studio v1 shape (captured from a real 0.4.0+ server)', () {
+    test('parses the real /api/v1/models body into loaded + installed', () {
+      final parsed = lmStudioV1FromJson(_edge('lmstudio_v1.json'));
+      expect(parsed!.installed.length, 2);
+      expect(parsed.loaded.length, 1);
+      final loaded = parsed.loaded.single;
+      expect(loaded.name, 'example/coder-8b');
+      expect(loaded.param, '7.5B');
+      expect(loaded.quant, 'Q4_K_M');
+      expect(loaded.context, 8192); // the running instance's context
     });
   });
 
