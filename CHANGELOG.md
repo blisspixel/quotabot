@@ -2,11 +2,11 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.8.0 - 2026-07-12
 
-Work toward 0.6 (truthful substrate), 0.7 (one forecast, one engine), and 0.8
-(the calibration moat), the first milestones of the reframed version ladder to
-1.0 (see ROADMAP.md).
+The first three milestones of the reframed version ladder to 1.0, released
+together: 0.6 (truthful substrate), 0.7 (one forecast, one engine), and 0.8
+(the calibration moat). See ROADMAP.md.
 
 ### Added
 - `quotabot calibration` now self-tunes: it fits the burn lookback that makes the
