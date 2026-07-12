@@ -280,6 +280,13 @@ happened, and it improves on the user's own data.
 - The plain-language layer generates every casual sentence from the calibrated
   number underneath, so "about an hour left" is always backed and inspectable one
   layer down.
+- Reset-aware burn. The recent-burn regression is a flat lookback today, so a
+  refill inside the window (a scheduled reset, or a redeemed bonus reset) can read
+  as "recovering" and skew the runway. Segment the burn at reset boundaries so a
+  refill never counts as negative burn, and treat a redemption as a first-class
+  event rather than an unexplained jump. The observed availability history already
+  records the post-reset capacity; this makes the burn and runway honest around
+  it, and pairs with the spent-window escape-hatch detection in 0.9.
 
 Acceptance: predictions and outcomes are logged and replayable; Brier and
 reliability are computed and exposed only when observations suffice; a documented
