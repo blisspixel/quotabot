@@ -21,6 +21,7 @@ export 'cache.dart'
         recentBurnStatsByQuota;
 export 'calibration.dart';
 export 'catalog_audit.dart';
+export 'decision.dart';
 export 'insights.dart';
 export 'leases.dart';
 export 'litellm_metrics.dart';
