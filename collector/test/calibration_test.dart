@@ -80,6 +80,14 @@ void main() {
     expect(pooled.samples, single.samples * 2);
   });
 
+  test('the headline reads only once predictions have resolved', () {
+    final rich =
+        calibrationFromHistory(_sawtooth(cycles: 6), _t0 + (6 * 12 + 6) * 3600);
+    expect(rich.samples, greaterThan(0));
+    expect(rich.headline, contains('calibrated over ${rich.samples}'));
+    expect(calibrationFromHistory(const [], _t0).headline, isNull);
+  });
+
   group('self-tuning the burn lookback on local history', () {
     test('a thin history keeps the shipped default, never overfitting', () {
       final thin = _sawtooth(cycles: 1); // only a handful of predictions
