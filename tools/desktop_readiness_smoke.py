@@ -178,6 +178,28 @@ def await_windows_tray(
     )
 
 
+def _read_json_if_ready(path: Path) -> Any:
+    """Read a JSON file the desktop process may be writing concurrently.
+
+    Returns the parsed object, or None when the file is not there yet, is
+    momentarily share-locked (on Windows the app holds the handle while it
+    writes, which surfaces as PermissionError), or is a partial write (invalid
+    JSON). All three are "not ready yet, poll again" states rather than hard
+    failures; the caller's deadline bounds the wait, so a genuinely stuck app
+    still fails with a clear timeout message instead of a flaky read error.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
 def await_readiness(
     process: subprocess.Popen[bytes],
     readiness_file: Path,
@@ -187,38 +209,17 @@ def await_readiness(
     deadline = time.monotonic() + timeout_seconds
     progress: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        try:
-            payload_text = readiness_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            payload_text = None
-        except OSError as error:
-            raise RuntimeError("Desktop readiness file could not be read") from error
-        if payload_text is not None:
-            try:
-                payload = json.loads(payload_text)
-            except json.JSONDecodeError as error:
-                raise RuntimeError(
-                    "Desktop readiness file is not valid UTF-8 JSON"
-                ) from error
+        payload = _read_json_if_ready(readiness_file)
+        if payload is not None:
             if validate_payload(payload, expected_platform):
                 return
             raise RuntimeError("Desktop readiness file contains an incomplete state")
         for component in ("window", "tray"):
-            progress_file = Path(f"{readiness_file}.{component}.json")
-            try:
-                progress_text = progress_file.read_text(encoding="utf-8")
-            except FileNotFoundError:
+            component_payload = _read_json_if_ready(
+                Path(f"{readiness_file}.{component}.json")
+            )
+            if component_payload is None:
                 continue
-            except OSError as error:
-                raise RuntimeError(
-                    f"Desktop {component} progress file could not be read"
-                ) from error
-            try:
-                component_payload = json.loads(progress_text)
-            except json.JSONDecodeError as error:
-                raise RuntimeError(
-                    f"Desktop {component} progress file is not valid UTF-8 JSON"
-                ) from error
             validate_payload(component_payload, expected_platform)
             progress[component] = component_payload
         return_code = process.poll()

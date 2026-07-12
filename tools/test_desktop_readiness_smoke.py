@@ -12,6 +12,7 @@ import unittest.mock
 
 from tools.desktop_readiness_smoke import (
     SCHEMA,
+    _read_json_if_ready,
     await_readiness,
     launch_command,
     macos_app_process_ids,
@@ -168,6 +169,55 @@ class DesktopReadinessTests(unittest.TestCase):
                 writer.join(timeout=1)
                 process.terminate()
                 process.wait(timeout=5)
+
+    def test_polls_through_a_partial_write_to_complete_readiness(self) -> None:
+        # The desktop app may be mid-write when the poll reads the file. A
+        # truncated (invalid) readiness file must be treated as not-ready-yet
+        # and retried, not raised as a hard failure - the real flaky-CI race.
+        with tempfile.TemporaryDirectory() as raw_temp:
+            readiness_file = Path(raw_temp) / "readiness.json"
+            readiness_file.write_text('{"schema": "quotabot.des', encoding="utf-8")
+            complete_payload = json.dumps(
+                {
+                    "schema": SCHEMA,
+                    "window_ready": True,
+                    "tray_ready": True,
+                    "platform": "windows",
+                }
+            )
+            writer = threading.Timer(
+                0.05,
+                readiness_file.write_text,
+                args=(complete_payload,),
+                kwargs={"encoding": "utf-8"},
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            writer.start()
+            try:
+                await_readiness(process, readiness_file, "windows", 1)
+            finally:
+                writer.join(timeout=1)
+                process.terminate()
+                process.wait(timeout=5)
+
+    def test_read_json_if_ready_treats_a_share_lock_as_not_ready(self) -> None:
+        # A Windows share lock during the app's write surfaces as PermissionError
+        # (an OSError); the reader must report "not ready yet", never raise.
+        with tempfile.TemporaryDirectory() as raw_temp:
+            path = Path(raw_temp) / "readiness.json"
+            path.write_text("{}", encoding="utf-8")
+            with unittest.mock.patch.object(
+                Path, "read_text", side_effect=PermissionError(13, "locked")
+            ):
+                self.assertIsNone(_read_json_if_ready(path))
+            # A clean read still parses.
+            self.assertEqual(_read_json_if_ready(path), {})
+            # A missing file is not-ready, not an error.
+            self.assertIsNone(_read_json_if_ready(Path(raw_temp) / "absent.json"))
 
     @unittest.skipIf(os.name == "nt", "POSIX process-group behavior")
     def test_stops_the_entire_posix_process_group(self) -> None:
