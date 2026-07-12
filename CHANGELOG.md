@@ -14,7 +14,12 @@ Work toward 0.6 (truthful substrate), 0.7 (one forecast, one engine), and 0.8
   score), degrading to the shipped default unless enough predictions have resolved
   and a candidate genuinely beats it - it never overfits a thin history. Reported
   as an advisory `tuning` block (fitted lookback plus the Brier improvement over
-  the default); not yet applied to routing.
+  the default). `quotabot suggest --tuned-burn` opts in to applying the fitted
+  lookback to the burn feeding the routing decision; default behaviour is
+  unchanged.
+- `quotabot doctor` shows the calibration headline ("N% calibrated over M
+  predictions") under the routing suggestion, once enough predictions have
+  resolved.
 - LM Studio: prefer the current native `GET /api/v1/models` (0.4.0+), which
   exposes loaded-instance context, on-disk size, quantization, and a real
   parameter size, with the older `/api/v0/models` and OpenAI-compatible
