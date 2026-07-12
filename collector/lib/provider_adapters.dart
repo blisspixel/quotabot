@@ -192,7 +192,9 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
 ];
 
 ProviderAdapterRegistration? providerAdapterById(String id) {
-  final normalized = id.trim().toLowerCase();
+  // Canonicalize so a persisted record under a retired id still resolves to the
+  // current adapter after a rename. Identity until a rename is registered.
+  final normalized = canonicalizeProviderId(id.trim().toLowerCase());
   for (final entry in kProviderAdapterRegistry) {
     if (entry.id == normalized) return entry;
   }

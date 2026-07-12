@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'provider_ids.dart';
 import 'util.dart';
 
 const defaultLeaseSeconds = 120;
@@ -20,7 +21,8 @@ String _normalizeIdPart(String value) =>
     value.trim().replaceAll(RegExp(r'[^a-zA-Z0-9._@-]'), '_');
 
 String normalizeLeaseProvider(String value) {
-  final normalized = _normalizeIdPart(value).toLowerCase();
+  final normalized =
+      canonicalizeProviderId(_normalizeIdPart(value).toLowerCase());
   return normalized.isEmpty ? 'unknown' : normalized;
 }
 

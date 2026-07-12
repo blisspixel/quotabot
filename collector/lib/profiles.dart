@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'models.dart';
+import 'provider_ids.dart';
 import 'util.dart';
 
 const profileSchema = 'quotabot.profile.v1';
@@ -219,7 +220,10 @@ String? normalizeProviderId(String? provider) {
   final s = provider?.trim().toLowerCase();
   if (s == null || s.isEmpty || s.length > 64) return null;
   if (!RegExp(r'^[a-z0-9][a-z0-9._-]*$').hasMatch(s)) return null;
-  return s;
+  // Resolve a retired id to its current canonical id so a rename does not lose
+  // the profiles, hidden-provider choices, filters, and manual entries that
+  // funnel through here. Identity until a rename is registered.
+  return canonicalizeProviderId(s);
 }
 
 const _maxProfileBytes = 256 * 1024;

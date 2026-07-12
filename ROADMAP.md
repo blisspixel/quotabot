@@ -214,8 +214,15 @@ in the changelog.
 **Outcome:** every advertised route means exactly what it says, on every claimed
 provider, before a forecast is built on top of it.
 
-- Add provider identity aliases for current renames without losing profiles,
-  hidden-provider choices, cache, or history.
+- Provider identity aliases for renames. **Mechanism shipped:** a one-way
+  `kProviderIdAliases` map plus `canonicalizeProviderId`, funnelled through every
+  identity seam (profile/hidden/filter/manual normalization, adapter resolution,
+  lease keys, cache filename stems), so registering a rename preserves the user's
+  durable state and routing resolution. The map is empty until a real rename
+  ships (identity, zero behavior change), and guard tests keep it one-way and
+  stop it shadowing a live provider. Remaining: an on-disk migration so cached
+  snapshots, history, and analytics buckets written under the old id carry
+  forward rather than regenerating from live reads after a rename.
 - Pin every remaining supported response shape with sanitized fixtures.
 - Resolve Antigravity weekly-window versus baseline-credit semantics from provider
   evidence. If the API exposes no stable mapping, keep baseline credits explicitly
