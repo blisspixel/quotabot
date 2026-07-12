@@ -36,6 +36,19 @@ Work toward 0.6 (truthful substrate), 0.7 (one forecast, one engine), and 0.8
   engine one named, replayable object (the substrate for calibration).
 
 ### Fixed
+- Antigravity now shows its weekly allowance correctly. Its Cloud Code endpoint
+  reports each model's single binding limit (its tightest cap across the weekly
+  allowance and the short-term burst limit) with only a remaining fraction and a
+  reset, and no window type. quotabot was labeling that by reset delta, so a
+  weekly whose reset fell within a few hours (the common case near a refresh) was
+  mislabeled a "5h" window. It now surfaces the account's most-constrained binding
+  limit as a single weekly window with its true reset. The separate burst limit
+  and per-model-group breakdown that Antigravity's own CLI shows are not exposed
+  by this endpoint; per-model detail stays in the model quotas.
+- `quotabot doctor` no longer shows a fully-available short window (a 5-hour rate
+  limit at 0% used) next to the longer window that is the real constraint; a
+  window is shown once it has been drawn on, and an all-fresh account still shows
+  its picture.
 - The recent-burn estimate is now reset-aware: it fits only the current draw-down
   run, segmenting at a window refill (a large single-step headroom jump, a
   scheduled or redeemed reset). Previously a reset inside the lookback could make

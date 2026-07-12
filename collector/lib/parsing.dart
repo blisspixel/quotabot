@@ -138,16 +138,27 @@ int? parseIsoToEpoch(dynamic v) {
 /// asserted as a plan-level window.
 const _antigravityMaxWindowHorizon = 8 * 86400;
 
-/// Buckets per-model Cloud Code quota into sprint/daily/weekly windows, keeping
-/// the most constrained model per bucket. A reset beyond
-/// [_antigravityMaxWindowHorizon] is not bucketed into a window, because the API
-/// exposes no stable weekly-versus-baseline mapping and inferring a far-future
-/// "weekly" window would misrepresent a static balance as a resetting one.
+/// The account's binding Antigravity limit as a single weekly-allowance window.
+///
+/// The Cloud Code endpoint reports one `quotaInfo` per model: a single
+/// `remainingFraction` and `resetTime`, its tightest cap across the plan's
+/// weekly allowance and its short-term burst limit, with no field naming which
+/// window that is. Earlier this was bucketed by reset delta into 5h/daily/weekly
+/// labels, which mislabels a weekly whose reset happens to fall within a few
+/// hours (the common case near a refresh) as a "5h" window. Instead, surface the
+/// most-constrained model's binding limit as the account's weekly allowance -
+/// the cap a subscription user tracks - with its true reset time. The separate
+/// burst limit and the per-model-group breakdown that Antigravity's own CLI
+/// shows are not exposed by this endpoint; per-model detail is carried by
+/// [antigravityModelQuotasFromLive]. A reset beyond
+/// [_antigravityMaxWindowHorizon] is treated as an indeterminate balance and not
+/// asserted as a window.
 List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
   final models = resp?['models'];
   if (models is! Map) return const [];
 
-  final buckets = <String, (double, int)>{};
+  double? bindingUsed;
+  int? bindingReset;
   models.forEach((_, m) {
     if (m is! Map) return;
     final qi = m['quotaInfo'];
@@ -157,23 +168,20 @@ List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
     if (frac == null || reset == null) return;
     if (reset - now > _antigravityMaxWindowHorizon) return;
     final used = ((1 - frac) * 100).clamp(0, 100).toDouble();
-    final label = resetLabel(reset, now);
-    final existing = buckets[label];
-    if (existing == null || used > existing.$1) {
-      buckets[label] = (used, reset);
+    if (bindingUsed == null || used > bindingUsed!) {
+      bindingUsed = used;
+      bindingReset = reset;
     }
   });
 
-  return buckets.entries
-      .map(
-        (e) => QuotaWindow(
-          label: e.key,
-          usedPercent: e.value.$1,
-          resetsAt: e.value.$2,
-        ),
-      )
-      .toList()
-    ..sort((a, b) => (a.resetsAt ?? 0).compareTo(b.resetsAt ?? 0));
+  if (bindingUsed == null) return const [];
+  return [
+    QuotaWindow(
+      label: 'weekly',
+      usedPercent: bindingUsed,
+      resetsAt: bindingReset,
+    ),
+  ];
 }
 
 /// Per-model quota from the live Cloud Code `fetchAvailableModels` response.

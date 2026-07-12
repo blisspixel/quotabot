@@ -52,6 +52,23 @@ void main() {
     expect(providerHeadroom(q, _now), 30); // 100 - 70
   });
 
+  test('visibleWindows hides a fully-available short window when one is used',
+      () {
+    final windows = [
+      QuotaWindow(label: '5h', usedPercent: 0), // fully available: no signal
+      QuotaWindow(label: 'weekly', usedPercent: 30), // the real constraint
+    ];
+    expect(visibleWindows(windows, _now).map((w) => w.label), ['weekly']);
+  });
+
+  test('visibleWindows shows every window when none has been used', () {
+    final windows = [
+      QuotaWindow(label: '5h', usedPercent: 0),
+      QuotaWindow(label: 'weekly', usedPercent: 0),
+    ];
+    expect(visibleWindows(windows, _now), hasLength(2));
+  });
+
   test('anyProviderUsable reflects whether there is anywhere to route', () {
     expect(anyProviderUsable(const [], _now), isFalse);
     final spent = _q('codex', [QuotaWindow(label: '5h', usedPercent: 100)]);

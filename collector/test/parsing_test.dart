@@ -172,7 +172,12 @@ void main() {
 
   group('antigravity', () {
     const now = 1782000000;
-    test('buckets models by reset window keeping most constrained', () {
+    test('surfaces the most-constrained binding limit as one weekly window',
+        () {
+      // The endpoint reports each model's single binding limit with no window
+      // type. quotabot shows the account's tightest one as its weekly allowance,
+      // with that model's reset - not a reset-delta guess that would mislabel a
+      // near-term weekly reset as a "5h" window.
       final w = antigravityWindows({
         'models': {
           'a': {
@@ -189,10 +194,11 @@ void main() {
           },
         },
       }, now);
-      // a and b both fall in the 5h bucket; b is more used so it wins.
-      final fiveH = w.firstWhere((e) => e.label == '5h');
-      expect(fiveH.usedPercent, closeTo(50, 0.01));
-      expect(w.any((e) => e.label == 'weekly'), isTrue);
+      expect(w, hasLength(1));
+      expect(w.single.label, 'weekly');
+      // b is the most-constrained (50% used); its reset is surfaced.
+      expect(w.single.usedPercent, closeTo(50, 0.01));
+      expect(w.single.resetsAt, now + 7200);
     });
 
     test('ignores models lacking fraction or reset', () {

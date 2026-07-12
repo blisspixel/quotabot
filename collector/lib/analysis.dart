@@ -26,6 +26,17 @@ double windowUsedPercent(QuotaWindow w, int now) => windowHasRolledOver(w, now)
 double windowHeadroom(QuotaWindow w, int now) =>
     100.0 - windowUsedPercent(w, now);
 
+/// The windows worth showing at a glance: those with real usage. A fully
+/// available short window (a 5-hour rate limit sitting at 0% used) carries no
+/// information next to the longer window that is the actual binding constraint,
+/// so it is hidden until it has been drawn on. When nothing has been used yet,
+/// all windows are returned, so an all-fresh account still shows its picture
+/// rather than nothing.
+List<QuotaWindow> visibleWindows(List<QuotaWindow> windows, int now) {
+  final used = windows.where((w) => windowUsedPercent(w, now) > 0.5).toList();
+  return used.isEmpty ? windows : used;
+}
+
 /// Returns the currently active reservation discount for a provider account.
 typedef LeaseDiscountProvider = double Function(
     String provider, String account);
