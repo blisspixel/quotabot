@@ -60,6 +60,20 @@ bool _isReRatingWindow(String provider, String? label) =>
     _reRatingProviders.contains(provider) ||
     (label != null && (_reRatingWindows[provider]?.contains(label) ?? false));
 
+/// Providers whose set of quota windows is defined by the provider and can
+/// legitimately change shape - a window bucket appearing or disappearing as the
+/// provider restructures its plan - rather than a fixed schema. Codex qualifies:
+/// OpenAI has been observed collapsing the separate 5 hour and weekly buckets
+/// into a single weekly window on the Pro plan, so a window vanishing is a
+/// provider restructure, not a parser regression. Holding the pre-restructure
+/// snapshot would then keep reporting a spent old window as current and hide the
+/// real headroom the account now has (for example a fresh weekly at 4% used
+/// after an off-cycle reset would read as the stale 93% used it held before).
+/// This exemption only relaxes the window-disappeared check; a surviving
+/// window's own value still passes the monotonicity and re-rating checks, so a
+/// genuinely implausible number is still caught.
+const _variableWindowSetProviders = {codexProviderId};
+
 /// Whether [quota]'s status and window shape are structurally eligible for
 /// trusted evidence. Time-aware persistence and routing must use
 /// [isTrustedQuotaEvidenceAt] so missing or future capture provenance cannot
@@ -392,8 +406,10 @@ String? detectQuotaDrift(
   if (!_syntheticWindowProviders.contains(fresh.provider)) {
     final prev = {for (final w in previous.windows) w.label: w};
     final freshLabels = {for (final w in fresh.windows) w.label};
+    final windowSetIsVariable =
+        _variableWindowSetProviders.contains(fresh.provider);
     for (final prior in previous.windows) {
-      if (!freshLabels.contains(prior.label)) {
+      if (!freshLabels.contains(prior.label) && !windowSetIsVariable) {
         return boundedQuotaDriftReason(
           '${prior.label} quota window disappeared',
         );

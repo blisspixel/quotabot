@@ -142,6 +142,44 @@ void main() {
       expect(codexLabel(45, 'x'), '45m');
       expect(codexLabel(null, 'fallback'), 'fallback');
     });
+
+    test('reads the available redeemable reset-credit count', () {
+      expect(
+        codexResetCredits({
+          'rate_limit_reset_credits': {'available_count': 2},
+        }),
+        2,
+      );
+      expect(
+        codexResetCredits({
+          'rate_limit_reset_credits': {'available_count': 0},
+        }),
+        0,
+      );
+    });
+
+    test('reset credits are null when absent or malformed, not silently zero',
+        () {
+      expect(codexResetCredits(null), isNull);
+      expect(codexResetCredits({}), isNull);
+      expect(codexResetCredits({'rate_limit_reset_credits': null}), isNull);
+      expect(
+        codexResetCredits({'rate_limit_reset_credits': 'two'}),
+        isNull,
+      );
+      expect(
+        codexResetCredits({
+          'rate_limit_reset_credits': {'available_count': -1},
+        }),
+        isNull,
+      );
+      expect(
+        codexResetCredits({
+          'rate_limit_reset_credits': {'available_count': 'lots'},
+        }),
+        isNull,
+      );
+    });
   });
 
   group('claude', () {

@@ -76,6 +76,7 @@ class CodexAdapter {
       if (windows.isEmpty) return null;
       final plan = resp['plan_type']?.toString();
       final email = resp['email']?.toString();
+      final credits = codexResetCredits(resp);
       return ProviderQuota(
         provider: id,
         displayName: name,
@@ -84,6 +85,11 @@ class CodexAdapter {
         plan: plan,
         asOf: asOf,
         windows: windows,
+        details: [
+          if (credits != null && credits > 0)
+            '$credits rate-limit reset ${credits == 1 ? 'credit' : 'credits'} '
+                'available - redeem in Codex to refresh your limit early',
+        ],
       );
     } catch (_) {
       return null;

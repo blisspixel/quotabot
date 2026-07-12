@@ -2,6 +2,27 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Fixed
+- Codex now reflects an off-cycle reset instead of pinning stale scarcity. When
+  OpenAI restructured the Codex Pro plan from separate 5-hour and weekly buckets
+  into a single weekly window, the vanished 5-hour window tripped the
+  fail-closed drift guard, which held the last trusted pre-reset snapshot - so a
+  freshly reset account at 5% used kept reading as 93% used, and routing avoided
+  a provider that in fact had full headroom. A provider whose window set is
+  defined by the provider and can restructure (Codex) is now exempt from the
+  window-disappeared drift check; a surviving window's own value is still held to
+  the monotonicity and re-rating checks, so an implausible number is still
+  caught. The carve-out is scoped to Codex and does not relax any other provider.
+
+### Added
+- Codex surfaces redeemable rate-limit reset credits. The live usage response
+  carries `rate_limit_reset_credits.available_count` - the off-cycle resets you
+  can redeem to refresh your limit early - which quotabot previously dropped. It
+  now shows as an actionable line ("N rate-limit reset credits available - redeem
+  in Codex to refresh your limit early") wherever provider details render.
+
 ## 0.8.0 - 2026-07-12
 
 The first three milestones of the reframed version ladder to 1.0, released
