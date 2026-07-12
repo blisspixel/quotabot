@@ -5,6 +5,7 @@ import 'drift.dart';
 import 'insights.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
+import 'provider_ids.dart';
 import 'util.dart';
 
 /// Last-known-good snapshot cache.
@@ -19,7 +20,10 @@ Directory cacheDir() {
 }
 
 String _safeProviderStem(String provider) {
-  final safe = provider.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+  // Canonicalize first so cache/history/bucket filenames stay consistent under a
+  // provider rename. Identity until a rename is registered.
+  final canonical = canonicalizeProviderId(provider);
+  final safe = canonical.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
   return safe.isEmpty ? 'unknown' : safe;
 }
 
