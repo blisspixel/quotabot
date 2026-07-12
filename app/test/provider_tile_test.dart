@@ -295,7 +295,10 @@ void main() {
   testWidgets('spent window shows a near-term countdown to when it is back', (
     tester,
   ) async {
-    final soon = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600;
+    // Sit 30s into the "1h" countdown bucket (which floors at exactly 3600s), so
+    // the few milliseconds that elapse before the widget reads its own clock
+    // cannot tip the label down to "59m". Exactly 3600 raced on slow runners.
+    final soon = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600 + 30;
     await tester.pumpWidget(
       _wrap(
         ProviderTile(
