@@ -253,6 +253,25 @@ void main() {
       expect(burn, isNotNull);
       expect(burn, lessThanOrEqualTo(0));
     });
+
+    test('a mid-window reset does not read as recovery (reset-aware)', () {
+      // Headroom declines, a reset refills it (a large single-step jump up),
+      // then it declines again. Burn must reflect the current draw-down run
+      // (100 -> 60 over 2h = 20%/h consuming), not average across the refill
+      // into a spurious near-zero or negative "recovering" reading.
+      final now = 10 * 3600;
+      final buckets = [
+        HeadroomBucket(start: 4 * 3600)..add(60),
+        HeadroomBucket(start: 5 * 3600)..add(40),
+        HeadroomBucket(start: 6 * 3600)..add(20),
+        HeadroomBucket(start: 7 * 3600)..add(100), // reset refill (+80)
+        HeadroomBucket(start: 8 * 3600)..add(80),
+        HeadroomBucket(start: 9 * 3600)..add(60),
+      ];
+      final burn = burnRatePerHour(buckets, now); // 6h lookback covers all
+      expect(burn, isNotNull);
+      expect(burn, closeTo(20, 0.001));
+    });
   });
 
   group('computePace', () {

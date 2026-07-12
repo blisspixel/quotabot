@@ -414,12 +414,26 @@ double? burnRatePerHour(
 }) =>
     burnRateWithError(buckets, now, lookbackHours: lookbackHours).perHour;
 
+/// A single-step rise in headroom this large (percentage points, between two
+/// time-adjacent buckets) is a window refill - a reset, scheduled or a redeemed
+/// bonus - not the gradual give-back of a rolling window. The threshold is
+/// deliberately conservative: a rolling window returns headroom slowly (bounded
+/// by its refill rate, well under this in one step), so it is never mistaken for
+/// a reset, while a real reset restores a large fraction of the cap at once and
+/// clears it easily.
+const double _resetRefillJumpPercent = 40;
+
 /// Recent burn rate with an uncertainty estimate, from the last [lookbackHours]
 /// of hourly buckets. Returns the burn (percent of quota per hour; negative when
 /// headroom is easing) as the negated least-squares slope of headroom over time,
 /// the standard error of that slope (`se = sqrt( (SSR / (n - 2)) / Sxx )`, the
 /// textbook OLS slope error; null with fewer than three points, where it is
-/// undefined), and the sample count. Pure.
+/// undefined), and the sample count.
+///
+/// Reset-aware: it fits only the current draw-down run. If a refill (a headroom
+/// jump over [_resetRefillJumpPercent]) falls inside the lookback, the fit starts
+/// after it, so a mid-window reset is not read as "recovering" (a spurious
+/// negative burn) and does not corrupt the runway. Pure.
 BurnStat burnRateWithError(
   List<HeadroomBucket> buckets,
   int now, {
@@ -427,12 +441,21 @@ BurnStat burnRateWithError(
 }) {
   final cutoff = now - lookbackHours * 3600;
   final recent =
-      buckets.where((b) => b.count > 0 && b.start >= cutoff).toList();
-  final n = recent.length;
+      (buckets.where((b) => b.count > 0 && b.start >= cutoff).toList()
+        ..sort((a, b) => a.start.compareTo(b.start)));
+  // Restrict to the current draw-down run: everything after the last refill.
+  var runStart = 0;
+  for (var i = 1; i < recent.length; i++) {
+    if (recent[i].mean - recent[i - 1].mean > _resetRefillJumpPercent) {
+      runStart = i;
+    }
+  }
+  final run = runStart == 0 ? recent : recent.sublist(runStart);
+  final n = run.length;
   if (n < 2) return BurnStat(samples: n);
-  final x0 = recent.first.start;
+  final x0 = run.first.start;
   var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0, syy = 0.0;
-  for (final b in recent) {
+  for (final b in run) {
     final x = (b.start - x0) / 3600.0;
     final y = b.mean;
     sx += x;
