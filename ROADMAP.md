@@ -290,15 +290,17 @@ happened, and it improves on the user's own data.
   observed frequency).
 - **Shipped:** surfaced at the hood via `quotabot calibration` ("N% calibrated
   over M predictions, Kd of history", the reliability diagram, and per-provider
-  lines), with an honest empty state when the history is too thin to grade.
-  Remaining: fold the headline into a deep `doctor` view.
+  lines), with an honest empty state when the history is too thin to grade, and
+  the headline also appears in `quotabot doctor`.
 - **Shipped (first parameter):** self-tuning fits the burn lookback that makes
   the predictor best-calibrated on the user's own history (minimum Brier over
   candidates), degrading to the shipped default unless enough predictions have
   resolved and a candidate beats it on a comparable sample size - never
-  overfitting a thin history. It is advisory (reported, not yet applied to
-  routing). Remaining: extend to the other free parameters (comfort threshold,
-  risk z, lead time) and, behind an explicit opt-in, apply the fit.
+  overfitting a thin history. It is advisory by default; `quotabot suggest
+  --tuned-burn` opts in to applying the fitted lookback to the burn feeding the
+  decision. The other free parameters (comfort threshold, risk z, lead time) are
+  routing-policy values tuned by realized regret (the oracle-benchmark corpus, a
+  1.x piece), not calibration; see `.agent/DECISIONS.md`.
 - The plain-language layer generates every casual sentence from the calibrated
   number underneath, so "about an hour left" is always backed and inspectable one
   layer down.
