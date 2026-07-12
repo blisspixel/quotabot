@@ -936,6 +936,30 @@ void main() {
     expect(stats[quotaIdentityKey(id, 'home')]?.perHour, closeTo(2, 0.001));
   });
 
+  test('recentBurnStatsByQuota honors an explicit shorter burn lookback', () {
+    final now = 1782000000;
+    // Flat for several hours, then a steep recent draw-down. A shorter lookback
+    // sees only the steep part and reports a faster burn than the default.
+    for (var h = 6; h >= 2; h--) {
+      recordHeadroomSample(id, 100, now - h * 3600);
+    }
+    recordHeadroomSample(id, 70, now - 3600);
+    recordHeadroomSample(id, 40, now);
+    final q = ProviderQuota(
+      provider: id,
+      displayName: 'T',
+      account: 'default',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 60)],
+    );
+    final key = quotaIdentityKey(id, 'default');
+    final byDefault = recentBurnStatsByQuota([q], now)[key]!;
+    final short = recentBurnStatsByQuota([q], now, lookbackHours: 2)[key]!;
+    expect(byDefault.perHour, isNotNull);
+    expect(short.perHour, isNotNull);
+    expect(short.perHour!, greaterThan(byDefault.perHour!));
+  });
+
   test('provider cache filenames stay inside the cache directory', () {
     final q = ProviderQuota(
       provider: '../escape',
