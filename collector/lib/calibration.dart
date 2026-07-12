@@ -62,6 +62,13 @@ class CalibrationReport {
     required this.bins,
   });
 
+  /// The one-line headline shared by every surface that shows calibration, e.g.
+  /// "94% calibrated over 128 predictions". Null when nothing has resolved yet,
+  /// so a surface shows a number only when it can stand behind it.
+  String? get headline => samples > 0 && calibration != null
+      ? '${(calibration! * 100).round()}% calibrated over $samples predictions'
+      : null;
+
   Map<String, dynamic> toJson() => {
         'samples': samples,
         if (brier != null) 'brier_score': brier,

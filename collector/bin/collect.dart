@@ -2142,6 +2142,22 @@ void _printDoctor(List<ProviderQuota> results) {
   final suggestion = _suggestFor(results, now);
   print('\nSuggested: ${suggestion.reason}');
   print('  (run "quotabot suggest" for the full ranked list)');
+
+  // Surface the calibration headline here so a skeptic sees how often quotabot's
+  // predictions come true without a separate command. Shown only once enough
+  // predictions have resolved; a thin history prints nothing rather than a
+  // number it cannot stand behind.
+  final calBuckets = <String, List<HeadroomBucket>>{};
+  for (final q in results.where((q) => !q.isLocal)) {
+    final b = _historyBuckets(q.provider);
+    if (b.isNotEmpty) calBuckets[q.provider] = b;
+  }
+  final calHeadline = calibrationAcross(calBuckets, now).headline;
+  if (calHeadline != null) {
+    print(
+      '  ${style.dim('$calHeadline (run "quotabot calibration" for detail)')}',
+    );
+  }
   print(
     '\n${style.cyan('Live view:')} ${style.bold('quotabot top')}  '
     '${style.dim('a refreshing dashboard (q to quit). Also: quotabot models')}',
