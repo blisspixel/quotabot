@@ -124,5 +124,40 @@ void main() {
       final s = suggestRoute([machineScoped, accountWide], _now);
       expect(s.recommended?.provider, 'claude');
     });
+
+    test('an unknown reset is never fabricated (healthy or spent)', () {
+      // Usable now on headroom, but no invented reset time.
+      final healthyNoReset =
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 40)]);
+      final healthy = providerAvailability(healthyNoReset, _now);
+      expect(healthy.available, isTrue);
+      expect(healthy.resetsAt, isNull);
+
+      // Spent with an unknown reset: not available, and "when it's back" stays
+      // null rather than a confident fabricated time.
+      final spentNoReset =
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 100)]);
+      final spent = providerAvailability(spentNoReset, _now);
+      expect(spent.available, isFalse);
+      expect(spent.resetsAt, isNull);
+    });
+
+    test('a spent unknown-reset provider is not the soonest-reset fallback',
+        () {
+      // All spent; only one has a known reset. The fail-soft "wait for the
+      // soonest reset" fallback must point at the known reset, never invent one
+      // for the unknown-reset provider.
+      final knownReset = _q('claude', [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now + 3600),
+      ]);
+      final unknownReset =
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 100)]);
+      final s = suggestRoute([knownReset, unknownReset], _now);
+      expect(s.recommended, isNull);
+      expect(s.fallback.resetsAt, anyOf(isNull, equals(_now + 3600)));
+      if (s.fallback.kind == RouteFallbackKind.soonestReset) {
+        expect(s.fallback.provider, 'claude');
+      }
+    });
   });
 }
