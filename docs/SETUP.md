@@ -70,9 +70,9 @@ because quotabot reads its models over a local HTTP API. If you have one
 installed but do not see it, start its server:
 
 - **Ollama:** runs as a background service once installed (port 11434). Honors
-  `OLLAMA_HOST`. Ollama cloud models can be reached through the local daemon;
-  version 0.5.14 does not yet treat those as proof of local-only execution, so do
-  not use them to satisfy a strict local budget.
+  `OLLAMA_HOST`. Ollama cloud models (a `-cloud` tag) can be reached through the
+  local daemon but run on ollama.com; quotabot flags them `cloud_offloaded` and
+  keeps them out of `--budget=local` and free budgets automatically.
 - **LM Studio:** loading a model in the chat window is not enough; you must start
   the **local server** (the Developer tab, toggle "Start Server", or run
   `lms server start`). It listens on port 1234.
@@ -290,7 +290,7 @@ build outputs and launcher behavior.
 
 ### Roll back
 
-Version 0.5.14 has no automatic rollback command. Download the previous release
+quotabot has no automatic rollback command. Download the previous release
 archive and its `.sha256` sidecar from GitHub Releases, verify both, stop running
 quotabot processes, and restore that bundle in the same install location. Keep
 the local metadata directory: public cache and profile formats are additive

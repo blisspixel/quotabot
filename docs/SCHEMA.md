@@ -205,9 +205,11 @@ quota-backed path for it. Local-runtime entries also include
 `local_readiness` (`loaded` or `cold`), `size_bytes`, loaded-model
 `vram_bytes`, and `quant` when the runtime exposes them, so routers can
 distinguish ready-now models from installed models that may need a cold start.
-`budget_policy` is `any`, `quota`, or `local`. These are entry-classification
-filters, not proof of execution location or cost. In 0.5.14, an Ollama model
-reached through the local daemon may still be cloud-offloaded.
+`budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
+runtime executes in its cloud rather than on-device (an Ollama `-cloud` model)
+carries `cloud_offloaded: true` and is excluded from `--budget=local` and free
+budgets, though it stays listed under `--budget=any`; it remains `local: true`
+because it is reached through the local daemon.
 
 `quotabot suggest --json` with a model profile and MCP `suggest_model` emit
 `quotabot.suggest_model.v1` with `schema`, `generated_at`, `budget_policy`,
@@ -259,12 +261,15 @@ invented score.
 ## `quotabot.catalog_audit.v1`
 
 The maintenance tool `dart run bin/catalog_audit.dart` (not the `quotabot`
-binary) emits `schema`, `generated_at`, `catalog_updated`, and `providers`.
-Each provider row carries `provider`, `endpoint`, `auth_env`, `ok`, `skipped`,
-optional `error`, `catalog_models`, `endpoint_models`,
-`missing_from_catalog`, and `catalog_only`. Its process exit codes (0/1 with
-`--fail-on-drift`/`--fail-on-error`) are the tool's own, outside the
-`quotabot` CLI's documented exit-code contract.
+binary) emits `schema`, `generated_at`, `catalog_updated`, and `providers`, plus
+optional freshness fields `catalog_age_days` and `elapsed_included_quota` (an
+array of `{provider, model, included_until}` for any curated `quotaIncludedUntil`
+window that has already passed). Each provider row carries `provider`,
+`endpoint`, `auth_env`, `ok`, `skipped`, optional `error`, `catalog_models`,
+`endpoint_models`, `missing_from_catalog`, and `catalog_only`. The freshness
+fields are prompts to re-verify the catalog, separate from drift and errors. Its
+process exit codes (0/1 with `--fail-on-drift`/`--fail-on-error`) are the tool's
+own, outside the `quotabot` CLI's documented exit-code contract.
 
 ## `quotabot.verify.v1`
 

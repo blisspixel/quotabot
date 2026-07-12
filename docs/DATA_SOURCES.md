@@ -15,7 +15,7 @@ are a stable additive contract:
 | Authoritative | `authoritative_live` | Claude; live Codex; live Grok; live Antigravity | Eligible while fresh and its binding quota is usable | The provider registry permits the class; `quotabot verify` checks its account-wide shape, time, bounds, resets, drift, and provider-owned cross-check target | Preserve the last trusted snapshot as stale evidence; reject implausible changes and never call stale cloud quota available |
 | This-machine fallback | `this_machine_fallback` | Codex session snapshot; Antigravity local state | Eligible only under normal freshness and binding rules; routing confidence is multiplied by `0.7`, and machine scope stays visible | The registry permits the fallback path; a successful measured window must carry `per_machine: true`, then passes the normal time, bounds, reset, and drift checks | State that another device can make the value incomplete |
 | Passive local | `passive_local_evidence` | Cursor; Windsurf/Devin; Kiro | A measured normalized window can participate with routing confidence multiplied by `0.7`; detection-only state cannot | The registry and sanitized parser fixture pin the source; a successful measured window must carry `per_machine: true`, and `verify` checks its shape and honesty | Show no live data or last-trusted reader-drift evidence instead of inventing quota |
-| Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Version 0.5.14 admits reachable runtime-classified entries; the class alone does not prove execution location | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; do not treat ambiguous Ollama cloud offload as proof of local-only or free execution |
+| Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Admits reachable runtime-classified entries; an Ollama `-cloud` model is flagged `cloud_offloaded` and excluded from local-only and free budgets | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; keep a cloud-offloaded local model out of any local-only or free budget promise |
 | Status only | `status_only` | NVIDIA NIM model-list access check | Visible for access diagnostics, never a model-budget route without measured quota | The registry requires a subscription observation with no quota windows; `verify` rejects quota or provider-drift claims on this class | Show access state with numeric quota unknown |
 | Manual | `manual` | User-defined entries | Visible with the existing `0.35` self-reported confidence factor; excluded by `budget=quota` | The entry must carry both `source_class: "manual"` and the legacy `source: "manual"` marker; it cannot claim local-runtime, machine-scoped, or drift evidence | Never refresh or reinterpret what the user entered |
 
@@ -196,8 +196,13 @@ State lives in the Antigravity globalStorage SQLite database at
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
 - Antigravity also exposes AI Premium credits and baseline quota concepts in its
-  own CLI/docs. quotabot does not guess those as spendable windows until their
-  API shape is verified; per-model quota remains the measured live signal.
+  own CLI/docs. The live response carries only `{remainingFraction, resetTime}`
+  per model with no field distinguishing a resettable weekly window from a
+  persistent baseline balance, so quotabot bounds the window horizon: a reset
+  more than eight days out (a week plus a day of buffer) is not asserted as a
+  weekly window. That balance still surfaces per-model, without inferring a reset
+  cadence the provider never declared. Per-model quota remains the measured live
+  signal.
 - The adapter constructs the SQLite path cross-platform (Windows APPDATA, macOS
   Library, Linux XDG) and scans Antigravity profile directories. Each active
   account gets its own live read when a matching account grant, active CLI token,
@@ -300,13 +305,16 @@ never served from cache (a cached "available" would mislead when the daemon is
 actually down). All three built-in runtime adapters emit
 `source_class: "local_runtime"`.
 
-- Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). Honors
+- Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). `/api/ps` also
+  reports each running model's `context_length`, which quotabot reads for the
+  loaded model's context window, so no `/api/show` call is needed. Honors
   `OLLAMA_HOST`, default `http://127.0.0.1:11434`.
 - LM Studio: `GET /api/v0/models` (native REST, includes a per-model `state` of
   loaded or not-loaded), falling back to the OpenAI-compatible `GET /v1/models`
   when the native API is unavailable. Honors `LMSTUDIO_HOST`, default
   `http://127.0.0.1:1234`. The LM Studio local server must be started (Developer
-  tab, or `lms server start`).
+  tab, or `lms server start`). The v0 shape carries `arch` (architecture), not a
+  parameter count, so quotabot does not fill the parameter-size slot from it.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`). Honors `LEMONADE_HOST` and `LEMONADE_PORT`;
   the default is `http://127.0.0.1:13305`.
@@ -317,14 +325,17 @@ actually down). All three built-in runtime adapters emit
 
 Current compatibility limits:
 
-- Ollama now offers cloud-offloaded models through its local daemon. Version
-  0.5.14 does not yet have authoritative execution-location evidence for those
-  entries. Do not treat an installed Ollama cloud model as proof of local-only or
-  free execution; conservative classification is a 1.0 release blocker.
-- LM Studio's current native contract is `GET /api/v1/models`, which exposes
-  richer loaded-instance, context, size, quantization, and capability evidence.
-  Version 0.5.14 still prefers v0 and falls back to `/v1/models`; v1-first support
-  is a planned compatibility correction, not current behavior.
+- Ollama can expose cloud-offloaded models through its local daemon (a `-cloud`
+  tag suffix, e.g. `qwen3-coder:480b-cloud`); these execute on ollama.com, not
+  on-device. quotabot detects the suffix, flags the model `cloud_offloaded`, and
+  excludes it from `--budget=local` and free budgets, so a cloud model reached
+  through the local daemon is never treated as local-only or free. It stays
+  listed (reachable via the local runtime) but only under `--budget=any`.
+- LM Studio released its native `GET /api/v1/models` contract in 0.4.0 and
+  deprecated `/api/v0/models`. quotabot currently reads `/api/v0/models` (falling
+  back to the OpenAI-compatible `/v1/models`); adopting the v1 endpoint and its
+  richer capability array is pending a captured v1 response body and is tracked as
+  a 0.6 compatibility correction, not current behavior.
 
 ## Cloud model catalog audit
 
@@ -344,11 +355,16 @@ catalog against provider-owned model-list endpoints:
   https://generativelanguage.googleapis.com/v1beta/models` with
   `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 
-The audit follows provider pagination tokens and reports model-id drift only:
-`missing_from_catalog` and `catalog_only`. Context window, tool support, vision,
-reasoning, and tier remain curated because provider list endpoints are
-inconsistent and often account-scoped. Missing API keys are reported as skipped,
-not failures, unless the caller opts into `--fail-on-error`.
+The audit follows provider pagination tokens and reports model-id drift:
+`missing_from_catalog` and `catalog_only`. It also reports two freshness signals,
+kept separate from drift and errors: `catalog_age_days` (how long since the
+curated `kCatalogUpdated` date) and `elapsed_included_quota` (any per-model
+`quotaIncludedUntil` window that has already passed, so a stale included-quota
+claim is surfaced for re-verification even when every provider audit is skipped
+for lack of a key). Context window, tool support, vision, reasoning, and tier
+remain curated because provider list endpoints are inconsistent and often
+account-scoped. Missing API keys are reported as skipped, not failures, unless
+the caller opts into `--fail-on-error`.
 
 The Currency workflow runs this audit daily and on manual dispatch with
 `--summary --fail-on-drift --fail-on-error`, after exercising the drift canary,

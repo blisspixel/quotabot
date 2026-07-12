@@ -63,9 +63,10 @@ for that surface.
     `budget: "quota"` means measured built-in quota plans plus local runtimes;
     it excludes self-reported manual quota and entries catalogued as paid API.
     Local-runtime model entries include `local_readiness` (`loaded` or `cold`);
-    prefer loaded local models when equivalent candidates are available. In
-    0.5.14, do not use an Ollama cloud-offloaded model as evidence of local-only
-    execution; conservative classification is a tracked 1.0 gate.
+    prefer loaded local models when equivalent candidates are available. An
+    Ollama cloud-offloaded model (a `-cloud` tag) carries `cloud_offloaded: true`
+    and is excluded from local and free budgets, so it is never evidence of
+    local-only or free execution.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): available first, then local-runtime readiness, provider tier,
     and headroom. Pass `use_expiring_quota: true` to let a measured quota-backed
@@ -87,8 +88,8 @@ for that surface.
   `quotabot stats --json` for analytics. Add `--local-first` to `suggest` when
   you prefer local capacity before spending subscription quota, and
   `--budget=local` or `--budget=quota` to filter model choices by quotabot's
-  runtime or measured-quota classification. These filters do not yet prove
-  execution location for Ollama cloud-offloaded models. Add
+  runtime or measured-quota classification; both exclude Ollama cloud-offloaded
+  (`-cloud`) models, which run in the provider cloud rather than on-device. Add
   `--exclude=A,B` to quota-reading commands after `--profile` when one request
   should avoid specific providers. Add `--use-expiring-quota` to a profiled
   `suggest` call only when you want soon-resetting included quota to outrank

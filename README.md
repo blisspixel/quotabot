@@ -214,14 +214,15 @@ The defaults are deliberate:
 | Pick a provider | `quotabot suggest` | measured subscriptions first, reachable local fallback |
 | Prefer local execution | `quotabot suggest --local-first` | reachable local runtime before subscriptions |
 | Pick a model | `quotabot suggest --task=hard` | available first; local-runtime, loaded, lighter provider tier, then headroom |
-| Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; not proof of execution location or cost |
+| Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; excludes Ollama cloud-offloaded (`-cloud`) models |
 | Restrict to quota-plan and runtime classes | `quotabot suggest --task=hard --budget=quota` | measured included quota plus local-runtime entries; excludes catalogued manual and paid API classes |
 | Inspect candidates | `quotabot models` | entries for providers represented in the current registry, ordered by routability with availability explicit |
 
-Known 0.5.14 limit: Ollama can offload cloud models through its local daemon,
-and quotabot does not yet have authoritative execution-location evidence for
-those entries. Do not use an installed Ollama cloud model to satisfy a strict
-local-only policy; conservative classification is a 1.0 release gate.
+Ollama can offload cloud models through its local daemon (a `-cloud` tag suffix,
+e.g. `qwen3-coder:480b-cloud`) that run on ollama.com, not on-device. quotabot
+detects the suffix, flags the model `cloud_offloaded`, and excludes it from
+`--budget=local` and free budgets, so an Ollama cloud model never satisfies a
+local-only or free policy; it stays listed only under `--budget=any`.
 
 `--use-expiring-quota` applies only to a model suggestion and lets measured
 included quota beat local when local history projects meaningful quota would
