@@ -380,19 +380,22 @@ RouteSuggestion _suggestFor(
         catalog: kModelCatalog,
         requirements: routeRequirements,
       );
-      return suggestRoute(
+      return decide(
         results,
         now,
-        burnStatsByProvider: _burnStatsFor(results, now),
-        riskZ: riskZ,
-        preferLocal: preferLocal,
-        costPenaltyByProvider: costPenaltyByProvider,
-        costWeight: costWeight,
-        pipePenaltyByProvider: _pipePenaltyFor(results, now),
-        capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-        capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
-        capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
-      );
+        context: DecisionContext(
+          burnStatsByProvider: _burnStatsFor(results, now),
+          riskZ: riskZ,
+          preferLocal: preferLocal,
+          costPenaltyByProvider: costPenaltyByProvider,
+          costWeight: costWeight,
+          pipePenaltyByProvider: _pipePenaltyFor(results, now),
+          capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+          capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+          capabilityBudgetResetByQuotaKey:
+              capabilityGates.budgetResetByQuotaKey,
+        ),
+      ).route;
     }();
 
 Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
