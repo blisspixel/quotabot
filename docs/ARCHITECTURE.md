@@ -310,10 +310,12 @@ quotabot cannot verify their overage settings. Local-runtime entries surface
 local models ahead of cold installed models when both satisfy the same profile.
 Recommendations also echo available local memory/context evidence so callers can
 see why a model is loaded versus merely installed without forcing a model call.
-Ollama now exposes cloud-offloaded models through the local daemon; version
-0.5.14 does not yet have authoritative execution-location classification for
-those entries, so this is a declared 1.0 correction before `budget=local` can be
-treated as a complete execution-location guarantee.
+Ollama exposes cloud-offloaded models through the local daemon (a `-cloud` tag
+suffix); quotabot detects the suffix, flags the model `cloud_offloaded`, and
+excludes it from `budget=local` and free budgets, so a cloud-offloaded model
+reached through the local daemon is never counted as on-device or free. Detection
+is by the documented naming convention, so it is the practical boundary rather
+than a proof of every model's execution location.
 Concrete-model suggestions can opt into `use_expiring_quota`, which computes a
 pure `ExpiringQuotaSignal` from existing headroom, reset, and local burn
 statistics. The signal is intentionally narrow: measured quota-backed providers

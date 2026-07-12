@@ -311,6 +311,14 @@ recommendation is aligned to what the user actually wants.
 - Multi-account: a work-and-home account per provider visible in one dashboard,
   generalizing the existing per-account model, without cross-contaminating
   profiles, cache, or history.
+- Spent-window escape hatch. Some providers offer a one-time reset or bonus
+  credit you can redeem to keep working after a window is spent (Codex/ChatGPT
+  has surfaced such a reset). Investigate whether that availability is present in
+  the usage metadata quotabot already reads; if it is, surface "a reset is
+  available" on a spent card so the user sees the escape hatch instead of only a
+  wait time. Zero inference and no purchase action - detection and display only,
+  and only if the signal is authoritative (never inferred). Verify the exact
+  provider mechanism before relying on it.
 - Validate loading, empty, stale, auth, provider-drift, no-safe-route, alert, and
   integration states with first-time-user and operator checks.
 - Already shipped on 0.5.x: the concise desktop route line with detail on hover,

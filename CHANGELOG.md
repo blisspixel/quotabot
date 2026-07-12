@@ -2,6 +2,36 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+Work toward 0.6 (truthful substrate), the first milestone of the reframed
+version ladder to 1.0 (see ROADMAP.md).
+
+### Fixed
+- An Ollama cloud model (a `-cloud` tag suffix, e.g. `qwen3-coder:480b-cloud`)
+  runs on ollama.com, not on-device, but was tagged plain local, so it could
+  satisfy `--budget=local` and free budgets. Such models are now flagged
+  `cloud_offloaded` and excluded from local-only and free budgets, closing a
+  no-surprise-bills / local-only-honesty gap. They stay listed under
+  `--budget=any`.
+- Antigravity's live response distinguishes no resettable weekly window from a
+  persistent baseline balance, and the bucketer labeled any reset more than 36
+  hours out as "weekly" with no upper bound, so a far-future or static balance
+  was shown as a resetting weekly window. The window horizon is now capped at
+  eight days; a further-out balance stays visible per-model without a fabricated
+  cadence.
+- The LM Studio parser no longer puts the model architecture (`arch`, e.g.
+  "llama") into the parameter-size slot; that field is left null because LM
+  Studio's v0 shape exposes no parameter count.
+
+### Added
+- Ollama now reads the running model's context window from `/api/ps`
+  (`context_length`), which it already returns, so no extra call is made.
+- The catalog audit reports two freshness signals: `catalog_age_days` and
+  `elapsed_included_quota` (any curated `quotaIncludedUntil` window that has
+  already passed), so a stale included-quota claim is surfaced for
+  re-verification. Freshness prompts, separate from drift and errors.
+
 ## 0.5.18 - 2026-07-11
 
 ### Fixed

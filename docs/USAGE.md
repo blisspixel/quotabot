@@ -414,10 +414,11 @@ status views but do not become `models` candidates. If a provider model is only
 temporarily included in a plan, quotabot marks it quota-backed only until the
 documented cutoff; after that point `--budget=quota` excludes it rather than
 drifting into credit-backed usage.
-Ollama can expose cloud-offloaded models through its local daemon. Version 0.5.14
-does not yet have authoritative execution-location evidence for those entries,
-so do not treat an installed Ollama cloud model as proof of local-only or free
-execution; conservative classification is a 1.0 release gate.
+Ollama can expose cloud-offloaded models through its local daemon (a `-cloud` tag
+suffix, e.g. `qwen3-coder:480b-cloud`) that execute on ollama.com, not on-device.
+quotabot flags these `cloud_offloaded` and excludes them from `--budget=local` and
+free budgets, so an Ollama cloud model is never treated as local-only or free; it
+stays listed only under `--budget=any`.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only
@@ -465,12 +466,12 @@ request-metered paid API routes.
 | Intent | CLI trigger | Output | Default ordering | Spend envelope |
 |---|---|---|---|---|
 | Choose a provider | `suggest` | provider recommendation and ranked alternatives | measured subscription runway, then reachable local fallback | does not enable catalogued paid API routes |
-| Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; the Ollama caveat still applies |
+| Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
 | Inspect model candidates | `models` | matching entries represented by the current snapshot and catalog | most routable first; known unavailable entries remain explicit within represented providers | `any` shows the normal catalog policy |
 | Choose one model | `suggest --task=PROFILE` or capability flags | concrete model recommendation | available first; local-runtime, loaded, lighter provider tier, then headroom | `--use-expiring-quota` may let measured included quota beat local |
-| Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud and manual entries, but does not prove execution location; see the Ollama caveat above |
-| Restrict to quota-plan and runtime classes | add `--budget=quota` to a model command | filtered list or concrete model | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; the Ollama caveat still applies |
-| Keep model requirements but return a provider | add `--provider-route` | `quotabot.suggest.v1` provider result | provider ranking after the caller-supplied capability gate | does not enable catalogued paid API routes; the Ollama caveat still applies |
+| Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud, manual, and cloud-offloaded Ollama (`-cloud`) entries |
+| Restrict to quota-plan and runtime classes | add `--budget=quota` to a model command | filtered list or concrete model | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Keep model requirements but return a provider | add `--provider-route` | `quotabot.suggest.v1` provider result | provider ranking after the caller-supplied capability gate | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
 
 MCP `suggest_provider`, `list_models`, and `suggest_model` expose the same
 policies through explicit arguments. The plain loopback HTTP surface exposes the
