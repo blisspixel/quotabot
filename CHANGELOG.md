@@ -2,7 +2,7 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.8.1 - 2026-07-12
 
 ### Fixed
 - Codex now reflects an off-cycle reset instead of pinning stale scarcity. When
