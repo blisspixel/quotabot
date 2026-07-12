@@ -263,6 +263,7 @@ Future<void> main(List<String> rawArgs) async {
           results,
           now,
           riskZ: riskZ,
+          tunedBurn: flags.contains('--tuned-burn'),
           preferLocal: flags.contains('--local-first'),
           costPenaltyByProvider: costPolicy.penalties,
           costWeight: costPolicy.weight,
@@ -372,6 +373,7 @@ RouteSuggestion _suggestFor(
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   ModelRequirements? routeRequirements,
+  bool tunedBurn = false,
 }) =>
     () {
       final capabilityGates = providerRouteCapabilityGates(
@@ -384,7 +386,7 @@ RouteSuggestion _suggestFor(
         results,
         now,
         context: DecisionContext(
-          burnStatsByProvider: _burnStatsFor(results, now),
+          burnStatsByProvider: _burnStatsFor(results, now, tuned: tunedBurn),
           riskZ: riskZ,
           preferLocal: preferLocal,
           costPenaltyByProvider: costPenaltyByProvider,
@@ -398,10 +400,26 @@ RouteSuggestion _suggestFor(
       ).route;
     }();
 
-Map<String, BurnStat> _burnStatsFor(List<ProviderQuota> results, int now) {
+Map<String, BurnStat> _burnStatsFor(
+  List<ProviderQuota> results,
+  int now, {
+  bool tuned = false,
+}) {
   if (Platform.environment['QUOTABOT_DEMO'] == '1') return demo.demoBurnStats();
   if (_usingSimulation) return const <String, BurnStat>{};
-  return recentBurnStatsByQuota(results, now);
+  // Opt-in: fit the burn lookback to this user's own recorded history (the value
+  // best calibrated to how their quota actually behaves) instead of the shipped
+  // default. Falls back to the default when the history is too thin to fit.
+  int? lookback;
+  if (tuned) {
+    final byProvider = <String, List<HeadroomBucket>>{
+      for (final q in results.where((q) => !q.isLocal))
+        if (_historyBuckets(q.provider).isNotEmpty)
+          q.provider: _historyBuckets(q.provider),
+    };
+    lookback = tuneBurnLookback(byProvider, now).burnLookbackHours;
+  }
+  return recentBurnStatsByQuota(results, now, lookbackHours: lookback);
 }
 
 Map<String, double> _pipePenaltyFor(List<ProviderQuota> results, int now) {
@@ -1413,6 +1431,10 @@ void _printHelp() {
   stdout.writeln(
     '  --risk=Z            suggest: risk aversion (0 = mean, higher avoids '
     'uncertain caps)',
+  );
+  stdout.writeln(
+    '  --tuned-burn        suggest: fit the burn lookback to your own history '
+    '(see quotabot calibration)',
   );
   stdout.writeln(
     '  --local-first       suggest: prefer local runtime before subscription quota',

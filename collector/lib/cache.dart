@@ -885,8 +885,9 @@ Map<String, BurnStat> recentBurnStatsByProvider(
 /// old history without applying one account's burn to another.
 Map<String, BurnStat> recentBurnStatsByQuota(
   Iterable<ProviderQuota> providers,
-  int now,
-) {
+  int now, {
+  int? lookbackHours,
+}) {
   final list = providers.where((q) => !q.isLocal).toList();
   final measuredCounts = <String, int>{};
   for (final q in list) {
@@ -903,7 +904,9 @@ Map<String, BurnStat> recentBurnStatsByQuota(
     if (buckets.isEmpty && (measuredCounts[q.provider] ?? 0) == 1) {
       buckets = loadBuckets(q.provider);
     }
-    out[key] = burnRateWithError(buckets, now);
+    out[key] = lookbackHours == null
+        ? burnRateWithError(buckets, now)
+        : burnRateWithError(buckets, now, lookbackHours: lookbackHours);
   }
   return shrinkBurnStats(out);
 }
