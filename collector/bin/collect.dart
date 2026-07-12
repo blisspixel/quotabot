@@ -2434,18 +2434,20 @@ Future<void> _runCalibration(
     if (b.isNotEmpty) byProvider[q.provider] = b;
   }
   final overall = calibrationAcross(byProvider, now);
+  final tuning = tuneBurnLookback(byProvider, now);
   if (wantsJson) {
     print(_jsonPretty({
       'schema': 'quotabot.calibration.v1',
       'generated_at': now,
       'overall': overall.toJson(),
+      'tuning': tuning.toJson(),
       'by_provider': {
         for (final e in byProvider.entries)
           e.key: calibrationFromHistory(e.value, now).toJson(),
       },
     }));
   } else {
-    _printCalibration(overall, byProvider, now);
+    _printCalibration(overall, byProvider, now, tuning);
   }
 }
 
@@ -2455,6 +2457,7 @@ void _printCalibration(
   CalibrationReport overall,
   Map<String, List<HeadroomBucket>> byProvider,
   int now,
+  TunedParameters tuning,
 ) {
   print(
     'quotabot calibration  (how often quotabot\'s strand calls come true, '
@@ -2492,6 +2495,16 @@ void _printCalibration(
       '  ${e.key.padRight(12)} ${(r.calibration! * 100).round()}% '
       'calibrated  ${style.dim('(${r.samples})')}',
     );
+  }
+  if (tuning.tuned) {
+    final improve = ((tuning.brierImprovement ?? 0) * 1000).round() / 1000;
+    print('');
+    print(style.dim(
+      '  self-tuned: your history predicts best with a '
+      '${tuning.burnLookbackHours}h burn lookback '
+      '(Brier -$improve vs the ${kDefaultBurnLookbackHours}h default). '
+      'Advisory; not yet applied to routing.',
+    ));
   }
 }
 

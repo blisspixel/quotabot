@@ -220,3 +220,107 @@ CalibrationReport calibrationAcross(
   }
   return _score(_Samples(predicted, outcomes, spanDays), horizonHours, bins);
 }
+
+/// The shipped default burn lookback, in hours: the window `burnRateWithError`
+/// fits recent burn over, and the parameter [tuneBurnLookback] fits on local
+/// history.
+const int kDefaultBurnLookbackHours = 6;
+
+/// The result of fitting the strand predictor's burn lookback on the user's own
+/// recorded history. When there are too few resolved predictions to fit
+/// responsibly, [tuned] is false and [burnLookbackHours] is the shipped default:
+/// quotabot never overfits a thin history.
+class TunedParameters {
+  /// The fitted burn lookback in hours (the shipped default when not [tuned]).
+  final int burnLookbackHours;
+
+  /// True when a candidate other than the default was accepted on enough data.
+  final bool tuned;
+
+  /// Resolved predictions graded at the default lookback - the sample size the
+  /// fit rests on.
+  final int samples;
+
+  /// Brier at the shipped default and at the fitted value (lower is better).
+  /// Null when nothing could be graded.
+  final double? brierAtDefault;
+  final double? brierTuned;
+
+  const TunedParameters({
+    required this.burnLookbackHours,
+    required this.tuned,
+    required this.samples,
+    required this.brierAtDefault,
+    required this.brierTuned,
+  });
+
+  /// Brier improvement from tuning (`brierAtDefault - brierTuned`), or null when
+  /// not gradable. Never negative: the default is always a candidate, so the fit
+  /// can only match or beat it.
+  double? get brierImprovement => (brierAtDefault == null || brierTuned == null)
+      ? null
+      : brierAtDefault! - brierTuned!;
+
+  Map<String, dynamic> toJson() => {
+        'burn_lookback_hours': burnLookbackHours,
+        'tuned': tuned,
+        'samples': samples,
+        if (brierAtDefault != null) 'brier_at_default': brierAtDefault,
+        if (brierTuned != null) 'brier_tuned': brierTuned,
+        if (brierImprovement != null) 'brier_improvement': brierImprovement,
+      };
+}
+
+/// Fits the burn lookback that makes the strand predictor best-calibrated on the
+/// user's own recorded history: the candidate in [lookbackCandidates] with the
+/// lowest Brier over the pooled predictions. It degrades to [defaultLookbackHours]
+/// unless the default itself has at least [minSamples] resolved predictions and a
+/// candidate beats it while resting on a comparable sample size (at least half
+/// the default's) - the honesty guard against overfitting a thin history or a
+/// candidate that only looks better because it graded an easier subset.
+///
+/// Pure: it only grades recorded history through [calibrationAcross]. It never
+/// touches the live decision, sends anything, or spends a token; a caller decides
+/// whether to adopt the fitted value.
+TunedParameters tuneBurnLookback(
+  Map<String, List<HeadroomBucket>> byProvider,
+  int now, {
+  List<int> lookbackCandidates = const [3, 6, 12, 24],
+  int minSamples = 40,
+  int defaultLookbackHours = kDefaultBurnLookbackHours,
+  int horizonHours = 5,
+}) {
+  final base = calibrationAcross(byProvider, now,
+      horizonHours: horizonHours, burnLookbackHours: defaultLookbackHours);
+  if (base.samples < minSamples || base.brier == null) {
+    return TunedParameters(
+      burnLookbackHours: defaultLookbackHours,
+      tuned: false,
+      samples: base.samples,
+      brierAtDefault: base.brier,
+      brierTuned: base.brier,
+    );
+  }
+  final minComparable = (base.samples / 2).round();
+  var bestLookback = defaultLookbackHours;
+  var bestBrier = base.brier!;
+  for (final candidate in lookbackCandidates) {
+    if (candidate == defaultLookbackHours) continue;
+    final report = calibrationAcross(byProvider, now,
+        horizonHours: horizonHours, burnLookbackHours: candidate);
+    if (report.brier != null &&
+        report.samples >= minSamples &&
+        report.samples >= minComparable &&
+        report.brier! < bestBrier) {
+      bestBrier = report.brier!;
+      bestLookback = candidate;
+    }
+  }
+  return TunedParameters(
+    burnLookbackHours: bestLookback,
+    tuned: bestLookback != defaultLookbackHours,
+    samples: base.samples,
+    brierAtDefault: base.brier,
+    brierTuned: bestBrier,
+  );
+}

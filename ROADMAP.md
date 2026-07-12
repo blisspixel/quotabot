@@ -282,17 +282,23 @@ mode drives the full pipeline from fixtures with no network.
 **Outcome:** the number is not only shown, it is measured against what actually
 happened, and it improves on the user's own data.
 
-- Calibration ledger: log every prediction (strand probability, runway, "usable
-  until X") with the outcome later snapshots reveal.
-- Grade with proper scoring rules: Brier score and a reliability diagram - when the
-  engine says 20% strand, does it happen about 20% of the time?
-- Surface it at the hood: `quotabot calibration` and a deep `doctor` view
-  ("predictions ~94% calibrated over your last 30 days"), so a skeptic can verify
-  the glance is honest. Never assert calibration without enough local observations
-  to support it.
-- Self-tuning: fit the free parameters (EWMA half-life, comfort threshold, risk z,
-  lead time) to minimize realized regret on local history, reducing to the shipped
-  defaults when data is thin.
+- **Shipped:** the calibration ledger replays the strand predictor over the
+  hourly history quotabot already keeps, resolving each prediction against the
+  outcome later buckets reveal (`calibration.dart`).
+- **Shipped:** graded with proper scoring rules - Brier score, expected
+  calibration error, and a reliability diagram (predicted probability versus
+  observed frequency).
+- **Shipped:** surfaced at the hood via `quotabot calibration` ("N% calibrated
+  over M predictions, Kd of history", the reliability diagram, and per-provider
+  lines), with an honest empty state when the history is too thin to grade.
+  Remaining: fold the headline into a deep `doctor` view.
+- **Shipped (first parameter):** self-tuning fits the burn lookback that makes
+  the predictor best-calibrated on the user's own history (minimum Brier over
+  candidates), degrading to the shipped default unless enough predictions have
+  resolved and a candidate beats it on a comparable sample size - never
+  overfitting a thin history. It is advisory (reported, not yet applied to
+  routing). Remaining: extend to the other free parameters (comfort threshold,
+  risk z, lead time) and, behind an explicit opt-in, apply the fit.
 - The plain-language layer generates every casual sentence from the calibrated
   number underneath, so "about an hour left" is always backed and inspectable one
   layer down.

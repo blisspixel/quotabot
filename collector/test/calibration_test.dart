@@ -79,4 +79,38 @@ void main() {
     final single = calibrationFromHistory(a, now);
     expect(pooled.samples, single.samples * 2);
   });
+
+  group('self-tuning the burn lookback on local history', () {
+    test('a thin history keeps the shipped default, never overfitting', () {
+      final thin = _sawtooth(cycles: 1); // only a handful of predictions
+      final t = tuneBurnLookback({'p': thin}, thin.last.start + 6 * 3600);
+      expect(t.tuned, isFalse);
+      expect(t.burnLookbackHours, kDefaultBurnLookbackHours);
+      expect(t.samples, lessThan(40));
+    });
+
+    test('a rich history fits a candidate and never scores worse', () {
+      final rich = _sawtooth(cycles: 15); // plenty of resolved predictions
+      final now = rich.last.start + 6 * 3600;
+      final t = tuneBurnLookback({'p': rich}, now);
+      expect(t.samples, greaterThanOrEqualTo(40));
+      expect(const [3, 6, 12, 24], contains(t.burnLookbackHours));
+      // The fit is a minimum over candidates that includes the default, so it
+      // can only match or beat the default's Brier - never regress it.
+      expect(t.brierTuned, lessThanOrEqualTo(t.brierAtDefault!));
+      if (t.tuned) {
+        expect(t.brierImprovement, greaterThan(0));
+        expect(t.burnLookbackHours, isNot(kDefaultBurnLookbackHours));
+      }
+    });
+
+    test('serializes with the improvement metric', () {
+      final rich = _sawtooth(cycles: 15);
+      final j =
+          tuneBurnLookback({'p': rich}, rich.last.start + 6 * 3600).toJson();
+      expect(j['burn_lookback_hours'], isA<int>());
+      expect(j['tuned'], isA<bool>());
+      expect(j.containsKey('samples'), isTrue);
+    });
+  });
 }

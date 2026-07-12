@@ -4,10 +4,21 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-Work toward 0.6 (truthful substrate) and 0.7 (one forecast, one engine), the
-first milestones of the reframed version ladder to 1.0 (see ROADMAP.md).
+Work toward 0.6 (truthful substrate), 0.7 (one forecast, one engine), and 0.8
+(the calibration moat), the first milestones of the reframed version ladder to
+1.0 (see ROADMAP.md).
 
 ### Added
+- `quotabot calibration` now self-tunes: it fits the burn lookback that makes the
+  strand predictor best-calibrated on your own recorded history (lowest Brier
+  score), degrading to the shipped default unless enough predictions have resolved
+  and a candidate genuinely beats it - it never overfits a thin history. Reported
+  as an advisory `tuning` block (fitted lookback plus the Brier improvement over
+  the default); not yet applied to routing.
+- LM Studio: prefer the current native `GET /api/v1/models` (0.4.0+), which
+  exposes loaded-instance context, on-disk size, quantization, and a real
+  parameter size, with the older `/api/v0/models` and OpenAI-compatible
+  `/v1/models` as fallbacks.
 - Provider identity aliases: a rename that changes a provider's id no longer
   silently orphans profiles, hidden-provider choices, filters, manual entries,
   leases, or routing resolution. A one-way alias map (empty until a real rename

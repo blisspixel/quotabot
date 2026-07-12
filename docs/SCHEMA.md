@@ -251,11 +251,16 @@ Schedule hints include `scheduled_at`, `wait_seconds`, `resets_at`, `label`,
 
 ## `quotabot.calibration.v1`
 
-`quotabot calibration --json` emits `schema`, `generated_at`, `overall`, and
-`by_provider`. Each calibration report carries `samples`, `brier_score`,
-`expected_calibration_error`, `calibration`, `span_days`, `horizon_hours`, and
-`bins` (each bin: `mean_predicted`, `observed_frequency`, `count`). Computed
-entirely from local history; empty history yields zero samples, never an
+`quotabot calibration --json` emits `schema`, `generated_at`, `overall`,
+`tuning`, and `by_provider`. Each calibration report carries `samples`,
+`brier_score`, `expected_calibration_error`, `calibration`, `span_days`,
+`horizon_hours`, and `bins` (each bin: `mean_predicted`, `observed_frequency`,
+`count`). `tuning` reports fitting the strand predictor's burn lookback on the
+user's own history: `burn_lookback_hours` (the fitted value, the shipped default
+when not tuned), `tuned` (false when the history is too thin to fit responsibly),
+`samples`, and, when gradable, `brier_at_default`, `brier_tuned`, and
+`brier_improvement`. Advisory only - the fitted value is not applied to routing.
+Computed entirely from local history; empty history yields zero samples, never an
 invented score.
 
 ## `quotabot.catalog_audit.v1`
