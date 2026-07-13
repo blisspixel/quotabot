@@ -4,6 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Provider preference for routing: `quotabot suggest --prefer=codex,claude`
+  orders the recommendation by your stated preference, but only among candidates
+  that are already viable (available and above the comfort threshold). It never
+  revives an unavailable, spent, or spend-blocked route, and when it does decide
+  among several viable options the reason says so ("first by your preference").
+  The selection is a pure, unit-tested `preferredViableCandidate` threaded
+  through the decision core. This is the CLI half of the 0.9 preference item;
+  per-profile persistence of the preference is the remaining piece.
+
 ### Changed
 - The `quotabot suggest` candidates list no longer prints the model's internal
   scores (`conf N%`, `strand N%`) on the plain glance. They read as jargon and,

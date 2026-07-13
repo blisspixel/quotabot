@@ -41,6 +41,10 @@ class DecisionContext {
   final Set<String>? capabilityAvailableQuotaKeys;
   final Map<String, int> capabilityBudgetResetByQuotaKey;
 
+  /// The user's explicit provider preference, most-preferred first. Applied only
+  /// among already-viable candidates; empty means no preference.
+  final List<String> preferenceOrder;
+
   const DecisionContext({
     this.comfortThreshold = 15,
     this.burnByProvider = const {},
@@ -58,6 +62,7 @@ class DecisionContext {
     this.capabilityKnownQuotaKeys,
     this.capabilityAvailableQuotaKeys,
     this.capabilityBudgetResetByQuotaKey = const {},
+    this.preferenceOrder = const [],
   });
 }
 
@@ -124,6 +129,7 @@ Decision decide(
         capabilityAvailableQuotaKeys: context.capabilityAvailableQuotaKeys,
         capabilityBudgetResetByQuotaKey:
             context.capabilityBudgetResetByQuotaKey,
+        preferenceOrder: context.preferenceOrder,
       ),
     );
 

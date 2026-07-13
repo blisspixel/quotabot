@@ -69,6 +69,75 @@ void main() {
     expect(visibleWindows(windows, _now), hasLength(2));
   });
 
+  group('provider preference', () {
+    QuotaWindow win(double used) =>
+        QuotaWindow(label: 'weekly', usedPercent: used, resetsAt: _now + 86400);
+
+    test('preferredViableCandidate picks the earliest-ranked viable provider',
+        () {
+      final suggestion = suggestRoute(
+        [
+          _q('codex', [win(10)]),
+          _q('claude', [win(20)])
+        ],
+        _now,
+      );
+      final viable = suggestion.ranked;
+      // No preference: null, caller keeps its score pick.
+      expect(preferredViableCandidate(viable, const []), isNull);
+      // Preference names claude first, so claude wins even though codex has more
+      // headroom (would otherwise score first).
+      expect(
+        preferredViableCandidate(viable, const ['claude', 'codex'])?.provider,
+        'claude',
+      );
+      // A preference naming none of the viable providers yields null.
+      expect(preferredViableCandidate(viable, const ['grok']), isNull);
+    });
+
+    test('preference reorders viable candidates and says so in the reason', () {
+      // codex has more free headroom and would score first; the user prefers
+      // claude, which is also viable, so claude leads and the reason names it.
+      final s = suggestRoute(
+        [
+          _q('codex', [win(10)]),
+          _q('claude', [win(20)])
+        ],
+        _now,
+        preferenceOrder: const ['claude', 'codex'],
+      );
+      expect(s.recommended?.provider, 'claude');
+      expect(s.reason, contains('first by your preference'));
+    });
+
+    test('preference never overrides availability', () {
+      // The preferred provider is spent; preference must not revive it. The one
+      // viable provider wins, and the reason does not claim a preference choice.
+      final s = suggestRoute(
+        [
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 100)]),
+          _q('claude', [win(20)]),
+        ],
+        _now,
+        preferenceOrder: const ['codex', 'claude'],
+      );
+      expect(s.recommended?.provider, 'claude');
+      expect(s.reason, isNot(contains('preference')));
+    });
+
+    test('a lone viable candidate is not claimed as a preference choice', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [win(20)])
+        ],
+        _now,
+        preferenceOrder: const ['claude'],
+      );
+      expect(s.recommended?.provider, 'claude');
+      expect(s.reason, isNot(contains('preference')));
+    });
+  });
+
   test('anyProviderUsable reflects whether there is anywhere to route', () {
     expect(anyProviderUsable(const [], _now), isFalse);
     final spent = _q('codex', [QuotaWindow(label: '5h', usedPercent: 100)]);

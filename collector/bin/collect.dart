@@ -269,6 +269,7 @@ Future<void> main(List<String> rawArgs) async {
           costPenaltyByProvider: costPolicy.penalties,
           costWeight: costPolicy.weight,
           routeRequirements: routeReqs.requirements,
+          preferenceOrder: _preferenceOrderFrom(flags),
         );
         wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       }
@@ -366,6 +367,19 @@ const _quotaReadCommands = {
 
 /// The routing recommendation for [results], discounted by recent burn. Shared
 /// by `suggest`, `doctor`, and the live `top` view so they never diverge.
+/// The provider preference order from `--prefer=codex,claude`, most-preferred
+/// first. Names are lowercased and trimmed, blanks dropped, and order and
+/// duplicates left as given (the router uses first occurrence). Empty when the
+/// flag is absent, so routing keeps its score-based pick.
+List<String> _preferenceOrderFrom(Set<String> flags) {
+  final raw = _stringOption(flags, 'prefer', null);
+  if (raw == null) return const [];
+  return [
+    for (final part in raw.split(','))
+      if (part.trim().isNotEmpty) part.trim().toLowerCase(),
+  ];
+}
+
 RouteSuggestion _suggestFor(
   List<ProviderQuota> results,
   int now, {
@@ -375,6 +389,7 @@ RouteSuggestion _suggestFor(
   double costWeight = kDefaultRoutingCostWeight,
   ModelRequirements? routeRequirements,
   bool tunedBurn = false,
+  List<String> preferenceOrder = const [],
 }) =>
     () {
       final capabilityGates = providerRouteCapabilityGates(
@@ -397,6 +412,7 @@ RouteSuggestion _suggestFor(
           capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
           capabilityBudgetResetByQuotaKey:
               capabilityGates.budgetResetByQuotaKey,
+          preferenceOrder: preferenceOrder,
         ),
       ).route;
     }();
@@ -1439,6 +1455,10 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --local-first       suggest: prefer local runtime before subscription quota',
+  );
+  stdout.writeln(
+    '  --prefer=A,B        suggest: provider preference among viable options '
+    '(never overrides availability)',
   );
   stdout.writeln(
     '  --provider-route    suggest: keep provider output while applying model filters',
