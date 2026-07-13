@@ -110,6 +110,21 @@ void main() {
       expect(s.reason, contains('first by your preference'));
     });
 
+    test('preference is not claimed when it agrees with the top score', () {
+      // codex has more free headroom and is the score-based pick; preferring
+      // codex changes nothing, so the reason must not credit the preference.
+      final s = suggestRoute(
+        [
+          _q('codex', [win(10)]),
+          _q('claude', [win(20)])
+        ],
+        _now,
+        preferenceOrder: const ['codex', 'claude'],
+      );
+      expect(s.recommended?.provider, 'codex');
+      expect(s.reason, isNot(contains('preference')));
+    });
+
     test('preference never overrides availability', () {
       // The preferred provider is spent; preference must not revive it. The one
       // viable provider wins, and the reason does not claim a preference choice.

@@ -104,9 +104,10 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) {
 int? codexResetCredits(Map<String, dynamic>? resp) {
   final credits = resp?['rate_limit_reset_credits'];
   if (credits is! Map) return null;
-  final count = credits['available_count'];
-  if (count is! num || !count.isFinite || count < 0) return null;
-  return count.toInt();
+  // Bounded like every other numeric wire field: reject a fractional or absurd
+  // count rather than truncating it or rendering "1000000000 resets available".
+  // Real counts are single digits; the ceiling only guards against garbage.
+  return boundedIntFromWire(credits['available_count'], min: 0, max: 1000);
 }
 
 // --- Claude -----------------------------------------------------------------

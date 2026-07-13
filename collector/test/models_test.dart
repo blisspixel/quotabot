@@ -119,6 +119,22 @@ void main() {
         resetAvailableMessage(fresh.withProviderDrift('weekly drift', 1001)),
         isNull,
       );
+      // The guard does not depend on withSuspect zeroing the field: a suspect
+      // quota that still carries the count is suppressed by the message guard.
+      expect(
+        resetAvailableMessage(
+          ProviderQuota(
+            provider: 'codex',
+            displayName: 'Codex',
+            account: 'pro',
+            asOf: 1000,
+            windows: [QuotaWindow(label: 'weekly', usedPercent: 100)],
+            suspect: 'plausibility flagged',
+            resetCreditsAvailable: 2,
+          ),
+        ),
+        isNull,
+      );
       // toJson omits the field when zero.
       expect(
         ProviderQuota(

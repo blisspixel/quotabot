@@ -44,18 +44,20 @@ String routeCandidateGlanceLine(
           ? 'last known'
           : 'free';
   // A candidate can be unroutable for reasons other than being spent. Show the
-  // real one: drift or staleness reads "unavailable"; a provider with headroom
-  // left but no catalog model meeting the route's capability floor reads "no
-  // capable model" rather than the contradictory "100% free ... spent"; only a
-  // genuinely depleted window reads "spent".
-  final capabilityLimited = c.capabilityLimited || c.capabilityBudgetLimited;
+  // real one, matching the distinctions suggestRoute's reason draws: drift or
+  // staleness reads "unavailable"; a provider with headroom but no catalog model
+  // meeting the capability floor reads "no capable model"; one whose capable
+  // model exists but whose model-budget gate is closed reads "model budget
+  // spent"; only a genuinely depleted window reads "spent".
   final hasHeadroom = (c.headroom ?? 0) > kSpentHeadroomFloor;
   final state = c.available
       ? ''
       : c.driftReason != null || c.stale
           ? style.dim('  unavailable')
-          : capabilityLimited && hasHeadroom
+          : c.capabilityLimited && hasHeadroom
               ? style.dim('  no capable model')
-              : style.red('  spent');
+              : c.capabilityBudgetLimited && hasHeadroom
+                  ? style.dim('  model budget spent')
+                  : style.red('  spent');
   return '    ${c.provider.padRight(12)} $head $qualifier  $provenance$state';
 }

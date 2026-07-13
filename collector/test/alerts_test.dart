@@ -15,6 +15,7 @@ ProviderQuota _q(
   bool perMachine = false,
   int? resetsAt,
   String account = 'default',
+  int resetCreditsAvailable = 0,
 }) =>
     ProviderQuota(
       provider: id,
@@ -25,6 +26,7 @@ ProviderQuota _q(
       kind: kind,
       sourceClass: sourceClass,
       perMachine: perMachine,
+      resetCreditsAvailable: resetCreditsAvailable,
       windows: [
         QuotaWindow(label: '5h', usedPercent: usedPercent, resetsAt: resetsAt),
       ],
@@ -43,6 +45,61 @@ void main() {
       expect(alertSeverity(10), AlertSeverity.amber); // at the red floor
       expect(alertSeverity(9), AlertSeverity.red);
       expect(alertSeverity(0), AlertSeverity.red);
+    });
+  });
+
+  group('computeResetSignals (edge-triggered, flap-resistant)', () {
+    test('fires once when a reset appears, then stays armed', () {
+      final snap = [_q('codex', 100, resetCreditsAvailable: 2)];
+      final first = computeResetSignals(snapshot: snap);
+      expect(first.fired, hasLength(1));
+      expect(first.fired.single.provider, 'codex');
+      expect(first.fired.single.message, contains('2 resets available'));
+      expect(first.armed, contains('codex'));
+
+      // Same reset still present: armed, no re-fire.
+      final second = computeResetSignals(snapshot: snap, armed: first.armed);
+      expect(second.fired, isEmpty);
+      expect(second.armed, contains('codex'));
+    });
+
+    test('a live-to-session flap does not re-notify the same reset', () {
+      final live = [_q('codex', 100, resetCreditsAvailable: 2)];
+      // Session fallback: this-machine scope, no reset-credit knowledge.
+      final session = [_q('codex', 100, perMachine: true)];
+
+      final armed = computeResetSignals(snapshot: live).armed;
+      // Live read drops out; the fallback must not disarm...
+      final duringFlap = computeResetSignals(snapshot: session, armed: armed);
+      expect(duringFlap.fired, isEmpty);
+      expect(duringFlap.armed, contains('codex'));
+      // ...so when the live read returns, it does not fire again.
+      final back = computeResetSignals(snapshot: live, armed: duringFlap.armed);
+      expect(back.fired, isEmpty);
+    });
+
+    test('a fresh account-wide zero disarms so a later reset can fire again',
+        () {
+      final armed = computeResetSignals(
+        snapshot: [_q('codex', 100, resetCreditsAvailable: 2)],
+      ).armed;
+      // Authoritative read genuinely reports no reset: disarm.
+      final gone = computeResetSignals(
+        snapshot: [_q('codex', 100, resetCreditsAvailable: 0)],
+        armed: armed,
+      );
+      expect(gone.armed, isEmpty);
+      // A new reset later fires again.
+      final again = computeResetSignals(
+        snapshot: [_q('codex', 100, resetCreditsAvailable: 1)],
+        armed: gone.armed,
+      );
+      expect(again.fired, hasLength(1));
+    });
+
+    test('stale or drifted evidence never fires a reset signal', () {
+      final stale = _q('codex', 100, resetCreditsAvailable: 2, stale: true);
+      expect(computeResetSignals(snapshot: [stale]).fired, isEmpty);
     });
   });
 

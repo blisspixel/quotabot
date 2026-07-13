@@ -13,6 +13,7 @@ RouteCandidate _candidate({
   double? confidence,
   double? strandProbability,
   bool capabilityLimited = false,
+  bool capabilityBudgetLimited = false,
 }) =>
     RouteCandidate(
       provider: provider,
@@ -32,6 +33,7 @@ RouteCandidate _candidate({
       confidence: confidence,
       strandProbability: strandProbability,
       capabilityLimited: capabilityLimited,
+      capabilityBudgetLimited: capabilityBudgetLimited,
     );
 
 void main() {
@@ -91,6 +93,24 @@ void main() {
     expect(line, contains('100% free'));
     expect(line, contains('no capable model'));
     expect(line, isNot(contains('spent')));
+  });
+
+  test('a budget-limited candidate reads "model budget spent", not spent', () {
+    // A capable model exists but its model-budget gate is closed - distinct from
+    // "no capable model" and from a depleted window. The glance must match the
+    // distinction suggestRoute's reason draws.
+    final line = routeCandidateGlanceLine(
+      _candidate(
+        provider: 'codex',
+        headroom: 100,
+        available: false,
+        capabilityBudgetLimited: true,
+      ),
+      style: plain,
+      provenance: '[live]',
+    );
+    expect(line, contains('model budget spent'));
+    expect(line, isNot(contains('no capable model')));
   });
 
   test('a genuinely spent candidate still reads as spent', () {
