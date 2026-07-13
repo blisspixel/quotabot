@@ -49,4 +49,15 @@ void main() {
     expect(def.existsSync(), isFalse, reason: 'default grant must be cleared');
     expect(acct.existsSync(), isFalse, reason: 'account grant must be cleared');
   });
+
+  test('logout and login reject an unknown provider with the usage exit code',
+      () async {
+    final env = {'LOCALAPPDATA': temp.path, 'XDG_CONFIG_HOME': temp.path};
+    // Documented: 64 = bad arguments or an unknown provider. These previously
+    // printed usage but returned 0, so a wrapper saw a rejected command succeed.
+    expectExitCode(
+        await runCollectCli(['logout', 'bogus'], environment: env), 64);
+    expectExitCode(
+        await runCollectCli(['login', 'bogus'], environment: env), 64);
+  });
 }

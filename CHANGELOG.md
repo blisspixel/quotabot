@@ -12,6 +12,12 @@ Notable changes to quotabot. Newest first.
   the same reset.
 
 ### Fixed
+- The loopback HTTP server no longer stops draining if a client disconnects
+  before its response is flushed: closing the response is now guarded, so one
+  ill-timed disconnect can no longer hang every later request.
+- `quotabot login`/`logout` with a missing or unknown provider now exits with the
+  documented usage code (64) instead of 0, and a failed `login grok` reports
+  cleanly like the other providers instead of an unhandled exception.
 - An Ollama `-cloud` model is no longer wrongly treated as on-device and free:
   snapshot sanitizing dropped the `cloud_offloaded` flag, so a billable cloud
   model could satisfy `--budget=local` and free budgets. The flag now survives.
