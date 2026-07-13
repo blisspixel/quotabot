@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
+import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -2670,35 +2671,10 @@ void _printSuggest(RouteSuggestion s) {
       );
       continue;
     }
-    final pct = c.headroom == null
-        ? '   ? '
-        : '${c.headroom!.round().toString().padLeft(3)}%';
-    final head = c.headroom == null
-        ? pct
-        : c.stale
-            ? style.dim(pct)
-            : style.health(c.headroom!, pct);
-    final qualifier = c.driftReason != null
-        ? c.headroom == null
-            ? 'no trusted quota'
-            : 'last trusted'
-        : c.stale
-            ? 'last known'
-            : 'free';
-    final state = c.available
-        ? ''
-        : c.driftReason != null || c.stale
-            ? style.dim('  unavailable')
-            : style.red('  spent');
-    final conf = c.confidence == null
-        ? ''
-        : style.dim('  conf ${(c.confidence! * 100).round()}%');
-    final strand = (c.strandProbability != null && c.strandProbability! >= 0.2)
-        ? style.orange('  strand ${(c.strandProbability! * 100).round()}%')
-        : '';
-    print(
-      '    ${c.provider.padRight(12)} $head $qualifier  $provenance$conf$strand$state',
-    );
+    // Internal scores (confidence, strand probability, cost weighting) stay in
+    // `suggest --json`; the glance shows only what a person acts on. See
+    // routeCandidateGlanceLine and ROADMAP 0.9.
+    print(routeCandidateGlanceLine(c, style: style, provenance: provenance));
   }
 }
 
