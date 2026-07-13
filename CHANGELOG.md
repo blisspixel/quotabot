@@ -4,6 +4,17 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- The `quotabot suggest` candidates list no longer prints the model's internal
+  scores (`conf N%`, `strand N%`) on the plain glance. They read as jargon and,
+  on the recommended provider, were alarming without a paragraph to interpret
+  ("strand 98%" is the chance a window is spent before it resets, not a defect).
+  The glance now shows only what a person acts on - headroom, whether the route
+  is usable, and how the reading is trusted - while `suggest --json` still
+  carries `strand_probability`, `confidence`, `routing_score`, and
+  `runway_hours` in full. Progress on the 0.9 self-explanatory-advisor line;
+  the candidate line is now a pure, unit-tested `routeCandidateGlanceLine`.
+
 ### Fixed
 - `quotabot top` now shows provider detail lines on quota-provider cards,
   including on a spent card. The spent-window collapse and the normal
