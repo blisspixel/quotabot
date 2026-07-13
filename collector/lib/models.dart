@@ -52,6 +52,13 @@ class QuotaWindow {
   });
 
   /// Best-effort percent used, deriving from used/limit when needed.
+  ///
+  /// Intentionally NOT clamped: the trust boundary
+  /// ([unusableQuotaEvidenceDriftReason]) and `quotabot verify` rely on seeing a
+  /// raw out-of-range value (a negative percent, or `used > limit` giving
+  /// >100%) so they can reject or flag the read as drift rather than route on it.
+  /// Clamping here would hide that from those checks. Display-time consumers
+  /// clamp separately (see `windowUsedPercent`).
   double? get percent {
     if (usedPercent != null) return usedPercent;
     if (used != null && limit != null && limit! > 0) {
@@ -737,6 +744,10 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           sizeBytes: m.sizeBytes,
           vramBytes: m.vramBytes,
           quant: m.quant == null ? null : t(m.quant!),
+          // Must be carried: sanitize runs on every collected snapshot, and
+          // dropping this would reset a cloud-offloaded model to on-device,
+          // letting a billable `-cloud` model satisfy --budget=local and free.
+          cloudOffloaded: m.cloudOffloaded,
         ),
     ],
     modelQuotas: [

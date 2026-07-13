@@ -136,8 +136,13 @@ class OpenAiAuth {
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
     if (refreshed?.accessToken == null) return null;
-    TokenStore.save(provider, refreshed!, account: account);
-    return refreshed.accessToken;
+    // Best-effort persist of the rotated token: the old refresh token is already
+    // burned, so a save failure must not discard the valid access token and fail
+    // this read. See AnthropicAuth.freshAccessToken.
+    try {
+      TokenStore.save(provider, refreshed!, account: account);
+    } catch (_) {}
+    return refreshed!.accessToken;
   }
 
   static void _saveGrant(Tokens tokens, {String? account}) {

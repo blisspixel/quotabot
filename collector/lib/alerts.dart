@@ -172,8 +172,13 @@ class QuotaAlert {
       continue;
     }
     final bw = bindingWindow(q, now);
-    final free = providerHeadroom(q, now);
-    if (bw == null || free == null) continue;
+    // providerHeadroom also validates every window parses; keep it as the guard,
+    // but grade and report the binding window's own headroom so the alert's
+    // window label and its free-percent always describe the same window (they
+    // could diverge for a spent provider, where the binding window is the one
+    // that resets last, not the one with the least headroom).
+    if (bw == null || providerHeadroom(q, now) == null) continue;
+    final free = windowHeadroom(bw, now);
     final sev = alertSeverity(free);
     if (!alertOn.contains(sev)) continue; // calm or recovered: disarm
     next.add(key);

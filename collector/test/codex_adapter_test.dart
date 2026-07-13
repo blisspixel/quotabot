@@ -220,6 +220,34 @@ void main() {
     expect(q.sourceClass.wireName, 'this_machine_fallback');
   });
 
+  test('a malformed session primary does not discard the weekly window',
+      () async {
+    // rate_limits.primary is not a Map. The stale-window sizing must not throw
+    // on it and abort _toQuota, dropping the perfectly good weekly bucket.
+    _writeRollout(temp, 'rollout-bad.jsonl', [
+      {
+        'timestamp': _iso(nowEpoch()),
+        'rate_limits': {
+          'plan_type': 'pro',
+          'primary': 'unexpected',
+          'secondary': {
+            'used_percent': 42,
+            'window_minutes': 10080,
+            'resets_at': nowEpoch() + 2000,
+          },
+        },
+      },
+    ]);
+
+    final q = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async => null,
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 42);
+  });
+
   test('codexUsageWindows maps the live rate_limit windows', () {
     final w = codexUsageWindows(_wham(primary: 12, secondary: 100));
     expect(w.firstWhere((x) => x.label == '5h').usedPercent, 12);

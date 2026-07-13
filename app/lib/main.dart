@@ -1328,7 +1328,11 @@ class _DashboardState extends State<Dashboard>
         _checkAndNotify();
       }
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
-    } on Exception catch (error) {
+    } catch (error) {
+      // Catch Error as well as Exception: a latent adapter fault (a bad cast,
+      // .first on empty) surfaces as an Error, and the isolate-failure fallback
+      // rethrows it on the main isolate. Catching only Exception let it escape
+      // as an unhandled async error every poll while the UI showed no failure.
       // A failed or timed-out refresh keeps the last data on screen; the next
       // poll (scheduled in finally) retries.
       _failStreak += 1;

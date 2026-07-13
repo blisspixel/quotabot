@@ -89,10 +89,17 @@ class Decision {
 
   /// The ALERT view: the forecasts at or below [thresholdPercent] remaining
   /// headroom (a fresh, usable-or-spent metered provider crossing a caller's
-  /// alert line). Local runtimes have no spendable headroom and are excluded.
+  /// alert line). Local runtimes have no spendable headroom and are excluded, as
+  /// are stale and drifted candidates - `ranked` retains those as last-trusted
+  /// evidence, but alerting on hours-old or rejected data would misfire, so the
+  /// ALERT view stays on fresh readings only (matching computeAlerts).
   Iterable<RouteCandidate> alertsBelow(double thresholdPercent) =>
       forecasts.where((c) =>
-          !c.isLocal && c.headroom != null && c.headroom! <= thresholdPercent);
+          !c.isLocal &&
+          !c.stale &&
+          c.driftReason == null &&
+          c.headroom != null &&
+          c.headroom! <= thresholdPercent);
 }
 
 /// The single pure entry point: turn a set of [observations] at [now] into one

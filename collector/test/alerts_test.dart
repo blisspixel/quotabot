@@ -123,6 +123,32 @@ void main() {
       expect(r.armed, {'codex'});
     });
 
+    test('the alert window label and free-percent describe the same window',
+        () {
+      // Spent provider: the binding window (resets last) is the weekly, while the
+      // provider-wide minimum headroom is the 5h's. The alert must report the
+      // named window's own headroom (0.4%), not the other window's.
+      final spent = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        asOf: _now,
+        windows: [
+          QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now + 3600),
+          QuotaWindow(
+              label: 'weekly', usedPercent: 99.6, resetsAt: _now + 6000),
+        ],
+      );
+      final r = computeAlerts(
+        snapshot: [spent],
+        suggestion: _suggestion([spent]),
+        now: _now,
+      );
+      final a = r.fired.single;
+      expect(a.window, 'weekly');
+      expect(a.freePercent, closeTo(0.4, 0.01));
+    });
+
     test('keys low-quota crossings by account and can route to a sibling', () {
       final snap = [
         _q('claude', 98, account: 'work@example.com'),

@@ -102,18 +102,22 @@ class XaiAuth {
     // the default slot here too would let a background refresh of one account
     // overwrite the provider-default grant with that account's tokens, so a
     // later default-slot fallback could return the wrong account's token.
-    if (account == null) {
-      // Refreshing the default slot in place: keep its owner stamp so the
-      // adapter's cross-account guard still knows who the default belongs to.
-      // A plain save would drop the stamp and reopen that guard.
-      final owner = TokenStore.defaultOwner(provider);
-      owner != null
-          ? TokenStore.saveDefaultOwnedBy(provider, refreshed!, owner)
-          : TokenStore.save(provider, refreshed!);
-    } else {
-      TokenStore.save(provider, refreshed!, account: account);
-    }
-    return refreshed.accessToken;
+    // Best-effort: a save failure must not discard the just-minted access token
+    // (the old refresh token is already burned). See AnthropicAuth.
+    try {
+      if (account == null) {
+        // Refreshing the default slot in place: keep its owner stamp so the
+        // adapter's cross-account guard still knows who the default belongs to.
+        // A plain save would drop the stamp and reopen that guard.
+        final owner = TokenStore.defaultOwner(provider);
+        owner != null
+            ? TokenStore.saveDefaultOwnedBy(provider, refreshed!, owner)
+            : TokenStore.save(provider, refreshed!);
+      } else {
+        TokenStore.save(provider, refreshed!, account: account);
+      }
+    } catch (_) {}
+    return refreshed!.accessToken;
   }
 
   /// Establishes the grant at login: the account-scoped slot when the email is

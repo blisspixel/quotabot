@@ -42,6 +42,21 @@ void main() {
     expect(back.windows.single.resetsAt, 999);
   });
 
+  test('reset credits are fresh-read only and never return from cache', () {
+    final q = ProviderQuota(
+      provider: id,
+      displayName: 'Test',
+      account: 'acct',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: '5h', usedPercent: 33)],
+      resetCreditsAvailable: 2,
+    );
+    saveSnapshot(q);
+    // The cached snapshot must not resurrect the redeemable-reset count, which
+    // would assert a reset from stale evidence against the field's contract.
+    expect(loadSnapshot(id)!.resetCreditsAvailable, 0);
+  });
+
   test('untrusted snapshots cannot replace last-known-good cache', () {
     final trusted = ProviderQuota(
       provider: id,
