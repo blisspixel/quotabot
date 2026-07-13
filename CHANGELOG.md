@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Fixed
+- `quotabot suggest` no longer labels a capability-limited provider as "spent".
+  A provider with headroom left but no catalog model meeting the route's
+  capability floor (for example a Kiro credit plan) read the contradictory
+  "100% free ... spent"; it now reads "no capable model", so the reason it is
+  not the pick is truthful. Drift and staleness still read "unavailable", and a
+  genuinely depleted window still reads "spent".
 - `quotabot doctor` no longer shows an unconfigured optional provider as a red
   `ERROR`. NVIDIA NIM without an API key is a setup state, not a failed read, so
   it now reads as `no live data` with an actionable hint ("set NVIDIA_API_KEY or

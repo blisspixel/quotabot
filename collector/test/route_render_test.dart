@@ -12,6 +12,7 @@ RouteCandidate _candidate({
   String? driftReason,
   double? confidence,
   double? strandProbability,
+  bool capabilityLimited = false,
 }) =>
     RouteCandidate(
       provider: provider,
@@ -30,6 +31,7 @@ RouteCandidate _candidate({
       driftReason: driftReason,
       confidence: confidence,
       strandProbability: strandProbability,
+      capabilityLimited: capabilityLimited,
     );
 
 void main() {
@@ -70,6 +72,35 @@ void main() {
     );
     expect(staleLine, contains('48% last known'));
     expect(staleLine, contains('unavailable'));
+  });
+
+  test('a capability-limited candidate with headroom reads "no capable model"',
+      () {
+    // The real kiro case: 100% free but no catalog model meets the route floor,
+    // so it must not read the contradictory "free ... spent".
+    final line = routeCandidateGlanceLine(
+      _candidate(
+        provider: 'kiro',
+        headroom: 100,
+        available: false,
+        capabilityLimited: true,
+      ),
+      style: plain,
+      provenance: '[live]',
+    );
+    expect(line, contains('100% free'));
+    expect(line, contains('no capable model'));
+    expect(line, isNot(contains('spent')));
+  });
+
+  test('a genuinely spent candidate still reads as spent', () {
+    final line = routeCandidateGlanceLine(
+      _candidate(provider: 'claude', headroom: 0, available: false),
+      style: plain,
+      provenance: '[live]',
+    );
+    expect(line, contains('spent'));
+    expect(line, isNot(contains('no capable model')));
   });
 
   test('a drift candidate reads as last trusted, never as fresh free', () {
