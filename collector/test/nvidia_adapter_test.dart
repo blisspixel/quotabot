@@ -17,9 +17,13 @@ void main() {
       ).collect();
 
       expect(called, isFalse);
-      expect(q.ok, isFalse);
-      expect(q.error, contains('NVIDIA_API_KEY'));
-      expect(q.error, contains('nvapi'));
+      // Not configured is a setup state, not a failed read: ok with no windows
+      // (renders as "no live data", not a red ERROR), and no error message.
+      expect(q.ok, isTrue);
+      expect(q.error, isNull);
+      expect(q.windows, isEmpty);
+      expect(q.status, contains('not configured'));
+      expect(q.status, contains('optional'));
     });
 
     test('chooses the first nonblank key alias', () {

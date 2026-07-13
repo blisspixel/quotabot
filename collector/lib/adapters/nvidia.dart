@@ -80,14 +80,20 @@ class NvidiaAdapter {
     }
   }
 
+  // Not configuring an optional provider is a setup state, not a failed read.
+  // Reporting it as ok with no windows renders as "no live data" (the same as
+  // an installed-but-unread local tool), not a red ERROR for a provider the
+  // user never enabled. A key that is present but rejected still fails loudly
+  // (see _keyInvalid); only the never-set-up case is quieted here.
   ProviderQuota _noKey(int asOf) => ProviderQuota(
         provider: id,
         displayName: name,
         account: 'default',
         plan: 'free trial',
         asOf: asOf,
-        ok: false,
-        error: 'NVIDIA NIM not configured; set NVIDIA_API_KEY or nvapi',
+        ok: true,
+        status: 'not configured; optional free-trial provider',
+        windows: const [],
       );
 
   ProviderQuota _keyInvalid(

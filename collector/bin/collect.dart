@@ -2136,7 +2136,10 @@ void _printDoctor(List<ProviderQuota> results) {
     final detail = q.isLocal
         ? (q.status ?? '')
         : q.windows.isEmpty
-            ? (q.error ?? '')
+            // A no-window row shows its status if it has one (a setup or
+            // availability state), otherwise its error. A real failure sets
+            // error, not status, so an ERROR row still shows the failure.
+            ? (q.status ?? q.error ?? '')
             : visibleWindows(q.windows, now).map((w) {
                 final pct = windowUsedPercent(w, now).round();
                 final reset = w.resetsAt == null
@@ -2959,6 +2962,11 @@ String? _doctorHint(ProviderQuota q, String state) {
     return q.error;
   }
   if (state == 'no live data' && !q.isLocal) {
+    // NVIDIA NIM is an env-key provider, not an installed app, so the generic
+    // "open the app" guidance does not apply: point at the key instead.
+    if (q.provider == 'nvidia') {
+      return 'set NVIDIA_API_KEY (or nvapi) to check free-trial access';
+    }
     if (canLogin.contains(q.provider)) {
       return 'open the ${q.displayName} app on this machine, '
           'or run: quotabot login ${q.provider}';
