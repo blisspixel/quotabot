@@ -76,9 +76,11 @@ Provider snapshots keep these stable fields:
   bodies, prompts, generated text, source code, or secrets.
 - `reset_credits_available` is an optional non-negative count of redeemable
   off-cycle resets the provider reports as available now (Codex's rate-limit
-  reset credits today), omitted when zero. It is a fresh-read signal, not carried
-  onto stale, drifted, or quarantined snapshots, and surfaces as the prominent
-  "reset available" escape hatch and a desktop notification.
+  reset credits today), omitted when zero. It is a fresh-read signal: it is not
+  carried onto stale, drifted, or quarantined snapshots, and it is stripped from
+  the cache and history on write so it is never served back from disk. It
+  surfaces as the prominent "reset available" escape hatch and a desktop
+  notification.
 - `windows` is always present. Local runtimes use an empty list because they
   have no spendable quota. Status-only cloud providers can also have an empty
   list when quotabot can verify availability but has no measured quota window;
