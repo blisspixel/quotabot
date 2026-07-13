@@ -4,6 +4,15 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- `quotabot doctor` no longer shows an unconfigured optional provider as a red
+  `ERROR`. NVIDIA NIM without an API key is a setup state, not a failed read, so
+  it now reads as `no live data` with an actionable hint ("set NVIDIA_API_KEY or
+  nvapi to check free-trial access") instead of alarming someone who never
+  enabled it. A key that is present but rejected still fails loudly. A no-window
+  provider row now shows its status where it has one, so the setup message is
+  visible rather than blank.
+
 ### Added
 - Provider preference for routing (ROADMAP 0.9). `quotabot suggest
   --prefer=codex,claude` orders the recommendation by your stated preference,
