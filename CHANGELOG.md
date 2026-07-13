@@ -4,6 +4,15 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- The redeemable-reset escape hatch is now a first-class, prominent signal.
+  Codex's reset credits became a structured `reset_credits_available` on each
+  provider (in JSON too) instead of a dim detail line, and `doctor` and `top`
+  render it in green - "reset available: N redeemable resets in Codex to refresh
+  your limit now" - so a spent or tight provider's way out stands out rather than
+  reading as one more note. It is deliberately not asserted from stale or drifted
+  evidence.
+
 ### Fixed
 - `quotabot suggest` no longer labels a capability-limited provider as "spent".
   A provider with headroom left but no catalog model meeting the route's

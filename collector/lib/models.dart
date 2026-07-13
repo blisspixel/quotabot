@@ -315,6 +315,12 @@ class ProviderQuota {
   /// available and parseable.
   final int? retryAfterSeconds;
 
+  /// Count of redeemable off-cycle resets the provider reports as available now
+  /// (for example Codex's rate-limit reset credits). Zero when none are offered
+  /// or the provider does not expose them. This is a live, fresh-read signal, so
+  /// it is deliberately not asserted from stale, drifted, or degraded snapshots.
+  final int resetCreditsAvailable;
+
   ProviderQuota({
     required this.provider,
     required this.displayName,
@@ -339,6 +345,7 @@ class ProviderQuota {
     this.pipeHealth,
     this.httpStatus,
     this.retryAfterSeconds,
+    this.resetCreditsAvailable = 0,
     ProviderSourceClass? sourceClass,
   }) : sourceClass = sourceClass ??
             inferProviderSourceClass(
@@ -456,6 +463,8 @@ class ProviderQuota {
         if (pipeHealth != null) 'pipe_health': pipeHealth,
         if (httpStatus != null) 'http_status': httpStatus,
         if (retryAfterSeconds != null) 'retry_after_seconds': retryAfterSeconds,
+        if (resetCreditsAvailable > 0)
+          'reset_credits_available': resetCreditsAvailable,
         'windows': windows.map((w) => w.toJson()).toList(),
         if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
         if (modelQuotas.isNotEmpty)
@@ -483,6 +492,8 @@ class ProviderQuota {
         pipeHealth: providerPipeHealthFromWire(j['pipe_health']),
         httpStatus: boundedIntFromWire(j['http_status'], min: 100, max: 599),
         retryAfterSeconds: boundedIntFromWire(j['retry_after_seconds'], min: 0),
+        resetCreditsAvailable:
+            boundedIntFromWire(j['reset_credits_available'], min: 0) ?? 0,
         details: ((j['details'] as List?) ?? const []).cast<String>(),
         windows: ((j['windows'] as List?) ?? const [])
             .map((w) => QuotaWindow.fromJson(w as Map<String, dynamic>))
@@ -744,7 +755,22 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     pipeHealth: q.pipeHealth == null ? null : t(q.pipeHealth!),
     httpStatus: q.httpStatus,
     retryAfterSeconds: q.retryAfterSeconds,
+    resetCreditsAvailable: q.resetCreditsAvailable,
   );
+}
+
+/// A short escape-hatch message when [q] reports redeemable off-cycle resets,
+/// or null when none are available. Shared by every surface so the wording and
+/// the "here is a way out now" framing stay consistent, and phrased as an action
+/// the user can take rather than a passive status. Never asserted from stale or
+/// drifted evidence, since [ProviderQuota.resetCreditsAvailable] is a fresh-read
+/// signal.
+String? resetAvailableMessage(ProviderQuota q) {
+  final n = q.resetCreditsAvailable;
+  if (n <= 0 || q.stale || q.driftReason != null) return null;
+  final unit = n == 1 ? 'reset' : 'resets';
+  return 'reset available: $n redeemable $unit in ${q.displayName} to refresh '
+      'your limit now';
 }
 
 /// True when an account string names a specific identity rather than a generic

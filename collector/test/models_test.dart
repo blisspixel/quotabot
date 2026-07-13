@@ -88,6 +88,49 @@ void main() {
       expect(decoded.retryAfterSeconds, 60);
     });
 
+    test('reset credits round-trip and drive the escape-hatch message', () {
+      final q = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'pro',
+        asOf: 1000,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 100)],
+        resetCreditsAvailable: 2,
+      );
+      expect(q.toJson()['reset_credits_available'], 2);
+      expect(ProviderQuota.fromJson(q.toJson()).resetCreditsAvailable, 2);
+      expect(sanitizeProviderQuota(q).resetCreditsAvailable, 2);
+      expect(resetAvailableMessage(q), contains('2 redeemable resets'));
+    });
+
+    test('the escape-hatch message is omitted from stale or drifted evidence',
+        () {
+      final fresh = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'pro',
+        asOf: 1000,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 100)],
+        resetCreditsAvailable: 2,
+      );
+      // A redeemable-reset claim must not be asserted from non-fresh data.
+      expect(resetAvailableMessage(fresh.asStale('cached')), isNull);
+      expect(
+        resetAvailableMessage(fresh.withProviderDrift('weekly drift', 1001)),
+        isNull,
+      );
+      // toJson omits the field when zero.
+      expect(
+        ProviderQuota(
+          provider: 'codex',
+          displayName: 'Codex',
+          account: 'pro',
+          asOf: 1000,
+        ).toJson().containsKey('reset_credits_available'),
+        isFalse,
+      );
+    });
+
     test('asStale preserves windows, capture time, and kind', () {
       final q = ProviderQuota(
         provider: 'codex',

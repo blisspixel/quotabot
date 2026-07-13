@@ -2154,6 +2154,13 @@ void _printDoctor(List<ProviderQuota> results) {
       '  ${namePart.padRight(nameWidth)} ${_stateStyled(state)} '
       '$detail $provenance',
     );
+    // A redeemable off-cycle reset is the most actionable thing on a tight or
+    // spent provider, so it leads the detail lines in green rather than reading
+    // as one more dim note.
+    final resetMessage = resetAvailableMessage(q);
+    if (resetMessage != null) {
+      print('  $indent ${_stateColumn('')} ${style.green(resetMessage)}');
+    }
     for (final d in q.details) {
       print('  $indent ${_stateColumn('')} $d');
     }

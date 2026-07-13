@@ -603,14 +603,27 @@ List<String> _localRows(
 /// runtime - surfaces the same detail instead of dropping it. A spent card in
 /// particular must still show an available reset so the glance answers "is there
 /// a way to keep working now?" and not only "when does it come back?".
-List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) => [
-      for (final d in q.details)
-        _line([
-          const _Cell('  '),
-          _Cell(' ' * (_nameW + _labelW)),
-          _Cell(d, (s, t) => s.dim(t)),
-        ], width, s),
-    ];
+List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
+  final rows = <String>[];
+  // A redeemable off-cycle reset leads in green: it is the way to keep working
+  // now, so it must not read as one more dim note under a spent card.
+  final reset = resetAvailableMessage(q);
+  if (reset != null) {
+    rows.add(_line([
+      const _Cell('  '),
+      _Cell(' ' * (_nameW + _labelW)),
+      _Cell(reset, (s, t) => s.green(t)),
+    ], width, s));
+  }
+  for (final d in q.details) {
+    rows.add(_line([
+      const _Cell('  '),
+      _Cell(' ' * (_nameW + _labelW)),
+      _Cell(d, (s, t) => s.dim(t)),
+    ], width, s));
+  }
+  return rows;
+}
 
 /// One footer chunk with its yield order under width pressure. Chunks with a
 /// higher [drop] value disappear first; -1 never drops. Whole chunks yield so
