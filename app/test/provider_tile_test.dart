@@ -42,6 +42,35 @@ double _contrastRatio(Color foreground, Color background) {
 }
 
 void main() {
+  testWidgets('shows a redeemable reset as a prominent green banner', (
+    tester,
+  ) async {
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final spentWithReset = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'default',
+      asOf: nowSec,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: nowSec + 3600),
+      ],
+      resetCreditsAvailable: 2,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(quota: spentWithReset, cardColor: const Color(0xFF1A1A1A)),
+      ),
+    );
+    await tester.pump();
+
+    final banner = find.textContaining('reset available');
+    expect(banner, findsOneWidget);
+    // Rendered in the actionable green, not the muted detail color, so a spent
+    // card's way out stands out.
+    expect(tester.widget<Text>(banner).style?.color, const Color(0xFF3FB950));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'shows a plain-language runway when burning without a strand error',
     (tester) async {

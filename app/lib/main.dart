@@ -830,6 +830,10 @@ class _DashboardState extends State<Dashboard>
   FleetRange _analyticsRange = FleetRange.now;
   final Map<String, DateTime> _lastNotified =
       {}; // debounce key -> time for notif spam reduction
+  // Providers currently notified about an available redeemable reset. Edge
+  // triggered: fire once when a reset appears, re-arm only after it is gone, so
+  // an available reset does not re-notify every poll.
+  final Set<String> _resetArmed = <String>{};
   Offset? _windowPos;
   DateTime _updated = DateTime.now();
   Timer? _refreshTimer;
@@ -2538,6 +2542,35 @@ class _DashboardState extends State<Dashboard>
           }
         }
       }
+
+      // Reset-available alerts: fire once when a provider offers a redeemable
+      // off-cycle reset (Codex reset credits), so the user sees the escape hatch
+      // the moment it appears instead of only in the card. Edge triggered via
+      // _resetArmed, and re-armed only after the reset is gone.
+      if (_enableNotifications) {
+        for (final q in snapshot) {
+          final key = quotaIdentityKeyFor(q);
+          final message = resetAvailableMessage(q);
+          if (message == null) {
+            _resetArmed.remove(key);
+            continue;
+          }
+          if (!_resetArmed.add(key)) continue; // already notified
+          final id = _notificationId('$key:reset-available');
+          try {
+            await flutterLocalNotificationsPlugin.cancel(id: id);
+            await flutterLocalNotificationsPlugin.show(
+              id: id,
+              title: 'Reset available',
+              body: message,
+              notificationDetails: _buildDetails(q.displayName),
+            );
+            _setNotificationDeliveryFailed(false);
+          } catch (_) {
+            _setNotificationDeliveryFailed(true);
+          }
+        }
+      }
     } catch (_) {
       // ignore notif errors
     }
@@ -3095,6 +3128,9 @@ class ProviderTile extends StatelessWidget {
         : _availColor(binding.remaining);
     final hasInsights = insights != null && insights!.samples > 0;
     final trustLine = desktopProviderTrustLine(quota, now);
+    // A redeemable off-cycle reset is the most actionable thing on a tight card,
+    // so it renders as a prominent green banner, not a muted detail line.
+    final resetMessage = resetAvailableMessage(quota);
     final evidenceLabel = quota.driftReason != null
         ? 'last trusted'
         : quota.stale
@@ -3227,6 +3263,32 @@ class ProviderTile extends StatelessWidget {
                 ),
               ),
             ),
+            if (resetMessage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.refresh_rounded,
+                      size: 13,
+                      color: Color(0xFF3FB950),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        resetMessage,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: AppType.small,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF3FB950),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (quota.driftReason != null)
               _providerDriftRow(
                 quota.driftReason!,
