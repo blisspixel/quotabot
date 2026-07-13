@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/codex.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
@@ -226,7 +227,7 @@ void main() {
     expect(codexUsageWindows(const {}), isEmpty);
   });
 
-  test('surfaces redeemable reset credits as an actionable detail', () async {
+  test('surfaces redeemable reset credits as a structured signal', () async {
     final q = await CodexAdapter(
       sessionsDir: temp,
       usageFetcher: () async =>
@@ -234,33 +235,40 @@ void main() {
     ).collect();
 
     expect(q.ok, isTrue);
+    expect(q.resetCreditsAvailable, 2);
+    // The shared escape-hatch phrasing is action-first and names the count.
     expect(
-      q.details.single,
-      allOf(contains('2 rate-limit reset credits'), contains('redeem')),
+      resetAvailableMessage(q),
+      allOf(contains('2 redeemable'), contains('refresh')),
     );
   });
 
-  test('reset-credit detail is pluralized and omitted when none are available',
+  test('reset credits are zero when none are available or the field is absent',
       () async {
-    final one = await CodexAdapter(
-      sessionsDir: temp,
-      usageFetcher: () async =>
-          _wham(primary: 95, secondary: 40, resetCredits: 1),
-    ).collect();
-    expect(one.details.single, contains('1 rate-limit reset credit '));
-
     final none = await CodexAdapter(
       sessionsDir: temp,
       usageFetcher: () async =>
           _wham(primary: 95, secondary: 40, resetCredits: 0),
     ).collect();
-    expect(none.details, isEmpty);
+    expect(none.resetCreditsAvailable, 0);
+    expect(resetAvailableMessage(none), isNull);
 
     final absent = await CodexAdapter(
       sessionsDir: temp,
       usageFetcher: () async => _wham(primary: 95, secondary: 40),
     ).collect();
-    expect(absent.details, isEmpty);
+    expect(absent.resetCreditsAvailable, 0);
+    expect(resetAvailableMessage(absent), isNull);
+  });
+
+  test('a single redeemable reset reads in the singular', () async {
+    final one = await CodexAdapter(
+      sessionsDir: temp,
+      usageFetcher: () async =>
+          _wham(primary: 95, secondary: 40, resetCredits: 1),
+    ).collect();
+    expect(one.resetCreditsAvailable, 1);
+    expect(resetAvailableMessage(one), contains('1 redeemable reset '));
   });
 }
 

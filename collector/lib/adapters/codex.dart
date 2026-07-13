@@ -85,11 +85,7 @@ class CodexAdapter {
         plan: plan,
         asOf: asOf,
         windows: windows,
-        details: [
-          if (credits != null && credits > 0)
-            '$credits rate-limit reset ${credits == 1 ? 'credit' : 'credits'} '
-                'available - redeem in Codex to refresh your limit early',
-        ],
+        resetCreditsAvailable: credits ?? 0,
       );
     } catch (_) {
       return null;

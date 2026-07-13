@@ -21,6 +21,7 @@ ProviderQuota _q(
   String account = 'a',
   int asOf = _now,
   List<String> details = const [],
+  int resetCreditsAvailable = 0,
 }) =>
     ProviderQuota(
       provider: id,
@@ -37,6 +38,7 @@ ProviderQuota _q(
       source: source,
       perMachine: perMachine,
       details: details,
+      resetCreditsAvailable: resetCreditsAvailable,
     );
 
 /// Strips ANSI SGR codes so tests can assert on visible text and width.
@@ -137,34 +139,37 @@ void main() {
     expect(row, isNot(contains('1% free')));
   });
 
-  test('a spent card surfaces a provider escape-hatch detail, not only a wait',
-      () {
-    // The 0.9 escape hatch: a spent Codex window whose account holds redeemable
-    // reset credits must show that way out instead of only "resets in Xh".
+  test('a spent card surfaces the reset escape hatch, not only a wait', () {
+    // A spent Codex window whose account holds redeemable resets must show that
+    // way out instead of only "resets in Xh".
     final lines = _frame([
-      _q('codex', [
-        QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: _now + 3600),
-      ], details: const [
-        '2 rate-limit reset credits available - redeem in Codex to '
-            'refresh your limit early',
-      ]),
+      _q(
+          'codex',
+          [
+            QuotaWindow(
+                label: 'weekly', usedPercent: 100, resetsAt: _now + 3600),
+          ],
+          resetCreditsAvailable: 2),
     ], width: 100);
     expect(lines.any((l) => _plain(l).contains('spent')), isTrue);
-    expect(
-      lines.any((l) => _plain(l).contains('reset credits available')),
-      isTrue,
-    );
+    expect(lines.any((l) => _plain(l).contains('reset available')), isTrue);
   });
 
-  test('a healthy card also carries provider detail lines', () {
+  test('the reset escape hatch renders in green, not dim', () {
     final lines = _frame([
-      _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 6)],
-          details: const ['2 rate-limit reset credits available - redeem']),
-    ], width: 100);
-    expect(
-      lines.any((l) => _plain(l).contains('reset credits available')),
-      isTrue,
-    );
+      _q(
+          'codex',
+          [
+            QuotaWindow(
+                label: 'weekly', usedPercent: 100, resetsAt: _now + 3600),
+          ],
+          resetCreditsAvailable: 2),
+    ], width: 100, color: true);
+    final resetLine =
+        lines.firstWhere((l) => _plain(l).contains('reset available'));
+    // The green SGR code (32) marks it prominent rather than the dim (2) that
+    // ordinary detail lines use.
+    expect(resetLine, contains('\x1B[32m'));
   });
 
   test('a local runtime shows its status and local trust scope', () {
