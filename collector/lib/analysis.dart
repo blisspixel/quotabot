@@ -883,6 +883,33 @@ int _compareSubscriptionCandidates(RouteCandidate a, RouteCandidate b) {
 ///
 /// Local runtimes never "win" on headroom (they would always read 100%); they
 /// are only chosen when the paid budget is too tight to be comfortable.
+/// Among already-viable, score-ordered [viable] candidates, the one the user's
+/// [preferenceOrder] ranks highest (earliest in the list wins). Returns null
+/// when the preference is empty or names none of the viable providers, so the
+/// caller keeps its score-based pick.
+///
+/// Preference reorders only genuinely viable options - the caller passes the
+/// available, above-comfort set - so it can never revive an unavailable, spent,
+/// or spend-blocked route; it just breaks the choice among ones already worth
+/// picking. Iteration is stable and a rank must strictly improve to win, so
+/// several accounts of one preferred provider keep their incoming score order.
+RouteCandidate? preferredViableCandidate(
+  List<RouteCandidate> viable,
+  List<String> preferenceOrder,
+) {
+  if (preferenceOrder.isEmpty) return null;
+  RouteCandidate? best;
+  var bestRank = preferenceOrder.length;
+  for (final c in viable) {
+    final rank = preferenceOrder.indexOf(c.provider);
+    if (rank >= 0 && rank < bestRank) {
+      bestRank = rank;
+      best = c;
+    }
+  }
+  return best;
+}
+
 RouteSuggestion suggestRoute(
   List<ProviderQuota> quotas,
   int now, {
@@ -902,6 +929,7 @@ RouteSuggestion suggestRoute(
   Set<String>? capabilityKnownQuotaKeys,
   Set<String>? capabilityAvailableQuotaKeys,
   Map<String, int> capabilityBudgetResetByQuotaKey = const {},
+  List<String> preferenceOrder = const [],
 }) {
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
@@ -1117,12 +1145,23 @@ RouteSuggestion suggestRoute(
       )
       .toList();
   if (comfy.isNotEmpty) {
-    final best = comfy.first;
+    // A user preference orders only genuinely viable candidates: [comfy] is
+    // already the available, above-comfort set, so preferring within it never
+    // revives an unavailable or spent route. When the preference names none of
+    // them, the score-based pick stands.
+    final preferred = preferredViableCandidate(comfy, preferenceOrder);
+    final best = preferred ?? comfy.first;
     final note = best.stale ? ' (cached)' : '';
     final burnNote = _effectiveHeadroomNote(best);
+    // Name the preference only when it actually chose among more than one viable
+    // option; with a single candidate the preference did not decide anything.
+    final byPreference = preferred != null && comfy.length > 1;
+    final lead = byPreference
+        ? 'Use ${best.provider}$note - first by your preference'
+        : 'Use ${best.provider}$note - best risk-adjusted runway';
     return result(
       best,
-      'Use ${best.provider}$note - best risk-adjusted runway (${best.headroom!.round()}% free$burnNote).',
+      '$lead (${best.headroom!.round()}% free$burnNote).',
     );
   }
 
