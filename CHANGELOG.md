@@ -5,101 +5,65 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Provider preference for routing (ROADMAP 0.9). `quotabot suggest
+  --prefer=codex,claude` orders the recommendation by your stated preference, but
+  only among candidates already viable (available and above the comfort
+  threshold), so it never revives an unavailable, spent, or spend-blocked route.
+  It persists per profile as `preference_order`; an explicit `--prefer` overrides
+  the saved order. The reason names it ("first by your preference") only when it
+  actually decided the pick.
 - The desktop app fires a "Reset available" notification the moment a provider
   offers a redeemable off-cycle reset (Codex reset credits). It fires once and
   re-arms only on a fresh account-wide read that genuinely reports none, so a
   live read flapping to its this-machine session fallback never re-notifies about
   the same reset.
 
-### Fixed
-- The loopback HTTP server no longer stops draining if a client disconnects
-  before its response is flushed: closing the response is now guarded, so one
-  ill-timed disconnect can no longer hang every later request.
-- `quotabot login`/`logout` with a missing or unknown provider now exits with the
-  documented usage code (64) instead of 0, and a failed `login grok` reports
-  cleanly like the other providers instead of an unhandled exception.
-- An Ollama `-cloud` model is no longer wrongly treated as on-device and free:
-  snapshot sanitizing dropped the `cloud_offloaded` flag, so a billable cloud
-  model could satisfy `--budget=local` and free budgets. The flag now survives.
-- Kiro and Cursor no longer discard every parsed window when a breakdown's
-  `resetDate` is a numeric epoch rather than a string (an unchecked cast threw
-  and aborted the read).
-- A numeric reset given in milliseconds is rescaled to seconds, so a reset no
-  longer renders as thousands of years out.
-- Low-quota alerts and the decision ALERT view no longer fire on stale or
-  drifted evidence; the alert's window label and its free-percent now always
-  describe the same window.
-- The desktop app keeps its last data and shows a failure message when a refresh
-  throws an `Error` (not just an `Exception`), instead of failing silently every
-  poll.
-- The redeemable-reset signal is never resurrected from the cache; it is
-  fresh-read only. A failed token-store write no longer discards a just-refreshed
-  access token and breaks the grant. The Lemonade adapter no longer leaks an HTTP
-  client per refresh, and a malformed Codex session `primary` no longer drops the
-  weekly window.
-- `quotabot suggest` says "first by your preference" only when the preference
-  actually changed the pick, not when it merely agreed with the top-scored
-  provider.
-- A provider whose capable model exists but whose model-budget gate is closed now
-  reads "model budget spent" rather than "no capable model", matching the suggest
-  reason.
-
 ### Changed
 - The redeemable-reset escape hatch is now a first-class, prominent signal.
   Codex's reset credits became a structured `reset_credits_available` on each
-  provider (in JSON too) instead of a dim detail line, and `doctor` and `top`
-  render it in green - "reset available: N redeemable resets in Codex to refresh
-  your limit now" - so a spent or tight provider's way out stands out rather than
-  reading as one more note. The desktop card shows the same signal as a green
-  banner with a refresh icon. It is deliberately not asserted from stale or
-  drifted evidence.
+  provider (in the JSON too), and `doctor`, `top`, and the desktop card render it
+  prominently ("N resets available in Codex - redeem now") so a spent or tight
+  provider's way out stands out. It is never asserted from stale or drifted
+  evidence, nor served from the cache.
+- `quotabot suggest`'s candidates list no longer prints the model's internal
+  scores (`conf`, `strand`) on the plain glance - they read as jargon and, on the
+  recommended provider, were alarming without explanation. The glance shows only
+  headroom, usability, and trust; `suggest --json` still carries
+  `strand_probability`, `confidence`, `routing_score`, and `runway_hours`.
 
 ### Fixed
-- `quotabot suggest` no longer labels a capability-limited provider as "spent".
-  A provider with headroom left but no catalog model meeting the route's
-  capability floor (for example a Kiro credit plan) read the contradictory
-  "100% free ... spent"; it now reads "no capable model", so the reason it is
-  not the pick is truthful. Drift and staleness still read "unavailable", and a
-  genuinely depleted window still reads "spent".
+- `quotabot suggest` no longer labels a viable-but-unroutable provider "spent": a
+  provider with headroom but no catalog model meeting the capability floor reads
+  "no capable model", and one whose model-budget gate is closed reads "model
+  budget spent", matching the suggest reason.
 - `quotabot doctor` no longer shows an unconfigured optional provider as a red
-  `ERROR`. NVIDIA NIM without an API key is a setup state, not a failed read, so
-  it now reads as `no live data` with an actionable hint ("set NVIDIA_API_KEY or
-  nvapi to check free-trial access") instead of alarming someone who never
-  enabled it. A key that is present but rejected still fails loudly. A no-window
-  provider row now shows its status where it has one, so the setup message is
-  visible rather than blank.
-
-### Added
-- Provider preference for routing (ROADMAP 0.9). `quotabot suggest
-  --prefer=codex,claude` orders the recommendation by your stated preference,
-  but only among candidates that are already viable (available and above the
-  comfort threshold). It never revives an unavailable, spent, or spend-blocked
-  route, and when it decides among several viable options the reason says so
-  ("first by your preference"). The preference also persists per profile
-  (`preference_order` in the profile JSON), and an explicit `--prefer` overrides
-  the active profile's saved preference. The selection is a pure, unit-tested
-  `preferredViableCandidate` threaded through the decision core; the profile
-  round-trip and the desktop profile transforms preserve the order.
-
-### Changed
-- The `quotabot suggest` candidates list no longer prints the model's internal
-  scores (`conf N%`, `strand N%`) on the plain glance. They read as jargon and,
-  on the recommended provider, were alarming without a paragraph to interpret
-  ("strand 98%" is the chance a window is spent before it resets, not a defect).
-  The glance now shows only what a person acts on - headroom, whether the route
-  is usable, and how the reading is trusted - while `suggest --json` still
-  carries `strand_probability`, `confidence`, `routing_score`, and
-  `runway_hours` in full. Progress on the 0.9 self-explanatory-advisor line;
-  the candidate line is now a pure, unit-tested `routeCandidateGlanceLine`.
-
-### Fixed
-- `quotabot top` now shows provider detail lines on quota-provider cards,
-  including on a spent card. The spent-window collapse and the normal
-  quota-window paths both dropped `details`, so the Codex reset-credit escape
-  hatch (and Antigravity's local-limit note) appeared in `doctor` but never in
-  the live dashboard. A spent card now shows an available reset instead of only
-  a wait time, completing the 0.9 spent-window escape-hatch item. Rendered
-  through one shared helper reused by the healthy, spent, and local-runtime rows.
+  `ERROR`. NVIDIA NIM without an API key reads as `no live data` with a hint to
+  set the key; a present-but-rejected key still fails loudly. A no-window row now
+  shows its status instead of a blank.
+- `quotabot top` shows provider detail lines on quota cards, including the reset
+  escape hatch on a spent card - both the spent-collapse and normal paths dropped
+  them - so a spent card shows an available reset, not only a wait time.
+- An Ollama `-cloud` model is no longer treated as on-device and free: snapshot
+  sanitizing dropped the `cloud_offloaded` flag, so a billable cloud model could
+  satisfy `--budget=local` and free budgets. The flag now survives.
+- Kiro and Cursor no longer discard every parsed window when a breakdown's
+  `resetDate` is a numeric epoch rather than a string, and a numeric reset given
+  in milliseconds is rescaled to seconds instead of rendering thousands of years
+  out.
+- Low-quota alerts and the decision ALERT view no longer fire on stale or drifted
+  evidence, and an alert's window label and free-percent now describe the same
+  window.
+- The loopback HTTP server no longer stops draining if a client disconnects
+  before its response is flushed: the response close and error-path write are now
+  guarded, so one ill-timed disconnect can no longer hang every later request.
+- `quotabot login`/`logout` with a missing or unknown provider now exits with the
+  documented usage code (64) instead of 0, and a failed `login grok` reports
+  cleanly instead of an unhandled exception.
+- The desktop app keeps its last data and shows a failure message when a refresh
+  throws an `Error` (not just an `Exception`) instead of failing silently.
+- Hardening: a failed token-store write no longer discards a just-refreshed
+  access token; the Lemonade adapter no longer leaks an HTTP client per refresh;
+  a malformed Codex session `primary` no longer drops the weekly window.
 
 ## 0.8.1 - 2026-07-12
 
