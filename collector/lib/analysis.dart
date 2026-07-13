@@ -1153,9 +1153,12 @@ RouteSuggestion suggestRoute(
     final best = preferred ?? comfy.first;
     final note = best.stale ? ' (cached)' : '';
     final burnNote = _effectiveHeadroomNote(best);
-    // Name the preference only when it actually chose among more than one viable
-    // option; with a single candidate the preference did not decide anything.
-    final byPreference = preferred != null && comfy.length > 1;
+    // Name the preference only when it actually changed the pick - when the
+    // preferred candidate differs from the one the risk-adjusted score would
+    // have chosen. If preference merely agreed with the top score, it decided
+    // nothing, so do not claim it did.
+    final byPreference =
+        preferred != null && !identical(preferred, comfy.first);
     final lead = byPreference
         ? 'Use ${best.provider}$note - first by your preference'
         : 'Use ${best.provider}$note - best risk-adjusted runway';

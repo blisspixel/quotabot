@@ -492,8 +492,9 @@ class ProviderQuota {
         pipeHealth: providerPipeHealthFromWire(j['pipe_health']),
         httpStatus: boundedIntFromWire(j['http_status'], min: 100, max: 599),
         retryAfterSeconds: boundedIntFromWire(j['retry_after_seconds'], min: 0),
-        resetCreditsAvailable:
-            boundedIntFromWire(j['reset_credits_available'], min: 0) ?? 0,
+        resetCreditsAvailable: boundedIntFromWire(j['reset_credits_available'],
+                min: 0, max: 1000) ??
+            0,
         details: ((j['details'] as List?) ?? const []).cast<String>(),
         windows: ((j['windows'] as List?) ?? const [])
             .map((w) => QuotaWindow.fromJson(w as Map<String, dynamic>))
@@ -765,7 +766,12 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
 /// fresh-read signal.
 String? resetAvailableMessage(ProviderQuota q) {
   final n = q.resetCreditsAvailable;
-  if (n <= 0 || q.stale || q.driftReason != null) return null;
+  // Never assert a redeemable reset from any degraded snapshot: stale, drifted,
+  // or plausibility-flagged (suspect). This does not rely on the reconstruction
+  // paths happening to zero the field.
+  if (n <= 0 || q.stale || q.driftReason != null || q.suspect != null) {
+    return null;
+  }
   final unit = n == 1 ? 'reset' : 'resets';
   return '$n $unit available in ${q.displayName} - redeem now';
 }

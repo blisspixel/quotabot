@@ -2545,25 +2545,27 @@ class _DashboardState extends State<Dashboard>
 
       // Reset-available alerts: fire once when a provider offers a redeemable
       // off-cycle reset (Codex reset credits), so the user sees the escape hatch
-      // the moment it appears instead of only in the card. Edge triggered via
-      // _resetArmed, and re-armed only after the reset is gone.
+      // the moment it appears instead of only in the card. The edge-trigger and
+      // its flap-resistant re-arm rule live in the pure computeResetSignals.
       if (_enableNotifications) {
-        for (final q in snapshot) {
-          final key = quotaIdentityKeyFor(q);
-          final message = resetAvailableMessage(q);
-          if (message == null) {
-            _resetArmed.remove(key);
-            continue;
-          }
-          if (!_resetArmed.add(key)) continue; // already notified
-          final id = _notificationId('$key:reset-available');
+        final resets = computeResetSignals(
+          snapshot: snapshot,
+          armed: _resetArmed,
+        );
+        _resetArmed
+          ..clear()
+          ..addAll(resets.armed);
+        for (final r in resets.fired) {
+          final id = _notificationId(
+            '${quotaIdentityKey(r.provider, r.account)}:reset-available',
+          );
           try {
             await flutterLocalNotificationsPlugin.cancel(id: id);
             await flutterLocalNotificationsPlugin.show(
               id: id,
               title: 'Reset available',
-              body: message,
-              notificationDetails: _buildDetails(q.displayName),
+              body: r.message,
+              notificationDetails: _buildDetails(r.displayName),
             );
             _setNotificationDeliveryFailed(false);
           } catch (_) {

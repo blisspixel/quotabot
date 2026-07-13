@@ -54,6 +54,25 @@ const _reRatingWindows = <String, Set<String>>{
   codexProviderId: {'weekly'},
 };
 
+/// Whether the vanished [gone] window is explained by the account folding into a
+/// longer cap: some surviving [fresh] window has a reset at least as far out as
+/// [gone]'s (within tolerance). This distinguishes a legitimate collapse to a
+/// longer window (the observed Codex 5h+weekly to single-weekly restructure)
+/// from losing the longest cap, which stays drift. Conservative on missing reset
+/// times: without a comparable reset on both sides it returns false, so the
+/// disappearance is flagged rather than quietly accepted.
+bool _collapsedIntoLongerWindow(QuotaWindow gone, ProviderQuota fresh) {
+  final goneReset = gone.resetsAt;
+  if (goneReset == null) return false;
+  for (final w in fresh.windows) {
+    final r = w.resetsAt;
+    if (r != null && r >= goneReset - _resetRegressToleranceSeconds) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Whether a used-percent drop in [label] for [provider] is expected re-rating
 /// rather than drift.
 bool _isReRatingWindow(String provider, String? label) =>
@@ -409,11 +428,20 @@ String? detectQuotaDrift(
     final windowSetIsVariable =
         _variableWindowSetProviders.contains(fresh.provider);
     for (final prior in previous.windows) {
-      if (!freshLabels.contains(prior.label) && !windowSetIsVariable) {
-        return boundedQuotaDriftReason(
-          '${prior.label} quota window disappeared',
-        );
+      if (freshLabels.contains(prior.label)) continue;
+      // A window vanished. For a provider whose window set can restructure
+      // (Codex), that is a legitimate collapse only when a window reaching at
+      // least as far as the vanished one survives - the account folded into its
+      // longer cap, as when the 5h and weekly buckets became a single weekly.
+      // If instead the longest cap vanished, the binding constraint (or a parser
+      // that dropped it) is lost, so it is still flagged. A blanket exemption
+      // would silently accept losing the weekly cap.
+      if (windowSetIsVariable && _collapsedIntoLongerWindow(prior, fresh)) {
+        continue;
       }
+      return boundedQuotaDriftReason(
+        '${prior.label} quota window disappeared',
+      );
     }
     for (final w in fresh.windows) {
       final p = prev[w.label];

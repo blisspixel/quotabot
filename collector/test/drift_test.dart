@@ -117,6 +117,21 @@ void main() {
           contains('5h quota window disappeared'));
     });
 
+    test('a Codex collapse that loses the longest cap is still flagged', () {
+      // The exemption covers folding into a longer window (5h vanishes, weekly
+      // survives), not losing the long-term cap. If a parser regression drops
+      // the weekly (reset far out) and only the 5h (reset soon) survives, no
+      // surviving window reaches as far, so it must still be flagged rather than
+      // silently accepted.
+      final prev = snap(codexProviderId, [
+        win('5h', 40, 1000),
+        win('weekly', 30, 600000),
+      ]);
+      final fresh = snap(codexProviderId, [win('5h', 40, 1000)]);
+      expect(detectQuotaDrift(fresh, prev),
+          contains('weekly quota window disappeared'));
+    });
+
     test('Antigravity is exempt: its window is a max over a changing set', () {
       final prev = snap(antigravityProviderId, [win('5h', 80, 2000)]);
       // Both a headroom gain and a reset regression, yet not flagged.

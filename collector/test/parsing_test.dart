@@ -179,6 +179,20 @@ void main() {
         }),
         isNull,
       );
+      // A fractional count is rejected, not truncated, and an absurd count is
+      // rejected rather than rendered as "1000000000 resets available".
+      expect(
+        codexResetCredits({
+          'rate_limit_reset_credits': {'available_count': 2.9},
+        }),
+        isNull,
+      );
+      expect(
+        codexResetCredits({
+          'rate_limit_reset_credits': {'available_count': 1000000000},
+        }),
+        isNull,
+      );
     });
   });
 

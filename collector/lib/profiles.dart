@@ -79,6 +79,7 @@ class QuotaProfile {
     final normalizedProviders = _providerSet(providers);
     final normalizedAccounts = _accountMap(accounts);
     final normalizedHidden = _hiddenSet(hiddenProviders);
+    final normalizedPreference = _preferenceList(preferenceOrder);
     return {
       'schema': profileSchema,
       'name': normalizeProfileName(name) ?? name,
@@ -93,8 +94,8 @@ class QuotaProfile {
       'routing_policy': routingPolicy.name,
       // Order matters (most-preferred first), so this is a list, not a sorted
       // set like the filter fields above.
-      if (_preferenceList(preferenceOrder).isNotEmpty)
-        'preference_order': _preferenceList(preferenceOrder),
+      if (normalizedPreference.isNotEmpty)
+        'preference_order': normalizedPreference,
       if (theme != null) 'theme': theme,
       if (sort != null) 'sort': sort,
     };

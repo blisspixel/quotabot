@@ -6,9 +6,18 @@ Notable changes to quotabot. Newest first.
 
 ### Added
 - The desktop app fires a "Reset available" notification the moment a provider
-  offers a redeemable off-cycle reset (Codex reset credits), edge-triggered so it
-  alerts once when the reset appears and re-arms only after it is gone - the
-  escape hatch reaches you even when the window is not open.
+  offers a redeemable off-cycle reset (Codex reset credits). It fires once and
+  re-arms only on a fresh account-wide read that genuinely reports none, so a
+  live read flapping to its this-machine session fallback never re-notifies about
+  the same reset.
+
+### Fixed
+- `quotabot suggest` says "first by your preference" only when the preference
+  actually changed the pick, not when it merely agreed with the top-scored
+  provider.
+- A provider whose capable model exists but whose model-budget gate is closed now
+  reads "model budget spent" rather than "no capable model", matching the suggest
+  reason.
 
 ### Changed
 - The redeemable-reset escape hatch is now a first-class, prominent signal.

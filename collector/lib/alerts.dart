@@ -273,3 +273,64 @@ String _displayLabel(String displayName, String? account) =>
     account != null && account.contains('@') && hasSpecificQuotaAccount(account)
         ? '$displayName ($account)'
         : displayName;
+
+/// A newly available redeemable reset for one provider account: the escape
+/// hatch worth telling the user about once, the moment it appears.
+class ResetSignal {
+  final String provider;
+  final String account;
+  final String displayName;
+
+  /// The shared escape-hatch message (see [resetAvailableMessage]).
+  final String message;
+
+  const ResetSignal({
+    required this.provider,
+    required this.account,
+    required this.displayName,
+    required this.message,
+  });
+}
+
+/// Edge-triggers reset-available signals across a snapshot. Mirrors
+/// [computeAlerts]: given the provider identity keys already notified ([armed]),
+/// it returns the signals that newly appeared this cycle and the updated armed
+/// set, so a caller fires each reset exactly once.
+///
+/// A provider stays armed while it keeps reporting a redeemable reset. It
+/// disarms (so a later new reset can fire again) only on a fresh, account-wide
+/// read that genuinely reports none: a this-machine session snapshot or a
+/// stale/drifted/suspect read leaves the armed state unchanged, so a live
+/// endpoint flapping to a fallback never re-notifies about the same reset.
+({List<ResetSignal> fired, Set<String> armed}) computeResetSignals({
+  required List<ProviderQuota> snapshot,
+  Set<String> armed = const {},
+}) {
+  final next = <String>{};
+  final fired = <ResetSignal>[];
+  for (final q in snapshot) {
+    final key = quotaIdentityKeyFor(q);
+    final message = resetAvailableMessage(q);
+    if (message != null) {
+      next.add(key);
+      if (!armed.contains(key)) {
+        fired.add(ResetSignal(
+          provider: q.provider,
+          account: q.account,
+          displayName: q.displayName,
+          message: message,
+        ));
+      }
+      continue;
+    }
+    // No message. Keep a prior armed state unless a fresh account-wide read
+    // genuinely reports no reset; that alone proves the reset is gone.
+    final genuinelyGone = !q.perMachine &&
+        !q.stale &&
+        q.driftReason == null &&
+        q.suspect == null &&
+        q.resetCreditsAvailable == 0;
+    if (!genuinelyGone && armed.contains(key)) next.add(key);
+  }
+  return (fired: fired, armed: next);
+}
