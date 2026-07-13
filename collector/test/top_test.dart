@@ -152,7 +152,7 @@ void main() {
           resetCreditsAvailable: 2),
     ], width: 100);
     expect(lines.any((l) => _plain(l).contains('spent')), isTrue);
-    expect(lines.any((l) => _plain(l).contains('reset available')), isTrue);
+    expect(lines.any((l) => _plain(l).contains('resets available')), isTrue);
   });
 
   test('the reset escape hatch renders in green, not dim', () {
@@ -166,7 +166,7 @@ void main() {
           resetCreditsAvailable: 2),
     ], width: 100, color: true);
     final resetLine =
-        lines.firstWhere((l) => _plain(l).contains('reset available'));
+        lines.firstWhere((l) => _plain(l).contains('resets available'));
     // The green SGR code (32) marks it prominent rather than the dim (2) that
     // ordinary detail lines use.
     expect(resetLine, contains('\x1B[32m'));

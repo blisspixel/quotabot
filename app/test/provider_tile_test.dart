@@ -63,7 +63,7 @@ void main() {
     );
     await tester.pump();
 
-    final banner = find.textContaining('reset available');
+    final banner = find.textContaining('resets available');
     expect(banner, findsOneWidget);
     // Rendered in the actionable green, not the muted detail color, so a spent
     // card's way out stands out.

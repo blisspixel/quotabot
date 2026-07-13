@@ -236,10 +236,10 @@ void main() {
 
     expect(q.ok, isTrue);
     expect(q.resetCreditsAvailable, 2);
-    // The shared escape-hatch phrasing is action-first and names the count.
+    // The shared escape-hatch phrasing names the count and the action.
     expect(
       resetAvailableMessage(q),
-      allOf(contains('2 redeemable'), contains('refresh')),
+      allOf(contains('2 resets available in Codex'), contains('redeem')),
     );
   });
 
@@ -268,7 +268,7 @@ void main() {
           _wham(primary: 95, secondary: 40, resetCredits: 1),
     ).collect();
     expect(one.resetCreditsAvailable, 1);
-    expect(resetAvailableMessage(one), contains('1 redeemable reset '));
+    expect(resetAvailableMessage(one), contains('1 reset available in Codex'));
   });
 }
 

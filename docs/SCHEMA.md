@@ -74,12 +74,11 @@ Provider snapshots keep these stable fields:
   (`100..599`). `retry_after_seconds` is an optional non-negative delay parsed
   from `Retry-After`. These are metadata only and must not include response
   bodies, prompts, generated text, source code, or secrets.
-- `reset_credits_available` is an optional non-negative integer count of
-  redeemable off-cycle resets the provider reports as available now (Codex's
-  rate-limit reset credits today). It is omitted when zero. It is a live
-  fresh-read signal, so it is not carried onto stale, drifted, or quarantined
-  snapshots, and surfaces as the prominent "reset available" escape hatch on the
-  glance surfaces and a desktop notification.
+- `reset_credits_available` is an optional non-negative count of redeemable
+  off-cycle resets the provider reports as available now (Codex's rate-limit
+  reset credits today), omitted when zero. It is a fresh-read signal, not carried
+  onto stale, drifted, or quarantined snapshots, and surfaces as the prominent
+  "reset available" escape hatch and a desktop notification.
 - `windows` is always present. Local runtimes use an empty list because they
   have no spendable quota. Status-only cloud providers can also have an empty
   list when quotabot can verify availability but has no measured quota window;
