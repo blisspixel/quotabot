@@ -435,6 +435,16 @@ commands (`status`, `doctor`, `json`, `check`, `top`, `watch`, `stats`,
 profiles. MCP routing and model tools accept the same idea as
 `exclude: ["codex", "grok"]`, and the loopback HTTP server supports
 `GET /suggest?exclude=codex,grok`.
+
+To express a preferred order among providers, add `--prefer=codex,claude` to
+`suggest` (most-preferred first). The preference applies only among candidates
+that are already viable - available and above the comfort threshold - so it can
+never revive an unavailable, spent, or spend-blocked route; it just breaks the
+choice among options already worth picking, and the reason then reads "first by
+your preference". Unlike `--exclude`, which removes providers, `--prefer` only
+reorders. The preference also persists per profile as `preference_order` in the
+profile JSON; an explicit `--prefer` overrides the active profile's saved order
+for that run.
 For cost-sensitive dispatch, `quotabot suggest --local-first` keeps the normal
 provider ranking visible but recommends a local runtime before subscription quota
 when one is available. MCP `suggest_provider` and `decide_now` accept
