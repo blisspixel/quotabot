@@ -12,6 +12,25 @@ Notable changes to quotabot. Newest first.
   the same reset.
 
 ### Fixed
+- An Ollama `-cloud` model is no longer wrongly treated as on-device and free:
+  snapshot sanitizing dropped the `cloud_offloaded` flag, so a billable cloud
+  model could satisfy `--budget=local` and free budgets. The flag now survives.
+- Kiro and Cursor no longer discard every parsed window when a breakdown's
+  `resetDate` is a numeric epoch rather than a string (an unchecked cast threw
+  and aborted the read).
+- A numeric reset given in milliseconds is rescaled to seconds, so a reset no
+  longer renders as thousands of years out.
+- Low-quota alerts and the decision ALERT view no longer fire on stale or
+  drifted evidence; the alert's window label and its free-percent now always
+  describe the same window.
+- The desktop app keeps its last data and shows a failure message when a refresh
+  throws an `Error` (not just an `Exception`), instead of failing silently every
+  poll.
+- The redeemable-reset signal is never resurrected from the cache; it is
+  fresh-read only. A failed token-store write no longer discards a just-refreshed
+  access token and breaks the grant. The Lemonade adapter no longer leaks an HTTP
+  client per refresh, and a malformed Codex session `primary` no longer drops the
+  weekly window.
 - `quotabot suggest` says "first by your preference" only when the preference
   actually changed the pick, not when it merely agreed with the top-scored
   provider.

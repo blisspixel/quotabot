@@ -139,11 +139,18 @@ void saveSnapshot(
 
 int _nowMicros() => DateTime.now().microsecondsSinceEpoch;
 
+/// The persisted form of a snapshot: its JSON minus fields valid only on a live,
+/// fresh read. Reset-credit availability is such a signal - serving it back from
+/// disk would assert a redeemable reset from stale evidence, which its contract
+/// forbids - so it never enters the cache or history files.
+Map<String, dynamic> _persistedSnapshotJson(ProviderQuota quota) =>
+    quota.toJson()..remove('reset_credits_available');
+
 void _writeTrustedSnapshotUnlocked(ProviderQuota quota, int observedMicros) {
   _atomicWrite(
     _accountedFile(quota),
     jsonEncode({
-      ...quota.toJson(),
+      ..._persistedSnapshotJson(quota),
       _cacheObservedAtMicrosKey: observedMicros,
     }),
   );
@@ -316,7 +323,7 @@ void saveHistory(ProviderQuota q) {
   if (!isTrustedQuotaEvidenceAt(q, nowEpoch())) return;
   try {
     final f = _historyFile(q.provider, account: q.account);
-    final line = jsonEncode(q.toJson());
+    final line = jsonEncode(_persistedSnapshotJson(q));
     if (!f.existsSync() || f.lengthSync() > _maxHistoryBytes) {
       _atomicWrite(f, '$line\n');
       return;

@@ -143,6 +143,15 @@ void main() {
       expect(codexLabel(null, 'fallback'), 'fallback');
     });
 
+    test('live window label uses integer minutes, not "90.0m"', () {
+      final w = codexUsageWindows({
+        'rate_limit': {
+          'primary_window': {'used_percent': 10, 'limit_window_seconds': 5400},
+        },
+      });
+      expect(w.single.label, '90m');
+    });
+
     test('reads the available redeemable reset-credit count', () {
       expect(
         codexResetCredits({
@@ -297,6 +306,11 @@ void main() {
       expect(parseReset('5678'), 5678);
       expect(parseReset('2026-01-01T00:00:00Z'), isPositive);
       expect(parseReset(null), isNull);
+      // A millisecond timestamp (numeric or string) is rescaled to seconds; a
+      // real seconds value is never large enough to be mistaken for millis.
+      expect(parseReset(1782088200000), 1782088200);
+      expect(parseReset('1782088200000'), 1782088200);
+      expect(parseReset(1782088200), 1782088200); // plain seconds untouched
     });
 
     test('findEmbeddedToken recovers a base64-wrapped token', () {
@@ -488,6 +502,25 @@ void main() {
       expect(ws.first.label, 'credit');
       expect(ws.first.percent, closeTo(100, 0.1));
       expect(ws.first.resetsAt, isNotNull);
+    });
+
+    test('kiroWindows keeps the window when resetDate is a numeric epoch', () {
+      // A numeric resetDate previously hit an `as String?` cast that threw and
+      // discarded every parseable window; parseReset now tolerates it.
+      final ws = kiroWindows({
+        'usageBreakdowns': [
+          {
+            'currentUsage': 5000,
+            'usageLimit': 10000,
+            'percentageUsed': 50,
+            'resetDate': 1782088200,
+            'displayName': 'Credit',
+          },
+        ],
+      }, 1782000000);
+      expect(ws.length, 1);
+      expect(ws.first.percent, closeTo(50, 0.1));
+      expect(ws.first.resetsAt, 1782088200);
     });
   });
 

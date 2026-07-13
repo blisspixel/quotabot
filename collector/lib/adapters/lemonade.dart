@@ -21,8 +21,8 @@ class LemonadeAdapter {
   static const id = lemonadeProviderId;
   static const name = lemonadeProviderName;
 
-  final http.Client _http;
-  LemonadeAdapter({http.Client? client}) : _http = client ?? http.Client();
+  final http.Client? _injectedClient;
+  LemonadeAdapter({http.Client? client}) : _injectedClient = client;
 
   static String baseUrl({Map<String, String>? environment}) {
     final env = environment ?? Platform.environment;
@@ -35,9 +35,13 @@ class LemonadeAdapter {
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
+    // Own the client for this collect: close it in `finally` when we created it,
+    // so a long-lived TUI's periodic refresh does not leak a client (and its
+    // connection pool) every cycle. An injected client is the caller's to close.
+    final client = _injectedClient ?? http.Client();
     try {
       for (final path in const ['/api/v1/models', '/v1/models']) {
-        final models = await _models(path);
+        final models = await _models(path, client);
         if (models != null) {
           return localRuntimeQuota(
             id: id,
@@ -51,12 +55,14 @@ class LemonadeAdapter {
       return _notRunning(asOf);
     } catch (_) {
       return _notRunning(asOf);
+    } finally {
+      if (_injectedClient == null) client.close();
     }
   }
 
-  Future<List<LocalModel>?> _models(String path) async {
+  Future<List<LocalModel>?> _models(String path, http.Client client) async {
     try {
-      final resp = await _http
+      final resp = await client
           .get(Uri.parse('${baseUrl()}$path'))
           .timeout(const Duration(seconds: 2));
       if (resp.statusCode != 200) return null;

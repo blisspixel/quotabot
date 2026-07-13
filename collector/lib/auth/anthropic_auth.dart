@@ -139,10 +139,16 @@ class AnthropicAuth {
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
     if (refreshed?.accessToken == null) return null;
-    // Persist the rotated refresh token or the next refresh fails; both
-    // providers rotate single-use refresh tokens.
-    TokenStore.save(provider, refreshed!, account: account);
-    return refreshed.accessToken;
+    // Persist the rotated refresh token (providers rotate single-use tokens),
+    // but best-effort: the provider already burned the old refresh token in the
+    // refresh above, so if the write fails (for example owner-only hardening
+    // fails and save refuses to write insecurely) we still return the valid
+    // access token for this read rather than discarding it and failing the whole
+    // collect. The grant degrades to needing a re-login, instead of crashing.
+    try {
+      TokenStore.save(provider, refreshed!, account: account);
+    } catch (_) {}
+    return refreshed!.accessToken;
   }
 
   static void _saveGrant(Tokens tokens, {String? account}) {

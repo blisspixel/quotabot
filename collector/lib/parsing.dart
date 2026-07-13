@@ -87,7 +87,9 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) {
     final pct = _boundedPercent(w['used_percent']);
     final reset = parseReset(w['reset_at']);
     final secs = w['limit_window_seconds'];
-    final label = secs is num ? codexLabel(secs / 60, entry[1]) : entry[1];
+    // Integer minutes: `secs / 60` is a double, so a non-standard window
+    // rendered as "90.0m" rather than "90m".
+    final label = secs is num ? codexLabel(secs ~/ 60, entry[1]) : entry[1];
     if (pct != null || reset != null) {
       out.add(QuotaWindow(label: label, usedPercent: pct, resetsAt: reset));
     }
@@ -412,12 +414,9 @@ List<QuotaWindow> cursorWindows(dynamic usageData, int now) {
       final used = _firstNum(block, const ['currentUsage']);
       final limit = _firstNum(block, const ['usageLimit']);
       final pct = _boundedPercent(block['percentageUsed']);
-      final resetStr = block['resetDate'] as String?;
-      int? resetsAt;
-      if (resetStr != null) {
-        final dt = DateTime.tryParse(resetStr);
-        if (dt != null) resetsAt = dt.millisecondsSinceEpoch ~/ 1000;
-      }
+      // See kiroWindows: parseReset tolerates a numeric resetDate; the raw cast
+      // threw on one and dropped every window in the breakdown.
+      final resetsAt = parseReset(block['resetDate']);
       final label = (block['displayName'] ?? 'usage').toString().toLowerCase();
       final usedP = pct ??
           (used != null && limit != null && limit > 0
@@ -827,12 +826,10 @@ List<QuotaWindow> kiroWindows(dynamic usageState, int now) {
     final used = _firstNum(block, const ['currentUsage']);
     final limit = _firstNum(block, const ['usageLimit']);
     final pct = _boundedPercent(block['percentageUsed']);
-    final resetStr = block['resetDate'] as String?;
-    int? resetsAt;
-    if (resetStr != null) {
-      final dt = DateTime.tryParse(resetStr);
-      if (dt != null) resetsAt = dt.millisecondsSinceEpoch ~/ 1000;
-    }
+    // parseReset tolerates an ISO string, an epoch-seconds number, or millis; a
+    // raw `as String?` cast here threw on a numeric resetDate and aborted the
+    // whole loop, discarding every otherwise-parseable window.
+    final resetsAt = parseReset(block['resetDate']);
     final label = (block['displayName'] ?? 'Credits').toString().toLowerCase();
     final usedP = pct ??
         (used != null && limit != null && limit > 0
@@ -847,15 +844,25 @@ List<QuotaWindow> kiroWindows(dynamic usageState, int now) {
   return windows;
 }
 
+/// A numeric reset above this many "seconds" is really epoch milliseconds. No
+/// genuine epoch-seconds reset is this large (it is year ~33658), while any
+/// present-day millisecond timestamp (~1.7e12) exceeds it, so dividing by 1000
+/// above the threshold rescues an accidentally-millis value without ever
+/// corrupting a real seconds value.
+const int _resetMillisThreshold = 1000000000000;
+
 int? parseReset(dynamic v) {
   if (v == null) return null;
   if (v is num) {
-    final parsed = v.toDouble();
-    return parsed.isFinite ? v.toInt() : null;
+    if (!v.toDouble().isFinite) return null;
+    final seconds = v.abs() > _resetMillisThreshold ? v ~/ 1000 : v.toInt();
+    return seconds;
   }
   final s = v.toString();
   final asInt = int.tryParse(s);
-  if (asInt != null) return asInt;
+  if (asInt != null) {
+    return asInt.abs() > _resetMillisThreshold ? asInt ~/ 1000 : asInt;
+  }
   final dt = DateTime.tryParse(s);
   return dt == null ? null : dt.millisecondsSinceEpoch ~/ 1000;
 }

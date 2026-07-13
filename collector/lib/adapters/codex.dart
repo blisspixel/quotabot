@@ -226,8 +226,12 @@ class CodexAdapter {
     // Mark stale once the freshest snapshot is older than the shortest (primary)
     // window, since by then the numbers no longer reflect live usage. Defaults
     // to one hour when the primary window length is unknown.
-    final primaryMinutes =
-        (newest.rl['primary']?['window_minutes'] as num?)?.toInt();
+    // Guard the type: a malformed `primary` (not a Map, or a string
+    // window_minutes) must not throw here and abort _toQuota, which would drop
+    // windows codexBindingWindows parses fine. Defaults to one hour when absent.
+    final primary = newest.rl['primary'];
+    final rawMinutes = primary is Map ? primary['window_minutes'] : null;
+    final primaryMinutes = rawMinutes is num ? rawMinutes.toInt() : null;
     final staleAfter = primaryMinutes != null ? primaryMinutes * 60 : 3600;
     final stale = age > staleAfter;
     final base = ProviderQuota(

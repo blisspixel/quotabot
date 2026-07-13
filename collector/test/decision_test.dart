@@ -78,6 +78,26 @@ void main() {
       final alerting = d.alertsBelow(10).map((c) => c.provider).toList();
       expect(alerting, ['codex']);
     });
+
+    test('ALERT view excludes stale and drifted candidates', () {
+      // A stale cached provider stays in the ranked SEE view as last-trusted
+      // evidence, but alerting on hours-old data would misfire, so the ALERT
+      // view must skip it even though its headroom is below the line.
+      final staleLow = ProviderQuota(
+        provider: 'codex',
+        displayName: 'codex',
+        account: 'a',
+        asOf: _now,
+        stale: true,
+        windows: [_win('weekly', 95)], // 5% left, below a 10% line
+      );
+      final d = decide([
+        staleLow,
+        _q('claude', [_win('weekly', 20)])
+      ], _now);
+      expect(d.forecasts.map((c) => c.provider), contains('codex')); // in SEE
+      expect(d.alertsBelow(10), isEmpty); // but not alerted
+    });
   });
 
   group('replay folds the core over history, deterministically', () {

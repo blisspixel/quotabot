@@ -18,6 +18,14 @@ void main() {
       expect(QuotaWindow(label: 'w', used: 5, limit: 0).percent, isNull);
     });
 
+    test('percent is left unclamped so the trust boundary can flag out-of-range',
+        () {
+      // used > limit (>100%) and negative values must survive to verify/drift,
+      // which reject or flag them rather than route on them; clamping here would
+      // hide that. Display-time consumers clamp separately (windowUsedPercent).
+      expect(QuotaWindow(label: 'w', used: 1050, limit: 1000).percent, 105);
+    });
+
     test('exhausted at or above the shared spent headroom floor', () {
       expect(QuotaWindow(label: 'w', usedPercent: 100).exhausted, isTrue);
       expect(QuotaWindow(label: 'w', usedPercent: 98.6).exhausted, isTrue);
@@ -86,6 +94,24 @@ void main() {
       expect(decoded.pipeHealth, providerPipeHealthThrottled);
       expect(decoded.httpStatus, 429);
       expect(decoded.retryAfterSeconds, 60);
+    });
+
+    test('sanitize preserves a cloud-offloaded model flag', () {
+      // sanitizeProviderQuota runs on every collected snapshot; dropping this
+      // flag would reset a cloud-offloaded model to on-device and let a billable
+      // -cloud model satisfy --budget=local and free budgets.
+      final q = ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'local',
+        asOf: 1000,
+        kind: ProviderQuotaKind.local,
+        models: const [
+          ModelInfo(
+              id: 'qwen3-coder:480b-cloud', local: true, cloudOffloaded: true),
+        ],
+      );
+      expect(sanitizeProviderQuota(q).models.single.cloudOffloaded, isTrue);
     });
 
     test('reset credits round-trip and drive the escape-hatch message', () {
