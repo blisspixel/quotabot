@@ -2,6 +2,17 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Fixed
+- `quotabot top` now shows provider detail lines on quota-provider cards,
+  including on a spent card. The spent-window collapse and the normal
+  quota-window paths both dropped `details`, so the Codex reset-credit escape
+  hatch (and Antigravity's local-limit note) appeared in `doctor` but never in
+  the live dashboard. A spent card now shows an available reset instead of only
+  a wait time, completing the 0.9 spent-window escape-hatch item. Rendered
+  through one shared helper reused by the healthy, spent, and local-runtime rows.
+
 ## 0.8.1 - 2026-07-12
 
 ### Fixed
