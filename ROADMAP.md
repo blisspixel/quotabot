@@ -337,10 +337,13 @@ recommendation is aligned to what the user actually wants.
   LiteLLM: decision id, snapshot source and age, binding pool, raw headroom, every
   adjustment, confidence reasons, lease and pipe-health effects, spend policy,
   winner qualification, and each rejected alternative's reason. Content-free.
-- An explicit user spend-order and provider-preference policy, per profile, applied
-  among viable candidates only: it never overrides availability or the
-  no-surprise-spend envelope, and it always shows in the reason ("Codex first by
-  your preference").
+- **Done (provider preference):** an explicit per-profile provider preference,
+  applied among viable candidates only - it never revives an unavailable, spent,
+  or spend-blocked route, and it shows in the reason ("first by your
+  preference"). Persisted as `preference_order` in the profile and overridable
+  per run with `suggest --prefer=a,b`; a pure `preferredViableCandidate` threaded
+  through the decision core. A finer spend-order beyond provider preference
+  (per-model or per-cost) remains open.
 - Local-first QOL: local model capability (context, size, quantization, loaded
   state), a hardware-fit signal (which installed models comfortably fit this RAM or
   VRAM, metadata only, never a throughput probe), and local-first stretch behavior

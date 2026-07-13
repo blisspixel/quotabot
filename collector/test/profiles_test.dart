@@ -119,6 +119,40 @@ void main() {
     expect(back.accounts, profile.accounts);
   });
 
+  test('preference order persists, keeps order, and normalizes', () {
+    final profile = QuotaProfile.fromJson({
+      'schema': profileSchema,
+      'name': 'work',
+      // Mixed case, a blank, and a duplicate: normalized to canonical ids,
+      // order preserved, first occurrence wins.
+      'preference_order': ['Codex', '', 'claude', 'codex'],
+    });
+    expect(profile.preferenceOrder, ['codex', 'claude']);
+
+    // Round-trips through JSON as an ordered list (not a sorted set).
+    expect(profile.toJson()['preference_order'], ['codex', 'claude']);
+    final back = QuotaProfile.fromJson(profile.toJson());
+    expect(back.preferenceOrder, ['codex', 'claude']);
+  });
+
+  test('saveProfile preserves the preference order (not dropped on rewrite)',
+      () {
+    final profile = QuotaProfile(
+      name: 'work',
+      preferenceOrder: const ['claude', 'codex'],
+    );
+    saveProfile(profile, dir: temp);
+    expect(
+        loadProfile('work', dir: temp)!.preferenceOrder, ['claude', 'codex']);
+  });
+
+  test('a profile without a preference has an empty order and omits the key',
+      () {
+    final profile = QuotaProfile.fromJson({'name': 'work'});
+    expect(profile.preferenceOrder, isEmpty);
+    expect(profile.toJson().containsKey('preference_order'), isFalse);
+  });
+
   test('safe profile names reject traversal and invalid filenames', () {
     expect(normalizeProfileName('Work-1'), 'work-1');
     expect(normalizeProfileName('../work'), isNull);
