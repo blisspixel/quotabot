@@ -107,14 +107,13 @@ PROV-DM conformance.
   weekly, each with `used_percent` and `reset_at`; `plan_type` and `email`
   identify the account. This is a metadata read, so it costs no tokens.
 - Reset credits: the same response carries
-  `rate_limit_reset_credits.available_count` - the redeemable off-cycle resets an
-  account can spend to refresh its rate limit early. quotabot exposes this as the
-  structured `reset_credits_available` field and surfaces it prominently as an
-  escape hatch: `doctor` and `top` show a green "reset available: N redeemable
-  resets ... to refresh your limit now" line, the desktop card shows a green
-  banner, and the desktop app fires a "Reset available" notification once when it
-  appears. It is a fresh-read signal (not asserted from stale or drifted
-  evidence), and it is detection and display only; quotabot never redeems one.
+  `rate_limit_reset_credits.available_count` - redeemable off-cycle resets that
+  refresh the rate limit early. quotabot exposes this as the structured
+  `reset_credits_available` field and surfaces it prominently: a green
+  "N resets available ... redeem now" line in `doctor` and `top`, a green banner
+  on the desktop card, and a "Reset available" notification. It is a fresh-read
+  signal (never asserted from stale or drifted evidence), and it is display only;
+  quotabot never redeems one.
 - Window restructure: OpenAI has been observed collapsing the separate 5 hour and
   weekly buckets into a single weekly window. A Codex window disappearing is
   treated as a provider restructure rather than silent drift, so a fresh

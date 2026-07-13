@@ -71,11 +71,10 @@ collapses the card to a single "weekly spent - resets in 2d" line rather than
 showing a green 5 hour bar you cannot use. Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
 
-When a provider offers a redeemable off-cycle reset (Codex's rate-limit reset
-credits), quotabot shows it as a prominent green "reset available" escape hatch
-on the card, in `doctor`, and in `top`, and the desktop app raises a notification
-once when it appears, so a spent window shows the way to keep working now instead
-of only a wait time.
+When a provider offers a redeemable off-cycle reset (Codex's reset credits),
+quotabot flags it prominently in green on the card, in `doctor`, and in `top`,
+and the desktop app notifies you once, so a spent window shows a way to keep
+working now, not just a countdown.
 
 If a fresh provider read moves in a way that contradicts the last trusted read,
 quotabot does not replace that trusted cache with the rejected values. The
@@ -142,10 +141,9 @@ shape. NVIDIA NIM is an optional free trial signal when
 model-list metadata read, but does not invent a numeric balance because NVIDIA
 does not expose one without using the service. Because no quota windows are
 known, NIM availability is not used as a routable model-budget candidate. With
-no key set it reads as a quiet "no live data" setup state ("not configured;
-optional free-trial provider") with a hint to set the key, not a red error - it
-is opt-in, so an unconfigured NIM never looks like a failure. A key that is
-present but rejected still reads as an error.
+no key set it reads as a quiet "no live data" setup state with a hint to set the
+key, not a red error, since it is opt-in. A key that is present but rejected
+still reads as an error.
 
 For exactly where each number comes from, see
 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md); for each provider's own usage

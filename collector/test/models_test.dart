@@ -100,7 +100,7 @@ void main() {
       expect(q.toJson()['reset_credits_available'], 2);
       expect(ProviderQuota.fromJson(q.toJson()).resetCreditsAvailable, 2);
       expect(sanitizeProviderQuota(q).resetCreditsAvailable, 2);
-      expect(resetAvailableMessage(q), contains('2 redeemable resets'));
+      expect(resetAvailableMessage(q), contains('2 resets available in Codex'));
     });
 
     test('the escape-hatch message is omitted from stale or drifted evidence',

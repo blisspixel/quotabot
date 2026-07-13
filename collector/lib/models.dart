@@ -759,18 +759,15 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
   );
 }
 
-/// A short escape-hatch message when [q] reports redeemable off-cycle resets,
-/// or null when none are available. Shared by every surface so the wording and
-/// the "here is a way out now" framing stay consistent, and phrased as an action
-/// the user can take rather than a passive status. Never asserted from stale or
-/// drifted evidence, since [ProviderQuota.resetCreditsAvailable] is a fresh-read
-/// signal.
+/// A short escape-hatch message when [q] reports redeemable off-cycle resets, or
+/// null when none are. Shared by every surface for consistent wording. Never
+/// asserted from stale or drifted evidence, since [resetCreditsAvailable] is a
+/// fresh-read signal.
 String? resetAvailableMessage(ProviderQuota q) {
   final n = q.resetCreditsAvailable;
   if (n <= 0 || q.stale || q.driftReason != null) return null;
   final unit = n == 1 ? 'reset' : 'resets';
-  return 'reset available: $n redeemable $unit in ${q.displayName} to refresh '
-      'your limit now';
+  return '$n $unit available in ${q.displayName} - redeem now';
 }
 
 /// True when an account string names a specific identity rather than a generic
