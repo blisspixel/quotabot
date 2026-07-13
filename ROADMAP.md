@@ -348,14 +348,15 @@ recommendation is aligned to what the user actually wants.
 - Multi-account: a work-and-home account per provider visible in one dashboard,
   generalizing the existing per-account model, without cross-contaminating
   profiles, cache, or history.
-- Spent-window escape hatch. Some providers offer a one-time reset or bonus
-  credit you can redeem to keep working after a window is spent (Codex/ChatGPT
-  has surfaced such a reset). Investigate whether that availability is present in
-  the usage metadata quotabot already reads; if it is, surface "a reset is
-  available" on a spent card so the user sees the escape hatch instead of only a
-  wait time. Zero inference and no purchase action - detection and display only,
-  and only if the signal is authoritative (never inferred). Verify the exact
-  provider mechanism before relying on it.
+- **Done:** Spent-window escape hatch. Codex's authoritative usage metadata
+  carries `rate_limit_reset_credits.available_count` - the redeemable off-cycle
+  resets a user can spend to refresh their limit early - verified against a live
+  account (not inferred). quotabot surfaces it as an actionable line ("N
+  rate-limit reset credits available - redeem in Codex to refresh your limit
+  early") wherever provider details render, and `top` now shows provider details
+  on a spent card too (previously dropped on the spent-collapse path), so a spent
+  window shows the way out and not only a wait time. Detection and display only,
+  no purchase action.
 - Validate loading, empty, stale, auth, provider-drift, no-safe-route, alert, and
   integration states with first-time-user and operator checks.
 - Already shipped on 0.5.x: the concise desktop route line with detail on hover,

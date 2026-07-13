@@ -517,6 +517,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
             (s, t) => s.dim(t)),
       ], width, s));
     }
+    rows.addAll(_detailRows(q, width, s));
     return rows;
   }
 
@@ -556,6 +557,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     ], width, s));
     first = false;
   }
+  lines.addAll(_detailRows(q, width, s));
   return lines;
 }
 
@@ -590,15 +592,25 @@ List<String> _localRows(
       ],
     ], width, s),
   ];
-  for (final d in q.details) {
-    lines.add(_line([
-      const _Cell('  '),
-      _Cell(' ' * (_nameW + _labelW)),
-      _Cell(d, (s, t) => s.dim(t)),
-    ], width, s));
-  }
+  lines.addAll(_detailRows(q, width, s));
   return lines;
 }
+
+/// The provider's annotation lines (for example Codex's redeemable reset-credit
+/// escape hatch, or Antigravity's higher-local-limit note), indented under the
+/// headline the same way the desktop app and `doctor` render them. Kept as a
+/// shared helper so every card - a healthy quota row, a spent one, and a local
+/// runtime - surfaces the same detail instead of dropping it. A spent card in
+/// particular must still show an available reset so the glance answers "is there
+/// a way to keep working now?" and not only "when does it come back?".
+List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) => [
+      for (final d in q.details)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell(d, (s, t) => s.dim(t)),
+        ], width, s),
+    ];
 
 /// One footer chunk with its yield order under width pressure. Chunks with a
 /// higher [drop] value disappear first; -1 never drops. Whole chunks yield so
