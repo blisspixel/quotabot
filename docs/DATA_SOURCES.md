@@ -108,11 +108,13 @@ PROV-DM conformance.
   identify the account. This is a metadata read, so it costs no tokens.
 - Reset credits: the same response carries
   `rate_limit_reset_credits.available_count` - the redeemable off-cycle resets an
-  account can spend to refresh its rate limit early. quotabot surfaces these as
-  an actionable line ("N rate-limit reset credits available - redeem in Codex to
-  refresh your limit early") wherever provider details render, including on a
-  spent card, so a spent window shows the escape hatch instead of only a wait
-  time. Detection and display only; quotabot never redeems one.
+  account can spend to refresh its rate limit early. quotabot exposes this as the
+  structured `reset_credits_available` field and surfaces it prominently as an
+  escape hatch: `doctor` and `top` show a green "reset available: N redeemable
+  resets ... to refresh your limit now" line, the desktop card shows a green
+  banner, and the desktop app fires a "Reset available" notification once when it
+  appears. It is a fresh-read signal (not asserted from stale or drifted
+  evidence), and it is detection and display only; quotabot never redeems one.
 - Window restructure: OpenAI has been observed collapsing the separate 5 hour and
   weekly buckets into a single weekly window. A Codex window disappearing is
   treated as a provider restructure rather than silent drift, so a fresh

@@ -22,8 +22,8 @@ Provider snapshots keep these stable fields:
   `windows`.
 - Optional `plan`, `source`, `source_class`, `status`, `active`, `details`,
   `error`, `models`, `model_quotas`, `suspect`, `drift_reason`,
-  `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`, and
-  `retry_after_seconds`.
+  `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`,
+  `retry_after_seconds`, and `reset_credits_available`.
 - `kind` is `subscription` or `local`.
 - `as_of` is the evidence capture time. Structurally the frozen schema retains
   its non-negative integer type, but live quota is trusted for routing only when
@@ -74,6 +74,12 @@ Provider snapshots keep these stable fields:
   (`100..599`). `retry_after_seconds` is an optional non-negative delay parsed
   from `Retry-After`. These are metadata only and must not include response
   bodies, prompts, generated text, source code, or secrets.
+- `reset_credits_available` is an optional non-negative integer count of
+  redeemable off-cycle resets the provider reports as available now (Codex's
+  rate-limit reset credits today). It is omitted when zero. It is a live
+  fresh-read signal, so it is not carried onto stale, drifted, or quarantined
+  snapshots, and surfaces as the prominent "reset available" escape hatch on the
+  glance surfaces and a desktop notification.
 - `windows` is always present. Local runtimes use an empty list because they
   have no spendable quota. Status-only cloud providers can also have an empty
   list when quotabot can verify availability but has no measured quota window;

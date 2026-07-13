@@ -351,6 +351,16 @@ widget raises the same low-quota alerts (as a notification) and can POST to the
 same kind of webhook, set from its menu under "Alert webhook"; loopback is the
 default there too, with an explicit "allow external host" checkbox.
 
+Beyond low-quota alerts, the desktop widget raises two more local notifications:
+a scheduled "Quota reset soon" reminder before a heavily used window resets, and
+a "Reset available" notification the moment a provider offers a redeemable
+off-cycle reset (Codex reset credits today) - edge-triggered so it fires once
+when the reset appears and re-arms only after it is gone. The same redeemable
+reset shows as a prominent green escape-hatch line in `doctor` and `top` and as
+a green banner on the desktop card ("reset available: N redeemable resets ... to
+refresh your limit now"). These reset notifications are local only and are never
+sent to the webhook.
+
 ## Exit codes
 
 The CLI uses stable exit codes so a shell or agent can branch without parsing
