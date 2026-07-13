@@ -226,9 +226,13 @@ local-only or free policy; it stays listed only under `--budget=any`.
 
 `--use-expiring-quota` applies only to a model suggestion and lets measured
 included quota beat local when local history projects meaningful quota would
-expire unused soon. `--exclude=A,B` avoids providers for one read. Advanced
-capability, profile, account, alert, cost-policy, report, calibration, and
-provenance commands are documented in [docs/USAGE.md](docs/USAGE.md).
+expire unused soon. `--exclude=A,B` avoids providers for one read.
+`--prefer=A,B` states a provider preference that reorders only candidates already
+viable (available and above the comfort threshold), so it never revives an
+unavailable or spent route; the preference also persists per profile as
+`preference_order`. Advanced capability, profile, account, alert, cost-policy,
+report, calibration, and provenance commands are documented in
+[docs/USAGE.md](docs/USAGE.md).
 
 For agent integration, use the MCP server described in [AGENTS.md](AGENTS.md).
 It exposes live and cache-only decisions, model filters, resources, and expiring

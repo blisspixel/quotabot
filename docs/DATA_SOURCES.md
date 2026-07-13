@@ -106,6 +106,20 @@ PROV-DM conformance.
   `rate_limit.primary_window` is the 5 hour window and `secondary_window` the
   weekly, each with `used_percent` and `reset_at`; `plan_type` and `email`
   identify the account. This is a metadata read, so it costs no tokens.
+- Reset credits: the same response carries
+  `rate_limit_reset_credits.available_count` - the redeemable off-cycle resets an
+  account can spend to refresh its rate limit early. quotabot surfaces these as
+  an actionable line ("N rate-limit reset credits available - redeem in Codex to
+  refresh your limit early") wherever provider details render, including on a
+  spent card, so a spent window shows the escape hatch instead of only a wait
+  time. Detection and display only; quotabot never redeems one.
+- Window restructure: OpenAI has been observed collapsing the separate 5 hour and
+  weekly buckets into a single weekly window. A Codex window disappearing is
+  treated as a provider restructure rather than silent drift, so a fresh
+  single-window read is admitted instead of being held behind the
+  pre-restructure snapshot (which would keep reporting a spent old window as
+  current). A surviving window's own value still passes the reset-monotonicity
+  and re-rating checks, so an implausible number is still caught.
 - Fallback (this machine only): the newest `rollout-*.jsonl` under
   `~/.codex/sessions/<date>/`, where the CLI writes a `rate_limits` object with
   `primary` (5 hour) and `secondary` (weekly) buckets on every turn. Used only
