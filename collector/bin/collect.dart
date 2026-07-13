@@ -260,6 +260,12 @@ Future<void> main(List<String> rawArgs) async {
           exitCode = _exitUsage;
           return;
         }
+        // An explicit --prefer overrides the active profile's saved preference;
+        // otherwise the profile's preference (if any) applies.
+        final flagPreference = _preferenceOrderFrom(flags);
+        final preferenceOrder = flagPreference.isNotEmpty
+            ? flagPreference
+            : (profile?.preferenceOrder ?? const []);
         final s = _suggestFor(
           results,
           now,
@@ -269,7 +275,7 @@ Future<void> main(List<String> rawArgs) async {
           costPenaltyByProvider: costPolicy.penalties,
           costWeight: costPolicy.weight,
           routeRequirements: routeReqs.requirements,
-          preferenceOrder: _preferenceOrderFrom(flags),
+          preferenceOrder: preferenceOrder,
         );
         wantsJson ? print(_jsonPretty(s.toJson())) : _printSuggest(s);
       }

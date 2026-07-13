@@ -302,6 +302,7 @@ void main() {
               'codex': {'work@example.com'},
             },
             routingPolicy: ProfileRoutingPolicy.subscriptionsFirst,
+            preferenceOrder: ['claude', 'codex'],
           ),
           hiddenProviders: {'grok'},
           sort: ProviderSort.alphabetical,
@@ -312,12 +313,16 @@ void main() {
         expect(profile.hiddenProviders, {'grok'});
         expect(profile.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
         expect(profile.sort, ProviderSort.alphabetical.name);
+        // A UI-pref update must not disturb the routing preference.
+        expect(profile.preferenceOrder, ['claude', 'codex']);
 
         final routing = profileWithoutUiPrefs(profile);
         expect(routing.providers, {'codex'});
         expect(routing.accounts['codex'], {'work@example.com'});
         expect(routing.hiddenProviders, isEmpty);
         expect(routing.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+        // Stripping UI prefs must keep the routing preference.
+        expect(routing.preferenceOrder, ['claude', 'codex']);
       },
     );
 

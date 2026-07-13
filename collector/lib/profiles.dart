@@ -28,6 +28,12 @@ class QuotaProfile {
   final Map<String, Set<String>> accounts;
   final Set<String> hiddenProviders;
   final ProfileRoutingPolicy routingPolicy;
+
+  /// The user's provider preference for routing, most-preferred first. Applied
+  /// only among already-viable candidates (see [preferredViableCandidate]); it
+  /// never overrides availability or the spend envelope. Empty means no
+  /// preference.
+  final List<String> preferenceOrder;
   final String? theme;
   final String? sort;
 
@@ -37,6 +43,7 @@ class QuotaProfile {
     this.accounts = const {},
     this.hiddenProviders = const {},
     this.routingPolicy = ProfileRoutingPolicy.balanced,
+    this.preferenceOrder = const [],
     this.theme,
     this.sort,
   });
@@ -84,6 +91,10 @@ class QuotaProfile {
         },
       if (normalizedHidden.isNotEmpty) 'hidden': _sorted(normalizedHidden),
       'routing_policy': routingPolicy.name,
+      // Order matters (most-preferred first), so this is a list, not a sorted
+      // set like the filter fields above.
+      if (_preferenceList(preferenceOrder).isNotEmpty)
+        'preference_order': _preferenceList(preferenceOrder),
       if (theme != null) 'theme': theme,
       if (sort != null) 'sort': sort,
     };
@@ -108,6 +119,8 @@ class QuotaProfile {
       accounts: accounts,
       hiddenProviders: _hiddenSet(_stringSet(json['hidden'])),
       routingPolicy: ProfileRoutingPolicy.parse(json['routing_policy']),
+      preferenceOrder:
+          _preferenceList(_stringListInOrder(json['preference_order'])),
       theme: _nonEmptyString(json['theme']),
       sort: _nonEmptyString(json['sort']),
     );
@@ -144,6 +157,7 @@ void saveProfile(QuotaProfile profile, {Directory? dir}) {
     accounts: _accountMap(profile.accounts),
     hiddenProviders: _hiddenSet(profile.hiddenProviders),
     routingPolicy: profile.routingPolicy,
+    preferenceOrder: _preferenceList(profile.preferenceOrder),
     theme: profile.theme,
     sort: profile.sort,
   );
@@ -277,6 +291,31 @@ Set<String> _stringSet(Object? value) {
     for (final item in value)
       if (_nonEmptyString(item) case final s?) s,
   };
+}
+
+/// Parses a JSON array into a string list preserving order (unlike [_stringSet],
+/// which discards it). Non-list input yields an empty list.
+List<String> _stringListInOrder(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (_nonEmptyString(item) case final s?) s,
+  ];
+}
+
+/// Normalizes a provider preference list: canonical provider ids where known,
+/// otherwise the trimmed lowercase name, with blanks dropped and duplicates
+/// removed while preserving the given order (the router honors first occurrence).
+List<String> _preferenceList(Iterable<String> values) {
+  final out = <String>[];
+  final seen = <String>{};
+  for (final value in values) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) continue;
+    final id = normalizeProviderId(trimmed) ?? trimmed.toLowerCase();
+    if (seen.add(id)) out.add(id);
+  }
+  return out;
 }
 
 String? _nonEmptyString(Object? value) {

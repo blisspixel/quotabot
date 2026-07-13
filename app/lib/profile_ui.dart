@@ -49,6 +49,8 @@ QuotaProfile profileWithUiPrefs(
   accounts: profile.accounts,
   hiddenProviders: hiddenProviders,
   routingPolicy: profile.routingPolicy,
+  // Routing preference is not a UI pref; it survives a UI-pref update.
+  preferenceOrder: profile.preferenceOrder,
   theme: profile.theme,
   sort: sort.name,
 );
@@ -58,6 +60,8 @@ QuotaProfile profileWithoutUiPrefs(QuotaProfile profile) => QuotaProfile(
   providers: profile.providers,
   accounts: profile.accounts,
   routingPolicy: profile.routingPolicy,
+  // Stripping UI prefs (theme, sort) must not drop a routing preference.
+  preferenceOrder: profile.preferenceOrder,
   theme: profile.theme,
   sort: profile.sort,
 );
