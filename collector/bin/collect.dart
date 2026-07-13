@@ -1841,13 +1841,21 @@ String _providerDriftEvidenceSummary(ProviderQuota quota) => quota.hasWindows
 Future<void> _login(String provider) async {
   switch (provider) {
     case 'grok':
-      await XaiAuth().deviceLogin(
-        prompt: (url, code) {
-          stderr.writeln('Open this URL and confirm the code $code:\n  $url');
-        },
-      );
-      stderr.writeln(
-          'Grok connected. Run "quotabot doctor" to verify live data.');
+      try {
+        await XaiAuth().deviceLogin(
+          prompt: (url, code) {
+            stderr.writeln('Open this URL and confirm the code $code:\n  $url');
+          },
+        );
+        stderr.writeln(
+            'Grok connected. Run "quotabot doctor" to verify live data.');
+      } catch (e) {
+        // Match the other providers: a failed device login (network error,
+        // timeout, declined code) reports cleanly and exits with the usage code,
+        // rather than escaping main as an unhandled exception (exit 255 + trace).
+        stderr.writeln('Grok login failed: $e');
+        exitCode = _exitUsage;
+      }
       break;
     case 'antigravity':
       try {
@@ -1920,6 +1928,7 @@ Future<void> _login(String provider) async {
       break;
     default:
       stderr.writeln('usage: quotabot login <grok|antigravity|claude|codex>');
+      exitCode = _exitUsage;
   }
 }
 
@@ -1927,6 +1936,7 @@ void _logout(String provider) {
   const known = {'grok', 'antigravity', 'claude', 'codex'};
   if (!known.contains(provider)) {
     stderr.writeln('usage: quotabot logout <grok|antigravity|claude|codex>');
+    exitCode = _exitUsage;
     return;
   }
   // Login persists both a provider-default grant and an account-scoped grant

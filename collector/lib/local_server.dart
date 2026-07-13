@@ -287,13 +287,23 @@ Future<HttpServer> startLocalQuotabotServer({
         log?.call(
           'local server ${request.method} $path failed: ${error.runtimeType}',
         );
-        writeJson(
-          request,
-          {'error': 'internal error'},
-          HttpStatus.internalServerError,
-        );
+        // Writing can itself throw if the client already disconnected; guard it
+        // so the error path cannot escape either.
+        try {
+          writeJson(
+            request,
+            {'error': 'internal error'},
+            HttpStatus.internalServerError,
+          );
+        } catch (_) {}
       }
-      await request.response.close();
+      // Closing can throw if the client aborted before the body flushed. A
+      // single ill-timed disconnect must not escape the `await for` loop, which
+      // runs unawaited: an uncaught throw here would stop the server draining
+      // and hang every later request (a local denial of service).
+      try {
+        await request.response.close();
+      } catch (_) {}
     }
   }
 
