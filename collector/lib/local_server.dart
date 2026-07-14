@@ -160,114 +160,107 @@ Future<HttpServer> startLocalQuotabotServer({
     return (requirements: requirements, error: null);
   }
 
-  Future<void> serve() async {
-    await for (final request in server) {
-      final path = request.uri.path;
-      try {
-        // Reject non-loopback Host headers before doing any work. The socket
-        // is already bound to loopback, but a DNS-rebinding page can still
-        // reach it as same-origin; the Host check is the fix the MCP HTTP
-        // server uses, and this server exposes account identities the same way.
-        if (!_isLoopbackHost(request.headers.value('host'))) {
-          writeJson(request, {'error': 'forbidden host'}, HttpStatus.forbidden);
-          await request.response.close();
-          continue;
-        }
-        if (request.method != 'GET') {
-          writeJson(
-            request,
-            {'error': 'method not allowed'},
-            HttpStatus.methodNotAllowed,
-          );
-        } else if (path == '/') {
-          final results = await snapshot();
-          writeJson(request, {
-            'schema': 'quotabot.v1',
-            'generated_at': now(),
-            'providers': results.map((r) => r.toJson()).toList(),
-          });
-        } else if (path == '/suggest') {
-          final exclusions = parseProviderExclusions(
-            request.uri.queryParametersAll['exclude'],
-          );
-          if (!exclusions.ok) {
-            writeJson(
-              request,
-              {'error': exclusions.error},
-              HttpStatus.badRequest,
-            );
-          } else {
-            final costPenalties = parseProviderCostPenalties(
-              queryValues(request.uri, 'cost_penalty', 'cost-penalty'),
-            );
-            if (!costPenalties.ok) {
-              writeJson(
-                request,
-                {'error': costPenalties.error},
-                HttpStatus.badRequest,
-              );
-              await request.response.close();
-              continue;
-            }
-            final costWeight = queryCostWeight(
-              request.uri,
-              costPenalties.penalties.isNotEmpty,
-            );
-            if (costWeight.error != null) {
-              writeJson(
-                request,
-                {'error': costWeight.error},
-                HttpStatus.badRequest,
-              );
-              await request.response.close();
-              continue;
-            }
-            final routeRequirements = queryRouteRequirements(request.uri);
-            if (routeRequirements.error != null) {
-              writeJson(
-                request,
-                {'error': routeRequirements.error},
-                HttpStatus.badRequest,
-              );
-              await request.response.close();
-              continue;
-            }
-            final snap =
-                filterExcludedProviders(await snapshot(), exclusions.providers);
-            final current = now();
-            final capabilityGates = providerRouteCapabilityGates(
-              snap,
-              current,
-              catalog: kModelCatalog,
-              requirements: routeRequirements.requirements,
-            );
-            writeJson(
-              request,
-              decide(
-                snap,
-                current,
-                context: DecisionContext(
-                  burnStatsByProvider: recentBurnStatsByQuota(snap, current),
-                  preferLocal:
-                      queryFlag(request.uri, 'local_first', 'local-first'),
-                  costPenaltyByProvider: costPenalties.penalties,
-                  costWeight: costWeight.weight,
-                  pipePenaltyByProvider:
-                      routeSummaryProvider().pipePenaltyByProvider(
-                    now: current,
-                  ),
-                  capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-                  capabilityAvailableQuotaKeys:
-                      capabilityGates.availableQuotaKeys,
-                  capabilityBudgetResetByQuotaKey:
-                      capabilityGates.budgetResetByQuotaKey,
-                ),
-              ).route.toJson(),
-            );
-          }
-        } else if (path == '/health') {
-          writeJson(request, {'ok': true, 'generated_at': now()});
-        } else if (path.startsWith('/providers/')) {
+  // Answers the /suggest route: parse and validate the routing query, then write
+  // the decision. Each validation failure writes a 400 and returns; the caller
+  // owns closing the response, so no handler closes it here.
+  Future<void> handleSuggest(HttpRequest request) async {
+    final exclusions = parseProviderExclusions(
+      request.uri.queryParametersAll['exclude'],
+    );
+    if (!exclusions.ok) {
+      writeJson(request, {'error': exclusions.error}, HttpStatus.badRequest);
+      return;
+    }
+    final costPenalties = parseProviderCostPenalties(
+      queryValues(request.uri, 'cost_penalty', 'cost-penalty'),
+    );
+    if (!costPenalties.ok) {
+      writeJson(request, {'error': costPenalties.error}, HttpStatus.badRequest);
+      return;
+    }
+    final costWeight = queryCostWeight(
+      request.uri,
+      costPenalties.penalties.isNotEmpty,
+    );
+    if (costWeight.error != null) {
+      writeJson(request, {'error': costWeight.error}, HttpStatus.badRequest);
+      return;
+    }
+    final routeRequirements = queryRouteRequirements(request.uri);
+    if (routeRequirements.error != null) {
+      writeJson(
+        request,
+        {'error': routeRequirements.error},
+        HttpStatus.badRequest,
+      );
+      return;
+    }
+    final snap =
+        filterExcludedProviders(await snapshot(), exclusions.providers);
+    final current = now();
+    final capabilityGates = providerRouteCapabilityGates(
+      snap,
+      current,
+      catalog: kModelCatalog,
+      requirements: routeRequirements.requirements,
+    );
+    writeJson(
+      request,
+      decide(
+        snap,
+        current,
+        context: DecisionContext(
+          burnStatsByProvider: recentBurnStatsByQuota(snap, current),
+          preferLocal: queryFlag(request.uri, 'local_first', 'local-first'),
+          costPenaltyByProvider: costPenalties.penalties,
+          costWeight: costWeight.weight,
+          pipePenaltyByProvider: routeSummaryProvider().pipePenaltyByProvider(
+            now: current,
+          ),
+          capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+          capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
+          capabilityBudgetResetByQuotaKey:
+              capabilityGates.budgetResetByQuotaKey,
+        ),
+      ).route.toJson(),
+    );
+  }
+
+  // Routes one request to its handler. Handlers only write a response; they
+  // never close it, so [serve] can own closing exactly once. A rejected Host or
+  // method short-circuits before any snapshot or provider work.
+  Future<void> handleRequest(HttpRequest request) async {
+    // Reject non-loopback Host headers before doing any work. The socket is
+    // already bound to loopback, but a DNS-rebinding page can still reach it as
+    // same-origin; the Host check is the fix the MCP HTTP server uses, and this
+    // server exposes account identities the same way.
+    if (!_isLoopbackHost(request.headers.value('host'))) {
+      writeJson(request, {'error': 'forbidden host'}, HttpStatus.forbidden);
+      return;
+    }
+    if (request.method != 'GET') {
+      writeJson(
+        request,
+        {'error': 'method not allowed'},
+        HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+    final path = request.uri.path;
+    switch (path) {
+      case '/':
+        final results = await snapshot();
+        writeJson(request, {
+          'schema': 'quotabot.v1',
+          'generated_at': now(),
+          'providers': results.map((r) => r.toJson()).toList(),
+        });
+      case '/suggest':
+        await handleSuggest(request);
+      case '/health':
+        writeJson(request, {'ok': true, 'generated_at': now()});
+      default:
+        if (path.startsWith('/providers/')) {
           final name = path.substring('/providers/'.length).toLowerCase();
           final match = (await snapshot()).where((r) => r.provider == name);
           if (match.isEmpty) {
@@ -282,13 +275,24 @@ Future<HttpServer> startLocalQuotabotServer({
         } else {
           writeJson(request, {'error': 'not found'}, HttpStatus.notFound);
         }
+    }
+  }
+
+  Future<void> serve() async {
+    await for (final request in server) {
+      // Every request is answered and its response closed exactly once, here:
+      // handlers only write, so no route can leak an open socket or double
+      // close. A write or close can itself throw if the client disconnected
+      // mid-response; guard both so one ill-timed abort cannot escape this
+      // unawaited loop and stop the server draining (a local denial of service).
+      try {
+        await handleRequest(request);
       } catch (error) {
         // Do not leak internal exception detail to the client.
         log?.call(
-          'local server ${request.method} $path failed: ${error.runtimeType}',
+          'local server ${request.method} ${request.uri.path} failed: '
+          '${error.runtimeType}',
         );
-        // Writing can itself throw if the client already disconnected; guard it
-        // so the error path cannot escape either.
         try {
           writeJson(
             request,
@@ -297,10 +301,6 @@ Future<HttpServer> startLocalQuotabotServer({
           );
         } catch (_) {}
       }
-      // Closing can throw if the client aborted before the body flushed. A
-      // single ill-timed disconnect must not escape the `await for` loop, which
-      // runs unawaited: an uncaught throw here would stop the server draining
-      // and hang every later request (a local denial of service).
       try {
         await request.response.close();
       } catch (_) {}
