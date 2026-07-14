@@ -946,6 +946,42 @@ RouteCandidate? preferredViableCandidate(
   return best;
 }
 
+/// The capability-gate verdict for one routing candidate. A gate is only present
+/// when the caller supplied capability key sets. [limited] means no catalog model
+/// meets the requirement floor for this account (routed around entirely);
+/// [budgetLimited] means a capable model exists but its model budget is spent.
+/// [resetsAt] is the reset the candidate should surface: none while capability
+/// limited, the model-budget reset while budget limited, else the normal
+/// availability reset.
+({bool limited, bool budgetLimited, bool blocked, int? resetsAt})
+    capabilityVerdict(
+  ProviderQuota q, {
+  required String quotaKey,
+  required Set<String>? knownQuotaKeys,
+  required Set<String>? availableQuotaKeys,
+  required Map<String, int> budgetResetByQuotaKey,
+  required int? availabilityResetsAt,
+}) {
+  // Either set alone still defines the gate; fall back to the other when one is
+  // absent so a caller may supply only "known" or only "available".
+  final known = knownQuotaKeys ?? availableQuotaKeys;
+  final available = availableQuotaKeys ?? knownQuotaKeys;
+  final hasGate = !q.isLocal && (known != null || available != null);
+  final limited = hasGate && !(known?.contains(quotaKey) ?? false);
+  final budgetLimited =
+      hasGate && !limited && !(available?.contains(quotaKey) ?? false);
+  return (
+    limited: limited,
+    budgetLimited: budgetLimited,
+    blocked: limited || budgetLimited,
+    resetsAt: limited
+        ? null
+        : budgetLimited
+            ? budgetResetByQuotaKey[quotaKey]
+            : availabilityResetsAt,
+  );
+}
+
 RouteSuggestion suggestRoute(
   List<ProviderQuota> quotas,
   int now, {
@@ -980,23 +1016,18 @@ RouteSuggestion suggestRoute(
     final a = providerAvailability(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
     final quotaKey = quotaIdentityKeyFor(q);
-    final knownCapabilityKeys =
-        capabilityKnownQuotaKeys ?? capabilityAvailableQuotaKeys;
-    final availableCapabilityKeys =
-        capabilityAvailableQuotaKeys ?? capabilityKnownQuotaKeys;
-    final hasCapabilityGate = !q.isLocal &&
-        (knownCapabilityKeys != null || availableCapabilityKeys != null);
-    final capabilityLimited = hasCapabilityGate &&
-        !(knownCapabilityKeys?.contains(quotaKey) ?? false);
-    final capabilityBudgetLimited = hasCapabilityGate &&
-        !capabilityLimited &&
-        !(availableCapabilityKeys?.contains(quotaKey) ?? false);
-    final capabilityBlocked = capabilityLimited || capabilityBudgetLimited;
-    final candidateResetsAt = capabilityLimited
-        ? null
-        : capabilityBudgetLimited
-            ? capabilityBudgetResetByQuotaKey[quotaKey]
-            : a.resetsAt;
+    final cap = capabilityVerdict(
+      q,
+      quotaKey: quotaKey,
+      knownQuotaKeys: capabilityKnownQuotaKeys,
+      availableQuotaKeys: capabilityAvailableQuotaKeys,
+      budgetResetByQuotaKey: capabilityBudgetResetByQuotaKey,
+      availabilityResetsAt: a.resetsAt,
+    );
+    final capabilityLimited = cap.limited;
+    final capabilityBudgetLimited = cap.budgetLimited;
+    final capabilityBlocked = cap.blocked;
+    final candidateResetsAt = cap.resetsAt;
     final accountStat = q.isLocal ? null : burnStatsByProvider[quotaKey];
     final providerStat = q.isLocal ? null : burnStatsByProvider[q.provider];
     final stat = q.isLocal ? null : (accountStat ?? providerStat);
