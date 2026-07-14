@@ -2192,7 +2192,7 @@ void _printDoctor(List<ProviderQuota> results) {
     if (q.driftReason != null) {
       final detected = q.driftObservedAt == null
           ? ''
-          : ' ${_ago((now - q.driftObservedAt!).clamp(0, 1 << 31).toInt())}';
+          : ' ${compactAge((now - q.driftObservedAt!).clamp(0, 1 << 31).toInt(), suffix: ' ago')}';
       print(
         '  $indent ${_stateColumn('')} '
         '${style.red('! provider drift$detected: ${q.driftReason}; '
@@ -2499,12 +2499,6 @@ String _verificationProvenanceState(ProviderQuota q, String state) =>
           };
 
 /// A compact "Ns/Nm/Nh ago" age label.
-String _ago(int seconds) {
-  if (seconds < 90) return '${seconds}s ago';
-  if (seconds < 5400) return '${(seconds / 60).round()}m ago';
-  if (seconds < 129600) return '${(seconds / 3600).round()}h ago';
-  return '${(seconds / 86400).round()}d ago';
-}
 
 /// `calibration`: grade quotabot's own strand predictions against the user's
 /// recorded history, so "how often is it right" is a measured number, not a claim.
@@ -2755,7 +2749,7 @@ const routeFutureCaptureLabel = 'captured in the future';
 String routeCaptureAgeLabel(int capturedAt, int decisionAsOf) {
   if (capturedAt <= 0) return '';
   if (capturedAt > decisionAsOf) return routeFutureCaptureLabel;
-  return 'captured ${_ago(decisionAsOf - capturedAt)}';
+  return 'captured ${compactAge(decisionAsOf - capturedAt, suffix: ' ago')}';
 }
 
 /// Pace for a provider from its live binding window plus the recent burn rate.
