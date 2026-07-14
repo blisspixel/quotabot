@@ -20,7 +20,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
 /// local metadata lookup, not a model call, so it costs no usage tokens.
 
-const _version = '0.8.1';
+const _version = '0.9.0';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a

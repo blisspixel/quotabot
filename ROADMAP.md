@@ -71,7 +71,7 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.8.1**, is best
+The current line, **0.9.0**, is best
 understood as having closed the first three milestones of the ladder below:
 the truthful substrate (0.6), one calibrated forecast behind a single decision
 core (0.7), and the self-tuning calibration moat (0.8). The core product
