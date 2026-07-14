@@ -223,11 +223,25 @@ List<QuotaProfile> listProfiles({Directory? dir}) {
   return out;
 }
 
+/// Windows reserved device names. As a bare filename stem (with or without an
+/// extension) these resolve to a device, not a file, so a profile named `nul`
+/// would silently discard its writes and mangle reads. Rejected on every OS so a
+/// profile file is portable.
+const _windowsReservedNames = {
+  'con', 'prn', 'aux', 'nul', //
+  'com1', 'com2', 'com3', 'com4', 'com5',
+  'com6', 'com7', 'com8', 'com9',
+  'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5',
+  'lpt6', 'lpt7', 'lpt8', 'lpt9',
+};
+
 String? normalizeProfileName(String? name) {
   final s = name?.trim().toLowerCase();
   if (s == null || s.isEmpty || s.length > 64) return null;
   if (s == '.' || s == '..') return null;
   if (!RegExp(r'^[a-z0-9][a-z0-9._-]*$').hasMatch(s)) return null;
+  // Check the stem before the first dot, since `nul.json` is reserved too.
+  if (_windowsReservedNames.contains(s.split('.').first)) return null;
   return s;
 }
 

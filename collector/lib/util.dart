@@ -455,17 +455,21 @@ List<String> _parseCsvLine(String line) {
 }
 
 /// Recursively find the first value stored under [key] anywhere in a decoded
-/// JSON tree (maps/lists). Returns null if absent.
-dynamic findKey(dynamic node, String key) {
+/// JSON tree (maps/lists). Returns null if absent. [maxDepth] bounds the
+/// recursion so a deeply-nested tree (for example from an attacker-written
+/// `state.vscdb` value) cannot overflow the stack; legitimate provider blobs are
+/// only a few levels deep.
+dynamic findKey(dynamic node, String key, {int maxDepth = 64}) {
+  if (maxDepth <= 0) return null;
   if (node is Map) {
     if (node.containsKey(key)) return node[key];
     for (final v in node.values) {
-      final found = findKey(v, key);
+      final found = findKey(v, key, maxDepth: maxDepth - 1);
       if (found != null) return found;
     }
   } else if (node is List) {
     for (final v in node) {
-      final found = findKey(v, key);
+      final found = findKey(v, key, maxDepth: maxDepth - 1);
       if (found != null) return found;
     }
   }

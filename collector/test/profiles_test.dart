@@ -162,6 +162,18 @@ void main() {
     expect(() => profileFile('../work', dir: temp), throwsArgumentError);
   });
 
+  test('profile names reject Windows reserved device names', () {
+    // `nul`/`con`/`com1` (with or without an extension) resolve to a device on
+    // Windows, not a file, silently discarding writes.
+    for (final reserved in ['nul', 'con', 'aux', 'prn', 'com1', 'lpt9']) {
+      expect(normalizeProfileName(reserved), isNull, reason: reserved);
+      expect(normalizeProfileName('$reserved.json'), isNull, reason: reserved);
+    }
+    // A name that merely contains a reserved word is fine.
+    expect(normalizeProfileName('console'), 'console');
+    expect(normalizeProfileName('nul-work'), 'nul-work');
+  });
+
   test('saves, loads, lists, and fails soft on corrupt profiles', () {
     final work = QuotaProfile(
       name: 'Work',

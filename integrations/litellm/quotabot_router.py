@@ -393,7 +393,11 @@ class QuotabotRouter(CustomLogger):
             self.policy = Policy()
         # Cached ranked candidate dicts from /suggest.
         self._cache: list[dict[str, Any]] = []
-        self._cache_at: float = 0.0
+        # None until the first fetch. Freshness is tracked here, not by the
+        # list's truthiness: a legitimately empty ranked list (e.g. only local
+        # runtimes connected) must still be cached for the TTL, or every request
+        # would trigger a fresh synchronous loopback fetch.
+        self._cache_at: Optional[float] = None
         self._lock = asyncio.Lock()
 
     # -- routing ------------------------------------------------------------
@@ -559,7 +563,11 @@ class QuotabotRouter(CustomLogger):
         """Returns ranked candidate info from quotabot's /suggest, cached for
         ``snapshot_ttl_seconds``. None when quotabot is unreachable."""
         async with self._lock:
-            if self._cache and (time.monotonic() - self._cache_at) < self.policy.snapshot_ttl_seconds:
+            if (
+                self._cache_at is not None
+                and (time.monotonic() - self._cache_at)
+                < self.policy.snapshot_ttl_seconds
+            ):
                 return self._cache
             payload = await asyncio.to_thread(self._fetch_suggest)
             if payload is None:

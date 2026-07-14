@@ -52,6 +52,22 @@ void main() {
     test('returns null when absent', () {
       expect(findKey({'a': 1}, 'missing'), isNull);
     });
+
+    test('bounds recursion depth so a deep tree cannot overflow the stack', () {
+      // Build a tree deeper than the default guard and confirm the walk stops
+      // (returns null) instead of recursing without bound.
+      dynamic tree = {'target': 1};
+      for (var i = 0; i < 500; i++) {
+        tree = {'nest': tree};
+      }
+      expect(findKey(tree, 'target'), isNull);
+      // A shallow tree still finds the value.
+      expect(
+          findKey({
+            'a': {'target': 1}
+          }, 'target'),
+          1);
+    });
   });
 
   group('readVarint', () {
