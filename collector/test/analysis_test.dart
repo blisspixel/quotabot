@@ -1368,4 +1368,86 @@ void main() {
       expect(strandProbability(30, 20, 0, 3600, 0), 0.0); // burn*T < headroom
     });
   });
+
+  group('flagStalePassiveRolloverEvidence', () {
+    test('a passive-local read whose reset has passed is marked stale', () {
+      final q = _q('kiro', [
+        QuotaWindow(
+          label: 'credits',
+          usedPercent: 0,
+          resetsAt: _now - 12 * 86400,
+        ),
+      ]);
+      // Before flagging, the passed reset launders it into a confident 100% free.
+      expect(q.stale, isFalse);
+      expect(providerHeadroom(q, _now), 100);
+
+      final flagged = flagStalePassiveRolloverEvidence(q, _now);
+      expect(flagged.stale, isTrue);
+      expect(flagged.error, contains('predates its reset'));
+      expect(flagged.error, contains('12d ago'));
+      // Windows are preserved (shown as last-known), scope stays this-machine.
+      expect(flagged.windows, hasLength(1));
+      expect(flagged.perMachine, isTrue);
+      // Routing no longer treats a stale read as usable headroom.
+      expect(providerAvailability(flagged, _now).available, isFalse);
+    });
+
+    test('a passive-local read with a future reset is left untouched', () {
+      final fresh = _q('kiro', [
+        QuotaWindow(
+          label: 'credits',
+          usedPercent: 20,
+          resetsAt: _now + 5 * 86400,
+        ),
+      ]);
+      expect(flagStalePassiveRolloverEvidence(fresh, _now).stale, isFalse);
+
+      // A genuinely spent read (future reset, fully used) also stays as-is: it is
+      // real evidence, not a stale rollover.
+      final spent = _q('kiro', [
+        QuotaWindow(
+          label: 'credits',
+          usedPercent: 100,
+          resetsAt: _now + 2 * 86400,
+        ),
+      ]);
+      final spentFlagged = flagStalePassiveRolloverEvidence(spent, _now);
+      expect(spentFlagged.stale, isFalse);
+      expect(providerHeadroom(spentFlagged, _now), 0);
+    });
+
+    test('server-refreshing evidence keeps its genuine rollover', () {
+      // Codex is authoritative-live: a passed reset really did roll the window
+      // over, so it must NOT be marked stale.
+      final codex = _q('codex', [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 90,
+          resetsAt: _now - 3600,
+        ),
+      ]);
+      final flagged = flagStalePassiveRolloverEvidence(codex, _now);
+      expect(flagged.stale, isFalse);
+      expect(providerHeadroom(flagged, _now), 100); // rollover still applies
+    });
+
+    test('an already-stale or windowless passive-local read is unchanged', () {
+      final already = _q(
+        'kiro',
+        [QuotaWindow(label: 'credits', usedPercent: 0, resetsAt: _now - 86400)],
+        stale: true,
+      );
+      expect(
+        identical(flagStalePassiveRolloverEvidence(already, _now), already),
+        isTrue,
+      );
+
+      final empty = _q('kiro', const []);
+      expect(
+        identical(flagStalePassiveRolloverEvidence(empty, _now), empty),
+        isTrue,
+      );
+    });
+  });
 }
