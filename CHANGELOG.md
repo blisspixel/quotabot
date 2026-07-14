@@ -2,6 +2,19 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Fixed
+- A passive-local metered read (Kiro, Cursor, Windsurf, from a VS Code-fork
+  `state.vscdb`) whose window's reset has already passed is no longer shown as a
+  confident 100% free. The local file predates the reset and quotabot never
+  observed the refresh, so the post-reset usage is unknown; such a read is now
+  marked stale with a caveat ("local usage predates its reset (Nd ago); open
+  <provider> to confirm current headroom"), routing declines to rely on it, and
+  the glance shows it as a last-known value rather than a live one.
+  Server-refreshing providers (Claude, Codex) are unaffected: there a passed
+  reset genuinely rolled the window over.
+
 ## 0.9.0 - 2026-07-13
 
 ### Security

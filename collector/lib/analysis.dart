@@ -26,6 +26,42 @@ double windowUsedPercent(QuotaWindow w, int now) => windowHasRolledOver(w, now)
 double windowHeadroom(QuotaWindow w, int now) =>
     100.0 - windowUsedPercent(w, now);
 
+/// A passive-local metered read (Kiro, Cursor, Windsurf state files) whose window
+/// has already passed its reset cannot be trusted as a fresh full balance. The
+/// local file predates the reset and quotabot never observed the refresh, so the
+/// post-reset usage is unknown; presenting it as a confident 100% free asserts
+/// more than the evidence supports. Such a read is marked stale with a caveat, so
+/// routing declines to rely on it and the glance shows it as a last-known value
+/// rather than a live one. Server-refreshing evidence (authoritative live and
+/// this-machine fallback) is untouched: there a passed reset genuinely rolled the
+/// window over and the next read reflects the real post-reset state.
+ProviderQuota flagStalePassiveRolloverEvidence(ProviderQuota q, int now) {
+  if (q.sourceClass != ProviderSourceClass.passiveLocalEvidence) return q;
+  if (!q.ok || q.stale || q.windows.isEmpty) return q;
+  int? lastPassedReset;
+  for (final w in q.windows) {
+    final r = w.resetsAt;
+    if (r != null &&
+        r <= now &&
+        (lastPassedReset == null || r > lastPassedReset)) {
+      lastPassedReset = r;
+    }
+  }
+  if (lastPassedReset == null) return q;
+  return q.asStale(
+    'local usage predates its reset (${_passiveRolloverAgeLabel(lastPassedReset, now)}); '
+    'open ${q.displayName} to confirm current headroom',
+  );
+}
+
+String _passiveRolloverAgeLabel(int then, int now) {
+  final secs = now - then;
+  if (secs < 3600) return 'under 1h ago';
+  final hours = secs ~/ 3600;
+  if (hours < 24) return '${hours}h ago';
+  return '${secs ~/ 86400}d ago';
+}
+
 /// The windows worth showing at a glance: those with real usage. A fully
 /// available short window (a 5-hour rate limit sitting at 0% used) carries no
 /// information next to the longer window that is the actual binding constraint,

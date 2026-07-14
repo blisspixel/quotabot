@@ -179,13 +179,17 @@ Future<List<ProviderQuota>> _collectRegistered(
     // eventually returned. Otherwise an earlier slow request can finish after a
     // later fast request and overwrite the genuinely newer observation.
     final evidenceGenerationMicros = DateTime.now().microsecondsSinceEpoch;
+    final now = nowEpoch();
     final collected = await _listWithDeadline(entry);
     final results = <ProviderQuota>[];
     for (final q in collected) {
+      // Passive-local reads whose window predates its own reset are stale, not a
+      // fresh full balance; mark them so before admission, so the fabricated
+      // rolled-over headroom never enters the trusted cache or routing.
       results.add(
         admitRegisteredProviderObservation(
           entry,
-          q,
+          flagStalePassiveRolloverEvidence(q, now),
           evidenceGenerationMicros: evidenceGenerationMicros,
         ),
       );
