@@ -76,6 +76,37 @@ void main() {
     expect(clean.providers.single.state, isNot('provider drift'));
   });
 
+  test('report spend class is the shared classifier, consistent under drift',
+      () {
+    // A plan-quota provider names its plan; a measured non-plan provider reads
+    // metered - both from the shared providerSpendClass, not a report-local copy.
+    final claude = buildQuotaHealthReport([_quota('claude', 20)], _now,
+        suggestRoute([_quota('claude', 20)], _now));
+    expect(claude.providers.single.spendClass, 'quota plan');
+    expect(claude.toMarkdown(), contains('quota plan'));
+
+    final cursor = _quota('cursor', 30);
+    final metered =
+        buildQuotaHealthReport([cursor], _now, suggestRoute([cursor], _now));
+    expect(metered.providers.single.spendClass, 'metered plan');
+
+    // Consistency: a drifted, unavailable plan provider still names the plan.
+    // The report previously returned null here because it keyed the plan case off
+    // the 'unavailable' state, which the 'provider drift' state now precedes.
+    final driftedDown = ProviderQuota(
+      provider: 'codex',
+      displayName: 'codex',
+      account: 'work',
+      asOf: _now,
+      ok: false,
+      driftReason: 'provider drift detected; showing last trusted snapshot',
+      windows: const [],
+    );
+    final drift = buildQuotaHealthReport(
+        [driftedDown], _now, suggestRoute([driftedDown], _now));
+    expect(drift.providers.single.spendClass, 'quota plan');
+  });
+
   test('buildQuotaHealthReport produces versioned JSON', () {
     final providers = [
       _quota('claude', 20),
