@@ -839,25 +839,34 @@ void recordHeadroomSample(
   String? account,
 }) {
   try {
-    final buckets = loadBuckets(
-      provider,
-      account: account,
-      fallbackToProvider: false,
-    );
-    final start = bucketStart(now);
-    final cutoff = now - kRetentionDays * 86400;
-    buckets.removeWhere((b) => b.start < cutoff);
-    var current =
-        buckets.isNotEmpty && buckets.last.start == start ? buckets.last : null;
-    if (current == null) {
-      current = HeadroomBucket(start: start);
-      buckets.add(current);
-    }
-    current.add(headroom);
-    _atomicWrite(
-      _bucketsFile(provider, account: account),
-      jsonEncode(buckets.map((b) => b.toJson()).toList()),
-    );
+    // Serialize the read-modify-write under the same interprocess lock the
+    // snapshot/history paths use, keyed by provider/account. Without it, the app
+    // and CLI folding a sample into the same hour bucket at once would each
+    // read, add, and write, and the second rename would silently drop the
+    // first's sample (or a concurrent prune would drop a re-added bucket) - a
+    // lost update on the most expensive local data to lose.
+    _withEvidenceLock(provider, account ?? '', () {
+      final buckets = loadBuckets(
+        provider,
+        account: account,
+        fallbackToProvider: false,
+      );
+      final start = bucketStart(now);
+      final cutoff = now - kRetentionDays * 86400;
+      buckets.removeWhere((b) => b.start < cutoff);
+      var current = buckets.isNotEmpty && buckets.last.start == start
+          ? buckets.last
+          : null;
+      if (current == null) {
+        current = HeadroomBucket(start: start);
+        buckets.add(current);
+      }
+      current.add(headroom);
+      _atomicWrite(
+        _bucketsFile(provider, account: account),
+        jsonEncode(buckets.map((b) => b.toJson()).toList()),
+      );
+    });
   } catch (_) {
     // Analytics are best-effort; never let a write failure affect collection.
   }

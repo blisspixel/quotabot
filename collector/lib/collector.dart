@@ -59,21 +59,33 @@ class CollectedQuotaSnapshot {
   });
 }
 
+/// A single fail-soft error quota for [entry], shaped like a real read so
+/// verify, routing, and display treat it consistently. Used for both a deadline
+/// timeout and an unexpected throw in a provider's pipeline.
+ProviderQuota _adapterErrorQuota(
+  ProviderAdapterRegistration entry,
+  String error,
+) =>
+    ProviderQuota(
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: 'unknown',
+      asOf: nowEpoch(),
+      ok: false,
+      error: error,
+      kind: entry.adapterClass.quotaKind,
+      sourceClass: entry.sourceClasses.first,
+    );
+
 Future<List<ProviderQuota>> _listWithDeadline(
   ProviderAdapterRegistration entry,
 ) =>
     entry.collect().timeout(
           kAdapterDeadline,
           onTimeout: () => [
-            ProviderQuota(
-              provider: entry.id,
-              displayName: entry.displayName,
-              account: 'unknown',
-              asOf: nowEpoch(),
-              ok: false,
-              error: 'timed out after ${kAdapterDeadline.inSeconds}s',
-              kind: entry.adapterClass.quotaKind,
-              sourceClass: entry.sourceClasses.first,
+            _adapterErrorQuota(
+              entry,
+              'timed out after ${kAdapterDeadline.inSeconds}s',
             ),
           ],
         );
@@ -162,29 +174,37 @@ void _recordAnalytics(List<ProviderQuota> results) {
 Future<List<ProviderQuota>> _collectRegistered(
   ProviderAdapterRegistration entry,
 ) async {
-  // This generation identifies when collection began, not when a provider
-  // eventually returned. Otherwise an earlier slow request can finish after a
-  // later fast request and overwrite the genuinely newer observation.
-  final evidenceGenerationMicros = DateTime.now().microsecondsSinceEpoch;
-  final collected = await _listWithDeadline(entry);
-  final results = <ProviderQuota>[];
-  for (final q in collected) {
-    results.add(
-      admitRegisteredProviderObservation(
-        entry,
-        q,
-        evidenceGenerationMicros: evidenceGenerationMicros,
-      ),
-    );
+  try {
+    // This generation identifies when collection began, not when a provider
+    // eventually returned. Otherwise an earlier slow request can finish after a
+    // later fast request and overwrite the genuinely newer observation.
+    final evidenceGenerationMicros = DateTime.now().microsecondsSinceEpoch;
+    final collected = await _listWithDeadline(entry);
+    final results = <ProviderQuota>[];
+    for (final q in collected) {
+      results.add(
+        admitRegisteredProviderObservation(
+          entry,
+          q,
+          evidenceGenerationMicros: evidenceGenerationMicros,
+        ),
+      );
+    }
+    if (entry.accountScopedCache) {
+      results.addAll(currentAccountFallbacks(
+        liveResults: results,
+        cachedSnapshots: loadAccountSnapshots(entry.id),
+        currentAccounts: entry.currentAccounts!(),
+      ));
+    }
+    return results;
+  } catch (_) {
+    // Per-provider isolation: an unexpected throw anywhere in this provider's
+    // collect, admission, or account-fallback pipeline must not fail the whole
+    // Future.wait fleet read. Adapters already return error quotas rather than
+    // throwing, so this is defense in depth against a future regression.
+    return [_adapterErrorQuota(entry, 'read failed')];
   }
-  if (entry.accountScopedCache) {
-    results.addAll(currentAccountFallbacks(
-      liveResults: results,
-      cachedSnapshots: loadAccountSnapshots(entry.id),
-      currentAccounts: entry.currentAccounts!(),
-    ));
-  }
-  return results;
 }
 
 /// Applies one adapter registration's identity and provenance contract before

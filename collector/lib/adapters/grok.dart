@@ -109,23 +109,30 @@ class GrokAdapter {
           windows: const [],
         );
 
-    final token = await _resolveToken(account.email, allowDefaultGrant) ??
-        account.cliToken;
-    if (token == null) return offline('no token - run: quotabot login grok');
+    try {
+      final token = await _resolveToken(account.email, allowDefaultGrant) ??
+          account.cliToken;
+      if (token == null) return offline('no token - run: quotabot login grok');
 
-    final window = await (_usageFetcher ?? _fetchUsage)(token, asOf);
-    if (window == null) {
-      return offline('token expired (open Grok to refresh) - account only');
+      final window = await (_usageFetcher ?? _fetchUsage)(token, asOf);
+      if (window == null) {
+        return offline('token expired (open Grok to refresh) - account only');
+      }
+
+      return ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: account.email,
+        plan: 'SuperGrok',
+        asOf: asOf,
+        windows: [window],
+      );
+    } catch (_) {
+      // Isolate this account: a token-refresh or network throw here must not
+      // escape to collectAccounts' single catch, which would discard the other
+      // accounts' results already gathered in the fan-out.
+      return offline('unable to read this account (network or token error)');
     }
-
-    return ProviderQuota(
-      provider: id,
-      displayName: name,
-      account: account.email,
-      plan: 'SuperGrok',
-      asOf: asOf,
-      windows: [window],
-    );
   }
 
   Future<String?> _resolveToken(String account, bool allowDefaultGrant) async {
