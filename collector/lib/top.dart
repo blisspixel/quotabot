@@ -290,15 +290,6 @@ List<_Cell> _bar(
   return cells;
 }
 
-/// A compact age for the cached tag: "5m", "8h", "2d". Under a minute reads
-/// "now" so a just-served cache is not dramatized.
-String _ageTerse(int seconds) {
-  if (seconds < 60) return 'now';
-  if (seconds < 5400) return '${(seconds / 60).round()}m';
-  if (seconds < 129600) return '${(seconds / 3600).round()}h';
-  return '${(seconds / 86400).round()}d';
-}
-
 /// Compact trust annotation for a provider row. It stays on the first row only
 /// and is included in width planning, so spend class, stale age, and local scope
 /// are visible without wrapping the dashboard.
@@ -311,13 +302,17 @@ String _topTrustTag(ProviderQuota q, int now) {
 
 String _topReadState(ProviderQuota q, int now) {
   if (q.driftReason != null) {
-    final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
+    final age = q.asOf > 0 && now > q.asOf
+        ? ' ${compactAge(now - q.asOf, floorNow: true)}'
+        : '';
     return 'provider drift$age';
   }
   if (!q.ok) return 'error';
   if (q.isLocal) return q.active ? 'in use' : 'available';
   if (q.stale) {
-    final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
+    final age = q.asOf > 0 && now > q.asOf
+        ? ' ${compactAge(now - q.asOf, floorNow: true)}'
+        : '';
     return 'cached$age';
   }
   if (q.windows.isEmpty && (q.status ?? '').isEmpty) return 'no live data';

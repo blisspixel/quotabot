@@ -1,5 +1,6 @@
 import 'analysis.dart';
 import 'insights.dart';
+import 'labels.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 
@@ -340,14 +341,7 @@ String? _trustSpendClass(QuotaHealthProviderLine provider) {
 String _captureAgeLabel(int asOf, int generatedAt) {
   if (asOf <= 0) return '';
   if (asOf > generatedAt) return 'captured in the future';
-  return 'captured ${_ageLabel(generatedAt - asOf)} ago';
-}
-
-String _ageLabel(int seconds) {
-  if (seconds < 90) return '${seconds}s';
-  if (seconds < 5400) return '${(seconds / 60).round()}m';
-  if (seconds < 129600) return '${(seconds / 3600).round()}h';
-  return '${(seconds / Duration.secondsPerDay).round()}d';
+  return 'captured ${compactAge(generatedAt - asOf, suffix: ' ago')}';
 }
 
 String _iso(int epochSeconds) => DateTime.fromMillisecondsSinceEpoch(

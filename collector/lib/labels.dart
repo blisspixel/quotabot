@@ -17,6 +17,23 @@ String resetCountdownLabel(int? resetsAt, int now) {
   return '${secs ~/ 3600}h';
 }
 
+/// A compact single-unit age for [seconds] elapsed, rounded to the nearest unit:
+/// `45s`, `12m`, `3h`, `2d`. With [suffix] the unit is followed by it (e.g.
+/// ` ago`). With [floorNow], anything under a minute reads `now` instead of
+/// seconds - used by the terse `top` tag where a raw seconds count is noise.
+/// This is the collector's rounding age policy, shared by the CLI, `top`, and the
+/// report so a captured-age reads the same on every terminal surface.
+String compactAge(int seconds, {String suffix = '', bool floorNow = false}) {
+  if (floorNow) {
+    if (seconds < 60) return 'now';
+  } else if (seconds < 90) {
+    return '${seconds}s$suffix';
+  }
+  if (seconds < 5400) return '${(seconds / 60).round()}m$suffix';
+  if (seconds < 129600) return '${(seconds / 3600).round()}h$suffix';
+  return '${(seconds / 86400).round()}d$suffix';
+}
+
 /// A compact two-unit countdown to [resetsAt]: `now` when reached, `2d3h` when a
 /// day or more away, otherwise `3h20m`. Used wherever a precise time-to-reset is
 /// shown (the `top` view and the CLI).
