@@ -4,6 +4,15 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Security
+- Hardened parsing of a VS Code-fork `state.vscdb` (Cursor/Windsurf/Kiro local
+  state, written by another app and not owned by quotabot): the value blob is now
+  size-capped before decode and the JSON key-walk is depth-bounded, so a
+  pathological or malicious same-user-written value cannot exhaust memory or
+  overflow the stack. A defense-in-depth pass over the credential, network,
+  loopback, webhook, OAuth, path, injection, and permission surfaces found no
+  exploitable issues.
+
 ### Added
 - Provider preference for routing (ROADMAP 0.9). `quotabot suggest
   --prefer=codex,claude` orders the recommendation by your stated preference, but
@@ -64,6 +73,12 @@ Notable changes to quotabot. Newest first.
 - Hardening: a failed token-store write no longer discards a just-refreshed
   access token; the Lemonade adapter no longer leaks an HTTP client per refresh;
   a malformed Codex session `primary` no longer drops the weekly window.
+- A profile name that is a Windows reserved device name (`nul`, `con`, `com1`,
+  ...) is now rejected, since as a filename it resolves to a device and would
+  silently discard the profile's writes.
+- The LiteLLM router caches an empty availability result for its TTL instead of
+  making a fresh synchronous loopback fetch on every proxied request (a latency
+  regression when only local runtimes were connected).
 
 ## 0.8.1 - 2026-07-12
 

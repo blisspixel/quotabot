@@ -547,6 +547,29 @@ class RouterTests(unittest.TestCase):
         policy = Policy(quotabot_url="http://169.254.169.254/latest")
         self.assertEqual(policy.quotabot_url, "http://127.0.0.1:8721")
 
+    def test_empty_availability_is_cached_not_refetched_every_call(self):
+        # A legitimately empty ranked list (e.g. only local runtimes connected)
+        # must be cached for the TTL. Freshness is tracked by _cache_at, not the
+        # list's truthiness, so this no longer re-fetches on every request.
+        router = QuotabotRouter()
+        calls = {"n": 0}
+
+        def fake_fetch():
+            calls["n"] += 1
+            return {"ranked": []}
+
+        router._fetch_suggest = fake_fetch  # type: ignore[method-assign]
+
+        async def run_twice():
+            first = await router._availability()
+            second = await router._availability()
+            return first, second
+
+        first, second = asyncio.run(run_twice())
+        self.assertEqual(first, [])
+        self.assertEqual(second, [])
+        self.assertEqual(calls["n"], 1, "empty availability must be cached")
+
     def test_fetch_suggest_does_not_follow_redirects(self):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
