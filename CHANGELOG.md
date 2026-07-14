@@ -2,7 +2,7 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.9.0 - 2026-07-13
 
 ### Security
 - Hardened parsing of a VS Code-fork `state.vscdb` (Cursor/Windsurf/Kiro local
@@ -12,6 +12,12 @@ Notable changes to quotabot. Newest first.
   overflow the stack. A defense-in-depth pass over the credential, network,
   loopback, webhook, OAuth, path, injection, and permission surfaces found no
   exploitable issues.
+- Antigravity now fails closed when an account without its own stored grant
+  borrows the provider-default grant (whose slot is not owner-stamped and may
+  belong to another account) and the token's email cannot be verified: rather
+  than risk showing another account's quota under this account's label, it
+  reports the read as this-machine-only and unverified. An account-specific
+  grant is trusted for its account without the cross-check.
 
 ### Added
 - Provider preference for routing (ROADMAP 0.9). `quotabot suggest
@@ -79,6 +85,14 @@ Notable changes to quotabot. Newest first.
 - The LiteLLM router caches an empty availability result for its TTL instead of
   making a fresh synchronous loopback fetch on every proxied request (a latency
   regression when only local runtimes were connected).
+- One provider or account failing no longer takes down an entire fleet read.
+  Each provider's collect/admission/fallback pipeline and each Grok account's
+  fetch are isolated, so an unexpected throw degrades to a single fail-soft
+  error for that provider or account instead of discarding every other result
+  gathered in the same fan-out.
+- A concurrent desktop app and CLI can no longer lose an analytics sample:
+  the long-term headroom bucket update now takes the per-evidence lock around
+  its read-modify-write instead of racing on a torn update.
 
 ## 0.8.1 - 2026-07-12
 
