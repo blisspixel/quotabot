@@ -41,6 +41,10 @@ class OllamaAdapter {
   static const id = ollamaProviderId;
   static const name = ollamaProviderName;
 
+  final http.Client? _http;
+
+  OllamaAdapter({http.Client? client}) : _http = client;
+
   static String baseUrl() =>
       localBaseUrl(Platform.environment['OLLAMA_HOST'], ollamaDefaultPort);
 
@@ -66,9 +70,9 @@ class OllamaAdapter {
   /// is unreachable.
   Future<List<LocalModel>?> _models(String path) async {
     try {
-      final resp = await http
-          .get(Uri.parse('${baseUrl()}$path'))
-          .timeout(const Duration(seconds: 2));
+      final resp =
+          await (_http?.get ?? http.get)(Uri.parse('${baseUrl()}$path'))
+              .timeout(const Duration(seconds: 2));
       if (resp.statusCode != 200) return null;
       return ollamaModelsFromJson(jsonDecode(resp.body));
     } catch (_) {

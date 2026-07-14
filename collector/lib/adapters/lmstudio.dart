@@ -25,8 +25,16 @@ class LmStudioAdapter {
   static const id = lmStudioProviderId;
   static const name = lmStudioProviderName;
 
+  final http.Client? _http;
+
+  LmStudioAdapter({http.Client? client}) : _http = client;
+
   static String baseUrl() =>
       localBaseUrl(Platform.environment['LMSTUDIO_HOST'], lmStudioDefaultPort);
+
+  Future<http.Response> _get(String path) =>
+      (_http?.get ?? http.get)(Uri.parse('${baseUrl()}$path'))
+          .timeout(const Duration(seconds: 2));
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
@@ -59,9 +67,7 @@ class LmStudioAdapter {
   Future<({List<LocalModel> installed, List<LocalModel> loaded})?>
       _v1Models() async {
     try {
-      final resp = await http
-          .get(Uri.parse('${baseUrl()}/api/v1/models'))
-          .timeout(const Duration(seconds: 2));
+      final resp = await _get('/api/v1/models');
       if (resp.statusCode != 200) return null;
       return lmStudioV1FromJson(jsonDecode(resp.body));
     } catch (_) {
@@ -72,9 +78,7 @@ class LmStudioAdapter {
   Future<({List<LocalModel> installed, List<LocalModel> loaded})?>
       _nativeModels() async {
     try {
-      final resp = await http
-          .get(Uri.parse('${baseUrl()}/api/v0/models'))
-          .timeout(const Duration(seconds: 2));
+      final resp = await _get('/api/v0/models');
       if (resp.statusCode != 200) return null;
       return lmStudioNativeFromJson(jsonDecode(resp.body));
     } catch (_) {
@@ -84,9 +88,7 @@ class LmStudioAdapter {
 
   Future<List<LocalModel>?> _compatModels() async {
     try {
-      final resp = await http
-          .get(Uri.parse('${baseUrl()}/v1/models'))
-          .timeout(const Duration(seconds: 2));
+      final resp = await _get('/v1/models');
       if (resp.statusCode != 200) return null;
       return lmStudioCompatFromJson(jsonDecode(resp.body));
     } catch (_) {
