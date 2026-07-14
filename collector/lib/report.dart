@@ -278,6 +278,12 @@ QuotaHealthProviderLine _providerLine(
 }
 
 String _state(ProviderQuota provider, double? headroom) {
+  // Drift is the top-priority read state, as it is in `top` and the desktop app:
+  // a provider whose live read disagreed with its trusted history is showing a
+  // held snapshot, and that must not be mislabeled as an ordinary live/cached
+  // number. Checked before ok/local/stale so a drifted-and-stale read still reads
+  // as drift.
+  if (provider.driftReason != null) return 'provider drift';
   if (!provider.ok) return 'unavailable';
   if (provider.isLocal) return provider.active ? 'local active' : 'local ready';
   if (provider.stale) return 'cached';
@@ -300,6 +306,7 @@ String _trustContext(QuotaHealthProviderLine provider, int generatedAt) {
 }
 
 String _trustReadState(QuotaHealthProviderLine provider) {
+  if (provider.state == 'provider drift') return 'provider drift';
   if (provider.state == 'unavailable') return 'error';
   if (provider.kind.isLocal) {
     return provider.state == 'local active' ? 'in use' : 'available';
