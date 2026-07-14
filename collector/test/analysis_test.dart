@@ -1369,6 +1369,72 @@ void main() {
     });
   });
 
+  group('capabilityVerdict', () {
+    final q = _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 10)]);
+    ({bool limited, bool budgetLimited, bool blocked, int? resetsAt}) verdict({
+      Set<String>? known,
+      Set<String>? available,
+      Map<String, int> budgetReset = const {},
+      int? availabilityResetsAt = 5000,
+      ProviderQuota? quota,
+    }) =>
+        capabilityVerdict(
+          quota ?? q,
+          quotaKey: 'k',
+          knownQuotaKeys: known,
+          availableQuotaKeys: available,
+          budgetResetByQuotaKey: budgetReset,
+          availabilityResetsAt: availabilityResetsAt,
+        );
+
+    test('no gate passes through the availability reset', () {
+      final v = verdict(); // no capability sets supplied
+      expect(v.blocked, isFalse);
+      expect(v.limited, isFalse);
+      expect(v.budgetLimited, isFalse);
+      expect(v.resetsAt, 5000);
+    });
+
+    test('a local runtime is never gated even with capability sets', () {
+      final v = verdict(
+          quota: _local('ollama'), known: const {}, available: const {});
+      expect(v.blocked, isFalse);
+    });
+
+    test('gated and present is not blocked and keeps the availability reset',
+        () {
+      final v = verdict(known: {'k'}, available: {'k'});
+      expect(v.blocked, isFalse);
+      expect(v.resetsAt, 5000);
+    });
+
+    test('absent from the known set is capability-limited with no reset', () {
+      final v = verdict(known: const {}, available: const {});
+      expect(v.limited, isTrue);
+      expect(v.blocked, isTrue);
+      expect(v.resetsAt, isNull);
+    });
+
+    test('known but budget-spent surfaces the model-budget reset', () {
+      final v = verdict(
+        known: {'k'},
+        available: const {},
+        budgetReset: {'k': 7777},
+      );
+      expect(v.budgetLimited, isTrue);
+      expect(v.limited, isFalse);
+      expect(v.resetsAt, 7777);
+    });
+
+    test('one set alone still defines the gate', () {
+      // Only availableQuotaKeys supplied; known falls back to it.
+      final present = verdict(known: null, available: {'k'});
+      expect(present.blocked, isFalse);
+      final absent = verdict(known: null, available: const {});
+      expect(absent.limited, isTrue);
+    });
+  });
+
   group('flagStalePassiveRolloverEvidence', () {
     test('a passive-local read whose reset has passed is marked stale', () {
       final q = _q('kiro', [
