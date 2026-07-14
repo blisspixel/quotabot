@@ -31,6 +31,7 @@ import 'logos.dart';
 import 'prefs.dart';
 import 'profile_editor.dart';
 import 'profile_ui.dart';
+import 'quota_labels.dart';
 import 'single_instance.dart';
 import 'termshot.dart';
 import 'theme_spec.dart';
@@ -434,7 +435,7 @@ String? desktopRouteDetailLine(
   }
   final ageSeconds = now - suggestion.asOf;
   if (ageSeconds >= 60) {
-    parts.add('as of ${_ageLabel(suggestion.asOf, now)} ago');
+    parts.add('as of ${ageLabel(suggestion.asOf, now)} ago');
   }
   return parts.join(' | ');
 }
@@ -479,7 +480,7 @@ String? _desktopProviderSpendClass(ProviderQuota quota) {
 String _desktopCaptureAgeLabel(int asOf, int now) {
   if (asOf <= 0) return '';
   if (asOf > now) return 'captured in the future';
-  return 'captured ${_ageLabel(asOf, now)} ago';
+  return 'captured ${ageLabel(asOf, now)} ago';
 }
 
 @visibleForTesting
@@ -1959,7 +1960,7 @@ class _DashboardState extends State<Dashboard>
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
-                          _ago(_updated),
+                          asOfLabel(_updated),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -2482,7 +2483,7 @@ class _DashboardState extends State<Dashboard>
         // suppress the webhook or skip the rest of the batch. Both keys carry
         // the account so two accounts of one provider do not collide.
         if (_enableNotifications) {
-          final id = _notificationId(
+          final id = notificationId(
             '${quotaIdentityKey(a.provider, a.account)}:low',
           );
           try {
@@ -2530,7 +2531,7 @@ class _DashboardState extends State<Dashboard>
                   w.resetsAt! * 1000,
                 );
                 final tzReset = tz.TZDateTime.from(resetDt, tz.local);
-                final id = _notificationId(key);
+                final id = notificationId(key);
                 try {
                   await flutterLocalNotificationsPlugin.cancel(id: id);
                   await flutterLocalNotificationsPlugin.zonedSchedule(
@@ -2565,7 +2566,7 @@ class _DashboardState extends State<Dashboard>
           ..clear()
           ..addAll(resets.armed);
         for (final r in resets.fired) {
-          final id = _notificationId(
+          final id = notificationId(
             '${quotaIdentityKey(r.provider, r.account)}:reset-available',
           );
           try {
@@ -3508,7 +3509,7 @@ class ProviderTile extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text(
-          v.resetsAt == null ? '' : 'available ${_backLabel(v.resetsAt, now)}',
+          v.resetsAt == null ? '' : 'available ${backLabel(v.resetsAt, now)}',
           style: TextStyle(
             fontSize: AppType.caption,
             fontWeight: FontWeight.w600,
@@ -3677,7 +3678,7 @@ class WindowBar extends StatelessWidget {
         : view.rolledOver
         ? 'ready'
         : view.resetsAt != null
-        ? '${remaining.round()}% free  ${_resetLabel(view.resetsAt, now)}'
+        ? '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
         : '${remaining.round()}% free';
 
     return Row(
@@ -4004,79 +4005,4 @@ PStatus providerStatus(ProviderQuota q, int now) {
     return const PStatus(Color(0xFF8A91A0), true, false);
   }
   return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);
-}
-
-int _notificationId(String key) {
-  var hash = 0x811c9dc5;
-  for (final unit in key.codeUnits) {
-    hash ^= unit;
-    hash = (hash * 0x01000193) & 0xffffffff;
-  }
-  return hash & 0x7fffffff;
-}
-
-/// Compact "3h12m" / "2d4h" reset label.
-String _resetLabel(int? resetsAt, int now) {
-  if (resetsAt == null) return '';
-  final s = resetsAt - now;
-  if (s <= 0) return 'now';
-  // Near-term: a precise countdown is what you act on ("59m", "3h58m").
-  if (s < 18 * 3600) {
-    final h = s ~/ 3600;
-    final m = (s % 3600) ~/ 60;
-    if (h == 0) return '${m}m';
-    return m == 0 ? '${h}h' : '${h}h${m}m';
-  }
-  // Far-out (a weekly cap, say): an absolute day and time reads far clearer than
-  // a "2d7h" countdown - "Mon 5:00 PM", with the date added beyond a week out.
-  final dt = DateTime.fromMillisecondsSinceEpoch(resetsAt * 1000);
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  final wd = days[dt.weekday - 1];
-  // Join the day and clock time with a non-breaking space so the whole reset
-  // renders as one unit in a narrow right-hand column. When the row runs out of
-  // width it then breaks cleanly after the label ("37% free" over "Fri 11:14
-  // PM") instead of dropping a lone "PM" onto the next line.
-  const nb = '\u00A0';
-  final time = _formatTime(dt).replaceAll(' ', nb);
-  return s < 7 * 86400 ? '$wd$nb$time' : '$wd$nb${dt.month}/${dt.day}$nb$time';
-}
-
-/// When a spent window becomes usable again, phrased for a spent card: a
-/// near-term countdown reads "in 59m", a far-out reset reads as its absolute day
-/// and time ("Mon 5:00 PM").
-String _backLabel(int? resetsAt, int now) {
-  if (resetsAt == null) return '';
-  final s = resetsAt - now;
-  if (s <= 0) return 'now';
-  final label = _resetLabel(resetsAt, now);
-  return s < 18 * 3600 ? 'in $label' : label;
-}
-
-String _ago(DateTime t) {
-  // Show an absolute clock time ("as of 8:38 AM") so it is unambiguous whether
-  // the data is current. Append a short date only once it is no longer today,
-  // so a stale snapshot can never masquerade as fresh.
-  final now = DateTime.now();
-  final clock = _formatTime(t);
-  final sameDay =
-      now.year == t.year && now.month == t.month && now.day == t.day;
-  if (sameDay) return 'as of $clock';
-  return 'as of $clock ${t.month}/${t.day}';
-}
-
-String _formatTime(DateTime t) {
-  final h = t.hour;
-  final min = t.minute.toString().padLeft(2, '0');
-  final ampm = h >= 12 ? 'PM' : 'AM';
-  final h12 = h % 12 == 0 ? 12 : h % 12;
-  return '$h12:$min $ampm';
-}
-
-/// Short age of a cached snapshot, e.g. "12m", "3h", "2d".
-String _ageLabel(int asOf, int now) {
-  final s = now - asOf;
-  if (s < 60) return '${s}s';
-  if (s < 3600) return '${s ~/ 60}m';
-  if (s < 86400) return '${s ~/ 3600}h';
-  return '${s ~/ 86400}d';
 }
