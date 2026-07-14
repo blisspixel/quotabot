@@ -38,6 +38,44 @@ Insights _insights() => Insights.from([
     ], _now);
 
 void main() {
+  test('a drifted provider reads as drift in the report, not live', () {
+    // Regression: report _state omitted the driftReason check that top and the
+    // desktop app apply first, so a held-during-drift snapshot was mislabeled as
+    // an ordinary live/cached number on the report health surface only.
+    final drifted = ProviderQuota(
+      provider: 'codex',
+      displayName: 'codex',
+      account: 'work',
+      asOf: _now,
+      stale: true,
+      driftReason: 'provider drift detected; showing last trusted snapshot',
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 20,
+          resetsAt: _now + 8 * Duration.secondsPerDay,
+        ),
+      ],
+    );
+    final report = buildQuotaHealthReport(
+      [drifted],
+      _now,
+      suggestRoute([drifted], _now),
+    );
+
+    final line = report.providers.single;
+    expect(line.state, 'provider drift');
+    expect(line.toJson()['state'], 'provider drift');
+    // The trust context (State + Trust columns in the markdown) names the drift
+    // rather than reading 'live' or a bare 'cached'.
+    expect(report.toMarkdown(), contains('provider drift'));
+
+    // A clean provider is unaffected.
+    final clean = buildQuotaHealthReport([_quota('claude', 20)], _now,
+        suggestRoute([_quota('claude', 20)], _now));
+    expect(clean.providers.single.state, isNot('provider drift'));
+  });
+
   test('buildQuotaHealthReport produces versioned JSON', () {
     final providers = [
       _quota('claude', 20),

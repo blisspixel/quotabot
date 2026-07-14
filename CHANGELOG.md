@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Fixed
+- The `report` health surface now labels a provider that is showing a
+  held-during-drift snapshot as "provider drift", matching `top` and the desktop
+  app. Its read-state classifier omitted the drift check, so a drifted provider
+  could read as an ordinary live or cached number in the report only.
 - A passive-local metered read (Kiro, Cursor, Windsurf, from a VS Code-fork
   `state.vscdb`) whose window's reset has already passed is no longer shown as a
   confident 100% free. The local file predates the reset and quotabot never
