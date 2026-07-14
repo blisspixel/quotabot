@@ -18,7 +18,8 @@ void main() {
       expect(QuotaWindow(label: 'w', used: 5, limit: 0).percent, isNull);
     });
 
-    test('percent is left unclamped so the trust boundary can flag out-of-range',
+    test(
+        'percent is left unclamped so the trust boundary can flag out-of-range',
         () {
       // used > limit (>100%) and negative values must survive to verify/drift,
       // which reject or flag them rather than route on them; clamping here would

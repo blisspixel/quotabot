@@ -446,13 +446,27 @@ class AntigravityAdapter {
       String? access;
       var usingQuotabot = false;
       var usingCli = false;
+      // True only when the token is the provider-default grant, not one stored
+      // for this specific account. The default slot is not owner-stamped, so it
+      // can belong to a different account; the email cross-check below must
+      // verify a default-grant token and fail closed if it cannot. An
+      // account-specific grant is trusted for its account without that check.
+      var usedDefaultGrant = false;
 
-      access = await _resolveGrant(
-        account,
-        source.useCliToken ? false : allowDefaultGrant,
-      );
+      // Account-specific grant first; only fall back to the default grant when
+      // it is allowed (the first discovered account) and this account has none,
+      // and remember that the fallback was used. Matches the prior behavior of
+      // `_resolveGrant(account, useCliToken ? false : allowDefaultGrant)` while
+      // exposing whether the default was used.
+      access = await _resolveGrant(account, false);
       if (access != null) {
         usingQuotabot = true;
+      } else if (!source.useCliToken && allowDefaultGrant) {
+        access = await _resolveGrant(account, true);
+        if (access != null) {
+          usingQuotabot = true;
+          usedDefaultGrant = true;
+        }
       }
 
       // Mint a fresh token from the IDE's own stored refresh token (Antigravity's
@@ -502,6 +516,17 @@ class AntigravityAdapter {
           );
         }
         account = tokenEmail;
+      } else if (usedDefaultGrant && account != 'default') {
+        // The token is the provider-default grant, which may belong to a
+        // different account, and we could not resolve its email to confirm it is
+        // this account's. Fail closed rather than risk labeling another account's
+        // quota as this one. An account-specific grant is not affected (it is
+        // this account's by construction), so a transient userinfo failure only
+        // hides a default-grant-backed first account, and self-heals next read.
+        return offline(
+          'local Antigravity status found (this machine only); could not verify '
+          'the live quota token belongs to this account',
+        );
       }
 
       // Also try to extract email from the load response. Only accept a

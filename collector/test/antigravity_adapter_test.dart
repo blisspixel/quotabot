@@ -164,7 +164,10 @@ void main() {
         if (account == 'b@example.com') return 'grant-b';
         return allowDefault ? 'default-token' : null;
       },
-      emailResolver: (_, __, ___) async => null,
+      // The first account uses the default grant; its email resolves to that
+      // account, so the cross-check confirms it (rather than failing closed).
+      emailResolver: (access, _, __) async =>
+          access == 'default-token' ? 'a@example.com' : null,
       loadCodeAssist: (access) async {
         loadTokens.add(access);
         return load(project: 'load-$access');
@@ -191,6 +194,8 @@ void main() {
       isTrue,
     );
     expect(tokenCalls, [
+      // The first account tries its own grant, then the default fallback.
+      'a@example.com:false',
       'a@example.com:true',
       'b@example.com:false',
       'c@example.com:false',
@@ -206,6 +211,47 @@ void main() {
       'grant-b:onboard-grant-b',
       'ide-c:onboard-ide-c',
     ]);
+  });
+
+  test(
+      'a default grant with an unverifiable email fails closed, not mislabeled',
+      () async {
+    // The first account has no own grant, so it borrows the (not owner-stamped)
+    // default grant, which may belong to a different account. When the email
+    // cannot be resolved to confirm ownership, quotabot must not show that
+    // token's quota under this account's label.
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('a@example.com')],
+      tokenResolver: (account, allowDefault) async =>
+          allowDefault ? 'default-token' : null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(project: 'p'),
+      onboardUser: (_, __) async => 'proj',
+      fetchModels: (_, __) async => models(0.5),
+    ).collectAccounts();
+
+    final a = q.single;
+    expect(a.account, 'a@example.com');
+    expect(a.windows, isEmpty, reason: 'unverified default grant is not shown');
+    expect(a.error, contains('could not verify'));
+  });
+
+  test('an account-specific grant is shown without an email cross-check',
+      () async {
+    // The token stored for this account is this account's by construction, so a
+    // failed email lookup must not hide it (no false fail-closed).
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('a@example.com')],
+      tokenResolver: (account, _) async =>
+          account == 'a@example.com' ? 'own-grant' : null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(project: 'p'),
+      onboardUser: (_, __) async => 'proj',
+      fetchModels: (_, __) async => models(0.5),
+    ).collectAccounts();
+
+    expect(q.single.account, 'a@example.com');
+    expect(q.single.windows.single.usedPercent, 50);
   });
 
   test('injected empty account discovery is fail-soft', () async {
