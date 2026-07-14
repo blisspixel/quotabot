@@ -175,7 +175,7 @@ Future<void> main() async {
       await windowManager.setMinimumSize(const Size(120, 40));
       // Gentle bring-to-front for launcher contexts (was aggressive loop causing issues)
       await windowManager.setAlwaysOnTop(true);
-      await Future.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
       await windowManager.setAlwaysOnTop(prefs.alwaysOnTop);
       await windowManager.focus();
       _desktopReadiness.recordWindowReady();
@@ -1011,7 +1011,7 @@ class _DashboardState extends State<Dashboard>
       setState(() => _compact = value);
       _applySize();
     }
-    await Future.delayed(const Duration(milliseconds: 650));
+    await Future<void>.delayed(const Duration(milliseconds: 650));
     await WidgetsBinding.instance.endOfFrame;
   }
 
@@ -1020,7 +1020,7 @@ class _DashboardState extends State<Dashboard>
   Future<void> _exportShots() async {
     // The window show is gated behind windowManager.waitUntilReadyToShow, so wait
     // out that plus the first real paint before the first capture.
-    await Future.delayed(const Duration(seconds: 2));
+    await Future<void>.delayed(const Duration(seconds: 2));
     await WidgetsBinding.instance.endOfFrame;
     await _setShotCompact(false);
     await _captureBoundary('screenshot-widget.png');
@@ -1032,20 +1032,22 @@ class _DashboardState extends State<Dashboard>
       await _captureBoundary('demo-03-widget-expanded.png');
     }
     _showFleet(initialRange: FleetRange.quarter);
-    await Future.delayed(const Duration(milliseconds: 1400)); // route + charts
+    await Future<void>.delayed(
+      const Duration(milliseconds: 1400),
+    ); // route + charts
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-analytics.png');
     if (_gifFramesMode) {
       await _captureBoundary('demo-04-analytics-90d.png');
     }
     _showTerminal(_demoTopFrame());
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-top.png', _termShotKey);
     if (_gifFramesMode) {
       await _captureBoundary('demo-05-top.png', _termShotKey);
     }
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future<void>.delayed(const Duration(milliseconds: 150));
     exit(0);
   }
 
@@ -1325,7 +1327,10 @@ class _DashboardState extends State<Dashboard>
         _insights = shrinkInsightsReliability(rawInsights);
       });
       if (widget._hostIntegration || widget.alertPoster != null) {
-        _checkAndNotify();
+        // Fire-and-forget: notification and webhook posting must not delay the
+        // refresh completing or the post-frame resize; _checkAndNotify swallows
+        // its own errors, so an unawaited failure cannot escape.
+        unawaited(_checkAndNotify());
       }
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     } catch (error) {

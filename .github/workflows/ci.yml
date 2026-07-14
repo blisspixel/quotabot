@@ -85,7 +85,7 @@ jobs:
             --out=coverage/lcov.info \
             --packages=.dart_tool/package_config.json \
             --report-on=lib
-          python ../tools/check_lcov.py coverage/lcov.info 85
+          python ../tools/check_lcov.py coverage/lcov.info 90
 
       - name: Flutter dependencies
         working-directory: app
