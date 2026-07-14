@@ -12,6 +12,7 @@ import 'dart:convert';
 
 import 'analysis.dart';
 import 'ansi.dart';
+import 'labels.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'palette.dart';
@@ -289,17 +290,6 @@ List<_Cell> _bar(
   return cells;
 }
 
-/// "3d12h" / "2h14m" / "now" countdown from [now] to [resetsAt].
-String _eta(int resetsAt, int now) {
-  var s = resetsAt - now;
-  if (s <= 0) return 'now';
-  final d = s ~/ 86400;
-  s %= 86400;
-  final h = s ~/ 3600;
-  if (d > 0) return '${d}d${h}h';
-  return '${h}h${(s % 3600) ~/ 60}m';
-}
-
 /// A compact age for the cached tag: "5m", "8h", "2d". Under a minute reads
 /// "now" so a just-served cache is not dramatized.
 String _ageTerse(int seconds) {
@@ -480,7 +470,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   if (binding != null && headroom <= kSpentHeadroomFloor) {
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
-        : 'resets ${_eta(binding.resetsAt!, now)}';
+        : 'resets ${countdown(binding.resetsAt!, now)}';
     final state = q.stale ? 'last spent' : 'spent';
     final text = '$state${reset.isEmpty ? '' : '   $reset'}';
     final visibleTags = _visibleInlineTags(
@@ -508,7 +498,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       final remaining = 100 - used;
       final secReset = secondary.resetsAt == null
           ? ''
-          : '   resets ${_eta(secondary.resetsAt!, now)}';
+          : '   resets ${countdown(secondary.resetsAt!, now)}';
       rows.add(_line([
         ..._rowHead('', secondary.label, palette: p),
         _Cell(
@@ -526,7 +516,8 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   for (final w in q.windows) {
     final used = windowUsedPercent(w, now);
     final remaining = 100 - used;
-    final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
+    final reset =
+        w.resetsAt == null ? '' : 'resets ${countdown(w.resetsAt!, now)}';
     final showForecast =
         columns.forecast && forecast != null && w.label == binding?.label;
     final headroomText =

@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
+import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
@@ -1060,7 +1061,7 @@ void _printManualEntries(List<ManualQuotaEntry> entries) {
       '${entry.account.padRight(18)} '
       '${_manualNumber(entry.used)}/${_manualNumber(entry.limit)} '
       '${entry.window} '
-      'resets in ${_in(entry.resetsAt, now)}',
+      'resets in ${countdown(entry.resetsAt, now)}',
     );
   }
 }
@@ -1815,7 +1816,8 @@ Future<void> _check(
       : q.stale
           ? '  ${style.dim('last ${head.round()}% free')}'
           : '  ${style.health(head, '${head.round()}% free')}';
-  final rs = reset == null ? '' : style.dim('  resets ${_in(reset, now)}');
+  final rs =
+      reset == null ? '' : style.dim('  resets ${countdown(reset, now)}');
   final staleTag = q.driftReason != null
       ? style.dim(' (provider drift)')
       : q.stale
@@ -2043,7 +2045,7 @@ String _quotaAlertFallback(RouteFallback fallback, int now) {
     case RouteFallbackKind.soonestReset:
       final reset = fallback.resetsAt == null
           ? ''
-          : ' (resets ${_in(fallback.resetsAt!, now)})';
+          : ' (resets ${countdown(fallback.resetsAt!, now)})';
       return ' - fallback: wait for ${fallback.provider}$reset';
     case RouteFallbackKind.passthrough:
       return ' - fallback: use the requested provider';
@@ -2154,7 +2156,7 @@ void _printDoctor(List<ProviderQuota> results) {
                 final pct = windowUsedPercent(w, now).round();
                 final reset = w.resetsAt == null
                     ? ''
-                    : ' (resets ${_in(w.resetsAt!, now)})';
+                    : ' (resets ${countdown(w.resetsAt!, now)})';
                 return '${w.label} $pct% used$reset';
               }).join(', ');
     final namePart =
@@ -2991,14 +2993,4 @@ String? _doctorHint(ProviderQuota q, String state) {
     return 'open the ${q.displayName} app once so it writes local state, then re-run';
   }
   return null;
-}
-
-String _in(int resetsAt, int now) {
-  var s = resetsAt - now;
-  if (s <= 0) return 'now';
-  final d = s ~/ 86400;
-  s %= 86400;
-  final h = s ~/ 3600;
-  if (d > 0) return '${d}d${h}h';
-  return '${h}h${(s % 3600) ~/ 60}m';
 }
