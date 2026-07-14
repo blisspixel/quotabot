@@ -13,9 +13,9 @@ import 'dart:convert';
 import 'analysis.dart';
 import 'ansi.dart';
 import 'labels.dart';
-import 'model_catalog.dart';
 import 'models.dart';
 import 'palette.dart';
+import 'provenance.dart';
 
 /// Builds the OSC 52 terminal escape that asks the terminal to copy [text] to
 /// the system clipboard. This needs no external process or platform clipboard
@@ -295,7 +295,7 @@ List<_Cell> _bar(
 /// are visible without wrapping the dashboard.
 String _topTrustTag(ProviderQuota q, int now) {
   final parts = <String>[_topReadState(q, now), q.sourceClass.label];
-  final spendClass = _topSpendClass(q);
+  final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   return ' (${parts.join(', ')})';
 }
@@ -318,17 +318,6 @@ String _topReadState(ProviderQuota q, int now) {
   if (q.windows.isEmpty && (q.status ?? '').isEmpty) return 'no live data';
   if (q.windows.isEmpty) return 'metadata';
   return 'live';
-}
-
-String? _topSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'loaded' : 'cold';
-  if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
-    return null;
-  }
-  if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  if (q.windows.isEmpty) return null;
-  if (kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  return 'metered plan';
 }
 
 bool _isCollapsedSpent(ProviderQuota q, int now) {

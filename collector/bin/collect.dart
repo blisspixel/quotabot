@@ -13,6 +13,7 @@ import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/labels.dart';
+import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
@@ -1999,7 +2000,7 @@ List<String> _providerProvenanceParts(
     _providerReadStateLabel(state),
     q.sourceClass.label,
   ];
-  final spendClass = _providerSpendClass(q);
+  final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
     parts.add(q.account);
@@ -2084,18 +2085,6 @@ String _providerReadStateLabel(String state) => switch (state) {
       'ERROR' => 'error',
       _ => state,
     };
-
-String? _providerSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'loaded' : 'cold';
-  if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
-    return null;
-  }
-  if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  if (q.windows.isEmpty) return null;
-  return kQuotaPlanProviders.contains(q.provider)
-      ? 'quota plan'
-      : 'metered plan';
-}
 
 bool _providerHasDoctorAccountIdentity(ProviderQuota q) {
   const placeholders = {'cli', 'installed', 'simulated'};
