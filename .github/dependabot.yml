@@ -8,6 +8,7 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "tuesday"
@@ -27,6 +28,7 @@ updates:
 
   - package-ecosystem: "pub"
     directory: "/collector"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "tuesday"
@@ -46,6 +48,7 @@ updates:
 
   - package-ecosystem: "pub"
     directory: "/app"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "tuesday"
@@ -65,6 +68,7 @@ updates:
 
   - package-ecosystem: "npm"
     directory: "/integrations/mcp_clients"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "tuesday"
@@ -84,6 +88,7 @@ updates:
 
   - package-ecosystem: "pip"
     directory: "/integrations/litellm"
+    target-branch: "main"
     schedule:
       interval: "weekly"
       day: "tuesday"
