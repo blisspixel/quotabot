@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-11. This file is the forward plan. Shipped work belongs in
+Updated 2026-07-15. This file is the forward plan. Shipped work belongs in
 [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
 the plan belongs in [docs/PRODUCT-STRATEGY.md](docs/PRODUCT-STRATEGY.md).
@@ -91,9 +91,9 @@ until the remaining 1.0 trust gates close.
 | Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, structured errors, `verify`, and `explain` exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
 | Release rehearsal | Open | 0.5.14 release artifacts and provenance have been exercised | Run the true 1.0 tag-candidate workflow, install its artifacts on clean native hosts, then cut 1.0 |
 
-Version numbers are not project phases. Continue small corrective 0.5.x patches
-as needed, then cut 1.0 when the evidence gates pass. Do not manufacture 0.6,
-0.7, 0.8, and 0.9 releases to represent work already completed.
+Version numbers are not project phases. The logical 0.6 through 0.8 milestones
+shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
+needed, then cut 1.0 when the evidence gates pass.
 
 ## Version plan
 
@@ -115,10 +115,11 @@ self-tuning decision engine grounded in longitudinal local history no competitor
 keeps. An exceptional 1.0 therefore ships that engine, not only a hardened meter,
 which is why calibration lands before 1.0 rather than after it.
 
-- **0.5.x, now - release hardening.** Feature-complete beta receiving only
-  corrective patches: provider truth, cross-machine correctness, install and
-  update, desktop robustness, and documentation. No new breadth. This line ends
-  when 0.6 opens.
+- **0.9.x, now - advisor completion and release hardening.** Finish the remaining
+  0.9 explanation and decision-receipt work while taking focused corrective
+  patches for provider truth, cross-machine correctness, install and update,
+  desktop robustness, and documentation. No new breadth. This line ends when the
+  1.0 evidence gates pass.
 - **0.6 - Truthful substrate.** Every advertised route means exactly what it says,
   on every claimed provider, before anything is built on top. Close the remaining
   observation-layer gaps so the data feeding the forecast is trustworthy. A
@@ -232,12 +233,12 @@ provider, before a forecast is built on top of it.
   window with its true reset, rather than a reset-delta guess that mislabeled a
   near-term weekly as "5h". The separate burst limit and per-model-group
   breakdown are not exposed by this endpoint and stay in the per-model quotas.
-- Prefer LM Studio's current `GET /api/v1/models` contract, preserving v0 and
-  OpenAI-compatible fallbacks. Parse loaded instances, context, size, quantization,
-  and capability evidence without loading or invoking a model.
-- Parse Ollama's documented loaded `context_length`. Detect or conservatively
-  exclude cloud-offloaded Ollama models from policies that promise local-only or
-  free execution. Never estimate throughput by generating content.
+- **Done:** prefer LM Studio's current `GET /api/v1/models` contract, preserving
+  v0 and OpenAI-compatible fallbacks. Parse loaded instances, context, size,
+  quantization, and capability evidence without loading or invoking a model.
+- **Done:** parse Ollama's documented loaded `context_length`. Detect or
+  conservatively exclude cloud-offloaded Ollama models from policies that promise
+  local-only or free execution. Never estimate throughput by generating content.
 - Validate the connected-grant login flows (`login claude` / `login codex`) on real
   accounts, and add fixtures for the expired-host-token fall-through.
 - Keep the LiteLLM loopback, bearer-auth, and unauthenticated-denial regression
@@ -272,8 +273,9 @@ that object can be replayed and simulated deterministically.
   frames deterministically; the `--mock-provider` simulation (`simulateFleet`)
   drives the whole pipeline through `decide` with no network. Both pinned by test.
 - **Remaining:** migrate the secondary route surfaces (`top`, the remaining MCP
-  tools) to source from `decide` too, and wire `replay` to real recorded history
-  in the impure shell (it drives the 0.8 calibration ledger and oracle benchmark).
+  tools) to source from `decide` too, and wire the public decision replay harness
+  to real recorded history for the oracle benchmark. The shipped calibration
+  ledger has its own pinned replay of hourly history.
 - No public contract change and no visible behavior change: existing SEE / ROUTE /
   `suggest` output stays stable, `decide().route` equals `suggestRoute()`.
 
