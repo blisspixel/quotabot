@@ -38,6 +38,75 @@ Insights _insights() => Insights.from([
     ], _now);
 
 void main() {
+  test('a drifted provider reads as drift in the report, not live', () {
+    // Regression: report _state omitted the driftReason check that top and the
+    // desktop app apply first, so a held-during-drift snapshot was mislabeled as
+    // an ordinary live/cached number on the report health surface only.
+    final drifted = ProviderQuota(
+      provider: 'codex',
+      displayName: 'codex',
+      account: 'work',
+      asOf: _now,
+      stale: true,
+      driftReason: 'provider drift detected; showing last trusted snapshot',
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 20,
+          resetsAt: _now + 8 * Duration.secondsPerDay,
+        ),
+      ],
+    );
+    final report = buildQuotaHealthReport(
+      [drifted],
+      _now,
+      suggestRoute([drifted], _now),
+    );
+
+    final line = report.providers.single;
+    expect(line.state, 'provider drift');
+    expect(line.toJson()['state'], 'provider drift');
+    // The trust context (State + Trust columns in the markdown) names the drift
+    // rather than reading 'live' or a bare 'cached'.
+    expect(report.toMarkdown(), contains('provider drift'));
+
+    // A clean provider is unaffected.
+    final clean = buildQuotaHealthReport([_quota('claude', 20)], _now,
+        suggestRoute([_quota('claude', 20)], _now));
+    expect(clean.providers.single.state, isNot('provider drift'));
+  });
+
+  test('report spend class is the shared classifier, consistent under drift',
+      () {
+    // A plan-quota provider names its plan; a measured non-plan provider reads
+    // metered - both from the shared providerSpendClass, not a report-local copy.
+    final claude = buildQuotaHealthReport([_quota('claude', 20)], _now,
+        suggestRoute([_quota('claude', 20)], _now));
+    expect(claude.providers.single.spendClass, 'quota plan');
+    expect(claude.toMarkdown(), contains('quota plan'));
+
+    final cursor = _quota('cursor', 30);
+    final metered =
+        buildQuotaHealthReport([cursor], _now, suggestRoute([cursor], _now));
+    expect(metered.providers.single.spendClass, 'metered plan');
+
+    // Consistency: a drifted, unavailable plan provider still names the plan.
+    // The report previously returned null here because it keyed the plan case off
+    // the 'unavailable' state, which the 'provider drift' state now precedes.
+    final driftedDown = ProviderQuota(
+      provider: 'codex',
+      displayName: 'codex',
+      account: 'work',
+      asOf: _now,
+      ok: false,
+      driftReason: 'provider drift detected; showing last trusted snapshot',
+      windows: const [],
+    );
+    final drift = buildQuotaHealthReport(
+        [driftedDown], _now, suggestRoute([driftedDown], _now));
+    expect(drift.providers.single.spendClass, 'quota plan');
+  });
+
   test('buildQuotaHealthReport produces versioned JSON', () {
     final providers = [
       _quota('claude', 20),

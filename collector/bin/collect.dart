@@ -12,6 +12,8 @@ import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
+import 'package:quotabot_collector/labels.dart';
+import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
@@ -1060,7 +1062,7 @@ void _printManualEntries(List<ManualQuotaEntry> entries) {
       '${entry.account.padRight(18)} '
       '${_manualNumber(entry.used)}/${_manualNumber(entry.limit)} '
       '${entry.window} '
-      'resets in ${_in(entry.resetsAt, now)}',
+      'resets in ${countdown(entry.resetsAt, now)}',
     );
   }
 }
@@ -1815,7 +1817,8 @@ Future<void> _check(
       : q.stale
           ? '  ${style.dim('last ${head.round()}% free')}'
           : '  ${style.health(head, '${head.round()}% free')}';
-  final rs = reset == null ? '' : style.dim('  resets ${_in(reset, now)}');
+  final rs =
+      reset == null ? '' : style.dim('  resets ${countdown(reset, now)}');
   final staleTag = q.driftReason != null
       ? style.dim(' (provider drift)')
       : q.stale
@@ -1997,7 +2000,7 @@ List<String> _providerProvenanceParts(
     _providerReadStateLabel(state),
     q.sourceClass.label,
   ];
-  final spendClass = _providerSpendClass(q);
+  final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
     parts.add(q.account);
@@ -2043,7 +2046,7 @@ String _quotaAlertFallback(RouteFallback fallback, int now) {
     case RouteFallbackKind.soonestReset:
       final reset = fallback.resetsAt == null
           ? ''
-          : ' (resets ${_in(fallback.resetsAt!, now)})';
+          : ' (resets ${countdown(fallback.resetsAt!, now)})';
       return ' - fallback: wait for ${fallback.provider}$reset';
     case RouteFallbackKind.passthrough:
       return ' - fallback: use the requested provider';
@@ -2082,18 +2085,6 @@ String _providerReadStateLabel(String state) => switch (state) {
       'ERROR' => 'error',
       _ => state,
     };
-
-String? _providerSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'loaded' : 'cold';
-  if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
-    return null;
-  }
-  if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  if (q.windows.isEmpty) return null;
-  return kQuotaPlanProviders.contains(q.provider)
-      ? 'quota plan'
-      : 'metered plan';
-}
 
 bool _providerHasDoctorAccountIdentity(ProviderQuota q) {
   const placeholders = {'cli', 'installed', 'simulated'};
@@ -2154,7 +2145,7 @@ void _printDoctor(List<ProviderQuota> results) {
                 final pct = windowUsedPercent(w, now).round();
                 final reset = w.resetsAt == null
                     ? ''
-                    : ' (resets ${_in(w.resetsAt!, now)})';
+                    : ' (resets ${countdown(w.resetsAt!, now)})';
                 return '${w.label} $pct% used$reset';
               }).join(', ');
     final namePart =
@@ -2190,7 +2181,7 @@ void _printDoctor(List<ProviderQuota> results) {
     if (q.driftReason != null) {
       final detected = q.driftObservedAt == null
           ? ''
-          : ' ${_ago((now - q.driftObservedAt!).clamp(0, 1 << 31).toInt())}';
+          : ' ${compactAge((now - q.driftObservedAt!).clamp(0, 1 << 31).toInt(), suffix: ' ago')}';
       print(
         '  $indent ${_stateColumn('')} '
         '${style.red('! provider drift$detected: ${q.driftReason}; '
@@ -2497,12 +2488,6 @@ String _verificationProvenanceState(ProviderQuota q, String state) =>
           };
 
 /// A compact "Ns/Nm/Nh ago" age label.
-String _ago(int seconds) {
-  if (seconds < 90) return '${seconds}s ago';
-  if (seconds < 5400) return '${(seconds / 60).round()}m ago';
-  if (seconds < 129600) return '${(seconds / 3600).round()}h ago';
-  return '${(seconds / 86400).round()}d ago';
-}
 
 /// `calibration`: grade quotabot's own strand predictions against the user's
 /// recorded history, so "how often is it right" is a measured number, not a claim.
@@ -2753,7 +2738,7 @@ const routeFutureCaptureLabel = 'captured in the future';
 String routeCaptureAgeLabel(int capturedAt, int decisionAsOf) {
   if (capturedAt <= 0) return '';
   if (capturedAt > decisionAsOf) return routeFutureCaptureLabel;
-  return 'captured ${_ago(decisionAsOf - capturedAt)}';
+  return 'captured ${compactAge(decisionAsOf - capturedAt, suffix: ' ago')}';
 }
 
 /// Pace for a provider from its live binding window plus the recent burn rate.
@@ -2991,14 +2976,4 @@ String? _doctorHint(ProviderQuota q, String state) {
     return 'open the ${q.displayName} app once so it writes local state, then re-run';
   }
   return null;
-}
-
-String _in(int resetsAt, int now) {
-  var s = resetsAt - now;
-  if (s <= 0) return 'now';
-  final d = s ~/ 86400;
-  s %= 86400;
-  final h = s ~/ 3600;
-  if (d > 0) return '${d}d${h}h';
-  return '${h}h${(s % 3600) ~/ 60}m';
 }

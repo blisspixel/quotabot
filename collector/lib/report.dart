@@ -1,7 +1,8 @@
 import 'analysis.dart';
 import 'insights.dart';
-import 'model_catalog.dart';
+import 'labels.dart';
 import 'models.dart';
+import 'provenance.dart';
 
 const quotaHealthReportSchema = 'quotabot.report.v1';
 
@@ -13,6 +14,10 @@ class QuotaHealthProviderLine {
   final String? source;
   final ProviderSourceClass sourceClass;
   final String state;
+  // The spend class for the trust tag ('quota plan', 'metered plan', 'loaded',
+  // 'cold', or null), computed from the source quota via the shared
+  // providerSpendClass so it cannot drift from `top` and the CLI.
+  final String? spendClass;
   final int asOf;
   final bool perMachine;
   final double? headroomPercent;
@@ -35,6 +40,7 @@ class QuotaHealthProviderLine {
     required this.source,
     required this.sourceClass,
     required this.state,
+    required this.spendClass,
     required this.asOf,
     required this.perMachine,
     required this.headroomPercent,
@@ -261,6 +267,7 @@ QuotaHealthProviderLine _providerLine(
     source: provider.source,
     sourceClass: provider.sourceClass,
     state: state,
+    spendClass: providerSpendClass(provider),
     asOf: provider.asOf,
     perMachine: provider.perMachine,
     headroomPercent: headroom,
@@ -278,6 +285,12 @@ QuotaHealthProviderLine _providerLine(
 }
 
 String _state(ProviderQuota provider, double? headroom) {
+  // Drift is the top-priority read state, as it is in `top` and the desktop app:
+  // a provider whose live read disagreed with its trusted history is showing a
+  // held snapshot, and that must not be mislabeled as an ordinary live/cached
+  // number. Checked before ok/local/stale so a drifted-and-stale read still reads
+  // as drift.
+  if (provider.driftReason != null) return 'provider drift';
   if (!provider.ok) return 'unavailable';
   if (provider.isLocal) return provider.active ? 'local active' : 'local ready';
   if (provider.stale) return 'cached';
@@ -292,14 +305,14 @@ String _trustContext(QuotaHealthProviderLine provider, int generatedAt) {
     _trustReadState(provider),
     provider.sourceClass.label,
   ];
-  final spendClass = _trustSpendClass(provider);
-  if (spendClass != null) parts.add(spendClass);
+  if (provider.spendClass != null) parts.add(provider.spendClass!);
   final captured = _captureAgeLabel(provider.asOf, generatedAt);
   if (captured.isNotEmpty) parts.add(captured);
   return parts.join(', ');
 }
 
 String _trustReadState(QuotaHealthProviderLine provider) {
+  if (provider.state == 'provider drift') return 'provider drift';
   if (provider.state == 'unavailable') return 'error';
   if (provider.kind.isLocal) {
     return provider.state == 'local active' ? 'in use' : 'available';
@@ -311,36 +324,10 @@ String _trustReadState(QuotaHealthProviderLine provider) {
   };
 }
 
-String? _trustSpendClass(QuotaHealthProviderLine provider) {
-  if (provider.kind.isLocal) {
-    return provider.state == 'local active' ? 'loaded' : 'cold';
-  }
-  if (provider.sourceClass == ProviderSourceClass.manual ||
-      provider.sourceClass == ProviderSourceClass.statusOnly) {
-    return null;
-  }
-  if (provider.headroomPercent == null) {
-    return provider.state == 'unavailable' &&
-            kQuotaPlanProviders.contains(provider.provider)
-        ? 'quota plan'
-        : null;
-  }
-  return kQuotaPlanProviders.contains(provider.provider)
-      ? 'quota plan'
-      : 'metered plan';
-}
-
 String _captureAgeLabel(int asOf, int generatedAt) {
   if (asOf <= 0) return '';
   if (asOf > generatedAt) return 'captured in the future';
-  return 'captured ${_ageLabel(generatedAt - asOf)} ago';
-}
-
-String _ageLabel(int seconds) {
-  if (seconds < 90) return '${seconds}s';
-  if (seconds < 5400) return '${(seconds / 60).round()}m';
-  if (seconds < 129600) return '${(seconds / 3600).round()}h';
-  return '${(seconds / Duration.secondsPerDay).round()}d';
+  return 'captured ${compactAge(generatedAt - asOf, suffix: ' ago')}';
 }
 
 String _iso(int epochSeconds) => DateTime.fromMillisecondsSinceEpoch(

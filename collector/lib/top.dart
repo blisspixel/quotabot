@@ -12,9 +12,10 @@ import 'dart:convert';
 
 import 'analysis.dart';
 import 'ansi.dart';
-import 'model_catalog.dart';
+import 'labels.dart';
 import 'models.dart';
 import 'palette.dart';
+import 'provenance.dart';
 
 /// Builds the OSC 52 terminal escape that asks the terminal to copy [text] to
 /// the system clipboard. This needs no external process or platform clipboard
@@ -289,61 +290,34 @@ List<_Cell> _bar(
   return cells;
 }
 
-/// "3d12h" / "2h14m" / "now" countdown from [now] to [resetsAt].
-String _eta(int resetsAt, int now) {
-  var s = resetsAt - now;
-  if (s <= 0) return 'now';
-  final d = s ~/ 86400;
-  s %= 86400;
-  final h = s ~/ 3600;
-  if (d > 0) return '${d}d${h}h';
-  return '${h}h${(s % 3600) ~/ 60}m';
-}
-
-/// A compact age for the cached tag: "5m", "8h", "2d". Under a minute reads
-/// "now" so a just-served cache is not dramatized.
-String _ageTerse(int seconds) {
-  if (seconds < 60) return 'now';
-  if (seconds < 5400) return '${(seconds / 60).round()}m';
-  if (seconds < 129600) return '${(seconds / 3600).round()}h';
-  return '${(seconds / 86400).round()}d';
-}
-
 /// Compact trust annotation for a provider row. It stays on the first row only
 /// and is included in width planning, so spend class, stale age, and local scope
 /// are visible without wrapping the dashboard.
 String _topTrustTag(ProviderQuota q, int now) {
   final parts = <String>[_topReadState(q, now), q.sourceClass.label];
-  final spendClass = _topSpendClass(q);
+  final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   return ' (${parts.join(', ')})';
 }
 
 String _topReadState(ProviderQuota q, int now) {
   if (q.driftReason != null) {
-    final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
+    final age = q.asOf > 0 && now > q.asOf
+        ? ' ${compactAge(now - q.asOf, floorNow: true)}'
+        : '';
     return 'provider drift$age';
   }
   if (!q.ok) return 'error';
   if (q.isLocal) return q.active ? 'in use' : 'available';
   if (q.stale) {
-    final age = q.asOf > 0 && now > q.asOf ? ' ${_ageTerse(now - q.asOf)}' : '';
+    final age = q.asOf > 0 && now > q.asOf
+        ? ' ${compactAge(now - q.asOf, floorNow: true)}'
+        : '';
     return 'cached$age';
   }
   if (q.windows.isEmpty && (q.status ?? '').isEmpty) return 'no live data';
   if (q.windows.isEmpty) return 'metadata';
   return 'live';
-}
-
-String? _topSpendClass(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'loaded' : 'cold';
-  if (q.isManual || q.sourceClass == ProviderSourceClass.statusOnly) {
-    return null;
-  }
-  if (!q.ok && kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  if (q.windows.isEmpty) return null;
-  if (kQuotaPlanProviders.contains(q.provider)) return 'quota plan';
-  return 'metered plan';
 }
 
 bool _isCollapsedSpent(ProviderQuota q, int now) {
@@ -480,7 +454,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   if (binding != null && headroom <= kSpentHeadroomFloor) {
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
-        : 'resets ${_eta(binding.resetsAt!, now)}';
+        : 'resets ${countdown(binding.resetsAt!, now)}';
     final state = q.stale ? 'last spent' : 'spent';
     final text = '$state${reset.isEmpty ? '' : '   $reset'}';
     final visibleTags = _visibleInlineTags(
@@ -508,7 +482,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       final remaining = 100 - used;
       final secReset = secondary.resetsAt == null
           ? ''
-          : '   resets ${_eta(secondary.resetsAt!, now)}';
+          : '   resets ${countdown(secondary.resetsAt!, now)}';
       rows.add(_line([
         ..._rowHead('', secondary.label, palette: p),
         _Cell(
@@ -526,7 +500,8 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   for (final w in q.windows) {
     final used = windowUsedPercent(w, now);
     final remaining = 100 - used;
-    final reset = w.resetsAt == null ? '' : 'resets ${_eta(w.resetsAt!, now)}';
+    final reset =
+        w.resetsAt == null ? '' : 'resets ${countdown(w.resetsAt!, now)}';
     final showForecast =
         columns.forecast && forecast != null && w.label == binding?.label;
     final headroomText =

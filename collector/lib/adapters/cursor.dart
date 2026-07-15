@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
 
+import '../labels.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -45,7 +46,8 @@ class CursorAdapter {
       } else {
         final main = windows.first;
         if (main.exhausted) {
-          err = 'out of quota (resets ${_resetLabel(main.resetsAt, asOf)})';
+          err =
+              'out of quota (resets ${resetCountdownLabel(main.resetsAt, asOf)})';
         }
       }
 
@@ -139,14 +141,4 @@ class _CursorState {
   final String? plan;
 
   const _CursorState({this.usage, this.account, this.plan});
-}
-
-String _resetLabel(int? resetsAt, int now) {
-  if (resetsAt == null) return 'soon';
-  final secs = resetsAt - now;
-  if (secs <= 0) return 'now';
-  final d = secs ~/ 86400;
-  if (d > 0) return '${d}d';
-  final h = secs ~/ 3600;
-  return '${h}h';
 }

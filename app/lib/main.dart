@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -13,7 +12,6 @@ import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
-import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -31,6 +29,9 @@ import 'logos.dart';
 import 'prefs.dart';
 import 'profile_editor.dart';
 import 'profile_ui.dart';
+import 'provider_display.dart';
+import 'quota_labels.dart';
+import 'quota_loading_indicator.dart';
 import 'single_instance.dart';
 import 'termshot.dart';
 import 'theme_spec.dart';
@@ -175,7 +176,7 @@ Future<void> main() async {
       await windowManager.setMinimumSize(const Size(120, 40));
       // Gentle bring-to-front for launcher contexts (was aggressive loop causing issues)
       await windowManager.setAlwaysOnTop(true);
-      await Future.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
       await windowManager.setAlwaysOnTop(prefs.alwaysOnTop);
       await windowManager.focus();
       _desktopReadiness.recordWindowReady();
@@ -286,289 +287,6 @@ TextTheme _tabularFigures(TextTheme t) {
   );
 }
 
-@visibleForTesting
-class ProviderDisplayGroup {
-  final String? account;
-  final List<ProviderQuota> quotas;
-
-  const ProviderDisplayGroup({required this.account, required this.quotas});
-}
-
-@visibleForTesting
-List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
-  // Group by account only when it is genuinely meaningful: some provider is
-  // signed in under more than one account (a real work/personal split on the
-  // same service). Signing into different providers with different emails - the
-  // common case - is not multi-account, so account headers there would just be
-  // noise, and the fleet stays one ungrouped list. A local runtime's account
-  // field is a model summary ("3 models"), not an identity, so locals never
-  // define a group and land in the account-less bucket.
-  final accountsByProvider = <String, Set<String>>{};
-  for (final q in data) {
-    if (!q.isLocal && quotaHasSpecificAccount(q)) {
-      accountsByProvider
-          .putIfAbsent(q.provider, () => <String>{})
-          .add(q.account);
-    }
-  }
-  final hasDuplicatedAccount = accountsByProvider.values.any(
-    (accounts) => accounts.length > 1,
-  );
-  if (!hasDuplicatedAccount) {
-    return [ProviderDisplayGroup(account: null, quotas: List.of(data))];
-  }
-
-  final grouped = <String, List<ProviderQuota>>{};
-  final groupAccounts = <String, String?>{};
-  for (final q in data) {
-    final account = !q.isLocal && quotaHasSpecificAccount(q) ? q.account : null;
-    final key = account ?? '';
-    grouped.putIfAbsent(key, () => <ProviderQuota>[]).add(q);
-    groupAccounts.putIfAbsent(key, () => account);
-  }
-  return [
-    for (final entry in grouped.entries)
-      ProviderDisplayGroup(
-        account: groupAccounts[entry.key],
-        quotas: List.of(entry.value),
-      ),
-  ];
-}
-
-(ProviderQuota?, String, String) _routeDisplay(
-  RouteCandidate candidate,
-  List<ProviderQuota> snapshot,
-  bool showAccounts,
-) {
-  ProviderQuota? quota;
-  for (final q in snapshot) {
-    if (q.provider == candidate.provider && q.account == candidate.account) {
-      quota = q;
-      break;
-    }
-  }
-  final display = quota?.displayName ?? candidate.provider;
-  final counts = <String, int>{};
-  for (final q in snapshot) {
-    counts[q.provider] = (counts[q.provider] ?? 0) + 1;
-  }
-  final accountLabel =
-      quota != null &&
-          showAccounts &&
-          quotaShouldShowAccountLabel(quota, counts)
-      ? ' (${quota.account})'
-      : '';
-  return (quota, display, accountLabel);
-}
-
-/// The compact glance line: just the route and how much is free (or that it is a
-/// local fallback), so it never truncates mid-word. The provenance, burn, and
-/// confidence detail lives in [desktopRouteDetailLine], shown on hover.
-@visibleForTesting
-String? desktopRouteSignalLine(
-  RouteSuggestion suggestion,
-  List<ProviderQuota> snapshot,
-  int now, {
-  bool showAccounts = false,
-}) {
-  final candidate = suggestion.recommended;
-  if (candidate == null) return null;
-  final (_, display, accountLabel) = _routeDisplay(
-    candidate,
-    snapshot,
-    showAccounts,
-  );
-  final buf = StringBuffer('Next: $display$accountLabel');
-  if (candidate.isLocal) {
-    buf.write(' - local fallback');
-  } else if (candidate.headroom != null) {
-    final prefix = candidate.stale ? 'cached ' : '';
-    buf.write(' - $prefix${candidate.headroom!.round()}% free');
-  }
-  return buf.toString();
-}
-
-/// The full route detail (provenance, burn-adjusted headroom, confidence, age),
-/// kept off the compact glance line so it never overflows. Shown on hover and
-/// carried into machine-readable surfaces.
-@visibleForTesting
-String? desktopRouteDetailLine(
-  RouteSuggestion suggestion,
-  List<ProviderQuota> snapshot,
-  int now, {
-  bool showAccounts = false,
-}) {
-  final candidate = suggestion.recommended;
-  if (candidate == null) return null;
-  final (_, display, accountLabel) = _routeDisplay(
-    candidate,
-    snapshot,
-    showAccounts,
-  );
-  final parts = <String>[
-    'Next: $display$accountLabel',
-    candidate.sourceClass.label,
-  ];
-  if (candidate.isLocal) {
-    parts.add('fallback');
-  } else if (candidate.headroom != null) {
-    final prefix = candidate.stale ? 'cached ' : '';
-    parts.add('$prefix${candidate.headroom!.round()}% free');
-    final effective = candidate.effectiveHeadroom;
-    if (effective != null && candidate.headroom! - effective >= 1) {
-      final cause = candidate.leaseDiscount > 0
-          ? 'after burn/leases'
-          : 'after burn';
-      parts.add('${effective.round()}% $cause');
-    }
-  }
-  final confidence = candidate.confidence;
-  if (confidence != null) {
-    final pct = (confidence * 100).round().clamp(0, 100);
-    final label = confidence >= 0.8
-        ? 'high confidence'
-        : confidence >= 0.55
-        ? 'medium confidence'
-        : 'low confidence';
-    parts.add('$label ($pct%)');
-  }
-  final ageSeconds = now - suggestion.asOf;
-  if (ageSeconds >= 60) {
-    parts.add('as of ${_ageLabel(suggestion.asOf, now)} ago');
-  }
-  return parts.join(' | ');
-}
-
-@visibleForTesting
-String desktopProviderTrustLine(ProviderQuota quota, int now) {
-  final parts = <String>[
-    _desktopProviderReadState(quota),
-    quota.sourceClass.label,
-  ];
-  final spendClass = _desktopProviderSpendClass(quota);
-  if (spendClass != null) parts.add(spendClass);
-  final captured = _desktopCaptureAgeLabel(quota.asOf, now);
-  if (captured.isNotEmpty) parts.add(captured);
-  return parts.join(' | ');
-}
-
-String _desktopProviderReadState(ProviderQuota quota) {
-  if (quota.isLocal) {
-    if (!quota.ok) return 'error';
-    return quota.active ? 'in use' : 'available';
-  }
-  if (quota.driftReason != null) return 'provider drift';
-  if (!quota.ok) return 'error';
-  if (quota.stale) return 'cached';
-  if (quota.windows.isEmpty && (quota.status ?? '').isEmpty) {
-    return 'no live data';
-  }
-  if (quota.windows.isEmpty) return 'metadata';
-  return 'live';
-}
-
-String? _desktopProviderSpendClass(ProviderQuota quota) {
-  if (!quota.sourceClass.carriesMeasuredQuota || quota.windows.isEmpty) {
-    return null;
-  }
-  return kQuotaPlanProviders.contains(quota.provider)
-      ? 'quota plan'
-      : 'metered plan';
-}
-
-String _desktopCaptureAgeLabel(int asOf, int now) {
-  if (asOf <= 0) return '';
-  if (asOf > now) return 'captured in the future';
-  return 'captured ${_ageLabel(asOf, now)} ago';
-}
-
-@visibleForTesting
-String providerSetupText(String provider) {
-  switch (provider) {
-    case 'codex':
-      return 'Sign in to the Codex CLI (run codex once). quotabot reads the '
-          'ChatGPT usage endpoint and falls back to this-machine session '
-          'snapshots when live data is unavailable. No quotabot login needed '
-          'here.';
-    case 'claude':
-      return 'Sign in to Claude Code. quotabot reads its usage automatically. '
-          'No login needed here.';
-    case 'grok':
-      return 'Grok shows live while the Grok CLI token is fresh. To keep it '
-          'live without reopening the CLI, connect quotabot once with a device '
-          'code (works on Windows, macOS, and Linux).';
-    case 'antigravity':
-      return 'Antigravity shows live while the IDE token is fresh. To keep it '
-          'live without reopening the IDE, connect quotabot once and sign in '
-          'with the account you want shown.';
-    case 'nvidia':
-      return 'Set NVIDIA_API_KEY or nvapi to check NVIDIA NIM trial access. '
-          'quotabot only calls /v1/models and shows availability without a '
-          'numeric balance.';
-    case 'kiro':
-    case 'cursor':
-    case 'windsurf':
-      return 'Detected from the app\'s local data. If it shows no data, open '
-          'the app once and sign in, then refresh.';
-    case 'ollama':
-    case 'lmstudio':
-    case 'lemonade':
-      return 'Local runtime. Start its server and load a model; quotabot '
-          'detects what is installed and loaded automatically. No login '
-          'needed.';
-    default:
-      return 'quotabot reads this provider from local or provider metadata; '
-          'no setup needed here.';
-  }
-}
-
-@visibleForTesting
-bool providerRowShouldBeVisible(
-  ProviderQuota quota,
-  Set<String> detectedProviders,
-) {
-  if (quota.windows.isNotEmpty || quota.stale) return true;
-  if ((quota.status ?? '').isNotEmpty) return true;
-  final err = (quota.error ?? '').toLowerCase();
-  final passiveStub =
-      err.contains('installed') ||
-      err.contains('no data') ||
-      err.contains('free tier') ||
-      err.contains('not configured') ||
-      err.contains('not installed');
-  if (passiveStub) return detectedProviders.contains(quota.provider);
-  return true;
-}
-
-@visibleForTesting
-List<ProviderQuota> visibleProviderRows(
-  List<ProviderQuota> results,
-  Set<String> detectedProviders,
-) => [
-  for (final quota in results)
-    if (providerRowShouldBeVisible(quota, detectedProviders)) quota,
-];
-
-@visibleForTesting
-List<ProviderQuota> providerSetupRows(List<ProviderQuota> results) {
-  final seen = <String>{};
-  final rows = <ProviderQuota>[];
-  for (final quota in results) {
-    if (seen.add(quotaDisplayKey(quota))) rows.add(quota);
-  }
-  return rows;
-}
-
-@visibleForTesting
-String refreshFailureMessage(Object error, {required bool hasPreviousData}) {
-  final outcome = hasPreviousData
-      ? 'showing previous data'
-      : 'retrying automatically';
-  return error is TimeoutException
-      ? 'Refresh timed out; $outcome'
-      : 'Refresh failed; $outcome';
-}
-
 typedef AlertPoster =
     Future<WebhookResult> Function(
       String url,
@@ -576,30 +294,7 @@ typedef AlertPoster =
       required bool allowExternal,
     });
 
-@visibleForTesting
-String webhookDeliveryStatus(WebhookResult result) {
-  if (result.ok) return 'Last delivery succeeded';
-  final statusCode = result.statusCode;
-  return statusCode == null
-      ? 'Last delivery failed'
-      : 'Last delivery failed (HTTP $statusCode)';
-}
-
 typedef PrefsSaver = Future<void> Function(Prefs prefs);
-
-@visibleForTesting
-double? trustedPoolHeadroom(Iterable<ProviderQuota> quotas, int now) {
-  double sum = 0;
-  int count = 0;
-  for (final quota in quotas) {
-    if (!isTrustedQuotaEvidenceAt(quota, now)) continue;
-    final headroom = providerHeadroom(quota, now);
-    if (headroom == null) continue;
-    sum += headroom;
-    count++;
-  }
-  return count == 0 ? null : sum / count;
-}
 
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
@@ -645,140 +340,6 @@ class Dashboard extends StatefulWidget {
 
   @override
   State<Dashboard> createState() => _DashboardState();
-}
-
-class QuotaLoadingIndicator extends StatefulWidget {
-  final double size;
-  final Color color;
-  final Color trackColor;
-
-  const QuotaLoadingIndicator({
-    super.key,
-    this.size = 30,
-    required this.color,
-    required this.trackColor,
-  });
-
-  @override
-  State<QuotaLoadingIndicator> createState() => _QuotaLoadingIndicatorState();
-}
-
-class _QuotaLoadingIndicatorState extends State<QuotaLoadingIndicator>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  bool _reduceMotion = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1400),
-    )..repeat();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final reduce = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (reduce == _reduceMotion) return;
-    _reduceMotion = reduce;
-    if (_reduceMotion) {
-      _controller.stop();
-    } else {
-      _controller.repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    Widget paint(double phase) => SizedBox.square(
-      dimension: widget.size,
-      child: CustomPaint(
-        painter: _QuotaLoadingPainter(
-          phase: phase,
-          color: widget.color,
-          trackColor: widget.trackColor,
-        ),
-      ),
-    );
-
-    return Semantics(
-      label: 'Loading quota data',
-      child: _reduceMotion
-          ? paint(0.64)
-          : AnimatedBuilder(
-              animation: _controller,
-              builder: (context, child) => paint(_controller.value),
-            ),
-    );
-  }
-}
-
-class _QuotaLoadingPainter extends CustomPainter {
-  final double phase;
-  final Color color;
-  final Color trackColor;
-
-  const _QuotaLoadingPainter({
-    required this.phase,
-    required this.color,
-    required this.trackColor,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final s = size.shortestSide;
-    final center = size.center(Offset.zero);
-    final radius = s * 0.34;
-    final stroke = s * 0.14;
-    final start = -math.pi / 2 + phase * math.pi * 2;
-    final sweep = math.pi * 1.45;
-    final pulse = 0.88 + 0.12 * math.sin(phase * math.pi * 2);
-    final animatedColor = Color.lerp(trackColor, color, pulse) ?? color;
-
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
-        ..strokeCap = StrokeCap.round
-        ..color = trackColor,
-    );
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      start,
-      sweep,
-      false,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
-        ..strokeCap = StrokeCap.round
-        ..color = animatedColor,
-    );
-
-    final dotAngle = start + sweep;
-    canvas.drawCircle(
-      Offset(
-        center.dx + radius * math.cos(dotAngle),
-        center.dy + radius * math.sin(dotAngle),
-      ),
-      s * 0.095,
-      Paint()..color = color,
-    );
-    canvas.drawCircle(center, s * 0.07, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant _QuotaLoadingPainter old) =>
-      old.phase != phase || old.color != color || old.trackColor != trackColor;
 }
 
 class _DashboardState extends State<Dashboard>
@@ -1011,7 +572,7 @@ class _DashboardState extends State<Dashboard>
       setState(() => _compact = value);
       _applySize();
     }
-    await Future.delayed(const Duration(milliseconds: 650));
+    await Future<void>.delayed(const Duration(milliseconds: 650));
     await WidgetsBinding.instance.endOfFrame;
   }
 
@@ -1020,7 +581,7 @@ class _DashboardState extends State<Dashboard>
   Future<void> _exportShots() async {
     // The window show is gated behind windowManager.waitUntilReadyToShow, so wait
     // out that plus the first real paint before the first capture.
-    await Future.delayed(const Duration(seconds: 2));
+    await Future<void>.delayed(const Duration(seconds: 2));
     await WidgetsBinding.instance.endOfFrame;
     await _setShotCompact(false);
     await _captureBoundary('screenshot-widget.png');
@@ -1032,20 +593,22 @@ class _DashboardState extends State<Dashboard>
       await _captureBoundary('demo-03-widget-expanded.png');
     }
     _showFleet(initialRange: FleetRange.quarter);
-    await Future.delayed(const Duration(milliseconds: 1400)); // route + charts
+    await Future<void>.delayed(
+      const Duration(milliseconds: 1400),
+    ); // route + charts
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-analytics.png');
     if (_gifFramesMode) {
       await _captureBoundary('demo-04-analytics-90d.png');
     }
     _showTerminal(_demoTopFrame());
-    await Future.delayed(const Duration(milliseconds: 700));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
     await WidgetsBinding.instance.endOfFrame;
     await _captureBoundary('screenshot-top.png', _termShotKey);
     if (_gifFramesMode) {
       await _captureBoundary('demo-05-top.png', _termShotKey);
     }
-    await Future.delayed(const Duration(milliseconds: 150));
+    await Future<void>.delayed(const Duration(milliseconds: 150));
     exit(0);
   }
 
@@ -1325,7 +888,10 @@ class _DashboardState extends State<Dashboard>
         _insights = shrinkInsightsReliability(rawInsights);
       });
       if (widget._hostIntegration || widget.alertPoster != null) {
-        _checkAndNotify();
+        // Fire-and-forget: notification and webhook posting must not delay the
+        // refresh completing or the post-frame resize; _checkAndNotify swallows
+        // its own errors, so an unawaited failure cannot escape.
+        unawaited(_checkAndNotify());
       }
       WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     } catch (error) {
@@ -1954,7 +1520,7 @@ class _DashboardState extends State<Dashboard>
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
-                          _ago(_updated),
+                          asOfLabel(_updated),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -2477,7 +2043,7 @@ class _DashboardState extends State<Dashboard>
         // suppress the webhook or skip the rest of the batch. Both keys carry
         // the account so two accounts of one provider do not collide.
         if (_enableNotifications) {
-          final id = _notificationId(
+          final id = notificationId(
             '${quotaIdentityKey(a.provider, a.account)}:low',
           );
           try {
@@ -2525,7 +2091,7 @@ class _DashboardState extends State<Dashboard>
                   w.resetsAt! * 1000,
                 );
                 final tzReset = tz.TZDateTime.from(resetDt, tz.local);
-                final id = _notificationId(key);
+                final id = notificationId(key);
                 try {
                   await flutterLocalNotificationsPlugin.cancel(id: id);
                   await flutterLocalNotificationsPlugin.zonedSchedule(
@@ -2560,7 +2126,7 @@ class _DashboardState extends State<Dashboard>
           ..clear()
           ..addAll(resets.armed);
         for (final r in resets.fired) {
-          final id = _notificationId(
+          final id = notificationId(
             '${quotaIdentityKey(r.provider, r.account)}:reset-available',
           );
           try {
@@ -3503,7 +3069,7 @@ class ProviderTile extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text(
-          v.resetsAt == null ? '' : 'available ${_backLabel(v.resetsAt, now)}',
+          v.resetsAt == null ? '' : 'available ${backLabel(v.resetsAt, now)}',
           style: TextStyle(
             fontSize: AppType.caption,
             fontWeight: FontWeight.w600,
@@ -3672,7 +3238,7 @@ class WindowBar extends StatelessWidget {
         : view.rolledOver
         ? 'ready'
         : view.resetsAt != null
-        ? '${remaining.round()}% free  ${_resetLabel(view.resetsAt, now)}'
+        ? '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
         : '${remaining.round()}% free';
 
     return Row(
@@ -3999,79 +3565,4 @@ PStatus providerStatus(ProviderQuota q, int now) {
     return const PStatus(Color(0xFF8A91A0), true, false);
   }
   return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);
-}
-
-int _notificationId(String key) {
-  var hash = 0x811c9dc5;
-  for (final unit in key.codeUnits) {
-    hash ^= unit;
-    hash = (hash * 0x01000193) & 0xffffffff;
-  }
-  return hash & 0x7fffffff;
-}
-
-/// Compact "3h12m" / "2d4h" reset label.
-String _resetLabel(int? resetsAt, int now) {
-  if (resetsAt == null) return '';
-  final s = resetsAt - now;
-  if (s <= 0) return 'now';
-  // Near-term: a precise countdown is what you act on ("59m", "3h58m").
-  if (s < 18 * 3600) {
-    final h = s ~/ 3600;
-    final m = (s % 3600) ~/ 60;
-    if (h == 0) return '${m}m';
-    return m == 0 ? '${h}h' : '${h}h${m}m';
-  }
-  // Far-out (a weekly cap, say): an absolute day and time reads far clearer than
-  // a "2d7h" countdown - "Mon 5:00 PM", with the date added beyond a week out.
-  final dt = DateTime.fromMillisecondsSinceEpoch(resetsAt * 1000);
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  final wd = days[dt.weekday - 1];
-  // Join the day and clock time with a non-breaking space so the whole reset
-  // renders as one unit in a narrow right-hand column. When the row runs out of
-  // width it then breaks cleanly after the label ("37% free" over "Fri 11:14
-  // PM") instead of dropping a lone "PM" onto the next line.
-  const nb = '\u00A0';
-  final time = _formatTime(dt).replaceAll(' ', nb);
-  return s < 7 * 86400 ? '$wd$nb$time' : '$wd$nb${dt.month}/${dt.day}$nb$time';
-}
-
-/// When a spent window becomes usable again, phrased for a spent card: a
-/// near-term countdown reads "in 59m", a far-out reset reads as its absolute day
-/// and time ("Mon 5:00 PM").
-String _backLabel(int? resetsAt, int now) {
-  if (resetsAt == null) return '';
-  final s = resetsAt - now;
-  if (s <= 0) return 'now';
-  final label = _resetLabel(resetsAt, now);
-  return s < 18 * 3600 ? 'in $label' : label;
-}
-
-String _ago(DateTime t) {
-  // Show an absolute clock time ("as of 8:38 AM") so it is unambiguous whether
-  // the data is current. Append a short date only once it is no longer today,
-  // so a stale snapshot can never masquerade as fresh.
-  final now = DateTime.now();
-  final clock = _formatTime(t);
-  final sameDay =
-      now.year == t.year && now.month == t.month && now.day == t.day;
-  if (sameDay) return 'as of $clock';
-  return 'as of $clock ${t.month}/${t.day}';
-}
-
-String _formatTime(DateTime t) {
-  final h = t.hour;
-  final min = t.minute.toString().padLeft(2, '0');
-  final ampm = h >= 12 ? 'PM' : 'AM';
-  final h12 = h % 12 == 0 ? 12 : h % 12;
-  return '$h12:$min $ampm';
-}
-
-/// Short age of a cached snapshot, e.g. "12m", "3h", "2d".
-String _ageLabel(int asOf, int now) {
-  final s = now - asOf;
-  if (s < 60) return '${s}s';
-  if (s < 3600) return '${s ~/ 60}m';
-  if (s < 86400) return '${s ~/ 3600}h';
-  return '${s ~/ 86400}d';
 }
