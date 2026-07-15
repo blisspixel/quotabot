@@ -202,7 +202,7 @@ the grant only changes how the token stays fresh. quotabot stores its own refres
 token under your per-user config directory, independent of the app's credentials,
 and never writes the host app's credential files. A new or rotated grant is not
 written unless owner-only permission hardening succeeds. Details in
-[docs/SETUP.md](docs/SETUP.md#4-keep-grok-and-antigravity-live-or-pin-an-account-optional).
+[docs/SETUP.md](docs/SETUP.md#4-keep-a-provider-live-on-an-idle-machine-or-pin-an-account-optional).
 
 ## Routing for tools and agents
 
