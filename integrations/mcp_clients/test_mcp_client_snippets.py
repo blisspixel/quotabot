@@ -19,7 +19,7 @@ class McpClientSnippetTest(unittest.TestCase):
 
         self.assertIn('"typecheck": "tsc --noEmit"', package_json)
         self.assertIn('"@modelcontextprotocol/sdk": "1.29.0"', package_json)
-        self.assertIn('"typescript": "6.0.3"', package_json)
+        self.assertIn('"typescript": "7.0.2"', package_json)
         self.assertIn('"strict": true', tsconfig)
 
     def test_snippets_use_current_sdk_transports(self) -> None:
