@@ -113,6 +113,20 @@ class DependencyPolicyTest(unittest.TestCase):
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("tools.test_archive_dependabot_advisory", ci)
 
+    def test_litellm_resolver_uses_the_ci_python_line(self) -> None:
+        runtime = (ROOT / "integrations" / "litellm" / ".python-version").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(runtime, r"^3\.13\.\d+\n?$")
+
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("python-version: '3.13'", ci)
+
+        requirements = (
+            ROOT / "integrations" / "litellm" / "requirements.in"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Python 3.10 through 3.13 only", requirements)
+
 
 if __name__ == "__main__":
     unittest.main()
