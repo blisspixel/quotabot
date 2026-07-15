@@ -31,7 +31,8 @@ class Api(Protocol):
         path: str,
         payload: dict[str, Any] | None = None,
         allow_status: tuple[int, ...] = (),
-    ) -> Any: ...
+    ) -> Any:
+        raise NotImplementedError
 
 
 class GitHubApi:

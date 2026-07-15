@@ -61,7 +61,7 @@ class FakeResponse:
         return self
 
     def __exit__(self, *args: object) -> None:
-        del args
+        return None
 
     def read(self) -> bytes:
         return self.body
