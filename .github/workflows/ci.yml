@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
+    branches: [main]
 
 # Actions pinned to commit SHAs (version in the trailing comment); Dependabot's
 # github-actions group keeps them current.
