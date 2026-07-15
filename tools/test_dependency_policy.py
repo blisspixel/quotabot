@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -117,7 +118,14 @@ class DependencyPolicyTest(unittest.TestCase):
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("tools.test_archive_dependabot_advisory", ci)
 
-    def test_litellm_resolver_uses_the_ci_python_line(self) -> None:
+    def test_litellm_resolver_uses_the_supported_python_line(self) -> None:
+        metadata = tomllib.loads(
+            (ROOT / "integrations" / "litellm" / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(">=3.10,<3.14", metadata["project"]["requires-python"])
+
         runtime = (ROOT / "integrations" / "litellm" / ".python-version").read_text(
             encoding="utf-8"
         )
@@ -129,7 +137,7 @@ class DependencyPolicyTest(unittest.TestCase):
         requirements = (
             ROOT / "integrations" / "litellm" / "requirements.in"
         ).read_text(encoding="utf-8")
-        self.assertIn("Python 3.10 through 3.13 only", requirements)
+        self.assertIn("Python 3.10 through 3.13", requirements)
 
 
 if __name__ == "__main__":

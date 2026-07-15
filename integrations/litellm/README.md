@@ -59,9 +59,10 @@ so routing here stays consistent with the desktop widget and the MCP server.
    not support Python 3.14. The requirements file locks the proxy dependency and
    its transitive packages with hashes. Dependabot reports available updates;
    selected versions are regenerated and tested on a first-party branch.
-   `.python-version` selects an exact supported Python 3.13 patch for local
-   version managers and Dependabot's `pip-compile` resolver. Update that patch
-   deliberately when the supported 3.13 runtime advances.
+   `pyproject.toml` declares that supported range for package tooling and for
+   Dependabot's resolver. `.python-version` selects an exact supported Python
+   3.13 patch for local version managers. Update both declarations deliberately
+   when the supported runtime range advances.
 
    Keep `config.yaml` in the same folder as `quotabot_router.py`; current
    LiteLLM proxy releases resolve custom callback modules relative to the config
