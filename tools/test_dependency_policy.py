@@ -65,6 +65,10 @@ class DependencyPolicyTest(unittest.TestCase):
                 )
                 self.assertRegex(
                     body,
+                    r'(?m)^      prefix: "advisory\(deps\)"$',
+                )
+                self.assertRegex(
+                    body,
                     r'(?m)^      - "dependencies"$',
                 )
                 self.assertRegex(
