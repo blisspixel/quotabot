@@ -1,4 +1,10 @@
 version: 2
+
+# Dependabot pull requests are advisory signals only. Do not merge or reuse a
+# bot branch. Recreate selected updates from current main on a first-party
+# branch, regenerate lockfiles with the native package manager, review upstream
+# changes, and run the full project gates. Advisory intake retains the closed
+# pull request as the warning record and removes its transient bot branch.
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -7,7 +13,11 @@ updates:
       day: "tuesday"
       time: "09:00"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "advisory-only"
     groups:
       github-actions:
         patterns:
@@ -20,7 +30,11 @@ updates:
       day: "tuesday"
       time: "09:15"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "advisory-only"
     groups:
       collector-dart:
         patterns:
@@ -33,7 +47,11 @@ updates:
       day: "tuesday"
       time: "09:30"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "advisory-only"
     groups:
       app-dart:
         patterns:
@@ -46,7 +64,11 @@ updates:
       day: "tuesday"
       time: "09:45"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "advisory-only"
     groups:
       mcp-client-npm:
         patterns:
@@ -59,7 +81,11 @@ updates:
       day: "tuesday"
       time: "10:00"
       timezone: "America/Los_Angeles"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "advisory-only"
     groups:
       litellm-python:
         patterns:

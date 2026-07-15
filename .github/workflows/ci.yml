@@ -7,13 +7,15 @@ on:
   pull_request:
     branches: [main]
 
-# Actions pinned to commit SHAs (version in the trailing comment); Dependabot's
-# github-actions group keeps them current.
+# Actions are pinned to commit SHAs with versions in trailing comments.
+# Dependabot reports available updates; selected pins are recreated and tested
+# on a first-party branch.
 permissions:
   contents: read
 
 jobs:
   test:
+    if: github.actor != 'dependabot[bot]'
     # Run the full suite on every claimed platform (Linux, macOS, Windows) so the
     # cross-platform paths (config dirs, sqlite loader, file sources) are
     # exercised on real hosts, not just assumed. fail-fast off so one OS failing
@@ -58,8 +60,8 @@ jobs:
         if: runner.os == 'Linux'
         run: bash tools/test-write-desktop-entry.sh
 
-      - name: Coverage checker tests
-        run: python -m unittest tools.test_check_lcov tools.test_check_release_version tools.test_desktop_readiness_smoke tools.test_installer_security
+      - name: Coverage checker and policy tests
+        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_installer_security
 
       - name: Release version consistency
         run: python tools/check_release_version.py

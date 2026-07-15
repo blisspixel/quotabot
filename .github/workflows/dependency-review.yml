@@ -4,13 +4,15 @@ on:
   pull_request:
     branches: [main]
 
-# Actions pinned to commit SHAs (version in the trailing comment); Dependabot's
-# github-actions group keeps them current.
+# Actions are pinned to commit SHAs with versions in trailing comments.
+# Dependabot reports available updates; selected pins are recreated and tested
+# on a first-party branch.
 permissions:
   contents: read
 
 jobs:
   dependency-review:
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

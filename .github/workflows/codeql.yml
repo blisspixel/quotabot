@@ -8,8 +8,9 @@ on:
   schedule:
     - cron: "37 16 * * 2"
 
-# Actions pinned to commit SHAs (version in the trailing comment); Dependabot's
-# github-actions group keeps them current.
+# Actions are pinned to commit SHAs with versions in trailing comments.
+# Dependabot reports available updates; selected pins are recreated and tested
+# on a first-party branch.
 permissions:
   actions: read
   contents: read
@@ -17,6 +18,7 @@ permissions:
 
 jobs:
   analyze-python:
+    if: github.actor != 'dependabot[bot]'
     name: Analyze Python
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -37,6 +39,7 @@ jobs:
           category: "/language:python"
 
   analyze-typescript:
+    if: github.actor != 'dependabot[bot]'
     name: Analyze TypeScript
     runs-on: ubuntu-latest
     timeout-minutes: 15

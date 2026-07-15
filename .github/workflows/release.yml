@@ -16,8 +16,9 @@ on:
 
 # Least privilege by default; jobs widen only what they need. Actions are
 # pinned to commit SHAs (version in the trailing comment) so a repointed tag
-# cannot inject a compromised action into the artifact build path. Dependabot's
-# github-actions group keeps the pins current.
+# cannot inject a compromised action into the artifact build path. Dependabot
+# reports available updates; selected pins are recreated and tested on a
+# first-party branch.
 permissions:
   contents: read
 

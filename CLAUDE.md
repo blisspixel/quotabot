@@ -30,8 +30,8 @@ new ones.
 
 ## No em-dashes or en-dashes
 
-Use a plain hyphen with spaces ` - ` for an aside. Never `—` or `–`, in code,
-comments, commits, docs, or UI copy.
+Use a plain hyphen with spaces ` - ` for an aside. Never use em-dash or en-dash
+Unicode punctuation in code, comments, commits, docs, or UI copy.
 
 ## Reads cost zero usage tokens
 
@@ -42,6 +42,15 @@ usage tokens. Metadata endpoints only.
 
 Read host-owned credentials and state without modifying them. Never write to
 another application's credential or state files.
+
+## Dependabot is advisory only
+
+Never merge, amend, or reuse a Dependabot branch. Review the signal, recreate
+any selected update from current `main` on a first-party branch with the native
+package manager, inspect upstream release and security notes, regenerate the
+lockfile, and run the full project gates. Advisory intake keeps the closed pull
+request as the warning record and deletes its bot branch. If that automation
+fails, close the pull request and delete the bot branch manually.
 
 ---
 
