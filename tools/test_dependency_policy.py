@@ -58,6 +58,10 @@ class DependencyPolicyTest(unittest.TestCase):
             with self.subTest(update=identity):
                 self.assertRegex(
                     body,
+                    r'(?m)^    target-branch: "main"$',
+                )
+                self.assertRegex(
+                    body,
                     r"(?m)^    open-pull-requests-limit: 1$",
                 )
                 self.assertRegex(
