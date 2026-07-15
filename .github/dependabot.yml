@@ -15,6 +15,8 @@ updates:
       timezone: "America/Los_Angeles"
     open-pull-requests-limit: 1
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "advisory(deps)"
     labels:
       - "dependencies"
       - "advisory-only"
@@ -32,6 +34,8 @@ updates:
       timezone: "America/Los_Angeles"
     open-pull-requests-limit: 1
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "advisory(deps)"
     labels:
       - "dependencies"
       - "advisory-only"
@@ -49,6 +53,8 @@ updates:
       timezone: "America/Los_Angeles"
     open-pull-requests-limit: 1
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "advisory(deps)"
     labels:
       - "dependencies"
       - "advisory-only"
@@ -66,6 +72,8 @@ updates:
       timezone: "America/Los_Angeles"
     open-pull-requests-limit: 1
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "advisory(deps)"
     labels:
       - "dependencies"
       - "advisory-only"
@@ -83,6 +91,8 @@ updates:
       timezone: "America/Los_Angeles"
     open-pull-requests-limit: 1
     rebase-strategy: "disabled"
+    commit-message:
+      prefix: "advisory(deps)"
     labels:
       - "dependencies"
       - "advisory-only"
