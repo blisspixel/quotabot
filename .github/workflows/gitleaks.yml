@@ -5,8 +5,9 @@ name: Secret scan
 # Reuses the repository .gitleaks.toml (which allowlists the two public,
 # non-confidential Google installed-app OAuth client secrets). gitleaks is
 # pinned by version and verified against its published checksum. Actions are
-# pinned to commit SHAs (version in the trailing comment); Dependabot's
-# github-actions group keeps them current.
+# pinned to commit SHAs with versions in trailing comments. Dependabot reports
+# available updates; selected pins are recreated and tested on a first-party
+# branch.
 
 on:
   push:
@@ -19,6 +20,7 @@ permissions:
 
 jobs:
   gitleaks:
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

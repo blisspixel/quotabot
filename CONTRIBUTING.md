@@ -61,6 +61,32 @@ Guidelines:
   and degrade gracefully (return account/plan with an explanatory note rather
   than throwing) when live data is unavailable.
 
+## Dependency updates
+
+Dependabot pull requests are advisory signals, not merge candidates. For every
+selected dependency update:
+
+1. Read the upstream release notes, security advisory when applicable, and
+   breaking-change or runtime requirements.
+2. Create a first-party branch from current `main`. Never merge, amend, or reuse
+   the Dependabot branch or commit.
+3. Apply the update with the ecosystem's native package manager so manifests and
+   lockfiles are regenerated from trusted inputs. Keep GitHub Actions pinned to
+   full commit SHAs with the version in a trailing comment.
+4. Review the complete transitive diff, licensing or maintainer changes, and any
+   new install scripts or platform packages.
+5. Run the relevant format, analysis, unit, coverage, packaging, integration,
+   dependency-review, and security gates before merging.
+6. Confirm advisory intake retained the closed pull request as the warning
+   record and deleted its branch. If intake failed, close the pull request and
+   delete the bot branch manually.
+
+Dependabot rebases are disabled and each ecosystem is limited to one open
+advisory so warnings stay bounded while selected upgrades remain deliberate.
+Dependabot-triggered CI jobs are skipped. A trusted second-stage workflow reads
+only GitHub metadata, adds the advisory record, closes the pull request, and
+removes its transient bot branch without checking out or executing bot code.
+
 ## Add a provider in 10 minutes
 
 Use this checklist for every provider adapter:

@@ -29,6 +29,13 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 - No em-dashes or en-dashes. Use a spaced hyphen ` - `.
 - Quota and routing reads spend zero usage tokens and never read prompts or
   code. Never modify a host application's credential or state files.
+- Dependabot pull requests are advisory only. Never merge, amend, or reuse a
+  Dependabot branch. Review the signal, recreate any selected update from
+  current `main` on a first-party branch with the native package manager,
+  inspect upstream changes, and run the full project gates. Advisory intake
+  keeps the closed pull request as the warning record and deletes its bot
+  branch. If that automation fails, close the pull request and delete the bot
+  branch manually.
 
 ## Set it up from source (humans or agents)
 
