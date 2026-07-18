@@ -13,6 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstallerSecurityTests(unittest.TestCase):
+    def test_install_smoke_uses_the_demo_environment_contract(self) -> None:
+        smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("--demo", smoke)
+        self.assertEqual(smoke.count("doctor --json"), 5)
+        clean_install = smoke.split("  clean-install:\n", 1)[1].split(
+            "  upgrade-and-setup:\n", 1
+        )[0]
+        upgrade_and_setup = smoke.split("  upgrade-and-setup:\n", 1)[1]
+        for job in (clean_install, upgrade_and_setup):
+            with self.subTest(job=job.splitlines()[0]):
+                header = job.split("    steps:\n", 1)[0]
+                self.assertIn("QUOTABOT_DEMO: '1'", header)
+
     def test_windows_installer_requires_checksum_sidecar(self) -> None:
         script = (ROOT / "install.ps1").read_text(encoding="utf-8")
 
