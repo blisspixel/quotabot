@@ -32,7 +32,14 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn(
             "needs: [create-release, build, verify-desktop-release]", workflow
         )
-        self.assertIn("needs: audit-release-assets", workflow)
+        publish_job = workflow.split("  publish-release:\n", 1)[1]
+        for gate in (
+            "audit-release-assets",
+            "quality-gate",
+            "codeql-gate",
+            "secret-scan-gate",
+        ):
+            self.assertIn(f"      - {gate}", publish_job)
         self.assertIn("Refusing to replace assets on published release", workflow)
         for asset in (
             "release/quotabot-windows-x64-desktop.zip",
@@ -49,6 +56,51 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("sha256sum --check", audit_job)
         self.assertEqual(audit_job.count("python tools/verify_desktop_archive.py"), 3)
         self.assertIn("gh attestation verify", audit_job)
+
+    def test_release_runs_exact_tag_quality_and_security_gates(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        codeql = (ROOT / ".github" / "workflows" / "codeql.yml").read_text(
+            encoding="utf-8"
+        )
+        gitleaks = (ROOT / ".github" / "workflows" / "gitleaks.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("uses: ./.github/workflows/ci.yml", release)
+        self.assertIn("uses: ./.github/workflows/codeql.yml", release)
+        self.assertIn("uses: ./.github/workflows/gitleaks.yml", release)
+        self.assertIn("security-events: write", release)
+        for reusable in (ci, codeql, gitleaks):
+            self.assertIn("  workflow_call:", reusable.split("jobs:", 1)[0])
+
+        create_release = release.split("  create-release:\n", 1)[1].split(
+            "  build:\n", 1
+        )[0]
+        for gate in (
+            "preflight",
+            "quality-gate",
+            "codeql-gate",
+            "secret-scan-gate",
+        ):
+            self.assertIn(f"      - {gate}", create_release)
+
+    def test_release_rejects_a_tagged_commit_outside_main(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        preflight = release.split("  preflight:\n", 1)[1].split(
+            "  quality-gate:\n", 1
+        )[0]
+
+        self.assertIn("fetch-depth: 0", preflight)
+        self.assertIn("refs/remotes/origin/main", preflight)
+        self.assertIn("git merge-base --is-ancestor HEAD", preflight)
+        self.assertIn("Release tags must point to a commit on main", preflight)
 
     def test_desktop_archive_is_verified_before_attestation_and_upload(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -97,9 +149,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("quotabot-windows-x64-desktop.zip", windows)
         self.assertIn("$archive.sha256", windows)
         self.assertIn("quotabot-linux-$arch-desktop.tar.gz", linux)
-        self.assertIn('> "$out.sha256"', linux)
+        self.assertIn('> "$temporary_sidecar"', linux)
+        self.assertIn("publish_package_pair", linux)
         self.assertIn("quotabot-darwin-$arch-desktop.zip", macos)
-        self.assertIn('> "$out.sha256"', macos)
+        self.assertIn('> "$temporary_sidecar"', macos)
+        self.assertIn("publish_package_pair", macos)
 
     def test_normal_ci_builds_and_verifies_native_desktop_archives(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(

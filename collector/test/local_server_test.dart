@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -127,6 +128,38 @@ void main() {
       );
       expect(wrongMethod.status, 405);
       expect(wrongMethod.body['error'], 'method not allowed');
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('snapshot throttle age starts after a slow collection completes',
+      () async {
+    var current = _now;
+    var collections = 0;
+    final collectionStarted = Completer<void>();
+    final collectionResult = Completer<List<ProviderQuota>>();
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () {
+        collections += 1;
+        collectionStarted.complete();
+        return collectionResult.future;
+      },
+      now: () => current,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final firstRequest = _getJson(Uri.parse('$base/'));
+      await collectionStarted.future;
+      current += 10;
+      collectionResult.complete([_q('claude', 20)]);
+
+      final first = await firstRequest;
+      expect(first['providers'], hasLength(1));
+      final second = await _getJson(Uri.parse('$base/suggest'));
+      expect((second['recommended'] as Map)['provider'], 'claude');
+      expect(collections, 1);
     } finally {
       await server.close(force: true);
     }
@@ -262,6 +295,48 @@ void main() {
         Uri.parse('http://127.0.0.1:${server.port}/suggest?task=simple'),
       );
       expect((simpleRoute['recommended'] as Map)['provider'], 'antigravity');
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('local /suggest rejects malformed routing constraints', () async {
+    var collections = 0;
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async {
+        collections += 1;
+        return [_q('claude', 20)];
+      },
+      now: () => _now,
+    );
+    try {
+      final cases = {
+        'min_context=garbage': 'min_context',
+        'min_context=0': 'min_context',
+        'tier_floor=banana': 'tier_floor',
+        'tier_ceiling=': 'tier_ceiling',
+        'tier_floor=flagship&tier_ceiling=light': 'tier_floor cannot be higher',
+        'task=banana': 'task profile',
+        'require_tools=perhaps': 'require_tools',
+        'budget=': 'budget policy',
+        'local_first=perhaps': 'local_first',
+        'local_frist=true': 'unknown query parameter: local_frist',
+      };
+      for (final entry in cases.entries) {
+        final response = await _requestJson(
+          Uri.parse(
+            'http://127.0.0.1:${server.port}/suggest?${entry.key}',
+          ),
+        );
+        expect(response.status, 400, reason: entry.key);
+        expect(
+          response.body['error'],
+          contains(entry.value),
+          reason: entry.key,
+        );
+      }
+      expect(collections, 0);
     } finally {
       await server.close(force: true);
     }

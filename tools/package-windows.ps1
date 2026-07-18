@@ -11,6 +11,13 @@ $root = Split-Path -Parent $scriptDir
 $appDir = Join-Path $root 'app'
 $releaseRoot = Join-Path $root 'release'
 . (Join-Path $scriptDir 'windows-build-prereqs.ps1')
+. (Join-Path $scriptDir 'windows-architecture.ps1')
+. (Join-Path $scriptDir 'package-pair.ps1')
+
+$windowsArch = Get-QuotabotWindowsArchitecture
+if ($windowsArch -ne 'x64') {
+  throw "Windows desktop release packaging currently supports x64 only, not $windowsArch. Refusing to label a different build as x64."
+}
 
 # Find flutter on PATH so this builds on any machine.
 $flutter = (Get-Command flutter -ErrorAction SilentlyContinue).Source
@@ -48,12 +55,29 @@ if (-not $NoArchive) {
   $asset = 'quotabot-windows-x64-desktop.zip'
   $archive = Join-Path $releaseRoot $asset
   $sidecar = "$archive.sha256"
-  Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $sidecar -Force -ErrorAction SilentlyContinue
+  $packageWorkspace = Join-Path $releaseRoot ".quotabot-package-$([guid]::NewGuid())"
+  $temporaryArchive = Join-Path $packageWorkspace $asset
+  $temporarySidecar = "$temporaryArchive.sha256"
+  New-Item -ItemType Directory -Force -Path $packageWorkspace | Out-Null
+  try {
+    Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $temporaryArchive
+    $archiveHash = (Get-FileHash -Algorithm SHA256 $temporaryArchive).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath $temporarySidecar -Value "$archiveHash  $asset" -NoNewline
 
-  Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $archive
-  $archiveHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-  Set-Content -LiteralPath $sidecar -Value "$archiveHash  $asset" -NoNewline
+    # Activate both complete files as one rollback-protected package pair.
+    Publish-QuotabotPackagePair `
+      -TemporaryArchive $temporaryArchive `
+      -TemporarySidecar $temporarySidecar `
+      -Archive $archive `
+      -Sidecar $sidecar `
+      -Workspace $packageWorkspace
+  } finally {
+    if (Test-Path -LiteralPath (Join-Path $packageWorkspace '.preserve')) {
+      Write-Warning "Package recovery files were preserved in $packageWorkspace"
+    } else {
+      Remove-Item -LiteralPath $packageWorkspace -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
 
   Write-Host "Archive ready: $archive"
   Write-Host "Checksum: $sidecar"

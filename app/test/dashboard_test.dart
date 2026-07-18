@@ -49,6 +49,36 @@ ProviderQuota _historyPoint(double usedPercent) => ProviderQuota(
   windows: [QuotaWindow(label: '5h', usedPercent: usedPercent)],
 );
 
+List<ProviderQuota> _multiAccountClaude(int now) => [
+  ProviderQuota(
+    provider: 'claude',
+    displayName: 'Claude',
+    account: 'personal@example.com',
+    asOf: now,
+    windows: [
+      QuotaWindow(label: 'weekly', usedPercent: 25, resetsAt: now + 86400),
+    ],
+  ),
+  ProviderQuota(
+    provider: 'claude',
+    displayName: 'Claude',
+    account: 'work@example.com',
+    asOf: now,
+    windows: [
+      QuotaWindow(label: 'weekly', usedPercent: 50, resetsAt: now + 86400),
+    ],
+  ),
+];
+
+List<String> _providerMenuValues(WidgetTester tester) => tester
+    .widgetList<CheckedPopupMenuItem<String>>(
+      find.byType(CheckedPopupMenuItem<String>),
+    )
+    .map((item) => item.value)
+    .whereType<String>()
+    .where((value) => value.startsWith('show:'))
+    .toList();
+
 double _contrastRatio(Color foreground, Color background) {
   final foregroundLuminance = foreground.computeLuminance();
   final backgroundLuminance = background.computeLuminance();
@@ -263,6 +293,161 @@ void main() {
     );
   }
 
+  testWidgets('provider setup refreshes live state from any matching account', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final stale = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'old@example.com',
+      asOf: now - 300,
+      stale: true,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 60, resetsAt: now + 86400),
+      ],
+    );
+    final fresh = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'fresh@example.com',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    var collections = 0;
+    var connections = 0;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false),
+          demoMode: false,
+          collector: () async {
+            collections++;
+            return collections == 1 ? [stale] : [stale, fresh];
+          },
+          providerConnector: (provider) async {
+            expect(provider, 'grok');
+            connections++;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(collections, 1);
+
+    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.pumpAndSettle();
+    final dialog = find.byType(Dialog);
+    expect(
+      find.descendant(of: dialog, matching: find.text('cached')),
+      findsOneWidget,
+    );
+    final connect = find.descendant(
+      of: dialog,
+      matching: find.widgetWithText(TextButton, 'Connect'),
+    );
+    expect(connect, findsOneWidget);
+
+    await tester.tap(connect);
+    await tester.pumpAndSettle();
+
+    expect(connections, 1);
+    expect(collections, 2);
+    expect(find.text('Grok connected'), findsOneWidget);
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(
+      find.descendant(of: dialog, matching: find.text('live')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: dialog,
+        matching: find.widgetWithText(TextButton, 'Connect'),
+      ),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('provider connect recollects after an active refresh', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final stale = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'test@example.com',
+      asOf: now - 300,
+      stale: true,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 60, resetsAt: now + 86400),
+      ],
+    );
+    final fresh = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'test@example.com',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    final activeRefresh = Completer<List<ProviderQuota>>();
+    var collections = 0;
+    var connections = 0;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false),
+          demoMode: false,
+          collector: () {
+            collections++;
+            if (collections == 1) return Future.value([stale]);
+            if (collections == 2) return activeRefresh.future;
+            return Future.value([fresh]);
+          },
+          providerConnector: (provider) async {
+            expect(provider, 'grok');
+            connections++;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.pump();
+    expect(collections, 2);
+
+    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.pumpAndSettle();
+    final connect = find.descendant(
+      of: find.byType(Dialog),
+      matching: find.widgetWithText(TextButton, 'Connect'),
+    );
+    await tester.tap(connect);
+    await tester.pump();
+    expect(connections, 1);
+    expect(collections, 2);
+
+    activeRefresh.complete([stale]);
+    await tester.pumpAndSettle();
+
+    expect(collections, 3);
+    expect(find.text('Grok connected'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('failed secure preference save stays visible and actionable', (
     tester,
   ) async {
@@ -331,6 +516,44 @@ void main() {
       findsOneWidget,
     );
     expect(find.bySemanticsLabel(warning), findsOneWidget);
+  });
+
+  testWidgets('profile delete failure is bounded and keeps the profile', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    const work = QuotaProfile(name: 'work', providers: {'grok'});
+    var deleteAttempts = 0;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(activeProfile: 'work', enableNotifications: false),
+          testProfiles: [QuotaProfile.defaultProfile(), work],
+          profileDeleter: (_) {
+            deleteAttempts++;
+            throw StateError('private-profile-path');
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _selectMenuValue(tester, 'profiles:manage');
+    expect(find.text('Profiles'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+
+    expect(deleteAttempts, 1);
+    expect(find.text('Could not delete profile.'), findsOneWidget);
+    expect(find.textContaining('private-profile-path'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await _selectMenuValue(tester, 'profiles:manage');
+    expect(find.text('Delete'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('demo dashboard exercises quota, compact, and analytics views', (
@@ -487,6 +710,76 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('hidden account mode uses one private provider control', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, showAccounts: false),
+          demoMode: false,
+          collector: () async => _multiAccountClaude(now),
+          testProfiles: [QuotaProfile.defaultProfile()],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(ProviderTile), findsNWidgets(2));
+    expect(find.text('personal@example.com'), findsNothing);
+    expect(find.text('work@example.com'), findsNothing);
+
+    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.pumpAndSettle();
+    expect(_providerMenuValues(tester), ['show:claude']);
+    expect(find.text('personal@example.com'), findsNothing);
+    expect(find.text('work@example.com'), findsNothing);
+
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pumpAndSettle();
+    await _selectMenuValue(tester, 'show:claude');
+    expect(find.byType(ProviderTile), findsNothing);
+    await _selectMenuValue(tester, 'show:claude');
+    expect(find.byType(ProviderTile), findsNWidgets(2));
+  });
+
+  testWidgets('visible account mode keeps per-account headers and controls', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, showAccounts: true),
+          demoMode: false,
+          collector: () async => _multiAccountClaude(now),
+          testProfiles: [QuotaProfile.defaultProfile()],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('personal@example.com'), findsOneWidget);
+    expect(find.text('work@example.com'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.pumpAndSettle();
+    expect(_providerMenuValues(tester), [
+      'show:claude|personal@example.com',
+      'show:claude|work@example.com',
+    ]);
+
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pumpAndSettle();
+    await _selectMenuValue(tester, 'show:claude|work@example.com');
+    expect(find.byType(ProviderTile), findsOneWidget);
   });
 
   testWidgets('initial refresh failure leaves an actionable dashboard', (

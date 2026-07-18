@@ -9,6 +9,7 @@ root="$(cd "$script_dir/.." && pwd)"
 collector_dir="$root/collector"
 release_dir="$root/release"
 build_dir="$collector_dir/build/quotabot_cli_release"
+. "$script_dir/package-pair.sh"
 
 if ! command -v dart >/dev/null 2>&1; then
   echo "dart not found on PATH. Install Flutter or Dart and add it to PATH." >&2
@@ -42,15 +43,32 @@ if [ ! -f "$bundle/bin/collect" ]; then
   exit 1
 fi
 mv "$bundle/bin/collect" "$bundle/bin/quotabot"
-rm -f "$out" "$out.sha256"
-tar -C "$bundle" -czf "$out" .
+package_workspace="$(mktemp -d "$release_dir/.quotabot-package.XXXXXX")"
+cleanup_package() {
+  if [[ -e "$package_workspace/.preserve" ]]; then
+    echo "Package recovery files were preserved in $package_workspace" >&2
+  else
+    rm -rf "$package_workspace"
+  fi
+}
+trap cleanup_package EXIT
+temporary_out="$package_workspace/$asset"
+temporary_sidecar="$package_workspace/$asset.sha256"
+tar -C "$bundle" -czf "$temporary_out" .
 
 if command -v sha256sum >/dev/null 2>&1; then
-  hash="$(sha256sum "$out" | awk '{print tolower($1)}')"
+  hash="$(sha256sum "$temporary_out" | awk '{print tolower($1)}')"
 else
-  hash="$(shasum -a 256 "$out" | awk '{print tolower($1)}')"
+  hash="$(shasum -a 256 "$temporary_out" | awk '{print tolower($1)}')"
 fi
-printf '%s  %s' "$hash" "$asset" > "$out.sha256"
+printf '%s  %s' "$hash" "$asset" > "$temporary_sidecar"
+
+# Activate both complete files as one rollback-protected package pair.
+publish_package_pair \
+  "$temporary_out" "$temporary_sidecar" "$out" "$out.sha256" \
+  "$package_workspace"
+trap - EXIT
+rm -rf "$package_workspace"
 
 echo "CLI asset ready: $out"
 echo "Checksum: $out.sha256"

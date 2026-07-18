@@ -10,6 +10,7 @@ name: Secret scan
 # branch.
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:

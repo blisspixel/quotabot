@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
@@ -96,5 +97,22 @@ void main() {
     );
     expect(resp.statusCode, 200);
     expect(await capture.code, 'abc123');
+  });
+
+  test('closing a loopback capture releases its port immediately', () async {
+    final capture = await startLoopbackCodeCapture(
+      path: '/cb',
+      expectedState: 'xyz',
+    );
+    final cancelled = expectLater(capture.code, throwsA(isA<StateError>()));
+
+    await capture.close();
+    await cancelled;
+
+    final rebound = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      capture.port,
+    );
+    await rebound.close(force: true);
   });
 }

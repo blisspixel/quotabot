@@ -9,7 +9,11 @@ import 'package:crypto/crypto.dart';
 typedef Pkce = ({String verifier, String challenge});
 
 /// A bound one-shot loopback capture and the port it is listening on.
-typedef LoopbackCodeCapture = ({int port, Future<String> code});
+typedef LoopbackCodeCapture = ({
+  int port,
+  Future<String> code,
+  Future<void> Function() close,
+});
 
 final _rng = Random.secure();
 
@@ -63,31 +67,43 @@ Future<String> captureLoopbackCode({
   required String path,
   required String expectedState,
 }) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-  return _captureFromServer(server, path: path, expectedState: expectedState);
+  final capture = await startLoopbackCodeCapture(
+    port: port,
+    path: path,
+    expectedState: expectedState,
+  );
+  return capture.code;
 }
 
 /// Binds a one-shot loopback capture on an OS-selected port and keeps it bound.
 /// Use this for OAuth login flows so another local process cannot win the port
 /// between choosing it and opening the browser.
 Future<LoopbackCodeCapture> startLoopbackCodeCapture({
+  int port = 0,
   required String path,
   required String expectedState,
 }) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+  final capture = _captureFromServer(
+    server,
+    path: path,
+    expectedState: expectedState,
+  );
   return (
     port: server.port,
-    code: _captureFromServer(server, path: path, expectedState: expectedState),
+    code: capture.code,
+    close: capture.close,
   );
 }
 
-Future<String> _captureFromServer(
+({Future<String> code, Future<void> Function() close}) _captureFromServer(
   HttpServer server, {
   required String path,
   required String expectedState,
-}) async {
+}) {
   final completer = Completer<String>();
   late final StreamSubscription<HttpRequest> sub;
+  late final Future<String> code;
   var closed = false;
 
   Future<void> closeOnce() async {
@@ -95,6 +111,18 @@ Future<String> _captureFromServer(
     closed = true;
     await sub.cancel();
     await server.close(force: true);
+  }
+
+  Future<void> cancel() async {
+    if (!completer.isCompleted) {
+      // Register an error listener before cancellation so callers that are
+      // unwinding before they awaited [code] do not leave an unhandled future.
+      unawaited(code.then<void>((_) {}, onError: (_, __) {}));
+      completer.completeError(
+        StateError('authorization callback capture cancelled'),
+      );
+    }
+    await closeOnce();
   }
 
   sub = server.listen((req) async {
@@ -138,7 +166,8 @@ Future<String> _captureFromServer(
     }
   });
 
-  return completer.future
+  code = completer.future
       .timeout(const Duration(minutes: 5))
       .whenComplete(closeOnce);
+  return (code: code, close: cancel);
 }

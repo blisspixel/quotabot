@@ -68,9 +68,9 @@ class OpenAiAuth {
     // Bind the fixed port the public client allow-lists. If it is already in
     // use (a Codex login in flight, say), surface a clear error rather than
     // silently capturing on the wrong port.
-    final Future<String> codeFuture;
+    final LoopbackCodeCapture capture;
     try {
-      codeFuture = captureLoopbackCode(
+      capture = await startLoopbackCodeCapture(
         port: _redirectPort,
         path: _redirectPath,
         expectedState: state,
@@ -97,9 +97,15 @@ class OpenAiAuth {
       },
     ).toString();
 
-    showUrl(authUrl);
-    await openInBrowser(authUrl);
-    final code = await codeFuture;
+    late final String code;
+    try {
+      showUrl(authUrl);
+      await openInBrowser(authUrl);
+      code = await capture.code;
+    } catch (_) {
+      await capture.close();
+      rethrow;
+    }
 
     final json = await _post({
       'grant_type': 'authorization_code',

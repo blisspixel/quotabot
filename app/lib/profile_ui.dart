@@ -119,6 +119,7 @@ QuotaProfile profileFromSelection({
   required Set<String> hiddenProviders,
   required ProfileRoutingPolicy routingPolicy,
   required ProviderSort sort,
+  List<String> preferenceOrder = const [],
   String? theme,
 }) {
   final allProviders = options.map((option) => option.provider).toSet();
@@ -143,6 +144,7 @@ QuotaProfile profileFromSelection({
     accounts: accounts,
     hiddenProviders: hiddenProviders,
     routingPolicy: routingPolicy,
+    preferenceOrder: preferenceOrder,
     theme: theme == null ? null : storedAppTheme(theme),
     sort: sort.name,
   );

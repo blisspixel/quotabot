@@ -80,7 +80,7 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.9.1**, is best
+The current line, **0.9.2**, is best
 understood as having closed the first three milestones of the ladder below:
 the truthful substrate (0.6), one calibrated forecast behind a single decision
 core (0.7), and the self-tuning calibration moat (0.8). The core product
@@ -98,7 +98,7 @@ until the remaining 1.0 trust gates close.
 | Installation and update | Partial | CLI archives and installers plus native portable desktop archives, required checksums, attestations, exact-asset and clean-runner lifecycle barriers, source setup, lifecycle docs, and a three-OS smoke workflow exist | Sign and notarize desktop apps and record one green tagged clean-host lifecycle run |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation, backed by the content-blind decision receipt and setup recovery guidance | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
 | Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, structured errors, `verify`, and `explain` exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Open | 0.5.14 release artifacts and provenance have been exercised | Run the true 1.0 tag-candidate workflow, install its artifacts on clean native hosts, then cut 1.0 |
+| Release rehearsal | Open | 0.9.1 release artifacts and provenance have been exercised | Run the true 1.0 tag-candidate workflow, install its artifacts on clean native hosts, then cut 1.0 |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -235,8 +235,21 @@ provider, before a forecast is built on top of it.
   durable state and routing resolution. The map is empty until a real rename
   ships (identity, zero behavior change), and guard tests keep it one-way and
   stop it shadowing a live provider. Remaining: an on-disk migration so cached
-  snapshots, history, and analytics buckets written under the old id carry
-  forward rather than regenerating from live reads after a rename.
+  snapshots, history, and analytics buckets written under the old provider id
+  carry forward rather than regenerating from live reads after a rename.
+- **Done:** new account-scoped snapshots, drift records, history, analytics
+  buckets, evidence locks, and lease grouping use collision-resistant opaque
+  account keys. During a one-way upgrade, exact-account legacy evidence remains
+  readable, snapshot scans deduplicate canonical and legacy copies, and an
+  ambiguous legacy bucket file can be claimed by only one verified identity.
+- **Remaining:** mixed-version concurrent writes and downgrades are not a
+  synchronization protocol. Once canonical history or bucket files exist, an
+  older binary can still append to a legacy path that canonical readers do not
+  merge. Safe aggregate reconciliation needs versioned baseline or generation
+  metadata; without it, merging can double-count the shared legacy samples while
+  choosing either file can discard newer samples. Stop
+  older quotabot processes before upgrading, and do not run an older build
+  against migrated state.
 - Pin every remaining supported response shape with sanitized fixtures.
 - **Done:** Antigravity weekly-window semantics resolved from live evidence. The
   Cloud Code endpoint reports each model's single binding limit with no window
@@ -252,7 +265,9 @@ provider, before a forecast is built on top of it.
   local-only or free execution. Never estimate throughput by generating content.
 - Grant implementation and deterministic expired-host-token fall-through
   fixtures are shipped for Claude and Codex. Remaining: validate the connected
-  login flows on idle real-account machines.
+  login flows on idle real-account machines, and find a provider-backed stable
+  identity for two Claude accounts on the same subscription tier before
+  automatic same-tier multi-account cache separation can be promised.
 - Keep the LiteLLM loopback, bearer-auth, and unauthenticated-denial regression
   green as its pinned dependency changes.
 - Already shipped on 0.5.x: the normalized six-value `source_class` contract

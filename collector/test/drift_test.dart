@@ -469,6 +469,101 @@ void main() {
       expect(rejected.driftReason, contains('not admitted for claude'));
     });
 
+    test('invalid model quota is quarantined behind trusted evidence', () {
+      final previous = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: 100,
+        windows: [win('weekly', 40, 5000)],
+        modelQuotas: const [
+          ModelQuota(model: 'Gemini', usedPercent: 40, resetsAt: 5000),
+        ],
+      );
+      final invalid = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: 200,
+        windows: [win('weekly', 45, 5000)],
+        modelQuotas: const [
+          ModelQuota(model: 'Gemini', usedPercent: -1, resetsAt: 5000),
+        ],
+      );
+
+      expect(isTrustedQuotaEvidence(invalid), isFalse);
+      final admission = admitQuotaEvidence(
+        invalid,
+        previous,
+        observedAt: 210,
+      );
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('percent outside 0..100'));
+      expect(admission.snapshot.stale, isTrue);
+      expect(admission.snapshot.modelQuotas.single.usedPercent, 40);
+    });
+
+    test('malformed model quota cannot establish a trusted baseline', () {
+      final invalid = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: 200,
+        windows: [win('weekly', 45, 5000)],
+        modelQuotas: const [
+          ModelQuota(model: '', usedPercent: double.nan, resetsAt: -1),
+        ],
+      );
+
+      final admission = admitQuotaEvidence(invalid, null, observedAt: 210);
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('invalid model identifier'));
+      expect(admission.snapshot.ok, isFalse);
+      expect(admission.snapshot.windows, isEmpty);
+      expect(admission.snapshot.modelQuotas, isEmpty);
+    });
+
+    test('implausibly distant model reset is not trusted', () {
+      final invalid = ProviderQuota(
+        provider: antigravityProviderId,
+        displayName: 'Antigravity',
+        account: 'a',
+        asOf: 200,
+        windows: [win('weekly', 45, 5000)],
+        modelQuotas: const [
+          ModelQuota(
+            model: 'Gemini',
+            usedPercent: 20,
+            resetsAt: 50000000,
+          ),
+        ],
+      );
+
+      expect(isTrustedQuotaEvidenceAt(invalid, 210), isFalse);
+      final admission = admitQuotaEvidence(invalid, null, observedAt: 210);
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('implausibly far'));
+    });
+
+    test('unknown model percent does not poison trusted provider evidence', () {
+      final evidence = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'a',
+        asOf: 200,
+        windows: [win('weekly', 45, 5000)],
+        modelQuotas: const [
+          ModelQuota(model: 'Fable', resetsAt: 5000),
+        ],
+      );
+
+      expect(isTrustedQuotaEvidenceAt(evidence, 210), isTrue);
+      final admission = admitQuotaEvidence(evidence, null, observedAt: 210);
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.driftReason, isNull);
+      expect(admission.snapshot.modelQuotas.single.usedPercent, isNull);
+    });
+
     test('legacy suspect evidence cannot be laundered by a repeated read', () {
       final legacy = evidence(used: 10, asOf: 100)
           .withSuspect('5h usage fell without a reset');

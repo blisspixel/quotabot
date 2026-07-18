@@ -11,6 +11,7 @@ from mcp.client.streamable_http import streamable_http_client
 from quotabot_mcp_common import (
     as_pretty_json,
     require_routing_tools,
+    require_loopback_mcp_url,
     routing_summary,
     structured_content,
 )
@@ -24,12 +25,14 @@ def bearer_headers() -> dict[str, str]:
 
 
 async def main() -> int:
-    url = os.environ.get("QUOTABOT_MCP_URL", DEFAULT_MCP_URL)
+    raw_url = os.environ.get("QUOTABOT_MCP_URL", DEFAULT_MCP_URL)
     task = os.environ.get("QUOTABOT_TASK", "standard")
 
     try:
+        url = require_loopback_mcp_url(raw_url)
+        headers = bearer_headers()
         timeout = httpx.Timeout(10.0, read=60.0)
-        async with httpx.AsyncClient(headers=bearer_headers(), timeout=timeout) as client:
+        async with httpx.AsyncClient(headers=headers, timeout=timeout) as client:
             async with streamable_http_client(url, http_client=client) as (
                 read_stream,
                 write_stream,

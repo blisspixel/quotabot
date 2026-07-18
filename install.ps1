@@ -5,6 +5,7 @@
 .DESCRIPTION
     Downloads the latest Windows CLI release asset from GitHub.
     Requires and verifies the release asset's .sha256 sidecar.
+    Set QUOTABOT_VERSION to an exact vMAJOR.MINOR.PATCH tag for rollback.
 
 .EXAMPLE
     # From PowerShell (run as normal user):
@@ -15,31 +16,135 @@ $ErrorActionPreference = 'Stop'
 
 Write-Host "=== quotabot installer ==="
 
+function Install-QuotabotPayload {
+    param(
+        [Parameter(Mandatory)][string]$SourceRoot,
+        [Parameter(Mandatory)][string]$InstallRoot
+    )
+
+    New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+    $transaction = [guid]::NewGuid().ToString('N')
+    $binDst = Join-Path $InstallRoot 'bin'
+    $libDst = Join-Path $InstallRoot 'lib'
+    $stagedBin = Join-Path $InstallRoot ".quotabot-bin-new-$transaction"
+    $stagedLib = Join-Path $InstallRoot ".quotabot-lib-new-$transaction"
+    $backupBin = Join-Path $InstallRoot ".quotabot-bin-previous-$transaction"
+    $backupLib = Join-Path $InstallRoot ".quotabot-lib-previous-$transaction"
+    $binBackedUp = $false
+    $libBackedUp = $false
+    $binInstalled = $false
+    $libInstalled = $false
+    $lockPath = Join-Path $InstallRoot '.quotabot-install.lock'
+    $installLock = $null
+
+    try {
+        Copy-Item -LiteralPath (Join-Path $SourceRoot 'bin') -Destination $stagedBin -Recurse
+        Copy-Item -LiteralPath (Join-Path $SourceRoot 'lib') -Destination $stagedLib -Recurse
+        if (-not (Test-Path -LiteralPath (Join-Path $stagedBin 'quotabot.exe') -PathType Leaf)) {
+            throw 'Staged payload is missing bin\quotabot.exe'
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $stagedLib 'sqlite3.dll') -PathType Leaf)) {
+            throw 'Staged payload is missing lib\sqlite3.dll'
+        }
+        try {
+            $installLock = [IO.File]::Open(
+                $lockPath,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None
+            )
+        } catch {
+            throw 'Another quotabot install is already activating a bundle. Re-run after it finishes.'
+        }
+
+        if (Test-Path -LiteralPath $binDst) {
+            Move-Item -LiteralPath $binDst -Destination $backupBin
+            $binBackedUp = $true
+        }
+        if (Test-Path -LiteralPath $libDst) {
+            Move-Item -LiteralPath $libDst -Destination $backupLib
+            $libBackedUp = $true
+        }
+        Move-Item -LiteralPath $stagedBin -Destination $binDst
+        $binInstalled = $true
+        Move-Item -LiteralPath $stagedLib -Destination $libDst
+        $libInstalled = $true
+    } catch {
+        $installError = $_.Exception.Message
+        try {
+            if ($binInstalled -and (Test-Path -LiteralPath $binDst)) {
+                Remove-Item -LiteralPath $binDst -Recurse -Force
+            }
+            if ($libInstalled -and (Test-Path -LiteralPath $libDst)) {
+                Remove-Item -LiteralPath $libDst -Recurse -Force
+            }
+            if ($binBackedUp -and (Test-Path -LiteralPath $backupBin)) {
+                Move-Item -LiteralPath $backupBin -Destination $binDst
+                $binBackedUp = $false
+            }
+            if ($libBackedUp -and (Test-Path -LiteralPath $backupLib)) {
+                Move-Item -LiteralPath $backupLib -Destination $libDst
+                $libBackedUp = $false
+            }
+        } catch {
+            throw "Install failed and rollback was incomplete. Recovery payloads remain under $InstallRoot. Original error: $installError. Rollback error: $($_.Exception.Message)"
+        } finally {
+            Remove-Item -LiteralPath $stagedBin -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $stagedLib -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        throw "Could not replace the existing install; it was left intact or restored. Close any running quotabot process and re-run. ($installError)"
+    } finally {
+        if ($installLock) {
+            $installLock.Dispose()
+        }
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+    }
+
+    foreach ($backup in @($backupBin, $backupLib)) {
+        if (Test-Path -LiteralPath $backup) {
+            try {
+                Remove-Item -LiteralPath $backup -Recurse -Force
+            } catch {
+                Write-Warning "The new install is active, but the previous payload could not be removed: $backup"
+            }
+        }
+    }
+}
+
 $repo = if ($env:QUOTABOT_REPO) { $env:QUOTABOT_REPO } else { "blisspixel/quotabot" }
+$version = if ($env:QUOTABOT_VERSION) { $env:QUOTABOT_VERSION } else { 'latest' }
 if ($repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
     Write-Error "Invalid QUOTABOT_REPO value. Expected owner/repo."
+    exit 1
+}
+if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
+    Write-Error "Invalid QUOTABOT_VERSION value. Expected vMAJOR.MINOR.PATCH."
     exit 1
 }
 $installRoot = "$env:LOCALAPPDATA\quotabot"
 $installDir = Join-Path $installRoot "bin"
 $assetName = "quotabot-windows-x64.zip"
-$downloadPath = Join-Path $env:TEMP "$assetName.download"
-$checksumPath = Join-Path $env:TEMP "$assetName.sha256"
-$extractPath = Join-Path $env:TEMP "quotabot-install-$([guid]::NewGuid())"
+$workPath = Join-Path ([IO.Path]::GetTempPath()) "quotabot-install-$([guid]::NewGuid())"
+$downloadPath = Join-Path $workPath "$assetName.download"
+$checksumPath = Join-Path $workPath "$assetName.sha256"
+$extractPath = Join-Path $workPath 'expanded'
 
 Write-Host "Installing quotabot CLI for Windows (via prebuilt bundle)..."
 
 # Ensure install root exists.
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 
-# Download URL (GitHub latest release)
-$downloadUrl = "https://github.com/$repo/releases/latest/download/$assetName"
+# Download the latest release by default, or one validated exact tag for a
+# reproducible rollback.
+$downloadUrl = if ($version -eq 'latest') {
+    "https://github.com/$repo/releases/latest/download/$assetName"
+} else {
+    "https://github.com/$repo/releases/download/$version/$assetName"
+}
 
 try {
-    Write-Host "Downloading $downloadUrl"
-    Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $workPath | Out-Null
+    Write-Host "Downloading $assetName from $version"
     Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
     $checksumUrl = "$downloadUrl.sha256"
     # A release without a valid checksum sidecar is incomplete. Fail closed
@@ -67,30 +172,13 @@ try {
     if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
         throw "Downloaded archive did not contain lib\sqlite3.dll"
     }
-    # Replace the old install. Do NOT swallow a removal failure: if a running
-    # quotabot holds the exe open, a silenced Remove-Item would leave the old
-    # bin/ in place and Copy-Item would nest the new bundle at bin\bin, so PATH
-    # would keep resolving the stale binary while the installer reports success.
-    $binDst = Join-Path $installRoot "bin"
-    $libDst = Join-Path $installRoot "lib"
-    try {
-        if (Test-Path -LiteralPath $binDst) { Remove-Item -LiteralPath $binDst -Recurse -Force }
-        if (Test-Path -LiteralPath $libDst) { Remove-Item -LiteralPath $libDst -Recurse -Force }
-    } catch {
-        throw "Could not replace the existing install. Close any running quotabot (for example 'quotabot top' or the MCP server) and re-run. ($($_.Exception.Message))"
-    }
-    Copy-Item -LiteralPath (Join-Path $extractPath "bin") -Destination $installRoot -Recurse
-    Copy-Item -LiteralPath (Join-Path $extractPath "lib") -Destination $installRoot -Recurse
+    Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
     Write-Host "Installed to $installRoot"
 } catch {
-    Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
     Write-Error "Install failed: $($_.Exception.Message). Make sure the release publishes '$assetName' and its required .sha256 sidecar at https://github.com/$repo/releases"
     exit 1
 } finally {
-    Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $checksumPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $workPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Add to user PATH if necessary

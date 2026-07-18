@@ -510,9 +510,10 @@ jobs:
           if (-not (Test-Path -LiteralPath $link)) { throw 'Desktop shortcut was not created.' }
           $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
           $target = [IO.Path]::GetFullPath($shortcut.TargetPath)
-          $workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE)
-          if (-not $target.StartsWith($workspace, [StringComparison]::OrdinalIgnoreCase) -or
-              -not (Test-Path -LiteralPath $target)) {
+          $expectedTarget = [IO.Path]::GetFullPath(
+            (Join-Path $env:LOCALAPPDATA 'quotabot\desktop\quotabot.exe')
+          )
+          if ($target -ine $expectedTarget -or -not (Test-Path -LiteralPath $target)) {
             throw "Desktop shortcut target is invalid: $target"
           }
 
@@ -525,7 +526,7 @@ jobs:
           quotabot --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
           config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
           test -f "$config_root/quotabot/manual/install-smoke-sentinel"
-          test -x "app/build/macos/Build/Products/Release/quotabot.app/Contents/MacOS/quotabot"
+          test -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot"
 
       - name: Verify Linux install and desktop entry
         if: runner.os == 'Linux'
@@ -545,3 +546,4 @@ jobs:
           fi
           test -n "$target"
           test -x "$target"
+          [[ "$target" == "$HOME/.local/share/quotabot-desktop/quotabot" ]]

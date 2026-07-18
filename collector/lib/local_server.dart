@@ -45,12 +45,30 @@ Future<HttpServer> startLocalQuotabotServer({
   // and trip provider rate limits.
   List<ProviderQuota>? cached;
   var cachedAt = 0;
+  Future<List<ProviderQuota>>? inFlightSnapshot;
   Future<List<ProviderQuota>> snapshot() async {
     final current = now();
     if (cached != null && current - cachedAt < 5) return cached!;
-    cached = await snapshotProvider();
-    cachedAt = current;
-    return cached!;
+    final active = inFlightSnapshot;
+    if (active != null) return active;
+
+    // Schedule collection after publishing the in-flight future. This keeps a
+    // reentrant or concurrently dispatched request from starting a duplicate
+    // provider read before the throttle has a result to cache.
+    final requested = Future<List<ProviderQuota>>.microtask(snapshotProvider);
+    inFlightSnapshot = requested;
+    try {
+      final fresh = await requested;
+      cached = fresh;
+      // Cache age begins when collection finishes, not when it starts. A slow
+      // provider read should not make its result stale before it is returned.
+      cachedAt = now();
+      return fresh;
+    } finally {
+      if (identical(inFlightSnapshot, requested)) {
+        inFlightSnapshot = null;
+      }
+    }
   }
 
   void writeJson(HttpRequest req, Object data, [int status = HttpStatus.ok]) {
@@ -60,27 +78,38 @@ Future<HttpServer> startLocalQuotabotServer({
       ..write(const JsonEncoder.withIndent('  ').convert(data));
   }
 
-  bool queryFlag(Uri uri, String snakeName, String kebabName) {
-    final values = [
-      ...?uri.queryParametersAll[snakeName],
-      ...?uri.queryParametersAll[kebabName],
-    ];
-    return values.any((value) {
-      final normalized = value.trim().toLowerCase();
-      return normalized.isEmpty ||
-          normalized == '1' ||
-          normalized == 'true' ||
-          normalized == 'yes' ||
-          normalized == 'on';
-    });
+  List<String>? queryValues(Uri uri, String snakeName, String kebabName) {
+    final values = snakeName == kebabName
+        ? [...?uri.queryParametersAll[snakeName]]
+        : [
+            ...?uri.queryParametersAll[snakeName],
+            ...?uri.queryParametersAll[kebabName],
+          ];
+    return values.isEmpty ? null : values;
   }
 
-  List<String>? queryValues(Uri uri, String snakeName, String kebabName) {
-    final values = [
-      ...?uri.queryParametersAll[snakeName],
-      ...?uri.queryParametersAll[kebabName],
-    ];
-    return values.isEmpty ? null : values;
+  ({bool value, String? error}) queryBoolean(
+    Uri uri,
+    String snakeName,
+    String kebabName,
+  ) {
+    final values = queryValues(uri, snakeName, kebabName);
+    if (values == null) return (value: false, error: null);
+    final normalized = values.last.trim().toLowerCase();
+    if (normalized.isEmpty ||
+        normalized == '1' ||
+        normalized == 'true' ||
+        normalized == 'yes' ||
+        normalized == 'on') {
+      return (value: true, error: null);
+    }
+    if (normalized == '0' ||
+        normalized == 'false' ||
+        normalized == 'no' ||
+        normalized == 'off') {
+      return (value: false, error: null);
+    }
+    return (value: false, error: '$snakeName must be a boolean');
   }
 
   ({double weight, String? error}) queryCostWeight(
@@ -103,27 +132,41 @@ Future<HttpServer> startLocalQuotabotServer({
     return (weight: weight, error: null);
   }
 
-  String? queryLast(Uri uri, String snakeName, String kebabName) {
-    final values = queryValues(uri, snakeName, kebabName);
-    if (values == null) return null;
-    final trimmed = values.last.trim();
-    return trimmed.isEmpty ? null : trimmed;
-  }
-
   ({ModelRequirements? requirements, String? error}) queryRouteRequirements(
     Uri uri,
   ) {
-    final hasRequirements = queryLast(uri, 'task', 'task') != null ||
-        queryLast(uri, 'min_context', 'min-context') != null ||
-        queryFlag(uri, 'require_tools', 'require-tools') ||
-        queryFlag(uri, 'require_vision', 'require-vision') ||
-        queryFlag(uri, 'require_reasoning', 'require-reasoning') ||
-        queryLast(uri, 'tier_floor', 'tier-floor') != null ||
-        queryLast(uri, 'tier_ceiling', 'tier-ceiling') != null ||
-        queryLast(uri, 'budget', 'budget') != null;
+    final taskValues = queryValues(uri, 'task', 'task');
+    final contextValues = queryValues(uri, 'min_context', 'min-context');
+    final tierFloorValues = queryValues(uri, 'tier_floor', 'tier-floor');
+    final tierCeilingValues = queryValues(uri, 'tier_ceiling', 'tier-ceiling');
+    final budgetValues = queryValues(uri, 'budget', 'budget');
+    final tools = queryBoolean(uri, 'require_tools', 'require-tools');
+    final vision = queryBoolean(uri, 'require_vision', 'require-vision');
+    final reasoning =
+        queryBoolean(uri, 'require_reasoning', 'require-reasoning');
+    for (final flag in [tools, vision, reasoning]) {
+      if (flag.error != null) {
+        return (requirements: null, error: flag.error);
+      }
+    }
+    final hasRequirements = taskValues != null ||
+        contextValues != null ||
+        tools.value ||
+        vision.value ||
+        reasoning.value ||
+        tierFloorValues != null ||
+        tierCeilingValues != null ||
+        budgetValues != null;
     if (!hasRequirements) return (requirements: null, error: null);
-    final rawTask = queryLast(uri, 'task', 'task');
-    final rawBudget = queryLast(uri, 'budget', 'budget');
+    final rawTask = taskValues?.last.trim().toLowerCase();
+    const taskChoices = {'simple', 'standard', 'hard', 'complex', 'reasoning'};
+    if (rawTask != null && !taskChoices.contains(rawTask)) {
+      return (requirements: null, error: 'unknown task profile: "$rawTask"');
+    }
+    final rawBudget = budgetValues?.last.trim().toLowerCase();
+    if (rawBudget != null && rawBudget.isEmpty) {
+      return (requirements: null, error: 'unknown budget policy: ""');
+    }
     final budget = rawBudget == null
         ? ModelBudgetPolicy.any
         : modelBudgetPolicyFromName(rawBudget);
@@ -133,20 +176,43 @@ Future<HttpServer> startLocalQuotabotServer({
         error: 'unknown budget policy: "$rawBudget"',
       );
     }
-    final minContext = int.tryParse(
-      queryLast(uri, 'min_context', 'min-context') ?? '',
-    );
+    final rawContext = contextValues?.last.trim();
+    final minContext = rawContext == null ? null : int.tryParse(rawContext);
+    if (rawContext != null &&
+        (minContext == null || minContext <= 0 || minContext > 1 << 31)) {
+      return (
+        requirements: null,
+        error: 'min_context must be a positive integer up to ${1 << 31}',
+      );
+    }
+    const tierRanks = {'light': 0, 'standard': 1, 'flagship': 2};
+    final tierFloor = tierFloorValues?.last.trim().toLowerCase();
+    final tierCeiling = tierCeilingValues?.last.trim().toLowerCase();
+    if (tierFloor != null && !tierRanks.containsKey(tierFloor)) {
+      return (requirements: null, error: 'unknown tier_floor: "$tierFloor"');
+    }
+    if (tierCeiling != null && !tierRanks.containsKey(tierCeiling)) {
+      return (
+        requirements: null,
+        error: 'unknown tier_ceiling: "$tierCeiling"'
+      );
+    }
+    if (tierFloor != null &&
+        tierCeiling != null &&
+        tierRanks[tierFloor]! > tierRanks[tierCeiling]!) {
+      return (
+        requirements: null,
+        error: 'tier_floor cannot be higher than tier_ceiling',
+      );
+    }
     final profile = taskProfile(rawTask);
     final explicit = ModelRequirements(
-      minContextTokens: minContext == null || minContext <= 0
-          ? null
-          : minContext.clamp(0, 1 << 31).toInt(),
-      requireTools: queryFlag(uri, 'require_tools', 'require-tools'),
-      requireVision: queryFlag(uri, 'require_vision', 'require-vision'),
-      requireReasoning:
-          queryFlag(uri, 'require_reasoning', 'require-reasoning'),
-      tierFloor: queryLast(uri, 'tier_floor', 'tier-floor'),
-      tierCeiling: queryLast(uri, 'tier_ceiling', 'tier-ceiling'),
+      minContextTokens: minContext,
+      requireTools: tools.value,
+      requireVision: vision.value,
+      requireReasoning: reasoning.value,
+      tierFloor: tierFloor,
+      tierCeiling: tierCeiling,
       budgetPolicy: budget,
     );
     final parsed = profile.merge(explicit);
@@ -164,6 +230,43 @@ Future<HttpServer> startLocalQuotabotServer({
   // the decision. Each validation failure writes a 400 and returns; the caller
   // owns closing the response, so no handler closes it here.
   Future<void> handleSuggest(HttpRequest request) async {
+    const allowedQueryParameters = {
+      'exclude',
+      'cost_penalty',
+      'cost-penalty',
+      'cost_weight',
+      'cost-weight',
+      'task',
+      'min_context',
+      'min-context',
+      'require_tools',
+      'require-tools',
+      'require_vision',
+      'require-vision',
+      'require_reasoning',
+      'require-reasoning',
+      'tier_floor',
+      'tier-floor',
+      'tier_ceiling',
+      'tier-ceiling',
+      'budget',
+      'local_first',
+      'local-first',
+    };
+    final unknownParameters = request.uri.queryParametersAll.keys
+        .where((name) => !allowedQueryParameters.contains(name))
+        .toList()
+      ..sort();
+    if (unknownParameters.isNotEmpty) {
+      writeJson(
+        request,
+        {
+          'error': 'unknown query parameter: ${unknownParameters.join(', ')}',
+        },
+        HttpStatus.badRequest,
+      );
+      return;
+    }
     final exclusions = parseProviderExclusions(
       request.uri.queryParametersAll['exclude'],
     );
@@ -195,6 +298,19 @@ Future<HttpServer> startLocalQuotabotServer({
       );
       return;
     }
+    final localFirst = queryBoolean(
+      request.uri,
+      'local_first',
+      'local-first',
+    );
+    if (localFirst.error != null) {
+      writeJson(
+        request,
+        {'error': localFirst.error},
+        HttpStatus.badRequest,
+      );
+      return;
+    }
     final snap =
         filterExcludedProviders(await snapshot(), exclusions.providers);
     final current = now();
@@ -211,7 +327,7 @@ Future<HttpServer> startLocalQuotabotServer({
         current,
         context: DecisionContext(
           burnStatsByProvider: recentBurnStatsByQuota(snap, current),
-          preferLocal: queryFlag(request.uri, 'local_first', 'local-first'),
+          preferLocal: localFirst.value,
           costPenaltyByProvider: costPenalties.penalties,
           costWeight: costWeight.weight,
           pipePenaltyByProvider: routeSummaryProvider().pipePenaltyByProvider(

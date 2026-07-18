@@ -227,7 +227,7 @@ List<ModelQuota> claudeModelQuotas(Map<String, dynamic> data) {
 
   final legacyOpus = data['seven_day_opus'];
   if (legacyOpus is Map && seenModels.add('opus')) {
-    final percent = _boundedPercent(legacyOpus['utilization']);
+    final percent = _strictBoundedPercent(legacyOpus['utilization']);
     if (percent != null) {
       out.add(
         ModelQuota(
@@ -302,7 +302,7 @@ List<QuotaWindow> _legacyClaudeWindows(Map<String, dynamic> data) {
   ]) {
     final block = data[spec[0]];
     if (block is! Map) continue;
-    final util = _boundedPercent(block['utilization']);
+    final util = _strictBoundedPercent(block['utilization']);
     if (util == null) continue;
     out.add(
       QuotaWindow(

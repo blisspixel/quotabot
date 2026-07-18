@@ -391,6 +391,19 @@ void main() {
       expect(models.single.resetsAt, isNotNull);
     });
 
+    test('rejects out-of-range legacy utilization instead of clamping it', () {
+      final windows = claudeWindows({
+        'five_hour': {'utilization': -1},
+        'seven_day': {'utilization': 101},
+      });
+      final models = claudeModelQuotas({
+        'seven_day_opus': {'utilization': 250},
+      });
+
+      expect(windows, isEmpty);
+      expect(models, isEmpty);
+    });
+
     test('skips blocks without utilization', () {
       expect(claudeWindows({'five_hour': <String, Object?>{}}), isEmpty);
       expect(claudeWindows({'seven_day': 'nope'}), isEmpty);

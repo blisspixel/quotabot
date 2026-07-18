@@ -64,7 +64,15 @@ class ClaudeAdapter {
         lastError = outcome;
       }
 
-      final grantToken = await _grantToken();
+      // The optional quotabot grant is independent of Claude Code's host
+      // credential. A corrupt grant file or failed refresh must not prevent a
+      // stale host token from getting its documented last-chance read.
+      String? grantToken;
+      try {
+        grantToken = await _grantToken();
+      } catch (_) {
+        grantToken = null;
+      }
       if (grantToken != null) {
         final outcome = await _read(
           grantToken,
@@ -97,7 +105,7 @@ class ClaudeAdapter {
         return ProviderQuota.error(
           id,
           name,
-          'no ~/.claude/.credentials.json (run claude, or quotabot login claude)',
+          'no usable Claude login (run claude, or quotabot login claude)',
           asOf,
         );
       }
@@ -192,22 +200,30 @@ class ClaudeAdapter {
     final credFile =
         _credentialsFile ?? File('${home()}/.claude/.credentials.json');
     if (!credFile.existsSync()) return null;
-    final oauth = (jsonDecode(credFile.readAsStringSync())
-        as Map)['claudeAiOauth'] as Map?;
-    final token = oauth?['accessToken'] as String?;
-    if (token == null || token.isEmpty) return null;
-    final plan = oauth?['subscriptionType']?.toString();
-    final expiresAtMs = oauth?['expiresAt'];
-    final expiresAt = expiresAtMs is int ? expiresAtMs ~/ 1000 : null;
-    final now = nowEpoch();
-    final fresh = expiresAt != null && expiresAt > now + 60;
-    final knownExpired = expiresAt != null && expiresAt <= now;
-    return _HostCredential(
-      token: token,
-      plan: plan,
-      fresh: fresh,
-      knownExpired: knownExpired,
-    );
+    try {
+      final decoded = jsonDecode(credFile.readAsStringSync());
+      if (decoded is! Map) return null;
+      final oauth = decoded['claudeAiOauth'];
+      if (oauth is! Map) return null;
+      final token = oauth['accessToken'];
+      if (token is! String || token.isEmpty) return null;
+      final plan = oauth['subscriptionType']?.toString();
+      final expiresAtMs = oauth['expiresAt'];
+      final expiresAt = expiresAtMs is int ? expiresAtMs ~/ 1000 : null;
+      final now = nowEpoch();
+      final fresh = expiresAt != null && expiresAt > now + 60;
+      final knownExpired = expiresAt != null && expiresAt <= now;
+      return _HostCredential(
+        token: token,
+        plan: plan,
+        fresh: fresh,
+        knownExpired: knownExpired,
+      );
+    } catch (_) {
+      // A partially-written or corrupt host credential must not mask
+      // quotabot's independent refreshable grant.
+      return null;
+    }
   }
 }
 

@@ -1,6 +1,6 @@
-# Creates or refreshes a Desktop shortcut to the built quotabot desktop app.
-# Points at the Release build and uses the app's own icon. Re-run after a build
-# to repoint the shortcut. Build first with: cd app; flutter build windows --release
+# Creates or refreshes a Desktop shortcut to a quotabot desktop executable.
+# The source setup script passes its stable per-user install path. Without an
+# explicit path, this development helper falls back to the current build tree.
 param(
   [string]$ExePath
 )

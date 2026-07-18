@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,6 +8,98 @@ import 'package:test/test.dart';
 LeaseIdFactory _idFactory() {
   var i = 0;
   return () => 'lease-${++i}';
+}
+
+const _workerReady = 'quotabot-lease-worker-ready';
+const _workerResult = 'quotabot-lease-worker-result:';
+
+class _LeaseSelectionWorker {
+  final Process process;
+  final StreamIterator<String> output;
+  final Future<String> stderrText;
+
+  _LeaseSelectionWorker(this.process, this.output, this.stderrText);
+
+  static Future<_LeaseSelectionWorker> start(
+    String script,
+    String directory,
+    String leaseId,
+  ) async {
+    final process = await Process.start(
+      Platform.resolvedExecutable,
+      [
+        '--packages=.dart_tool/package_config.json',
+        script,
+        directory,
+        leaseId,
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    return _LeaseSelectionWorker(
+      process,
+      StreamIterator(
+        process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+      ),
+      process.stderr.transform(utf8.decoder).join(),
+    );
+  }
+
+  Future<void> waitUntilReady() async {
+    while (await output.moveNext()) {
+      if (output.current == _workerReady) return;
+    }
+    final exit = await process.exitCode;
+    final stderr = await stderrText;
+    throw StateError('lease worker exited before ready: $exit $stderr');
+  }
+
+  Future<Map<String, dynamic>> releaseAndRead() async {
+    process.stdin.writeln('start');
+    await process.stdin.flush();
+    await process.stdin.close();
+    Map<String, dynamic>? result;
+    while (await output.moveNext()) {
+      final line = output.current;
+      if (!line.startsWith(_workerResult)) continue;
+      final decoded = jsonDecode(line.substring(_workerResult.length));
+      if (decoded is Map<Object?, Object?>) {
+        result = decoded.cast<String, dynamic>();
+      }
+    }
+    final exit = await process.exitCode;
+    final stderr = await stderrText;
+    if (exit != 0 || result == null) {
+      throw StateError('lease worker failed: $exit $stderr');
+    }
+    return result;
+  }
+
+  Future<void> stop() async {
+    try {
+      await process.stdin.close();
+    } catch (_) {}
+    process.kill();
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 3));
+      } on TimeoutException {
+        // The test is already unwinding. Leave directory cleanup to report a
+        // still-active worker rather than blocking the suite indefinitely.
+      }
+    }
+    try {
+      await output.cancel();
+    } catch (_) {}
+    try {
+      await stderrText.timeout(const Duration(seconds: 1));
+    } on TimeoutException {
+      // The process pipes should close with the process. Do not let diagnostics
+      // prevent bounded cleanup on an abnormal platform failure.
+    }
+  }
 }
 
 void main() {
@@ -19,6 +112,10 @@ void main() {
     expect(normalizeLeaseWeight(null), defaultLeaseWeightPercent);
     expect(normalizeLeaseProvider(' Claude! '), 'claude_');
     expect(normalizeLeaseAccount(''), 'default');
+    expect(
+      normalizeLeaseAccount(' nick+work@example.com '),
+      'nick+work@example.com',
+    );
     expect(normalizeLeaseText(123), isNull);
     expect(normalizeLeaseText('  '), isNull);
     expect(normalizeLeaseText('abcdef', maxLength: 3), 'abc');
@@ -74,6 +171,40 @@ void main() {
     expect(store.release(leaseId: 'lease-1', now: 103).released, isFalse);
   });
 
+  test('auto reservation rejects an idempotency key outside reuse scope', () {
+    final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
+    store.reserve(
+      provider: 'claude',
+      account: 'work',
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: 'retry-1',
+    );
+    var selections = 0;
+
+    final conflict = store.selectAndReserve(
+      select: (active) {
+        selections += 1;
+        return const RouteLeaseSelection.selected(
+          RouteLeaseTarget(provider: 'codex', account: 'home'),
+        );
+      },
+      now: 101,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: 'retry-1',
+      reuseWhere: (lease) => lease.provider == 'codex',
+    );
+
+    expect(conflict.reserved, isFalse);
+    expect(conflict.reused, isFalse);
+    expect(conflict.lease, isNull);
+    expect(conflict.reason, contains('outside this request'));
+    expect(conflict.activeLeases, hasLength(1));
+    expect(selections, 0);
+  });
+
   test('memory store retains other leases during release', () {
     final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
     store.reserve(
@@ -94,6 +225,27 @@ void main() {
     final release = store.release(leaseId: 'lease-1', now: 101);
     expect(release.released, isTrue);
     expect(release.activeLeases.single.id, 'lease-2');
+  });
+
+  test('memory store selects against leases from the same transaction', () {
+    final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
+    RouteLeaseReservation reserveBest() => store.selectAndReserve(
+          select: (active) {
+            final provider = active.any((lease) => lease.provider == 'claude')
+                ? 'codex'
+                : 'claude';
+            return RouteLeaseSelection.selected(
+              RouteLeaseTarget(provider: provider, account: 'a'),
+            );
+          },
+          now: 100,
+          leaseSeconds: 60,
+          weightPercent: 30,
+        );
+
+    expect(reserveBest().lease!.provider, 'claude');
+    expect(reserveBest().lease!.provider, 'codex');
+    expect(store.active(100), hasLength(2));
   });
 
   test('memory store rejects reservations after the active lease cap', () {
@@ -171,6 +323,44 @@ void main() {
     expect(leaseDiscountFor(leases, 'codex', 'work'), 0);
   });
 
+  test('colliding legacy account stems keep independent lease discounts', () {
+    const plus = 'nick+work@example.com';
+    const underscore = 'nick_work@example.com';
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final store = FileRouteLeaseStore(
+      dirFactory: () => dir,
+      idFactory: _idFactory(),
+    );
+    store.reserve(
+      provider: 'grok',
+      account: plus,
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 11,
+    );
+    store.reserve(
+      provider: 'grok',
+      account: underscore,
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 29,
+    );
+
+    final active = FileRouteLeaseStore(dirFactory: () => dir).active(100);
+    expect(active.map((lease) => lease.account).toSet(), {plus, underscore});
+    expect(leaseDiscountFor(active, 'grok', plus), 11);
+    expect(leaseDiscountFor(active, 'grok', underscore), 29);
+    final discounts = leaseDiscounts(active);
+    expect(discounts, hasLength(2));
+    expect(discounts.map((discount) => discount.account).toSet(), {
+      plus,
+      underscore,
+    });
+  });
+
   test('file store fails soft when the lease directory is unavailable', () {
     // Leases are advisory; a lock/IO failure must degrade like the noop store
     // rather than break the read-only routing tools that consult active().
@@ -244,6 +434,81 @@ void main() {
     );
     expect(secondStore.active(138), isEmpty);
   });
+
+  test('file store selects against leases persisted in its transaction', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final store = FileRouteLeaseStore(
+      dirFactory: () => dir,
+      idFactory: _idFactory(),
+    );
+    RouteLeaseReservation reserveBest() => store.selectAndReserve(
+          select: (active) {
+            final provider = active.any((lease) => lease.provider == 'claude')
+                ? 'codex'
+                : 'claude';
+            return RouteLeaseSelection.selected(
+              RouteLeaseTarget(provider: provider, account: 'a'),
+            );
+          },
+          now: 100,
+          leaseSeconds: 60,
+          weightPercent: 30,
+        );
+
+    expect(reserveBest().lease!.provider, 'claude');
+    expect(reserveBest().lease!.provider, 'codex');
+    expect(store.active(100), hasLength(2));
+  });
+
+  test('file store atomically selects concurrent reservation targets',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
+    final workerScript = File(
+      '${Directory.current.path}${Platform.pathSeparator}test'
+      '${Platform.pathSeparator}support${Platform.pathSeparator}'
+      'lease_selection_worker.dart',
+    ).absolute.path;
+    expect(File(workerScript).existsSync(), isTrue);
+    final workers = <_LeaseSelectionWorker>[];
+    try {
+      workers.add(
+        await _LeaseSelectionWorker.start(workerScript, dir.path, 'lease-a'),
+      );
+      workers.add(
+        await _LeaseSelectionWorker.start(workerScript, dir.path, 'lease-b'),
+      );
+      await Future.wait(
+        workers.map((worker) => worker.waitUntilReady()),
+      ).timeout(const Duration(seconds: 15));
+      final results = await Future.wait(
+        workers.map((worker) => worker.releaseAndRead()),
+      ).timeout(const Duration(seconds: 15));
+      final diagnostics = jsonEncode(results);
+
+      expect(
+        results.map((result) => result['reserved']),
+        everyElement(isTrue),
+        reason: diagnostics,
+      );
+      expect(
+        results.map((result) => result['provider']),
+        unorderedEquals(['claude', 'codex']),
+        reason: diagnostics,
+      );
+      final persisted = FileRouteLeaseStore(dirFactory: () => dir).active(100);
+      expect(
+        persisted.map((lease) => lease.provider),
+        unorderedEquals(['claude', 'codex']),
+        reason: diagnostics,
+      );
+    } finally {
+      await Future.wait(workers.map((worker) => worker.stop()));
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('file store rejects reservations after pruning reaches the active cap',
       () {

@@ -141,6 +141,23 @@ void main() {
     expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
+  test('a malformed host credential falls through to the independent grant',
+      () async {
+    credentials.writeAsStringSync('{not valid json');
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => 'grant-token',
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer grant-token');
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.hasWindows, isTrue);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+  });
+
   test('falls through to the grant when the host token is expired', () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
@@ -177,6 +194,23 @@ void main() {
 
     expect(q.ok, isTrue);
     expect(tried, ['Bearer grant-token', 'Bearer host-token']);
+  });
+
+  test('keeps the stale host token as a last chance when grant loading throws',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => throw StateError('grant store unavailable'),
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer host-token');
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.hasWindows, isTrue);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
   test('falls through to the grant on a 401 from a fresh host token', () async {

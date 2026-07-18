@@ -26,17 +26,86 @@ void main() {
     final providers = (json['providers'] as List).cast<Map<String, dynamic>>();
     final claude = providers.firstWhere((p) => p['provider'] == 'claude');
     final claudeReads = (claude['reads'] as List).cast<Map<String, dynamic>>();
-    expect(claudeReads.single['target'], contains('.claude'));
-    expect(claudeReads.single['target'], contains('.credentials.json'));
-    expect(claudeReads.single['credential_material'], isTrue);
+    expect(
+      claudeReads.any((record) =>
+          (record['target'] as String).contains('.claude') &&
+          (record['target'] as String).contains('.credentials.json') &&
+          record['credential_material'] == true),
+      isTrue,
+    );
+    expect(
+      claudeReads.any((record) =>
+          (record['target'] as String).contains('auth') &&
+          (record['target'] as String).contains('claude') &&
+          record['kind'] == 'fileRead'),
+      isTrue,
+    );
+    expect(
+      claudeReads.any((record) =>
+          (record['target'] as String).contains('auth') &&
+          (record['target'] as String).contains('claude') &&
+          record['kind'] == 'fileWrite'),
+      isTrue,
+    );
 
     final claudeNetwork =
         (claude['network'] as List).cast<Map<String, dynamic>>();
-    expect(claudeNetwork.single['host'], 'api.anthropic.com');
-    expect(claudeNetwork.single['path'], '/api/oauth/usage');
-    expect(claudeNetwork.single['spends_tokens'], isFalse);
+    expect(
+      claudeNetwork.any((record) =>
+          record['host'] == 'api.anthropic.com' &&
+          record['path'] == '/api/oauth/usage' &&
+          record['spends_tokens'] == false),
+      isTrue,
+    );
+    expect(
+      claudeNetwork.any((record) =>
+          record['host'] == 'console.anthropic.com' &&
+          record['path'] == '/v1/oauth/token' &&
+          record['data_class'] == 'credential_exchange' &&
+          record['credential_material'] == true),
+      isTrue,
+    );
+
+    final codex = providers.firstWhere((p) => p['provider'] == 'codex');
+    final codexReads = (codex['reads'] as List).cast<Map<String, dynamic>>();
+    expect(
+      codexReads.any((record) =>
+          (record['target'] as String).contains('auth') &&
+          (record['target'] as String).contains('codex') &&
+          record['kind'] == 'fileRead'),
+      isTrue,
+    );
+    expect(
+      codexReads.any((record) =>
+          (record['target'] as String).contains('auth') &&
+          (record['target'] as String).contains('codex') &&
+          record['kind'] == 'fileWrite'),
+      isTrue,
+    );
+    final codexNetwork =
+        (codex['network'] as List).cast<Map<String, dynamic>>();
+    expect(
+      codexNetwork.any((record) =>
+          record['host'] == 'auth.openai.com' &&
+          record['path'] == '/oauth/token' &&
+          record['data_class'] == 'credential_exchange' &&
+          record['credential_material'] == true),
+      isTrue,
+    );
 
     final shared = (json['shared'] as List).cast<Map<String, dynamic>>();
+    final historyRecords = shared.where(
+      (record) => (record['target'] as String).contains('history_*.jsonl'),
+    );
+    expect(historyRecords, hasLength(2));
+    expect(
+      historyRecords.every(
+        (record) => !(record['target'] as String)
+            .replaceAll('\\', '/')
+            .contains('/cache/history/'),
+      ),
+      isTrue,
+    );
     expect(
       shared.any((r) =>
           r['kind'] == 'fileWrite' &&

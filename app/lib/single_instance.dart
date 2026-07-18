@@ -67,13 +67,17 @@ class SingleInstanceGuard {
         .timeout(_ipcTimeout, onTimeout: () => '')
         .then((line) async {
           if (line.trim() == _request) {
+            var surfaced = false;
             try {
               await onShowRequested();
+              surfaced = true;
             } catch (_) {}
-            try {
-              socket.write('$_ack\n');
-              await socket.flush();
-            } catch (_) {}
+            if (surfaced) {
+              try {
+                socket.write('$_ack\n');
+                await socket.flush();
+              } catch (_) {}
+            }
           }
         })
         .whenComplete(() {

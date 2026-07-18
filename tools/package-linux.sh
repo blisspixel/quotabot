@@ -19,6 +19,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$script_dir/.." && pwd)"
 app_dir="$root/app"
 release_dir="$root/release"
+. "$script_dir/package-pair.sh"
 
 if ! command -v flutter >/dev/null 2>&1; then
   echo "flutter not found on PATH. Install Flutter and add it to PATH." >&2
@@ -67,10 +68,27 @@ if [ "$archive" -eq 1 ]; then
   mkdir -p "$release_dir"
   out="$release_dir/quotabot-linux-$arch-desktop.tar.gz"
   asset="$(basename "$out")"
-  rm -f "$out" "$out.sha256"
-  tar -C "$bundle" -czf "$out" .
-  hash="$(sha256sum "$out" | awk '{print tolower($1)}')"
-  printf '%s  %s' "$hash" "$asset" > "$out.sha256"
+  package_workspace="$(mktemp -d "$release_dir/.quotabot-package.XXXXXX")"
+  cleanup_package() {
+    if [[ -e "$package_workspace/.preserve" ]]; then
+      echo "Package recovery files were preserved in $package_workspace" >&2
+    else
+      rm -rf "$package_workspace"
+    fi
+  }
+  trap cleanup_package EXIT
+  temporary_out="$package_workspace/$asset"
+  temporary_sidecar="$package_workspace/$asset.sha256"
+  tar -C "$bundle" -czf "$temporary_out" .
+  hash="$(sha256sum "$temporary_out" | awk '{print tolower($1)}')"
+  printf '%s  %s' "$hash" "$asset" > "$temporary_sidecar"
+
+  # Activate both complete files as one rollback-protected package pair.
+  publish_package_pair \
+    "$temporary_out" "$temporary_sidecar" "$out" "$out.sha256" \
+    "$package_workspace"
+  trap - EXIT
+  rm -rf "$package_workspace"
   echo "Archive ready: $out"
   echo "Checksum: $out.sha256"
   echo "SHA256: $hash"

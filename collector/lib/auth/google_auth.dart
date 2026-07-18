@@ -85,9 +85,15 @@ class GoogleAuth {
       },
     ).toString();
 
-    showUrl(authUrl);
-    await openInBrowser(authUrl);
-    final code = await capture.code;
+    late final String code;
+    try {
+      showUrl(authUrl);
+      await openInBrowser(authUrl);
+      code = await capture.code;
+    } catch (_) {
+      await capture.close();
+      rethrow;
+    }
 
     final json = await _post({
       'code': code,

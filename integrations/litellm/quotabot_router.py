@@ -51,6 +51,7 @@ from typing import Any, Optional
 try:  # LiteLLM is present when this runs inside the proxy.
     from litellm.integrations.custom_logger import CustomLogger
 except Exception:  # pragma: no cover - allows importing/testing without litellm.
+
     class CustomLogger:  # type: ignore
         """Minimal stand-in so the module imports without LiteLLM installed."""
 
@@ -321,7 +322,9 @@ class Policy:
 
         if not _is_loopback_url(self.quotabot_url):
             self.quotabot_url = self.default_quotabot_url
-        self.snapshot_ttl_seconds = max(1.0, min(float(self.snapshot_ttl_seconds), 3600.0))
+        self.snapshot_ttl_seconds = max(
+            1.0, min(float(self.snapshot_ttl_seconds), 3600.0)
+        )
         self.comfort_threshold = max(0.0, min(float(self.comfort_threshold), 100.0))
 
     @classmethod
@@ -394,16 +397,27 @@ class QuotabotRouter(CustomLogger):
     """
 
     def __init__(self, policy_path: Optional[str] = None) -> None:
+        configured_path = policy_path or os.environ.get("QUOTABOT_ROUTING")
         path = _expand(
-            policy_path
-            or os.environ.get("QUOTABOT_ROUTING")
-            or str(Path(__file__).with_name("quotabot-routing.yaml"))
+            configured_path or str(Path(__file__).with_name("quotabot-routing.yaml"))
         )
+        self._policy_load_failed = False
         try:
-            self.policy = Policy.load(path) if path.exists() else Policy()
+            if path.exists():
+                self.policy = Policy.load(path)
+            elif configured_path:
+                # An explicitly configured path is part of the billing policy.
+                # Treat a missing file like a parse failure rather than silently
+                # turning every intended managed model into passthrough.
+                self.policy = Policy()
+                self._policy_load_failed = True
+            else:
+                self.policy = Policy()
         except Exception:
-            # A broken policy must not take the proxy down; route nothing.
+            # Keep the proxy importable, but reject requests because an empty
+            # policy would make intended managed names look unmanaged.
             self.policy = Policy()
+            self._policy_load_failed = True
         # Cached ranked candidate dicts from /suggest.
         self._cache = _Availability([], None)
         # None until the first fetch. Freshness is tracked here, not by the
@@ -422,22 +436,30 @@ class QuotabotRouter(CustomLogger):
         data: dict,
         call_type: str,
     ) -> Optional[dict]:
+        requested = data.get("model")
+        managed = self._request_is_managed(requested, data, user_api_key_dict)
         try:
-            requested = data.get("model")
             chosen = await self._route(requested, data, user_api_key_dict)
             if chosen and chosen != requested:
-                data.setdefault("metadata", {})["quotabot_original_model"] = requested
+                self._managed_metadata(data)["quotabot_original_model"] = requested
                 data["model"] = chosen
         except UnsafeRouteError:
             raise
-        except Exception:
-            # Fail soft: leave the request exactly as it was.
+        except Exception as error:
+            if managed:
+                raise UnsafeRouteError(
+                    f'quotabot could not safely route managed model "{requested}"'
+                ) from error
+            # Unmanaged names retain the fail-soft passthrough contract.
             return data
         return data
 
     async def _route(
         self, requested: Optional[str], data: dict, key: Any
     ) -> Optional[str]:
+        if self._policy_load_failed:
+            raise UnsafeRouteError("quotabot routing policy could not be loaded safely")
+
         agent = self._agent_id(data, key)
         rule = self.policy.agents.get(agent) if agent else None
 
@@ -453,6 +475,8 @@ class QuotabotRouter(CustomLogger):
         logical = (rule.model if rule and rule.model else requested) or ""
         candidates = self.policy.models.get(logical)
         if candidates is None:
+            if (rule and rule.model) or logical in self.policy.models:
+                return self._unsafe_passthrough(requested)
             return requested  # not a managed model; pass through unchanged
         if not candidates:
             # Declared in the policy but with no candidate route. This is a
@@ -525,7 +549,7 @@ class QuotabotRouter(CustomLogger):
         spend: Optional[str] = None,
         decision_id: Optional[str] = None,
     ) -> None:
-        meta = data.setdefault("metadata", {})
+        meta = QuotabotRouter._managed_metadata(data)
         if spend is not None:
             route_spend = spend
         elif candidate:
@@ -545,6 +569,30 @@ class QuotabotRouter(CustomLogger):
             meta[_ACCOUNT_METADATA_KEY] = account
         if _valid_decision_id(decision_id):
             meta[_DECISION_METADATA_KEY] = decision_id
+
+    @staticmethod
+    def _managed_metadata(data: dict) -> dict[str, Any]:
+        metadata = data.get("metadata")
+        if metadata is None:
+            metadata = {}
+            data["metadata"] = metadata
+        if not isinstance(metadata, dict):
+            raise UnsafeRouteError("metadata must be an object for a managed route")
+        return metadata
+
+    def _request_is_managed(
+        self,
+        requested: Optional[str],
+        data: dict,
+        key: Any,
+    ) -> bool:
+        if self._policy_load_failed:
+            return True
+        agent = self._agent_id(data, key)
+        rule = self.policy.agents.get(agent) if agent else None
+        return bool(rule and (rule.pin or rule.model)) or (
+            isinstance(requested, str) and requested in self.policy.models
+        )
 
     def _candidate_allowed(self, candidate: Candidate) -> bool:
         return candidate.local or self._spend_allowed(
@@ -598,6 +646,8 @@ class QuotabotRouter(CustomLogger):
                 return self._cache
             payload = await asyncio.to_thread(self._fetch_suggest)
             if payload is None:
+                return None
+            if not isinstance(payload, dict):
                 return None
             receipt = payload.get("receipt")
             versioned_receipt = (
@@ -734,9 +784,18 @@ def _best_ranked_candidate(
     floor: float,
 ) -> Optional[tuple[Candidate, dict[str, Any]]]:
     for info in ranked:
-        if not info.get("available"):
+        # Routing is a billing boundary. Accept only the exact versioned field
+        # types the quotabot contract emits so malformed values such as the
+        # string "false", NaN, or contradictory stale evidence fail closed.
+        if info.get("available") is not True:
             continue
-        if _effective_headroom(info) < floor:
+        stale = info.get("stale")
+        if stale is not None and (not isinstance(stale, bool) or stale):
+            continue
+        if info.get("drift_reason") is not None:
+            continue
+        headroom = _effective_headroom(info)
+        if headroom is None or headroom < floor:
             continue
         for candidate in candidates:
             if _candidate_matches_info(candidate, info):
@@ -776,12 +835,14 @@ def _metric_info_for_candidate(
     return out
 
 
-def _effective_headroom(info: dict[str, Any]) -> float:
+def _effective_headroom(info: dict[str, Any]) -> Optional[float]:
     value = info.get("effective_headroom_percent")
-    if isinstance(value, (int, float)):
-        return float(value)
-    value = info.get("headroom_percent")
-    return float(value) if isinstance(value, (int, float)) else 0.0
+    if value is None:
+        value = info.get("headroom_percent")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    parsed = float(value)
+    return parsed if math.isfinite(parsed) and 0 <= parsed <= 100 else None
 
 
 def _string_field(source: Optional[dict[str, Any]], key: str) -> Optional[str]:

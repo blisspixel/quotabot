@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
@@ -86,7 +87,7 @@ class _FleetScreenState extends State<FleetScreen> {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final nodes = <_Node>[];
     for (final q in widget.data) {
-      if (q.isLocal) continue;
+      if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) continue;
       final h = providerHeadroom(q, now);
       if (h == null) continue;
       nodes.add(_Node(q.displayName, h, bindingWindow(q, now)?.resetsAt));
@@ -126,6 +127,7 @@ class _FleetScreenState extends State<FleetScreen> {
         children: [
           _card(c, 'HEADROOM', 'free now', _empty('no live data', c.muted)),
           _routedRequestsCard(now, c),
+          _excludedEvidenceNote(now, c),
         ],
       );
     }
@@ -160,9 +162,14 @@ class _FleetScreenState extends State<FleetScreen> {
           c,
           'HEADROOM',
           'free now, tightest first',
-          SizedBox(
-            height: nodes.length * 30.0,
-            child: CustomPaint(painter: _BarsPainter(nodes, now, dark, c.fg)),
+          Semantics(
+            container: true,
+            label: _liveHeadroomSemantics(nodes, now),
+            excludeSemantics: true,
+            child: SizedBox(
+              height: nodes.length * 30.0,
+              child: CustomPaint(painter: _BarsPainter(nodes, now, dark, c.fg)),
+            ),
           ),
         ),
         const SizedBox(height: 10),
@@ -170,19 +177,48 @@ class _FleetScreenState extends State<FleetScreen> {
           c,
           'CONSUMPTION',
           'share of total usage',
-          SizedBox(
-            height: 150,
-            child: nodes.every((n) => n.used <= 0.5)
-                ? _empty('nothing spent yet', c.muted)
-                : CustomPaint(
-                    painter: _DonutPainter(nodes, dark, c.fg, c.muted),
-                  ),
+          Semantics(
+            container: true,
+            label: _consumptionSemantics(nodes),
+            excludeSemantics: true,
+            child: SizedBox(
+              height: 150,
+              child: nodes.every((n) => n.used <= 0.5)
+                  ? _empty('nothing spent yet', c.muted)
+                  : CustomPaint(
+                      painter: _DonutPainter(nodes, dark, c.fg, c.muted),
+                    ),
+            ),
           ),
         ),
         _routedRequestsCard(now, c),
-        _missingNote(now, c),
+        _excludedEvidenceNote(now, c),
       ],
     );
+  }
+
+  String _liveHeadroomSemantics(List<_Node> nodes, int now) {
+    final providers = nodes
+        .map((node) {
+          final reset = _reset(node.resetsAt, now);
+          final resetText = reset.isEmpty ? '' : ', reset $reset';
+          return '${node.label}, ${node.free.round()} percent free$resetText';
+        })
+        .join('; ');
+    return 'Live headroom. $providers.';
+  }
+
+  String _consumptionSemantics(List<_Node> nodes) {
+    final spenders = nodes.where((node) => node.used > 0.5).toList();
+    final total = spenders.fold<double>(0, (sum, node) => sum + node.used);
+    if (total <= 0) return 'Consumption share. Nothing spent yet.';
+    final shares = spenders
+        .map(
+          (node) =>
+              '${node.label}, ${(node.used / total * 100).round()} percent',
+        )
+        .join('; ');
+    return 'Consumption share of used quota. $shares.';
   }
 
   Widget _routedRequestsCard(
@@ -285,29 +321,66 @@ class _FleetScreenState extends State<FleetScreen> {
     );
   }
 
-  /// Providers that exist but have no live quota right now (e.g. an expired
-  /// token), so they are absent from the charts above. Naming them avoids the
-  /// "where did X go?" confusion.
-  Widget _missingNote(
+  /// Names provider evidence excluded from the live charts, with bounded
+  /// last-known context where that context is safe to display. The full text is
+  /// available on hover even when the two-line glance surface truncates it.
+  Widget _excludedEvidenceNote(
     int now,
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
-    final missing = [
-      for (final q in widget.data)
-        if (!q.isLocal && providerHeadroom(q, now) == null) q.displayName,
-    ];
-    if (missing.isEmpty) return const SizedBox.shrink();
+    final excluded = <String>[];
+    final seen = <String>{};
+    for (final quota in widget.data) {
+      if (quota.isLocal || isTrustedQuotaEvidenceAt(quota, now)) continue;
+      final label = _excludedEvidenceLabel(quota, now);
+      if (seen.add(label)) excluded.add(label);
+    }
+    if (excluded.isEmpty) return const SizedBox.shrink();
+    const limit = 4;
+    final shown = excluded.take(limit).join(', ');
+    final remaining = excluded.length - limit;
+    final message =
+        'not counted as free now: $shown'
+        '${remaining > 0 ? ', plus $remaining more' : ''}';
     return Padding(
       padding: const EdgeInsets.only(top: 10, left: 2, right: 2),
-      child: Text(
-        'no live data: ${missing.join(', ')} (reopen the app or reconnect)',
-        style: TextStyle(
-          fontSize: AppType.caption,
-          color: c.muted,
-          height: 1.3,
+      child: Tooltip(
+        message: message,
+        child: Text(
+          message,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: AppType.caption,
+            color: c.muted,
+            height: 1.3,
+          ),
         ),
       ),
     );
+  }
+
+  String _excludedEvidenceLabel(ProviderQuota quota, int now) {
+    final headroom = providerHeadroom(quota, now);
+    final String state;
+    if (quota.driftReason != null) {
+      state = headroom == null
+          ? 'provider drift'
+          : 'provider drift, last trusted ${headroom.round()}% free';
+    } else if (quota.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+      state = 'future timestamp';
+    } else if (quota.stale) {
+      state = headroom == null
+          ? 'cached'
+          : 'cached, last known ${headroom.round()}% free';
+    } else if (quota.asOf <= 0) {
+      state = 'missing timestamp';
+    } else if (!quota.ok || quota.windows.isEmpty) {
+      state = 'no live quota';
+    } else {
+      state = 'untrusted evidence';
+    }
+    return '${quota.displayName} ($state)';
   }
 
   // ---- history (7d / 90d) ---------------------------------------------
@@ -390,10 +463,15 @@ class _FleetScreenState extends State<FleetScreen> {
           c,
           'DISTRIBUTION',
           'free % p10-p90, median tick',
-          SizedBox(
-            height: stats.length * 26.0,
-            child: CustomPaint(
-              painter: _DistPainter(stats, dark, c.fg, c.muted),
+          Semantics(
+            container: true,
+            label: _distributionSemantics(stats),
+            excludeSemantics: true,
+            child: SizedBox(
+              height: stats.length * 26.0,
+              child: CustomPaint(
+                painter: _DistPainter(stats, dark, c.fg, c.muted),
+              ),
             ),
           ),
         ),
@@ -414,15 +492,20 @@ class _FleetScreenState extends State<FleetScreen> {
           c,
           'CALENDAR',
           'sampled days, oldest to newest',
-          SizedBox(
-            height: stats.length * 18.0,
-            child: CustomPaint(
-              painter: _CalendarPainter(
-                stats,
-                dark,
-                c.fg,
-                c.muted,
-                math.min(days, kRetentionDays),
+          Semantics(
+            container: true,
+            label: _calendarSemantics(stats),
+            excludeSemantics: true,
+            child: SizedBox(
+              height: stats.length * 18.0,
+              child: CustomPaint(
+                painter: _CalendarPainter(
+                  stats,
+                  dark,
+                  c.fg,
+                  c.muted,
+                  math.min(days, kRetentionDays),
+                ),
               ),
             ),
           ),
@@ -435,13 +518,18 @@ class _FleetScreenState extends State<FleetScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SizedBox(
-                height: 120,
-                child: grid == null
-                    ? _empty('not enough data', c.muted)
-                    : CustomPaint(
-                        painter: _HeatmapPainter(grid, dark, c.muted),
-                      ),
+              Semantics(
+                container: true,
+                label: _heatmapSemantics(grid, bestWindows),
+                excludeSemantics: true,
+                child: SizedBox(
+                  height: 120,
+                  child: grid == null
+                      ? _empty('not enough data', c.muted)
+                      : CustomPaint(
+                          painter: _HeatmapPainter(grid, dark, c.muted),
+                        ),
+                ),
               ),
               if (bestWindows.isNotEmpty) ...[
                 const SizedBox(height: 6),
@@ -485,6 +573,69 @@ class _FleetScreenState extends State<FleetScreen> {
         ),
       ],
     );
+  }
+
+  String _distributionSemantics(List<_Node> nodes) {
+    final providers = nodes
+        .map((node) {
+          final insights = node.insights!;
+          final low = insights.p10;
+          final median = insights.p50;
+          final high = insights.p90;
+          if (low == null || median == null || high == null) {
+            return '${node.label}, insufficient distribution data';
+          }
+          return '${node.label}, ${low.round()} to ${high.round()} percent free, '
+              'median ${median.round()} percent';
+        })
+        .join('; ');
+    return 'Free quota distribution. $providers.';
+  }
+
+  String _calendarSemantics(List<_Node> nodes) {
+    final providers = nodes
+        .map((node) {
+          final days = node.insights!.contributionCalendar;
+          if (days.isEmpty) return '${node.label}, no sampled days';
+          final samples = days.fold<int>(0, (sum, day) => sum + day.samples);
+          final weightedFree = samples == 0
+              ? 0.0
+              : days.fold<double>(
+                      0,
+                      (sum, day) => sum + day.meanFreePercent * day.samples,
+                    ) /
+                    samples;
+          final spentDays = days.where((day) => day.spent).length;
+          final spentText = spentDays == 1
+              ? '1 spent day'
+              : '$spentDays spent days';
+          return '${node.label}, ${days.length} sampled days, '
+              'average ${weightedFree.round()} percent free, $spentText';
+        })
+        .join('; ');
+    return 'Quota calendar. $providers.';
+  }
+
+  String _heatmapSemantics(
+    List<List<double?>>? grid,
+    List<WeekHourWindow> bestWindows,
+  ) {
+    if (grid == null) {
+      return 'Best time heatmap. Not enough data.';
+    }
+    final values = [
+      for (final row in grid)
+        for (final value in row) ?value,
+    ];
+    if (values.isEmpty) return 'Best time heatmap. Not enough data.';
+    final low = values.reduce(math.min).round();
+    final high = values.reduce(math.max).round();
+    final best = bestWindows.isEmpty
+        ? ''
+        : ' Best sampled window ${bestWindows.first.timeLabel}, '
+              '${bestWindows.first.scoreFreePercent.round()} percent free.';
+    return 'Best time heatmap. Mean free quota ranges from $low to $high '
+        'percent by weekday and hour.$best';
   }
 
   Widget _statRow(

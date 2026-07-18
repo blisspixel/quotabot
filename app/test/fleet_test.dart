@@ -2,13 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/drift.dart';
 
-ProviderQuota _q(String id, String name, double usedPercent, {int? resetsAt}) {
+ProviderQuota _q(
+  String id,
+  String name,
+  double usedPercent, {
+  int? resetsAt,
+  int? asOf,
+}) {
   return ProviderQuota(
     provider: id,
     displayName: name,
     account: '$id@example.com',
-    asOf: 1782046566,
+    asOf: asOf ?? 1782046566,
     windows: [
       QuotaWindow(label: '5h', usedPercent: usedPercent, resetsAt: resetsAt),
     ],
@@ -108,6 +115,123 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('fresh trusted evidence enters free-now analytics', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('codex', 'Codex', 40, asOf: now, resetsAt: now + 86400)],
+          buckets: const {},
+          dark: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('60%'), findsOneWidget);
+    expect(find.text('most headroom (60%)'), findsOneWidget);
+    expect(find.textContaining('not counted as free now'), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp(r'Live headroom\. Codex, 60 percent free, reset .+\.'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(
+        'Consumption share of used quota. Codex, 100 percent.',
+      ),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('stale evidence stays out of free-now analytics', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final live = _q(
+      'claude',
+      'Claude',
+      20,
+      asOf: now - 300,
+      resetsAt: now + 86400,
+    );
+    final stale = ProviderQuota.fromJson({...live.toJson(), 'stale': true});
+
+    await tester.pumpWidget(
+      _wrap(FleetScreen(data: [stale], buckets: const {}, dark: true)),
+    );
+    await tester.pump();
+
+    expect(find.text('no live data'), findsOneWidget);
+    expect(find.text('80%'), findsNothing);
+    expect(
+      find.textContaining('Claude (cached, last known 80% free)'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('drifted evidence stays out of free-now analytics', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final drifted = _q(
+      'grok',
+      'Grok',
+      35,
+      asOf: now - 300,
+      resetsAt: now + 86400,
+    ).withProviderDrift('weekly usage fell without a reset', now);
+
+    await tester.pumpWidget(
+      _wrap(FleetScreen(data: [drifted], buckets: const {}, dark: true)),
+    );
+    await tester.pump();
+
+    expect(find.text('no live data'), findsOneWidget);
+    expect(find.text('65%'), findsNothing);
+    expect(
+      find.textContaining('Grok (provider drift, last trusted 65% free)'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('future-dated evidence stays out of free-now analytics', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final future = _q(
+      'antigravity',
+      'Antigravity',
+      10,
+      asOf: now + kQuotaEvidenceClockSkewSeconds + 1,
+      resetsAt: now + 86400,
+    );
+
+    await tester.pumpWidget(
+      _wrap(FleetScreen(data: [future], buckets: const {}, dark: true)),
+    );
+    await tester.pump();
+
+    expect(find.text('no live data'), findsOneWidget);
+    expect(find.text('90%'), findsNothing);
+    expect(
+      find.textContaining('Antigravity (future timestamp)'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('FleetScreen is a body under the dashboard chrome', (
     tester,
   ) async {
@@ -139,6 +263,7 @@ void main() {
   testWidgets('FleetScreen finds history stored under account-scoped keys', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     await tester.binding.setSurfaceSize(const Size(820, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -159,7 +284,35 @@ void main() {
 
     expect(find.text('DISTRIBUTION'), findsOneWidget);
     expect(find.textContaining('history is still warming up'), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          r'Free quota distribution\. Codex, \d+ to \d+ percent free, '
+          r'median \d+ percent\.',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          r'Quota calendar\. Codex, \d+ sampled days, average \d+ percent '
+          r'free, \d+ spent days?\.',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          r'Best time heatmap\. Mean free quota ranges from \d+ to \d+ '
+          r'percent by weekday and hour\.',
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('FleetScreen shows a reset-aware best slot', (tester) async {

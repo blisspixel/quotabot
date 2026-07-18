@@ -951,6 +951,206 @@ void main() {
     expect(stats[quotaIdentityKey(id, 'home')]?.perHour, closeTo(2, 0.001));
   });
 
+  test('colliding legacy account stems stay isolated across local evidence',
+      () {
+    const provider = grokProviderId;
+    const plus = 'nick+work@example.com';
+    const underscore = 'nick_work@example.com';
+    const now = 1782000000;
+    ProviderQuota quota(String account, double used) => ProviderQuota(
+          provider: provider,
+          displayName: 'Grok',
+          account: account,
+          asOf: now,
+          windows: [
+            QuotaWindow(label: 'monthly', usedPercent: used),
+          ],
+        );
+
+    final plusQuota = quota(plus, 20);
+    final underscoreQuota = quota(underscore, 70);
+    saveSnapshot(plusQuota, observedAtMicros: 1782000000000100);
+    saveSnapshot(underscoreQuota, observedAtMicros: 1782000000000200);
+    saveProviderDriftObservation(
+      plusQuota,
+      'plus account drift',
+      now + 10,
+      observedAtMicros: 1782000010000300,
+    );
+    saveProviderDriftObservation(
+      underscoreQuota,
+      'underscore account drift',
+      now + 20,
+      observedAtMicros: 1782000020000400,
+    );
+
+    expect(loadAccountSnapshot(provider, plus)?.windows.single.usedPercent, 20);
+    expect(
+      loadAccountSnapshot(provider, underscore)?.windows.single.usedPercent,
+      70,
+    );
+    expect(
+      loadAccountSnapshots(provider).map((quota) => quota.account).toSet(),
+      {plus, underscore},
+    );
+    expect(
+      attachProviderDriftObservation(plusQuota, now: now + 30).driftReason,
+      'plus account drift',
+    );
+    expect(
+      attachProviderDriftObservation(
+        underscoreQuota,
+        now: now + 30,
+      ).driftReason,
+      'underscore account drift',
+    );
+    expect(
+      loadHistory(provider, account: plus)
+          .map((quota) => quota.account)
+          .toSet(),
+      {plus},
+    );
+    expect(
+      loadHistory(provider, account: underscore)
+          .map((quota) => quota.account)
+          .toSet(),
+      {underscore},
+    );
+
+    recordHeadroomSample(provider, 90, now - 3600, account: plus);
+    recordHeadroomSample(provider, 60, now, account: plus);
+    recordHeadroomSample(provider, 50, now - 3600, account: underscore);
+    recordHeadroomSample(provider, 48, now, account: underscore);
+    expect(
+      loadBuckets(provider, account: plus, fallbackToProvider: false).last.mean,
+      closeTo(60, 0.001),
+    );
+    expect(
+      loadBuckets(provider, account: underscore, fallbackToProvider: false)
+          .last
+          .mean,
+      closeTo(48, 0.001),
+    );
+    final stats = recentBurnStatsByQuota([plusQuota, underscoreQuota], now);
+    expect(
+      stats[quotaIdentityKey(provider, plus)]?.perHour,
+      closeTo(30, 0.001),
+    );
+    expect(
+      stats[quotaIdentityKey(provider, underscore)]?.perHour,
+      closeTo(2, 0.001),
+    );
+
+    final names = cacheDir()
+        .listSync()
+        .whereType<File>()
+        .map((file) => file.uri.pathSegments.last)
+        .toList();
+    for (final prefix in [
+      '${provider}_account_',
+      'drift_${provider}_account_',
+      'history_${provider}_account_',
+      'buckets_${provider}_account_',
+      'evidence_${provider}_account_',
+    ]) {
+      expect(names.where((name) => name.startsWith(prefix)), hasLength(2));
+    }
+    expect(names.any((name) => name.contains('nick')), isFalse);
+    expect(names.any((name) => name.contains('example.com')), isFalse);
+  });
+
+  test('legacy colliding files are read only for their exact identity', () {
+    const provider = grokProviderId;
+    const plus = 'nick+work@example.com';
+    const underscore = 'nick_work@example.com';
+    const legacyStem = 'nick_work_example.com';
+    const now = 1782000000;
+    ProviderQuota quota(String account, double used) => ProviderQuota(
+          provider: provider,
+          displayName: 'Grok',
+          account: account,
+          asOf: now,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: used)],
+        );
+    final plusQuota = quota(plus, 20);
+    final underscoreQuota = quota(underscore, 70);
+    File('${cacheDir().path}/${provider}_$legacyStem.json')
+        .writeAsStringSync(jsonEncode(plusQuota.toJson()));
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$legacyStem.jsonl',
+    );
+    legacyHistory.writeAsStringSync(
+      '${jsonEncode(plusQuota.toJson())}\n'
+      '${jsonEncode(underscoreQuota.toJson())}\n',
+    );
+
+    expect(loadAccountSnapshot(provider, plus)?.account, plus);
+    expect(loadAccountSnapshot(provider, underscore), isNull);
+    expect(loadHistory(provider, account: plus).single.account, plus);
+    expect(
+        loadHistory(provider, account: underscore).single.account, underscore);
+
+    legacyHistory.writeAsStringSync('${jsonEncode(plusQuota.toJson())}\n');
+    final legacyBucket = HeadroomBucket(start: now)..add(75);
+    File('${cacheDir().path}/buckets_${provider}_$legacyStem.json')
+        .writeAsStringSync(jsonEncode([legacyBucket.toJson()]));
+    expect(
+      loadBuckets(provider, account: plus, fallbackToProvider: false),
+      hasLength(1),
+    );
+    expect(
+      loadBuckets(provider, account: underscore, fallbackToProvider: false),
+      isEmpty,
+    );
+
+    recordHeadroomSample(provider, 65, now + 30, account: plus);
+    File('${cacheDir().path}/${provider}_$legacyStem.json')
+        .writeAsStringSync(jsonEncode(underscoreQuota.toJson()));
+    legacyHistory
+        .writeAsStringSync('${jsonEncode(underscoreQuota.toJson())}\n');
+    expect(
+      loadBuckets(provider, account: underscore, fallbackToProvider: false),
+      isEmpty,
+    );
+    final ownerMarker = cacheDir().listSync().whereType<File>().singleWhere(
+        (file) =>
+            file.uri.pathSegments.last.startsWith('legacy_bucket_owner_'));
+    expect(ownerMarker.uri.pathSegments.last, isNot(contains('nick')));
+    expect(ownerMarker.readAsStringSync(), isNot(contains(plus)));
+  });
+
+  test('canonical and legacy snapshots coexist as one newest identity', () {
+    const provider = grokProviderId;
+    const account = 'nick+work@example.com';
+    const legacyStem = 'nick_work_example.com';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Grok',
+          account: account,
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: used)],
+        );
+    File('${cacheDir().path}/${provider}_$legacyStem.json')
+        .writeAsStringSync(jsonEncode(quota(20, now).toJson()));
+    saveSnapshot(
+      quota(65, now + 100),
+      observedAtMicros: 1782000100000200,
+    );
+
+    final accountRows = loadAccountSnapshots(provider)
+        .where((snapshot) => snapshot.account == account)
+        .toList();
+    expect(accountRows, hasLength(1));
+    expect(accountRows.single.windows.single.usedPercent, 65);
+    final cachedRows = loadCachedSnapshots(now: now + 200)
+        .where((snapshot) =>
+            snapshot.provider == provider && snapshot.account == account)
+        .toList();
+    expect(cachedRows, hasLength(1));
+    expect(cachedRows.single.windows.single.usedPercent, 65);
+  });
+
   test('recentBurnStatsByQuota honors an explicit shorter burn lookback', () {
     final now = 1782000000;
     // Flat for several hours, then a steep recent draw-down. A shorter lookback
