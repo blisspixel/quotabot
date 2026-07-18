@@ -179,6 +179,7 @@ class ClaudeAdapter {
         plan: plan,
         asOf: asOf,
         windows: claudeWindows(data),
+        modelQuotas: claudeModelQuotas(data),
       ),
     );
   }

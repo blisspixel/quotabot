@@ -93,9 +93,11 @@ Window objects keep:
 - Optional `used` and `limit` counts.
 - Optional `resets_at` Unix epoch seconds.
 
-`model_quotas` is present only for providers that meter each model family from
-its own pool (Antigravity), and the `windows` summary stays the headline. Each
-entry keeps:
+`model_quotas` is present when a provider exposes a model-specific pool or cap.
+For Antigravity the list is exhaustive and each model family has an independent
+pool. For Claude the list is a sparse overlay on the shared `windows`, so an
+unmatched Claude model still uses the provider binding window and a spent scoped
+cap blocks only its matching model. Each entry keeps:
 
 - `model`, the provider's model name (pool-sharing effort/mode variants are
   rolled up to this base name).

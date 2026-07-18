@@ -20,6 +20,10 @@ void main() {
 
       _expectWindowsSafe(codexBindingWindows([input], now));
       _expectWindowsSafe(claudeWindows(input));
+      for (final model in claudeModelQuotas(input)) {
+        expect(model.model.trim(), isNotEmpty);
+        expect(model.usedPercent, inInclusiveRange(0, 100));
+      }
       _expectWindowsSafe(antigravityWindows(input, now));
       _expectWindowsSafe(cursorWindows(input, now));
       _expectWindowsSafe(windsurfWindows(input, now));

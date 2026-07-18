@@ -50,12 +50,16 @@ void main() {
   });
 
   group('claude degraded shapes', () {
-    test('an exhausted plan keeps every window with its spent utilization', () {
-      final windows = claudeWindows(_edge('claude_exhausted.json'));
-      expect(windows.map((w) => w.label), ['5h', 'weekly', 'opus']);
+    test('an exhausted plan separates provider and model caps', () {
+      final data = _edge('claude_exhausted.json');
+      final windows = claudeWindows(data);
+      expect(windows.map((w) => w.label), ['5h', 'weekly']);
       final fiveHour = windows.firstWhere((w) => w.label == '5h');
       expect(fiveHour.usedPercent, 100);
       expect(fiveHour.resetsAt, isNotNull);
+      final models = claudeModelQuotas(data);
+      expect(models.map((m) => m.model), ['Opus']);
+      expect(models.single.usedPercent, 100);
     });
   });
 }

@@ -107,6 +107,23 @@ void main() {
     expect(grantCalled, isFalse);
   });
 
+  test('maps the current limits payload to live quota windows', () async {
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => http.Response(_currentUsageBody(), 200)),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.windows.map((window) => window.label), ['5h', 'weekly']);
+    expect(q.windows.map((window) => window.usedPercent), [45, 17]);
+    expect(q.windows.every((window) => window.resetsAt != null), isTrue);
+    expect(q.modelQuotas.map((quota) => quota.model), ['Fable']);
+    expect(q.modelQuotas.single.usedPercent, 26);
+    expect(q.modelQuotas.single.resetsAt, isNotNull);
+    expect(q.perMachine, isFalse);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+  });
+
   test('a throwing grant loader cannot break a fresh host-token read',
       () async {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
@@ -224,4 +241,36 @@ void main() {
 String _usageBody() => jsonEncode({
       'five_hour': {'utilization': 30, 'resets_at': '2030-01-01T00:00:00Z'},
       'seven_day': {'utilization': 20, 'resets_at': '2030-01-02T00:00:00Z'},
+    });
+
+String _currentUsageBody() => jsonEncode({
+      'limits': [
+        {
+          'kind': 'session',
+          'group': 'session',
+          'percent': 45,
+          'resets_at': '2030-01-01T00:00:00Z',
+          'scope': null,
+          'is_active': true,
+        },
+        {
+          'kind': 'weekly_all',
+          'group': 'weekly',
+          'percent': 17,
+          'resets_at': '2030-01-02T00:00:00Z',
+          'scope': null,
+          'is_active': false,
+        },
+        {
+          'kind': 'weekly_scoped',
+          'group': 'weekly',
+          'percent': 26,
+          'resets_at': '2030-01-02T00:00:00Z',
+          'scope': {
+            'model': {'id': null, 'display_name': 'Fable'},
+            'surface': null,
+          },
+          'is_active': false,
+        },
+      ],
     });

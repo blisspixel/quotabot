@@ -17,7 +17,7 @@ import 'provider_ids.dart';
 
 /// The date the catalog was last refreshed (YYYY-MM-DD). Surfaced so consumers
 /// can see how fresh the capability hints are.
-const String kCatalogUpdated = '2026-07-10';
+const String kCatalogUpdated = '2026-07-18';
 
 /// Providers whose windows are true rolling included-quota plans. Only these
 /// can ever mark a model quota-backed for the no-surprise `--budget=quota`
@@ -34,7 +34,7 @@ const Set<String> kQuotaPlanProviders = {
 /// Cloud models per provider id. Context windows are total tokens. Kept to the
 /// current flagships per provider; the refresh tool can widen this.
 const Map<String, List<ModelInfo>> kModelCatalog = {
-  'claude': [
+  claudeProviderId: [
     ModelInfo(
       id: 'claude-fable-5',
       displayName: 'Claude Fable 5',
@@ -44,9 +44,6 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
       vision: true,
       reasoning: 'adaptive',
       tier: 'flagship',
-      // Anthropic says Fable 5 is included for up to 50% of weekly usage
-      // limits through July 7, 2026, then moves to usage credits.
-      quotaIncludedUntil: 1783494000,
     ),
     ModelInfo(
       id: 'claude-opus-4-8',

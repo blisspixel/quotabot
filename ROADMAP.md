@@ -62,6 +62,9 @@ by being correct, quiet, and predictable, not by being large.
 - **Stale resets prove nothing.** Cached quota keeps its original capture time
   and last observed percentage. A reset boundary passing after a failed live
   read never turns stale evidence into 100% free capacity or a routable result.
+- **Scoped limits stay scoped.** A provider-reported model allowance can gate
+  that model, but spending it never blocks unrelated models while the
+  provider's shared subscription windows still have headroom.
 - **Fail soft.** If quotabot is unavailable or lacks a safe route, callers keep
   their original behavior or receive an explicit no-safe-route result. Routing
   is an optimization, not a dependency.

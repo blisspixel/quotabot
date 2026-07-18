@@ -165,7 +165,10 @@ Claude's interactive `/usage` command is a human cross-check only. quotabot does
 not run `claude -p /usage` or `/quota`: print mode is a prompt-execution surface,
 not a stable quota API, and it conflicts with quotabot's zero-inference,
 content-blind boundary. quotabot calls the account-wide usage metadata endpoint
-directly instead.
+directly instead. When that endpoint includes a model-scoped limit such as
+Fable, quotabot reports it separately from the shared session and weekly
+windows. Spending a scoped model limit makes that model unavailable; it does not
+make every Claude model unavailable while shared plan quota remains.
 
 For a tool quotabot does not read yet, `quotabot manual set` adds a local
 self-reported quota window. Manual entries appear in the same views and JSON

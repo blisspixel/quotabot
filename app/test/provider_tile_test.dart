@@ -4,7 +4,7 @@ import 'package:quotabot/main.dart';
 import 'package:quotabot_collector/collector.dart';
 
 ProviderQuota _q(double usedPercent, {int? resetsAt}) => ProviderQuota(
-  provider: 'claude',
+  provider: claudeProviderId,
   displayName: 'Claude',
   account: 'default',
   asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -14,7 +14,7 @@ ProviderQuota _q(double usedPercent, {int? resetsAt}) => ProviderQuota(
 );
 
 ProviderQuota _accountQ(String account) => ProviderQuota(
-  provider: 'antigravity',
+  provider: antigravityProviderId,
   displayName: 'Antigravity',
   account: account,
   plan: 'AI Pro',
@@ -42,6 +42,105 @@ double _contrastRatio(Color foreground, Color background) {
 }
 
 void main() {
+  testWidgets('renders Claude scoped quota after shared provider windows', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: '5h', usedPercent: 45, resetsAt: now + 3600),
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 17,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(model: 'Fable', usedPercent: 26, resetsAt: now + 5 * 86400),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.text('5h'), findsOneWidget);
+    expect(find.text('weekly'), findsOneWidget);
+    expect(find.text('Fable'), findsOneWidget);
+    expect(find.textContaining('74% free'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Fable')).dy,
+      greaterThan(tester.getTopLeft(find.text('weekly')).dy),
+    );
+    expect(providerTileQuotaRowCount(quota, now), 3);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('spent Claude scoped quota does not block the provider tile', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 17,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(model: 'Fable', usedPercent: 100, resetsAt: now + 5 * 86400),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('83% free'), findsOneWidget);
+    expect(find.textContaining('0% free'), findsOneWidget);
+    expect(find.textContaining('weekly spent'), findsNothing);
+    expect(find.text('Fable'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('does not render Antigravity model-quota list on its tile', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: antigravityProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      modelQuotas: const [
+        ModelQuota(model: 'Gemini 3.5 Flash', usedPercent: 10),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.text('weekly'), findsOneWidget);
+    expect(find.text('Gemini 3.5 Flash'), findsNothing);
+    expect(desktopScopedModelQuotas(quota), isEmpty);
+    expect(providerTileQuotaRowCount(quota, now), 1);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shows a redeemable reset as a prominent green banner', (
     tester,
   ) async {

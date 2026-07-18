@@ -136,6 +136,10 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   profile databases, attempts live reads for each discovered account, refreshes
   the Gemini CLI token from disk when it is the active token source, and runs the
   Cloud Code onboarding step before reading per-model quota.
+- Claude's current usage response separates shared session and weekly windows
+  from optional model-scoped weekly limits. Shared windows govern provider
+  routing; a scoped row is a sparse model-budget overlay, so spending it cannot
+  block unrelated Claude models.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
   Cursor's current included-usage pool is normalized as a monthly quota window

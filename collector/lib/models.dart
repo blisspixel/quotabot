@@ -89,11 +89,11 @@ class QuotaWindow {
       );
 }
 
-/// Live per-model quota for a provider that meters each model family from its
-/// own pool rather than one shared window (Antigravity: every Gemini/Claude/
-/// GPT-OSS family has its own remaining headroom and reset). Captured richly for
-/// routing and detail views; the compact window summary stays the headline, so
-/// this never bloats the default display.
+/// Live per-model quota for either an exhaustive provider pool or a scoped
+/// allowance layered over shared provider windows. Antigravity reports every
+/// model family independently; Claude can report an additional cap for one
+/// model such as Fable. Consumers must preserve that provider-specific scope so
+/// an optional model cap never blocks unrelated models.
 class ModelQuota {
   /// Model name as the provider labels it, e.g. "Gemini 3.5 Flash". Effort or
   /// mode variants that share a pool are rolled up to this base name.
@@ -361,9 +361,9 @@ class ProviderQuota {
   /// for subscriptions and when the operating system exposes no usable value.
   final LocalHardwareInfo? localHardware;
 
-  /// Live per-model quota, for providers that meter each model family from its
-  /// own pool (Antigravity). Empty for providers with a single shared window;
-  /// the [windows] summary stays the headline and this is detail on demand.
+  /// Live per-model quota. Antigravity uses an exhaustive set of independent
+  /// model pools; Claude may use sparse overlays on its shared [windows]. Empty
+  /// when the provider exposes only shared quota.
   final List<ModelQuota> modelQuotas;
 
   /// True when data was read successfully.

@@ -145,8 +145,12 @@ PROV-DM conformance.
   or expired. Both are sent as a bearer token with the
   `anthropic-beta: oauth-2025-04-20` header. quotabot never writes the host
   credentials file.
-- Response provides `five_hour` and `seven_day` blocks (plus per-model weekly
-  blocks) with a `utilization` percent and an ISO `resets_at`.
+- Current responses provide a `limits` array with shared session and weekly rows
+  plus model-scoped weekly rows, each carrying a percent and ISO `resets_at`.
+  Older responses expose equivalent `five_hour`, `seven_day`, and per-model
+  blocks with `utilization`; those remain a compatibility fallback. Model-scoped
+  rows gate only the matching model and never become provider-wide binding
+  windows.
 - This is live, and is the same data the in-CLI `/usage` command shows.
 - The host token only refreshes while Claude Code runs on this machine, so on an
   idle machine it eventually expires. quotabot then refreshes its own grant if

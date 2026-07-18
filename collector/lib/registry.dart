@@ -14,10 +14,12 @@ library;
 import 'dart:math' as math;
 
 import 'analysis.dart';
+import 'drift.dart';
 import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'parsing.dart' show resetLabel;
+import 'provider_ids.dart';
 import 'util.dart';
 
 const _mib = 1024 * 1024;
@@ -619,6 +621,10 @@ List<ModelEntry> buildModelRegistry(
         q.windows.isNotEmpty &&
         kQuotaPlanProviders.contains(q.provider);
     for (final m in models) {
+      final claudeScopedQuota =
+          q.provider == claudeProviderId ? _matchingModelQuota(q, m) : null;
+      final requiresLiveFableQuota =
+          q.provider == claudeProviderId && _claudeScopedFamily(m) == 'fable';
       final budget = q.isLocal
           ? null
           : _modelBudgetFor(
@@ -628,9 +634,12 @@ List<ModelEntry> buildModelRegistry(
               providerAvailable: a.available,
               providerResetsAt: a.resetsAt,
               bindingLabel: binding?.label,
+              now: now,
             );
       final quotaBacked = providerQuotaBacked &&
-          (m.quotaIncludedUntil == null || now < m.quotaIncludedUntil!);
+          (m.quotaIncludedUntil == null || now < m.quotaIncludedUntil!) &&
+          (!requiresLiveFableQuota ||
+              (claudeScopedQuota != null && isTrustedQuotaEvidenceAt(q, now)));
       entries.add(ModelEntry(
         model: m,
         provider: q.provider,
@@ -696,8 +705,18 @@ List<ModelEntry> buildModelRegistry(
   required bool providerAvailable,
   required int? providerResetsAt,
   required String? bindingLabel,
+  required int now,
 }) {
   if (q.modelQuotas.isEmpty) {
+    if (q.provider == claudeProviderId &&
+        _claudeScopedFamily(model) == 'fable') {
+      return (
+        headroomPercent: null,
+        resetsAt: null,
+        gatingWindow: null,
+        available: false,
+      );
+    }
     return (
       headroomPercent: providerHeadroom,
       resetsAt: providerResetsAt,
@@ -705,7 +724,60 @@ List<ModelEntry> buildModelRegistry(
       available: providerAvailable,
     );
   }
-  final quota = _matchingModelQuota(q.modelQuotas, model);
+  final quota = _matchingModelQuota(q, model);
+  if (q.provider == claudeProviderId) {
+    // Claude's model quotas are scoped overlays on the account-wide shared
+    // windows. They are not an exhaustive catalog of every Claude model, so an
+    // unmatched model still inherits the shared provider budget. A matching
+    // model must satisfy both gates and reports whichever one is tighter.
+    if (quota == null) {
+      // Fable inclusion differs by plan. Without a live scoped Fable pool there
+      // is no evidence that this account can use it without paid credits.
+      if (_claudeScopedFamily(model) == 'fable') {
+        return (
+          headroomPercent: null,
+          resetsAt: null,
+          gatingWindow: null,
+          available: false,
+        );
+      }
+      return (
+        headroomPercent: providerHeadroom,
+        resetsAt: providerResetsAt,
+        gatingWindow: bindingLabel,
+        available: providerAvailable,
+      );
+    }
+    final scopedHeadroom = _scopedModelHeadroom(q, quota, now);
+    if (providerHeadroom == null) {
+      return (
+        headroomPercent: null,
+        resetsAt: providerResetsAt,
+        gatingWindow: bindingLabel,
+        available: false,
+      );
+    }
+    if (scopedHeadroom == null) {
+      final reset = quota.resetsAt;
+      return (
+        headroomPercent: null,
+        resetsAt: reset,
+        gatingWindow: reset == null ? null : resetLabel(reset, q.asOf),
+        available: false,
+      );
+    }
+    final scopedIsTighter = scopedHeadroom < providerHeadroom;
+    final headroom = scopedIsTighter ? scopedHeadroom : providerHeadroom;
+    final reset = scopedIsTighter ? quota.resetsAt : providerResetsAt;
+    return (
+      headroomPercent: headroom,
+      resetsAt: reset,
+      gatingWindow: scopedIsTighter
+          ? (reset == null ? null : resetLabel(reset, q.asOf))
+          : bindingLabel,
+      available: providerAvailable && headroom > kSpentHeadroomFloor,
+    );
+  }
   final headroom = quota?.remainingPercent;
   final reset = quota?.resetsAt;
   return (
@@ -717,28 +789,73 @@ List<ModelEntry> buildModelRegistry(
   );
 }
 
-ModelQuota? _matchingModelQuota(List<ModelQuota> quotas, ModelInfo model) {
+double? _scopedModelHeadroom(
+  ProviderQuota providerQuota,
+  ModelQuota modelQuota,
+  int now,
+) {
+  final reset = modelQuota.resetsAt;
+  if (isTrustedQuotaEvidenceAt(providerQuota, now) &&
+      reset != null &&
+      reset <= now) {
+    return 100;
+  }
+  return modelQuota.remainingPercent;
+}
+
+ModelQuota? _matchingModelQuota(ProviderQuota quota, ModelInfo model) {
   final modelKeys = _modelIdentityKeys(model.id, model.displayName);
   ModelQuota? best;
   var bestScore = 0;
-  for (final quota in quotas) {
-    final score = _modelQuotaMatchScore(_modelQuotaKey(quota.model), modelKeys);
+  for (final modelQuota in quota.modelQuotas) {
+    final score = _modelQuotaMatchScore(
+      _modelQuotaKey(modelQuota.model),
+      modelKeys,
+      provider: quota.provider,
+    );
     if (score > bestScore) {
-      best = quota;
+      best = modelQuota;
       bestScore = score;
     }
   }
   return best;
 }
 
-int _modelQuotaMatchScore(String quotaKey, Set<String> modelKeys) {
+int _modelQuotaMatchScore(
+  String quotaKey,
+  Set<String> modelKeys, {
+  required String provider,
+}) {
   if (modelKeys.contains(quotaKey)) return 3;
   if (modelKeys.any((modelKey) => quotaKey.startsWith(modelKey))) return 2;
   if (_isProviderFamilyQuotaKey(quotaKey) &&
       modelKeys.any((modelKey) => modelKey.startsWith(quotaKey))) {
     return 1;
   }
+  if (provider == claudeProviderId &&
+      _claudeScopedFamilies.any(
+        (family) =>
+            quotaKey == family &&
+            modelKeys.any((modelKey) => modelKey.contains(family)),
+      )) {
+    return 1;
+  }
   return 0;
+}
+
+const Set<String> _claudeScopedFamilies = {
+  'fable',
+  'opus',
+  'sonnet',
+  'haiku',
+};
+
+String? _claudeScopedFamily(ModelInfo model) {
+  final keys = _modelIdentityKeys(model.id, model.displayName);
+  for (final family in _claudeScopedFamilies) {
+    if (keys.any((key) => key.contains(family))) return family;
+  }
+  return null;
 }
 
 Set<String> _modelIdentityKeys(String id, String? displayName) => {

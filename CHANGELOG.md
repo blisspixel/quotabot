@@ -33,6 +33,13 @@ Notable changes to quotabot. Newest first.
   and fallback.
 
 ### Fixed
+- Claude now reads Anthropic's current `limits` array, including live
+  model-scoped weekly allowances such as Fable, while retaining compatibility
+  with the older top-level usage fields. Scoped limits gate and display only the
+  matching model, so exhausting Fable cannot incorrectly block every Claude
+  model while the shared session or weekly plan still has headroom. Older cache
+  snapshots that stored a scoped family as a provider window migrate without a
+  false drift quarantine.
 - Cached cloud quota no longer becomes a misleading 100% free when its reset
   boundary passes after a failed live read. Stale windows retain their original
   capture time and last observed percentage across CLI, desktop, `top`, alerts,

@@ -206,16 +206,189 @@ void main() {
   });
 
   group('claude', () {
+    test('prefers canonical limits and normalizes scoped families', () {
+      final data = <String, dynamic>{
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': 45,
+            'resets_at': '2026-07-18T17:00:00Z',
+            'scope': null,
+            'is_active': true,
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': 17,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': null,
+            // Live responses mark weekly rows inactive even though `/usage`
+            // displays and enforces them.
+            'is_active': false,
+          },
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 26,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': {
+              'model': {'id': null, 'display_name': 'Claude Fable 5'},
+              'surface': null,
+            },
+            'is_active': false,
+          },
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': 99,
+            'resets_at': '2026-07-18T18:00:00Z',
+            'scope': null,
+            'is_active': true,
+          },
+        ],
+        // Canonical rows win over duplicate legacy buckets.
+        'five_hour': {'utilization': 1},
+        'seven_day': {'utilization': 2},
+      };
+      final w = claudeWindows(data);
+      final models = claudeModelQuotas(data);
+
+      expect(w.map((e) => e.label), ['5h', 'weekly']);
+      expect(w.map((e) => e.usedPercent), [45, 17]);
+      expect(w.every((e) => e.resetsAt != null), isTrue);
+      expect(models.map((e) => e.model), ['Fable']);
+      expect(models.single.usedPercent, 26);
+      expect(models.single.resetsAt, isNotNull);
+    });
+
+    test('skips malformed canonical rows and fills missing legacy labels', () {
+      final data = <String, dynamic>{
+        'limits': [
+          'not a row',
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': '88',
+            'scope': null,
+            'is_active': false,
+          },
+          {
+            'kind': 'session',
+            'group': 'weekly',
+            'percent': 44,
+            'scope': null,
+            'is_active': true,
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': 101,
+            'scope': null,
+            'is_active': true,
+          },
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 20,
+            'scope': null,
+            'is_active': true,
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': 31,
+            'resets_at': null,
+            'scope': null,
+            'is_active': true,
+          },
+        ],
+        'five_hour': {'utilization': 5},
+      };
+      final w = claudeWindows(data);
+
+      expect(w.map((e) => e.label), ['5h', 'weekly']);
+      expect(w.map((e) => e.usedPercent), [5, 31]);
+      expect(claudeModelQuotas(data), isEmpty);
+    });
+
+    test('merges scoped-only canonical data with legacy primary windows', () {
+      final data = <String, dynamic>{
+        'limits': [
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 26,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': {
+              'model': {'id': null, 'display_name': 'Fable'},
+              'surface': null,
+            },
+            'is_active': false,
+          },
+        ],
+        'five_hour': {'utilization': 45},
+        'seven_day': {'utilization': 17},
+      };
+      final w = claudeWindows(data);
+      final models = claudeModelQuotas(data);
+
+      expect(w.map((e) => e.label), ['5h', 'weekly']);
+      expect(w.map((e) => e.usedPercent), [45, 17]);
+      expect(models.map((e) => e.model), ['Fable']);
+      expect(models.single.usedPercent, 26);
+    });
+
+    test('falls back to legacy fields when no canonical row is trusted', () {
+      final w = claudeWindows({
+        'limits': [
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': '17',
+            'scope': null,
+            'is_active': true,
+          },
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': 45,
+            'resets_at': 'not-a-date',
+            'scope': null,
+            'is_active': true,
+          },
+        ],
+        'five_hour': {'utilization': 18},
+        'seven_day': {'utilization': 23},
+      });
+
+      expect(w.map((e) => e.label), ['5h', 'weekly']);
+      expect(w.map((e) => e.usedPercent), [18, 23]);
+    });
+
     test('parses utilization blocks and iso reset', () {
       final w = claudeWindows({
         'five_hour': {'utilization': 18.0, 'resets_at': '2026-06-21T17:00:00Z'},
         'seven_day': {'utilization': 23.0, 'resets_at': null},
         'seven_day_opus': {'utilization': 0.0},
       });
-      expect(w.map((e) => e.label), ['5h', 'weekly', 'opus']);
+      expect(w.map((e) => e.label), ['5h', 'weekly']);
       expect(w[0].usedPercent, 18.0);
       expect(w[0].resetsAt, isNotNull);
       expect(w[1].resetsAt, isNull);
+    });
+
+    test('keeps a legacy Opus cap as model quota', () {
+      final models = claudeModelQuotas({
+        'seven_day_opus': {
+          'utilization': 12,
+          'resets_at': '2026-06-21T17:00:00Z',
+        },
+      });
+
+      expect(models.map((e) => e.model), ['Opus']);
+      expect(models.single.usedPercent, 12);
+      expect(models.single.resetsAt, isNotNull);
     });
 
     test('skips blocks without utilization', () {
