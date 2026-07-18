@@ -88,6 +88,14 @@ Optional environment:
   repository's `collector/`.
 - `DART`: Dart executable. Defaults to `dart`.
 
+The HTTP examples accept only absolute `http` or `https` URLs whose textual
+host is case-insensitive `localhost`, exact `127.0.0.1`, or bracketed `::1`.
+They reject external names, trailing-dot and DNS lookalikes, alternate numeric
+loopback spellings, embedded credentials, fragments, and malformed ports before
+reading the bearer token or constructing the HTTP transport. Explicit ports,
+paths, and query strings are allowed. The check intentionally does not resolve
+DNS names.
+
 ## TypeScript
 
 Install the SDK:

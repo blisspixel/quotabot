@@ -2,11 +2,47 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import urlsplit
 
 
 _REQUIRED_ROUTING_TOOLS = ("suggest_provider", "suggest_model")
+_LOOPBACK_MCP_URL_PATTERN = re.compile(
+    r"^https?://(?:localhost|127\.0\.0\.1|\[::1\])"
+    r"(?::[0-9]+)?(?:[/?][^\s\\#]*)?$",
+    re.IGNORECASE,
+)
+_LOOPBACK_MCP_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_LOOPBACK_MCP_URL_ERROR = (
+    "QUOTABOT_MCP_URL must use http or https with the exact loopback host "
+    "localhost, 127.0.0.1, or ::1"
+)
+
+
+def require_loopback_mcp_url(value: str) -> str:
+    """Validate an MCP HTTP endpoint without resolving alternate host forms."""
+    if not isinstance(value, str) or not _LOOPBACK_MCP_URL_PATTERN.fullmatch(value):
+        raise ValueError(_LOOPBACK_MCP_URL_ERROR)
+
+    try:
+        parsed = urlsplit(value)
+        parsed.port
+    except ValueError as error:
+        raise ValueError(_LOOPBACK_MCP_URL_ERROR) from error
+
+    hostname = parsed.hostname
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or hostname is None
+        or hostname.lower() not in _LOOPBACK_MCP_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise ValueError(_LOOPBACK_MCP_URL_ERROR)
+    return value
 
 
 def structured_content(result: Any) -> dict[str, Any]:

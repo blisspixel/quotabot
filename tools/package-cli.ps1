@@ -9,6 +9,7 @@ $collectorDir = Join-Path $root 'collector'
 $releaseDir = Join-Path $root 'release'
 $buildDir = Join-Path $collectorDir 'build\quotabot_cli_release'
 . (Join-Path $scriptDir 'windows-architecture.ps1')
+. (Join-Path $scriptDir 'package-pair.ps1')
 
 $dart = (Get-Command dart -ErrorAction SilentlyContinue).Source
 if (-not $dart) {
@@ -52,12 +53,29 @@ if (-not (Test-Path -LiteralPath $builtExe)) {
 }
 Move-Item -LiteralPath $builtExe -Destination $packagedExe -Force
 
-Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $sidecar -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $out -Force
+$packageWorkspace = Join-Path $releaseDir ".quotabot-package-$([guid]::NewGuid())"
+$temporaryOut = Join-Path $packageWorkspace $asset
+$temporarySidecar = "$temporaryOut.sha256"
+New-Item -ItemType Directory -Force -Path $packageWorkspace | Out-Null
+try {
+  Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $temporaryOut
+  $hash = (Get-FileHash -Algorithm SHA256 $temporaryOut).Hash.ToLowerInvariant()
+  Set-Content -LiteralPath $temporarySidecar -Value "$hash  $asset" -NoNewline
 
-$hash = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLowerInvariant()
-Set-Content -LiteralPath $sidecar -Value "$hash  $asset" -NoNewline
+  # Activate both complete files as one rollback-protected package pair.
+  Publish-QuotabotPackagePair `
+    -TemporaryArchive $temporaryOut `
+    -TemporarySidecar $temporarySidecar `
+    -Archive $out `
+    -Sidecar $sidecar `
+    -Workspace $packageWorkspace
+} finally {
+  if (Test-Path -LiteralPath (Join-Path $packageWorkspace '.preserve')) {
+    Write-Warning "Package recovery files were preserved in $packageWorkspace"
+  } else {
+    Remove-Item -LiteralPath $packageWorkspace -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
 
 Write-Host "CLI asset ready: $out"
 Write-Host "Checksum: $sidecar"

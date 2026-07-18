@@ -467,8 +467,8 @@ class ModelRequirements {
 }
 
 /// Maps a coarse task label to a default requirement set: a documented heuristic,
-/// fully overridable by explicit requirements. Unknown labels add nothing, so a
-/// typo never silently filters everything out.
+/// fully overridable by explicit requirements. Public surfaces validate labels;
+/// unknown internal values add nothing as a final fail-soft guard.
 ModelRequirements taskProfile(String? task) {
   switch (task?.toLowerCase()) {
     case 'simple':

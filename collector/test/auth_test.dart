@@ -485,6 +485,44 @@ void main() {
   });
 
   group('OpenAiAuth', () {
+    test('login reports a busy callback port before showing the URL', () async {
+      final server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        1455,
+      );
+      addTearDown(() => server.close(force: true));
+      var showedUrl = false;
+
+      await expectLater(
+        OpenAiAuth(clientId: 'test-client').loginLoopback(
+          showUrl: (_) => showedUrl = true,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            contains('port 1455 is busy'),
+          ),
+        ),
+      );
+      expect(showedUrl, isFalse);
+    });
+
+    test('login releases the callback port when URL display fails', () async {
+      await expectLater(
+        OpenAiAuth(clientId: 'test-client').loginLoopback(
+          showUrl: (_) => throw StateError('display failed'),
+        ),
+        throwsA(isA<StateError>()),
+      );
+
+      final server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        1455,
+      );
+      await server.close(force: true);
+    });
+
     test('refresh maps the token response and keeps rotation', () async {
       final mock = MockClient((req) async {
         expect(req.url.toString(), contains('auth.openai.com/oauth/token'));

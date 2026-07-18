@@ -98,6 +98,26 @@ void main() {
     }
   });
 
+  test('window position persists only as a finite coordinate pair', () {
+    expect(const Prefs(windowX: 120).toJson(), isNot(contains('window_x')));
+    expect(const Prefs(windowY: 80).toJson(), isNot(contains('window_y')));
+
+    final partial = Prefs.fromJson({'window_x': 120});
+    expect(partial.windowX, isNull);
+    expect(partial.windowY, isNull);
+
+    final invalid = Prefs.fromJson({
+      'window_x': double.infinity,
+      'window_y': 80,
+    });
+    expect(invalid.windowX, isNull);
+    expect(invalid.windowY, isNull);
+
+    final valid = Prefs.fromJson({'window_x': -1600, 'window_y': 120});
+    expect(valid.windowX, -1600);
+    expect(valid.windowY, 120);
+  });
+
   test('concurrent saves serialize and retain the newest settings', () async {
     final first = const Prefs(
       webhookUrl: 'http://127.0.0.1:9000/first',

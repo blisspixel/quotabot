@@ -688,6 +688,63 @@ void main() {
       expect(rankedModel['drift_observed_at'], _now - 30);
     });
 
+    test('invalid routing filters fail before live collection', () async {
+      var liveCalls = 0;
+      await connect(
+        const [],
+        snapshotProvider: () async {
+          liveCalls += 1;
+          return _fixture();
+        },
+      );
+
+      final invalidTask = await client.callTool(
+        const CallToolRequest(
+          name: 'list_models',
+          arguments: {'task': 'banana'},
+        ),
+      );
+      expect(invalidTask.isError, isFalse);
+      expect(invalidTask.structuredContent?['error'], contains('task must be'));
+
+      final invalidContext = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_model',
+          arguments: {'min_context': 0},
+        ),
+      );
+      expect(invalidContext.isError, isFalse);
+      expect(
+        invalidContext.structuredContent?['error'],
+        contains('min_context must be'),
+      );
+
+      final invertedTiers = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {
+            'tier_floor': 'flagship',
+            'tier_ceiling': 'light',
+          },
+        ),
+      );
+      expect(invertedTiers.isError, isFalse);
+      expect(
+        invertedTiers.structuredContent?['error'],
+        contains('tier_floor cannot be higher'),
+      );
+
+      final invalidCost = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'cost_weight': 11},
+        ),
+      );
+      expect(invalidCost.isError, isFalse);
+      expect(invalidCost.structuredContent?['error'], contains('cost_weight'));
+      expect(liveCalls, 0);
+    });
+
     test('suggest_provider applies explicit cost policy', () async {
       await connect([
         _q('claude', [
@@ -751,10 +808,8 @@ void main() {
           arguments: {'task': 'typo'},
         ),
       );
-      expect(
-        (typoSuggestion.structuredContent?['recommended'] as Map)['provider'],
-        'ollama',
-      );
+      expect(typoSuggestion.structuredContent?['recommended'], isNull);
+      expect(typoSuggestion.structuredContent?['error'], contains('task must'));
     });
 
     test('suggest_provider applies supplied provider-route task context',
@@ -1209,6 +1264,44 @@ void main() {
       );
     });
 
+    test('concurrent auto reservations select different providers', () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 30)]),
+        ],
+        leaseStore: store,
+      );
+
+      final reservations = await Future.wait([
+        client.callTool(
+          const CallToolRequest(
+            name: 'reserve_provider',
+            arguments: {'weight_percent': 30},
+          ),
+        ),
+        client.callTool(
+          const CallToolRequest(
+            name: 'reserve_provider',
+            arguments: {'weight_percent': 30},
+          ),
+        ),
+      ]);
+
+      expect(
+        reservations.map(
+          (reservation) =>
+              (reservation.structuredContent?['lease'] as Map)['provider'],
+        ),
+        unorderedEquals(['claude', 'codex']),
+      );
+      expect(store.active(_now), hasLength(2));
+    });
+
     test('reserve_provider reuses an auto-selected lease on idempotent retry',
         () async {
       var nextId = 0;
@@ -1257,6 +1350,50 @@ void main() {
       expect(second['provider'], 'claude');
       // Exactly one lease exists, not two.
       expect((retry.structuredContent?['active_leases'] as List).length, 1);
+    });
+
+    test('reserve_provider does not reuse a lease excluded by this request',
+        () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+          _q('codex', [QuotaWindow(label: 'weekly', usedPercent: 30)]),
+        ],
+        leaseStore: store,
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'idempotency_key': 'shared-retry'},
+        ),
+      );
+      expect(
+        (reserved.structuredContent?['lease'] as Map)['provider'],
+        'claude',
+      );
+
+      final conflict = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'idempotency_key': 'shared-retry',
+            'exclude': ['claude'],
+          },
+        ),
+      );
+      expect(conflict.structuredContent?['reserved'], isFalse);
+      expect(conflict.structuredContent?['reused'], isFalse);
+      expect(conflict.structuredContent?['lease'], isNull);
+      expect(
+        conflict.structuredContent?['reason'],
+        contains('outside this request'),
+      );
+      expect(store.active(_now), hasLength(1));
     });
 
     test('reserve_provider reports profile and explicit target failures',
@@ -1418,6 +1555,133 @@ void main() {
         'ollama',
       );
       expect(liveCalls, 0);
+    });
+
+    test('decide_now rejects an old provider in a mixed-age cache', () async {
+      await connect(
+        const [],
+        snapshotProvider: () async => throw StateError('live collection'),
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: [
+            _q('codex', [
+              QuotaWindow(
+                label: 'weekly',
+                usedPercent: 40,
+                resetsAt: _now + 3600,
+              ),
+            ]),
+            ProviderQuota(
+              provider: 'claude',
+              displayName: 'claude',
+              account: 'a',
+              asOf: _now - 7200,
+              windows: [
+                QuotaWindow(
+                  label: 'weekly',
+                  usedPercent: 1,
+                  resetsAt: _now + 3600,
+                ),
+              ],
+            ),
+          ],
+          asOf: _now,
+          source: 'disk',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'max_age_seconds': 300},
+        ),
+      );
+
+      expect(decision.structuredContent?['snapshot_age_seconds'], 0);
+      expect(decision.structuredContent?['snapshot_stale'], isTrue);
+      expect(
+        (decision.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+      final ranked = decision.structuredContent?['ranked'] as List;
+      final claude = ranked.cast<Map<String, dynamic>>().singleWhere(
+            (candidate) => candidate['provider'] == 'claude',
+          );
+      expect(claude['stale'], isTrue);
+      expect(claude['available'], isFalse);
+    });
+
+    test('decide_now rejects a future-dated cached provider', () async {
+      await connect(
+        const [],
+        snapshotProvider: () async => throw StateError('live collection'),
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: [
+            ProviderQuota(
+              provider: 'claude',
+              displayName: 'claude',
+              account: 'a',
+              asOf: _now + 61,
+              windows: [
+                QuotaWindow(
+                  label: 'weekly',
+                  usedPercent: 1,
+                  resetsAt: _now + 3600,
+                ),
+              ],
+            ),
+          ],
+          asOf: _now,
+          source: 'disk',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'max_age_seconds': 300},
+        ),
+      );
+
+      expect(decision.structuredContent?['snapshot_stale'], isTrue);
+      expect(decision.structuredContent?['recommended'], isNull);
+      final ranked = decision.structuredContent?['ranked'] as List;
+      final claude = ranked.cast<Map<String, dynamic>>().single;
+      expect(claude['stale'], isTrue);
+      expect(claude['available'], isFalse);
+    });
+
+    test('decide_now marks a future-dated cache envelope stale', () async {
+      await connect(
+        const [],
+        snapshotProvider: () async => throw StateError('live collection'),
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: [
+            _q('claude', [
+              QuotaWindow(
+                label: 'weekly',
+                usedPercent: 20,
+                resetsAt: _now + 3600,
+              ),
+            ]),
+          ],
+          asOf: _now + 61,
+          source: 'disk',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'max_age_seconds': 300},
+        ),
+      );
+
+      expect(decision.structuredContent?['snapshot_age_seconds'], 0);
+      expect(decision.structuredContent?['snapshot_stale'], isTrue);
+      final receipt =
+          decision.structuredContent?['receipt'] as Map<String, dynamic>;
+      final snapshot = receipt['snapshot'] as Map<String, dynamic>;
+      expect(snapshot['stale'], isTrue);
     });
 
     test('decide_now applies explicit cost policy from cache', () async {

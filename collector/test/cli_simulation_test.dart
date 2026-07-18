@@ -52,6 +52,90 @@ void main() {
     );
   });
 
+  test('separated provider preference is applied', () async {
+    final result = await runCollectCli(
+      ['suggest', '--json', '--prefer', 'codex,claude'],
+      environment: {
+        'LOCALAPPDATA': temp.path,
+        'QUOTABOT_DEMO': '1',
+      },
+    );
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect((json['recommended'] as Map)['provider'], 'codex');
+    expect(json['reason'], contains('first by your preference'));
+  });
+
+  test('value option without a value is a usage error', () async {
+    final result = await runCli([
+      'models',
+      '--mock-provider=codex',
+      '--min-context',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('--min-context requires a value'));
+    expect(result.stdout as String, isEmpty);
+  });
+
+  test('unknown option is a usage error', () async {
+    final result = await runCli([
+      'models',
+      '--mock-provider=codex',
+      '--does-not-exist',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('unknown option'));
+    expect(result.stderr as String, contains('--does-not-exist'));
+    expect(result.stdout as String, isEmpty);
+  });
+
+  test('option terminator keeps later dash-prefixed text positional', () async {
+    final result = await runCollectCli(
+      ['status', '--', '--json'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('unexpected argument "--json"'));
+    expect(result.stdout as String, isEmpty);
+  });
+
+  test('recognized option on the wrong command is a usage error', () async {
+    final result = await runCollectCli(
+      ['models', '--used=10'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('--used is not valid for models'));
+    expect(result.stdout as String, isEmpty);
+  });
+
+  test('extra positional argument is a usage error', () async {
+    final result = await runCollectCli(
+      ['suggest', 'extra'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('unexpected argument "extra"'));
+    expect(result.stdout as String, isEmpty);
+  });
+
+  test('simulation state requires a mock provider', () async {
+    final result = await runCollectCli(
+      ['status', '--state=spent'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('--state requires'));
+    expect(result.stdout as String, isEmpty);
+  });
+
   test('check exits unavailable for an exhausted mock provider', () async {
     final result = await runCli([
       'check',
@@ -380,16 +464,58 @@ void main() {
     expect(result.stderr as String, contains('unknown --state "missing"'));
   });
 
-  test('models tolerates an overflowing --min-context instead of crashing',
-      () async {
-    // 1e309 parses to Infinity; round() throws on a non-finite double, so the
-    // filter must fall back to "no filter" rather than crash with exit 255.
+  test('models rejects invalid capability filter values', () async {
+    final cases = {
+      '--min-context=1e309': '--min-context',
+      '--min-context=-1': '--min-context',
+      '--task=banana': '--task',
+      '--tier-floor=banana': '--tier-floor',
+      '--tier-ceiling=': '--tier-ceiling',
+    };
+    for (final entry in cases.entries) {
+      final result = await runCollectCli(
+        ['models', entry.key],
+        environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+      );
+      expectExitCode(result, 64);
+      expect(result.stderr as String, contains(entry.value));
+      expect(result.stdout as String, isEmpty);
+    }
+  });
+
+  test('models rejects an inverted tier range', () async {
     final result = await runCollectCli(
-      ['models', '--min-context=1e309'],
+      ['models', '--tier-floor=flagship', '--tier-ceiling=light'],
       environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
     );
-    expectExitCode(result, 0);
-    expect(result.stdout as String, contains('quotabot models'));
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('cannot be higher'));
+    expect(result.stdout as String, isEmpty);
+  });
+
+  test('suggest rejects invalid risk policy values', () async {
+    for (final value in ['banana', 'NaN', '-1', '6']) {
+      final result = await runCollectCli(
+        ['suggest', '--json', '--risk=$value'],
+        environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+      );
+
+      expectExitCode(result, 64);
+      expect(result.stderr as String, contains('--risk'));
+      expect(result.stdout as String, isEmpty);
+    }
+  });
+
+  test('unknown command fails before producing a snapshot', () async {
+    final result = await runCollectCli(
+      ['definitely-not-a-command', '--json'],
+      environment: {'LOCALAPPDATA': temp.path, 'QUOTABOT_DEMO': '1'},
+    );
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('unknown command'));
+    expect(result.stdout as String, isEmpty);
   });
 
   test('models says filters excluded everything, not "no models detected"',

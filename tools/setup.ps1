@@ -37,6 +37,171 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg) { Write-Host "    $msg" -ForegroundColor Green }
 function Write-Warn2($msg) { Write-Host "    $msg" -ForegroundColor Yellow }
 
+function Install-QuotabotPayload {
+  param(
+    [Parameter(Mandatory)][string]$SourceRoot,
+    [Parameter(Mandatory)][string]$InstallRoot
+  )
+
+  New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+  $transaction = [guid]::NewGuid().ToString('N')
+  $binDst = Join-Path $InstallRoot 'bin'
+  $libDst = Join-Path $InstallRoot 'lib'
+  $stagedBin = Join-Path $InstallRoot ".quotabot-bin-new-$transaction"
+  $stagedLib = Join-Path $InstallRoot ".quotabot-lib-new-$transaction"
+  $backupBin = Join-Path $InstallRoot ".quotabot-bin-previous-$transaction"
+  $backupLib = Join-Path $InstallRoot ".quotabot-lib-previous-$transaction"
+  $binBackedUp = $false
+  $libBackedUp = $false
+  $binInstalled = $false
+  $libInstalled = $false
+  $lockPath = Join-Path $InstallRoot '.quotabot-install.lock'
+  $installLock = $null
+
+  try {
+    Copy-Item -LiteralPath (Join-Path $SourceRoot 'bin') -Destination $stagedBin -Recurse
+    Copy-Item -LiteralPath (Join-Path $SourceRoot 'lib') -Destination $stagedLib -Recurse
+    if (-not (Test-Path -LiteralPath (Join-Path $stagedBin 'quotabot.exe') -PathType Leaf)) {
+      throw 'Staged payload is missing bin\quotabot.exe'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $stagedLib 'sqlite3.dll') -PathType Leaf)) {
+      throw 'Staged payload is missing lib\sqlite3.dll'
+    }
+    try {
+      $installLock = [IO.File]::Open(
+        $lockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+      )
+    } catch {
+      throw 'Another quotabot install is already activating a bundle. Re-run after it finishes.'
+    }
+
+    if (Test-Path -LiteralPath $binDst) {
+      Move-Item -LiteralPath $binDst -Destination $backupBin
+      $binBackedUp = $true
+    }
+    if (Test-Path -LiteralPath $libDst) {
+      Move-Item -LiteralPath $libDst -Destination $backupLib
+      $libBackedUp = $true
+    }
+    Move-Item -LiteralPath $stagedBin -Destination $binDst
+    $binInstalled = $true
+    Move-Item -LiteralPath $stagedLib -Destination $libDst
+    $libInstalled = $true
+  } catch {
+    $installError = $_.Exception.Message
+    try {
+      if ($binInstalled -and (Test-Path -LiteralPath $binDst)) {
+        Remove-Item -LiteralPath $binDst -Recurse -Force
+      }
+      if ($libInstalled -and (Test-Path -LiteralPath $libDst)) {
+        Remove-Item -LiteralPath $libDst -Recurse -Force
+      }
+      if ($binBackedUp -and (Test-Path -LiteralPath $backupBin)) {
+        Move-Item -LiteralPath $backupBin -Destination $binDst
+        $binBackedUp = $false
+      }
+      if ($libBackedUp -and (Test-Path -LiteralPath $backupLib)) {
+        Move-Item -LiteralPath $backupLib -Destination $libDst
+        $libBackedUp = $false
+      }
+    } catch {
+      throw "Install failed and rollback was incomplete. Recovery payloads remain under $InstallRoot. Original error: $installError. Rollback error: $($_.Exception.Message)"
+    } finally {
+      Remove-Item -LiteralPath $stagedBin -Recurse -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath $stagedLib -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    throw "Could not replace the existing install; it was left intact or restored. Close any running quotabot process and re-run. ($installError)"
+  } finally {
+    if ($installLock) {
+      $installLock.Dispose()
+    }
+    Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  }
+
+  foreach ($backup in @($backupBin, $backupLib)) {
+    if (Test-Path -LiteralPath $backup) {
+      try {
+        Remove-Item -LiteralPath $backup -Recurse -Force
+      } catch {
+        Write-Warning "The new install is active, but the previous payload could not be removed: $backup"
+      }
+    }
+  }
+}
+
+function Install-QuotabotDesktopPayload {
+  param(
+    [Parameter(Mandatory)][string]$SourceRoot,
+    [Parameter(Mandatory)][string]$InstallRoot
+  )
+
+  New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+  $transaction = [guid]::NewGuid().ToString('N')
+  $desktopDst = Join-Path $InstallRoot 'desktop'
+  $stagedDesktop = Join-Path $InstallRoot ".quotabot-desktop-new-$transaction"
+  $backupDesktop = Join-Path $InstallRoot ".quotabot-desktop-previous-$transaction"
+  $desktopBackedUp = $false
+  $desktopInstalled = $false
+  $lockPath = Join-Path $InstallRoot '.quotabot-desktop-install.lock'
+  $installLock = $null
+
+  try {
+    Copy-Item -LiteralPath $SourceRoot -Destination $stagedDesktop -Recurse
+    if (-not (Test-Path -LiteralPath (Join-Path $stagedDesktop 'quotabot.exe') -PathType Leaf)) {
+      throw 'Staged desktop payload is missing quotabot.exe'
+    }
+    try {
+      $installLock = [IO.File]::Open(
+        $lockPath,
+        [IO.FileMode]::OpenOrCreate,
+        [IO.FileAccess]::ReadWrite,
+        [IO.FileShare]::None
+      )
+    } catch {
+      throw 'Another quotabot desktop install is already activating a bundle. Re-run after it finishes.'
+    }
+
+    if (Test-Path -LiteralPath $desktopDst) {
+      Move-Item -LiteralPath $desktopDst -Destination $backupDesktop
+      $desktopBackedUp = $true
+    }
+    Move-Item -LiteralPath $stagedDesktop -Destination $desktopDst
+    $desktopInstalled = $true
+  } catch {
+    $installError = $_.Exception.Message
+    try {
+      if ($desktopInstalled -and (Test-Path -LiteralPath $desktopDst)) {
+        Remove-Item -LiteralPath $desktopDst -Recurse -Force
+      }
+      if ($desktopBackedUp -and (Test-Path -LiteralPath $backupDesktop)) {
+        Move-Item -LiteralPath $backupDesktop -Destination $desktopDst
+        $desktopBackedUp = $false
+      }
+    } catch {
+      throw "Desktop install failed and rollback was incomplete. Recovery payloads remain under $InstallRoot. Original error: $installError. Rollback error: $($_.Exception.Message)"
+    } finally {
+      Remove-Item -LiteralPath $stagedDesktop -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    throw "Could not replace the existing desktop install; it was left intact or restored. Close the running quotabot desktop app and re-run. ($installError)"
+  } finally {
+    if ($installLock) {
+      $installLock.Dispose()
+    }
+    Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+  }
+
+  if (Test-Path -LiteralPath $backupDesktop) {
+    try {
+      Remove-Item -LiteralPath $backupDesktop -Recurse -Force
+    } catch {
+      Write-Warning "The new desktop install is active, but the previous payload could not be removed: $backupDesktop"
+    }
+  }
+}
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 $collector = Join-Path $root 'collector'
@@ -118,19 +283,7 @@ try {
   if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
     throw "CLI archive did not contain lib\sqlite3.dll"
   }
-  # Do not swallow a removal failure: a running quotabot holding the exe open
-  # would otherwise leave the old bin/ and nest the new bundle at bin\bin, so
-  # PATH would keep the stale binary while setup reports success.
-  $binDst = Join-Path $installRoot 'bin'
-  $libDst = Join-Path $installRoot 'lib'
-  try {
-    if (Test-Path -LiteralPath $binDst) { Remove-Item -LiteralPath $binDst -Recurse -Force }
-    if (Test-Path -LiteralPath $libDst) { Remove-Item -LiteralPath $libDst -Recurse -Force }
-  } catch {
-    throw "Could not replace the existing install. Close any running quotabot (for example 'quotabot top' or the MCP server) and re-run. ($($_.Exception.Message))"
-  }
-  Copy-Item -LiteralPath (Join-Path $extractPath 'bin') -Destination $installRoot -Recurse
-  Copy-Item -LiteralPath (Join-Path $extractPath 'lib') -Destination $installRoot -Recurse
+  Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
 } finally {
   Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -159,8 +312,15 @@ if ($userPaths -notcontains $installDir) {
 
 if (-not $CliOnly -and -not $NoApp) {
   $wasRunningApp = $false
-  $existingAppExe = Resolve-BuiltAppExe
-  $runningApp = Get-RunningDesktopApp $existingAppExe
+  $desktopInstallRoot = Join-Path $installRoot 'desktop'
+  $installedAppExe = Join-Path $desktopInstallRoot 'quotabot.exe'
+  $legacyBuiltAppExe = Resolve-BuiltAppExe
+  $runningApp = @(
+    @($installedAppExe, $legacyBuiltAppExe) |
+      Where-Object { $_ } |
+      Sort-Object -Unique |
+      ForEach-Object { Get-RunningDesktopApp $_ }
+  )
   if ($runningApp.Count -gt 0) {
     $wasRunningApp = $true
     Write-Step 'Stopping the running desktop app so the rebuilt app is used'
@@ -186,12 +346,18 @@ if (-not $CliOnly -and -not $NoApp) {
   $builtAppExe = Resolve-BuiltAppExe
   if (-not $builtAppExe) { throw "Desktop build finished, but quotabot.exe was not found under app\build\windows" }
 
+  Write-Step "Installing the desktop app to $desktopInstallRoot"
+  Install-QuotabotDesktopPayload `
+    -SourceRoot (Split-Path -Parent $builtAppExe) `
+    -InstallRoot $installRoot
+  $installedAppExe = Join-Path $desktopInstallRoot 'quotabot.exe'
+
   Write-Step 'Creating the Desktop shortcut'
-  & (Join-Path $scriptDir 'create-shortcut.ps1') -ExePath $builtAppExe
+  & (Join-Path $scriptDir 'create-shortcut.ps1') -ExePath $installedAppExe
 
   if ($wasRunningApp) {
-    Start-Process -FilePath $builtAppExe -WorkingDirectory (Split-Path -Parent $builtAppExe)
-    Write-Ok 'Restarted the desktop app from the rebuilt Release folder'
+    Start-Process -FilePath $installedAppExe -WorkingDirectory $desktopInstallRoot
+    Write-Ok 'Restarted the desktop app from its installed location'
   }
 }
 

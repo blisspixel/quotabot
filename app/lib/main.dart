@@ -16,6 +16,7 @@ import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import 'package:tray_manager/tray_manager.dart';
@@ -37,6 +38,7 @@ import 'single_instance.dart';
 import 'termshot.dart';
 import 'theme_spec.dart';
 import 'typography.dart';
+import 'window_geometry.dart';
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
@@ -87,21 +89,44 @@ String? preferenceLoadWarning(PrefsLoadResult result) =>
         'Saved settings unreadable; using defaults',
     };
 
+@visibleForTesting
+bool hasSuccessfulRefreshEvidence(Iterable<ProviderQuota> providers, int now) =>
+    providers.any((quota) {
+      if (!quota.ok ||
+          quota.stale ||
+          quota.suspect != null ||
+          quota.driftReason != null ||
+          quota.asOf <= 0 ||
+          quota.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+        return false;
+      }
+      if (quota.windows.isNotEmpty) {
+        return isTrustedQuotaEvidenceAt(quota, now);
+      }
+      if (quota.isLocal) return true;
+      if (quota.sourceClass != ProviderSourceClass.statusOnly) return false;
+      final status = quota.status?.trim().toLowerCase();
+      return status != null &&
+          status.isNotEmpty &&
+          !status.startsWith('not configured');
+    });
+
 final SingleInstanceGuard _singleInstance = SingleInstanceGuard();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
+  final prefsResult = await Prefs.load();
+  final prefs = prefsResult.prefs;
 
   // Enforce a single instance so a second launch surfaces the existing window
   // instead of spawning another process and a duplicate tray icon.
   final isPrimary = await _singleInstance.tryBecomePrimary(
     onShowRequested: () async {
-      try {
-        await windowManager.setSkipTaskbar(false);
-        await windowManager.show();
-        await windowManager.focus();
-      } catch (_) {}
+      // Preserve the running instance's current taskbar preference. The startup
+      // value captured here can be stale after the user changes settings.
+      await windowManager.show();
+      await windowManager.focus();
     },
   );
   if (!isPrimary) {
@@ -111,8 +136,6 @@ Future<void> main() async {
     exit(0);
   }
 
-  final prefsResult = await Prefs.load();
-  final prefs = prefsResult.prefs;
   final startupStorageWarning = preferenceLoadWarning(prefsResult);
   if (startupStorageWarning != null) {
     stderr.writeln(
@@ -142,8 +165,9 @@ Future<void> main() async {
     // notifications init failed, app will continue without them
   }
 
+  const initialWindowSize = Size(340, 760);
   final options = WindowOptions(
-    size: Size(340, 760),
+    size: initialWindowSize,
     minimumSize: Size(120, 40),
     center: false,
     backgroundColor: Colors.transparent,
@@ -156,20 +180,18 @@ Future<void> main() async {
     windowManager.waitUntilReadyToShow(options, () async {
       await windowManager.setAsFrameless();
       if (prefs.windowX != null && prefs.windowY != null) {
-        final x = prefs.windowX!;
-        final y = prefs.windowY!;
-        // Restore the saved position, but re-center on a corrupt or wildly
-        // out-of-range value. The bounds are generous on purpose: a monitor to
-        // the left or above has large negative coordinates and a wide multi-
-        // monitor layout has large positive ones, all of which the previous
-        // tight box wrongly rejected, re-centering every launch. NaN fails every
-        // comparison and so falls through to center(), which is the safe default.
-        const limit = 20000.0;
-        if (x > -limit && y > -limit && x < limit && y < limit) {
-          await windowManager.setPosition(Offset(x, y));
+        final position = restoredWindowPosition(
+          savedPosition: Offset(prefs.windowX!, prefs.windowY!),
+          windowSize: initialWindowSize,
+          workAreas: await desktopWorkAreas(),
+        );
+        if (position != null) {
+          await windowManager.setPosition(position);
         } else {
           await windowManager.center();
         }
+      } else {
+        await windowManager.center();
       }
       await windowManager.setTitle('quotabot');
       await windowManager.show();
@@ -297,6 +319,10 @@ typedef AlertPoster =
 
 typedef PrefsSaver = Future<void> Function(Prefs prefs);
 
+typedef ProviderConnector = Future<void> Function(String provider);
+
+typedef ProfileDeleter = void Function(String name);
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   final String? startupStorageWarning;
@@ -310,6 +336,10 @@ class Dashboard extends StatefulWidget {
   final AlertPoster? alertPoster;
   @visibleForTesting
   final PrefsSaver? prefsSaver;
+  @visibleForTesting
+  final ProviderConnector? providerConnector;
+  @visibleForTesting
+  final ProfileDeleter? profileDeleter;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
     : _hostIntegration = true,
@@ -317,7 +347,9 @@ class Dashboard extends StatefulWidget {
       collector = null,
       testProfiles = null,
       alertPoster = null,
-      prefsSaver = null;
+      prefsSaver = null,
+      providerConnector = null,
+      profileDeleter = null;
 
   /// Builds a deterministic dashboard without desktop plugin or preference
   /// side effects. This exercises the production widget tree while keeping
@@ -331,6 +363,8 @@ class Dashboard extends StatefulWidget {
     this.testProfiles,
     this.alertPoster,
     this.prefsSaver,
+    this.providerConnector,
+    this.profileDeleter,
     this.startupStorageWarning,
   }) : _hostIntegration = false,
        _demoModeOverride = demoMode,
@@ -344,7 +378,7 @@ class Dashboard extends StatefulWidget {
 }
 
 class _DashboardState extends State<Dashboard>
-    with WindowListener, TrayListener {
+    with WindowListener, TrayListener, ScreenListener {
   List<ProviderQuota> _data = const [];
   List<ProviderQuota> _setupData = const [];
   bool _loading = true;
@@ -370,6 +404,7 @@ class _DashboardState extends State<Dashboard>
   /// re-fire a still-red provider that was already alerted.
   Set<String> _armed = {};
   bool _isRefreshing = false;
+  Future<void>? _refreshInFlight;
   int _failStreak = 0; // consecutive refreshes with no live data at all
   late Set<String> _hidden;
   late ProviderSort _sort;
@@ -459,11 +494,20 @@ class _DashboardState extends State<Dashboard>
     final out = <ProviderQuota>[];
     final counts = _providerCounts(_profiledData);
     for (final q in _profiledData) {
-      final target = quotaHideTarget(q, counts);
+      final target = _menuVisibilityTarget(q, counts);
       if (seen.add(target)) out.add(q);
     }
     return out;
   }
+
+  String _menuVisibilityTarget(ProviderQuota quota, Map<String, int> counts) =>
+      _showAccounts ? quotaHideTarget(quota, counts) : quota.provider;
+
+  bool _menuProviderVisible(ProviderQuota quota) => _showAccounts
+      ? !hiddenTargetsQuota(_hidden, quota)
+      : _profiledData
+            .where((candidate) => candidate.provider == quota.provider)
+            .any((candidate) => !hiddenTargetsQuota(_hidden, candidate));
 
   List<QuotaProfile> _loadProfiles() {
     if (!widget._hostIntegration) {
@@ -532,12 +576,13 @@ class _DashboardState extends State<Dashboard>
     _profiles = _loadProfiles();
     _activeProfile = _profileByName(widget.prefs.activeProfile);
     _applyProfileUiState(_activeProfile);
-    _windowPos = widget.prefs.windowX == null
+    _windowPos = widget.prefs.windowX == null || widget.prefs.windowY == null
         ? null
-        : Offset(widget.prefs.windowX!, widget.prefs.windowY ?? 0);
+        : Offset(widget.prefs.windowX!, widget.prefs.windowY!);
     if (widget._hostIntegration) {
       windowManager.addListener(this);
       trayManager.addListener(this);
+      screenRetriever.addListener(this);
       unawaited(_initTray());
       unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
       unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
@@ -661,6 +706,7 @@ class _DashboardState extends State<Dashboard>
     if (widget._hostIntegration) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);
+      screenRetriever.removeListener(this);
     }
     _refreshTimer?.cancel();
     _tick?.cancel();
@@ -679,6 +725,37 @@ class _DashboardState extends State<Dashboard>
     _windowMovePersistTimer = Timer(const Duration(milliseconds: 250), () {
       unawaited(_persistPrefs());
     });
+  }
+
+  @override
+  void onScreenEvent(String eventName) {
+    unawaited(_reconcileWindowGeometry());
+  }
+
+  Future<void> _reconcileWindowGeometry() async {
+    try {
+      final position = await windowManager.getPosition();
+      final size = await windowManager.getSize();
+      final workAreas = await desktopWorkAreas();
+      if (!mounted || workAreas.isEmpty) return;
+      final restored = restoredWindowPosition(
+        savedPosition: position,
+        windowSize: size,
+        workAreas: workAreas,
+      );
+      if (restored != null && restored != position) {
+        _windowMoveRevision++;
+        _windowMovePersistTimer?.cancel();
+        await windowManager.setPosition(restored);
+        if (!mounted) return;
+        _windowPos = restored;
+        unawaited(_persistPrefs());
+      }
+      _applySize();
+    } catch (_) {
+      // Display discovery is optional. Keep the current reachable window when
+      // the platform cannot provide updated monitor geometry.
+    }
   }
 
   // System tray: keep quotabot one click away, and let the window close to the
@@ -825,8 +902,21 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
-  Future<void> _refresh() async {
-    if (_isRefreshing) return;
+  Future<void> _refresh() {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return inFlight;
+
+    late final Future<void> tracked;
+    tracked = _performRefresh().whenComplete(() {
+      if (identical(_refreshInFlight, tracked)) {
+        _refreshInFlight = null;
+      }
+    });
+    _refreshInFlight = tracked;
+    return tracked;
+  }
+
+  Future<void> _performRefresh() async {
     if (widget._demoModeOverride ?? _demoMode) {
       _loadDemo();
       return;
@@ -854,9 +944,7 @@ class _DashboardState extends State<Dashboard>
           ? recentBurnStatsByQuota(active, nowSec)
           : <String, BurnStat>{};
       // Track systemic failure...
-      final anyLive = active.any(
-        (q) => q.ok && q.windows.isNotEmpty && !q.stale,
-      );
+      final anyLive = hasSuccessfulRefreshEvidence(active, nowSec);
       _failStreak = anyLive ? 0 : _failStreak + 1;
       setState(() {
         _profiles = profiles;
@@ -1091,6 +1179,23 @@ class _DashboardState extends State<Dashboard>
     unawaited(_persistPrefs(saveProfileUiState: true));
   }
 
+  void _toggleProviderHidden(String provider) {
+    final quotas = _profiledData
+        .where((quota) => quota.provider == provider)
+        .toList(growable: false);
+    final allHidden =
+        quotas.isNotEmpty &&
+        quotas.every((quota) => hiddenTargetsQuota(_hidden, quota));
+    setState(() {
+      _hidden.removeWhere(
+        (target) => target == provider || target.startsWith('$provider|'),
+      );
+      if (!allHidden) _hidden.add(provider);
+    });
+    _applySize();
+    unawaited(_persistPrefs(saveProfileUiState: true));
+  }
+
   void _toggleQuotaHidden(ProviderQuota quota) {
     final counts = _providerCounts(_profiledData);
     final target = quotaHideTarget(quota, counts);
@@ -1253,7 +1358,9 @@ class _DashboardState extends State<Dashboard>
   Widget _expandedView(Color card) {
     final displayed = _displayed;
     final counts = _providerCounts(displayed);
-    final groups = groupProvidersForDisplay(displayed);
+    final groups = _showAccounts
+        ? groupProvidersForDisplay(displayed)
+        : [ProviderDisplayGroup(account: null, quotas: displayed)];
     final showGroupHeaders = groups.length > 1;
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1693,10 +1800,12 @@ class _DashboardState extends State<Dashboard>
         ),
         for (final q in _menuProviders)
           CheckedPopupMenuItem(
-            value: 'show:${quotaHideTarget(q, counts)}',
-            checked: !hiddenTargetsQuota(_hidden, q),
+            value: 'show:${_menuVisibilityTarget(q, counts)}',
+            checked: _menuProviderVisible(q),
             child: Text(
-              (counts[q.provider] ?? 0) > 1
+              !_showAccounts
+                  ? q.displayName
+                  : (counts[q.provider] ?? 0) > 1
                   ? _shouldShowAccount(q, counts)
                         ? '${q.displayName} (${q.account})'
                         : '${q.displayName} (${counts[q.provider]} accounts)'
@@ -1829,6 +1938,10 @@ class _DashboardState extends State<Dashboard>
       _showProfileEditor();
     } else if (value.startsWith('show:')) {
       final target = value.substring(5);
+      if (!_showAccounts) {
+        _toggleProviderHidden(target);
+        return;
+      }
       ProviderQuota? quota;
       final counts = _providerCounts(_profiledData);
       for (final q in _profiledData) {
@@ -1901,7 +2014,21 @@ class _DashboardState extends State<Dashboard>
     if (result.action == ProfileEditorAction.delete) {
       final name = result.deleteName;
       if (name == null) return;
-      if (widget._hostIntegration) deleteProfile(name);
+      try {
+        final deleter = widget.profileDeleter;
+        if (deleter != null) {
+          deleter(name);
+        } else if (widget._hostIntegration) {
+          deleteProfile(name);
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not delete profile.')),
+          );
+        }
+        return;
+      }
       final next = name == _activeProfile.name
           ? defaultProfileName
           : _activeProfile.name;
@@ -2218,84 +2345,126 @@ class _DashboardState extends State<Dashboard>
         final dark = Theme.of(ctx).brightness == Brightness.dark;
         final muted = dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280);
         final fg = dark ? Colors.white : const Color(0xFF111317);
-        final setupRows = _setupData.isEmpty ? _data : _setupData;
         return StatefulBuilder(
-          builder: (ctx, setDlg) => Dialog(
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 24,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320, maxHeight: 460),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Providers',
-                          style: TextStyle(
-                            fontSize: AppType.title,
-                            fontWeight: FontWeight.w700,
-                            color: fg,
+          builder: (ctx, setDlg) {
+            final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+            final setupRows = _currentSetupRows(now);
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 24,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 320,
+                  maxHeight: 460,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'Providers',
+                            style: TextStyle(
+                              fontSize: AppType.title,
+                              fontWeight: FontWeight.w700,
+                              color: fg,
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          tooltip: 'Close providers',
-                          icon: Icon(
-                            Icons.close_rounded,
-                            size: 18,
-                            color: muted,
+                          const Spacer(),
+                          IconButton(
+                            tooltip: 'Close providers',
+                            icon: Icon(
+                              Icons.close_rounded,
+                              size: 18,
+                              color: muted,
+                            ),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 28,
+                              minHeight: 28,
+                            ),
+                            onPressed: () => Navigator.of(ctx).pop(),
                           ),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 28,
-                            minHeight: 28,
-                          ),
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      'Connect Grok or Antigravity once to stay live. '
-                      'Key-based and local providers show their current setup '
-                      'state.',
-                      style: TextStyle(
-                        fontSize: AppType.bodySmall,
-                        height: 1.3,
-                        color: muted,
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Flexible(
-                      child: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final q in setupRows)
-                              _setupRow(ctx, q, muted, fg, connecting, setDlg),
-                          ],
+                      Text(
+                        'Connect Grok or Antigravity once to stay live. '
+                        'Key-based and local providers show their current setup '
+                        'state.',
+                        style: TextStyle(
+                          fontSize: AppType.bodySmall,
+                          height: 1.3,
+                          color: muted,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Tip: right-click any card to set it up or hide it.',
-                      style: TextStyle(fontSize: AppType.caption, color: muted),
-                    ),
-                  ],
+                      const SizedBox(height: 8),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (final q in setupRows)
+                                _setupRow(
+                                  ctx,
+                                  q,
+                                  muted,
+                                  fg,
+                                  connecting,
+                                  setDlg,
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Tip: right-click any card to set it up or hide it.',
+                        style: TextStyle(
+                          fontSize: AppType.caption,
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
+  }
+
+  List<ProviderQuota> _currentSetupRows(int now) {
+    final source = _setupData.isEmpty ? _data : _setupData;
+    final rowsByProvider = <String, ProviderQuota>{};
+    for (final quota in source) {
+      final current = rowsByProvider[quota.provider];
+      if (current == null ||
+          _setupRowRank(quota, now) > _setupRowRank(current, now)) {
+        rowsByProvider[quota.provider] = quota;
+      }
+    }
+    return rowsByProvider.values.toList();
+  }
+
+  static int _setupRowRank(ProviderQuota quota, int now) {
+    if (isTrustedQuotaEvidenceAt(quota, now)) return 4;
+    if (quota.ok &&
+        !quota.stale &&
+        quota.driftReason == null &&
+        (quota.status ?? '').isNotEmpty) {
+      return 3;
+    }
+    if (quota.stale && quota.windows.isNotEmpty) return 2;
+    if (quota.ok) return 1;
+    return 0;
   }
 
   Widget _setupRow(
@@ -2312,8 +2481,9 @@ class _DashboardState extends State<Dashboard>
       now,
       errorColor: Theme.of(ctx).colorScheme.error,
     );
-    final canConnect =
-        widget._hostIntegration && _canConnectProvider(q.provider);
+    final canConnect = widget.providerConnector != null
+        ? q.provider == 'grok' || q.provider == 'antigravity'
+        : widget._hostIntegration && _canConnectProvider(q.provider);
     final isLive = label == 'live' || label == 'in use';
     final busy = connecting.contains(q.provider);
     return Padding(
@@ -2378,7 +2548,11 @@ class _DashboardState extends State<Dashboard>
     // title instead of the raw provider id.
     final label = provider == 'antigravity' ? 'Antigravity' : 'Grok';
     try {
-      if (provider == 'antigravity') {
+      final connector = widget.providerConnector;
+      if (connector != null) {
+        if (provider != 'antigravity' && provider != 'grok') return false;
+        await connector(provider);
+      } else if (provider == 'antigravity') {
         await GoogleAuth().loginLoopback(
           showUrl: (url) {
             if (!mounted) return;
@@ -2423,13 +2597,18 @@ class _DashboardState extends State<Dashboard>
       } else {
         return false;
       }
+      // A refresh already in progress may have started before login completed,
+      // so wait for it and then force one collection that sees the new account.
+      final priorRefresh = _refreshInFlight;
+      if (priorRefresh != null) await priorRefresh;
       await _refresh();
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final match = _data.where((x) => x.provider == provider);
-      final ok =
-          match.isNotEmpty &&
-          !match.first.stale &&
-          providerHeadroom(match.first, now) != null;
+      final ok = match.any(
+        (quota) =>
+            isTrustedQuotaEvidenceAt(quota, now) &&
+            providerHeadroom(quota, now) != null,
+      );
       messenger.showSnackBar(
         SnackBar(
           content: Text(ok ? '$label connected' : '$label not live yet'),

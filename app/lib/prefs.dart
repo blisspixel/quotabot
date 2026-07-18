@@ -274,40 +274,49 @@ class Prefs {
     if (webhookUrl != null) 'webhook_url': webhookUrl,
     'webhook_allow_external': webhookAllowExternal,
     'setup_done': setupDone,
-    if (windowX != null) 'window_x': windowX,
-    if (windowY != null) 'window_y': windowY,
+    if (windowX != null && windowY != null) 'window_x': windowX,
+    if (windowX != null && windowY != null) 'window_y': windowY,
   };
 
-  factory Prefs.fromJson(Map<String, dynamic> j) => Prefs(
-    hidden: ((j['hidden'] as List?) ?? const []).map((e) => '$e').toSet(),
-    compact: j['compact'] as bool? ?? false,
-    cadence: Cadence.values.firstWhere(
-      (c) => c.name == j['cadence'],
-      orElse: () => Cadence.smart,
-    ),
-    alwaysOnTop: j['always_on_top'] as bool? ?? false,
-    showInTaskbar: j['show_in_taskbar'] as bool? ?? true,
-    enableNotifications: j['enable_notifications'] as bool? ?? true,
-    sort: ProviderSort.values.firstWhere(
-      (s) => s.name == j['sort'],
-      orElse: () => ProviderSort.defaultOrder,
-    ),
-    activeProfile:
-        normalizeProfileName(j['active_profile'] as String?) ??
-        defaultProfileName,
-    showAccounts: j['show_accounts'] as bool? ?? false,
-    textSize: TextSize.values.firstWhere(
-      (t) => t.name == j['text_size'],
-      orElse: () => TextSize.medium,
-    ),
-    webhookUrl: (j['webhook_url'] as String?)?.trim().isEmpty ?? true
-        ? null
-        : (j['webhook_url'] as String).trim(),
-    webhookAllowExternal: j['webhook_allow_external'] as bool? ?? false,
-    setupDone: j['setup_done'] as bool? ?? false,
-    windowX: (j['window_x'] as num?)?.toDouble(),
-    windowY: (j['window_y'] as num?)?.toDouble(),
-  );
+  factory Prefs.fromJson(Map<String, dynamic> j) {
+    final windowX = (j['window_x'] as num?)?.toDouble();
+    final windowY = (j['window_y'] as num?)?.toDouble();
+    final validWindowPosition =
+        windowX != null &&
+        windowY != null &&
+        windowX.isFinite &&
+        windowY.isFinite;
+    return Prefs(
+      hidden: ((j['hidden'] as List?) ?? const []).map((e) => '$e').toSet(),
+      compact: j['compact'] as bool? ?? false,
+      cadence: Cadence.values.firstWhere(
+        (c) => c.name == j['cadence'],
+        orElse: () => Cadence.smart,
+      ),
+      alwaysOnTop: j['always_on_top'] as bool? ?? false,
+      showInTaskbar: j['show_in_taskbar'] as bool? ?? true,
+      enableNotifications: j['enable_notifications'] as bool? ?? true,
+      sort: ProviderSort.values.firstWhere(
+        (s) => s.name == j['sort'],
+        orElse: () => ProviderSort.defaultOrder,
+      ),
+      activeProfile:
+          normalizeProfileName(j['active_profile'] as String?) ??
+          defaultProfileName,
+      showAccounts: j['show_accounts'] as bool? ?? false,
+      textSize: TextSize.values.firstWhere(
+        (t) => t.name == j['text_size'],
+        orElse: () => TextSize.medium,
+      ),
+      webhookUrl: (j['webhook_url'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (j['webhook_url'] as String).trim(),
+      webhookAllowExternal: j['webhook_allow_external'] as bool? ?? false,
+      setupDone: j['setup_done'] as bool? ?? false,
+      windowX: validWindowPosition ? windowX : null,
+      windowY: validWindowPosition ? windowY : null,
+    );
+  }
 
   static File _file() => File('${quotabotDir('app').path}/prefs.json');
 

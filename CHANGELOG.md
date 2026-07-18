@@ -2,7 +2,66 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.9.2 - 2026-07-18
+
+### Security
+- Python and TypeScript MCP examples now validate an exact loopback HTTP URL
+  before reading a bearer token or creating a transport. External hosts,
+  lookalikes, numeric aliases, credentials, fragments, whitespace, and
+  backslash-confused URLs are rejected.
+- Managed LiteLLM routes now fail closed when policy, availability, target, or
+  spend evidence is missing or malformed. Runtime access reports also identify
+  credential-exchange metadata accurately and use the real history paths.
+
+### Changed
+- CLI, loopback HTTP, and MCP validation now rejects unknown or misplaced
+  options, extra positionals, invalid task/model/risk values, inverted tiers,
+  unknown query names, and malformed model quota evidence before live provider
+  collection. `--` now ends CLI option parsing as documented.
+- Account-scoped cache, drift, history, analytics, lock, and lease filenames now
+  use collision-resistant opaque keys. Exact-account legacy data migrates on a
+  one-way upgrade, while ambiguous legacy aggregate ownership fails closed.
+- Tagged releases now run CI, CodeQL, and secret scanning against the exact tag
+  commit and reject tags outside `main`. SQLite is updated to 3.5.0 and the
+  hash-locked LiteLLM integration to 1.92.0.
+- Claude source guidance now records Anthropic's July 17 plan announcement:
+  beginning July 20, Fable 5 is included for Max and Team Premium at 50% of
+  limits, while Pro and Team Standard use credits. Runtime quota values still
+  come from the provider response and are never hardcoded.
+
+### Fixed
+- Claude collection now falls through malformed host credentials to an
+  independent quotabot grant, and a failed grant loader no longer suppresses a
+  stale host token's last-chance account-wide read. Invalid legacy percentages
+  are rejected instead of being clamped into plausible quota.
+- Desktop quota and analytics views exclude stale, drifted, missing-time, and
+  future-dated evidence from live totals. Account privacy mode now hides account
+  labels and grouping, while chart semantics, contrast, and keyboard behavior
+  are clearer for assistive technology.
+- Connecting a provider during another refresh now waits and then performs a
+  post-login collection. Profile edits preserve routing preference order,
+  failed deletes keep the profile visible, and new profiles support autofocus
+  and keyboard submission.
+- Desktop startup now restores windows across removed or rescaled monitors,
+  centers first-run windows, preserves runtime taskbar preferences on a second
+  launch, and acknowledges the single-instance handoff only after the existing
+  window is actually shown.
+- Cached provider envelopes and scoped model quota rows with impossible ages,
+  resets, or percentages are quarantined instead of routed. Verification keeps
+  cached reset language distinct from a trusted fresh reset.
+- Provider reservation selection and creation now share one storage lock.
+  Idempotent reuse is limited to the current profile, account, and exclusion
+  scope, preventing parallel dispatches from silently reusing an ineligible
+  provider.
+- Loopback HTTP reads are coalesced while in flight and timestamped after slow
+  collection, and OAuth callback listeners close when browser launch fails.
+- Release and source installers now stage complete CLI payloads beside the live
+  install, serialize activation, and restore the previous payload if activation
+  fails. A validated exact-tag selector uses the same path for rollback. Windows
+  downloads use a unique temporary workspace, and package helpers serialize the
+  archive/checksum swap and restore the last good pair if either activation
+  fails. Source setup installs desktop bundles at stable per-user locations on
+  every platform, so launchers no longer depend on the source checkout.
 
 ## 0.9.1 - 2026-07-18
 

@@ -24,6 +24,7 @@ import 'package:mcp_dart/mcp_dart.dart';
 import 'alerts.dart';
 import 'analysis.dart';
 import 'decision.dart';
+import 'drift.dart';
 import 'leases.dart';
 import 'litellm_metrics.dart';
 import 'model_catalog.dart';
@@ -35,7 +36,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.9.1';
+const quotabotMcpVersion = '0.9.2';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -185,12 +186,16 @@ Map<String, dynamic> decideNowResponse(
   final age = cached.asOf == null
       ? null
       : (now - cached.asOf!).clamp(0, 1 << 31).toInt();
-  final stale = cached.providers.isEmpty ||
+  final providers = cached.providers
+      .map((provider) => _cacheOnlyProvider(provider, now, maxAgeSeconds))
+      .toList(growable: false);
+  final stale = providers.isEmpty ||
       cached.asOf == null ||
+      cached.asOf! > now + kQuotaEvidenceClockSkewSeconds ||
       (age != null && age > maxAgeSeconds) ||
-      cached.providers.any((provider) => provider.stale);
+      providers.any((provider) => provider.stale || provider.asOf <= 0);
   final capabilityGates = providerRouteCapabilityGates(
-    cached.providers,
+    providers,
     now,
     catalog: catalog,
     requirements: routeRequirements,
@@ -198,7 +203,7 @@ Map<String, dynamic> decideNowResponse(
   // Same decide front door as suggest_provider so cache-only routing cannot
   // drift from the live recommendation engine (preference, capability, cost).
   final suggestion = decide(
-    cached.providers,
+    providers,
     now,
     context: DecisionContext(
       burnStatsByProvider: burnStatsByProvider,
@@ -245,6 +250,22 @@ Map<String, dynamic> decideNowResponse(
   };
 }
 
+ProviderQuota _cacheOnlyProvider(
+  ProviderQuota provider,
+  int now,
+  int maxAgeSeconds,
+) {
+  if (provider.stale) return provider;
+  final reason = provider.asOf <= 0
+      ? 'cached quota has no valid capture time'
+      : provider.asOf > now + kQuotaEvidenceClockSkewSeconds
+          ? 'cached quota capture time is materially in the future'
+          : now - provider.asOf > maxAgeSeconds
+              ? 'cached quota exceeds requested max age'
+              : null;
+  return reason == null ? provider : provider.asStale(reason);
+}
+
 /// Builds a [ModelRequirements] from `list_models` tool arguments: a coarse
 /// `task` profile overlaid with explicit capability/tier/budget filters.
 ({ModelRequirements requirements, String? error}) _requirementsFromArgs(
@@ -254,7 +275,7 @@ Map<String, dynamic> decideNowResponse(
   final budget = rawBudget == null
       ? defaultBudgetPolicy
       : rawBudget is String
-          ? modelBudgetPolicyFromName(rawBudget)
+          ? modelBudgetPolicyFromName(rawBudget.trim().toLowerCase())
           : null;
   if (budget == null) {
     final label = rawBudget == null ? 'null' : jsonEncode(rawBudget);
@@ -263,17 +284,72 @@ Map<String, dynamic> decideNowResponse(
       error: 'unknown budget policy: $label',
     );
   }
+
+  const taskChoices = {'simple', 'standard', 'hard', 'complex', 'reasoning'};
+  final rawTask = args['task'];
+  final task = rawTask is String ? rawTask.trim().toLowerCase() : null;
+  if (rawTask != null &&
+      (task == null || task.isEmpty || !taskChoices.contains(task))) {
+    return (
+      requirements: const ModelRequirements(),
+      error: 'task must be simple, standard, hard, complex, or reasoning',
+    );
+  }
+
+  final rawContext = args['min_context'];
+  final contextValue = rawContext is num ? rawContext.toDouble() : null;
+  final minContext = contextValue == null ||
+          !contextValue.isFinite ||
+          contextValue != contextValue.truncateToDouble()
+      ? null
+      : contextValue.toInt();
+  if (rawContext != null &&
+      (minContext == null || minContext <= 0 || minContext > 1 << 31)) {
+    return (
+      requirements: const ModelRequirements(),
+      error: 'min_context must be a positive integer up to ${1 << 31}',
+    );
+  }
+
+  const tiers = {'light': 0, 'standard': 1, 'flagship': 2};
+  final rawTierFloor = args['tier_floor'];
+  final rawTierCeiling = args['tier_ceiling'];
+  final tierFloor =
+      rawTierFloor is String ? rawTierFloor.trim().toLowerCase() : null;
+  final tierCeiling =
+      rawTierCeiling is String ? rawTierCeiling.trim().toLowerCase() : null;
+  if (rawTierFloor != null && !tiers.containsKey(tierFloor)) {
+    return (
+      requirements: const ModelRequirements(),
+      error: 'tier_floor must be light, standard, or flagship',
+    );
+  }
+  if (rawTierCeiling != null && !tiers.containsKey(tierCeiling)) {
+    return (
+      requirements: const ModelRequirements(),
+      error: 'tier_ceiling must be light, standard, or flagship',
+    );
+  }
+  if (tierFloor != null &&
+      tierCeiling != null &&
+      tiers[tierFloor]! > tiers[tierCeiling]!) {
+    return (
+      requirements: const ModelRequirements(),
+      error: 'tier_floor cannot be higher than tier_ceiling',
+    );
+  }
+
   final explicit = ModelRequirements(
-    minContextTokens: (args['min_context'] as num?)?.toInt(),
+    minContextTokens: minContext,
     requireTools: args['require_tools'] == true,
     requireVision: args['require_vision'] == true,
     requireReasoning: args['require_reasoning'] == true,
-    tierFloor: args['tier_floor'] as String?,
-    tierCeiling: args['tier_ceiling'] as String?,
+    tierFloor: tierFloor,
+    tierCeiling: tierCeiling,
     budgetPolicy: budget,
   );
   return (
-    requirements: taskProfile(args['task'] as String?).merge(explicit),
+    requirements: taskProfile(task).merge(explicit),
     error: null,
   );
 }
@@ -1010,7 +1086,8 @@ final _modelFilterInputSchema = JsonSchema.object(
           'Optional exact account label to route within after profile filtering.',
     ),
     'task': JsonSchema.string(
-      description: 'Coarse profile: "simple", "standard", or "hard".',
+      description:
+          'Coarse profile: simple, standard, hard, complex, or reasoning.',
     ),
     'min_context': JsonSchema.integer(
       description: 'Require a context window of at least this many tokens.',
@@ -1077,7 +1154,7 @@ final _routingInputSchema = JsonSchema.object(
     ),
     'task': JsonSchema.string(
       description:
-          'Optional provider-route capability profile: simple, reasoning, hard, or complex.',
+          'Optional provider-route capability profile: simple, standard, hard, complex, or reasoning.',
     ),
     'min_context': JsonSchema.integer(
       description:
@@ -1759,26 +1836,24 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     outputSchema: suggestOutputSchema,
     annotations: _liveCollection,
     callback: (args, extra) async {
-      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
-      final results = profiled.providers;
       final n = now();
-      final activeLeases = leaseStore.active(n);
       final costPolicy = _routingCostPolicy(args);
       final routeRequirements = _routeRequirementsFromArgs(args);
-      if (routeRequirements.error != null) {
+      if (routeRequirements.error != null || costPolicy.error != null) {
+        final profiled = await _profiledSnapshot(
+          args,
+          () async => const <ProviderQuota>[],
+          profileLoader,
+        );
         final response = decide(const [], n).route.toJson();
-        response['error'] = routeRequirements.error;
+        response['error'] = routeRequirements.error ?? costPolicy.error;
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(response, profiled),
         );
       }
-      if (costPolicy.error != null) {
-        final response = decide(const [], n).route.toJson();
-        response['error'] = costPolicy.error;
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(response, profiled),
-        );
-      }
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      final results = profiled.providers;
+      final activeLeases = leaseStore.active(n);
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           suggestResponse(
@@ -1838,7 +1913,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         ),
         'task': JsonSchema.string(
           description:
-              'Optional provider-route capability profile: simple, reasoning, hard, or complex.',
+              'Optional provider-route capability profile: simple, standard, hard, complex, or reasoning.',
         ),
         'min_context': JsonSchema.integer(
           description:
@@ -1982,8 +2057,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     callback: (args, extra) async {
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
-      var activeLeases = leaseStore.active(n);
       if (profiled.error != null) {
+        final activeLeases = leaseStore.active(n);
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(
             _reserveUnavailable(profiled.error!, n, activeLeases),
@@ -1997,76 +2072,91 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final pipePenalties =
           loadRoutedRequestSummary().pipePenaltyByProvider(now: n);
       final explicit = normalizeLeaseText(args['provider']) != null;
-      final idempotencyKey = normalizeLeaseText(args['idempotency_key']);
-      // An idempotent retry with an auto-selected target must reuse the
-      // existing lease. The first lease's discount can flip the ranking, so
-      // re-selecting would reserve a second provider under the same key and
-      // double-count the discount. Explicit-provider retries are already
-      // matched provider+account+key by the store, so this only covers the
-      // auto-select path.
-      if (!explicit && idempotencyKey != null) {
-        for (final lease in activeLeases) {
-          if (lease.idempotencyKey == idempotencyKey) {
-            return CallToolResult.fromStructuredContent(
-              _withProfileMeta(
-                _reserveJson(
-                  RouteLeaseReservation(
-                    reserved: true,
-                    reused: true,
-                    reason: 'reused the active lease for this idempotency key',
-                    lease: lease,
-                    activeLeases: activeLeases,
-                  ),
-                  n,
-                ),
-                profiled,
-              ),
-            );
-          }
-        }
-      }
       final capabilityGates = providerRouteCapabilityGates(
         results,
         n,
         catalog: catalog,
       );
+      final leaseSeconds = normalizeLeaseSeconds(args['lease_seconds']);
+      final weightPercent = normalizeLeaseWeight(args['weight_percent']);
+      final client = normalizeLeaseText(args['client']);
+      final idempotencyKey = normalizeLeaseText(args['idempotency_key']);
+
+      if (!explicit) {
+        final reservation = leaseStore.selectAndReserve(
+          select: (activeLeases) {
+            final target = decide(
+              results,
+              n,
+              context: DecisionContext(
+                burnStatsByProvider: burnStats,
+                leaseDiscountFor: (provider, account) =>
+                    leaseDiscountFor(activeLeases, provider, account),
+                pipePenaltyByProvider: pipePenalties,
+                capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
+                capabilityAvailableQuotaKeys:
+                    capabilityGates.availableQuotaKeys,
+                capabilityBudgetResetByQuotaKey:
+                    capabilityGates.budgetResetByQuotaKey,
+                preferenceOrder: profiled.preferenceOrder,
+              ),
+            ).route.recommended;
+            if (target == null) {
+              return const RouteLeaseSelection.unavailable(
+                'no reservable provider available',
+              );
+            }
+            if (target.isLocal) {
+              return const RouteLeaseSelection.unavailable(
+                'local runtimes do not need quota leases',
+              );
+            }
+            if (!target.available || (target.effectiveHeadroom ?? 0) <= 0) {
+              return RouteLeaseSelection.unavailable(
+                '${target.provider} has no effective headroom available',
+              );
+            }
+            return RouteLeaseSelection.selected(
+              RouteLeaseTarget(
+                provider: target.provider,
+                account: target.account,
+              ),
+            );
+          },
+          now: n,
+          leaseSeconds: leaseSeconds,
+          weightPercent: weightPercent,
+          client: client,
+          idempotencyKey: idempotencyKey,
+          reuseWhere: (lease) => results.any(
+            (quota) =>
+                normalizeLeaseProvider(quota.provider) == lease.provider &&
+                normalizeLeaseAccount(quota.account) == lease.account,
+          ),
+        );
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(_reserveJson(reservation, n), profiled),
+        );
+      }
+
+      final activeLeases = leaseStore.active(n);
       final target = _explicitReserveTarget(
-            results,
-            n,
-            args,
-            activeLeases,
-            burnStats,
-            pipePenalties,
-            capabilityGates.knownQuotaKeys,
-            capabilityGates.availableQuotaKeys,
-            capabilityGates.budgetResetByQuotaKey,
-            preferenceOrder: profiled.preferenceOrder,
-          ) ??
-          (explicit
-              ? null
-              : decide(
-                  results,
-                  n,
-                  context: DecisionContext(
-                    burnStatsByProvider: burnStats,
-                    leaseDiscountFor: (provider, account) =>
-                        leaseDiscountFor(activeLeases, provider, account),
-                    pipePenaltyByProvider: pipePenalties,
-                    capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-                    capabilityAvailableQuotaKeys:
-                        capabilityGates.availableQuotaKeys,
-                    capabilityBudgetResetByQuotaKey:
-                        capabilityGates.budgetResetByQuotaKey,
-                    preferenceOrder: profiled.preferenceOrder,
-                  ),
-                ).route.recommended);
+        results,
+        n,
+        args,
+        activeLeases,
+        burnStats,
+        pipePenalties,
+        capabilityGates.knownQuotaKeys,
+        capabilityGates.availableQuotaKeys,
+        capabilityGates.budgetResetByQuotaKey,
+        preferenceOrder: profiled.preferenceOrder,
+      );
       if (target == null) {
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(
             _reserveUnavailable(
-              explicit
-                  ? 'requested provider/account unavailable'
-                  : 'no reservable provider available',
+              'requested provider/account unavailable',
               n,
               activeLeases,
             ),
@@ -2103,10 +2193,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         provider: target.provider,
         account: target.account,
         now: n,
-        leaseSeconds: normalizeLeaseSeconds(args['lease_seconds']),
-        weightPercent: normalizeLeaseWeight(args['weight_percent']),
-        client: normalizeLeaseText(args['client']),
-        idempotencyKey: normalizeLeaseText(args['idempotency_key']),
+        leaseSeconds: leaseSeconds,
+        weightPercent: weightPercent,
+        client: client,
+        idempotencyKey: idempotencyKey,
       );
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(_reserveJson(reservation, n), profiled),
@@ -2173,10 +2263,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     outputSchema: listModelsOutputSchema,
     annotations: _liveCollection,
     callback: (args, extra) async {
-      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final requirements = _requirementsFromArgs(args);
       final n = now();
       if (requirements.error != null) {
+        final profiled = await _profiledSnapshot(
+          args,
+          () async => const <ProviderQuota>[],
+          profileLoader,
+        );
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(
             _modelRegistryError(n, requirements.error!),
@@ -2184,6 +2278,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           ),
         );
       }
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           modelRegistryJson(
@@ -2214,10 +2309,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     outputSchema: suggestModelOutputSchema,
     annotations: _liveCollection,
     callback: (args, extra) async {
-      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
       final requirements = _requirementsFromArgs(args);
       if (requirements.error != null) {
+        final profiled = await _profiledSnapshot(
+          args,
+          () async => const <ProviderQuota>[],
+          profileLoader,
+        );
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(
             _modelSuggestionError(n, requirements.error!),
@@ -2225,6 +2324,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           ),
         );
       }
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final burnStats = burnByProvider(profiled.providers, n);
       final useExpiringQuota = args['use_expiring_quota'] == true;
       return CallToolResult.fromStructuredContent(

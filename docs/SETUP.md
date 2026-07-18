@@ -28,8 +28,9 @@ current state, and missing or signed-out providers show a reason and next step.
 The one-line release installers install the CLI only. Tagged releases built by
 the current workflow also attach verified portable desktop bundles; follow
 [Desktop release bundles](DESKTOP-DISTRIBUTION.md) for checksum and provenance
-verification plus update, rollback, and uninstall behavior. To build the desktop
-widget and shortcut from source instead, use [Building from source](BUILDING.md).
+verification plus update, rollback, and uninstall behavior. To build and install
+the desktop widget with the platform-specific launcher from source instead, use
+[Building from source](BUILDING.md).
 
 The detailed sections below explain provider preparation, recovery, the optional
 desktop widget, and routing.
@@ -107,7 +108,17 @@ irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 The installer downloads a prebuilt CLI bundle, verifies its checksum, and exposes
 `quotabot` on your PATH from `~/.local/bin` (macOS/Linux) or
 `%LOCALAPPDATA%\quotabot\bin` (Windows). To install from a fork, set
-`QUOTABOT_REPO=owner/quotabot` first.
+`QUOTABOT_REPO=owner/quotabot` first. The default is the latest published
+release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` selects one exact tag for a
+reproducible rollback.
+
+For a one-line macOS or Linux fork install, pass the repository override to the
+installer process, not only to `curl`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/owner/quotabot/main/install.sh \
+  | QUOTABOT_REPO=owner/quotabot bash
+```
 
 ### Inspect before running the installer
 
@@ -288,19 +299,38 @@ Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\bin') -Recurse -
 Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\lib') -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
-Open a new terminal after uninstalling. Desktop release bundles and source-built
-desktop shortcuts are separate from the release CLI. Portable desktop lifecycle
-instructions are in [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md); source
-build outputs and launcher behavior remain in [BUILDING.md](BUILDING.md).
+Open a new terminal after uninstalling. Desktop release bundles and source-setup
+desktop installs are separate from the release CLI. The source setup locations
+are `%LOCALAPPDATA%\quotabot\desktop` on Windows,
+`~/.local/share/quotabot-desktop` on Linux, and
+`~/Applications/quotabot.app` on macOS. Portable desktop lifecycle instructions
+are in [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md); source build and
+launcher behavior remain in [BUILDING.md](BUILDING.md).
 
 ### Roll back
 
-quotabot has no automatic rollback command. Download the previous release
-archive and its `.sha256` sidecar from GitHub Releases, verify both, stop running
-quotabot processes, and restore that bundle in the same install location. Keep
-the local metadata directory: public cache and profile formats are additive
-within the 0.5 line. Run `quotabot --version` and `quotabot doctor` after the
-replacement.
+Stop running quotabot processes, then run the current installer with the exact
+previous release tag. The installer downloads that version, verifies its
+`.sha256` sidecar, and uses the same staged replacement and failure rollback as
+an update. Keep the local metadata directory.
+
+macOS or Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh \
+  | QUOTABOT_VERSION=vX.Y.Z bash
+```
+
+Windows PowerShell:
+
+```powershell
+$env:QUOTABOT_VERSION = 'vX.Y.Z'
+irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
+Remove-Item Env:QUOTABOT_VERSION
+```
+
+Only exact `vMAJOR.MINOR.PATCH` tags are accepted. Run `quotabot --version` and
+`quotabot doctor` after the replacement.
 
 ### Reset all local quotabot data
 

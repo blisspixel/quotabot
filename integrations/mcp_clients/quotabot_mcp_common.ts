@@ -1,6 +1,35 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const REQUIRED_ROUTING_TOOLS = ["suggest_provider", "suggest_model"] as const;
+const LOOPBACK_MCP_URL_PATTERN =
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:[/?][^\s\\#]*)?$/i;
+const LOOPBACK_MCP_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const LOOPBACK_MCP_URL_ERROR =
+  "QUOTABOT_MCP_URL must use http or https with the exact loopback host localhost, 127.0.0.1, or ::1";
+
+export function requireLoopbackMcpUrl(value: string): URL {
+  if (!LOOPBACK_MCP_URL_PATTERN.test(value)) {
+    throw new Error(LOOPBACK_MCP_URL_ERROR);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(LOOPBACK_MCP_URL_ERROR);
+  }
+
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    !LOOPBACK_MCP_HOSTS.has(parsed.hostname.toLowerCase()) ||
+    parsed.username.length > 0 ||
+    parsed.password.length > 0 ||
+    parsed.hash.length > 0
+  ) {
+    throw new Error(LOOPBACK_MCP_URL_ERROR);
+  }
+  return parsed;
+}
 
 export function mcpBearerHeaders() {
   const token = process.env.QUOTABOT_MCP_TOKEN?.trim();

@@ -47,4 +47,19 @@ void main() {
     addTearDown(next.dispose);
     expect(becamePrimary, isTrue);
   });
+
+  test('a failed surface request does not acknowledge success', () async {
+    final port = await _unusedLoopbackPort();
+    final primary = SingleInstanceGuard(port: port);
+    expect(
+      await primary.tryBecomePrimary(
+        onShowRequested: () async => throw StateError('cannot show window'),
+      ),
+      isTrue,
+    );
+    addTearDown(primary.dispose);
+
+    final second = SingleInstanceGuard(port: port);
+    expect(await second.tryBecomePrimary(onShowRequested: () async {}), isTrue);
+  });
 }

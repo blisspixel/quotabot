@@ -14,6 +14,7 @@
 library;
 
 import 'analysis.dart';
+import 'drift.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
 import 'provider_ids.dart';
@@ -444,11 +445,16 @@ List<VerifyCheck> _resetChecks(ProviderQuota q, int now) {
           '${w.label} resets ${(resetsAt - now) ~/ 86400}d out; implausible '
               'for a rolling window and likely provider drift'));
     } else if (resetsAt <= now) {
+      final trusted = isTrustedQuotaEvidenceAt(q, now);
       checks.add(VerifyCheck(
           'reset_sanity',
           VerifyStatus.info,
-          '${w.label} reset boundary has passed; the window is treated as '
-              'fresh until the next read (reset-edge state)'));
+          trusted
+              ? '${w.label} reset boundary has passed; trusted fresh evidence '
+                  'is treated as a reset-edge rollover until the next read'
+              : '${w.label} reset boundary has passed, but cached or untrusted '
+                  'evidence keeps its last observed usage and remains '
+                  'non-routable until a fresh read'));
     }
   }
   if (checks.isEmpty && q.windows.any((w) => w.resetsAt != null)) {

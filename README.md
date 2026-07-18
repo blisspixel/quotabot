@@ -170,6 +170,12 @@ Fable, quotabot reports it separately from the shared session and weekly
 windows. Spending a scoped model limit makes that model unavailable; it does not
 make every Claude model unavailable while shared plan quota remains.
 
+Beginning July 20, 2026, Anthropic says Fable 5 is a standard included benefit
+for Max and Team Premium at 50% of limits. Pro and Team Standard retain access
+through usage credits and receive a one-time $100 credit. This is a dated plan
+policy, not a value quotabot hardcodes; see the
+[July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
+
 For a tool quotabot does not read yet, `quotabot manual set` adds a local
 self-reported quota window. Manual entries appear in the same views and JSON
 snapshots with `source_class: "manual"` and the legacy `source: "manual"` hint,
@@ -206,10 +212,12 @@ current Windows and macOS bundles are not yet application-signed; the guide
 keeps that limitation explicit rather than suggesting that an OS warning is safe
 to ignore.
 
-To build everything from source in one command (CLI, desktop app, and a
-Desktop shortcut), run `pwsh tools/setup.ps1` on Windows or
-`bash tools/setup.sh` on macOS/Linux (add `-CliOnly` / `--cli-only` for just the
-CLI). Details in [docs/BUILDING.md](docs/BUILDING.md).
+To build and install everything from source in one command, run
+`pwsh tools/setup.ps1` on Windows or `bash tools/setup.sh` on macOS/Linux (add
+`-CliOnly` / `--cli-only` for just the CLI). Windows creates a Desktop shortcut,
+Linux installs the app and an application-menu entry, and macOS installs the app
+under `~/Applications`. The launchers target stable per-user copies, not build
+outputs inside the source checkout. Details in [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Keeping providers live on an idle machine
 
