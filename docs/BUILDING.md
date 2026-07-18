@@ -53,26 +53,33 @@ Notes:
 - Build on the target OS; cross-compilation is not supported.
 - **Windows:** the exe, data, and plugins land in
   `app/build/windows/x64/runner/Release/quotabot.exe`. `tools/package-windows.ps1`
-  runs the build. Ship the Release folder as portable, or package with Inno Setup
-  or MSIX. The desktop notification plugin uses Visual Studio ATL headers; if a
+  runs the build and writes `release/quotabot-windows-x64-desktop.zip` plus its
+  checksum sidecar. Add `-NoArchive` for a build-only check. The desktop
+  notification plugin uses Visual Studio ATL headers; if a
   build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
   ATL support for your installed MSVC toolset.
 - **macOS:** `bash tools/package-macos.sh` runs `flutter build macos --release`
-  on a macOS host and verifies the `.app` bundle. Production distribution then
-  needs Developer ID signing, notarization, stapling, and a DMG or ZIP.
+  on a macOS host, verifies the `.app` bundle, and writes a portable desktop ZIP
+  plus its checksum sidecar. Production distribution still needs Developer ID
+  signing, notarization, and stapling.
 - **Linux:** `bash tools/package-linux.sh` runs `flutter build linux --release`
   on a Linux host, verifies the executable bundle plus `.desktop` and icon
-  assets, and can create a portable tarball. You can also repackage that bundle
-  as an AppImage (`appimagetool`) or deb/rpm.
+  assets, and creates a portable tarball plus its checksum sidecar. You can also
+  repackage that bundle as an AppImage (`appimagetool`) or deb/rpm.
 - **CLI release archives** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
   writing a `dart build cli` bundle archive plus a `.sha256` sidecar. The
-  GitHub `Release` workflow runs those helpers on `v*` tags and uploads the
-  installer assets automatically.
+  GitHub `Release` workflow runs the CLI and desktop helpers on `v*` tags,
+  validates every desktop archive, performs native Windows and Linux readiness
+  smoke checks, attests every archive, exercises versioned update, rollback, and
+  data-preserving uninstall mechanics on clean native runners, and publishes
+  only after every asset has passed.
 
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
-their native runners, using `--no-archive` for macOS and Linux, so every pull
-request verifies those platform bundles without publishing release artifacts.
+their native runners and validates each resulting archive plus checksum, so
+every change exercises the same portable bundle shape without publishing release
+assets. The build-only `-NoArchive` and `--no-archive` flags remain available for
+local iteration.
 It then launches the packaged Windows and Linux apps and requires native window
 setup plus every supported tray-registration call to complete. Windows verifies
 the native `Shell_NotifyIconGetRect` result and rectangle independently of the
@@ -117,19 +124,24 @@ maintainer will consume it:
 5. Commit the release metadata on `main`, push it, and wait for hosted Windows,
    macOS, and Ubuntu CI plus CodeQL and secret scanning to pass before tagging.
 6. Push an annotated `vX.Y.Z` tag. Wait for both tag-triggered CI and every
-   `Release` workflow job, including all four native build legs, to pass.
+   `Release` workflow job, including four CLI builds, three desktop builds, and
+   three clean archive-verification legs, to pass.
 7. Confirm that the published release is neither draft nor prerelease and has
-   exactly these archive and `.sha256` sidecar pairs:
+   these CLI archive and `.sha256` sidecar pairs:
    `quotabot-windows-x64.zip`, `quotabot-darwin-arm64.tar.gz`,
    `quotabot-linux-x64.tar.gz`, and `quotabot-linux-arm64.tar.gz`.
+   Confirm the three desktop pairs are also present:
+   `quotabot-windows-x64-desktop.zip`,
+   `quotabot-darwin-arm64-desktop.zip`, and
+   `quotabot-linux-x64-desktop.tar.gz`.
 8. Download every archive, compare it with its SHA-256 sidecar, and verify its
    repository provenance with `gh attestation verify <archive> --repo
    blisspixel/quotabot`. That basic command does not constrain the signer or tag;
    the install-smoke workflow adds signer-workflow, source-ref, source-digest,
    and self-hosted-runner restrictions for the release gate.
    The release workflow creates the attestation before uploading each pair.
-9. Install and smoke-test the packaged CLI on clean Windows, macOS, and Linux
-   hosts before promoting a stable release candidate.
+9. Install and smoke-test the packaged CLI and portable desktop app on clean
+   Windows, macOS, and Linux hosts before promoting a stable release candidate.
 10. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
 

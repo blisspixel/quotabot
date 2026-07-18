@@ -125,6 +125,8 @@ void main() {
     expect(json['providers'], hasLength(2));
     final claude = (json['providers'] as List).first as Map<String, dynamic>;
     expect(claude['source_class'], 'authoritative_live');
+    // spend_class is machine-readable parity with the markdown Trust column.
+    expect(claude['spend_class'], 'quota plan');
     expect(claude.containsKey('trust'), isFalse);
     expect(claude.containsKey('as_of'), isFalse);
     expect(claude['weekly_sampled_days'], 3);

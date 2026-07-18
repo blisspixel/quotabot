@@ -4,6 +4,7 @@ import 'analysis.dart';
 import 'cache.dart';
 import 'demo.dart';
 import 'drift.dart';
+import 'local_hardware.dart';
 import 'manual_quota.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
@@ -25,6 +26,7 @@ export 'decision.dart';
 export 'insights.dart';
 export 'leases.dart';
 export 'litellm_metrics.dart';
+export 'local_hardware.dart';
 export 'manual_quota.dart';
 export 'model_catalog.dart';
 export 'models.dart';
@@ -146,12 +148,56 @@ Future<List<ProviderQuota>> _collectAllProviders({
   // run one never see an empty card. Cloud providers stay even when empty.
   // Every snapshot is sanitized last, so no provider-sourced string can carry
   // terminal control bytes to any display surface.
-  final results = [
+  final retained = [
     for (final group in collected) ...group,
     ...manual,
-  ].where(retainCollectedProviderQuota).map(sanitizeProviderQuota).toList();
+  ].where(retainCollectedProviderQuota).toList();
+  LocalHardwareInfo? hardware;
+  if (retained.any((quota) =>
+      quota.isLocal &&
+      quota.ok &&
+      quota.models.any((model) => !model.cloudOffloaded))) {
+    try {
+      hardware = await readLocalHardware();
+    } catch (_) {
+      // Hardware fit is advisory. A failed metadata probe must never hide an
+      // otherwise healthy local runtime or delay normal routing.
+    }
+  }
+  final results = [
+    for (final quota in retained)
+      sanitizeProviderQuota(
+        quota.isLocal && hardware != null
+            ? quota.withLocalHardware(
+                hardware,
+                detail: _localHardwareDetail(hardware),
+              )
+            : quota,
+      ),
+  ];
   _recordAnalytics(results);
   return results;
+}
+
+String _localHardwareDetail(LocalHardwareInfo hardware) {
+  final parts = <String>[];
+  final systemTotal = hardware.systemMemoryTotalBytes;
+  final systemAvailable = hardware.systemMemoryAvailableBytes;
+  if (systemTotal != null) {
+    parts.add(systemAvailable == null
+        ? '${formatCompactBytes(systemTotal)} RAM total'
+        : '${formatCompactBytes(systemAvailable)} of '
+            '${formatCompactBytes(systemTotal)} RAM available');
+  }
+  final gpuTotal = hardware.gpuMemoryTotalBytes;
+  final gpuAvailable = hardware.gpuMemoryAvailableBytes;
+  if (gpuTotal != null) {
+    parts.add(gpuAvailable == null
+        ? '${formatCompactBytes(gpuTotal)} largest GPU'
+        : '${formatCompactBytes(gpuAvailable)} of '
+            '${formatCompactBytes(gpuTotal)} GPU free');
+  }
+  return parts.join(' . ');
 }
 
 /// Folds the current binding headroom of each live subscription into the

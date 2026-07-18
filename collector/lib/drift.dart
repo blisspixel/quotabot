@@ -38,6 +38,30 @@ const int _maxQuotaDriftDimensionCharacters = 96;
 /// non-monotonically; its real signal is per-model quota, checked elsewhere.
 const _syntheticWindowProviders = {antigravityProviderId};
 
+/// Providers whose model quotas are optional overlays on shared provider
+/// windows rather than an exhaustive list of independent model pools. Claude
+/// can add or remove a promotional or plan-specific scoped limit without
+/// invalidating the account-wide session and weekly evidence.
+const _optionalModelQuotaProviders = {claudeProviderId};
+
+/// Claude Code briefly exposed scoped family caps in response shapes that older
+/// quotabot builds normalized as provider-wide windows. Those labels are not
+/// shared provider constraints. Let them leave the window set during migration
+/// even when the current account no longer reports the optional scoped cap.
+/// The shared `5h` and `weekly` windows keep the normal disappearance checks.
+const _legacyClaudeScopedWindowLabels = {
+  'fable',
+  'opus',
+  'sonnet',
+  'haiku',
+};
+
+bool _isLegacyClaudeScopedWindow(ProviderQuota quota, QuotaWindow window) =>
+    quota.provider == claudeProviderId &&
+    _legacyClaudeScopedWindowLabels.contains(
+      window.label.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ''),
+    );
+
 /// Providers whose every window can be re-rated downward mid-window, so a
 /// used-percent drop is expected rather than drift and the fresh (lower) number
 /// is the latest truth to show. xAI does this to the whole Grok credit pool
@@ -381,6 +405,7 @@ bool _hasAdvancedResetEvidence(
     for (final window in fresh.windows) window.label: window
   };
   for (final previous in legacy.windows) {
+    if (_isLegacyClaudeScopedWindow(legacy, previous)) continue;
     final current = freshWindows[previous.label];
     final previousReset = previous.resetsAt;
     final freshReset = current?.resetsAt;
@@ -397,6 +422,10 @@ bool _hasAdvancedResetEvidence(
   };
   for (final previous in legacy.modelQuotas) {
     final current = freshModels[previous.model];
+    if (current == null &&
+        _optionalModelQuotaProviders.contains(fresh.provider)) {
+      continue;
+    }
     final previousReset = previous.resetsAt;
     final freshReset = current?.resetsAt;
     if (previousReset == null ||
@@ -429,6 +458,7 @@ String? detectQuotaDrift(
         _variableWindowSetProviders.contains(fresh.provider);
     for (final prior in previous.windows) {
       if (freshLabels.contains(prior.label)) continue;
+      if (_isLegacyClaudeScopedWindow(previous, prior)) continue;
       // A window vanished. For a provider whose window set can restructure
       // (Codex), that is a legitimate collapse only when a window reaching at
       // least as far as the vanished one survives - the account folded into its
@@ -460,13 +490,15 @@ String? detectQuotaDrift(
       }
     }
   }
-  // Per-model pools are real per-model rolling windows (Antigravity meters each
-  // model family separately), so the same monotonicity applies, matched by
-  // model name. This is where Antigravity's drift is actually caught.
+  // Per-model pools keep the same monotonicity checks when a model survives in
+  // both snapshots. Antigravity's list is exhaustive, so disappearance is also
+  // drift. Claude's scoped list is optional, so addition or removal can reflect
+  // a legitimate plan-policy change without invalidating shared windows.
   final prevModels = {for (final m in previous.modelQuotas) m.model: m};
   final freshModelNames = {for (final m in fresh.modelQuotas) m.model};
   for (final prior in previous.modelQuotas) {
-    if (!freshModelNames.contains(prior.model)) {
+    if (!freshModelNames.contains(prior.model) &&
+        !_optionalModelQuotaProviders.contains(fresh.provider)) {
       return boundedQuotaDriftReason(
         '${prior.model} model quota disappeared',
       );

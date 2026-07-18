@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import json
+import math
 import py_compile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+
+from quotabot_mcp_common import (
+    as_pretty_json,
+    require_routing_tools,
+    routing_summary,
+    structured_content,
+)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -53,6 +63,95 @@ class McpClientSnippetTest(unittest.TestCase):
         self.assertNotIn("TO" + "DO", joined)
         self.assertNotIn("place" + "holder", joined.lower())
         self.assertNotIn("\n" + "pa" + "ss\n", joined)
+
+
+class McpClientCommonTest(unittest.TestCase):
+    def test_structured_content_prefers_direct_content(self) -> None:
+        result = SimpleNamespace(
+            structuredContent={"source": "direct"},
+            structured_content={"source": "snake"},
+            content=[SimpleNamespace(text='{"source":"text"}')],
+        )
+
+        self.assertEqual(structured_content(result), {"source": "direct"})
+
+    def test_structured_content_accepts_sdk_variants_and_json_text(self) -> None:
+        snake_case = SimpleNamespace(structured_content={"source": "snake"})
+        text_content = SimpleNamespace(
+            content=[
+                SimpleNamespace(binary=b"ignored"),
+                SimpleNamespace(text="not json"),
+                SimpleNamespace(text='["not", "an", "object"]'),
+                SimpleNamespace(text='{"source":"text"}'),
+            ]
+        )
+
+        self.assertEqual(structured_content(snake_case), {"source": "snake"})
+        self.assertEqual(structured_content(text_content), {"source": "text"})
+        self.assertEqual(structured_content(SimpleNamespace()), {})
+
+    def test_routing_summary_rejects_invalid_numeric_values(self) -> None:
+        for invalid in (True, False, math.nan, math.inf, -math.inf, "75"):
+            with self.subTest(value=invalid):
+                summary = routing_summary(
+                    {"recommended": {"headroom_percent": invalid}}
+                )
+                self.assertIsNone(summary["headroom_percent"])
+
+        self.assertEqual(
+            routing_summary({"recommended": {"headroom_percent": 75}})[
+                "headroom_percent"
+            ],
+            75,
+        )
+
+    def test_routing_summary_normalizes_malformed_payloads(self) -> None:
+        summary = routing_summary(
+            {
+                "schema": "quotabot.suggest.v1",
+                "recommended": "invalid",
+                "fallback": {"provider": "ollama"},
+                "using_local_fallback": 1,
+            },
+            {"schema": "quotabot.models.v1", "recommended": None},
+        )
+
+        self.assertEqual(
+            summary,
+            {
+                "suggest_schema": "quotabot.suggest.v1",
+                "recommended_provider": None,
+                "headroom_percent": None,
+                "using_local_fallback": False,
+                "fallback_provider": "ollama",
+                "model_schema": "quotabot.models.v1",
+                "recommended_model": None,
+                "model_provider": None,
+            },
+        )
+
+    def test_require_routing_tools_reports_all_missing_tools(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "quotabot MCP tools missing: suggest_provider, suggest_model",
+        ):
+            require_routing_tools([])
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "quotabot MCP tools missing: suggest_model",
+        ):
+            require_routing_tools(["suggest_provider"])
+
+        require_routing_tools(["suggest_provider", "suggest_model", "other"])
+
+    def test_pretty_json_remains_machine_parseable(self) -> None:
+        value = {"schema": "quotabot.suggest.v1", "headroom_percent": 42.5}
+
+        self.assertEqual(json.loads(as_pretty_json(value)), value)
+
+        with self.assertRaises(ValueError):
+            as_pretty_json({"headroom_percent": math.nan})
 
 
 if __name__ == "__main__":

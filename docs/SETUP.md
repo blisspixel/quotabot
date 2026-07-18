@@ -25,9 +25,11 @@ command here costs zero usage tokens.
 `doctor` is both the first quota view and the setup diagnostic. You do not need
 to configure every provider before running it: working providers show their
 current state, and missing or signed-out providers show a reason and next step.
-The one-line release installers install the CLI only. To install the desktop
-widget and shortcut as well, use the full source setup described in
-[Building from source](BUILDING.md).
+The one-line release installers install the CLI only. Tagged releases built by
+the current workflow also attach verified portable desktop bundles; follow
+[Desktop release bundles](DESKTOP-DISTRIBUTION.md) for checksum and provenance
+verification plus update, rollback, and uninstall behavior. To build the desktop
+widget and shortcut from source instead, use [Building from source](BUILDING.md).
 
 The detailed sections below explain provider preparation, recovery, the optional
 desktop widget, and routing.
@@ -51,6 +53,9 @@ pinning. There is no quotabot account.
 | NVIDIA NIM | `NVIDIA_API_KEY` or `nvapi` | set the environment key | status-only; numeric quota remains unknown |
 | Ollama, LM Studio, Lemonade | reachable local server | start the runtime server | live inventory only; never served from cache |
 | Manual entries | user-supplied local window | `quotabot manual set` | self-reported and never refreshed automatically |
+
+Quotabot-owned grants are stored locally and are not synchronized. Run the
+relevant `quotabot login` once on each idle machine that needs its own live read.
 
 If a tool has never run here, that provider simply shows "no live data" until you
 use it once.
@@ -283,10 +288,10 @@ Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\bin') -Recurse -
 Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\lib') -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
-Open a new terminal after uninstalling. Source-built desktop shortcuts and app
-bundles are separate from the release CLI. Source setup does not yet provide a
-single cross-platform uninstaller; [BUILDING.md](BUILDING.md) describes its
-build outputs and launcher behavior.
+Open a new terminal after uninstalling. Desktop release bundles and source-built
+desktop shortcuts are separate from the release CLI. Portable desktop lifecycle
+instructions are in [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md); source
+build outputs and launcher behavior remain in [BUILDING.md](BUILDING.md).
 
 ### Roll back
 

@@ -66,6 +66,12 @@ echo "Icon asset: $icon"
 if [ "$archive" -eq 1 ]; then
   mkdir -p "$release_dir"
   out="$release_dir/quotabot-linux-$arch-desktop.tar.gz"
+  asset="$(basename "$out")"
+  rm -f "$out" "$out.sha256"
   tar -C "$bundle" -czf "$out" .
+  hash="$(sha256sum "$out" | awk '{print tolower($1)}')"
+  printf '%s  %s' "$hash" "$asset" > "$out.sha256"
   echo "Archive ready: $out"
+  echo "Checksum: $out.sha256"
+  echo "SHA256: $hash"
 fi

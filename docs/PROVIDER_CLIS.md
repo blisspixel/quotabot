@@ -7,7 +7,7 @@ These tools change often. Treat this as a starting point and verify against each
 vendor's official docs (linked per provider). For exactly where quotabot reads
 each number, see [DATA_SOURCES.md](DATA_SOURCES.md).
 
-**Last updated: 2026-07-10.**
+**Last updated: 2026-07-18.**
 
 The provider command is only one part of the trust statement. quotabot also
 emits a normalized `source_class`: Claude and live Codex, Grok, and Antigravity
@@ -23,8 +23,18 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   https://platform.claude.com/docs/en/api/rate-limits
 - Check usage yourself: `/usage` in a Claude Code session shows remaining quota,
   reset time, and burn rate. Related: `/cost`, `/stats`, `/context`.
+- Do not automate this as `claude -p /usage` or `/quota`. Print mode is a
+  prompt-execution surface, not a stable quota API, and `/quota` is not a
+  documented built-in command. quotabot calls the account-wide usage metadata
+  endpoint directly so collection remains content-blind and uses zero inference.
 - Windows: a rolling 5-hour window plus a weekly cap, shared across Claude Code,
   Claude.ai, and related products.
+- The live response may also include a model-scoped weekly cap. Beginning July
+  20, 2026, Anthropic says Fable 5 is a standard included benefit at 50% of
+  limits for Max and Team Premium. Pro and Team Standard retain Fable through
+  usage credits and receive a one-time $100 credit. This is a dated plan policy,
+  not a value quotabot hardcodes; see the
+  [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
 - quotabot reads: the OAuth usage endpoint, reusing the token Claude Code stores.
   Live with no quotabot login when Claude Code has a valid signed-in token here;
   `quotabot login claude` adds a self-refreshing grant so the account-wide read

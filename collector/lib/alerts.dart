@@ -178,7 +178,7 @@ class QuotaAlert {
     // could diverge for a spent provider, where the binding window is the one
     // that resets last, not the one with the least headroom).
     if (bw == null || providerHeadroom(q, now) == null) continue;
-    final free = windowHeadroom(bw, now);
+    final free = quotaWindowHeadroom(q, bw, now);
     final sev = alertSeverity(free);
     if (!alertOn.contains(sev)) continue; // calm or recovered: disarm
     next.add(key);

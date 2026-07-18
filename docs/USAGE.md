@@ -212,8 +212,9 @@ the full adapter read surface rather than only the filtered output rows.
 `quotabot explain --reads --network` emits the local trust-boundary manifest for
 the current OS and profile without contacting providers or reading secret file
 contents. It names the credential files, quota caches, local IDE databases,
-loopback runtime endpoints, and provider metadata hosts quotabot may use during a
-normal read. The JSON shape is `quotabot.explain.v1`; every network record states
+passive OS/GPU memory commands, loopback runtime endpoints, and provider metadata
+hosts quotabot may use during a normal read. The JSON shape is
+`quotabot.explain.v1`; every network record states
 the method, host, path, data class, and the invariant that it sends no prompts,
 source code, model outputs, or generation requests and spends zero tokens.
 Shared local metadata records include cache and history writes, because a normal
@@ -405,7 +406,13 @@ account identity when the provider exposes one, source class, and capture age;
 JSON carries `source_class` and stable machine fields such as
 `local_readiness` (`loaded` or `cold`). Concrete model suggestions prefer loaded
 local models before installed-but-cold local models when both meet the requested
-profile.
+profile. Cold on-device models then rank by passive `hardware_fit`:
+`comfortable`, `tight`, `unknown`, then `constrained`. The human provenance tag
+shows that state, while JSON includes the estimated bytes, chosen RAM or GPU
+pool, current and total capacity, and observation time. The estimate adds a
+conservative runtime reserve to installed size. It never loads a model or runs a
+performance probe, never turns a reachable model unavailable, and may be
+conservative when a runtime can split a model across RAM and VRAM.
 
 Filter to what a task needs with a coarse `--task=simple|standard|hard` profile or
 explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
@@ -453,7 +460,8 @@ choice among options already worth picking, and the reason then reads "first by
 your preference". Unlike `--exclude`, which removes providers, `--prefer` only
 reorders. The preference also persists per profile as `preference_order` in the
 profile JSON; an explicit `--prefer` overrides the active profile's saved order
-for that run.
+for that run. MCP `suggest_provider` and `decide_now` apply the same saved
+`preference_order` when you pass `profile`, so CLI and agent paths agree.
 For cost-sensitive dispatch, `quotabot suggest --local-first` keeps the normal
 provider ranking visible but recommends a local runtime before subscription quota
 when one is available. MCP `suggest_provider` and `decide_now` accept
@@ -582,6 +590,16 @@ measured included quota near reset can win a close tie before it expires unused,
   route, the default provider route avoids a provider whose capable model pool is
   exhausted, and a caller can down-rank a provider it knows is more expensive
   without turning quotabot into a spend ledger.
+
+Every provider suggestion also carries `decision_code`, a complete
+plain-language `explanation`, and a nested `quotabot.receipt.v1` receipt. The
+receipt gives the decision a deterministic id and records the snapshot source
+and age, active policy, binding pool, spend classification, raw and effective
+headroom, all applied adjustments, confidence reasons, winner qualification,
+each alternative's rejection verdict, and the fallback. It is intentionally
+content-blind: no task text, prompt, source code, model response, credential, or
+exception can enter the receipt. `decide_now` uses the same receipt shape and
+stamps it with the cached snapshot source and age.
 
 For `this_machine_fallback` and `passive_local_evidence`, routing multiplies the
 normal freshness and sample-adequacy confidence by `0.7`. This provenance factor

@@ -1,5 +1,6 @@
 import 'package:quotabot_collector/model_catalog.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/provider_ids.dart';
 import 'package:quotabot_collector/registry.dart';
 import 'package:test/test.dart';
 
@@ -34,13 +35,19 @@ ProviderQuota _cloud(
       ],
     );
 
-ProviderQuota _local(String id, List<ModelInfo> models) => ProviderQuota(
+ProviderQuota _local(
+  String id,
+  List<ModelInfo> models, {
+  LocalHardwareInfo? hardware,
+}) =>
+    ProviderQuota(
       provider: id,
       displayName: id,
       account: 'local',
       asOf: _now,
       kind: ProviderQuotaKind.local,
       models: models,
+      localHardware: hardware,
     );
 
 void main() {
@@ -201,6 +208,168 @@ void main() {
     expect(reg.single.available, isFalse);
   });
 
+  test('Claude Fable quota is a sparse overlay on shared provider quota', () {
+    final providerReset = _now + 5 * 86400;
+    final fableReset = _now + 24 * 3600;
+    final claude = _cloud(
+      claudeProviderId,
+      20,
+      resetsAt: providerReset,
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 100,
+          resetsAt: fableReset,
+        ),
+      ],
+    );
+    final reg = buildModelRegistry(
+      [claude],
+      _now,
+      catalog: const {
+        claudeProviderId: [
+          ModelInfo(
+            id: 'claude-fable-5',
+            displayName: 'Claude Fable 5',
+            reasoning: 'adaptive',
+            tier: 'flagship',
+          ),
+          ModelInfo(
+            id: 'claude-opus-4-8',
+            displayName: 'Claude Opus 4.8',
+            reasoning: 'adaptive',
+            tier: 'flagship',
+          ),
+        ],
+      },
+    );
+
+    final fable = reg.firstWhere((entry) => entry.model.id == 'claude-fable-5');
+    final opus = reg.firstWhere((entry) => entry.model.id == 'claude-opus-4-8');
+    expect(fable.headroomPercent, 0);
+    expect(fable.resetsAt, fableReset);
+    expect(fable.gatingWindow, 'daily');
+    expect(fable.available, isFalse);
+    expect(opus.headroomPercent, 80);
+    expect(opus.resetsAt, providerReset);
+    expect(opus.gatingWindow, 'weekly');
+    expect(opus.available, isTrue);
+
+    final gates = modelCapabilityGates(
+      [claude],
+      _now,
+      catalog: const {
+        claudeProviderId: [
+          ModelInfo(
+            id: 'claude-fable-5',
+            reasoning: 'adaptive',
+            tier: 'flagship',
+          ),
+          ModelInfo(
+            id: 'claude-opus-4-8',
+            reasoning: 'adaptive',
+            tier: 'flagship',
+          ),
+        ],
+      },
+    );
+    final key = quotaIdentityKey(claudeProviderId, 'a');
+    expect(gates.knownQuotaKeys, contains(key));
+    expect(gates.availableQuotaKeys, contains(key));
+  });
+
+  test('Claude Fable uses the tighter shared or scoped quota gate', () {
+    const catalog = {
+      claudeProviderId: [
+        ModelInfo(
+          id: 'claude-fable-5',
+          displayName: 'Claude Fable 5',
+        ),
+      ],
+    };
+    final scopedReset = _now + 24 * 3600;
+    final providerReset = _now + 5 * 86400;
+
+    final scopedTighter = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          20,
+          resetsAt: providerReset,
+          modelQuotas: [
+            ModelQuota(
+              model: 'Fable',
+              usedPercent: 30,
+              resetsAt: scopedReset,
+            ),
+          ],
+        ),
+      ],
+      _now,
+      catalog: catalog,
+    ).single;
+    expect(scopedTighter.headroomPercent, 70);
+    expect(scopedTighter.resetsAt, scopedReset);
+    expect(scopedTighter.gatingWindow, 'daily');
+
+    final sharedTighter = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          90,
+          resetsAt: providerReset,
+          modelQuotas: [
+            ModelQuota(
+              model: 'Fable',
+              usedPercent: 30,
+              resetsAt: scopedReset,
+            ),
+          ],
+        ),
+      ],
+      _now,
+      catalog: catalog,
+    ).single;
+    expect(sharedTighter.headroomPercent, 10);
+    expect(sharedTighter.resetsAt, providerReset);
+    expect(sharedTighter.gatingWindow, 'weekly');
+  });
+
+  test('Claude legacy family labels match only their scoped catalog model', () {
+    final reg = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          20,
+          resetsAt: _now + 5 * 86400,
+          modelQuotas: const [
+            ModelQuota(model: 'Opus', usedPercent: 50),
+          ],
+        ),
+      ],
+      _now,
+      catalog: const {
+        claudeProviderId: [
+          ModelInfo(id: 'claude-opus-4-8', displayName: 'Claude Opus 4.8'),
+          ModelInfo(
+            id: 'claude-sonnet-5',
+            displayName: 'Claude Sonnet 5',
+          ),
+        ],
+      },
+    );
+
+    final opus = reg.firstWhere((entry) => entry.model.id == 'claude-opus-4-8');
+    final sonnet = reg.firstWhere(
+      (entry) => entry.model.id == 'claude-sonnet-5',
+    );
+    expect(opus.headroomPercent, 50);
+    expect(opus.available, isTrue);
+    expect(sonnet.headroomPercent, 80);
+    expect(sonnet.gatingWindow, 'weekly');
+    expect(sonnet.available, isTrue);
+  });
+
   test('model capability gates separate known capability from available budget',
       () {
     final gates = modelCapabilityGates(
@@ -274,37 +443,56 @@ void main() {
     expect(e.toJson().containsKey('per_machine'), isFalse);
   });
 
-  test('Claude catalog exposes Fable 5 with temporary quota backing', () {
-    final beforeCutoff = buildModelRegistry(
-      [_cloud('claude', 20)],
-      1783468800,
+  test('Claude catalog backs Fable only with live scoped quota evidence', () {
+    final withScopedQuota = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          20,
+          modelQuotas: const [
+            ModelQuota(model: 'Fable', usedPercent: 25),
+          ],
+        ),
+      ],
+      _now,
       catalog: kModelCatalog,
     );
-    final fable = beforeCutoff.singleWhere(
+    final fable = withScopedQuota.singleWhere(
       (entry) => entry.model.id == 'claude-fable-5',
     );
     expect(fable.model.displayName, 'Claude Fable 5');
     expect(fable.model.contextTokens, 1000000);
     expect(fable.model.maxOutputTokens, 128000);
-    expect(fable.model.toJson()['quota_included_until'], 1783494000);
+    expect(fable.model.toJson().containsKey('quota_included_until'), isFalse);
     expect(fable.quotaBacked, isTrue);
+    expect(fable.available, isTrue);
+    expect(fable.headroomPercent, 75);
 
-    final afterCutoff = buildModelRegistry(
-      [_cloud('claude', 20)],
-      1783494000,
+    final withoutScopedQuota = buildModelRegistry(
+      [_cloud(claudeProviderId, 20)],
+      _now,
       catalog: kModelCatalog,
       requirements: const ModelRequirements(
         budgetPolicy: ModelBudgetPolicy.quota,
       ),
     );
     expect(
-      afterCutoff.map((entry) => entry.model.id),
+      withoutScopedQuota.map((entry) => entry.model.id),
       isNot(contains('claude-fable-5')),
     );
     expect(
-      afterCutoff.map((entry) => entry.model.id),
+      withoutScopedQuota.map((entry) => entry.model.id),
       contains('claude-sonnet-5'),
     );
+
+    final fableWithoutEvidence = buildModelRegistry(
+      [_cloud(claudeProviderId, 20)],
+      _now,
+      catalog: kModelCatalog,
+    ).singleWhere((entry) => entry.model.id == 'claude-fable-5');
+    expect(fableWithoutEvidence.quotaBacked, isFalse);
+    expect(fableWithoutEvidence.available, isFalse);
+    expect(fableWithoutEvidence.headroomPercent, isNull);
   });
 
   test('local models come from the snapshot, no catalog needed', () {
@@ -383,6 +571,132 @@ void main() {
     expect(reg.map((e) => e.model.id).toList(), ['a-loaded', 'z-cold']);
     expect(reg.first.toJson()['local_readiness'], 'loaded');
     expect(reg.last.toJson()['local_readiness'], 'cold');
+  });
+
+  test('cold local models sort by passive hardware fit', () {
+    const gib = 1024 * 1024 * 1024;
+    final reg = buildModelRegistry(
+      [
+        _local(
+          'ollama',
+          const [
+            ModelInfo(
+              id: 'a-constrained',
+              local: true,
+              sizeBytes: 14 * gib,
+            ),
+            ModelInfo(id: 'm-unknown', local: true),
+            ModelInfo(
+              id: 'z-comfortable',
+              local: true,
+              sizeBytes: 4 * gib,
+            ),
+          ],
+          hardware: const LocalHardwareInfo(
+            asOf: _now,
+            systemMemoryTotalBytes: 16 * gib,
+            systemMemoryAvailableBytes: 12 * gib,
+          ),
+        ),
+      ],
+      _now,
+    );
+
+    expect(reg.map((e) => e.model.id), [
+      'z-comfortable',
+      'm-unknown',
+      'a-constrained',
+    ]);
+    expect(reg[0].toJson()['hardware_fit'], 'comfortable');
+    expect(reg[1].toJson()['hardware_fit'], 'unknown');
+    expect(reg[2].toJson()['hardware_fit'], 'constrained');
+  });
+
+  test('hardware fit chooses the strongest observed memory pool', () {
+    const gib = 1024 * 1024 * 1024;
+    const model = ModelInfo(
+      id: 'local-model',
+      local: true,
+      sizeBytes: 4 * gib,
+    );
+    const hardware = LocalHardwareInfo(
+      asOf: _now,
+      systemMemoryTotalBytes: 32 * gib,
+      systemMemoryAvailableBytes: 4 * gib,
+      gpuMemoryTotalBytes: 12 * gib,
+      gpuMemoryAvailableBytes: 10 * gib,
+      gpuCount: 1,
+    );
+
+    final fit = localModelHardwareFit(model, hardware);
+    final json = fit.toJson();
+
+    expect(fit.status, LocalHardwareFitStatus.comfortable);
+    expect(fit.basis, 'gpu_memory');
+    expect(fit.estimatedMemoryBytes, 5 * gib);
+    expect(json['fit_available_bytes'], 10 * gib);
+    expect(json['fit_total_bytes'], 12 * gib);
+    expect(json['hardware_observed_at'], _now);
+  });
+
+  test('hardware fit distinguishes tight, constrained, unknown, and loaded',
+      () {
+    const gib = 1024 * 1024 * 1024;
+    const hardware = LocalHardwareInfo(
+      asOf: _now,
+      systemMemoryTotalBytes: 16 * gib,
+      systemMemoryAvailableBytes: 8 * gib,
+    );
+
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'tight', local: true, sizeBytes: 10 * gib),
+        hardware,
+      ).status,
+      LocalHardwareFitStatus.tight,
+    );
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'large', local: true, sizeBytes: 14 * gib),
+        hardware,
+      ).status,
+      LocalHardwareFitStatus.constrained,
+    );
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'unknown', local: true),
+        hardware,
+      ).status,
+      LocalHardwareFitStatus.unknown,
+    );
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'loaded', local: true, loaded: true),
+        null,
+      ).status,
+      LocalHardwareFitStatus.loaded,
+    );
+  });
+
+  test('on-device local entries sort ahead of cloud-offloaded daemon entries',
+      () {
+    final reg = buildModelRegistry(
+      [
+        _local('ollama', const [
+          ModelInfo(
+            id: 'a-cloud',
+            local: true,
+            cloudOffloaded: true,
+          ),
+          ModelInfo(id: 'z-on-device', local: true),
+        ]),
+      ],
+      _now,
+    );
+
+    expect(reg.map((e) => e.model.id), ['z-on-device', 'a-cloud']);
+    expect(reg.first.hardwareFit?.status, LocalHardwareFitStatus.unknown);
+    expect(reg.last.hardwareFit, isNull);
   });
 
   test('a cloud provider absent from the catalog contributes no models', () {
@@ -727,6 +1041,41 @@ void main() {
       expect(s.recommended?.model.id, 'cold-local');
       expect(s.reason, contains('cold start may be required'));
       expect(s.reason, contains('5.0 GB on disk'));
+      expect(s.reason, contains('hardware fit is unknown'));
+    });
+
+    test('a cold local recommendation explains its hardware-fit evidence', () {
+      const gib = 1024 * 1024 * 1024;
+      final s = suggestModel(
+        [
+          _local(
+            'ollama',
+            const [
+              ModelInfo(
+                id: 'fit-local',
+                local: true,
+                sizeBytes: 4 * gib,
+              ),
+            ],
+            hardware: const LocalHardwareInfo(
+              asOf: _now,
+              gpuMemoryTotalBytes: 12 * gib,
+              gpuMemoryAvailableBytes: 10 * gib,
+              gpuCount: 1,
+            ),
+          ),
+        ],
+        _now,
+      );
+      final json = s.toJson(_now);
+
+      expect(s.recommended?.model.id, 'fit-local');
+      expect(s.reason, contains('comfortable metadata-only hardware fit'));
+      expect(s.reason, contains('5.0 GB estimated'));
+      expect(s.reason, contains('10.0 GB available of 12.0 GB GPU memory'));
+      expect(json['recommended']['hardware_fit'], 'comfortable');
+      expect(json['recommended']['hardware_fit_basis'], 'gpu_memory');
+      expect(json['recommended']['estimated_memory_bytes'], 5 * gib);
     });
 
     test('no model with budget yields a null pick and a reason', () {

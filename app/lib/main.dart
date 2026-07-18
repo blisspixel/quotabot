@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
+import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -1012,8 +1013,7 @@ class _DashboardState extends State<Dashboard>
         h = 62; // header row + outer paddings
         for (final q in _displayed) {
           final key = quotaDisplayKey(q);
-          final blocked = providerStatus(q, now).blocked;
-          final rows = (q.windows.isEmpty || blocked) ? 1 : q.windows.length;
+          final rows = providerTileQuotaRowCount(q, now);
           var card =
               64.0 + rows * 14.0; // card chrome, trust line, and data rows
           if (q.isLocal) card += q.details.length * 14; // detail lines
@@ -2678,14 +2678,17 @@ class ProviderTile extends StatelessWidget {
     final muted = chrome.muted;
     final fg = chrome.foreground;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final views = quota.windows.map((w) => _view(w, now)).toList();
+    final views = quota.windows.map((w) => _view(quota, w, now)).toList();
+    final scopedModelViews = desktopScopedModelQuotas(
+      quota,
+    ).map((modelQuota) => _modelQuotaView(quota, modelQuota, now)).toList();
 
     // Binding constraint from pure analysis. A spent longer window overrides
     // shorter ones so the display never shows healthy when the binding cap is spent.
     final bindingWin = bindingWindow(quota, now);
     WinView? binding;
     if (bindingWin != null) {
-      binding = _view(bindingWin, now);
+      binding = _view(quota, bindingWin, now);
     }
     final blocked = binding != null && binding.exhausted;
     // When a spent short window blocks the card, a longer window that still has
@@ -2880,7 +2883,7 @@ class ProviderTile extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: WindowBar(
-                    view: _view(secondaryWin, now),
+                    view: _view(quota, secondaryWin, now),
                     muted: muted,
                     fg: fg,
                     evidenceLabel: evidenceLabel,
@@ -2898,6 +2901,17 @@ class ProviderTile extends StatelessWidget {
                   ),
                 ),
               ),
+            ...scopedModelViews.map(
+              (v) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: WindowBar(
+                  view: v,
+                  muted: muted,
+                  fg: fg,
+                  evidenceLabel: evidenceLabel,
+                ),
+              ),
+            ),
             if (forecast != null) _forecastRow(forecast, muted),
             if (history.isNotEmpty)
               Padding(
@@ -3197,10 +3211,39 @@ class WinView {
   bool get exhausted => !rolledOver && remaining <= kSpentHeadroomFloor;
 }
 
-WinView _view(QuotaWindow w, int now) {
-  final rolled = windowHasRolledOver(w, now);
-  final rem = windowHeadroom(w, now);
+WinView _view(ProviderQuota quota, QuotaWindow w, int now) {
+  final rolled = quotaWindowHasRolledOver(quota, w, now);
+  final rem = quotaWindowHeadroom(quota, w, now);
   return WinView(w.label, rem, rolled, w.resetsAt);
+}
+
+WinView _modelQuotaView(ProviderQuota quota, ModelQuota modelQuota, int now) {
+  final reset = modelQuota.resetsAt;
+  final rolled =
+      isTrustedQuotaEvidenceAt(quota, now) && reset != null && reset <= now;
+  final remaining = rolled ? 100.0 : modelQuota.remainingPercent!;
+  return WinView(modelQuota.model, remaining, rolled, reset);
+}
+
+/// Claude's scoped family pools are compact enough to show below its shared
+/// account windows. Antigravity's model-quota list is exhaustive and can be
+/// large, so it remains available only through model-routing detail surfaces.
+@visibleForTesting
+List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota) =>
+    quota.provider == claudeProviderId && quota.windows.isNotEmpty
+    ? quota.modelQuotas
+          .where((modelQuota) => modelQuota.remainingPercent != null)
+          .toList(growable: false)
+    : const [];
+
+/// Deterministic quota-row estimate used by the native window sizing fallback.
+@visibleForTesting
+int providerTileQuotaRowCount(ProviderQuota quota, int now) {
+  final blocked = providerStatus(quota, now).blocked;
+  final providerRows = (quota.windows.isEmpty || blocked)
+      ? 1
+      : quota.windows.length;
+  return providerRows + desktopScopedModelQuotas(quota).length;
 }
 
 Color _availColor(num remaining) {

@@ -205,6 +205,80 @@ void main() {
       ]);
       expect(detectQuotaDrift(fresh, prev), isNull);
     });
+
+    test('Claude may add or remove an optional scoped model quota', () {
+      final withoutFable = snapModels(claudeProviderId, const []);
+      final withFable = snapModels(claudeProviderId, const [
+        ModelQuota(model: 'Fable', usedPercent: 26, resetsAt: 2000),
+      ]);
+
+      expect(detectQuotaDrift(withFable, withoutFable), isNull);
+      expect(detectQuotaDrift(withoutFable, withFable), isNull);
+    });
+
+    test('Claude migrates legacy scoped windows out of provider windows', () {
+      final previous = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'max',
+        asOf: 1000,
+        windows: [
+          win('5h', 45, 5000),
+          win('weekly', 17, 9000),
+          win('fable', 26, 9000),
+        ],
+      );
+      final fresh = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'max',
+        asOf: 1100,
+        windows: [win('5h', 45, 5000), win('weekly', 17, 9000)],
+        modelQuotas: const [
+          ModelQuota(model: 'Fable', usedPercent: 26, resetsAt: 9000),
+        ],
+      );
+
+      expect(detectQuotaDrift(fresh, previous), isNull);
+      final admission = admitQuotaEvidence(
+        fresh,
+        previous,
+        observedAt: 1100,
+      );
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.snapshot, same(fresh));
+
+      final withoutScopedCap = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'max',
+        asOf: 1100,
+        windows: [win('5h', 45, 5000), win('weekly', 17, 9000)],
+      );
+      expect(detectQuotaDrift(withoutScopedCap, previous), isNull);
+    });
+
+    test('Claude still rejects impossible drift within the same scoped quota',
+        () {
+      final prev = snapModels(claudeProviderId, const [
+        ModelQuota(model: 'Fable', usedPercent: 60, resetsAt: 2000),
+      ]);
+      final fresh = snapModels(claudeProviderId, const [
+        ModelQuota(model: 'Fable', usedPercent: 20, resetsAt: 2000),
+      ]);
+
+      expect(detectQuotaDrift(fresh, prev), contains('usage fell'));
+    });
+
+    test('Antigravity still rejects a disappeared exhaustive model quota', () {
+      final prev = snapModels(antigravityProviderId, const [
+        ModelQuota(model: 'Gemini', usedPercent: 20, resetsAt: 2000),
+      ]);
+      final fresh = snapModels(antigravityProviderId, const []);
+
+      expect(
+          detectQuotaDrift(fresh, prev), contains('model quota disappeared'));
+    });
   });
 
   group('admitQuotaEvidence', () {

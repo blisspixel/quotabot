@@ -25,9 +25,13 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       expect(windows.map((w) => w.label), ['5h', 'weekly']);
       expect(windows[1].usedPercent, 73);
     case ProviderFixtureKind.claudeUsage:
-      final windows = claudeWindows(_fixtureMap(entry.fixtureFile));
-      expect(windows.map((w) => w.label), ['5h', 'weekly', 'opus']);
+      final data = _fixtureMap(entry.fixtureFile);
+      final windows = claudeWindows(data);
+      expect(windows.map((w) => w.label), ['5h', 'weekly']);
       expect(windows.first.resetsAt, isNotNull);
+      final models = claudeModelQuotas(data);
+      expect(models.map((m) => m.model), ['Opus']);
+      expect(models.single.usedPercent, 12);
     case ProviderFixtureKind.antigravityQuota:
       // The Cloud Code endpoint reports each model's binding limit; quotabot
       // surfaces the account's most-constrained one as a single weekly window.

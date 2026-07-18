@@ -263,7 +263,7 @@ ProviderVerification _verifyProvider(
         {
           'label': w.label,
           if (w.percent != null) 'used_percent': w.percent,
-          'effective_used_percent': windowUsedPercent(w, now),
+          'effective_used_percent': quotaWindowUsedPercent(q, w, now),
           if (w.resetsAt != null) 'resets_at': w.resetsAt,
           if (w.resetsAt != null) 'resets_in_seconds': w.resetsAt! - now,
         },

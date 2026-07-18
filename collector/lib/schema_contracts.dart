@@ -108,6 +108,20 @@ const quotabotV1JsonSchema = <String, Object?>{
           'type': 'array',
           'items': {r'$ref': r'#/$defs/modelInfo'},
         },
+        'local_hardware': {r'$ref': r'#/$defs/localHardware'},
+      },
+    },
+    'localHardware': {
+      'type': 'object',
+      'additionalProperties': true,
+      'required': ['as_of'],
+      'properties': {
+        'as_of': {'type': 'integer', 'minimum': 0},
+        'system_memory_total_bytes': {'type': 'integer', 'minimum': 1},
+        'system_memory_available_bytes': {'type': 'integer', 'minimum': 0},
+        'gpu_memory_total_bytes': {'type': 'integer', 'minimum': 1},
+        'gpu_memory_available_bytes': {'type': 'integer', 'minimum': 0},
+        'gpu_count': {'type': 'integer', 'minimum': 0, 'maximum': 64},
       },
     },
     'quotaWindow': {
@@ -137,6 +151,7 @@ const quotabotV1JsonSchema = <String, Object?>{
         'tier': {'type': 'string'},
         'quota_included_until': {'type': 'integer', 'minimum': 0},
         'local': {'type': 'boolean'},
+        'cloud_offloaded': {'type': 'boolean'},
         'loaded': {'type': 'boolean'},
         'size_bytes': {'type': 'integer', 'minimum': 0},
         'vram_bytes': {'type': 'integer', 'minimum': 0},
@@ -259,6 +274,89 @@ void _validateProvider(
       }
     }
   }
+
+  final localHardware = provider['local_hardware'];
+  if (localHardware != null) {
+    if (provider['kind'] != providerQuotaLocalKind) {
+      errors.add('$path.local_hardware requires kind=local');
+    }
+    if (localHardware is Map<String, dynamic>) {
+      _validateLocalHardware(localHardware, '$path.local_hardware', errors);
+    } else if (localHardware is Map) {
+      _validateLocalHardware(
+        localHardware.cast<String, dynamic>(),
+        '$path.local_hardware',
+        errors,
+      );
+    } else {
+      errors.add('$path.local_hardware must be an object');
+    }
+  }
+}
+
+void _validateLocalHardware(
+  Map<String, dynamic> hardware,
+  String path,
+  List<String> errors,
+) {
+  _checkRequired(hardware, const ['as_of'], path, errors);
+  _checkNonNegativeInt(hardware, 'as_of', path, errors);
+  _checkPositiveInt(
+    hardware,
+    'system_memory_total_bytes',
+    path,
+    errors,
+    required: false,
+  );
+  _checkNonNegativeInt(
+    hardware,
+    'system_memory_available_bytes',
+    path,
+    errors,
+    required: false,
+  );
+  _checkPositiveInt(
+    hardware,
+    'gpu_memory_total_bytes',
+    path,
+    errors,
+    required: false,
+  );
+  _checkNonNegativeInt(
+    hardware,
+    'gpu_memory_available_bytes',
+    path,
+    errors,
+    required: false,
+  );
+  _checkIntRange(
+    hardware,
+    'gpu_count',
+    path,
+    errors,
+    min: 0,
+    max: 64,
+    required: false,
+  );
+
+  final systemTotal = hardware['system_memory_total_bytes'];
+  final systemAvailable = hardware['system_memory_available_bytes'];
+  if (systemTotal is int &&
+      systemAvailable is int &&
+      systemAvailable > systemTotal) {
+    errors.add(
+      '$path.system_memory_available_bytes must not exceed '
+      'system_memory_total_bytes',
+    );
+  }
+  final gpuTotal = hardware['gpu_memory_total_bytes'];
+  final gpuAvailable = hardware['gpu_memory_available_bytes'];
+  if (gpuTotal is int && gpuAvailable is int && gpuAvailable > gpuTotal) {
+    errors.add(
+      '$path.gpu_memory_available_bytes must not exceed '
+      'gpu_memory_total_bytes',
+    );
+  }
 }
 
 void _validateWindow(
@@ -302,6 +400,7 @@ void _validateModel(
   _checkNonNegativeInt(model, 'quota_included_until', path, errors,
       required: false);
   _checkBool(model, 'local', path, errors, required: false);
+  _checkBool(model, 'cloud_offloaded', path, errors, required: false);
   _checkBool(model, 'loaded', path, errors, required: false);
   _checkNonNegativeInt(model, 'size_bytes', path, errors, required: false);
   _checkNonNegativeInt(model, 'vram_bytes', path, errors, required: false);

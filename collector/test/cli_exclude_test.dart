@@ -17,6 +17,9 @@ void main() {
     final ranked = json['ranked'] as List;
     expect(ranked.map((entry) => entry['provider']), isNot(contains('codex')));
     expect(json['recommended']['provider'], isNot('codex'));
+    final receipt = json['receipt'] as Map;
+    expect(receipt['schema'], 'quotabot.receipt.v1');
+    expect(receipt['decision_id'], startsWith('qb-'));
   });
 
   test('suggest local-first prefers a local runtime in demo mode', () async {

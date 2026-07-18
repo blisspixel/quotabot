@@ -109,6 +109,11 @@ void main() {
     expect(codex, contains('this-machine session snapshots'));
     expect(codex, contains('No quotabot login needed'));
 
+    final claude = providerSetupText('claude');
+    expect(claude, contains('account-wide usage endpoint'));
+    expect(claude, contains('re-run claude'));
+    expect(claude, contains('quotabot login claude'));
+
     final nvidia = providerSetupText('nvidia');
     expect(nvidia, contains('NVIDIA_API_KEY'));
     expect(nvidia, contains('nvapi'));
@@ -540,6 +545,10 @@ void main() {
       expect(detail, contains('authoritative'));
       expect(detail, contains('60% after burn'));
       expect(detail, contains('medium confidence (67%)'));
+      expect(detail, contains('Receipt: qb-$now-'));
+      expect(detail, contains('Decision: ${suggestion.explanation}'));
+      expect(detail, contains('Spend: measured quota-plan budget.'));
+      expect(detail, contains('Fallback:'));
     });
 
     test('uses account labels only to disambiguate duplicate providers', () {

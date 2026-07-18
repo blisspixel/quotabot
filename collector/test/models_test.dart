@@ -115,6 +115,68 @@ void main() {
       expect(sanitizeProviderQuota(q).models.single.cloudOffloaded, isTrue);
     });
 
+    test('local hardware evidence round-trips and survives sanitization', () {
+      const gib = 1024 * 1024 * 1024;
+      final q = ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'local',
+        asOf: 1000,
+        kind: ProviderQuotaKind.local,
+        localHardware: const LocalHardwareInfo(
+          asOf: 999,
+          systemMemoryTotalBytes: 32 * gib,
+          systemMemoryAvailableBytes: 20 * gib,
+          gpuMemoryTotalBytes: 12 * gib,
+          gpuMemoryAvailableBytes: 8 * gib,
+          gpuCount: 1,
+        ),
+      );
+
+      final decoded = ProviderQuota.fromJson(q.toJson());
+      final sanitized = sanitizeProviderQuota(q);
+
+      expect(decoded.localHardware?.systemMemoryTotalBytes, 32 * gib);
+      expect(decoded.localHardware?.gpuMemoryAvailableBytes, 8 * gib);
+      expect(decoded.localHardware?.gpuCount, 1);
+      expect(sanitized.localHardware?.asOf, 999);
+    });
+
+    test('local hardware parsing bounds malformed capacity metadata', () {
+      final hardware = LocalHardwareInfo.fromJson({
+        'as_of': -1,
+        'system_memory_total_bytes': 100,
+        'system_memory_available_bytes': 200,
+        'gpu_memory_total_bytes': 'large',
+        'gpu_count': 1000,
+      });
+
+      expect(hardware.asOf, 0);
+      expect(hardware.systemMemoryTotalBytes, 100);
+      expect(hardware.systemMemoryAvailableBytes, isNull);
+      expect(hardware.gpuMemoryTotalBytes, isNull);
+      expect(hardware.gpuCount, 0);
+    });
+
+    test('subscription provenance rejects attached local hardware evidence',
+        () {
+      final q = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        asOf: 1000,
+        localHardware: const LocalHardwareInfo(
+          asOf: 1000,
+          systemMemoryTotalBytes: 1024,
+        ),
+      );
+
+      expect(
+        q.sourceClassViolation,
+        'local hardware evidence requires kind=local',
+      );
+    });
+
     test('reset credits round-trip and drive the escape-hatch message', () {
       final q = ProviderQuota(
         provider: 'codex',

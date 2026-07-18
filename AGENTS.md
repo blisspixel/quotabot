@@ -66,12 +66,15 @@ for that surface.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low. Pass `local_first: true` to
     prefer a local runtime before spending subscription quota when one is
-    available.
+    available. Pass `profile` to apply that profile's provider filters and its
+    saved `preference_order` among viable candidates (same rule as the CLI).
   - `decide_now` - the same routing decision from the latest cached snapshot,
     with explicit `as_of`, age, and staleness so per-request routers do not force
     live collection. It accepts the same `local_first` routing policy.
   - `reserve_provider` - create a short local quota lease for a cloud provider
-    before dispatching parallel work, reducing later effective headroom.
+    before dispatching parallel work, reducing later effective headroom. Auto
+    target selection honors the same profile `preference_order` as
+    `suggest_provider` when `profile` is set.
   - `release_provider` - idempotently release a local routing lease when the
     caller finishes or abandons the dispatch.
   - `provider_with_most_headroom` - the account with the most remaining budget.
@@ -86,7 +89,10 @@ for that surface.
     `budget: "quota"` means measured built-in quota plans plus local runtimes;
     it excludes self-reported manual quota and entries catalogued as paid API.
     Local-runtime model entries include `local_readiness` (`loaded` or `cold`);
-    prefer loaded local models when equivalent candidates are available. An
+    on-device entries also carry an advisory metadata-only `hardware_fit`
+    (`loaded`, `comfortable`, `tight`, `constrained`, or `unknown`) with the
+    selected RAM/GPU capacity evidence. Prefer loaded, then comfortably fitting
+    local models when equivalent candidates are available. An
     Ollama cloud-offloaded model (a `-cloud` tag) carries `cloud_offloaded: true`
     and is excluded from local and free budgets, so it is never evidence of
     local-only or free execution.
@@ -173,7 +179,8 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   windows when they exist, while a migrated legacy quarantine uses an empty
   window list and `ok: false`.
 - `suggest` is `quotabot.suggest.v1`: `recommended`, `ranked`, `reason`, a
-  guaranteed `fallback`, `routing_policy`, and `as_of`/`risk_z` provenance. Each
+  complete plain-language `explanation`, a guaranteed `fallback`,
+  `routing_policy`, `decision_code`, and `as_of`/`risk_z` provenance. Each
   candidate carries
   `headroom_percent`, `effective_headroom_percent` (headroom after discounting
   recent burn and active local leases), optional `lease_discount_percent`, and,
@@ -182,10 +189,16 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   `drift_observed_at`, and are never available. Rank on
   `effective_headroom_percent`; treat low
   `confidence` or high `strand_probability` with appropriate caution.
+  The nested `receipt` is `quotabot.receipt.v1`: a deterministic decision id,
+  snapshot source and age, policy, binding pool, spend classification, raw and
+  adjusted headroom, adjustment and confidence reasons, winner qualification,
+  rejection verdicts for alternatives, and the same fallback. It contains quota
+  metadata and bounded identifiers only, never task text, prompts, source code,
+  model responses, credentials, or exceptions.
 - `decide_now` is `quotabot.decision.v1`: a cache-only routing decision with
   `source`, `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`,
-  `routing_policy`, ranked
-  candidates, fallback, and active local leases. It never forces a live collect.
+  `routing_policy`, the same nested decision receipt, ranked candidates,
+  fallback, and active local leases. It never forces a live collect.
 - `reserve_provider` is `quotabot.reserve.v1`: a local lease write returning
   `reserved`, `lease`, and the chosen candidate when a cloud provider can be
   reserved. Target selection performs live metadata collection and may contact

@@ -96,11 +96,12 @@ truer because the deeper layer exists, not harder to read.
 
 ### Boring acquisition and recovery
 
-The CLI already has a low-friction release path. The desktop is visually a
-first-class product but still requires a Flutter source build. The product must
-either ship a verified prebuilt desktop path or stop presenting desktop as a
-normal end-user 1.0 surface. Update, uninstall, data preservation, destructive
-reset, and rollback must be separate documented operations.
+The CLI has a low-friction release path, and the desktop now has a native
+portable-archive pipeline with checksums, attestations, and a draft-release
+barrier. The remaining acquisition work is operating-system signing,
+notarization, and clean-host lifecycle evidence. Update, uninstall, data
+preservation, destructive reset, and rollback remain separate documented
+operations.
 
 ### Content-blind auditability
 
@@ -121,6 +122,8 @@ turns into paid API spend.
 
 - The SEE and ROUTE thesis is coherent across desktop, CLI, MCP, HTTP, and
   LiteLLM.
+- Routing surfaces share one content-blind decision receipt and one complete
+  human explanation.
 - Binding-window correctness, staleness, source scope, spend classes, capability
   gates, and local fallback are represented in machine contracts.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
@@ -131,12 +134,11 @@ turns into paid API spend.
 
 ### Friction now
 
-- The default recommendation line exposes phrases such as "thin data" and the
-  terminal exposes "strand" before teaching their meaning.
 - Advanced routing choices are documented across long command lists instead of
   one intent matrix.
-- The README leads with a desktop product that normal users cannot install from
-  a prebuilt desktop artifact.
+- Portable desktop assets are not yet Authenticode-signed, Developer ID-signed,
+  or notarized, and have not completed the clean-host lifecycle record required
+  for a first-class 1.0 acquisition path.
 - Trust copy sometimes says read-only or never leaves the machine even though
   bounded local writes, provider metadata calls, Antigravity account onboarding,
   and explicitly enabled external webhooks exist.
@@ -192,8 +194,16 @@ Sources: [Ollama running-model API, accessed 2026-07-10](https://docs.ollama.com
 
 LM Studio's current native `GET /api/v1/models` response exposes installed
 models, loaded instances, context, parallel capacity, size, quantization, and
-capabilities. That is a direct metadata-only path to more honest readiness than
-the current v0-first adapter.
+capabilities. quotabot reads that endpoint first, with the older native and
+OpenAI-compatible shapes as fallbacks, for direct metadata-only readiness.
+
+quotabot now combines that runtime size/readiness evidence with a passive,
+bounded host-memory read. Loaded state remains direct evidence; cold models get
+an advisory comfortable, tight, constrained, or unknown fit against system RAM
+and the largest supported GPU pool. This improves local-first ordering without
+entering the request path or making a throughput claim. The remaining local
+quality gap is capability propagation and native evidence across diverse GPU and
+unified-memory hosts, not another synthetic benchmark.
 
 Source: [LM Studio model-list API, accessed 2026-07-10](https://lmstudio.ai/docs/developer/rest/list).
 
@@ -234,10 +244,10 @@ and content-blind integration contracts.
 
 ### Next: prove decision quality
 
-1. Unify routing provenance as one decision receipt.
-2. Build deterministic conformance, replay, and calibration evaluation.
-3. Adopt the next final MCP revision through a dual-version test matrix.
-4. Harden multi-agent leases under concurrent and corrupt-state stress.
+1. Grow deterministic conformance, replay, and calibration evaluation around
+   the now-shared decision receipt.
+2. Adopt the next final MCP revision through a dual-version test matrix.
+3. Harden multi-agent leases under concurrent and corrupt-state stress.
 
 ### Later: expand only through evidence
 

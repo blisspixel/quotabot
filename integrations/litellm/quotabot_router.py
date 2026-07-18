@@ -169,6 +169,19 @@ _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
 _SPEND_METADATA_KEY = "quotabot_spend"
 _PROVIDER_METADATA_KEY = "quotabot_provider"
 _ACCOUNT_METADATA_KEY = "quotabot_account"
+_DECISION_METADATA_KEY = "quotabot_decision_id"
+
+
+class _Availability(list[dict[str, Any]]):
+    """Ranked candidates plus the receipt id from the same atomic response."""
+
+    def __init__(
+        self,
+        entries: list[dict[str, Any]],
+        decision_id: Optional[str],
+    ) -> None:
+        super().__init__(entries)
+        self.decision_id = decision_id
 
 
 class UnsafeRouteError(RuntimeError):
@@ -392,7 +405,7 @@ class QuotabotRouter(CustomLogger):
             # A broken policy must not take the proxy down; route nothing.
             self.policy = Policy()
         # Cached ranked candidate dicts from /suggest.
-        self._cache: list[dict[str, Any]] = []
+        self._cache = _Availability([], None)
         # None until the first fetch. Freshness is tracked here, not by the
         # list's truthiness: a legitimately empty ranked list (e.g. only local
         # runtimes connected) must still be cached for the TTL, or every request
@@ -460,9 +473,14 @@ class QuotabotRouter(CustomLogger):
             return self._unsafe_passthrough(requested)
 
         ranked = _ranked_infos(avail)
+        decision_id = _availability_decision_id(avail)
         local = next((c for c in allowed if c.local), None)
         if allowed[0].local:
-            self._mark_route(data, candidate=allowed[0])
+            self._mark_route(
+                data,
+                candidate=allowed[0],
+                decision_id=decision_id,
+            )
             return allowed[0].deployment
 
         remote = _best_ranked_candidate(
@@ -476,10 +494,15 @@ class QuotabotRouter(CustomLogger):
                 data,
                 candidate=candidate,
                 info=_metric_info_for_candidate(info, ranked, candidate),
+                decision_id=decision_id,
             )
             return candidate.deployment
         if local:
-            self._mark_route(data, candidate=local)
+            self._mark_route(
+                data,
+                candidate=local,
+                decision_id=decision_id,
+            )
             return local.deployment
 
         remote = _best_ranked_candidate(allowed, ranked, 0.5)
@@ -489,6 +512,7 @@ class QuotabotRouter(CustomLogger):
                 data,
                 candidate=candidate,
                 info=_metric_info_for_candidate(info, ranked, candidate),
+                decision_id=decision_id,
             )
             return candidate.deployment
         return self._unsafe_passthrough(requested)
@@ -499,6 +523,7 @@ class QuotabotRouter(CustomLogger):
         candidate: Optional[Candidate] = None,
         info: Optional[dict[str, Any]] = None,
         spend: Optional[str] = None,
+        decision_id: Optional[str] = None,
     ) -> None:
         meta = data.setdefault("metadata", {})
         if spend is not None:
@@ -518,6 +543,8 @@ class QuotabotRouter(CustomLogger):
         account = account or _string_field(info, "account")
         if account:
             meta[_ACCOUNT_METADATA_KEY] = account
+        if _valid_decision_id(decision_id):
+            meta[_DECISION_METADATA_KEY] = decision_id
 
     def _candidate_allowed(self, candidate: Candidate) -> bool:
         return candidate.local or self._spend_allowed(
@@ -572,10 +599,24 @@ class QuotabotRouter(CustomLogger):
             payload = await asyncio.to_thread(self._fetch_suggest)
             if payload is None:
                 return None
+            receipt = payload.get("receipt")
+            versioned_receipt = (
+                receipt
+                if isinstance(receipt, dict)
+                and receipt.get("schema") == "quotabot.receipt.v1"
+                else None
+            )
+            candidate_id = _string_field(versioned_receipt, "decision_id")
+            decision_id = candidate_id if _valid_decision_id(candidate_id) else None
             ranked = payload.get("ranked") or []
-            self._cache = [
-                c for c in ranked if isinstance(c, dict) and _string_field(c, "provider")
-            ]
+            self._cache = _Availability(
+                [
+                    c
+                    for c in ranked
+                    if isinstance(c, dict) and _string_field(c, "provider")
+                ],
+                decision_id,
+            )
             self._cache_at = time.monotonic()
             return self._cache
 
@@ -610,6 +651,7 @@ class QuotabotRouter(CustomLogger):
                 "requested_model": meta.get("quotabot_original_model"),
                 "served_model": kwargs.get("model"),
                 "spend": meta.get(_SPEND_METADATA_KEY),
+                "decision_id": meta.get(_DECISION_METADATA_KEY),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "cost": _metric_cost(kwargs),
@@ -636,6 +678,7 @@ class QuotabotRouter(CustomLogger):
                 "requested_model": meta.get("quotabot_original_model"),
                 "served_model": kwargs.get("model"),
                 "spend": meta.get(_SPEND_METADATA_KEY),
+                "decision_id": meta.get(_DECISION_METADATA_KEY),
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "cost": _metric_cost(kwargs),
@@ -748,6 +791,25 @@ def _string_field(source: Optional[dict[str, Any]], key: str) -> Optional[str]:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _valid_decision_id(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    parts = value.split("-")
+    return (
+        len(parts) == 3
+        and parts[0] == "qb"
+        and 1 <= len(parts[1]) <= 20
+        and parts[1].isdigit()
+        and len(parts[2]) == 16
+        and all(char in "0123456789abcdef" for char in parts[2])
+    )
+
+
+def _availability_decision_id(value: Any) -> Optional[str]:
+    decision_id = getattr(value, "decision_id", None)
+    return decision_id if _valid_decision_id(decision_id) else None
 
 
 def _usage_counts(*sources: Any) -> tuple[Optional[int], Optional[int]]:

@@ -727,6 +727,27 @@ void main() {
     expect(_plain(lines.join('\n')), contains('56% last'));
   });
 
+  test('a stale snapshot does not roll passed resets to full headroom', () {
+    final q = ProviderQuota(
+      provider: 'claude',
+      displayName: 'claude',
+      account: 'a',
+      asOf: _now - 8 * 3600,
+      stale: true,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 80,
+          resetsAt: _now - 3600,
+        ),
+      ],
+    );
+
+    final rendered = _plain(_frame([q], width: 90).join('\n'));
+    expect(rendered, contains('20% last'));
+    expect(rendered, isNot(contains('100% last')));
+  });
+
   test('the pool gauge ignores stale cached cloud headroom', () {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)],

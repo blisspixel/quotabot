@@ -409,6 +409,12 @@ void main() {
           'size_bytes',
           'vram_bytes',
           'quant',
+          'hardware_fit',
+          'hardware_fit_basis',
+          'estimated_memory_bytes',
+          'fit_available_bytes',
+          'fit_total_bytes',
+          'hardware_observed_at',
           'drift_reason',
           'drift_observed_at',
         ]),
@@ -421,7 +427,11 @@ void main() {
               as Map);
       expect(
         providerProperties.keys,
-        containsAll(['drift_reason', 'drift_observed_at']),
+        containsAll([
+          'drift_reason',
+          'drift_observed_at',
+          'local_hardware',
+        ]),
       );
       final suggestModelProperties = byName['suggest_model']!
           .outputSchema!
@@ -870,6 +880,84 @@ void main() {
       );
     });
 
+    test('profile preference_order reorders MCP suggest and decide_now',
+        () async {
+      // codex has more free headroom; without preference it would win. A named
+      // profile that prefers claude must win on both live suggest_provider and
+      // cache-only decide_now - the same rule the CLI applies for profiles.
+      final providers = [
+        _q('codex', [
+          QuotaWindow(label: 'weekly', usedPercent: 10, resetsAt: _now + 3600),
+        ]),
+        _q('claude', [
+          QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: _now + 3600),
+        ]),
+      ];
+      await connect(
+        providers,
+        profileLoader: (name) => name == 'prefer-claude'
+            ? const QuotaProfile(
+                name: 'prefer-claude',
+                preferenceOrder: ['claude', 'codex'],
+              )
+            : null,
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: providers,
+          asOf: _now,
+          source: 'memory',
+        ),
+      );
+
+      final withoutProfile = await client.callTool(
+        const CallToolRequest(name: 'suggest_provider'),
+      );
+      expect(
+        (withoutProfile.structuredContent?['recommended'] as Map)['provider'],
+        'codex',
+      );
+
+      final withProfile = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'profile': 'prefer-claude'},
+        ),
+      );
+      expect(withProfile.isError, isFalse);
+      expect(withProfile.structuredContent?['profile'], 'prefer-claude');
+      expect(
+        (withProfile.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+      expect(
+        withProfile.structuredContent?['reason'],
+        contains('first by your preference'),
+      );
+      expect(
+        withProfile.structuredContent?['decision_code'],
+        'preferred_provider',
+      );
+
+      final decideNow = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {'profile': 'prefer-claude'},
+        ),
+      );
+      expect(decideNow.isError, isFalse);
+      expect(
+        (decideNow.structuredContent?['recommended'] as Map)['provider'],
+        'claude',
+      );
+      expect(
+        decideNow.structuredContent?['reason'],
+        contains('first by your preference'),
+      );
+      expect(
+        decideNow.structuredContent?['receipt'],
+        isA<Map<String, Object?>>(),
+      );
+    });
+
     test('account arguments scope routing queries after profile filtering',
         () async {
       await connect([
@@ -973,6 +1061,44 @@ void main() {
       expect(quotas.structuredContent?['error'],
           'invalid exclude provider: ../bad');
       expect(quotas.structuredContent?['providers'], isEmpty);
+    });
+
+    test('profile preference_order steers auto reserve_provider', () async {
+      // Without preference, higher-headroom codex would be auto-reserved.
+      // A profile preferring claude must reserve claude so leases match suggest.
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('codex', [
+            QuotaWindow(label: 'weekly', usedPercent: 10),
+          ]),
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 20),
+          ]),
+        ],
+        leaseStore: store,
+        profileLoader: (name) => name == 'prefer-claude'
+            ? const QuotaProfile(
+                name: 'prefer-claude',
+                preferenceOrder: ['claude', 'codex'],
+              )
+            : null,
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'profile': 'prefer-claude'},
+        ),
+      );
+      expect(reserved.structuredContent?['reserved'], isTrue);
+      expect(
+        (reserved.structuredContent?['lease'] as Map)['provider'],
+        'claude',
+      );
     });
 
     test('exclude arguments filter reservation choice', () async {
@@ -1278,6 +1404,15 @@ void main() {
       expect(decision.structuredContent?['snapshot_as_of'], _now - 10);
       expect(decision.structuredContent?['snapshot_age_seconds'], 10);
       expect(decision.structuredContent?['snapshot_stale'], isFalse);
+      expect(decision.structuredContent?['decision_code'], 'local_first');
+      final receipt =
+          decision.structuredContent?['receipt'] as Map<String, dynamic>;
+      expect(receipt['schema'], 'quotabot.receipt.v1');
+      expect(receipt['outcome'], 'local_first');
+      expect((receipt['snapshot'] as Map)['source'], 'disk');
+      expect((receipt['snapshot'] as Map)['as_of'], _now - 10);
+      expect((receipt['snapshot'] as Map)['age_seconds'], 10);
+      expect(receipt['explanation'], contains('Evidence: cached disk'));
       expect(
         (decision.structuredContent?['recommended'] as Map)['provider'],
         'ollama',

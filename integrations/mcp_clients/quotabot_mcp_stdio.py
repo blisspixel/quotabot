@@ -8,7 +8,12 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from quotabot_mcp_common import as_pretty_json, routing_summary, structured_content
+from quotabot_mcp_common import (
+    as_pretty_json,
+    require_routing_tools,
+    routing_summary,
+    structured_content,
+)
 
 
 def collector_dir() -> Path:
@@ -31,9 +36,7 @@ async def main() -> int:
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 tools = await session.list_tools()
-                names = {tool.name for tool in tools.tools}
-                if "suggest_provider" not in names:
-                    raise RuntimeError("quotabot suggest_provider tool is missing")
+                require_routing_tools(tool.name for tool in tools.tools)
 
                 suggestion = structured_content(
                     await session.call_tool("suggest_provider", {})

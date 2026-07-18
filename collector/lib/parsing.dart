@@ -116,11 +116,189 @@ int? codexResetCredits(Map<String, dynamic>? resp) {
 
 /// Builds windows from the Anthropic OAuth usage response.
 List<QuotaWindow> claudeWindows(Map<String, dynamic> data) {
+  final legacy = _legacyClaudeWindows(data);
+  final limits = data['limits'];
+  if (limits is List) {
+    final canonical = _claudeLimitWindows(limits);
+    if (canonical.isNotEmpty) {
+      return _mergeClaudeWindows(canonical, legacy);
+    }
+  }
+
+  return legacy;
+}
+
+/// Parses Anthropic's current `limits` array. Rows need a known kind/group
+/// pairing, but `is_active` is advisory: Claude reports enforced weekly rows as
+/// inactive while still displaying them in `/usage`. If this produces at least
+/// one window, it wins over a same-label legacy field. Missing primary windows
+/// can still be filled from legacy fields in a transitional response.
+List<QuotaWindow> _claudeLimitWindows(List<dynamic> limits) {
+  final out = <QuotaWindow>[];
+  final seenLabels = <String>{};
+  for (final row in limits) {
+    if (row is! Map) continue;
+    final label = _claudeLimitLabel(row);
+    final percent = _strictBoundedPercent(row['percent']);
+    if (label == null || percent == null || seenLabels.contains(label)) {
+      continue;
+    }
+
+    final resetValue = row['resets_at'];
+    final reset = parseIsoToEpoch(resetValue);
+    if (resetValue != null && reset == null) continue;
+
+    seenLabels.add(label);
+    out.add(
+      QuotaWindow(
+        label: label,
+        usedPercent: percent,
+        resetsAt: reset,
+      ),
+    );
+  }
+  return out;
+}
+
+/// Combines transitional response shapes without duplicate pools. Canonical
+/// rows win by label, while legacy fields can fill a missing primary. The
+/// primary routing windows stay in stable short-window, long-window order.
+List<QuotaWindow> _mergeClaudeWindows(
+  List<QuotaWindow> canonical,
+  List<QuotaWindow> legacy,
+) {
+  final byLabel = <String, QuotaWindow>{};
+  for (final window in legacy) {
+    byLabel[window.label] = window;
+  }
+  for (final window in canonical) {
+    byLabel[window.label] = window;
+  }
+
+  final out = <QuotaWindow>[];
+  final emitted = <String>{};
+  for (final label in const ['5h', 'weekly']) {
+    final window = byLabel[label];
+    if (window != null) {
+      out.add(window);
+      emitted.add(label);
+    }
+  }
+  for (final source in [canonical, legacy]) {
+    for (final window in source) {
+      if (emitted.add(window.label)) out.add(byLabel[window.label]!);
+    }
+  }
+  return out;
+}
+
+/// Builds per-model weekly caps without making them provider-wide binding
+/// windows. Spending a scoped Fable or Opus cap still leaves Claude usable with
+/// other models, so these belong in [ProviderQuota.modelQuotas].
+List<ModelQuota> claudeModelQuotas(Map<String, dynamic> data) {
+  final out = <ModelQuota>[];
+  final seenModels = <String>{};
+  final limits = data['limits'];
+  if (limits is List) {
+    for (final row in limits) {
+      if (row is! Map ||
+          row['kind'] != 'weekly_scoped' ||
+          row['group'] != 'weekly') {
+        continue;
+      }
+      final model = _claudeScopedModelName(row);
+      final percent = _strictBoundedPercent(row['percent']);
+      if (model == null || percent == null) continue;
+
+      final resetValue = row['resets_at'];
+      final reset = parseIsoToEpoch(resetValue);
+      if (resetValue != null && reset == null) continue;
+
+      if (!seenModels.add(model.toLowerCase())) continue;
+      out.add(
+        ModelQuota(
+          model: model,
+          usedPercent: percent,
+          resetsAt: reset,
+        ),
+      );
+    }
+  }
+
+  final legacyOpus = data['seven_day_opus'];
+  if (legacyOpus is Map && seenModels.add('opus')) {
+    final percent = _boundedPercent(legacyOpus['utilization']);
+    if (percent != null) {
+      out.add(
+        ModelQuota(
+          model: 'Opus',
+          usedPercent: percent,
+          resetsAt: parseIsoToEpoch(legacyOpus['resets_at']),
+        ),
+      );
+    }
+  }
+  return out;
+}
+
+String? _claudeLimitLabel(Map<dynamic, dynamic> row) {
+  final kind = row['kind'];
+  final group = row['group'];
+  final scope = row['scope'];
+  if (kind == 'session' && group == 'session' && scope == null) return '5h';
+  if (kind == 'weekly_all' && group == 'weekly' && scope == null) {
+    return 'weekly';
+  }
+  return null;
+}
+
+String? _claudeScopedModelName(Map<dynamic, dynamic> row) {
+  final scope = row['scope'];
+  if (scope is! Map) return null;
+  final model = scope['model'];
+  if (model is! Map) return null;
+  final displayName = model['display_name'];
+  if (displayName is! String) return null;
+  final label = _claudeScopedLabel(displayName);
+  if (label == null) return null;
+  return label
+      .split('-')
+      .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+      .join(' ');
+}
+
+/// Produces a short, deterministic model-family label for a scoped weekly cap.
+/// Known Claude families stay stable across display-name version changes. An
+/// unknown future family is reduced to a bounded lowercase slug rather than
+/// copying arbitrary provider text into terminal or desktop output.
+String? _claudeScopedLabel(String displayName) {
+  final words = displayName
+      .trim()
+      .toLowerCase()
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((word) => word.isNotEmpty)
+      .toList();
+  if (words.isEmpty) return null;
+  for (final family in const ['fable', 'opus', 'sonnet', 'haiku']) {
+    if (words.contains(family)) return family;
+  }
+  final slug = words.take(3).join('-');
+  if (slug == '5h' || slug == 'weekly') return null;
+  return slug.length <= 32 ? slug : slug.substring(0, 32);
+}
+
+double? _strictBoundedPercent(dynamic value) {
+  if (value is! num) return null;
+  final parsed = value.toDouble();
+  if (!parsed.isFinite || parsed < 0 || parsed > 100) return null;
+  return parsed;
+}
+
+List<QuotaWindow> _legacyClaudeWindows(Map<String, dynamic> data) {
   final out = <QuotaWindow>[];
   for (final spec in const [
     ['five_hour', '5h'],
     ['seven_day', 'weekly'],
-    ['seven_day_opus', 'opus'],
   ]) {
     final block = data[spec[0]];
     if (block is! Map) continue;

@@ -91,6 +91,10 @@ class _FakeQuotabotHandler(_SilentHandler):
                 },
                 "reason": "proxy integration test",
                 "as_of": 1782000000,
+                "receipt": {
+                    "schema": "quotabot.receipt.v1",
+                    "decision_id": "qb-1782000000-0123456789abcdef",
+                },
             },
         )
 

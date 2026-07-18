@@ -30,9 +30,13 @@ void main() {
 
   test('uses the host auth.json token for the live read', () async {
     final sessions = writeAuth('host-tok');
+    var grantCalled = false;
     final q = await CodexAdapter(
       sessionsDir: sessions,
-      grantToken: () async => null,
+      grantToken: () async {
+        grantCalled = true;
+        throw StateError('the grant must not be resolved');
+      },
       client: MockClient((request) async {
         expect(request.headers['Authorization'], 'Bearer host-tok');
         expect(request.headers['chatgpt-account-id'], 'acct-1');
@@ -44,6 +48,7 @@ void main() {
     expect(q.ok, isTrue);
     expect(q.perMachine, isFalse, reason: 'the live read is account-wide');
     expect(q.hasWindows, isTrue);
+    expect(grantCalled, isFalse);
   });
 
   test('falls through to the quotabot grant when the host token 401s',

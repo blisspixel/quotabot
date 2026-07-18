@@ -63,6 +63,14 @@ void main() {
             plan: 'local',
             kind: ProviderQuotaKind.local,
             asOf: 1782000000,
+            localHardware: const LocalHardwareInfo(
+              asOf: 1782000000,
+              systemMemoryTotalBytes: 16 * 1024 * 1024 * 1024,
+              systemMemoryAvailableBytes: 8 * 1024 * 1024 * 1024,
+              gpuMemoryTotalBytes: 8 * 1024 * 1024 * 1024,
+              gpuMemoryAvailableBytes: 6 * 1024 * 1024 * 1024,
+              gpuCount: 1,
+            ),
             models: const [
               ModelInfo(id: 'qwen2.5-coder:7b', local: true),
             ],
@@ -238,11 +246,20 @@ void main() {
                 'quant': 3,
                 'quota_included_until': -5,
                 'local': 'true',
+                'cloud_offloaded': 'false',
                 'loaded': 'false',
                 'size_bytes': -1,
                 'vram_bytes': 'large',
               },
             ],
+            'local_hardware': {
+              'as_of': -1,
+              'system_memory_total_bytes': 100,
+              'system_memory_available_bytes': 200,
+              'gpu_memory_total_bytes': 0,
+              'gpu_memory_available_bytes': -1,
+              'gpu_count': 65,
+            },
           },
         ],
       });
@@ -277,10 +294,46 @@ void main() {
           r'$.providers[2].models[1].quant must be a string',
           r'$.providers[2].models[1].quota_included_until must be a non-negative integer',
           r'$.providers[2].models[1].local must be a boolean',
+          r'$.providers[2].models[1].cloud_offloaded must be a boolean',
           r'$.providers[2].models[1].loaded must be a boolean',
           r'$.providers[2].models[1].size_bytes must be a non-negative integer',
           r'$.providers[2].models[1].vram_bytes must be a non-negative integer',
+          r'$.providers[2].local_hardware.as_of must be a non-negative integer',
+          r'$.providers[2].local_hardware.gpu_memory_total_bytes must be a positive integer',
+          r'$.providers[2].local_hardware.gpu_memory_available_bytes must be a non-negative integer',
+          r'$.providers[2].local_hardware.gpu_count must be an integer from 0 to 64',
+          r'$.providers[2].local_hardware.system_memory_available_bytes must not exceed system_memory_total_bytes',
         ]),
+      );
+    });
+
+    test('rejects local hardware evidence on a subscription provider', () {
+      final snapshot = {
+        'schema': quotabotV1SchemaId,
+        'generated_at': 1782000000,
+        'providers': [
+          {
+            'provider': 'codex',
+            'display_name': 'Codex',
+            'account': 'default',
+            'kind': 'subscription',
+            'ok': true,
+            'as_of': 1782000000,
+            'stale': false,
+            'windows': const <Object?>[],
+            'local_hardware': {
+              'as_of': 1782000000,
+              'system_memory_total_bytes': 1024,
+            },
+          },
+        ],
+      };
+
+      expect(
+        validateQuotabotV1Snapshot(snapshot),
+        contains(
+          r'$.providers[0].local_hardware requires kind=local',
+        ),
       );
     });
 
