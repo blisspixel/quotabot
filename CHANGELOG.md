@@ -4,7 +4,69 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.1 - 2026-07-18
+
+### Added
+- Local model routing now includes a passive hardware-fit signal. Reachable
+  on-device models are ranked by direct loaded state, then conservative
+  `comfortable`, `tight`, `unknown`, or `constrained` RAM/GPU fit. JSON and MCP
+  expose the model estimate, selected memory pool, available and total bytes,
+  and observation time. Linux, Windows, macOS, and multi-GPU parsers are pinned
+  by tests; probes are bounded, cached, fail soft, and never load or invoke a
+  model. Cloud-offloaded daemon entries remain outside the hardware-fit path and
+  sort behind on-device entries.
+- Tagged releases now build native portable desktop archives for Windows x64,
+  macOS Apple Silicon, and Linux x64. Every archive gets a matching SHA-256
+  sidecar, bundle-shape validation, build-provenance attestation, and a
+  draft-release barrier. Clean native runners download the exact uploaded
+  archive, reverify it, exercise side-by-side update, rollback, and
+  data-preserving uninstall mechanics, and repeat Windows/Linux window and tray
+  readiness before publication. A final exact-set audit blocks missing or stale
+  release assets and reverifies every checksum and provenance attestation.
+- Provider routing now emits one content-blind `quotabot.receipt.v1` decision
+  receipt through CLI JSON, MCP, loopback HTTP, desktop, and integration-facing
+  responses. It carries a deterministic decision id, snapshot provenance,
+  policy, binding pool, spend classification, raw and effective headroom, every
+  adjustment, confidence reasons, winner qualification, rejection verdicts for
+  alternatives, and the fail-soft fallback. The human surfaces share one full
+  explanation covering the pick, evidence freshness and source, spend class,
+  and fallback.
+
 ### Fixed
+- Claude now reads Anthropic's current `limits` array, including live
+  model-scoped weekly allowances such as Fable, while retaining compatibility
+  with the older top-level usage fields. Scoped limits gate and display only the
+  matching model, so exhausting Fable cannot incorrectly block every Claude
+  model while the shared session or weekly plan still has headroom. Older cache
+  snapshots that stored a scoped family as a provider window migrate without a
+  false drift quarantine.
+- Cached cloud quota no longer becomes a misleading 100% free when its reset
+  boundary passes after a failed live read. Stale windows retain their original
+  capture time and last observed percentage across CLI, desktop, `top`, alerts,
+  verification, routing, and MCP output, and remain unavailable for routing.
+- Claude now identifies a definitively expired saved login in failed-read
+  diagnostics while preserving HTTP throttle metadata and pointing at both
+  recovery paths. Claude and Codex also resolve their optional quotabot grants
+  only after a fresh host token fails, so an unavailable grant cannot suppress a
+  valid account-wide host-token read or cause needless token refreshes.
+- Adaptive polling ignores stale, drifted, manual, and local-runtime evidence
+  when choosing urgent fleet refreshes, so an old low-quota snapshot cannot
+  force repeated fast provider reads.
+- The Python and TypeScript MCP client examples now require both routing tools.
+  Python summaries also reject booleans and non-finite headroom values and never
+  serialize non-standard `NaN` JSON.
+- MCP `suggest_provider`, `decide_now`, and auto `reserve_provider` now apply a
+  named profile's `preference_order` the same way the CLI does. Profile
+  filtering already limited which providers were visible, but the preference
+  reorder among viable candidates was CLI-only, so an agent calling MCP with
+  `profile` could get a different winner than `quotabot suggest --profile`.
+  Cache-only `decide_now`, reserve auto-select, and the MCP alert subscription
+  poll also route through the shared `decide` front door so they cannot drift
+  from live suggestion inputs.
+- `quotabot report --json` now includes each provider's `spend_class` when
+  known, matching the Trust column already shown in the markdown report.
+- The shared routing explanation says evidence was captured "just now" when
+  the age is under one second, instead of the stilted "captured 0s ago".
 - The `report` health surface now labels a provider that is showing a
   held-during-drift snapshot as "provider drift", matching `top` and the desktop
   app. Its read-state classifier omitted the drift check, so a drifted provider
@@ -16,8 +78,8 @@ Notable changes to quotabot. Newest first.
   marked stale with a caveat ("local usage predates its reset (Nd ago); open
   <provider> to confirm current headroom"), routing declines to rely on it, and
   the glance shows it as a last-known value rather than a live one.
-  Server-refreshing providers (Claude, Codex) are unaffected: there a passed
-  reset genuinely rolled the window over.
+  A fresh successful provider read can still establish a rolled window; a
+  cached fallback from any source preserves only what was last observed.
 
 ## 0.9.0 - 2026-07-13
 

@@ -7,6 +7,8 @@ Start with the shortest path for what you need.
 - [SETUP.md](SETUP.md): install, run `doctor`, connect providers, and recover
   from common first-run states.
 - [BUILDING.md](BUILDING.md): build the CLI and desktop application from source.
+- [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md): verify, run, update,
+  roll back, and uninstall native desktop release bundles.
 
 ## Use the product
 

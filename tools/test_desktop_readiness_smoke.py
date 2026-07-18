@@ -219,6 +219,52 @@ class DesktopReadinessTests(unittest.TestCase):
             # A missing file is not-ready, not an error.
             self.assertIsNone(_read_json_if_ready(Path(raw_temp) / "absent.json"))
 
+    def test_windows_stop_waits_for_taskkill_to_release_log_handle(self) -> None:
+        process = unittest.mock.Mock(pid=31415)
+        process.poll.return_value = None
+        process.wait.return_value = 0
+
+        with (
+            unittest.mock.patch(
+                "tools.desktop_readiness_smoke.os.name", "nt"
+            ),
+            unittest.mock.patch(
+                "tools.desktop_readiness_smoke.subprocess.run"
+            ) as run,
+        ):
+            stop_process(process)
+
+        run.assert_called_once_with(
+            ["taskkill", "/PID", "31415", "/T", "/F"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        process.wait.assert_called_once_with(timeout=5)
+        process.kill.assert_not_called()
+
+    def test_windows_stop_force_kills_a_process_that_does_not_settle(self) -> None:
+        process = unittest.mock.Mock(pid=31415)
+        process.poll.return_value = None
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired(["quotabot.exe"], 5),
+            0,
+        ]
+
+        with (
+            unittest.mock.patch(
+                "tools.desktop_readiness_smoke.os.name", "nt"
+            ),
+            unittest.mock.patch("tools.desktop_readiness_smoke.subprocess.run"),
+        ):
+            stop_process(process)
+
+        process.kill.assert_called_once_with()
+        self.assertEqual(
+            process.wait.call_args_list,
+            [unittest.mock.call(timeout=5), unittest.mock.call(timeout=5)],
+        )
+
     @unittest.skipIf(os.name == "nt", "POSIX process-group behavior")
     def test_stops_the_entire_posix_process_group(self) -> None:
         process = unittest.mock.Mock(pid=31415)

@@ -66,6 +66,9 @@ class QuotaHealthProviderLine {
         if (source != null) 'source': source,
         'source_class': sourceClass.wireName,
         'state': state,
+        // Same spend class the markdown Trust column shows (quota plan,
+        // metered plan, loaded, cold, manual). Omitted only when unknown.
+        if (spendClass != null) 'spend_class': spendClass,
         'headroom_percent': headroomPercent,
         'resets_at': resetsAt,
         'weekly_p50_free_percent': p50Free,

@@ -570,6 +570,43 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(second, [])
         self.assertEqual(calls["n"], 1, "empty availability must be cached")
 
+    def test_route_propagates_content_blind_decision_id(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="codex-high",
+                        provider="codex",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ]
+            }
+        )
+        router._fetch_suggest = lambda: {  # type: ignore[method-assign]
+            "ranked": [
+                {
+                    "provider": "codex",
+                    "available": True,
+                    "effective_headroom_percent": 80,
+                }
+            ],
+            "receipt": {
+                "schema": "quotabot.receipt.v1",
+                "decision_id": "qb-1782000000-0123456789abcdef",
+            },
+        }
+
+        data = {}
+        chosen = asyncio.run(router._route("frontier", data, None))
+
+        self.assertEqual(chosen, "codex-high")
+        self.assertEqual(
+            data["metadata"]["quotabot_decision_id"],
+            "qb-1782000000-0123456789abcdef",
+        )
+
     def test_fetch_suggest_does_not_follow_redirects(self):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -709,6 +746,7 @@ models:
                                 "metadata": {
                                     "quotabot_original_model": "cheap-bulk",
                                     "quotabot_spend": "local",
+                                    "quotabot_decision_id": "qb-1782000000-0123456789abcdef",
                                 }
                             },
                         },
@@ -726,6 +764,10 @@ models:
         self.assertEqual(record["requested_model"], "cheap-bulk")
         self.assertEqual(record["served_model"], "ollama-qwen")
         self.assertEqual(record["spend"], "local")
+        self.assertEqual(
+            record["decision_id"],
+            "qb-1782000000-0123456789abcdef",
+        )
         self.assertEqual(record["prompt_tokens"], 10)
         self.assertEqual(open_modes, [0o600])
 

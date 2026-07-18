@@ -110,6 +110,18 @@ void main() {
       expect(s.reason, contains('first by your preference'));
     });
 
+    test('shared explanation uses just now when evidence age is zero', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [win(20)]),
+        ],
+        _now,
+      );
+      expect(s.explanation, contains('just now'));
+      expect(s.explanation, isNot(contains('captured 0s ago')));
+      expect(s.explanation, contains('Fallback:'));
+    });
+
     test('preference is not claimed when it agrees with the top score', () {
       // codex has more free headroom and is the score-based pick; preferring
       // codex changes nothing, so the reason must not credit the preference.
@@ -207,6 +219,29 @@ void main() {
     final availability = providerAvailability(q, _now);
     expect(availability.available, isTrue);
     expect(bindingWindow(q, _now), isNull);
+  });
+
+  test('stale quota keeps last-known headroom after its reset passes', () {
+    final window =
+        QuotaWindow(label: 'weekly', usedPercent: 80, resetsAt: _now - 60);
+    final q = _q('claude', [window], stale: true, asOf: _now - 86400);
+
+    expect(windowHasRolledOver(window, _now), isTrue);
+    expect(quotaWindowHasRolledOver(q, window, _now), isFalse);
+    expect(quotaWindowUsedPercent(q, window, _now), 80);
+    expect(quotaWindowHeadroom(q, window, _now), 20);
+    expect(providerHeadroom(q, _now), 20);
+    expect(bindingWindow(q, _now), same(window));
+
+    final availability = providerAvailability(q, _now);
+    expect(availability.available, isFalse);
+    expect(availability.headroom, 20);
+
+    final suggestion = suggestRoute([q], _now);
+    expect(suggestion.recommended, isNull);
+    expect(suggestion.ranked.single.headroom, 20);
+    expect(suggestion.reason, contains('last-known headroom was 20%'));
+    expect(suggestion.reason, isNot(contains('100%')));
   });
 
   test('providerHeadroom is null without windows', () {
@@ -1337,6 +1372,55 @@ void main() {
         ], _now),
         12 * 3600,
       );
+    });
+
+    test('stale low quota cannot force fast fleet polling', () {
+      final stale = _q(
+        'claude',
+        [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 99,
+            resetsAt: _now + 30,
+          ),
+        ],
+        stale: true,
+        asOf: _now - 3 * 86400,
+      );
+      final healthy = _q('codex', [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 10,
+          resetsAt: _now + 5 * 86400,
+        ),
+      ]);
+
+      expect(nextRefreshSeconds([stale, healthy], _now), 12 * 3600);
+      expect(nextRefreshSeconds([stale], _now), 900);
+      expect(nextRefreshSeconds([stale], _now, failStreak: 1), 3600);
+    });
+
+    test('manual quota cannot force fast automatic polling', () {
+      final manual = _q(
+        'custom-ai',
+        [
+          QuotaWindow(
+            label: 'monthly',
+            usedPercent: 99,
+            resetsAt: _now + 30,
+          ),
+        ],
+        source: providerQuotaManualSource,
+      );
+      final healthy = _q('codex', [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 10,
+          resetsAt: _now + 5 * 86400,
+        ),
+      ]);
+
+      expect(nextRefreshSeconds([manual, healthy], _now), 12 * 3600);
     });
   });
 

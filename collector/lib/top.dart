@@ -478,7 +478,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     // weekly cap behind the spent 5-hour line.
     final secondary = secondaryVisibleWindow(q, now);
     if (secondary != null) {
-      final used = windowUsedPercent(secondary, now);
+      final used = quotaWindowUsedPercent(q, secondary, now);
       final remaining = 100 - used;
       final secReset = secondary.resetsAt == null
           ? ''
@@ -498,7 +498,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   final lines = <String>[];
   var first = true;
   for (final w in q.windows) {
-    final used = windowUsedPercent(w, now);
+    final used = quotaWindowUsedPercent(q, w, now);
     final remaining = 100 - used;
     final reset =
         w.resetsAt == null ? '' : 'resets ${countdown(w.resetsAt!, now)}';
@@ -798,7 +798,7 @@ List<String> renderTopFrame({
     ],
     const _Cell('   '),
   ];
-  var reason = suggestion.reason;
+  var reason = suggestion.explanation;
   if (r != null && reason.startsWith('Use ${r.provider} - ')) {
     reason = reason.substring('Use ${r.provider} - '.length);
   }

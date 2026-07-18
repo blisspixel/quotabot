@@ -1,18 +1,18 @@
 name: Release
 
-# Cuts a GitHub release when a v* tag is pushed, building the CLI asset that the
-# one-line installers download (quotabot-<os>-<arch> archive plus a .sha256
-# sidecar) natively on each platform so every OS gets a real, checksummed
-# bundle with its native assets. The release is created as a draft and only
-# published after every platform's asset has uploaded, so `releases/latest`
-# never points at a half-built tag. Each archive also gets a signed build
-# provenance attestation, so an installer can verify where and how it was built,
-# not just its checksum.
+# Cuts a GitHub release when a v* tag is pushed, building native CLI and desktop
+# archives plus matching .sha256 sidecars. The release is created as a draft and
+# published only after every platform asset has been validated, attested, and
+# uploaded, so `releases/latest` never points at a partial release.
 
 on:
   push:
     tags:
       - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 # Least privilege by default; jobs widen only what they need. Actions are
 # pinned to commit SHAs (version in the trailing comment) so a repointed tag
@@ -35,22 +35,41 @@ jobs:
     needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      release_id: ${{ steps.ensure_release.outputs.release_id }}
     permissions:
       contents: write
     steps:
       - name: Create the release as a draft if it does not exist
+        id: ensure_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists."
-            exit 0
+            is_draft="$(gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft \
+              --jq '.isDraft')"
+            if [ "$is_draft" != true ]; then
+              echo "Refusing to replace assets on published release $GITHUB_REF_NAME." >&2
+              exit 1
+            fi
+            echo "Resuming draft release $GITHUB_REF_NAME."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$GITHUB_REF_NAME" \
+              --draft \
+              --generate-notes
           fi
-          gh release create "$GITHUB_REF_NAME" \
+          release_id="$(gh release view "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --draft \
-            --generate-notes
+            --json databaseId \
+            --jq '.databaseId')"
+          case "$release_id" in
+            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
+          esac
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   build:
     needs: create-release
@@ -93,10 +112,286 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" release/quotabot-* --repo "$GITHUB_REPOSITORY" --clobber
 
+  build-desktop:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: pwsh tools/package-windows.ps1
+            archive: release/quotabot-windows-x64-desktop.zip
+          - os: macos-latest
+            script: bash tools/package-macos.sh
+            archive: release/quotabot-darwin-arm64-desktop.zip
+          - os: ubuntu-latest
+            script: bash tools/package-linux.sh
+            archive: release/quotabot-linux-x64-desktop.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Linux desktop build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev dbus-x11 xvfb
+      - name: Resolve desktop dependencies
+        working-directory: app
+        run: flutter pub get
+      - name: Build and package the desktop asset
+        run: ${{ matrix.script }}
+      - name: Verify archive shape and checksum
+        run: python tools/verify_desktop_archive.py "${{ matrix.archive }}"
+      - name: Attest desktop archive build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ matrix.archive }}
+      - name: Upload the desktop asset to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "${{ matrix.archive }}" \
+            "${{ matrix.archive }}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+  verify-desktop-release:
+    needs: [create-release, build-desktop]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            archive: quotabot-windows-x64-desktop.zip
+          - os: macos-latest
+            archive: quotabot-darwin-arm64-desktop.zip
+          - os: ubuntu-latest
+            archive: quotabot-linux-x64-desktop.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      # GitHub exposes draft releases only to push-capable identities. This job
+      # performs reads only, but contents: write is required to see the draft.
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Install Linux desktop runtime prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev dbus-x11 xvfb
+      - name: Download the draft desktop asset and checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          case "$RELEASE_ID" in
+            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
+          esac
+          destination="$RUNNER_TEMP/quotabot-release"
+          mkdir -p "$destination"
+          for name in "${{ matrix.archive }}" "${{ matrix.archive }}.sha256"; do
+            asset_id="$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+              --paginate \
+              --jq ".[] | select(.name == \"$name\") | .id")"
+            case "$asset_id" in
+              ''|*[!0-9]*) echo "Draft asset id is invalid for $name." >&2; exit 1 ;;
+            esac
+            gh api \
+              -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "$destination/$name"
+          done
+      - name: Reverify downloaded archive shape and checksum
+        shell: bash
+        run: python tools/verify_desktop_archive.py "$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
+      - name: Verify downloaded archive provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          source_digest="$(git rev-parse 'HEAD^{commit}')"
+          gh attestation verify "$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$GITHUB_REF_NAME" \
+            --source-digest "$source_digest" \
+            --deny-self-hosted-runners
+      - name: Exercise the Windows portable lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'quotabot-release\${{ matrix.archive }}'
+          $current = Join-Path $env:RUNNER_TEMP 'quotabot-desktop-current'
+          $previous = Join-Path $env:RUNNER_TEMP 'quotabot-desktop-previous'
+          $config = Join-Path $env:RUNNER_TEMP 'quotabot-config'
+          $sentinel = Join-Path $config 'quotabot\manual\release-sentinel'
+          New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sentinel) | Out-Null
+          New-Item -ItemType File -Force -Path $sentinel | Out-Null
+          $env:LOCALAPPDATA = $config
+
+          Expand-Archive -LiteralPath $archive -DestinationPath $previous
+          Expand-Archive -LiteralPath $archive -DestinationPath $current
+          python tools/desktop_readiness_smoke.py --executable (Join-Path $current 'quotabot.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Current desktop archive did not start.' }
+          python tools/desktop_readiness_smoke.py --executable (Join-Path $previous 'quotabot.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop rollback archive did not start.' }
+
+          Remove-Item -LiteralPath $current -Recurse -Force
+          Remove-Item -LiteralPath $previous -Recurse -Force
+          if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) {
+            throw 'Portable uninstall removed the persistent-state sentinel.'
+          }
+      - name: Exercise the Linux portable lifecycle
+        if: runner.os == 'Linux'
+        run: |
+          archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
+          current="$RUNNER_TEMP/quotabot-desktop-current"
+          previous="$RUNNER_TEMP/quotabot-desktop-previous"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/quotabot-config"
+          sentinel="$XDG_CONFIG_HOME/quotabot/manual/release-sentinel"
+          mkdir -p "$(dirname "$sentinel")" "$current" "$previous"
+          : > "$sentinel"
+
+          tar -xzf "$archive" -C "$previous"
+          tar -xzf "$archive" -C "$current"
+          python tools/desktop_readiness_smoke.py --executable "$current/quotabot"
+          python tools/desktop_readiness_smoke.py --executable "$previous/quotabot"
+
+          rm -rf "$current" "$previous"
+          test -f "$sentinel"
+      - name: Exercise the macOS portable lifecycle
+        if: runner.os == 'macOS'
+        run: |
+          archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
+          current="$RUNNER_TEMP/quotabot-desktop-current"
+          previous="$RUNNER_TEMP/quotabot-desktop-previous"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/quotabot-config"
+          sentinel="$XDG_CONFIG_HOME/quotabot/manual/release-sentinel"
+          mkdir -p "$(dirname "$sentinel")" "$current" "$previous"
+          : > "$sentinel"
+
+          ditto -x -k "$archive" "$previous"
+          ditto -x -k "$archive" "$current"
+          for bundle in "$current/quotabot.app" "$previous/quotabot.app"; do
+            test -x "$bundle/Contents/MacOS/quotabot"
+            plutil -lint "$bundle/Contents/Info.plist"
+          done
+
+          rm -rf "$current" "$previous"
+          test -f "$sentinel"
+
+  audit-release-assets:
+    needs: [create-release, build, verify-desktop-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Draft asset listings require a push-capable token.
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Require the exact complete release asset set
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          case "$RELEASE_ID" in
+            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
+          esac
+          expected="$(printf '%s\n' \
+            quotabot-darwin-arm64-desktop.zip \
+            quotabot-darwin-arm64-desktop.zip.sha256 \
+            quotabot-darwin-arm64.tar.gz \
+            quotabot-darwin-arm64.tar.gz.sha256 \
+            quotabot-linux-arm64.tar.gz \
+            quotabot-linux-arm64.tar.gz.sha256 \
+            quotabot-linux-x64-desktop.tar.gz \
+            quotabot-linux-x64-desktop.tar.gz.sha256 \
+            quotabot-linux-x64.tar.gz \
+            quotabot-linux-x64.tar.gz.sha256 \
+            quotabot-windows-x64-desktop.zip \
+            quotabot-windows-x64-desktop.zip.sha256 \
+            quotabot-windows-x64.zip \
+            quotabot-windows-x64.zip.sha256 | sort)"
+          actual="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+            --paginate \
+            --jq '.[].name' | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo 'Draft release asset set is incomplete or unexpected.' >&2
+            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            exit 1
+          fi
+          invalid="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+            --paginate \
+            --jq '.[] | select(.state != "uploaded") | .name')"
+          if [ -n "$invalid" ]; then
+            echo "Draft release has assets that are not uploaded: $invalid" >&2
+            exit 1
+          fi
+      - name: Reverify every final archive, checksum, and attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          destination="$RUNNER_TEMP/quotabot-final-assets"
+          mkdir -p "$destination"
+          names="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+            --paginate \
+            --jq '.[].name')"
+          while IFS= read -r name; do
+            asset_id="$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+              --paginate \
+              --jq ".[] | select(.name == \"$name\") | .id")"
+            case "$asset_id" in
+              ''|*[!0-9]*) echo "Draft asset id is invalid for $name." >&2; exit 1 ;;
+            esac
+            gh api \
+              -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "$destination/$name"
+          done <<< "$names"
+
+          (cd "$destination" && sha256sum --check ./*.sha256)
+          python tools/verify_desktop_archive.py \
+            "$destination/quotabot-windows-x64-desktop.zip"
+          python tools/verify_desktop_archive.py \
+            "$destination/quotabot-darwin-arm64-desktop.zip"
+          python tools/verify_desktop_archive.py \
+            "$destination/quotabot-linux-x64-desktop.tar.gz"
+
+          source_digest="$(git rev-parse 'HEAD^{commit}')"
+          for archive in "$destination"/*.zip "$destination"/*.tar.gz; do
+            gh attestation verify "$archive" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$GITHUB_REF_NAME" \
+              --source-digest "$source_digest" \
+              --deny-self-hosted-runners
+          done
+
   publish-release:
     # Runs only if every build leg succeeded, so the release is published (and
     # `latest` flips) exactly once all platform assets are present.
-    needs: build
+    needs: audit-release-assets
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -16,12 +16,21 @@ import 'dart:io';
 class SingleInstanceGuard {
   // An app-specific loopback port. Only used as an interprocess lock and a
   // "surface the window" doorbell - never as a network service.
-  static const int _port = 47821;
+  static const int _defaultPort = 47821;
   static const String _request = 'quotabot-single-instance-v1 show';
   static const String _ack = 'quotabot-single-instance-v1 ok';
   static const Duration _ipcTimeout = Duration(seconds: 2);
 
+  final int _port;
   ServerSocket? _server;
+
+  /// [port] is injectable so tests and embedders do not contend with a running
+  /// production desktop process. Normal application code uses the fixed
+  /// app-specific default.
+  factory SingleInstanceGuard({int port = _defaultPort}) =>
+      SingleInstanceGuard._(port);
+
+  SingleInstanceGuard._(this._port);
 
   /// Attempts to become the primary instance. Returns true when this process is
   /// the primary (and should continue starting up); false when another instance

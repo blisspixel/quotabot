@@ -17,7 +17,8 @@ quotabot does two things:
 1. **Shows your remaining quota** for the rolling-window subscriptions you pay
    for: Claude (Pro/Max), Codex (OpenAI), Antigravity / Gemini (Google), and
    Grok (xAI). It also surfaces what supported **local LLM runtimes** (Ollama,
-   LM Studio, Lemonade) have loaded while their daemon is reachable.
+   LM Studio, Lemonade) have installed or loaded while their daemon is
+   reachable, plus a passive hardware-fit estimate for cold local models.
 2. **Recommends where to send the next request.** `quotabot suggest` (and the
    same logic over MCP) ranks your subscriptions by confidence-weighted runway
    with a small use-it-or-lose-it boost for measured quota that would otherwise
@@ -25,10 +26,11 @@ quotabot does two things:
    are low, so AI tools and agents can route across accounts instead of guessing
    from a spent short-window bar.
 
-It reuses the tokens your tools already store, so most providers need no setup:
-Claude and Codex read live when their apps are signed in, Antigravity reads from
-a signed-in IDE or a one-time quotabot login, and Grok can stay live with a
-one-time quotabot login.
+It reuses the tokens your tools already store, so most providers need no setup.
+Claude and Codex use account-wide metadata endpoints while a fresh host token or
+a local quotabot-owned grant is available. Antigravity reads from a signed-in IDE
+or a one-time quotabot login, and Grok can stay live with a one-time quotabot
+login.
 
 <p align="center">
   <img src="docs/quotabot-demo.gif" alt="quotabot demo showing the widget, compact strip, 90-day analytics, and top dashboard" width="620">
@@ -70,6 +72,9 @@ reset countdown. A longer window overrides a shorter one, so a spent weekly cap
 collapses the card to a single "weekly spent - resets in 2d" line rather than
 showing a green 5 hour bar you cannot use. Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
+Cold on-device models are ranked with a conservative metadata-only hardware-fit
+signal from current RAM and largest-GPU capacity. It never loads a model or runs
+a throughput probe, and it remains advisory because runtimes can split memory.
 
 When a provider offers a redeemable off-cycle reset (Codex's reset credits),
 quotabot flags it prominently in green on the card, in `doctor`, and in `top`,
@@ -88,6 +93,11 @@ quarantines them without headroom instead of laundering them through the next
 identical read. A later read establishes a new baseline only after every retained
 quota reset has
 advanced, or after an evidence-class transition.
+
+An ordinary live-read failure follows the same evidence rule. Cached quota keeps
+its original capture time and last observed percentage. A reset time passing does
+not prove the new window is unused, so stale evidence never becomes 100% free and
+is never routable.
 
 Every observation also carries a normalized provenance class. Machine output
 uses `source_class` with one of six values: `authoritative_live`,
@@ -111,7 +121,7 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 
 | Provider     | Source                                                   | Live usage      |
 |--------------|----------------------------------------------------------|-----------------|
-| Claude       | OAuth usage endpoint, token reused from Claude Code       | Yes             |
+| Claude       | Account-wide OAuth usage endpoint; fresh Claude Code token or quotabot grant | Yes, while authenticated |
 | Codex        | ChatGPT usage endpoint; local session fallback           | Yes; local fallback marked this machine |
 | Antigravity  | Google Cloud Code API (Gemini), token reused and refreshed | Yes, signed-in account; local fallback marked this machine |
 | Grok         | gRPC-web billing endpoint, token reused from the CLI     | Yes, when fresh |
@@ -122,13 +132,15 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 | NVIDIA NIM | `NVIDIA_API_KEY` or `nvapi` + safe `/v1/models` discovery | free trial available; numeric quota unknown |
 | Manual entries | User-entered limit, used count, and reset for any tool  | self-reported   |
 
-Claude and Codex are live with no quotabot login when their host apps have valid
-signed-in credentials. Codex reads the ChatGPT usage endpoint using the token
-Codex stores locally and falls back to this-machine session snapshots when the
-live read is unavailable. Because that host token only refreshes while the app
-runs on a given machine, a one-time `quotabot login claude` or
-`quotabot login codex` adds a separate refreshable grant so the account-wide read
-stays live on a machine where you have not opened the host app recently.
+Claude and Codex are live with no quotabot login while their host apps maintain
+valid credentials. Credential-file presence alone does not make a result live.
+Codex reads the ChatGPT usage endpoint using the token Codex stores locally and
+falls back to this-machine session snapshots when the live read is unavailable.
+Because host tokens may expire on an idle machine, a one-time local
+`quotabot login claude` or `quotabot login codex` adds a separate refreshable
+grant so the account-wide read stays live there. Grants are local and are not
+synchronized, so run the login once on each idle machine that needs an
+independent live read.
 Antigravity and Grok are live for the account their app is signed into; quotabot
 refreshes that token on its own.
 Google's consumer Gemini CLI has been superseded by Antigravity, so Google
@@ -148,6 +160,15 @@ still reads as an error.
 For exactly where each number comes from, see
 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md); for each provider's own usage
 command, [docs/PROVIDER_CLIS.md](docs/PROVIDER_CLIS.md).
+
+Claude's interactive `/usage` command is a human cross-check only. quotabot does
+not run `claude -p /usage` or `/quota`: print mode is a prompt-execution surface,
+not a stable quota API, and it conflicts with quotabot's zero-inference,
+content-blind boundary. quotabot calls the account-wide usage metadata endpoint
+directly instead. When that endpoint includes a model-scoped limit such as
+Fable, quotabot reports it separately from the shared session and weekly
+windows. Spending a scoped model limit makes that model unavailable; it does not
+make every Claude model unavailable while shared plan quota remains.
 
 For a tool quotabot does not read yet, `quotabot manual set` adds a local
 self-reported quota window. Manual entries appear in the same views and JSON
@@ -172,8 +193,18 @@ inspect-before-run path and provenance verification, see
 [docs/SETUP.md](docs/SETUP.md#inspect-before-running-the-installer).
 
 Restart your terminal, then run `quotabot doctor`. Claude and Codex should read
-live immediately when their host apps are signed in. Full getting-started guide,
-including which providers need a one-time login: [docs/SETUP.md](docs/SETUP.md).
+live immediately when their host apps have current credentials. Full
+getting-started guidance, including idle-machine grants:
+[docs/SETUP.md](docs/SETUP.md).
+
+Tagged releases built by the current workflow also contain verified portable
+desktop bundles for native Windows, macOS, and Linux. They are separate from the
+CLI installer and include checksum sidecars plus build provenance attestations.
+See [desktop release bundles](docs/DESKTOP-DISTRIBUTION.md) for exact asset
+names, verification, launch, update, rollback, and uninstall instructions. The
+current Windows and macOS bundles are not yet application-signed; the guide
+keeps that limitation explicit rather than suggesting that an OS warning is safe
+to ignore.
 
 To build everything from source in one command (CLI, desktop app, and a
 Desktop shortcut), run `pwsh tools/setup.ps1` on Windows or
@@ -182,12 +213,10 @@ CLI). Details in [docs/BUILDING.md](docs/BUILDING.md).
 
 ## Keeping providers live on an idle machine
 
-Every provider works with no login on a machine where you actively use its app.
-A one-time `quotabot login` adds a separate refreshable grant so the same live
-read keeps working on a machine you have not opened the app on recently (or when
-the host credential is short-lived, or to pin a specific account). The grant does
-not replace local account discovery; run the provider app on this machine first.
-No cloud project setup is needed:
+Claude and Codex usually need no quotabot login while their host apps maintain
+valid tokens. An idle machine can use a local quotabot-owned grant instead. Grok
+and Antigravity still require the local account discovery described in the setup
+guide. No cloud project setup is needed:
 
 ```bash
 quotabot login claude        # opens a browser; paste the code it shows back
@@ -241,6 +270,14 @@ unavailable or spent route; the preference also persists per profile as
 `preference_order`. Advanced capability, profile, account, alert, cost-policy,
 report, calibration, and provenance commands are documented in
 [docs/USAGE.md](docs/USAGE.md).
+
+Provider-routing JSON also includes a content-blind `quotabot.receipt.v1`
+decision receipt. It records the snapshot source and age, binding pool, spend
+classification, raw and adjusted headroom, every routing adjustment, the
+winner's qualification, each alternative's rejection reason, and the fail-soft
+fallback. Its deterministic decision id lets an operator correlate the same
+decision across CLI, MCP, HTTP, desktop, and LiteLLM without recording a prompt,
+source file, model response, credential, or exception.
 
 For agent integration, use the MCP server described in [AGENTS.md](AGENTS.md).
 It exposes live and cache-only decisions, model filters, resources, and expiring

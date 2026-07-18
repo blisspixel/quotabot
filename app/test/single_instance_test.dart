@@ -1,11 +1,21 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/single_instance.dart';
+
+Future<int> _unusedLoopbackPort() async {
+  final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+  final port = socket.port;
+  await socket.close();
+  return port;
+}
 
 void main() {
   test(
     'a second instance detects the first and is told to step aside',
     () async {
-      final primary = SingleInstanceGuard();
+      final port = await _unusedLoopbackPort();
+      final primary = SingleInstanceGuard(port: port);
       var surfaced = false;
       final becamePrimary = await primary.tryBecomePrimary(
         onShowRequested: () async => surfaced = true,
@@ -13,7 +23,7 @@ void main() {
       addTearDown(primary.dispose);
       expect(becamePrimary, isTrue);
 
-      final second = SingleInstanceGuard();
+      final second = SingleInstanceGuard(port: port);
       final secondBecamePrimary = await second.tryBecomePrimary(
         onShowRequested: () async {},
       );
@@ -25,11 +35,12 @@ void main() {
   );
 
   test('the lock is reusable once the primary disposes', () async {
-    final first = SingleInstanceGuard();
+    final port = await _unusedLoopbackPort();
+    final first = SingleInstanceGuard(port: port);
     expect(await first.tryBecomePrimary(onShowRequested: () async {}), isTrue);
     await first.dispose();
 
-    final next = SingleInstanceGuard();
+    final next = SingleInstanceGuard(port: port);
     final becamePrimary = await next.tryBecomePrimary(
       onShowRequested: () async {},
     );

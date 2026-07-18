@@ -161,6 +161,8 @@ String? desktopRouteDetailLine(
   if (ageSeconds >= 60) {
     parts.add('as of ${ageLabel(suggestion.asOf, now)} ago');
   }
+  parts.add('Receipt: ${suggestion.receipt.decisionId}');
+  parts.add('Decision: ${suggestion.explanation}');
   return parts.join(' | ');
 }
 
@@ -214,8 +216,10 @@ String providerSetupText(String provider) {
           'snapshots when live data is unavailable. No quotabot login needed '
           'here.';
     case 'claude':
-      return 'Sign in to Claude Code. quotabot reads its usage automatically. '
-          'No login needed here.';
+      return 'Sign in to Claude Code. quotabot reads its account-wide usage '
+          'endpoint automatically while that credential is current. If this '
+          'idle machine shows cached data, re-run claude or use quotabot login '
+          'claude once to keep the metadata read refreshable.';
     case 'grok':
       return 'Grok shows live while the Grok CLI token is fresh. To keep it '
           'live without reopening the CLI, connect quotabot once with a device '

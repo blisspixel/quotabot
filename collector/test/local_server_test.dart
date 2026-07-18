@@ -98,6 +98,9 @@ void main() {
 
       final suggestion = await _getJson(Uri.parse('$base/suggest'));
       expect((suggestion['recommended'] as Map)['provider'], 'claude');
+      final receipt = suggestion['receipt'] as Map;
+      expect(receipt['schema'], 'quotabot.receipt.v1');
+      expect(receipt['decision_id'], startsWith('qb-'));
 
       final provider = await _getJson(Uri.parse('$base/providers/claude'));
       expect(provider['provider'], 'claude');

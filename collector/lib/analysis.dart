@@ -4,6 +4,9 @@ import 'drift.dart';
 import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
+import 'route_receipt.dart';
+
+export 'route_receipt.dart';
 
 /// Routing helpers over a set of provider snapshots. Pure and side-effect free.
 
@@ -25,6 +28,38 @@ double windowUsedPercent(QuotaWindow w, int now) => windowHasRolledOver(w, now)
 /// Effective remaining percent for a single quota window.
 double windowHeadroom(QuotaWindow w, int now) =>
     100.0 - windowUsedPercent(w, now);
+
+/// Whether [w] can be treated as reset for this exact quota observation.
+///
+/// A passed reset establishes fresh capacity only when the surrounding quota is
+/// trusted current evidence. Cached or integrity-rejected evidence still owns
+/// its last observed percentage; rolling that stale window to zero used would
+/// turn an offline, spent snapshot into a misleading 100% free reading.
+bool quotaWindowHasRolledOver(
+  ProviderQuota quota,
+  QuotaWindow w,
+  int now,
+) =>
+    isTrustedQuotaEvidenceAt(quota, now) && windowHasRolledOver(w, now);
+
+/// Used percent for [w], preserving the last observed value when [quota] is
+/// stale or otherwise untrusted.
+double quotaWindowUsedPercent(
+  ProviderQuota quota,
+  QuotaWindow w,
+  int now,
+) =>
+    quotaWindowHasRolledOver(quota, w, now)
+        ? 0.0
+        : (w.percent ?? 0).clamp(0, 100).toDouble();
+
+/// Remaining percent for [w] under [quota]'s evidence trust state.
+double quotaWindowHeadroom(
+  ProviderQuota quota,
+  QuotaWindow w,
+  int now,
+) =>
+    100.0 - quotaWindowUsedPercent(quota, w, now);
 
 /// A passive-local metered read (Kiro, Cursor, Windsurf state files) whose window
 /// has already passed its reset cannot be trusted as a fresh full balance. The
@@ -90,7 +125,7 @@ double? providerHeadroom(ProviderQuota q, int now) {
     if (percent == null || !percent.isFinite || percent < 0 || percent > 100) {
       return null;
     }
-    final remaining = windowHeadroom(w, now);
+    final remaining = quotaWindowHeadroom(q, w, now);
     if (remaining < minRemaining) minRemaining = remaining;
   }
   return minRemaining;
@@ -176,7 +211,7 @@ QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   if (spent) {
     QuotaWindow? latest;
     for (final w in q.windows) {
-      if (windowHeadroom(w, now) > kSpentHeadroomFloor) continue;
+      if (quotaWindowHeadroom(q, w, now) > kSpentHeadroomFloor) continue;
       if (latest == null) {
         latest = w;
         continue;
@@ -191,7 +226,7 @@ QuotaWindow? bindingWindow(ProviderQuota q, int now) {
   QuotaWindow? worst;
   double minRem = 100;
   for (final w in q.windows) {
-    final remaining = windowHeadroom(w, now);
+    final remaining = quotaWindowHeadroom(q, w, now);
     if (remaining < minRem) {
       minRem = remaining;
       worst = w;
@@ -226,7 +261,7 @@ QuotaWindow? secondaryVisibleWindow(ProviderQuota q, int now) {
   QuotaWindow? best;
   for (final w in q.windows) {
     if (identical(w, binding)) continue;
-    if (windowHeadroom(w, now) <= kSpentHeadroomFloor) continue;
+    if (quotaWindowHeadroom(q, w, now) <= kSpentHeadroomFloor) continue;
     final wr = w.resetsAt;
     if (wr == null || wr <= bindingReset) continue;
     if (best == null || wr > best.resetsAt!) best = w;
@@ -313,6 +348,9 @@ class RouteCandidate {
   /// Reset epoch of the binding window, when known.
   final int? resetsAt;
 
+  /// Stable label of the quota pool that constrained this candidate.
+  final String? bindingPool;
+
   /// True when the default provider-route capability floor has no matching
   /// catalog model for this provider/account.
   final bool capabilityLimited;
@@ -349,6 +387,7 @@ class RouteCandidate {
     required this.resetsAt,
     required this.stale,
     required this.available,
+    this.bindingPool,
     this.driftReason,
     this.driftObservedAt,
     this.leaseDiscount = 0,
@@ -394,6 +433,7 @@ class RouteCandidate {
           'cost_discount': double.parse(costDiscount!.toStringAsFixed(4)),
         if (capabilityLimited) 'capability_limited': true,
         if (capabilityBudgetLimited) 'capability_budget_limited': true,
+        if (bindingPool != null) 'binding_pool': bindingPool,
         if (resetsAt != null) 'resets_at': resetsAt,
         'stale': stale,
         if (driftReason != null) 'drift_reason': driftReason,
@@ -410,6 +450,15 @@ class RouteCandidate {
           : kQuotaPlanProviders.contains(provider)
               ? 'quota plan'
               : 'metered plan';
+
+  String get spendClassWire => spendClass.replaceAll(' ', '_');
+
+  String get spendRisk => switch (spendClassWire) {
+        'local' => 'runtime_unverified',
+        'manual' => 'self_reported',
+        'quota_plan' => 'quota_plan',
+        _ => 'metered',
+      };
 }
 
 /// The closed set of fail-soft fallback actions quotabot can recommend.
@@ -466,6 +515,9 @@ class RouteSuggestion {
   /// One-line human explanation of the recommendation.
   final String reason;
 
+  /// Stable, low-cardinality outcome that explains which policy branch won.
+  final RouteDecisionCode decisionCode;
+
   /// True when the recommendation is a local fallback because every metered
   /// subscription is spent or below the comfort threshold.
   final bool usingLocalFallback;
@@ -497,10 +549,22 @@ class RouteSuggestion {
   /// Weight applied to caller-supplied cost penalties in the routing score.
   final double costWeight;
 
+  /// Effective-headroom floor required for the normal comfortable route.
+  final double comfortThreshold;
+
+  /// Planning horizon used for the burn and risk adjustment.
+  final double leadHours;
+
+  /// Provenance of the snapshot evaluated by this decision.
+  final String snapshotSource;
+  final int? snapshotAsOf;
+  final bool snapshotStale;
+
   const RouteSuggestion({
     required this.recommended,
     required this.ranked,
     required this.reason,
+    required this.decisionCode,
     required this.usingLocalFallback,
     required this.fallback,
     required this.asOf,
@@ -510,11 +574,55 @@ class RouteSuggestion {
     this.wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
     this.wasteMaxHours = kDefaultExpiringQuotaMaxHours,
     this.costWeight = kDefaultRoutingCostWeight,
+    this.comfortThreshold = 15,
+    this.leadHours = 1,
+    this.snapshotSource = 'live',
+    this.snapshotAsOf,
+    this.snapshotStale = false,
   });
+
+  /// A shared plain-language answer to what won, why, evidence trust and age,
+  /// spend classification, and the fail-soft fallback.
+  String get explanation {
+    final parts = <String>[reason];
+    final winner = recommended;
+    if (winner != null) {
+      final age = (asOf - winner.asOf).clamp(0, 1 << 31).toInt();
+      final state = switch (snapshotSource) {
+        'disk' => 'cached disk',
+        'memory' => 'cached memory',
+        'simulation' => 'simulation',
+        _ => winner.driftReason != null
+            ? 'provider drift'
+            : winner.stale
+                ? 'cached'
+                : 'live',
+      };
+      final ageLabel = age < 1 ? 'just now' : 'captured ${age}s ago';
+      parts.add(
+        'Evidence: $state ${winner.sourceClass.label}, $ageLabel.',
+      );
+      if (winner.bindingPool != null) {
+        parts.add('Binding pool: ${winner.bindingPool}.');
+      }
+      parts.add(switch (winner.spendRisk) {
+        'runtime_unverified' =>
+          'Spend: runtime classified; execution location and cost are not independently verified.',
+        'self_reported' => 'Spend: self-reported manual budget.',
+        'quota_plan' => 'Spend: measured quota-plan budget.',
+        _ => 'Spend: metered plan; this route may create metered spend.',
+      });
+    }
+    parts.add('Fallback: ${fallback.reason}');
+    return parts.join(' ');
+  }
+
+  RouteDecisionReceipt get receipt => _decisionReceiptFor(this);
 
   Map<String, dynamic> toJson() => {
         'schema': 'quotabot.suggest.v1',
         'as_of': asOf,
+        'decision_code': decisionCode.wireName,
         'risk_z': riskZ,
         'routing_policy': routingPolicy,
         'waste_weight': wasteWeight,
@@ -523,10 +631,175 @@ class RouteSuggestion {
         'cost_weight': costWeight,
         'recommended': recommended?.toJson(),
         'reason': reason,
+        'explanation': explanation,
         'using_local_fallback': usingLocalFallback,
         'fallback': fallback.toJson(),
         'ranked': ranked.map((c) => c.toJson()).toList(),
+        'receipt': receipt.toJson(),
       };
+}
+
+RouteDecisionReceipt _decisionReceiptFor(RouteSuggestion suggestion) {
+  RouteCandidateReceipt candidateReceipt(RouteCandidate candidate) {
+    final raw = candidate.headroom;
+    final effective = candidate.effectiveHeadroom;
+    final adjustments = <RouteAdjustmentReceipt>[];
+    if (raw != null && effective != null) {
+      final burnRisk =
+          raw - effective - candidate.leaseDiscount - candidate.pipeDiscount;
+      if (burnRisk > 0.0001) {
+        adjustments.add(RouteAdjustmentReceipt(
+          kind: RouteAdjustmentKind.burnRisk,
+          value: burnRisk,
+        ));
+      }
+    }
+    if (candidate.leaseDiscount > 0) {
+      adjustments.add(RouteAdjustmentReceipt(
+        kind: RouteAdjustmentKind.lease,
+        value: candidate.leaseDiscount,
+      ));
+    }
+    if (candidate.pipeDiscount > 0) {
+      adjustments.add(RouteAdjustmentReceipt(
+        kind: RouteAdjustmentKind.pipeHealth,
+        value: candidate.pipeDiscount,
+      ));
+    }
+    final confidence = candidate.confidence;
+    if (confidence != null && confidence < 0.9999) {
+      adjustments.add(RouteAdjustmentReceipt(
+        kind: RouteAdjustmentKind.confidence,
+        value: confidence,
+      ));
+    }
+    final wasteBoost = candidate.wasteBoost;
+    if (wasteBoost != null && wasteBoost > 1) {
+      adjustments.add(RouteAdjustmentReceipt(
+        kind: RouteAdjustmentKind.projectedWaste,
+        value: wasteBoost,
+      ));
+    }
+    final costDiscount = candidate.costDiscount;
+    if (costDiscount != null && costDiscount < 1) {
+      adjustments.add(RouteAdjustmentReceipt(
+        kind: RouteAdjustmentKind.cost,
+        value: costDiscount,
+      ));
+    }
+
+    final confidenceReasons = <String>[];
+    if (candidate.driftReason != null) {
+      confidenceReasons.add('provider_drift');
+    }
+    if (candidate.stale) confidenceReasons.add('stale_evidence');
+    if (candidate.perMachine) confidenceReasons.add('machine_scoped');
+    if (candidate.isManual) confidenceReasons.add('self_reported');
+    if (confidence != null &&
+        confidence < 0.9999 &&
+        confidenceReasons.isEmpty) {
+      confidenceReasons.add('limited_history_or_age');
+    }
+    if (confidenceReasons.isEmpty) confidenceReasons.add('no_discount');
+
+    return RouteCandidateReceipt(
+      provider: candidate.provider,
+      account: candidate.account,
+      sourceClass: candidate.sourceClass.wireName,
+      spendClass: candidate.spendClassWire,
+      spendRisk: candidate.spendRisk,
+      bindingPool: candidate.bindingPool,
+      rawHeadroomPercent: candidate.headroom,
+      effectiveHeadroomPercent: candidate.effectiveHeadroom,
+      evidenceAsOf: candidate.asOf,
+      evidenceAgeSeconds:
+          (suggestion.asOf - candidate.asOf).clamp(0, 1 << 31).toInt(),
+      resetsAt: candidate.resetsAt,
+      available: candidate.available,
+      stale: candidate.stale,
+      confidence: candidate.confidence,
+      confidenceReasons: confidenceReasons,
+      verdict: _receiptVerdict(candidate, suggestion),
+      adjustments: adjustments,
+    );
+  }
+
+  RouteCandidateReceipt? winner;
+  final alternatives = <RouteCandidateReceipt>[];
+  for (final candidate in suggestion.ranked) {
+    final receipt = candidateReceipt(candidate);
+    if (identical(candidate, suggestion.recommended)) {
+      winner = receipt;
+    } else {
+      alternatives.add(receipt);
+    }
+  }
+  final snapshotAsOf = suggestion.snapshotAsOf;
+  return RouteDecisionReceipt.create(
+    asOf: suggestion.asOf,
+    outcome: suggestion.decisionCode,
+    explanation: suggestion.explanation,
+    snapshot: RouteSnapshotReceipt(
+      source: suggestion.snapshotSource,
+      asOf: snapshotAsOf,
+      ageSeconds: snapshotAsOf == null
+          ? null
+          : (suggestion.asOf - snapshotAsOf).clamp(0, 1 << 31).toInt(),
+      stale: suggestion.snapshotStale,
+    ),
+    policy: RoutePolicyReceipt(
+      routing: suggestion.routingPolicy,
+      spendOrder: suggestion.routingPolicy == 'local_first'
+          ? const ['local', 'subscription']
+          : const ['subscription', 'local_fallback'],
+      comfortThresholdPercent: suggestion.comfortThreshold,
+      leadHours: suggestion.leadHours,
+      riskZ: suggestion.riskZ,
+    ),
+    winner: winner,
+    alternatives: alternatives,
+    fallback: RouteFallbackReceipt(
+      kind: suggestion.fallback.kind.wireName,
+      provider: suggestion.fallback.provider,
+      resetsAt: suggestion.fallback.resetsAt,
+      reason: suggestion.fallback.reason,
+    ),
+  );
+}
+
+RouteCandidateVerdict _receiptVerdict(
+  RouteCandidate candidate,
+  RouteSuggestion suggestion,
+) {
+  if (identical(candidate, suggestion.recommended)) {
+    return RouteCandidateVerdict.selected;
+  }
+  if (candidate.driftReason != null) {
+    return RouteCandidateVerdict.providerDrift;
+  }
+  if (candidate.stale) return RouteCandidateVerdict.stale;
+  if (candidate.capabilityLimited) {
+    return RouteCandidateVerdict.noCapableModel;
+  }
+  if (candidate.capabilityBudgetLimited) {
+    return RouteCandidateVerdict.modelBudgetSpent;
+  }
+  if (!candidate.available) {
+    return (candidate.headroom ?? 0) <= kSpentHeadroomFloor
+        ? RouteCandidateVerdict.spent
+        : RouteCandidateVerdict.unavailable;
+  }
+  if (candidate.isLocal && suggestion.recommended?.isLocal != true) {
+    return RouteCandidateVerdict.localFallbackOnly;
+  }
+  if (!candidate.isLocal &&
+      (candidate.effectiveHeadroom ?? 0) < suggestion.comfortThreshold) {
+    return RouteCandidateVerdict.belowComfort;
+  }
+  if (suggestion.decisionCode == RouteDecisionCode.preferredProvider) {
+    return RouteCandidateVerdict.lowerPreference;
+  }
+  return RouteCandidateVerdict.lowerRunway;
 }
 
 /// Builds the always-present fail-soft fallback from the available candidates:
@@ -1002,6 +1275,9 @@ RouteSuggestion suggestRoute(
   Set<String>? capabilityAvailableQuotaKeys,
   Map<String, int> capabilityBudgetResetByQuotaKey = const {},
   List<String> preferenceOrder = const [],
+  String snapshotSource = 'live',
+  int? snapshotAsOf,
+  bool? snapshotStale,
 }) {
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
@@ -1014,6 +1290,7 @@ RouteSuggestion suggestRoute(
 
   RouteCandidate toCandidate(ProviderQuota q) {
     final a = providerAvailability(q, now);
+    final binding = q.isLocal ? null : bindingWindow(q, now);
     final headroom = q.isLocal ? 100.0 : a.headroom;
     final quotaKey = quotaIdentityKeyFor(q);
     final cap = capabilityVerdict(
@@ -1114,6 +1391,11 @@ RouteSuggestion suggestRoute(
       costPenalty: costPenalty > 0 ? costPenalty : null,
       costDiscount:
           score == null || score.costDiscount >= 1 ? null : score.costDiscount,
+      bindingPool: q.isLocal
+          ? 'runtime'
+          : capabilityBudgetLimited
+              ? 'model_budget'
+              : binding?.label,
       resetsAt: candidateResetsAt,
       stale: q.stale,
       driftReason: q.driftReason,
@@ -1161,12 +1443,14 @@ RouteSuggestion suggestRoute(
   RouteSuggestion result(
     RouteCandidate? recommended,
     String reason, {
+    required RouteDecisionCode decisionCode,
     bool usingLocalFallback = false,
   }) =>
       RouteSuggestion(
         recommended: recommended,
         ranked: ranked,
         reason: reason,
+        decisionCode: decisionCode,
         usingLocalFallback: usingLocalFallback,
         fallback: fallback,
         asOf: now,
@@ -1179,12 +1463,22 @@ RouteSuggestion suggestRoute(
         costWeight: costWeight.isFinite
             ? costWeight.clamp(0.0, kMaxRoutingCostWeight).toDouble()
             : 0.0,
+        comfortThreshold: comfortThreshold.clamp(0.0, 100.0).toDouble(),
+        leadHours: leadHours.isFinite ? math.max(0.0, leadHours) : 0.0,
+        snapshotSource: _receiptSnapshotSource(snapshotSource),
+        snapshotAsOf: snapshotAsOf ?? (snapshotSource == 'live' ? now : null),
+        snapshotStale: snapshotStale ??
+            quotas.any((quota) =>
+                quota.stale ||
+                quota.driftReason != null ||
+                quota.suspect != null),
       );
 
   if (usable.isEmpty) {
     return result(
       null,
       'No live quota data. Open the provider app, or use quotabot login for Grok/Antigravity.',
+      decisionCode: RouteDecisionCode.noData,
     );
   }
 
@@ -1200,6 +1494,7 @@ RouteSuggestion suggestRoute(
       return result(
         localPick,
         'Local-first policy: use local ${localPick.provider} and keep subscription quota untouched.',
+        decisionCode: RouteDecisionCode.localFirst,
         usingLocalFallback: true,
       );
     }
@@ -1232,6 +1527,9 @@ RouteSuggestion suggestRoute(
     return result(
       best,
       '$lead (${best.headroom!.round()}% free$burnNote).',
+      decisionCode: byPreference
+          ? RouteDecisionCode.preferredProvider
+          : RouteDecisionCode.bestRunway,
     );
   }
 
@@ -1243,6 +1541,7 @@ RouteSuggestion suggestRoute(
     return result(
       best,
       'Subscriptions are low - fall back to local ${best.provider}$subNote.',
+      decisionCode: RouteDecisionCode.localFallback,
       usingLocalFallback: true,
     );
   }
@@ -1256,6 +1555,7 @@ RouteSuggestion suggestRoute(
     return result(
       best,
       'All subscriptions are low; ${best.provider} has the best runway (${best.headroom!.round()}% free).',
+      decisionCode: RouteDecisionCode.lowQuota,
     );
   }
 
@@ -1271,6 +1571,9 @@ RouteSuggestion suggestRoute(
       hasKnown
           ? 'Providers have quota, but no default-capable model has budget right now; use quotabot models or wait for the model gate to reset.'
           : 'Providers have quota, but none has a catalog model that meets the default capability floor; use quotabot models or pass an explicit task profile.',
+      decisionCode: hasKnown
+          ? RouteDecisionCode.capabilityBudgetBlocked
+          : RouteDecisionCode.capabilityBlocked,
     );
   }
 
@@ -1287,6 +1590,7 @@ RouteSuggestion suggestRoute(
       'Provider drift rejected the only quota evidence; ${best.provider} is '
       'not routable because $evidence. Run quotabot verify and compare the '
       'provider view.',
+      decisionCode: RouteDecisionCode.providerDrift,
     );
   }
   final staleWithLastKnown =
@@ -1296,6 +1600,7 @@ RouteSuggestion suggestRoute(
     return result(
       null,
       'Only cached quota evidence is present; ${best.provider} last-known headroom was ${best.headroom!.round()}%. Reconnect before routing from that number.',
+      decisionCode: RouteDecisionCode.staleEvidence,
     );
   }
 
@@ -1307,11 +1612,21 @@ RouteSuggestion suggestRoute(
     return result(
       null,
       'Everything is spent. ${soonest.provider} resets soonest - wait for it.',
+      decisionCode: RouteDecisionCode.spentWait,
     );
   }
 
-  return result(null, 'Everything is spent and no reset time is known.');
+  return result(
+    null,
+    'Everything is spent and no reset time is known.',
+    decisionCode: RouteDecisionCode.spentUnknownReset,
+  );
 }
+
+String _receiptSnapshotSource(String source) => switch (source) {
+      'live' || 'simulation' || 'disk' || 'memory' => source,
+      _ => 'other',
+    };
 
 double _pipePenaltyFor(ProviderQuota q, Map<String, double> penalties) {
   double normalize(double? value) {
@@ -1366,8 +1681,10 @@ double? _projectedWastePercent(
 /// The adaptive refresh delay in seconds for a snapshot: fast when a reset is
 /// imminent or a cap is nearly hit, relaxed when everything is healthy and resets
 /// are far off, and backing off after [failStreak] cycles that returned nothing
-/// live. Pure, so the desktop app and `quotabot top` poll on identical logic
-/// rather than two drifting copies.
+/// live. Only trusted, automatically refreshable quota controls urgency: stale,
+/// integrity-rejected, local-runtime, and manual entries remain visible but do
+/// not force the whole fleet into a fast polling loop. Pure, so the desktop app
+/// and `quotabot top` poll on identical logic rather than two drifting copies.
 int nextRefreshSeconds(List<ProviderQuota> data, int now,
     {int failStreak = 0}) {
   if (failStreak >= 2) return 6 * 3600;
@@ -1376,6 +1693,9 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
   int? soonestReset;
   double minRem = 100;
   for (final q in data) {
+    if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
+      continue;
+    }
     final h = providerHeadroom(q, now);
     if (h != null && h < minRem) minRem = h;
     for (final w in q.windows) {

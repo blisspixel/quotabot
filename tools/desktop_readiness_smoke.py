@@ -248,6 +248,11 @@ def stop_process(process: subprocess.Popen[bytes]) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
         return
 
     try:

@@ -41,6 +41,11 @@ Source class is separate from freshness. For example, authoritative data can be
 cached and stale, while a this-machine snapshot can be freshly captured but
 still incomplete across devices.
 
+Stale windows never roll forward speculatively. If a live read fails after a
+cached window's reset boundary passes, quotabot preserves the last observed
+percentage and original capture time. It does not infer 100% free capacity, and
+the stale provider remains non-routable until a fresh read succeeds.
+
 The `0.7` machine-scoped factor is multiplicative, not a fabricated probability
 that the number is correct. It discounts the routing confidence produced from
 freshness and sample adequacy because this-machine fallback and passive local
@@ -140,8 +145,12 @@ PROV-DM conformance.
   or expired. Both are sent as a bearer token with the
   `anthropic-beta: oauth-2025-04-20` header. quotabot never writes the host
   credentials file.
-- Response provides `five_hour` and `seven_day` blocks (plus per-model weekly
-  blocks) with a `utilization` percent and an ISO `resets_at`.
+- Current responses provide a `limits` array with shared session and weekly rows
+  plus model-scoped weekly rows, each carrying a percent and ISO `resets_at`.
+  Older responses expose equivalent `five_hour`, `seven_day`, and per-model
+  blocks with `utilization`; those remain a compatibility fallback. Model-scoped
+  rows gate only the matching model and never become provider-wide binding
+  windows.
 - This is live, and is the same data the in-CLI `/usage` command shows.
 - The host token only refreshes while Claude Code runs on this machine, so on an
   idle machine it eventually expires. quotabot then refreshes its own grant if
@@ -322,6 +331,27 @@ shown only when reachable; when it is off the provider is dropped, and it is
 never served from cache (a cached "available" would mislead when the daemon is
 actually down). All three built-in runtime adapters emit
 `source_class: "local_runtime"`.
+
+When at least one reachable runtime exposes an on-device model, the collector
+also reads passive machine memory metadata. Linux uses `/proc/meminfo`; Windows
+uses `Win32_OperatingSystem` through the system Windows PowerShell executable;
+macOS uses `/usr/sbin/sysctl hw.memsize` and `/usr/bin/vm_stat`. On Windows and
+Linux, an installed NVIDIA driver can add its largest single GPU through a
+bounded `nvidia-smi` memory query. Separate GPU pools are never summed. The read
+is cached for 30 seconds, has bounded output and deadlines, and fails soft. It
+does not load a model, reserve memory, execute inference, or measure throughput.
+
+For a cold model with an installed byte size, quotabot estimates required memory
+as the file size plus the larger of 25 percent or 512 MiB. Each observed memory
+pool retains a reserve of the larger of 10 percent, 2 GiB for system RAM, or 1
+GiB for GPU memory. `comfortable` means the estimate fits current availability
+after that reserve; `tight` means it fits total capacity after the reserve but
+not comfortably now; `constrained` means it exceeds the conservative capacity
+of every single observed pool; `unknown` means size or capacity evidence is
+missing. A loaded model reports `loaded`, which is direct runtime evidence.
+These states rank cold on-device candidates but never change runtime
+availability. A runtime may split work across RAM and VRAM, and context or model
+format overhead can differ from the estimate.
 
 - Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). `/api/ps` also
   reports each running model's `context_length`, which quotabot reads for the
