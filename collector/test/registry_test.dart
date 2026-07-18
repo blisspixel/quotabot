@@ -34,13 +34,19 @@ ProviderQuota _cloud(
       ],
     );
 
-ProviderQuota _local(String id, List<ModelInfo> models) => ProviderQuota(
+ProviderQuota _local(
+  String id,
+  List<ModelInfo> models, {
+  LocalHardwareInfo? hardware,
+}) =>
+    ProviderQuota(
       provider: id,
       displayName: id,
       account: 'local',
       asOf: _now,
       kind: ProviderQuotaKind.local,
       models: models,
+      localHardware: hardware,
     );
 
 void main() {
@@ -385,6 +391,132 @@ void main() {
     expect(reg.last.toJson()['local_readiness'], 'cold');
   });
 
+  test('cold local models sort by passive hardware fit', () {
+    const gib = 1024 * 1024 * 1024;
+    final reg = buildModelRegistry(
+      [
+        _local(
+          'ollama',
+          const [
+            ModelInfo(
+              id: 'a-constrained',
+              local: true,
+              sizeBytes: 14 * gib,
+            ),
+            ModelInfo(id: 'm-unknown', local: true),
+            ModelInfo(
+              id: 'z-comfortable',
+              local: true,
+              sizeBytes: 4 * gib,
+            ),
+          ],
+          hardware: const LocalHardwareInfo(
+            asOf: _now,
+            systemMemoryTotalBytes: 16 * gib,
+            systemMemoryAvailableBytes: 12 * gib,
+          ),
+        ),
+      ],
+      _now,
+    );
+
+    expect(reg.map((e) => e.model.id), [
+      'z-comfortable',
+      'm-unknown',
+      'a-constrained',
+    ]);
+    expect(reg[0].toJson()['hardware_fit'], 'comfortable');
+    expect(reg[1].toJson()['hardware_fit'], 'unknown');
+    expect(reg[2].toJson()['hardware_fit'], 'constrained');
+  });
+
+  test('hardware fit chooses the strongest observed memory pool', () {
+    const gib = 1024 * 1024 * 1024;
+    const model = ModelInfo(
+      id: 'local-model',
+      local: true,
+      sizeBytes: 4 * gib,
+    );
+    const hardware = LocalHardwareInfo(
+      asOf: _now,
+      systemMemoryTotalBytes: 32 * gib,
+      systemMemoryAvailableBytes: 4 * gib,
+      gpuMemoryTotalBytes: 12 * gib,
+      gpuMemoryAvailableBytes: 10 * gib,
+      gpuCount: 1,
+    );
+
+    final fit = localModelHardwareFit(model, hardware);
+    final json = fit.toJson();
+
+    expect(fit.status, LocalHardwareFitStatus.comfortable);
+    expect(fit.basis, 'gpu_memory');
+    expect(fit.estimatedMemoryBytes, 5 * gib);
+    expect(json['fit_available_bytes'], 10 * gib);
+    expect(json['fit_total_bytes'], 12 * gib);
+    expect(json['hardware_observed_at'], _now);
+  });
+
+  test('hardware fit distinguishes tight, constrained, unknown, and loaded',
+      () {
+    const gib = 1024 * 1024 * 1024;
+    const hardware = LocalHardwareInfo(
+      asOf: _now,
+      systemMemoryTotalBytes: 16 * gib,
+      systemMemoryAvailableBytes: 8 * gib,
+    );
+
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'tight', local: true, sizeBytes: 10 * gib),
+        hardware,
+      ).status,
+      LocalHardwareFitStatus.tight,
+    );
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'large', local: true, sizeBytes: 14 * gib),
+        hardware,
+      ).status,
+      LocalHardwareFitStatus.constrained,
+    );
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'unknown', local: true),
+        hardware,
+      ).status,
+      LocalHardwareFitStatus.unknown,
+    );
+    expect(
+      localModelHardwareFit(
+        const ModelInfo(id: 'loaded', local: true, loaded: true),
+        null,
+      ).status,
+      LocalHardwareFitStatus.loaded,
+    );
+  });
+
+  test('on-device local entries sort ahead of cloud-offloaded daemon entries',
+      () {
+    final reg = buildModelRegistry(
+      [
+        _local('ollama', const [
+          ModelInfo(
+            id: 'a-cloud',
+            local: true,
+            cloudOffloaded: true,
+          ),
+          ModelInfo(id: 'z-on-device', local: true),
+        ]),
+      ],
+      _now,
+    );
+
+    expect(reg.map((e) => e.model.id), ['z-on-device', 'a-cloud']);
+    expect(reg.first.hardwareFit?.status, LocalHardwareFitStatus.unknown);
+    expect(reg.last.hardwareFit, isNull);
+  });
+
   test('a cloud provider absent from the catalog contributes no models', () {
     final reg = buildModelRegistry([_cloud('grok', 30)], _now);
     expect(reg, isEmpty);
@@ -727,6 +859,41 @@ void main() {
       expect(s.recommended?.model.id, 'cold-local');
       expect(s.reason, contains('cold start may be required'));
       expect(s.reason, contains('5.0 GB on disk'));
+      expect(s.reason, contains('hardware fit is unknown'));
+    });
+
+    test('a cold local recommendation explains its hardware-fit evidence', () {
+      const gib = 1024 * 1024 * 1024;
+      final s = suggestModel(
+        [
+          _local(
+            'ollama',
+            const [
+              ModelInfo(
+                id: 'fit-local',
+                local: true,
+                sizeBytes: 4 * gib,
+              ),
+            ],
+            hardware: const LocalHardwareInfo(
+              asOf: _now,
+              gpuMemoryTotalBytes: 12 * gib,
+              gpuMemoryAvailableBytes: 10 * gib,
+              gpuCount: 1,
+            ),
+          ),
+        ],
+        _now,
+      );
+      final json = s.toJson(_now);
+
+      expect(s.recommended?.model.id, 'fit-local');
+      expect(s.reason, contains('comfortable metadata-only hardware fit'));
+      expect(s.reason, contains('5.0 GB estimated'));
+      expect(s.reason, contains('10.0 GB available of 12.0 GB GPU memory'));
+      expect(json['recommended']['hardware_fit'], 'comfortable');
+      expect(json['recommended']['hardware_fit_basis'], 'gpu_memory');
+      expect(json['recommended']['estimated_memory_bytes'], 5 * gib);
     });
 
     test('no model with budget yields a null pick and a reason', () {

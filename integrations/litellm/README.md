@@ -168,9 +168,10 @@ normally.
 Set `metrics_path` in `quotabot-routing.yaml` to append one JSON line per
 successful or failed request. Records contain routing metadata only: requested
 model, served model, gated provider/account when known, selected spend class,
-callback event, HTTP status, Retry-After seconds, callback latency, sanitized
-exception class, tokens, and cost. They never contain prompts, responses,
-exception messages, or source code. The path is constrained to `~/.quotabot`;
+the content-blind `quotabot.receipt.v1` decision id, callback event, HTTP status,
+Retry-After seconds, callback latency, sanitized exception class, tokens, and
+cost. They never contain prompts, responses, exception messages, or source code.
+The path is constrained to `~/.quotabot`;
 relative paths are placed there. The plugin attempts owner-only permissions on
 the metrics directory and file before writing local usage metadata, but does not
 abort metrics writes if the operating system rejects that hardening. Keep the

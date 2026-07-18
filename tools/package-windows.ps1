@@ -1,13 +1,15 @@
-# Simple Windows packaging helper for quotabot (no over-engineering).
-# Run from repo root or tools/.
-# Builds release and prints the ready-to-distribute exe location.
-# For installer, use Inno Setup or MSIX on the output dir.
+# Build the native Windows desktop bundle and optionally archive it.
+
+param(
+  [switch]$NoArchive
+)
 
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 $appDir = Join-Path $root 'app'
+$releaseRoot = Join-Path $root 'release'
 . (Join-Path $scriptDir 'windows-build-prereqs.ps1')
 
 # Find flutter on PATH so this builds on any machine.
@@ -35,9 +37,25 @@ $exe = Join-Path $releaseDir 'quotabot.exe'
 if (Test-Path $exe) {
   Write-Host "Release ready: $exe"
   Write-Host "Bundle (exe + data + dlls) in: $releaseDir"
-  Write-Host "Copy the Release folder for portable distribution."
   $hash = Get-FileHash -Algorithm SHA256 $exe
   Write-Host "SHA256: $($hash.Hash.ToLowerInvariant())"
 } else {
-  Write-Error 'Build did not produce expected exe.'
+  throw 'Build did not produce expected exe.'
+}
+
+if (-not $NoArchive) {
+  New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+  $asset = 'quotabot-windows-x64-desktop.zip'
+  $archive = Join-Path $releaseRoot $asset
+  $sidecar = "$archive.sha256"
+  Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $sidecar -Force -ErrorAction SilentlyContinue
+
+  Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $archive
+  $archiveHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+  Set-Content -LiteralPath $sidecar -Value "$archiveHash  $asset" -NoNewline
+
+  Write-Host "Archive ready: $archive"
+  Write-Host "Checksum: $sidecar"
+  Write-Host "Archive SHA256: $archiveHash"
 }

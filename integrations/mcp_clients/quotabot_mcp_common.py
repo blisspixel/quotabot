@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import math
+from collections.abc import Iterable
 from typing import Any
+
+
+_REQUIRED_ROUTING_TOOLS = ("suggest_provider", "suggest_model")
 
 
 def structured_content(result: Any) -> dict[str, Any]:
@@ -49,7 +54,15 @@ def routing_summary(
 
 
 def as_pretty_json(value: dict[str, Any]) -> str:
-    return json.dumps(value, indent=2, sort_keys=False)
+    return json.dumps(value, indent=2, sort_keys=False, allow_nan=False)
+
+
+def require_routing_tools(tool_names: Iterable[str]) -> None:
+    """Raise a clear error when the server lacks a routing tool we call."""
+    available = set(tool_names)
+    missing = [name for name in _REQUIRED_ROUTING_TOOLS if name not in available]
+    if missing:
+        raise RuntimeError(f"quotabot MCP tools missing: {', '.join(missing)}")
 
 
 def _object_value(value: Any) -> dict[str, Any]:
@@ -61,4 +74,8 @@ def _string_value(value: Any) -> str | None:
 
 
 def _number_value(value: Any) -> int | float | None:
-    return value if isinstance(value, (int, float)) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value

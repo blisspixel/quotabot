@@ -21,7 +21,7 @@ Provider snapshots keep these stable fields:
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
 - Optional `plan`, `source`, `source_class`, `status`, `active`, `details`,
-  `error`, `models`, `model_quotas`, `suspect`, `drift_reason`,
+  `error`, `models`, `local_hardware`, `model_quotas`, `suspect`, `drift_reason`,
   `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`,
   `retry_after_seconds`, and `reset_credits_available`.
 - `kind` is `subscription` or `local`.
@@ -116,9 +116,22 @@ emit `quotabot.suggest.v1` with:
   `waste_threshold_percent`, `waste_max_hours`, and `cost_weight`.
 - `routing_policy`: `balanced` by default, or `local_first` when the caller
   explicitly requested local capacity before subscription quota.
+- `decision_code`: the low-cardinality policy outcome, such as `best_runway`,
+  `preferred_provider`, `local_fallback`, or `spent_wait`.
 - `recommended`: the picked provider candidate, or an explicit `null` when
   nothing is usable.
-- `reason`, `using_local_fallback`, `fallback`, and `ranked`.
+- `reason`, the complete plain-language `explanation`,
+  `using_local_fallback`, `fallback`, and `ranked`.
+- `receipt`: a nested `quotabot.receipt.v1` decision receipt. Its deterministic
+  `decision_id` is stable for identical decision inputs and policy. `snapshot`
+  records source, age, and staleness; `policy` records routing order, comfort
+  threshold, planning horizon, and risk setting; `winner` records binding pool,
+  source and spend classes, raw and effective headroom, confidence reasons, and
+  every applied adjustment; `alternatives` assigns each rejected candidate a
+  low-cardinality `verdict` plus a plain reason; `fallback` is the same
+  guaranteed fail-soft action as the parent response. Receipt inputs are quota
+  metadata and bounded identifiers only. They never include task text, prompts,
+  source code, model responses, credentials, or exception messages.
 - Over MCP only, `active_leases`: the reservation discounts currently applied
   to ranked candidates. The CLI and loopback HTTP forms of the same schema id
   omit it (the lease ledger is local to the MCP server).
@@ -130,6 +143,7 @@ emit `quotabot.suggest.v1` with:
   `runway_hours`, optional `projected_waste_percent`, optional `waste_boost`,
   optional `cost_penalty`, optional `cost_discount`,
   optional `capability_limited`, optional `capability_budget_limited`,
+  optional `binding_pool`,
   optional `drift_reason`, optional `drift_observed_at`, `routing_score`,
   `resets_at`, `stale`, and `available`. Drift candidates are unavailable;
   `headroom_percent` is last-trusted when present and null for a legacy
@@ -159,7 +173,9 @@ emit `quotabot.suggest.v1` with:
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields (including `active_leases`) plus `source`,
 `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`, and
-`max_age_seconds`. It never forces a live provider collect.
+`max_age_seconds`. Its nested receipt carries those cache snapshot coordinates,
+so the receipt and the envelope cannot disagree about provenance. It never
+forces a live provider collect.
 
 ## Single-provider answers
 
@@ -212,6 +228,14 @@ quota-backed path for it. Local-runtime entries also include
 `local_readiness` (`loaded` or `cold`), `size_bytes`, loaded-model
 `vram_bytes`, and `quant` when the runtime exposes them, so routers can
 distinguish ready-now models from installed models that may need a cold start.
+An on-device local entry also carries advisory `hardware_fit` (`loaded`,
+`comfortable`, `tight`, `constrained`, or `unknown`), `hardware_fit_basis`, and,
+when known, `estimated_memory_bytes`, `fit_available_bytes`, `fit_total_bytes`,
+and `hardware_observed_at`. Fit is a metadata-only ranking signal, not an
+availability gate or performance claim. A local provider snapshot can carry the
+underlying `local_hardware` object with `as_of`, system-memory total/available
+bytes, largest-single-GPU total/available bytes, and `gpu_count`. Separate GPU
+pools are not summed. Capacity evidence is absent on subscription providers.
 `budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
 runtime executes in its cloud rather than on-device (an Ollama `-cloud` model)
 carries `cloud_offloaded: true` and is excluded from `--budget=local` and free
@@ -242,6 +266,8 @@ described below.
 `quotabot report --json` emits `quotabot.report.v1` with `schema`,
 `generated_at`, `recommended_provider`, `recommendation_reason`,
 `fallback_kind`, and `providers`. Provider rows include `source_class`, state,
+optional `spend_class` (the same spend label the markdown Trust column shows:
+`quota plan`, `metered plan`, `loaded`, `cold`, or a manual budget label),
 headroom/reset metadata, weekly p50 free percent, weekly reliability, weekly
 sampled-day counts, current
 usable/spent day streaks, `weekly_contribution_calendar`,
@@ -352,7 +378,7 @@ observation for the provider adapters invoked by that read:
   branches may skip some listed records at runtime.
 
 Each access record carries `kind` (`fileRead`, `fileWrite`,
-`environmentRead`, or `network`), `target`, `purpose`, `data_class`, `access`,
+`environmentRead`, `process`, or `network`), `target`, `purpose`, `data_class`, `access`,
 and booleans for `metadata_only`, `sends_prompt_or_code`, `spends_tokens`, and
 `credential_material`. Network records additionally carry `method`, `scheme`,
 `host`, and `path`; query values are intentionally not recorded. Credential

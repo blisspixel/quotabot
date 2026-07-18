@@ -7,7 +7,13 @@ import 'util.dart';
 
 const quotabotExplainV1SchemaId = 'quotabot.explain.v1';
 
-enum RuntimeAccessKind { fileRead, fileWrite, environmentRead, network }
+enum RuntimeAccessKind {
+  fileRead,
+  fileWrite,
+  environmentRead,
+  process,
+  network,
+}
 
 class RuntimeAccessRecord {
   final RuntimeAccessKind kind;
@@ -168,6 +174,7 @@ RuntimeAccessReport buildRuntimeAccessReport({
   String? os,
 }) {
   final env = environment ?? Platform.environment;
+  final operatingSystem = os ?? Platform.operatingSystem;
   final selectedProviders = providers == null
       ? defaultProviderRuntimeAccess(environment: env)
       : List<ProviderRuntimeAccess>.of(providers);
@@ -220,7 +227,7 @@ RuntimeAccessReport buildRuntimeAccessReport({
       .toList();
   return RuntimeAccessReport(
     generatedAt: generatedAt,
-    os: os ?? Platform.operatingSystem,
+    os: operatingSystem,
     includeReads: includeReads,
     includeNetwork: includeNetwork,
     collectionExecuted: collectionExecuted,
@@ -230,7 +237,7 @@ RuntimeAccessReport buildRuntimeAccessReport({
     profile: profile?.name,
     excludedProviders: excludedProviders.toList()..sort(),
     providers: filtered,
-    shared: includeReads ? _sharedReads(env) : const [],
+    shared: includeReads ? _sharedReads(env, operatingSystem) : const [],
     notes: collectionExecuted
         ? const [
             'Provider rows are limited to adapters invoked during this collection.',
@@ -436,7 +443,10 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
   ];
 }
 
-List<RuntimeAccessRecord> _sharedReads(Map<String, String> env) {
+List<RuntimeAccessRecord> _sharedReads(
+  Map<String, String> env,
+  String operatingSystem,
+) {
   final h = _home(env);
   final config = _configBase(env, h);
   return [
@@ -452,8 +462,49 @@ List<RuntimeAccessRecord> _sharedReads(Map<String, String> env) {
         'local analytics history updates'),
     _file(_joinPath(h, '.quotabot/litellm_metrics.jsonl'),
         'local LiteLLM routed-request metadata'),
+    ..._localHardwareAccess(env, operatingSystem),
   ];
 }
+
+List<RuntimeAccessRecord> _localHardwareAccess(
+  Map<String, String> env,
+  String operatingSystem,
+) =>
+    switch (operatingSystem) {
+      'linux' => [
+          _file('/proc/meminfo', 'passive system memory capacity',
+              dataClass: 'hardware_metadata'),
+          _process(
+            '/usr/bin/nvidia-smi --query-gpu=memory.total,memory.free',
+            'largest single NVIDIA GPU memory capacity, when installed',
+          ),
+        ],
+      'windows' => [
+          _process(
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe Get-CimInstance Win32_OperatingSystem',
+            'passive system memory capacity',
+          ),
+          _process(
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\nvidia-smi.exe --query-gpu=memory.total,memory.free',
+            'largest single NVIDIA GPU memory capacity, when installed',
+          ),
+          _process(
+            '${env['ProgramFiles'] ?? r'C:\Program Files'}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe --query-gpu=memory.total,memory.free',
+            'alternate NVIDIA GPU memory utility location, when installed',
+          ),
+        ],
+      'macos' => [
+          _process(
+            '/usr/sbin/sysctl -n hw.memsize',
+            'passive total system memory capacity',
+          ),
+          _process(
+            '/usr/bin/vm_stat',
+            'passive available system memory capacity',
+          ),
+        ],
+      _ => const <RuntimeAccessRecord>[],
+    };
 
 RuntimeAccessRecord _file(
   String target,
@@ -483,6 +534,15 @@ RuntimeAccessRecord _fileWrite(
       access: 'write',
       metadataOnly: dataClass != 'credential',
       credentialMaterial: dataClass == 'credential',
+    );
+
+RuntimeAccessRecord _process(String target, String purpose) =>
+    RuntimeAccessRecord(
+      kind: RuntimeAccessKind.process,
+      target: target,
+      purpose: purpose,
+      dataClass: 'hardware_metadata',
+      access: 'execute',
     );
 
 RuntimeAccessRecord _https(

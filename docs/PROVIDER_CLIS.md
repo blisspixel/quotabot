@@ -23,6 +23,10 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   https://platform.claude.com/docs/en/api/rate-limits
 - Check usage yourself: `/usage` in a Claude Code session shows remaining quota,
   reset time, and burn rate. Related: `/cost`, `/stats`, `/context`.
+- Do not automate this as `claude -p /usage` or `/quota`. Print mode is a
+  prompt-execution surface, not a stable quota API, and `/quota` is not a
+  documented built-in command. quotabot calls the account-wide usage metadata
+  endpoint directly so collection remains content-blind and uses zero inference.
 - Windows: a rolling 5-hour window plus a weekly cap, shared across Claude Code,
   Claude.ai, and related products.
 - quotabot reads: the OAuth usage endpoint, reusing the token Claude Code stores.

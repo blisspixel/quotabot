@@ -320,8 +320,18 @@ measured built-in quota plans but excludes self-reported manual quotas because
 quotabot cannot verify their overage settings. Local-runtime entries surface
 `local_readiness` (`loaded` or `cold`), and model recommendations rank loaded
 local models ahead of cold installed models when both satisfy the same profile.
-Recommendations also echo available local memory/context evidence so callers can
-see why a model is loaded versus merely installed without forcing a model call.
+When a reachable runtime has an on-device model, `local_hardware.dart` performs
+one cached, deadline-bounded passive read of system RAM and the largest supported
+GPU memory pool. Cold models with size evidence get an advisory `hardware_fit`
+of `comfortable`, `tight`, `constrained`, or `unknown`; loaded models retain the
+direct `loaded` state. The fit evidence is carried in the provider snapshot and
+the selected pool, capacities, estimate, and observation time are repeated on
+model registry entries so MCP and CLI clients can audit the rank without another
+read. Fit reorders cold local candidates but never changes availability and never
+loads or invokes a model.
+Recommendations also echo available local size, context, and fit evidence so
+callers can see why a model is loaded versus merely installed without forcing a
+model call.
 Ollama exposes cloud-offloaded models through the local daemon (a `-cloud` tag
 suffix); quotabot detects the suffix, flags the model `cloud_offloaded`, and
 excludes it from `budget=local` and free budgets, so a cloud-offloaded model
@@ -493,8 +503,11 @@ the menu instead of the smart schedule.
 
 The CLI release workflow builds native archives for Windows x64, macOS arm64,
 Linux x64, and Linux arm64, with checksums and provenance attestations. The
-Flutter desktop app builds on native Windows, macOS, and Linux CI hosts; source
-setup installs its launcher or shortcut. A normal prebuilt desktop acquisition
-path remains an explicit 1.0 product gate, so the docs do not claim one exists
-yet. Platform prerequisites, current artifacts, and the native verification gap
-are documented in [BUILDING.md](BUILDING.md) and [../ROADMAP.md](../ROADMAP.md).
+Flutter desktop app also produces native portable Windows x64, macOS arm64, and
+Linux x64 archives with checksum sidecars, shape validation, provenance
+attestations, clean-runner lifecycle checks, and a draft-release publication
+barrier. Source setup remains available when a launcher or shortcut is wanted.
+Application signing, notarization, and interactive native evidence remain 1.0
+gates. Platform prerequisites and artifacts are documented in
+[BUILDING.md](BUILDING.md), [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md),
+and [../ROADMAP.md](../ROADMAP.md).

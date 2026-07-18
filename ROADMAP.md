@@ -1,7 +1,8 @@
 # Roadmap
 
-Updated 2026-07-15. This file is the forward plan. Shipped work belongs in
-[CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
+Updated 2026-07-18. This file is the forward plan. It records brief shipped
+prerequisites only where remaining work depends on them; full shipped work
+belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
 the plan belongs in [docs/PRODUCT-STRATEGY.md](docs/PRODUCT-STRATEGY.md).
 
@@ -31,7 +32,9 @@ by being correct, quiet, and predictable, not by being large.
 
 - **Zero inference and content-blind.** Runtime code never calls generation
   endpoints and never reads prompts, source code, model responses, or task
-  content. Quota reads spend zero usage tokens.
+  content. Quota reads spend zero usage tokens. Provider print or headless
+  prompt commands such as `claude -p` are not quota APIs and are never used as
+  collectors.
 - **Local-first, not network-free.** History, cache, preferences, profiles,
   grants, and leases are local. Live adapters may send credentials and quota
   metadata to that provider's own metadata endpoint; Antigravity may also run
@@ -56,6 +59,9 @@ by being correct, quiet, and predictable, not by being large.
   its own credentials rather than depending on the host app to have run here. A
   machine-scoped fallback is only ever shown when nothing account-wide is
   available, and it is always labeled as this-machine.
+- **Stale resets prove nothing.** Cached quota keeps its original capture time
+  and last observed percentage. A reset boundary passing after a failed live
+  read never turns stale evidence into 100% free capacity or a routable result.
 - **Fail soft.** If quotabot is unavailable or lacks a safe route, callers keep
   their original behavior or receive an explicit no-safe-route result. Routing
   is an optimization, not a dependency.
@@ -71,7 +77,7 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.9.0**, is best
+The current line, **0.9.1**, is best
 understood as having closed the first three milestones of the ladder below:
 the truthful substrate (0.6), one calibrated forecast behind a single decision
 core (0.7), and the self-tuning calibration moat (0.8). The core product
@@ -84,10 +90,10 @@ until the remaining 1.0 trust gates close.
 |---|---|---|---|
 | Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
 | Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; the LiteLLM example now requires a bearer key and an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, cross-machine account-wide live reads via self-refreshing Claude/Codex grants, and a Windows live record exist | Validate the connected-grant login flows on real accounts; close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
-| Native provider evidence | Partial | Windows evidence exists; WSL covers truthful Linux failure behavior | Confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
-| Installation and update | Partial | CLI archives, required checksums, attestations, one-line installers, source setup, lifecycle docs, and a three-OS smoke workflow exist | Record green clean-host lifecycle runs, automate remaining rollback/uninstall checks, and close desktop acquisition |
-| First-run and recommendation comprehension | Partial | `doctor`, compact route lines, structured reasons, and setup recovery guidance exist | Prove a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
+| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, grant implementations, and expired-host fall-through fixtures exist | Validate connected Claude/Codex grants on idle real-account machines; link dated Windows evidence; close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
+| Native provider evidence | Partial | Windows validation has been reported; WSL covers truthful Linux failure behavior | Link dated Windows evidence and confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
+| Installation and update | Partial | CLI archives and installers plus native portable desktop archives, required checksums, attestations, exact-asset and clean-runner lifecycle barriers, source setup, lifecycle docs, and a three-OS smoke workflow exist | Sign and notarize desktop apps and record one green tagged clean-host lifecycle run |
+| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation, backed by the content-blind decision receipt and setup recovery guidance | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
 | Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, structured errors, `verify`, and `explain` exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
 | Release rehearsal | Open | 0.5.14 release artifacts and provenance have been exercised | Run the true 1.0 tag-candidate workflow, install its artifacts on clean native hosts, then cut 1.0 |
 
@@ -200,10 +206,12 @@ which is why calibration lands before 1.0 rather than after it.
     installation, accessibility, or security issue remains open.
 14. For every provider with an account-wide usage read, that read stays live on
     a machine the user has not actively used the host app on recently, by
-    refreshing quotabot's own credentials without reading or writing the host
-    app's credential files. When it cannot, the number is shown stale with an
-    actionable next step, never as a confident current value, and any machine-
-    scoped fallback is labeled this-machine.
+    refreshing quotabot's own credentials without requiring a fresh host token
+    and without writing the host app's credential files. Host state may still be
+    read for bounded credential or account discovery. When a live read cannot
+    succeed, the number is shown stale with an actionable next step, never as a
+    confident current value; a passed reset never changes stale evidence to
+    100% free, and any machine-scoped fallback is labeled this-machine.
 
 ## The path to 1.0, in detail
 
@@ -239,14 +247,14 @@ provider, before a forecast is built on top of it.
 - **Done:** parse Ollama's documented loaded `context_length`. Detect or
   conservatively exclude cloud-offloaded Ollama models from policies that promise
   local-only or free execution. Never estimate throughput by generating content.
-- Validate the connected-grant login flows (`login claude` / `login codex`) on real
-  accounts, and add fixtures for the expired-host-token fall-through.
+- Grant implementation and deterministic expired-host-token fall-through
+  fixtures are shipped for Claude and Codex. Remaining: validate the connected
+  login flows on idle real-account machines.
 - Keep the LiteLLM loopback, bearer-auth, and unauthenticated-denial regression
   green as its pinned dependency changes.
-- Already shipped on 0.5.x: cross-machine account-wide live reads via
-  self-refreshing grants; the normalized six-value `source_class` contract across
-  every surface; deterministic provider-drift admission with stale last-trusted
-  fallback and legacy-cache quarantine.
+- Already shipped on 0.5.x: the normalized six-value `source_class` contract
+  across every surface; deterministic provider-drift admission with stale
+  last-trusted fallback and legacy-cache quarantine.
 
 Acceptance: targeted parser, policy, schema, integration, and regression tests
 pass; docs state the same source and spend semantics as the code; no ambiguous
@@ -330,15 +338,18 @@ without breaking a safety invariant; thin-data cases degrade to the defaults.
 **Outcome:** the simple surface is clearer because of the engine under it, and the
 recommendation is aligned to what the user actually wants.
 
-- One plain human explanation shared by desktop, `doctor`, `suggest`, and `top`:
+- **Done (shared explanation):** one plain human explanation shared by desktop,
+  `doctor`, `suggest`, and `top`:
   winner, binding evidence, freshness and source, spend class, and fallback.
   Replace unexplained glance phrases such as "thin data"; reserve strand
   probability, shrinkage, pipe discount, and cost weight for expanded or
   machine-readable detail.
-- One unified, low-cardinality decision receipt across CLI, desktop, MCP, HTTP, and
-  LiteLLM: decision id, snapshot source and age, binding pool, raw headroom, every
-  adjustment, confidence reasons, lease and pipe-health effects, spend policy,
-  winner qualification, and each rejected alternative's reason. Content-free.
+- **Done (decision receipt):** one unified, low-cardinality
+  `quotabot.receipt.v1` receipt across CLI, desktop, MCP, HTTP, and LiteLLM:
+  deterministic decision id, snapshot source and age, binding pool, raw
+  headroom, every adjustment, confidence reasons, lease and pipe-health effects,
+  spend policy, winner qualification, and each rejected alternative's reason.
+  Content-free and pinned by routing, schema, MCP, desktop, and LiteLLM tests.
 - **Done (provider preference):** an explicit per-profile provider preference,
   applied among viable candidates only - it never revives an unavailable, spent,
   or spend-blocked route, and it shows in the reason ("first by your
@@ -346,10 +357,16 @@ recommendation is aligned to what the user actually wants.
   per run with `suggest --prefer=a,b`; a pure `preferredViableCandidate` threaded
   through the decision core. A finer spend-order beyond provider preference
   (per-model or per-cost) remains open.
-- Local-first QOL: local model capability (context, size, quantization, loaded
-  state), a hardware-fit signal (which installed models comfortably fit this RAM or
-  VRAM, metadata only, never a throughput probe), and local-first stretch behavior
-  when cloud quota is low.
+- **Done (local hardware fit):** reachable on-device models carry passive RAM
+  and largest-single-GPU capacity evidence and a conservative `loaded`,
+  `comfortable`, `tight`, `constrained`, or `unknown` fit. The model registry
+  ranks that signal after loaded state, exposes the estimate and selected pool
+  across CLI/MCP JSON, and explains it in plain model suggestions. Probes are
+  bounded, cached, fail soft, and never load or invoke a model; fit remains
+  advisory because runtimes may split memory.
+- Remaining local-first QOL: thread declared local tool/vision capabilities into
+  capability gates, and add local-first stretch behavior when cloud quota is
+  low.
 - Multi-account: a work-and-home account per provider visible in one dashboard,
   generalizing the existing per-account model, without cross-contaminating
   profiles, cache, or history.
@@ -385,6 +402,13 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   required for normal use, or explicitly narrow the 1.0 desktop promise to a labeled
   source-built preview (the prebuilt outcome is preferred). Confirm clean tray
   teardown on quit across all three OSes.
+  **Done (portable artifact pipeline):** native Windows x64, macOS Apple Silicon,
+  and Linux x64 archives now receive SHA-256 sidecars, archive-shape validation,
+  native Windows/Linux readiness checks, build-provenance attestations, and a
+  draft-release barrier. Clean native runners also re-download the draft assets
+  and exercise side-by-side update, rollback, and data-preserving uninstall
+  mechanics. Application signing, notarization, and a green tagged acquisition
+  record remain required before this gate is closed.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader.
@@ -435,11 +459,12 @@ breaking a safety invariant.
 
 ### P1. Adopt the next final MCP revision deliberately
 
-The 2026-07-28 release candidate is a breaking protocol revision. Keep current
-final `2025-11-25` behavior until the new revision is final and the Dart SDK and
-conformance path are ready. Then add a dual-version compatibility matrix before
-changing initialization, sessions, subscriptions, caching, trace context, or
-JSON Schema behavior. Trace metadata must remain content-free.
+The [release candidate for the planned `2026-07-28` MCP specification](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+is a breaking protocol revision. Keep current final `2025-11-25` behavior until
+the new revision is final and the Dart SDK and conformance path are ready. Then
+add a dual-version compatibility matrix before changing initialization,
+sessions, subscriptions, caching, trace context, or JSON Schema behavior. Trace
+metadata must remain content-free.
 
 ### P1. Model quota as a typed shared pool
 
@@ -481,17 +506,17 @@ GLM remains the best researched first candidate because its official coding plan
 publishes five-hour and weekly limits, but its time and model weighting means the
 typed shared-pool work comes first.
 
-Market survey, 2026-07-11: GLM, Kimi, Qwen (Alibaba ModelStudio), and MiniMax now
-all sell subscription coding plans on exactly quotabot's native five-hour rolling
-window plus a weekly cap - GLM at 4x the five-hour limit, Kimi 5x, Alibaba/Volcano
-7.5x - so the windowing model already fits them. The complication that still gates
-GLM is real: GLM-5 consumes quota at 3x GLM-4.7 and there are peak/off-peak
-multipliers, which is precisely why quota-as-a-typed-shared-pool must land before
-GLM rather than after. GitHub Copilot moved to usage-based AI Credits plus a weekly
-token cap on 2026-06-01, so if it is ever added it is a credit-pool provider like
-Cursor, never an included-quota plan. Amazon Q Developer is retiring (no new
-signups from 2026-05-15) and migrating users to Kiro, which quotabot already
-supports, so Q needs no separate adapter. None of this changes the 1.0 scope;
+Market review, 2026-07-18: candidate coding plans use provider-specific rolling,
+weekly, or credit pools whose exact ratios and weights are time-sensitive.
+[GLM consumption](https://docs.z.ai/devpack/faq) is model-weighted and
+time-weighted, which is precisely why quota-as-a-typed-shared-pool must land
+before GLM rather than after. [GitHub Copilot billing](https://docs.github.com/en/billing/concepts/product-billing/github-copilot-billing)
+uses a monthly AI Credit pool with optional paid continuation, so if it is ever
+added it is a credit-pool provider like Cursor, never an included-quota plan.
+[Amazon Q Developer](https://aws.amazon.com/blogs/devops/amazon-q-developer-end-of-support-announcement/)
+blocks new signups from 2026-05-15 and ends support for IDE plugins and paid
+subscriptions on 2027-04-30 while other AWS experiences continue, so it does not
+justify a separate adapter ahead of Kiro. None of this changes the 1.0 scope;
 these remain post-1.0, admission-gated, and behind the typed shared-pool work.
 
 ## Product measures

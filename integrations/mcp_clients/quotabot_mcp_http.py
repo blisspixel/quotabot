@@ -8,7 +8,12 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from quotabot_mcp_common import as_pretty_json, routing_summary, structured_content
+from quotabot_mcp_common import (
+    as_pretty_json,
+    require_routing_tools,
+    routing_summary,
+    structured_content,
+)
 
 DEFAULT_MCP_URL = "http://127.0.0.1:8722/mcp"
 
@@ -33,9 +38,7 @@ async def main() -> int:
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    names = {tool.name for tool in tools.tools}
-                    if "suggest_provider" not in names:
-                        raise RuntimeError("quotabot suggest_provider tool is missing")
+                    require_routing_tools(tool.name for tool in tools.tools)
 
                     suggestion = structured_content(
                         await session.call_tool("suggest_provider", {})

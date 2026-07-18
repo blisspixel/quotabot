@@ -101,17 +101,14 @@ class CodexAdapter {
     final base = _sessionsDir?.parent.path ?? '${home()}/.codex';
     final tokens = _readHostTokens(File('$base/auth.json'));
     final acct = tokens?.accountId;
-    final grantToken = await _grantToken();
-    final ordered = <String>[
-      if (tokens?.accessToken != null && tokens!.accessToken!.isNotEmpty)
-        tokens.accessToken!,
-      if (grantToken != null && grantToken.isNotEmpty) grantToken,
-    ];
-    for (final token in ordered) {
-      final body = await _usageWith(token, acct);
+    final hostToken = tokens?.accessToken;
+    if (hostToken != null && hostToken.isNotEmpty) {
+      final body = await _usageWith(hostToken, acct);
       if (body != null) return body;
     }
-    return null;
+    final grantToken = await _grantToken();
+    if (grantToken == null || grantToken.isEmpty) return null;
+    return _usageWith(grantToken, acct);
   }
 
   Future<Map<String, dynamic>?> _usageWith(String token, String? acct) async {

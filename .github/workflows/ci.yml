@@ -61,7 +61,7 @@ jobs:
         run: bash tools/test-write-desktop-entry.sh
 
       - name: Coverage checker and policy tests
-        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_installer_security
+        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_verify_desktop_archive
 
       - name: Release version consistency
         run: python tools/check_release_version.py
@@ -113,7 +113,9 @@ jobs:
       - name: Verify Windows desktop package build
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./tools/package-windows.ps1
+        run: |
+          ./tools/package-windows.ps1
+          python tools/verify_desktop_archive.py release/quotabot-windows-x64-desktop.zip
 
       - name: Verify Windows desktop window and tray readiness
         if: runner.os == 'Windows'
@@ -127,7 +129,9 @@ jobs:
 
       - name: Verify Linux desktop package build
         if: runner.os == 'Linux'
-        run: bash tools/package-linux.sh --no-archive
+        run: |
+          bash tools/package-linux.sh
+          python tools/verify_desktop_archive.py release/quotabot-linux-x64-desktop.tar.gz
 
       - name: Verify Linux desktop window and tray readiness
         if: runner.os == 'Linux'
@@ -135,7 +139,11 @@ jobs:
 
       - name: Verify macOS desktop package build
         if: runner.os == 'macOS'
-        run: bash tools/package-macos.sh --no-archive
+        run: |
+          bash tools/package-macos.sh
+          archive="$(find release -maxdepth 1 -name 'quotabot-darwin-*-desktop.zip' -print -quit)"
+          test -n "$archive"
+          python tools/verify_desktop_archive.py "$archive"
 
       - name: MCP client snippet tests
         working-directory: integrations/mcp_clients

@@ -19,6 +19,7 @@ void main() {
       'claudeAiOauth': {
         'accessToken': 'claude-token',
         'subscriptionType': 'max',
+        'expiresAt': (nowEpoch() + 3600) * 1000,
       },
     }));
   });
@@ -103,8 +104,24 @@ void main() {
     expect(q.hasWindows, isTrue);
     expect(q.perMachine, isFalse);
     expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
-    expect(grantCalled, isTrue,
-        reason: 'grant is fetched up front but the fresh host token wins');
+    expect(grantCalled, isFalse);
+  });
+
+  test('a throwing grant loader cannot break a fresh host-token read',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => throw StateError('grant refresh unavailable'),
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer host-token');
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.hasWindows, isTrue);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
   test('falls through to the grant when the host token is expired', () async {
@@ -122,6 +139,27 @@ void main() {
 
     expect(q.ok, isTrue);
     expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+  });
+
+  test('keeps the stale host token as a last chance after grant auth fails',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
+    final tried = <String>[];
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => 'grant-token',
+      client: MockClient((request) async {
+        final auth = request.headers['Authorization']!;
+        tried.add(auth);
+        if (auth == 'Bearer host-token') {
+          return http.Response(_usageBody(), 200);
+        }
+        return http.Response('{}', 401);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(tried, ['Bearer grant-token', 'Bearer host-token']);
   });
 
   test('falls through to the grant on a 401 from a fresh host token', () async {
@@ -155,6 +193,31 @@ void main() {
     expect(q.ok, isFalse);
     expect(q.error, contains('re-run claude'));
     expect(q.error, contains('quotabot login claude'));
+  });
+
+  test('preserves throttle metadata and recovery for a known-expired login',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => null,
+      client: MockClient((_) async => http.Response(
+            '{}',
+            429,
+            headers: {'retry-after': '120'},
+          )),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.error, startsWith('HTTP 429'));
+    expect(q.error, contains('saved Claude login expired'));
+    expect(q.error, contains('re-run claude'));
+    expect(q.error, contains('quotabot login claude'));
+    expect(q.account, 'max');
+    expect(q.plan, 'max');
+    expect(q.pipeHealth, providerPipeHealthThrottled);
+    expect(q.httpStatus, 429);
+    expect(q.retryAfterSeconds, 120);
   });
 }
 

@@ -22,7 +22,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
 /// local metadata lookup, not a model call, so it costs no usage tokens.
 
-const _version = '0.9.0';
+const _version = '0.9.1';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -421,6 +421,8 @@ RouteSuggestion _suggestFor(
           capabilityBudgetResetByQuotaKey:
               capabilityGates.budgetResetByQuotaKey,
           preferenceOrder: preferenceOrder,
+          snapshotSource: _simulatedSnapshot == null ? 'live' : 'simulation',
+          snapshotAsOf: now,
         ),
       ).route;
     }();
@@ -2097,6 +2099,13 @@ bool providerHasDoctorProvenanceIdentity(ProviderQuota q) =>
     _providerHasDoctorAccountIdentity(q) &&
     (q.isManual || q.account.contains('@'));
 
+List<QuotaWindow> _doctorVisibleWindows(ProviderQuota quota, int now) {
+  final used = quota.windows
+      .where((w) => quotaWindowUsedPercent(quota, w, now) > 0.5)
+      .toList();
+  return used.isEmpty ? quota.windows : used;
+}
+
 void _printDoctor(List<ProviderQuota> results) {
   final now = nowEpoch();
   print(
@@ -2141,8 +2150,8 @@ void _printDoctor(List<ProviderQuota> results) {
             // availability state), otherwise its error. A real failure sets
             // error, not status, so an ERROR row still shows the failure.
             ? (q.status ?? q.error ?? '')
-            : visibleWindows(q.windows, now).map((w) {
-                final pct = windowUsedPercent(w, now).round();
+            : _doctorVisibleWindows(q, now).map((w) {
+                final pct = quotaWindowUsedPercent(q, w, now).round();
                 final reset = w.resetsAt == null
                     ? ''
                     : ' (resets ${countdown(w.resetsAt!, now)})';
@@ -2200,7 +2209,7 @@ void _printDoctor(List<ProviderQuota> results) {
 
   // Close the loop: tell the user where to route work next.
   final suggestion = _suggestFor(results, now);
-  print('\nSuggested: ${suggestion.reason}');
+  print('\nSuggested: ${suggestion.explanation}');
   print('  (run "quotabot suggest" for the full ranked list)');
 
   // Surface the calibration headline here so a skeptic sees how often quotabot's
@@ -2653,6 +2662,10 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
   ];
   final spendClass = _modelSpendClass(e);
   if (spendClass != null) parts.add(spendClass);
+  final fit = e.hardwareFit?.status;
+  if (e.local && fit != null && fit != LocalHardwareFitStatus.loaded) {
+    parts.add('${fit.wireName} fit');
+  }
   if (_modelHasAccountIdentity(e)) parts.add(e.account);
   final captured = routeCaptureAgeLabel(e.asOf, decisionAsOf);
   if (captured.isNotEmpty) parts.add(captured);
@@ -2687,7 +2700,7 @@ void _printSuggest(RouteSuggestion s) {
       '$provenance',
     );
   }
-  print('  ${s.reason}\n');
+  print('  ${s.explanation}\n');
 
   if (s.ranked.isEmpty) return;
   print('  candidates (best first):');

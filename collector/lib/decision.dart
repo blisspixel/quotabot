@@ -40,6 +40,9 @@ class DecisionContext {
   final Set<String>? capabilityKnownQuotaKeys;
   final Set<String>? capabilityAvailableQuotaKeys;
   final Map<String, int> capabilityBudgetResetByQuotaKey;
+  final String snapshotSource;
+  final int? snapshotAsOf;
+  final bool? snapshotStale;
 
   /// The user's explicit provider preference, most-preferred first. Applied only
   /// among already-viable candidates; empty means no preference.
@@ -63,6 +66,9 @@ class DecisionContext {
     this.capabilityAvailableQuotaKeys,
     this.capabilityBudgetResetByQuotaKey = const {},
     this.preferenceOrder = const [],
+    this.snapshotSource = 'live',
+    this.snapshotAsOf,
+    this.snapshotStale,
   });
 }
 
@@ -137,6 +143,9 @@ Decision decide(
         capabilityBudgetResetByQuotaKey:
             context.capabilityBudgetResetByQuotaKey,
         preferenceOrder: context.preferenceOrder,
+        snapshotSource: context.snapshotSource,
+        snapshotAsOf: context.snapshotAsOf,
+        snapshotStale: context.snapshotStale,
       ),
     );
 

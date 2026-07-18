@@ -219,6 +219,98 @@ enum ProviderQuotaKind {
       };
 }
 
+/// Passive memory capacity observed on the machine hosting a local runtime.
+///
+/// These values come from operating-system memory metadata and, when present,
+/// the local NVIDIA driver utility. They are not a benchmark, allocation, model
+/// load, or inference request. GPU values describe the largest single observed
+/// GPU so fit estimates never assume that memory from separate devices can be
+/// combined.
+class LocalHardwareInfo {
+  /// Unix epoch seconds when the capacity metadata was captured.
+  final int asOf;
+
+  /// Total physical system memory in bytes, when available.
+  final int? systemMemoryTotalBytes;
+
+  /// Physical system memory currently available in bytes, when available.
+  final int? systemMemoryAvailableBytes;
+
+  /// Total memory on the largest observed GPU in bytes, when available.
+  final int? gpuMemoryTotalBytes;
+
+  /// Currently free memory on that same GPU in bytes, when available.
+  final int? gpuMemoryAvailableBytes;
+
+  /// Number of GPUs represented by the driver metadata.
+  final int gpuCount;
+
+  const LocalHardwareInfo({
+    required this.asOf,
+    this.systemMemoryTotalBytes,
+    this.systemMemoryAvailableBytes,
+    this.gpuMemoryTotalBytes,
+    this.gpuMemoryAvailableBytes,
+    this.gpuCount = 0,
+  });
+
+  bool get hasMemoryEvidence =>
+      systemMemoryTotalBytes != null || gpuMemoryTotalBytes != null;
+
+  Map<String, dynamic> toJson() => {
+        'as_of': asOf,
+        if (systemMemoryTotalBytes != null)
+          'system_memory_total_bytes': systemMemoryTotalBytes,
+        if (systemMemoryAvailableBytes != null)
+          'system_memory_available_bytes': systemMemoryAvailableBytes,
+        if (gpuMemoryTotalBytes != null)
+          'gpu_memory_total_bytes': gpuMemoryTotalBytes,
+        if (gpuMemoryAvailableBytes != null)
+          'gpu_memory_available_bytes': gpuMemoryAvailableBytes,
+        if (gpuCount > 0) 'gpu_count': gpuCount,
+      };
+
+  factory LocalHardwareInfo.fromJson(Map<String, dynamic> json) {
+    // 16 PiB is deliberately far above current workstation capacity while
+    // bounding corrupt or hostile local snapshot values.
+    const maxMemoryBytes = 16 * 1024 * 1024 * 1024 * 1024 * 1024;
+    final systemTotal = boundedIntFromWire(
+      json['system_memory_total_bytes'],
+      min: 1,
+      max: maxMemoryBytes,
+    );
+    final systemAvailable = systemTotal == null
+        ? null
+        : boundedIntFromWire(
+            json['system_memory_available_bytes'],
+            min: 0,
+            max: systemTotal,
+          );
+    final gpuTotal = boundedIntFromWire(
+      json['gpu_memory_total_bytes'],
+      min: 1,
+      max: maxMemoryBytes,
+    );
+    final gpuAvailable = gpuTotal == null
+        ? null
+        : boundedIntFromWire(
+            json['gpu_memory_available_bytes'],
+            min: 0,
+            max: gpuTotal,
+          );
+    return LocalHardwareInfo(
+      asOf: boundedIntFromWire(json['as_of'], min: 0) ?? 0,
+      systemMemoryTotalBytes: systemTotal,
+      systemMemoryAvailableBytes: systemAvailable,
+      gpuMemoryTotalBytes: gpuTotal,
+      gpuMemoryAvailableBytes: gpuAvailable,
+      gpuCount: gpuTotal == null
+          ? 0
+          : boundedIntFromWire(json['gpu_count'], min: 0, max: 64) ?? 0,
+    );
+  }
+}
+
 class ProviderQuota {
   /// Stable provider id: "codex", "claude", "grok", "antigravity".
   final String provider;
@@ -264,6 +356,10 @@ class ProviderQuota {
   /// from their own model list; cloud providers are populated from the catalog by
   /// the registry. Empty when the model set is unknown.
   final List<ModelInfo> models;
+
+  /// Passive capacity metadata for the machine hosting a local runtime. Null
+  /// for subscriptions and when the operating system exposes no usable value.
+  final LocalHardwareInfo? localHardware;
 
   /// Live per-model quota, for providers that meter each model family from its
   /// own pool (Antigravity). Empty for providers with a single shared window;
@@ -344,6 +440,7 @@ class ProviderQuota {
     this.active = false,
     this.details = const [],
     this.models = const [],
+    this.localHardware,
     this.modelQuotas = const [],
     this.suspect,
     this.driftReason,
@@ -374,6 +471,9 @@ class ProviderQuota {
   /// This check is independent of the provider registry so routing, cache, and
   /// analytics can fail closed even when they do not load adapter code.
   String? get sourceClassViolation {
+    if (localHardware != null && !isLocal) {
+      return 'local hardware evidence requires kind=local';
+    }
     final classifiedManual = sourceClass == ProviderSourceClass.manual;
     if (isManual != classifiedManual) {
       return classifiedManual
@@ -474,6 +574,7 @@ class ProviderQuota {
           'reset_credits_available': resetCreditsAvailable,
         'windows': windows.map((w) => w.toJson()).toList(),
         if (models.isNotEmpty) 'models': models.map((m) => m.toJson()).toList(),
+        if (localHardware != null) 'local_hardware': localHardware!.toJson(),
         if (modelQuotas.isNotEmpty)
           'model_quotas': modelQuotas.map((m) => m.toJson()).toList(),
       };
@@ -509,6 +610,11 @@ class ProviderQuota {
         models: ((j['models'] as List?) ?? const [])
             .map((m) => ModelInfo.fromJson(m as Map<String, dynamic>))
             .toList(),
+        localHardware: j['local_hardware'] is Map
+            ? LocalHardwareInfo.fromJson(
+                (j['local_hardware'] as Map).cast<String, dynamic>(),
+              )
+            : null,
         modelQuotas: ((j['model_quotas'] as List?) ?? const [])
             .map((m) => ModelQuota.fromJson(m as Map<String, dynamic>))
             .toList(),
@@ -539,6 +645,7 @@ class ProviderQuota {
         models: metadataFrom != null && metadataFrom.models.isNotEmpty
             ? metadataFrom.models
             : models,
+        localHardware: metadataFrom?.localHardware ?? localHardware,
         // Per-model budget is quota evidence, not presentation metadata. A
         // failed or windowless fresh read must never graft untrusted pools onto
         // otherwise trusted cached windows.
@@ -573,6 +680,7 @@ class ProviderQuota {
         active: active,
         details: details,
         models: models,
+        localHardware: localHardware,
         modelQuotas: modelQuotas,
         suspect: reason,
         driftReason: driftReason,
@@ -604,6 +712,7 @@ class ProviderQuota {
         active: active,
         details: details,
         models: models,
+        localHardware: localHardware,
         modelQuotas: modelQuotas,
         driftReason: reason,
         driftObservedAt: observedAt,
@@ -640,12 +749,48 @@ class ProviderQuota {
         stale: true,
         kind: kind,
         status: metadataFrom?.status ?? status,
+        localHardware: metadataFrom?.localHardware ?? localHardware,
         driftReason: reason,
         driftObservedAt: observedAt,
         perMachine: perMachine,
         pipeHealth: metadataFrom?.pipeHealth ?? pipeHealth,
         httpStatus: metadataFrom?.httpStatus ?? httpStatus,
         retryAfterSeconds: metadataFrom?.retryAfterSeconds ?? retryAfterSeconds,
+      );
+
+  /// Returns a local-runtime copy carrying a fresh passive hardware snapshot.
+  /// [detail] is an optional already-formatted display line for human surfaces.
+  ProviderQuota withLocalHardware(
+    LocalHardwareInfo hardware, {
+    String? detail,
+  }) =>
+      ProviderQuota(
+        provider: provider,
+        displayName: displayName,
+        account: account,
+        asOf: asOf,
+        plan: plan,
+        source: source,
+        sourceClass: sourceClass,
+        ok: ok,
+        error: error,
+        windows: windows,
+        stale: stale,
+        kind: kind,
+        status: status,
+        active: active,
+        details: detail == null ? details : [...details, detail],
+        models: models,
+        localHardware: hardware,
+        modelQuotas: modelQuotas,
+        suspect: suspect,
+        driftReason: driftReason,
+        driftObservedAt: driftObservedAt,
+        perMachine: perMachine,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfterSeconds,
+        resetCreditsAvailable: resetCreditsAvailable,
       );
 
   /// True when this snapshot carries usable quota windows.
@@ -750,6 +895,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           cloudOffloaded: m.cloudOffloaded,
         ),
     ],
+    localHardware: q.localHardware,
     modelQuotas: [
       for (final m in q.modelQuotas)
         ModelQuota(

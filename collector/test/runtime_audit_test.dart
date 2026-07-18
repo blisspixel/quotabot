@@ -44,6 +44,14 @@ void main() {
           r['access'] == 'write'),
       isTrue,
     );
+    expect(
+      shared.any((r) =>
+          r['kind'] == 'process' &&
+          (r['target'] as String).contains('Win32_OperatingSystem') &&
+          r['data_class'] == 'hardware_metadata' &&
+          r['spends_tokens'] == false),
+      isTrue,
+    );
     final grok = providers.firstWhere((p) => p['provider'] == 'grok');
     final grokReads = (grok['reads'] as List).cast<Map<String, dynamic>>();
     expect(
@@ -161,6 +169,42 @@ void main() {
     expect(targets, isNot(contains('/images')));
     expect(targets, isNot(contains('/responses')));
     expect(targets, isNot(contains(':generateContent')));
+  });
+
+  test('runtime manifest discloses OS-specific passive hardware access', () {
+    List<Map<String, dynamic>> sharedFor(String os) =>
+        (buildRuntimeAccessReport(
+          generatedAt: 1,
+          includeReads: true,
+          includeNetwork: false,
+          environment: const {
+            'HOME': '/home/tester',
+            'SystemRoot': r'C:\Windows',
+          },
+          os: os,
+        ).toJson()['shared'] as List)
+            .cast<Map<String, dynamic>>();
+
+    final linux = sharedFor('linux');
+    expect(linux.any((record) => record['target'] == '/proc/meminfo'), isTrue);
+    expect(
+      linux.any((record) =>
+          record['kind'] == 'process' &&
+          (record['target'] as String).contains('nvidia-smi')),
+      isTrue,
+    );
+
+    final mac = sharedFor('macos');
+    expect(
+      mac.any((record) =>
+          (record['target'] as String).contains('sysctl -n hw.memsize')),
+      isTrue,
+    );
+    expect(
+      mac.any((record) =>
+          (record['target'] as String).contains('/usr/bin/vm_stat')),
+      isTrue,
+    );
   });
 
   test('runtime access observation records invoked providers explicitly', () {

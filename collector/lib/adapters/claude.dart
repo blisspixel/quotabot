@@ -48,37 +48,58 @@ class ClaudeAdapter {
       final host = _readHostCredential();
       final plan = host?.plan;
 
-      // Try tokens in priority order. A fresh host token goes first (no refresh
-      // round trip); a stale host token is demoted below the self-refreshing
-      // grant but still tried last in case its expiry estimate was wrong.
-      final grantToken = await _grantToken();
-      final ordered = <String>[
-        if (host != null && host.fresh) host.token,
-        if (grantToken != null) grantToken,
-        if (host != null && !host.fresh) host.token,
-      ];
-
-      if (ordered.isEmpty) {
-        // No usable credential at all: neither a host token nor a grant.
-        if (host == null) {
-          return ProviderQuota.error(
-            id,
-            name,
-            'no ~/.claude/.credentials.json (run claude, or quotabot login claude)',
-            asOf,
-          );
-        }
-        return ProviderQuota.error(id, name, 'no oauth access token', asOf);
+      _ReadOutcome? lastError;
+      // A fresh host token is the cheapest path and must stay independent of
+      // quotabot's optional grant. Resolve that grant only after host auth
+      // fails, or when the host token is stale or missing.
+      if (host != null && host.fresh) {
+        final outcome = await _read(
+          host.token,
+          plan,
+          asOf,
+          knownExpired: false,
+        );
+        if (outcome.quota != null) return outcome.quota!;
+        if (!outcome.unauthorized) return outcome.error!;
+        lastError = outcome;
       }
 
-      _ReadOutcome? lastError;
-      for (final token in ordered) {
-        final outcome = await _read(token, plan, asOf);
+      final grantToken = await _grantToken();
+      if (grantToken != null) {
+        final outcome = await _read(
+          grantToken,
+          plan,
+          asOf,
+          knownExpired: false,
+        );
         if (outcome.quota != null) return outcome.quota!;
         // A 401 means "try the next token"; a non-auth HTTP/network error is
         // terminal for this collection and is reported as-is.
         if (!outcome.unauthorized) return outcome.error!;
         lastError = outcome;
+      }
+
+      // A stale host token is the last chance after the self-refreshing grant.
+      // Its expiry estimate can be wrong, so a successful read still wins.
+      if (host != null && !host.fresh) {
+        final outcome = await _read(
+          host.token,
+          plan,
+          asOf,
+          knownExpired: host.knownExpired,
+        );
+        if (outcome.quota != null) return outcome.quota!;
+        if (!outcome.unauthorized) return outcome.error!;
+        lastError = outcome;
+      }
+
+      if (host == null && grantToken == null) {
+        return ProviderQuota.error(
+          id,
+          name,
+          'no ~/.claude/.credentials.json (run claude, or quotabot login claude)',
+          asOf,
+        );
       }
       // Every candidate token was unauthorized.
       return lastError?.error ??
@@ -98,7 +119,12 @@ class ClaudeAdapter {
   /// Reads usage with one bearer token. Returns a quota on success, an
   /// `unauthorized` marker on 401 (caller should try the next token), or a
   /// terminal error for any other non-200.
-  Future<_ReadOutcome> _read(String token, String? plan, int asOf) async {
+  Future<_ReadOutcome> _read(
+    String token,
+    String? plan,
+    int asOf, {
+    required bool knownExpired,
+  }) async {
     final get = _http?.get ?? http.get;
     final resp = await get(
       Uri.parse(_endpoint),
@@ -125,11 +151,15 @@ class ClaudeAdapter {
     if (resp.statusCode != 200) {
       final retryAfter =
           retryAfterSeconds(resp.headers['retry-after'], now: asOf);
+      final recovery = knownExpired
+          ? '; saved Claude login expired '
+              '(re-run claude, or quotabot login claude)'
+          : '';
       return _ReadOutcome.error(
         ProviderQuota.error(
           id,
           name,
-          'HTTP ${resp.statusCode}',
+          'HTTP ${resp.statusCode}$recovery',
           asOf,
           account: plan ?? 'default',
           plan: plan,
@@ -167,8 +197,16 @@ class ClaudeAdapter {
     if (token == null || token.isEmpty) return null;
     final plan = oauth?['subscriptionType']?.toString();
     final expiresAtMs = oauth?['expiresAt'];
-    final fresh = expiresAtMs is int && expiresAtMs ~/ 1000 > nowEpoch() + 60;
-    return _HostCredential(token: token, plan: plan, fresh: fresh);
+    final expiresAt = expiresAtMs is int ? expiresAtMs ~/ 1000 : null;
+    final now = nowEpoch();
+    final fresh = expiresAt != null && expiresAt > now + 60;
+    final knownExpired = expiresAt != null && expiresAt <= now;
+    return _HostCredential(
+      token: token,
+      plan: plan,
+      fresh: fresh,
+      knownExpired: knownExpired,
+    );
   }
 }
 
@@ -176,7 +214,13 @@ class _HostCredential {
   final String token;
   final String? plan;
   final bool fresh;
-  _HostCredential({required this.token, this.plan, required this.fresh});
+  final bool knownExpired;
+  _HostCredential({
+    required this.token,
+    this.plan,
+    required this.fresh,
+    required this.knownExpired,
+  });
 }
 
 class _ReadOutcome {

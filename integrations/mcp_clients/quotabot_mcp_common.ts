@@ -1,5 +1,7 @@
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
+const REQUIRED_ROUTING_TOOLS = ["suggest_provider", "suggest_model"] as const;
+
 export function mcpBearerHeaders() {
   const token = process.env.QUOTABOT_MCP_TOKEN?.trim();
   return token ? { Authorization: `Bearer ${token}` } : undefined;
@@ -60,8 +62,9 @@ export async function printRoutingDecision(
 ): Promise<void> {
   const tools = await client.listTools();
   const names = new Set(tools.tools.map((tool) => tool.name));
-  if (!names.has("suggest_provider")) {
-    throw new Error("quotabot suggest_provider tool is missing");
+  const missing = REQUIRED_ROUTING_TOOLS.filter((name) => !names.has(name));
+  if (missing.length > 0) {
+    throw new Error(`quotabot MCP tools missing: ${missing.join(", ")}`);
   }
 
   const suggestion = structuredContent(

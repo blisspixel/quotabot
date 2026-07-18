@@ -283,6 +283,27 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('keeps stale headroom last known after the reset passes', (
+    tester,
+  ) async {
+    final past = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 60;
+    final stale = ProviderQuota.fromJson({
+      ..._q(80, resetsAt: past).toJson(),
+      'as_of': past - 3600,
+      'stale': true,
+    });
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: stale, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('20% last known'), findsOneWidget);
+    expect(find.text('reset passed (last known)'), findsNothing);
+    expect(find.text('ready'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('renders reset-past exhausted snapshots as ready', (
     tester,
   ) async {

@@ -2678,14 +2678,14 @@ class ProviderTile extends StatelessWidget {
     final muted = chrome.muted;
     final fg = chrome.foreground;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final views = quota.windows.map((w) => _view(w, now)).toList();
+    final views = quota.windows.map((w) => _view(quota, w, now)).toList();
 
     // Binding constraint from pure analysis. A spent longer window overrides
     // shorter ones so the display never shows healthy when the binding cap is spent.
     final bindingWin = bindingWindow(quota, now);
     WinView? binding;
     if (bindingWin != null) {
-      binding = _view(bindingWin, now);
+      binding = _view(quota, bindingWin, now);
     }
     final blocked = binding != null && binding.exhausted;
     // When a spent short window blocks the card, a longer window that still has
@@ -2880,7 +2880,7 @@ class ProviderTile extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: WindowBar(
-                    view: _view(secondaryWin, now),
+                    view: _view(quota, secondaryWin, now),
                     muted: muted,
                     fg: fg,
                     evidenceLabel: evidenceLabel,
@@ -3197,9 +3197,9 @@ class WinView {
   bool get exhausted => !rolledOver && remaining <= kSpentHeadroomFloor;
 }
 
-WinView _view(QuotaWindow w, int now) {
-  final rolled = windowHasRolledOver(w, now);
-  final rem = windowHeadroom(w, now);
+WinView _view(ProviderQuota quota, QuotaWindow w, int now) {
+  final rolled = quotaWindowHasRolledOver(quota, w, now);
+  final rem = quotaWindowHeadroom(quota, w, now);
   return WinView(w.label, rem, rolled, w.resetsAt);
 }
 

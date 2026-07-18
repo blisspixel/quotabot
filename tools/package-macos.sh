@@ -53,7 +53,13 @@ echo "Production distribution still requires Developer ID signing, notarization,
 
 if [ "$archive" -eq 1 ]; then
   mkdir -p "$release_dir"
-  out="$release_dir/quotabot-darwin-$arch-app.zip"
+  out="$release_dir/quotabot-darwin-$arch-desktop.zip"
+  asset="$(basename "$out")"
+  rm -f "$out" "$out.sha256"
   ditto -c -k --keepParent "$app_bundle" "$out"
+  hash="$(shasum -a 256 "$out" | awk '{print tolower($1)}')"
+  printf '%s  %s' "$hash" "$asset" > "$out.sha256"
   echo "Archive ready: $out"
+  echo "Checksum: $out.sha256"
+  echo "SHA256: $hash"
 fi

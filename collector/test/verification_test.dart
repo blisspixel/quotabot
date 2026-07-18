@@ -109,6 +109,37 @@ void main() {
       expect(report.passed, isTrue);
     });
 
+    test('stale passed resets retain their last observed usage', () {
+      final stale = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'work@example.com',
+        asOf: now - 86400,
+        stale: true,
+        error: 'cached',
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 80,
+            resetsAt: now - 3600,
+          ),
+        ],
+      );
+
+      final report = buildVerificationReport(
+        [stale],
+        now,
+        os: 'windows',
+        filtered: true,
+      );
+
+      expect(report.providers.single.windows.single['used_percent'], 80);
+      expect(
+        report.providers.single.windows.single['effective_used_percent'],
+        80,
+      );
+    });
+
     test('source-class contradictions fail verification', () {
       final invalid = <ProviderQuota>[
         ProviderQuota(
