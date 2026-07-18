@@ -201,8 +201,10 @@ abstract class RouteLeaseStore {
   List<RouteLease> active(int now);
 
   /// Selects a target from the latest active leases and creates its lease as
-  /// one store transaction. Implementations must not allow another reservation
-  /// to interleave between [select] and persistence. A matching idempotency key
+  /// one store transaction. File-backed stores serialize independent processes.
+  /// Callers must route all file-store operations in a POSIX process through one
+  /// isolate because Dart advisory file locks are process-scoped. Synchronous
+  /// calls within that isolate cannot interleave. A matching idempotency key
   /// that fails [reuseWhere] is a scope conflict and is never reassigned.
   RouteLeaseReservation selectAndReserve({
     required RouteLeaseSelector select,

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:quotabot_collector/leases.dart';
 import 'package:test/test.dart';
@@ -11,43 +10,95 @@ LeaseIdFactory _idFactory() {
   return () => 'lease-${++i}';
 }
 
-Future<void> _fileSelectionWorker(List<Object?> message) async {
-  final directory = message[0]! as String;
-  final leaseId = message[1]! as String;
-  final replies = message[2]! as SendPort;
-  final start = ReceivePort();
-  replies.send(start.sendPort);
-  await start.first;
-  try {
-    final store = FileRouteLeaseStore(
-      dirFactory: () => Directory(directory),
-      idFactory: () => leaseId,
+const _workerReady = 'quotabot-lease-worker-ready';
+const _workerResult = 'quotabot-lease-worker-result:';
+
+class _LeaseSelectionWorker {
+  final Process process;
+  final StreamIterator<String> output;
+  final Future<String> stderrText;
+
+  _LeaseSelectionWorker(this.process, this.output, this.stderrText);
+
+  static Future<_LeaseSelectionWorker> start(
+    String script,
+    String directory,
+    String leaseId,
+  ) async {
+    final process = await Process.start(
+      Platform.resolvedExecutable,
+      [
+        '--packages=.dart_tool/package_config.json',
+        script,
+        directory,
+        leaseId,
+      ],
+      workingDirectory: Directory.current.path,
     );
-    final reservation = store.selectAndReserve(
-      select: (active) {
-        // Widen the old read-then-write race. With the selector inside the file
-        // lock, only the first worker can observe an empty ledger.
-        if (active.isEmpty) sleep(const Duration(milliseconds: 150));
-        final provider = active.any((lease) => lease.provider == 'claude')
-            ? 'codex'
-            : 'claude';
-        return RouteLeaseSelection.selected(
-          RouteLeaseTarget(provider: provider, account: 'a'),
-        );
-      },
-      now: 100,
-      leaseSeconds: 60,
-      weightPercent: 30,
+    return _LeaseSelectionWorker(
+      process,
+      StreamIterator(
+        process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
+      ),
+      process.stderr.transform(utf8.decoder).join(),
     );
-    replies.send({
-      'reserved': reservation.reserved,
-      'provider': reservation.lease?.provider,
-      'reason': reservation.reason,
-    });
-  } catch (error) {
-    replies.send({'reserved': false, 'error': error.toString()});
-  } finally {
-    start.close();
+  }
+
+  Future<void> waitUntilReady() async {
+    while (await output.moveNext()) {
+      if (output.current == _workerReady) return;
+    }
+    final exit = await process.exitCode;
+    final stderr = await stderrText;
+    throw StateError('lease worker exited before ready: $exit $stderr');
+  }
+
+  Future<Map<String, dynamic>> releaseAndRead() async {
+    process.stdin.writeln('start');
+    await process.stdin.flush();
+    await process.stdin.close();
+    Map<String, dynamic>? result;
+    while (await output.moveNext()) {
+      final line = output.current;
+      if (!line.startsWith(_workerResult)) continue;
+      final decoded = jsonDecode(line.substring(_workerResult.length));
+      if (decoded is Map<Object?, Object?>) {
+        result = decoded.cast<String, dynamic>();
+      }
+    }
+    final exit = await process.exitCode;
+    final stderr = await stderrText;
+    if (exit != 0 || result == null) {
+      throw StateError('lease worker failed: $exit $stderr');
+    }
+    return result;
+  }
+
+  Future<void> stop() async {
+    try {
+      await process.stdin.close();
+    } catch (_) {}
+    process.kill();
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 3));
+      } on TimeoutException {
+        // The test is already unwinding. Leave directory cleanup to report a
+        // still-active worker rather than blocking the suite indefinitely.
+      }
+    }
+    try {
+      await output.cancel();
+    } catch (_) {}
+    try {
+      await stderrText.timeout(const Duration(seconds: 1));
+    } on TimeoutException {
+      // The process pipes should close with the process. Do not let diagnostics
+      // prevent bounded cleanup on an abnormal platform failure.
+    }
   }
 }
 
@@ -384,61 +435,80 @@ void main() {
     expect(secondStore.active(138), isEmpty);
   });
 
+  test('file store selects against leases persisted in its transaction', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final store = FileRouteLeaseStore(
+      dirFactory: () => dir,
+      idFactory: _idFactory(),
+    );
+    RouteLeaseReservation reserveBest() => store.selectAndReserve(
+          select: (active) {
+            final provider = active.any((lease) => lease.provider == 'claude')
+                ? 'codex'
+                : 'claude';
+            return RouteLeaseSelection.selected(
+              RouteLeaseTarget(provider: provider, account: 'a'),
+            );
+          },
+          now: 100,
+          leaseSeconds: 60,
+          weightPercent: 30,
+        );
+
+    expect(reserveBest().lease!.provider, 'claude');
+    expect(reserveBest().lease!.provider, 'codex');
+    expect(store.active(100), hasLength(2));
+  });
+
   test('file store atomically selects concurrent reservation targets',
       () async {
     final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
-    final replies = ReceivePort();
-    final starts = <SendPort>[];
-    final results = <Map<String, dynamic>>[];
-    final completed = Completer<void>();
-    final subscription = replies.listen((message) {
-      if (message is SendPort) {
-        starts.add(message);
-        if (starts.length == 2) {
-          for (final start in starts) {
-            start.send(null);
-          }
-        }
-        return;
-      }
-      if (message is Map<Object?, Object?>) {
-        results.add(message.cast<String, dynamic>());
-        if (results.length == 2 && !completed.isCompleted) {
-          completed.complete();
-        }
-      }
-    });
-    final workers = <Isolate>[];
+    final workerScript = File(
+      '${Directory.current.path}${Platform.pathSeparator}test'
+      '${Platform.pathSeparator}support${Platform.pathSeparator}'
+      'lease_selection_worker.dart',
+    ).absolute.path;
+    expect(File(workerScript).existsSync(), isTrue);
+    final workers = <_LeaseSelectionWorker>[];
     try {
-      workers.add(await Isolate.spawn(
-        _fileSelectionWorker,
-        <Object?>[dir.path, 'lease-a', replies.sendPort],
-      ));
-      workers.add(await Isolate.spawn(
-        _fileSelectionWorker,
-        <Object?>[dir.path, 'lease-b', replies.sendPort],
-      ));
-      await completed.future.timeout(const Duration(seconds: 10));
+      workers.add(
+        await _LeaseSelectionWorker.start(workerScript, dir.path, 'lease-a'),
+      );
+      workers.add(
+        await _LeaseSelectionWorker.start(workerScript, dir.path, 'lease-b'),
+      );
+      await Future.wait(
+        workers.map((worker) => worker.waitUntilReady()),
+      ).timeout(const Duration(seconds: 15));
+      final results = await Future.wait(
+        workers.map((worker) => worker.releaseAndRead()),
+      ).timeout(const Duration(seconds: 15));
+      final diagnostics = jsonEncode(results);
 
-      expect(results.map((result) => result['reserved']), everyElement(isTrue));
+      expect(
+        results.map((result) => result['reserved']),
+        everyElement(isTrue),
+        reason: diagnostics,
+      );
       expect(
         results.map((result) => result['provider']),
         unorderedEquals(['claude', 'codex']),
+        reason: diagnostics,
       );
       final persisted = FileRouteLeaseStore(dirFactory: () => dir).active(100);
       expect(
         persisted.map((lease) => lease.provider),
         unorderedEquals(['claude', 'codex']),
+        reason: diagnostics,
       );
     } finally {
-      for (final worker in workers) {
-        worker.kill(priority: Isolate.immediate);
-      }
-      await subscription.cancel();
-      replies.close();
+      await Future.wait(workers.map((worker) => worker.stop()));
       if (dir.existsSync()) dir.deleteSync(recursive: true);
     }
-  });
+  }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('file store rejects reservations after pruning reaches the active cap',
       () {
