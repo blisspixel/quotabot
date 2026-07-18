@@ -173,6 +173,30 @@ void main() {
     expect(saved?.sort, ProviderSort.defaultOrder.name);
   });
 
+  testWidgets('new profile focuses its name and submits with keyboard done', (
+    tester,
+  ) async {
+    final result = await _openEditor(tester);
+
+    await _choose(tester, 'Default', 'New profile');
+    final nameField = find.byType(TextField);
+    final editable = find.descendant(
+      of: nameField,
+      matching: find.byType(EditableText),
+    );
+    expect(
+      FocusManager.instance.primaryFocus,
+      tester.widget<EditableText>(editable).focusNode,
+    );
+
+    await tester.enterText(nameField, 'keyboard-profile');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(result.value?.action, ProfileEditorAction.save);
+    expect(result.value?.profile?.name, 'keyboard-profile');
+  });
+
   testWidgets('account selection removes and restores its provider', (
     tester,
   ) async {
@@ -276,6 +300,30 @@ void main() {
     expect(saved?.routingPolicy, ProfileRoutingPolicy.localOnly);
     expect(saved?.theme, appThemeLight);
     expect(saved?.sort, ProviderSort.alphabetical.name);
+  });
+
+  testWidgets('editing a profile preserves its routing preference order', (
+    tester,
+  ) async {
+    const ordered = QuotaProfile(
+      name: 'ordered',
+      providers: {'codex', 'grok'},
+      routingPolicy: ProfileRoutingPolicy.subscriptionsFirst,
+      preferenceOrder: ['grok', 'codex'],
+      theme: appThemeDark,
+    );
+    final result = await _openEditor(
+      tester,
+      profiles: [QuotaProfile.defaultProfile(), ordered],
+      activeProfile: ordered.name,
+    );
+
+    await _choose(tester, 'Dark', 'Light');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(result.value?.profile?.theme, appThemeLight);
+    expect(result.value?.profile?.preferenceOrder, ['grok', 'codex']);
   });
 
   testWidgets('switching profiles loads that profile stored UI preferences', (

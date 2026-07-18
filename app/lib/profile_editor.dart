@@ -47,6 +47,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
   late final List<ProfileProviderOption> _options;
   late final TextEditingController _name;
+  late final FocusNode _nameFocus;
   late String _selection;
   late ProfileRoutingPolicy _policy;
   late ProviderSort _sort;
@@ -54,6 +55,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   late Set<String> _hidden;
   late Set<String> _providers;
   late Map<String, Set<String>> _accounts;
+  late List<String> _preferenceOrder;
 
   bool get _creating => _selection == _newProfileValue;
 
@@ -65,6 +67,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       profiles: widget.profiles,
     );
     _name = TextEditingController();
+    _nameFocus = FocusNode();
     final active = widget.profiles.any((p) => p.name == widget.activeProfile)
         ? widget.activeProfile
         : defaultProfileName;
@@ -74,7 +77,14 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   @override
   void dispose() {
     _name.dispose();
+    _nameFocus.dispose();
     super.dispose();
+  }
+
+  void _focusNameAfterMenuCloses() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _creating) _nameFocus.requestFocus();
+    });
   }
 
   void _loadExisting(String name) {
@@ -94,6 +104,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         : {...profile.hiddenProviders};
     _providers = _selectedProvidersFor(profile);
     _accounts = _selectedAccountsFor(profile);
+    _preferenceOrder = List.of(profile.preferenceOrder);
   }
 
   void _loadNew() {
@@ -109,6 +120,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         if (option.accounts.isNotEmpty)
           option.provider: option.accounts.toSet(),
     };
+    _preferenceOrder = const [];
   }
 
   Set<String> _selectedProvidersFor(QuotaProfile profile) {
@@ -157,8 +169,14 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     hiddenProviders: _hidden,
     routingPolicy: _policy,
     sort: _sort,
+    preferenceOrder: _preferenceOrder,
     theme: storedAppTheme(_theme),
   );
+
+  void _submit() {
+    if (!_canSave) return;
+    Navigator.of(context).pop(ProfileEditorResult.save(_draft()));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -195,6 +213,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                   setState(() {
                     if (value == _newProfileValue) {
                       _loadNew();
+                      _focusNameAfterMenuCloses();
                     } else {
                       _loadExisting(value);
                     }
@@ -203,14 +222,19 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               ),
               const SizedBox(height: 10),
               TextField(
+                key: ValueKey('profile-name:$_selection'),
                 controller: _name,
+                focusNode: _nameFocus,
                 enabled: _creating,
+                autofocus: _creating,
+                textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
                   labelText: 'Name',
                   isDense: true,
                   errorText: _nameError(),
                 ),
                 onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<ProfileRoutingPolicy>(
@@ -311,11 +335,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           child: const Text('Cancel'),
         ),
         TextButton(
-          onPressed: _canSave
-              ? () => Navigator.of(
-                  context,
-                ).pop(ProfileEditorResult.save(_draft()))
-              : null,
+          onPressed: _canSave ? _submit : null,
           child: const Text('Save'),
         ),
       ],

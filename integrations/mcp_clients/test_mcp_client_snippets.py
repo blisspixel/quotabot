@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import math
 import py_compile
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,12 +12,16 @@ from types import SimpleNamespace
 from quotabot_mcp_common import (
     as_pretty_json,
     require_routing_tools,
+    require_loopback_mcp_url,
     routing_summary,
     structured_content,
 )
 
 
 ROOT = Path(__file__).resolve().parent
+LOOPBACK_URL_CASES = json.loads(
+    (ROOT / "mcp_loopback_url_cases.json").read_text(encoding="utf-8")
+)
 
 
 class McpClientSnippetTest(unittest.TestCase):
@@ -52,6 +58,29 @@ class McpClientSnippetTest(unittest.TestCase):
         self.assertIn("requestInit", ts_http)
         self.assertIn('"mcp>=1.28,<2"', readme)
 
+    def test_http_snippets_validate_before_token_or_transport(self) -> None:
+        python_http = (ROOT / "quotabot_mcp_http.py").read_text(encoding="utf-8")
+        ts_http = (ROOT / "quotabot_mcp_http.ts").read_text(encoding="utf-8")
+        python_main = python_http[python_http.index("async def main()") :]
+        ts_main = ts_http[ts_http.index("try {") :]
+
+        self.assertLess(
+            python_main.index("require_loopback_mcp_url(raw_url)"),
+            python_main.index("headers = bearer_headers()"),
+        )
+        self.assertLess(
+            python_main.index("headers = bearer_headers()"),
+            python_main.index("httpx.AsyncClient("),
+        )
+        self.assertLess(
+            ts_main.index("requireLoopbackMcpUrl(rawUrl)"),
+            ts_main.index("const headers = mcpBearerHeaders()"),
+        )
+        self.assertLess(
+            ts_main.index("const headers = mcpBearerHeaders()"),
+            ts_main.index("new StreamableHTTPClientTransport("),
+        )
+
     def test_snippets_stay_fail_soft_and_metadata_only(self) -> None:
         joined = "\n".join(
             path.read_text(encoding="utf-8")
@@ -66,6 +95,39 @@ class McpClientSnippetTest(unittest.TestCase):
 
 
 class McpClientCommonTest(unittest.TestCase):
+    def test_python_loopback_url_policy_uses_shared_cases(self) -> None:
+        for case in LOOPBACK_URL_CASES:
+            with self.subTest(url=case["url"]):
+                if case["accepted"]:
+                    self.assertEqual(
+                        require_loopback_mcp_url(case["url"]),
+                        case["url"],
+                    )
+                else:
+                    with self.assertRaisesRegex(ValueError, "exact loopback host"):
+                        require_loopback_mcp_url(case["url"])
+
+    def test_typescript_loopback_url_policy_uses_shared_cases(self) -> None:
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node.js is required for TypeScript snippet tests")
+        tsx_cli = ROOT / "node_modules" / "tsx" / "dist" / "cli.mjs"
+        self.assertTrue(tsx_cli.is_file(), "run npm ci before the snippet tests")
+
+        completed = subprocess.run(
+            [node, str(tsx_cli), str(ROOT / "test_mcp_client_urls.ts")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
     def test_structured_content_prefers_direct_content(self) -> None:
         result = SimpleNamespace(
             structuredContent={"source": "direct"},

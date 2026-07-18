@@ -22,7 +22,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
 /// local metadata lookup, not a model call, so it costs no usage tokens.
 
-const _version = '0.9.1';
+const _version = '0.9.2';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -148,8 +148,22 @@ Map<String, dynamic> _snapshot(
 
 Future<void> main(List<String> rawArgs) async {
   final args = _normalizeArgs(rawArgs);
-  final flags = args.where((a) => a.startsWith('-')).toSet();
-  final pos = args.where((a) => !a.startsWith('-')).toList();
+  final optionTerminator = args.indexOf('--');
+  final flags = <String>{};
+  final pos = <String>[];
+  for (var i = 0; i < args.length; i++) {
+    final arg = args[i];
+    if (i == optionTerminator) continue;
+    if (optionTerminator < 0 || i < optionTerminator) {
+      if (arg.startsWith('-')) {
+        flags.add(arg);
+      } else {
+        pos.add(arg);
+      }
+    } else {
+      pos.add(arg);
+    }
+  }
   final cmd = pos.isEmpty ? '' : pos.first;
   final wantsJson = flags.contains('--json');
   style = AnsiStyle(_useColor(flags));
@@ -160,6 +174,31 @@ Future<void> main(List<String> rawArgs) async {
   }
   if (cmd == 'version' || flags.contains('--version') || flags.contains('-v')) {
     stdout.writeln('quotabot $_version');
+    return;
+  }
+
+  final optionError = _optionError(args);
+  if (optionError != null) {
+    stderr.writeln('quotabot: $optionError');
+    exitCode = _exitUsage;
+    return;
+  }
+  if (!_isKnownCommand(cmd)) {
+    stderr.writeln('${style.red('unknown command')}: $cmd');
+    stderr.writeln('run "quotabot help" for the command list');
+    exitCode = _exitUsage;
+    return;
+  }
+  final commandOptionError = _commandOptionError(cmd, flags);
+  if (commandOptionError != null) {
+    stderr.writeln('quotabot: $commandOptionError');
+    exitCode = _exitUsage;
+    return;
+  }
+  final positionalError = _positionalError(cmd, pos);
+  if (positionalError != null) {
+    stderr.writeln('quotabot: $positionalError');
+    exitCode = _exitUsage;
     return;
   }
 
@@ -204,8 +243,6 @@ Future<void> main(List<String> rawArgs) async {
       await _check(pos[1], wantsJson, profile, excludedProviders);
       return;
     case 'suggest':
-      final results = await _read(profile, excludedProviders);
-      final now = nowEpoch();
       final providerRoute = flags.contains('--provider-route');
       if (_hasModelProfile(flags) && !providerRoute) {
         if (_hasRouteCostPolicy(flags)) {
@@ -221,6 +258,8 @@ Future<void> main(List<String> rawArgs) async {
           exitCode = _exitUsage;
           return;
         }
+        final results = await _read(profile, excludedProviders);
+        final now = nowEpoch();
         final burnStats = _burnStatsFor(results, now);
         final useExpiringQuota = flags.contains('--use-expiring-quota');
         final s = suggestModel(
@@ -255,8 +294,11 @@ Future<void> main(List<String> rawArgs) async {
           exitCode = _exitUsage;
           return;
         }
-        final riskZ =
-            _doubleOption(flags, 'risk', 0).clamp(0.0, 5.0).toDouble();
+        final risk = _riskFromFlags(flags);
+        if (!risk.ok) {
+          exitCode = _exitUsage;
+          return;
+        }
         final costPolicy = _routeCostPolicy(flags);
         if (!costPolicy.ok) {
           exitCode = _exitUsage;
@@ -268,10 +310,12 @@ Future<void> main(List<String> rawArgs) async {
         final preferenceOrder = flagPreference.isNotEmpty
             ? flagPreference
             : (profile?.preferenceOrder ?? const []);
+        final results = await _read(profile, excludedProviders);
+        final now = nowEpoch();
         final s = _suggestFor(
           results,
           now,
-          riskZ: riskZ,
+          riskZ: risk.value,
           tunedBurn: flags.contains('--tuned-burn'),
           preferLocal: flags.contains('--local-first'),
           costPenaltyByProvider: costPolicy.penalties,
@@ -306,13 +350,13 @@ Future<void> main(List<String> rawArgs) async {
       await _runWatch(flags, profile, excludedProviders);
       return;
     case 'models':
-      final results = await _read(profile, excludedProviders);
-      final now = nowEpoch();
       final reqs = _modelRequirements(flags);
       if (!reqs.ok) {
         exitCode = _exitUsage;
         return;
       }
+      final results = await _read(profile, excludedProviders);
+      final now = nowEpoch();
       if (wantsJson) {
         print(_jsonPretty(modelRegistryJson(results, now,
             catalog: kModelCatalog, requirements: reqs.requirements)));
@@ -348,11 +392,29 @@ Future<void> main(List<String> rawArgs) async {
         : _printDoctor(results);
     return;
   }
-
-  stderr.writeln('${style.red('unknown command')}: $cmd');
-  stderr.writeln('run "quotabot help" for the command list');
-  exitCode = 64;
 }
+
+bool _isKnownCommand(String command) =>
+    command.isEmpty || _knownCommands.contains(command);
+
+const _knownCommands = {
+  'calibration',
+  'check',
+  'doctor',
+  'explain',
+  'json',
+  'login',
+  'logout',
+  'manual',
+  'models',
+  'report',
+  'stats',
+  'status',
+  'suggest',
+  'top',
+  'verify',
+  'watch',
+};
 
 bool _usesQuotaRead(String cmd) =>
     cmd.isEmpty || _quotaReadCommands.contains(cmd);
@@ -548,15 +610,15 @@ StatsSeries _statsSeriesFor(
   );
 }
 
-/// Reads a `--name=double` option from [flags], or [dflt] when absent or invalid.
-double _doubleOption(Iterable<String> flags, String name, double dflt) {
-  final prefix = '--$name=';
-  for (final f in flags) {
-    if (f.startsWith(prefix)) {
-      return double.tryParse(f.substring(prefix.length)) ?? dflt;
-    }
+({double value, bool ok}) _riskFromFlags(Set<String> flags) {
+  final raw = _stringOption(flags, 'risk', null);
+  if (raw == null) return (value: 0, ok: true);
+  final parsed = double.tryParse(raw.trim());
+  if (parsed == null || !parsed.isFinite || parsed < 0 || parsed > 5) {
+    stderr.writeln('quotabot: --risk must be between 0 and 5');
+    return (value: 0, ok: false);
   }
-  return dflt;
+  return (value: parsed, ok: true);
 }
 
 /// Parses a context size like "200k", "1m", or "200000" into tokens, or null.
@@ -571,9 +633,8 @@ int? _parseContext(String? s) {
   final digits = mult == 1 ? t : t.substring(0, t.length - 1);
   final value = double.tryParse(digits);
   if (value == null || !value.isFinite) return null;
-  // Guard the scaled value too: round() throws on a non-finite double, so an
-  // overflowing --min-context (e.g. 1e309) must fall back to "no filter"
-  // rather than crash the command.
+  // Guard the scaled value too: round() throws on a non-finite double. Return
+  // null so the caller reports an ordinary usage error instead of crashing.
   final scaled = value * mult;
   return scaled.isFinite ? scaled.round() : null;
 }
@@ -596,18 +657,54 @@ int? _parseContext(String? s) {
     );
     return (requirements: const ModelRequirements(), ok: false);
   }
+  final rawTask = _stringOption(flags, 'task', null);
+  final task = rawTask?.trim().toLowerCase();
+  const taskChoices = {'simple', 'standard', 'hard', 'complex', 'reasoning'};
+  if (task != null && !taskChoices.contains(task)) {
+    stderr.writeln('quotabot: unknown --task value "$rawTask"');
+    return (requirements: const ModelRequirements(), ok: false);
+  }
+  final rawContext = _stringOption(flags, 'min-context', null);
+  final minContext = _parseContext(rawContext);
+  if (rawContext != null &&
+      (minContext == null || minContext <= 0 || minContext > 1 << 31)) {
+    stderr.writeln(
+      'quotabot: --min-context must be positive and no greater than ${1 << 31}',
+    );
+    return (requirements: const ModelRequirements(), ok: false);
+  }
+  const tierRanks = {'light': 0, 'standard': 1, 'flagship': 2};
+  final rawTierFloor = _stringOption(flags, 'tier-floor', null);
+  final rawTierCeiling = _stringOption(flags, 'tier-ceiling', null);
+  final tierFloor = rawTierFloor?.trim().toLowerCase();
+  final tierCeiling = rawTierCeiling?.trim().toLowerCase();
+  if (tierFloor != null && !tierRanks.containsKey(tierFloor)) {
+    stderr.writeln('quotabot: unknown --tier-floor value "$rawTierFloor"');
+    return (requirements: const ModelRequirements(), ok: false);
+  }
+  if (tierCeiling != null && !tierRanks.containsKey(tierCeiling)) {
+    stderr.writeln('quotabot: unknown --tier-ceiling value "$rawTierCeiling"');
+    return (requirements: const ModelRequirements(), ok: false);
+  }
+  if (tierFloor != null &&
+      tierCeiling != null &&
+      tierRanks[tierFloor]! > tierRanks[tierCeiling]!) {
+    stderr.writeln(
+      'quotabot: --tier-floor cannot be higher than --tier-ceiling',
+    );
+    return (requirements: const ModelRequirements(), ok: false);
+  }
   final explicit = ModelRequirements(
-    minContextTokens: _parseContext(_stringOption(flags, 'min-context', null)),
+    minContextTokens: minContext,
     requireTools: flags.contains('--require-tools'),
     requireVision: flags.contains('--require-vision'),
     requireReasoning: flags.contains('--require-reasoning'),
-    tierFloor: _stringOption(flags, 'tier-floor', null),
-    tierCeiling: _stringOption(flags, 'tier-ceiling', null),
+    tierFloor: tierFloor,
+    tierCeiling: tierCeiling,
     budgetPolicy: budget,
   );
   return (
-    requirements:
-        taskProfile(_stringOption(flags, 'task', null)).merge(explicit),
+    requirements: taskProfile(task).merge(explicit),
     ok: true,
   );
 }
@@ -866,6 +963,7 @@ const _valueOptions = {
   'min-context',
   'mock-provider',
   'plan',
+  'prefer',
   'profile',
   'risk',
   'sort',
@@ -882,6 +980,169 @@ const _valueOptions = {
   'webhook',
   'window',
 };
+
+const _switchOptions = {
+  '--allow-external',
+  '--color',
+  '--help',
+  '--json',
+  '--local-first',
+  '--network',
+  '--no-color',
+  '--once',
+  '--provider-route',
+  '--reads',
+  '--require-reasoning',
+  '--require-tools',
+  '--require-vision',
+  '--truecolor',
+  '--tuned-burn',
+  '--use-expiring-quota',
+  '--version',
+  '-h',
+  '-v',
+};
+
+/// Rejects mistyped options and value options whose value was omitted. Without
+/// this check both cases were silently ignored, so a command could report
+/// success while running with a materially different routing or filter policy.
+String? _optionError(List<String> args) {
+  for (final arg in args) {
+    if (arg == '--') break;
+    if (_switchOptions.contains(arg)) continue;
+    if (!arg.startsWith('-')) continue;
+    if (!arg.startsWith('--')) return 'unknown option "$arg"';
+
+    final separator = arg.indexOf('=');
+    final name = arg.substring(2, separator < 0 ? null : separator);
+    if (_valueOptions.contains(name)) {
+      if (separator < 0) return '--$name requires a value';
+      continue;
+    }
+    return 'unknown option "$arg"';
+  }
+  return null;
+}
+
+String _optionName(String flag) {
+  if (flag == '-h' || flag == '-v') return flag;
+  final separator = flag.indexOf('=');
+  return flag.substring(2, separator < 0 ? null : separator);
+}
+
+String? _commandOptionError(String command, Set<String> flags) {
+  const jsonCommands = {
+    '',
+    'status',
+    'doctor',
+    'json',
+    'check',
+    'suggest',
+    'stats',
+    'report',
+    'watch',
+    'models',
+    'calibration',
+    'manual',
+    'explain',
+    'verify',
+  };
+  final allowed = <String>{'color', 'no-color'};
+  if (jsonCommands.contains(command)) allowed.add('json');
+  if (_usesQuotaRead(command)) {
+    allowed.addAll(const {'profile', 'exclude'});
+    if (command != 'explain') {
+      allowed.addAll(const {'mock-provider', 'state'});
+    }
+  }
+  switch (command) {
+    case 'manual':
+      allowed.addAll(const {
+        'account',
+        'display-name',
+        'plan',
+        'window',
+        'used',
+        'limit',
+        'reset',
+      });
+    case 'suggest':
+      allowed.addAll(const {
+        'budget',
+        'cost-penalty',
+        'cost-weight',
+        'local-first',
+        'min-context',
+        'prefer',
+        'provider-route',
+        'require-reasoning',
+        'require-tools',
+        'require-vision',
+        'risk',
+        'task',
+        'tier-ceiling',
+        'tier-floor',
+        'tuned-burn',
+        'use-expiring-quota',
+      });
+    case 'models':
+      allowed.addAll(const {
+        'budget',
+        'min-context',
+        'require-reasoning',
+        'require-tools',
+        'require-vision',
+        'task',
+        'tier-ceiling',
+        'tier-floor',
+      });
+    case 'stats':
+      allowed.addAll(const {
+        'current-price',
+        'tier-plan',
+        'tier-risk',
+      });
+    case 'top':
+      allowed.addAll(const {'interval', 'sort', 'theme', 'truecolor'});
+    case 'watch':
+      allowed.addAll(const {
+        'allow-external',
+        'interval',
+        'once',
+        'waste-threshold',
+        'webhook',
+      });
+    case 'explain':
+      allowed.addAll(const {'network', 'reads'});
+  }
+  for (final flag in flags) {
+    final name = _optionName(flag);
+    if (!allowed.contains(name)) {
+      final label = command.isEmpty ? 'the default status command' : command;
+      return '--$name is not valid for $label';
+    }
+  }
+  final hasMock = flags.any((flag) => flag.startsWith('--mock-provider='));
+  final hasState = flags.any((flag) => flag.startsWith('--state='));
+  if (hasState && !hasMock) return '--state requires --mock-provider';
+  return null;
+}
+
+String? _positionalError(String command, List<String> positionals) {
+  if (command == 'manual') {
+    final action = positionals.length < 2 ? 'list' : positionals[1];
+    final maximum = action == 'set' || action == 'remove' ? 3 : 2;
+    if (positionals.length <= maximum) return null;
+    return 'unexpected argument "${positionals[maximum]}" for manual $action';
+  }
+  final maximum = switch (command) {
+    'login' || 'logout' || 'check' || 'stats' => 2,
+    _ => 1,
+  };
+  if (positionals.length <= maximum) return null;
+  return 'unexpected argument "${positionals[maximum]}" for '
+      '${command.isEmpty ? 'the default status command' : command}';
+}
 
 List<String> _normalizeArgs(List<String> args) {
   final normalized = <String>[];

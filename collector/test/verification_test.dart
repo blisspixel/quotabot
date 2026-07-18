@@ -138,6 +138,10 @@ void main() {
         report.providers.single.windows.single['effective_used_percent'],
         80,
       );
+      final reset = checkById(report.providers.single, 'reset_sanity');
+      expect(reset.status, VerifyStatus.info);
+      expect(reset.detail, contains('keeps its last observed usage'));
+      expect(reset.detail, contains('non-routable until a fresh read'));
     });
 
     test('source-class contradictions fail verification', () {
@@ -504,6 +508,7 @@ void main() {
       final resets = p.checks.where((c) => c.id == 'reset_sanity').toList();
       expect(resets.map((c) => c.status),
           containsAll([VerifyStatus.info, VerifyStatus.fail]));
+      expect(resets.first.detail, contains('trusted fresh evidence'));
       expect(p.passed, isFalse);
     });
   });

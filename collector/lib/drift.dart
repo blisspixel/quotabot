@@ -132,6 +132,8 @@ bool isTrustedQuotaEvidence(ProviderQuota quota) =>
           percent >= 0 &&
           percent <= 100;
     }) &&
+    quota.modelQuotas.every((modelQuota) =>
+        _unusableModelQuotaReason(modelQuota, observedAt: null) == null) &&
     !quota.stale &&
     quota.suspect == null &&
     quota.driftReason == null;
@@ -142,7 +144,9 @@ bool isTrustedQuotaEvidence(ProviderQuota quota) =>
 bool isTrustedQuotaEvidenceAt(ProviderQuota quota, int observedAt) =>
     isTrustedQuotaEvidence(quota) &&
     quota.asOf > 0 &&
-    quota.asOf <= observedAt + kQuotaEvidenceClockSkewSeconds;
+    quota.asOf <= observedAt + kQuotaEvidenceClockSkewSeconds &&
+    quota.modelQuotas.every((modelQuota) =>
+        _unusableModelQuotaReason(modelQuota, observedAt: observedAt) == null);
 
 /// Returns a bounded drift diagnostic when an otherwise successful fresh read
 /// contains a quota window that cannot produce a finite percent in 0..100.
@@ -192,6 +196,38 @@ String? unusableQuotaEvidenceDriftReason(
         '$namedWindow produced a percent outside 0..100',
       );
     }
+  }
+  for (final modelQuota in quota.modelQuotas) {
+    final reason = _unusableModelQuotaReason(
+      modelQuota,
+      observedAt: observedAt,
+    );
+    if (reason != null) return boundedQuotaDriftReason(reason);
+  }
+  return null;
+}
+
+String? _unusableModelQuotaReason(
+  ModelQuota quota, {
+  required int? observedAt,
+}) {
+  final rawModel = quota.model.trim();
+  final model = stripTerminalControl(rawModel).trim();
+  if (model.isEmpty ||
+      model.length > _maxQuotaDriftDimensionCharacters ||
+      model != rawModel) {
+    return 'model quota has an invalid model identifier';
+  }
+  final percent = quota.usedPercent;
+  if (percent != null && (!percent.isFinite || percent < 0 || percent > 100)) {
+    return '$model model quota produced a percent outside 0..100';
+  }
+  final reset = quota.resetsAt;
+  if (reset != null && reset <= 0) {
+    return '$model model quota has a non-positive reset timestamp';
+  }
+  if (reset != null && observedAt != null && reset > observedAt + 400 * 86400) {
+    return '$model model quota reset is implausibly far in the future';
   }
   return null;
 }

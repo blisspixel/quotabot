@@ -300,12 +300,246 @@ class RouterTests(unittest.TestCase):
         with self.assertRaises(UnsafeRouteError):
             asyncio.run(router._route("frontier", {}, None))
 
+    def test_malformed_policy_fails_closed_through_real_hook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.yaml"
+            path.write_text(
+                """
+models:
+  frontier:
+    candidates:
+      - provider: claude
+        spend: quota_plan
+""",
+                encoding="utf-8",
+            )
+            router = QuotabotRouter(str(path))
+
+            data = {"model": "frontier"}
+            with self.assertRaisesRegex(
+                UnsafeRouteError,
+                "routing policy could not be loaded safely",
+            ):
+                asyncio.run(router.async_pre_call_hook(None, None, data, "completion"))
+
+        self.assertEqual(data, {"model": "frontier"})
+
+    def test_explicitly_missing_policy_fails_closed_through_real_hook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            router = QuotabotRouter(str(Path(tmp) / "missing-policy.yaml"))
+            with self.assertRaisesRegex(
+                UnsafeRouteError,
+                "routing policy could not be loaded safely",
+            ):
+                asyncio.run(
+                    router.async_pre_call_hook(
+                        None,
+                        None,
+                        {"model": "frontier"},
+                        "completion",
+                    )
+                )
+
     def test_unmanaged_model_passes_through(self):
         # A model absent from the policy is not managed and passes through.
         router = QuotabotRouter()
         router.policy = Policy(models={"frontier": []})
         chosen = asyncio.run(router._route("some-other-model", {}, None))
         self.assertEqual(chosen, "some-other-model")
+
+    def test_unmanaged_model_passes_through_real_hook_with_opaque_metadata(self):
+        router = QuotabotRouter()
+        router.policy = Policy(models={"frontier": []})
+        data = {"model": "some-other-model", "metadata": "client-value"}
+
+        result = asyncio.run(router.async_pre_call_hook(None, None, data, "completion"))
+
+        self.assertIs(result, data)
+        self.assertEqual(
+            data,
+            {"model": "some-other-model", "metadata": "client-value"},
+        )
+
+    def test_unexpected_unmanaged_route_error_retains_fail_soft_passthrough(self):
+        router = QuotabotRouter()
+
+        async def broken_route(requested, data, key):
+            raise RuntimeError("unexpected unmanaged failure")
+
+        router._route = broken_route  # type: ignore[method-assign]
+        data = {"model": "unmanaged"}
+
+        result = asyncio.run(router.async_pre_call_hook(None, None, data, "completion"))
+
+        self.assertIs(result, data)
+        self.assertEqual(data, {"model": "unmanaged"})
+
+    def test_scalar_and_list_metadata_fail_closed_for_managed_routes(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [Candidate(deployment="safe-local", local=True)],
+            }
+        )
+
+        async def availability():
+            return []
+
+        router._availability = availability  # type: ignore[method-assign]
+        for metadata in ("client-value", ["client-value"]):
+            with self.subTest(metadata=metadata):
+                data = {"model": "frontier", "metadata": metadata}
+                with self.assertRaisesRegex(
+                    UnsafeRouteError,
+                    "metadata must be an object for a managed route",
+                ):
+                    asyncio.run(
+                        router.async_pre_call_hook(
+                            None,
+                            None,
+                            data,
+                            "completion",
+                        )
+                    )
+                self.assertEqual(data["model"], "frontier")
+                self.assertIs(data["metadata"], metadata)
+
+    def test_null_metadata_is_normalized_for_a_managed_route(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [Candidate(deployment="safe-local", local=True)],
+            }
+        )
+
+        async def availability():
+            return []
+
+        router._availability = availability  # type: ignore[method-assign]
+        data = {"model": "frontier", "metadata": None}
+
+        result = asyncio.run(router.async_pre_call_hook(None, None, data, "completion"))
+
+        self.assertIs(result, data)
+        self.assertEqual(data["model"], "safe-local")
+        self.assertEqual(data["metadata"]["quotabot_original_model"], "frontier")
+        self.assertEqual(data["metadata"]["quotabot_spend"], "local")
+
+    def test_unexpected_managed_route_error_fails_closed(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ]
+            }
+        )
+
+        async def broken_availability():
+            raise RuntimeError("unexpected managed failure")
+
+        router._availability = broken_availability  # type: ignore[method-assign]
+        with self.assertRaisesRegex(
+            UnsafeRouteError,
+            'could not safely route managed model "frontier"',
+        ):
+            asyncio.run(
+                router.async_pre_call_hook(
+                    None,
+                    None,
+                    {"model": "frontier"},
+                    "completion",
+                )
+            )
+
+    def test_agent_redirect_to_missing_logical_model_fails_closed(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            agents={"agent-a": AgentRule(model="missing-logical-model")},
+        )
+        key = type("Key", (), {"key_alias": "agent-a", "user_id": None})()
+
+        with self.assertRaisesRegex(UnsafeRouteError, "no safe"):
+            asyncio.run(
+                router.async_pre_call_hook(
+                    key,
+                    None,
+                    {"model": "potentially-paid-default"},
+                    "completion",
+                )
+            )
+
+    def test_malformed_candidate_fields_cannot_enable_quota_route(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ],
+            }
+        )
+
+        malformed = (
+            {"available": "false", "effective_headroom_percent": 90},
+            {"available": True, "effective_headroom_percent": float("nan")},
+            {"available": True, "effective_headroom_percent": True},
+            {"available": True, "effective_headroom_percent": 101},
+            {
+                "available": True,
+                "stale": True,
+                "effective_headroom_percent": 90,
+            },
+            {
+                "available": True,
+                "drift_reason": "rejected evidence",
+                "effective_headroom_percent": 90,
+            },
+        )
+        for fields in malformed:
+            with self.subTest(fields=fields):
+
+                async def availability(fields=fields):
+                    return [{"provider": "claude", **fields}]
+
+                router._availability = availability  # type: ignore[method-assign]
+                with self.assertRaisesRegex(UnsafeRouteError, "no safe"):
+                    asyncio.run(router._route("frontier", {}, None))
+
+    def test_malformed_suggest_payload_fails_closed_through_real_hook(self):
+        router = QuotabotRouter()
+        router.policy = Policy(
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-subscription",
+                        provider="claude",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    )
+                ]
+            }
+        )
+        router._fetch_suggest = lambda: []  # type: ignore[method-assign,return-value]
+
+        with self.assertRaisesRegex(UnsafeRouteError, "no safe"):
+            asyncio.run(
+                router.async_pre_call_hook(
+                    None,
+                    None,
+                    {"model": "frontier"},
+                    "completion",
+                )
+            )
 
     def test_quota_plan_candidates_require_overages_disabled(self):
         router = QuotabotRouter()

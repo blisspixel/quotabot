@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'provider_ids.dart';
+import 'storage_keys.dart';
 import 'util.dart';
 
 const defaultLeaseSeconds = 120;
@@ -27,9 +28,19 @@ String normalizeLeaseProvider(String value) {
 }
 
 String normalizeLeaseAccount(String? value) {
-  final normalized = _normalizeIdPart(value ?? '');
+  final trimmed = (value ?? '').trim();
+  if (trimmed.isEmpty) return 'default';
+  final clean = StringBuffer();
+  for (final rune in trimmed.runes) {
+    if (rune <= 0x1f || (rune >= 0x7f && rune <= 0x9f)) continue;
+    clean.writeCharCode(rune);
+  }
+  final normalized = clean.toString();
   return normalized.isEmpty ? 'default' : normalized;
 }
+
+String _leaseAccountKey(String? account) =>
+    accountIdentityDigest(normalizeLeaseAccount(account));
 
 int normalizeLeaseSeconds(Object? value) {
   final seconds = value is num ? value.round() : defaultLeaseSeconds;
@@ -144,6 +155,34 @@ class RouteLeaseReservation {
   });
 }
 
+class RouteLeaseTarget {
+  final String provider;
+  final String account;
+
+  const RouteLeaseTarget({
+    required this.provider,
+    required this.account,
+  });
+}
+
+class RouteLeaseSelection {
+  final RouteLeaseTarget? target;
+  final String reason;
+
+  const RouteLeaseSelection.selected(RouteLeaseTarget target)
+      : this._(target, 'lease target selected');
+
+  const RouteLeaseSelection.unavailable(String reason) : this._(null, reason);
+
+  const RouteLeaseSelection._(this.target, this.reason);
+}
+
+typedef RouteLeaseSelector = RouteLeaseSelection Function(
+  List<RouteLease> activeLeases,
+);
+
+typedef RouteLeaseReusePredicate = bool Function(RouteLease lease);
+
 class RouteLeaseRelease {
   final bool released;
   final String reason;
@@ -160,6 +199,20 @@ class RouteLeaseRelease {
 
 abstract class RouteLeaseStore {
   List<RouteLease> active(int now);
+
+  /// Selects a target from the latest active leases and creates its lease as
+  /// one store transaction. Implementations must not allow another reservation
+  /// to interleave between [select] and persistence. A matching idempotency key
+  /// that fails [reuseWhere] is a scope conflict and is never reassigned.
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  });
 
   RouteLeaseReservation reserve({
     required String provider,
@@ -182,6 +235,35 @@ class NoopRouteLeaseStore implements RouteLeaseStore {
 
   @override
   List<RouteLease> active(int now) => const [];
+
+  @override
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  }) {
+    final selection = select(const []);
+    if (selection.target == null) {
+      return RouteLeaseReservation(
+        reserved: false,
+        reused: false,
+        reason: selection.reason,
+        lease: null,
+        activeLeases: const [],
+      );
+    }
+    return const RouteLeaseReservation(
+      reserved: false,
+      reused: false,
+      reason: 'lease store unavailable',
+      lease: null,
+      activeLeases: [],
+    );
+  }
 
   @override
   RouteLeaseReservation reserve({
@@ -222,6 +304,32 @@ class InMemoryRouteLeaseStore implements RouteLeaseStore {
   List<RouteLease> active(int now) {
     _leases = _activeOnly(_leases, now);
     return List.unmodifiable(_leases);
+  }
+
+  @override
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  }) {
+    _leases = _activeOnly(_leases, now);
+    final reservation = _selectAndReserve(
+      active: _leases,
+      select: select,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+      reuseWhere: reuseWhere,
+      idFactory: idFactory,
+    );
+    _leases = List.of(reservation.activeLeases);
+    return reservation;
   }
 
   @override
@@ -323,6 +431,45 @@ class FileRouteLeaseStore implements RouteLeaseStore {
       });
     } catch (_) {
       return const [];
+    }
+  }
+
+  @override
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  }) {
+    try {
+      return _withLock((dir) {
+        final file = _dataFile(dir);
+        final active = _activeOnly(_readUnlocked(file), now);
+        final reservation = _selectAndReserve(
+          active: active,
+          select: select,
+          now: now,
+          leaseSeconds: leaseSeconds,
+          weightPercent: weightPercent,
+          client: client,
+          idempotencyKey: idempotencyKey,
+          reuseWhere: reuseWhere,
+          idFactory: idFactory,
+        );
+        _writeUnlocked(file, reservation.activeLeases);
+        return reservation;
+      });
+    } catch (_) {
+      return const RouteLeaseReservation(
+        reserved: false,
+        reused: false,
+        reason: 'lease store unavailable',
+        lease: null,
+        activeLeases: [],
+      );
     }
   }
 
@@ -480,6 +627,85 @@ List<RouteLease> _activeOnly(List<RouteLease> leases, int now) =>
     leases.where((lease) => lease.activeAt(now)).toList()
       ..sort((a, b) => a.expiresAt.compareTo(b.expiresAt));
 
+RouteLeaseReservation _selectAndReserve({
+  required List<RouteLease> active,
+  required RouteLeaseSelector select,
+  required int now,
+  required int leaseSeconds,
+  required double weightPercent,
+  required LeaseIdFactory idFactory,
+  String? client,
+  String? idempotencyKey,
+  RouteLeaseReusePredicate? reuseWhere,
+}) {
+  final normalizedKey = normalizeLeaseText(idempotencyKey);
+  if (normalizedKey != null) {
+    var conflictsWithScope = false;
+    for (final lease in active) {
+      if (lease.idempotencyKey == normalizedKey) {
+        if (reuseWhere != null && !reuseWhere(lease)) {
+          conflictsWithScope = true;
+          continue;
+        }
+        return RouteLeaseReservation(
+          reserved: true,
+          reused: true,
+          reason: 'reused the active lease for this idempotency key',
+          lease: lease,
+          activeLeases: List.unmodifiable(active),
+        );
+      }
+    }
+    if (conflictsWithScope) {
+      return RouteLeaseReservation(
+        reserved: false,
+        reused: false,
+        reason: 'idempotency key belongs to a lease outside this request',
+        lease: null,
+        activeLeases: List.unmodifiable(active),
+      );
+    }
+  }
+  final selection = select(List.unmodifiable(active));
+  final target = selection.target;
+  if (target == null) {
+    return RouteLeaseReservation(
+      reserved: false,
+      reused: false,
+      reason: selection.reason,
+      lease: null,
+      activeLeases: List.unmodifiable(active),
+    );
+  }
+  if (active.length >= maxActiveLeases) {
+    return RouteLeaseReservation(
+      reserved: false,
+      reused: false,
+      reason: 'too many active leases',
+      lease: null,
+      activeLeases: List.unmodifiable(active),
+    );
+  }
+  final request = _leaseFromRequest(
+    provider: target.provider,
+    account: target.account,
+    now: now,
+    leaseSeconds: leaseSeconds,
+    weightPercent: weightPercent,
+    client: client,
+    idempotencyKey: normalizedKey,
+    idFactory: idFactory,
+  );
+  final next = [...active, request];
+  return RouteLeaseReservation(
+    reserved: true,
+    reused: false,
+    reason: 'lease reserved',
+    lease: request,
+    activeLeases: List.unmodifiable(next),
+  );
+}
+
 RouteLease _leaseFromRequest({
   required String provider,
   required String account,
@@ -522,7 +748,7 @@ RouteLease? _matchingIdempotencyLease(
 List<LeaseTargetDiscount> leaseDiscounts(Iterable<RouteLease> leases) {
   final grouped = <String, List<RouteLease>>{};
   for (final lease in leases) {
-    final key = '${lease.provider}\u0000${lease.account}';
+    final key = '${lease.provider}\u0000${_leaseAccountKey(lease.account)}';
     grouped.putIfAbsent(key, () => []).add(lease);
   }
   final out = <LeaseTargetDiscount>[];
@@ -556,11 +782,11 @@ double leaseDiscountFor(
   String account,
 ) {
   final normalizedProvider = normalizeLeaseProvider(provider);
-  final normalizedAccount = normalizeLeaseAccount(account);
+  final accountKey = _leaseAccountKey(account);
   return leases
       .where((lease) =>
           lease.provider == normalizedProvider &&
-          lease.account == normalizedAccount)
+          _leaseAccountKey(lease.account) == accountKey)
       .fold<double>(0, (sum, lease) => sum + lease.weightPercent)
       .clamp(0.0, 100.0)
       .toDouble();

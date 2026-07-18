@@ -10,8 +10,7 @@ and CocoaPods (macOS), or
 ## One-command setup
 
 From a fresh clone, a single idempotent script builds and installs the CLI and
-the desktop app (with a Desktop shortcut) and finishes by running
-`quotabot doctor`:
+the desktop app, then finishes by running `quotabot doctor`:
 
 ```powershell
 pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
@@ -21,10 +20,16 @@ bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
 ```
 
 The CLI is installed to your per-user bin (`%LOCALAPPDATA%\quotabot\bin` on
-Windows, `~/.local/bin` on macOS and Linux) and added to PATH. Re-run after a
-`git pull` to update. On Windows, if the source-built desktop app is already
-running from the Release folder, setup restarts it after rebuilding so the tray
-app is not left on old code. The manual steps below are the same thing by hand.
+Windows, `~/.local/bin` on macOS and Linux). Windows setup adds that directory
+to the user PATH. On macOS and Linux, setup reports the exact shell-profile
+change when `~/.local/bin` is not already on PATH. Windows creates a Desktop
+shortcut to `%LOCALAPPDATA%\quotabot\desktop`, Linux installs the app under
+`~/.local/share/quotabot-desktop` with an application-menu entry, and macOS
+installs `~/Applications/quotabot.app`. These launchers remain valid if the
+source checkout moves or is removed. Re-run after a `git pull` to update. On
+Windows, setup restarts a running installed desktop app after activation so the
+tray app is not left on old code. The manual steps below are the same thing by
+hand.
 
 ## Run from source
 
@@ -54,8 +59,9 @@ Notes:
 - **Windows:** the exe, data, and plugins land in
   `app/build/windows/x64/runner/Release/quotabot.exe`. `tools/package-windows.ps1`
   runs the build and writes `release/quotabot-windows-x64-desktop.zip` plus its
-  checksum sidecar. Add `-NoArchive` for a build-only check. The desktop
-  notification plugin uses Visual Studio ATL headers; if a
+  checksum sidecar. The packager refuses non-x64 hosts so it cannot mislabel a
+  different native build as that x64 asset. Add `-NoArchive` for a build-only
+  check. The desktop notification plugin uses Visual Studio ATL headers; if a
   build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
   ATL support for your installed MSVC toolset.
 - **macOS:** `bash tools/package-macos.sh` runs `flutter build macos --release`

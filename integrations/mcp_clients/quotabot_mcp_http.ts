@@ -5,14 +5,11 @@ import {
   errorMessage,
   mcpBearerHeaders,
   printRoutingDecision,
+  requireLoopbackMcpUrl,
 } from "./quotabot_mcp_common.js";
 
-const url = process.env.QUOTABOT_MCP_URL ?? "http://127.0.0.1:8722/mcp";
-const headers = mcpBearerHeaders();
-const transport = new StreamableHTTPClientTransport(
-  new URL(url),
-  headers ? { requestInit: { headers } } : undefined,
-);
+const rawUrl =
+  process.env.QUOTABOT_MCP_URL ?? "http://127.0.0.1:8722/mcp";
 
 const client = new Client({
   name: "quotabot-mcp-http-example",
@@ -20,6 +17,12 @@ const client = new Client({
 });
 
 try {
+  const url = requireLoopbackMcpUrl(rawUrl);
+  const headers = mcpBearerHeaders();
+  const transport = new StreamableHTTPClientTransport(
+    url,
+    headers ? { requestInit: { headers } } : undefined,
+  );
   await client.connect(transport);
   await printRoutingDecision(client, {
     task: process.env.QUOTABOT_TASK ?? "standard",
