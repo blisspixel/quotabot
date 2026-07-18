@@ -118,6 +118,7 @@ jobs:
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
+      QUOTABOT_DEMO: '1'
       TARGET_TAG: ${{ needs.resolve-releases.outputs.target_tag }}
       TARGET_SHA: ${{ needs.resolve-releases.outputs.target_sha }}
     steps:
@@ -184,7 +185,7 @@ jobs:
           $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
           $actualVersion = & $installed --version
           if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
-          $doctor = & $installed --demo doctor --json | ConvertFrom-Json
+          $doctor = & $installed doctor --json | ConvertFrom-Json
           if ($doctor.schema -ne 'quotabot.v1') { throw "Unexpected doctor schema: $($doctor.schema)" }
 
       - name: Verify and clean-install macOS or Linux release
@@ -236,7 +237,7 @@ jobs:
           expected_version="quotabot ${TARGET_TAG#v}"
           actual_version="$($executable --version)"
           [[ "$actual_version" == "$expected_version" ]] || { echo "Expected $expected_version, got $actual_version" >&2; exit 1; }
-          "$executable" --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+          "$executable" doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
 
       - name: Preserve verified current release archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -264,6 +265,7 @@ jobs:
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
+      QUOTABOT_DEMO: '1'
       TARGET_TAG: ${{ needs.resolve-releases.outputs.target_tag }}
       PREVIOUS_TAG: ${{ needs.resolve-releases.outputs.previous_tag }}
       TARGET_SHA: ${{ needs.resolve-releases.outputs.target_sha }}
@@ -501,7 +503,7 @@ jobs:
           $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
           $actualVersion = quotabot --version
           if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
-          $doctor = quotabot --demo doctor --json | ConvertFrom-Json
+          $doctor = quotabot doctor --json | ConvertFrom-Json
           if ($doctor.schema -ne 'quotabot.v1') { throw "Unexpected doctor schema: $($doctor.schema)" }
 
           $sentinel = Join-Path $env:LOCALAPPDATA 'quotabot/manual/install-smoke-sentinel'
@@ -523,7 +525,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$(quotabot --version)" == "quotabot ${TARGET_TAG#v}" ]]
-          quotabot --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+          quotabot doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
           config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
           test -f "$config_root/quotabot/manual/install-smoke-sentinel"
           test -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot"
@@ -534,7 +536,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$(quotabot --version)" == "quotabot ${TARGET_TAG#v}" ]]
-          quotabot --demo doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+          quotabot doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
           config_root="${XDG_CONFIG_HOME:-$HOME/.config}"
           test -f "$config_root/quotabot/manual/install-smoke-sentinel"
           desktop="$HOME/.local/share/applications/quotabot.desktop"
