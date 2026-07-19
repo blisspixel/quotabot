@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'src/exclusive_create_collision.dart';
+
 typedef GuardFileHardener = void Function(File file);
 
 const _claimProbeGrace = Duration(seconds: 2);
 const _sameProcessClaimStaleAfter = Duration(minutes: 2);
+const _maxClaimBytes = 1024;
 
 /// A claim-backed native file guard that serializes both processes and isolates.
 ///
@@ -89,26 +92,32 @@ _FileClaim? _tryCreateClaim(
   final owner = '$pid.${_randomSuffix(18)}';
   try {
     claimFile.createSync(exclusive: true);
-  } on FileSystemException {
+  } on FileSystemException catch (error) {
     final type = FileSystemEntity.typeSync(
       claimFile.path,
       followLinks: false,
     );
-    if (type == FileSystemEntityType.file) return null;
-    if (type == FileSystemEntityType.notFound) rethrow;
+    if (shouldRetryExclusiveCreateFailure(error, type)) {
+      // The owner can release and delete its claim after this process loses
+      // the exclusive create but before the type probe. That is ordinary lock
+      // contention, not an unavailable store, so return to the retry loop.
+      return null;
+    }
+    if (type == FileSystemEntityType.file ||
+        type == FileSystemEntityType.notFound) {
+      rethrow;
+    }
     throw FileSystemException('invalid lock claim', claimFile.path);
   }
   try {
-    hardenClaim(claimFile);
     claimFile.writeAsStringSync(
       jsonEncode({'pid': pid, 'owner': owner}),
       flush: true,
     );
+    hardenClaim(claimFile);
     return _FileClaim(claimFile, owner);
   } catch (_) {
-    try {
-      if (claimFile.existsSync()) claimFile.deleteSync();
-    } catch (_) {}
+    _deleteOwnedClaim(claimFile, owner);
     rethrow;
   }
 }
@@ -241,17 +250,35 @@ bool _releaseNativeLock(RandomAccessFile lock) {
 }
 
 _FileClaimSnapshot? _readClaimSnapshot(File claimFile) {
+  RandomAccessFile? handle;
   try {
     if (!claimFile.existsSync()) return null;
     if (FileSystemEntity.typeSync(claimFile.path, followLinks: false) !=
         FileSystemEntityType.file) {
       throw FileSystemException('invalid lock claim', claimFile.path);
     }
-    if (claimFile.lengthSync() > 1024) {
+    final before = claimFile.statSync();
+    if (before.size > _maxClaimBytes) {
       throw FileSystemException('oversized lock claim', claimFile.path);
     }
-    final stat = claimFile.statSync();
-    final raw = claimFile.readAsStringSync();
+    handle = claimFile.openSync(mode: FileMode.read);
+    final bytes = handle.readSync(_maxClaimBytes + 1);
+    if (bytes.length > _maxClaimBytes) {
+      throw FileSystemException('oversized lock claim', claimFile.path);
+    }
+    final afterType = FileSystemEntity.typeSync(
+      claimFile.path,
+      followLinks: false,
+    );
+    if (afterType == FileSystemEntityType.notFound) return null;
+    if (afterType != FileSystemEntityType.file) {
+      throw FileSystemException('invalid lock claim', claimFile.path);
+    }
+    final after = claimFile.statSync();
+    if (before.size != after.size || before.modified != after.modified) {
+      return null;
+    }
+    final raw = utf8.decode(bytes);
     int? ownerPid;
     String? owner;
     try {
@@ -263,13 +290,17 @@ _FileClaimSnapshot? _readClaimSnapshot(File claimFile) {
     } catch (_) {}
     return _FileClaimSnapshot(
       raw: raw,
-      modified: stat.modified,
+      modified: after.modified,
       pid: ownerPid,
       owner: owner,
     );
-  } on FileSystemException {
+  } on FileSystemException catch (error) {
+    final code = error.osError?.errorCode;
+    if (code == 2 || code == 3) return null;
     if (!claimFile.existsSync()) return null;
     rethrow;
+  } finally {
+    handle?.closeSync();
   }
 }
 

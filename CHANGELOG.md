@@ -106,9 +106,15 @@ Notable changes to quotabot. Newest first.
 - Explicit provider reservations validate and write under one interprocess
   transaction. Parallel dispatch cannot reserve stale eligibility or overstate
   remaining headroom, including parallel isolates in one POSIX process. Lease
-  generations use exclusive random temporary files flushed before rename. Codex
-  provider health also treats 99% used as available; the router's comfort buffer
-  no longer masquerades as provider exhaustion.
+  generations use exclusive random temporary files flushed before rename. A
+  process that loses an exclusive claim creation now retries when the winner
+  releases the claim before its follow-up probe, instead of reporting the lease
+  store unavailable under Windows load. Only known file-exists errors retry;
+  permission and path failures remain fatal. Claim ownership is published before
+  hardening, failed setup removes only its own generation, and claim reads stay
+  bounded and revalidate the path generation. Codex provider health also treats
+  99% used as available; the router's comfort buffer no longer masquerades as
+  provider exhaustion.
 - Strict verification now distinguishes a valid exhausted live reading from a
   failed adapter. Unknown Claude and Codex quota-shaped binding pools are
   rejected atomically while benign additive metadata remains compatible.
