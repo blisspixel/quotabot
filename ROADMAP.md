@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-18. This file is the forward plan. It records brief shipped
+Updated 2026-07-19. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -104,7 +104,7 @@ can remain the preceding version until this line's tag workflow completes.
 |---|---|---|---|
 | Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
 | Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; HTTP writes are authenticated lease-only metadata; LiteLLM atomically reserves remote routes and requires its own client bearer key on an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, grant implementations, and expired-host fall-through fixtures exist | Validate connected Claude/Codex grants on idle real-account machines; link dated Windows evidence; close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
+| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, exact-account recovery, provider-backed Claude/Codex pool identities, source docs, cache provenance, grant implementations, and expired-host fall-through fixtures exist | Validate connected Claude/Codex grants on idle real-account machines; capture post-July-20 Fable entitlement evidence; link dated Windows evidence; close remaining response-shape fixtures and local-runtime compatibility gaps |
 | Native provider evidence | Partial | Windows validation has been reported; WSL covers truthful Linux failure behavior | Link dated Windows evidence and confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
 | Installation and update | Ready for candidate rerun | CLI and desktop archives have required checksums, restricted attestations, exact-asset barriers, and clean-runner lifecycle gates. The v0.9.2 published CLI passed clean install and prior-version upgrade smoke on Windows, macOS, and Linux. Official `v*` tags cannot be moved or deleted, and releases published after the July 18 immutability activation are locked | Run every gate on the exact candidate, then sign and notarize desktop apps and repeat the complete lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation, backed by the content-blind decision receipt and setup recovery guidance | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
@@ -272,11 +272,11 @@ provider, before a forecast is built on top of it.
   local-only or free execution. Never estimate throughput by generating content.
 - Grant implementation and deterministic expired-host-token fall-through
   fixtures are shipped for Claude and Codex. Remaining: validate the connected
-  login flows on idle real-account machines. Claude now uses irreversible
-  credential-generation identities so same-tier credential replacements cannot
-  share cache or drift evidence. A provider-backed stable identity is still
-  needed for durable account labels and deduplication when multiple credentials
-  belong to the same Claude account.
+  login flows on idle real-account machines. Claude now hashes current provider
+  profile account and organization ids into a stable pool identity for cache,
+  drift, leases, routing, and duplicate credentials. When profile identity is
+  unavailable, a credential-generation identity is the fallback and multiple
+  successful credentials fail closed to one routable pool.
 - Keep the LiteLLM loopback, bearer-auth, and unauthenticated-denial regression
   green as its pinned dependency changes.
 - Already shipped on 0.5.x: the normalized six-value `source_class` contract

@@ -177,9 +177,9 @@ String? desktopRouteDetailLine(
         : 'low confidence';
     parts.add('$label ($pct%)');
   }
-  final ageSeconds = now - suggestion.asOf;
+  final ageSeconds = now - candidate.asOf;
   if (ageSeconds >= 60) {
-    parts.add('as of ${ageLabel(suggestion.asOf, now)} ago');
+    parts.add('as of ${ageLabel(candidate.asOf, now)} ago');
   }
   parts.add('Receipt: ${suggestion.receipt.decisionId}');
   parts.add('Decision: ${suggestion.explanation}');

@@ -395,12 +395,20 @@ Future<void> main(List<String> rawArgs) async {
       _runExplain(flags, wantsJson, profile, excludedProviders);
       return;
     case 'verify':
-      await _runVerify(
-        wantsJson,
-        profile,
-        excludedProviders,
-        requireLive: flags.contains('--require-live'),
-      );
+      final recoveryRequested =
+          _stringOption(flags, 'recover-drift', null) != null ||
+              _stringOption(flags, 'account', null) != null ||
+              flags.contains('--yes');
+      if (recoveryRequested) {
+        await _runDriftRecovery(flags, wantsJson);
+      } else {
+        await _runVerify(
+          wantsJson,
+          profile,
+          excludedProviders,
+          requireLive: flags.contains('--require-live'),
+        );
+      }
       return;
   }
 
@@ -1016,6 +1024,7 @@ const _valueOptions = {
   'plan',
   'prefer',
   'profile',
+  'recover-drift',
   'risk',
   'sort',
   'state',
@@ -1051,6 +1060,7 @@ const _switchOptions = {
   '--tuned-burn',
   '--use-expiring-quota',
   '--version',
+  '--yes',
   '-h',
   '-v',
 };
@@ -1167,7 +1177,12 @@ String? _commandOptionError(String command, Set<String> flags) {
     case 'explain':
       allowed.addAll(const {'network', 'reads'});
     case 'verify':
-      allowed.add('require-live');
+      allowed.addAll(const {
+        'account',
+        'recover-drift',
+        'require-live',
+        'yes',
+      });
   }
   for (final flag in flags) {
     final name = _optionName(flag);
@@ -1491,6 +1506,7 @@ Future<void> _runTop(
   var loading = true;
   var lastCollect = 0;
   var failStreak = 0;
+  var refreshFailure = '';
   var selected = 0; // cursor index into the visible (sorted, unhidden) list
   // Provider/account identities hidden this session with the x key. Keyed by
   // account, not bare provider, so hiding one account of a duplicated provider
@@ -1535,7 +1551,9 @@ Future<void> _runTop(
         clock: _clock(),
         depth: depth,
         palette: palette,
-        updated: _agoLabel(lastCollect, now),
+        updated: refreshFailure.isEmpty
+            ? _agoLabel(lastCollect, now)
+            : refreshFailure,
         sort: sort.label,
         selected: (selected >= 0 && selected < visible.length)
             ? visible[selected].provider
@@ -1569,11 +1587,22 @@ Future<void> _runTop(
       data = fresh;
       lastCollect = nowEpoch();
       loading = false;
+      refreshFailure = '';
       final anyLive = fresh.any((q) => q.ok && q.hasWindows && !q.stale);
       failStreak = anyLive ? 0 : failStreak + 1;
       draw();
     },
-    // Keep the last good frame on a transient collection error.
+    onFailure: () {
+      final note = data.isEmpty
+          ? 'refresh failed - no quota data'
+          : 'refresh failed - showing last known';
+      data = retainSnapshotAfterRefreshFailure(data, note: note);
+      loading = false;
+      refreshFailure = note;
+      failStreak += 1;
+      draw();
+    },
+    // Keep retrying after a transient collection error.
     nextDelay: () => Duration(
       seconds: fixedInterval ??
           nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak),
@@ -1723,6 +1752,9 @@ void _printHelp() {
     '  verify              honesty checks over one read; add --require-live for adapter health',
   );
   stdout.writeln(
+    '                      recover one quarantined baseline with --recover-drift, --account, and --yes',
+  );
+  stdout.writeln(
     '  explain             show local reads and network hosts in the runtime trust boundary',
   );
   stdout.writeln('');
@@ -1816,6 +1848,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --require-live      verify: fail unless every selected provider read is fresh',
+  );
+  stdout.writeln(
+    '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
   );
   stdout.writeln(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
@@ -2816,6 +2851,113 @@ Future<void> _runVerify(
     _printVerify(report, results, requireLive: requireLive);
   }
   if (!report.passed) exitCode = _exitVerifyFailed;
+}
+
+Future<void> _runDriftRecovery(
+  Set<String> flags,
+  bool wantsJson,
+) async {
+  final providerOptions =
+      flags.where((flag) => flag.startsWith('--recover-drift=')).toList();
+  final accountOptions =
+      flags.where((flag) => flag.startsWith('--account=')).toList();
+  if (providerOptions.length > 1 || accountOptions.length > 1) {
+    stderr.writeln(
+      'quotabot: drift recovery requires one exact provider and account',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  final provider = _stringOption(flags, 'recover-drift', null);
+  final account = _stringOption(flags, 'account', null);
+  if (provider == null || provider.trim().isEmpty) {
+    stderr.writeln(
+      'quotabot: drift recovery requires --recover-drift=PROVIDER',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (account == null || account.trim().isEmpty) {
+    stderr.writeln('quotabot: drift recovery requires --account=EXACT_ACCOUNT');
+    exitCode = _exitUsage;
+    return;
+  }
+  if (provider.length > 64 ||
+      stripTerminalControl(provider) != provider ||
+      account.length > 512 ||
+      stripTerminalControl(account) != account) {
+    stderr.writeln('quotabot: drift recovery target is malformed');
+    exitCode = _exitUsage;
+    return;
+  }
+  final conflicts = <String>[
+    if (flags.any((flag) => flag.startsWith('--profile='))) '--profile',
+    if (flags.any((flag) => flag.startsWith('--exclude='))) '--exclude',
+    if (flags.any((flag) => flag.startsWith('--mock-provider=')))
+      '--mock-provider',
+    if (flags.any((flag) => flag.startsWith('--state='))) '--state',
+  ];
+  if (conflicts.isNotEmpty) {
+    stderr.writeln(
+      'quotabot: drift recovery cannot be combined with ${conflicts.join(', ')}',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (!flags.contains('--yes')) {
+    stderr.writeln(
+      'quotabot: drift recovery changes one local quota baseline; confirm the '
+      'exact target by rerunning the same command with --yes',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+
+  final report = await _withSpinner(
+    'verifying quota',
+    () => verifyAndRecoverProviderDriftBaseline(
+      provider: provider,
+      account: account,
+    ),
+  );
+  if (wantsJson) {
+    print(_jsonPretty(report.toJson()));
+  } else {
+    _printDriftRecovery(report);
+  }
+  if (!report.recovered) {
+    exitCode =
+        report.status == 'unsupported_target' ? _exitUsage : _exitVerifyFailed;
+  }
+}
+
+void _printDriftRecovery(ProviderDriftRecoveryReport report) {
+  final account = quotaAccountDisplayLabel(report.account);
+  final target = '${report.displayName} ($account)';
+  print(
+    '${style.bold('quotabot verify drift recovery')}  '
+    '${style.dim('fresh provider metadata, 0 usage tokens')}',
+  );
+  if (report.recovered) {
+    print('  ${style.green('RECOVERED')} $target');
+    print('  ${report.detail}');
+    print(
+      style.dim(
+        '  History and every other provider/account record were left unchanged.',
+      ),
+    );
+    return;
+  }
+  print('  ${style.red('NOT RECOVERED')} $target');
+  print('  ${style.dim(report.status)}: ${report.detail}');
+  final verification = report.verification;
+  if (verification != null) {
+    for (final check in verification.checks.where(
+      (check) => check.status == VerifyStatus.fail,
+    )) {
+      print('  ${style.dim(check.id)}: ${check.detail}');
+    }
+  }
 }
 
 String _verifyStateLabel(String state) => switch (state) {

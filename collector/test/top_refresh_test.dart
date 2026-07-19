@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/top_refresh.dart';
 import 'package:test/test.dart';
 
@@ -121,5 +123,76 @@ void main() {
     expect(timers.active, hasLength(1));
     coordinator.dispose();
     expect(timers.active, isEmpty);
+  });
+
+  test('a failed refresh makes retained quota stale and unroutable', () async {
+    const now = 1782046566;
+    final timers = _TimerHarness();
+    var failureCalls = 0;
+    var data = <ProviderQuota>[
+      ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 20,
+            resetsAt: now + 86400,
+          ),
+        ],
+      ),
+    ];
+    final coordinator = TopRefreshCoordinator<List<ProviderQuota>>(
+      collect: () async => throw StateError('collector failed'),
+      apply: (fresh) => data = fresh,
+      onFailure: () {
+        failureCalls++;
+        data = retainSnapshotAfterRefreshFailure(
+          data,
+          note: 'refresh failed - showing last known',
+        );
+      },
+      nextDelay: () => const Duration(seconds: 10),
+      timerFactory: timers.create,
+    );
+
+    await coordinator.refreshNow();
+
+    expect(failureCalls, 1);
+    expect(data.single.stale, isTrue);
+    expect(data.single.asOf, now);
+    expect(data.single.error, 'refresh failed - showing last known');
+    expect(suggestRoute(data, now).recommended, isNull);
+    expect(timers.active, hasLength(1));
+    coordinator.dispose();
+  });
+
+  test('retained stale and failed rows keep their precise errors', () {
+    final stale = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: 1782046500,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    ).asStale('provider returned HTTP 429');
+    final failed = ProviderQuota.error(
+      'codex',
+      'Codex',
+      'credential refresh failed',
+      1782046500,
+    );
+
+    final retained = retainSnapshotAfterRefreshFailure(
+      [stale, failed],
+      note: 'whole refresh failed',
+    );
+
+    expect(identical(retained[0], stale), isTrue);
+    expect(retained[0].error, 'provider returned HTTP 429');
+    expect(identical(retained[1], failed), isTrue);
+    expect(retained[1].error, 'credential refresh failed');
+    expect(retained[1].ok, isFalse);
   });
 }

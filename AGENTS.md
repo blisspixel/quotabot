@@ -161,8 +161,9 @@ collector. Its current-window bars are separate from its approximate
 this-machine contribution breakdown. Never turn that local breakdown, or the
 announced Fable allowance of 50% of plan limits, into remaining headroom. Use
 the live scoped Fable row for balance; `quota_backed` additionally requires
-same-response Max or Team Premium provider metadata captured on or after the
-announced July 20, 2026 UTC policy boundary. Do not invoke `claude -p /usage` or
+current Max or Team Premium provider usage or profile metadata read with the
+same credential on or after the announced July 20, 2026 UTC policy boundary.
+Do not invoke `claude -p /usage` or
 `/quota`, because print mode is a prompt-execution surface.
 
 ## Decision recipe

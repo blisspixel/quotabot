@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
 import '../credential_identity.dart';
+import '../file_guard.dart';
 import '../util.dart';
 
 export '../credential_identity.dart';
@@ -123,7 +125,6 @@ class TokenStore {
   static final _providerPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
   static const _accountKey = '_account';
   static const _maxTokenBytes = 128 * 1024;
-
   static File _file(String provider, {String? account}) {
     final providerName = _providerFileName(provider);
     final accountName = _normalizeAccount(account);
@@ -181,7 +182,11 @@ class TokenStore {
     required bool suppressIoErrors,
   }) {
     try {
-      if (!f.existsSync()) return null;
+      final type = FileSystemEntity.typeSync(f.path, followLinks: false);
+      if (type == FileSystemEntityType.notFound) return null;
+      if (type != FileSystemEntityType.file) {
+        throw FileSystemException('invalid credential file', f.path);
+      }
       if (f.lengthSync() > _maxTokenBytes) return null;
       final raw = f.readAsStringSync();
       final decoded = jsonDecode(raw);
@@ -233,6 +238,44 @@ class TokenStore {
     });
   }
 
+  /// Serializes one refresh side effect for a provider slot while leaving
+  /// ordinary login writes independent. The record is reloaded only after the
+  /// per-slot refresh guard is held, and the guard remains held until [run]
+  /// completes, including any awaited token-endpoint request and CAS publish.
+  ///
+  /// [run] should publish with [replaceIfCurrent]. A login that replaces the
+  /// slot while the network request is in flight therefore remains nonblocking
+  /// and causes that final CAS to return false. Different account slots use
+  /// different guards and do not block one another. When the slot is absent,
+  /// [run] receives null without creating a guard because there is no refresh
+  /// credential or remote side effect to serialize; a concurrent new login is
+  /// simply observed on the next read.
+  static Future<T> refreshTransaction<T>(
+    String provider,
+    Future<T> Function(TokenRecord? current) run, {
+    String? account,
+  }) async {
+    final accountName = _normalizeAccount(account);
+    final f = _file(provider, account: accountName);
+    if (!f.existsSync()) return run(null);
+    final lockFile = _prepareLockFile(f, qualifier: '.refresh');
+    final guard = await acquireInterprocessFileGuard(
+      lockFile,
+      hardenClaim: _hardenTokenFile,
+    );
+    try {
+      final current = _readRecord(
+        f,
+        provider: provider,
+        account: accountName,
+        suppressIoErrors: true,
+      );
+      return await run(current);
+    } finally {
+      guard.release();
+    }
+  }
+
   /// Replaces [current] only when its slot still contains the exact generation
   /// that was loaded. All TokenStore writers take the same per-slot file lock,
   /// so a completed login or another refresh cannot be overwritten by a stale
@@ -273,11 +316,8 @@ class TokenStore {
     // token this way would break every later refresh. Lock the temp down BEFORE
     // the secret lands so it is never briefly world-readable under the default
     // umask. The same-directory rename preserves that checked descriptor.
-    final tmp = File('${f.path}.$pid.tmp');
+    final tmp = _createTemporaryFile(f);
     try {
-      if (!tmp.existsSync()) {
-        tmp.createSync(recursive: true);
-      }
       _hardenTokenFile(tmp);
       tmp.writeAsStringSync(jsonEncode({
         ...tokens.toJson(),
@@ -292,6 +332,24 @@ class TokenStore {
       } catch (_) {}
       rethrow;
     }
+  }
+
+  static File _createTemporaryFile(File target) {
+    for (var attempt = 0; attempt < 16; attempt++) {
+      final temporary = File(
+        '${target.path}.$pid.${_randomSuffix(12)}.tmp',
+      );
+      try {
+        temporary.createSync(exclusive: true);
+        return temporary;
+      } on FileSystemException {
+        if (!temporary.existsSync()) rethrow;
+      }
+    }
+    throw FileSystemException(
+      'could not create credential temporary file',
+      target.path,
+    );
   }
 
   static void _replaceAtomically(File temporary, File target) {
@@ -317,7 +375,20 @@ class TokenStore {
   }
 
   static T _withFileLock<T>(File target, T Function() run) {
-    final lockFile = File('${target.path}.lock');
+    final lockFile = _prepareLockFile(target);
+    final guard = acquireInterprocessFileGuardSync(
+      lockFile,
+      hardenClaim: _hardenTokenFile,
+    );
+    try {
+      return run();
+    } finally {
+      guard.release();
+    }
+  }
+
+  static File _prepareLockFile(File target, {String qualifier = ''}) {
+    final lockFile = File('${target.path}$qualifier.lock');
     _hardenTokenDirectory(lockFile.parent);
     var created = false;
     if (!lockFile.existsSync()) {
@@ -338,16 +409,11 @@ class TokenStore {
       }
       rethrow;
     }
-    final lock = lockFile.openSync(mode: FileMode.write);
-    try {
-      lock.lockSync(FileLock.blockingExclusive);
-      return run();
-    } finally {
-      try {
-        lock.unlockSync();
-      } catch (_) {}
-      lock.closeSync();
+    if (FileSystemEntity.typeSync(lockFile.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      throw FileSystemException('invalid credential lock file', lockFile.path);
     }
+    return lockFile;
   }
 
   /// The account a provider-default grant is stamped for, or null when the
@@ -393,4 +459,11 @@ class TokenStore {
       clear(provider, account: account);
     }
   }
+}
+
+String _randomSuffix(int byteCount) {
+  final random = Random.secure();
+  return base64UrlEncode(
+    List<int>.generate(byteCount, (_) => random.nextInt(256)),
+  ).replaceAll('=', '');
 }

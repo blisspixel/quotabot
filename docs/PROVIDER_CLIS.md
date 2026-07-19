@@ -38,23 +38,29 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   usage credits and receive a one-time $100 credit. This is a dated plan policy,
   not a value quotabot hardcodes. `budget=quota` therefore requires both a live
   scoped Fable row and a Max or Team Premium entitlement carried by current
-  provider metadata captured on or after July 20, 2026 UTC. The
+  provider usage or profile metadata read with the same credential on or after
+  July 20, 2026 UTC. The
   `subscriptionType` in the local Claude credential is
   labeled `host_credential` evidence and never proves included spend after a
   plan change. Positive included-quota and credit-backed labels both require
   current provider plan evidence. Unknown, host-label-only, and credit-backed
   plans remain visible only under the unrestricted budget. See the
   [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
-- quotabot reads: the OAuth usage endpoint, reusing the token Claude Code stores.
+- quotabot reads: the OAuth usage and profile metadata endpoints, reusing the
+  token Claude Code stores.
   Live with no quotabot login when Claude Code has a valid signed-in token here;
   `quotabot login claude` adds a self-refreshing grant designed to keep the
   account-wide read live on a machine you have not opened Claude Code on
   recently. Confirm the result with `quotabot doctor`; real-account evidence
   after an idle interval remains a tracked 1.0 acceptance item.
-- Anthropic does not return a stable account id from this endpoint. quotabot
-  uses an irreversible local credential-generation fingerprint for cache and
-  drift isolation. Switching between two Max credentials cannot lend the new
-  credential an old 100% reading, and no raw credential enters quota output.
+- The usage endpoint does not return a stable account id, but the profile
+endpoint returns account and organization ids. quotabot hashes those ids to
+form the stable live snapshot, cache, drift, and lease identity and to collapse
+two credentials for the same subscription. If identity cannot be proven for
+every successful credential, at most one remains routable and an irreversible
+local credential fingerprint is the fallback boundary. Switching credentials
+cannot lend a new login an old 100% reading. No raw credential or provider
+account id enters quota output.
 
 ## Codex (OpenAI)
 

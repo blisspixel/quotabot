@@ -593,7 +593,7 @@ void main() {
     );
   }
 
-  testWidgets('provider setup refreshes live state from any matching account', (
+  testWidgets('provider setup refresh keeps every matching account visible', (
     tester,
   ) async {
     await _useDesktopSurface(tester);
@@ -657,10 +657,22 @@ void main() {
 
     expect(connections, 1);
     expect(collections, 2);
-    expect(find.text('Grok connected'), findsOneWidget);
+    expect(
+      find.text(
+        'Grok connected, but the selected account is still unconfirmed',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Grok connected'), findsNothing);
     expect(find.byType(Dialog), findsOneWidget);
     expect(
       find.descendant(of: dialog, matching: find.text('live')),
+      findsOneWidget,
+    );
+    expect(find.text('Grok (old@example.com)'), findsOneWidget);
+    expect(find.text('Grok (fresh@example.com)'), findsOneWidget);
+    expect(
+      find.descendant(of: dialog, matching: find.text('cached')),
       findsOneWidget,
     );
     expect(
@@ -668,11 +680,126 @@ void main() {
         of: dialog,
         matching: find.widgetWithText(TextButton, 'Connect'),
       ),
-      findsNothing,
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'provider setup keeps a failed grant beside a live host account',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final hostAccount = 'credential:${List.filled(64, 'a').join()}';
+      final grantAccount = 'credential:${List.filled(64, 'b').join()}';
+      final liveHost = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: hostAccount,
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+        ],
+      );
+      final failedGrant = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: grantAccount,
+        asOf: now,
+        ok: false,
+        error: 'refresh grant unavailable',
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(enableNotifications: false, setupDone: true),
+            demoMode: false,
+            collector: () async => [liveHost, failedGrant],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Setup and help'));
+      await tester.pumpAndSettle();
+
+      final dialog = find.byType(Dialog);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.text('Claude (account aaaaaaaa)'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.text('Claude (account bbbbbbbb)'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('live')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('no live data')),
+        findsOneWidget,
+      );
+      expect(
+        find.byTooltip('Set up Claude (account bbbbbbbb)'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('provider setup stays bounded at narrow width and 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 900);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final invalid = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'work@example.com',
+      asOf: now,
+      perMachine: true,
+      sourceClass: ProviderSourceClass.passiveLocalEvidence,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    expect(invalid.sourceClassViolation, isNotNull);
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          demoMode: false,
+          collector: () async => [invalid],
+          providerConnector: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('invalid evidence'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Connect'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('provider connect recollects after an active refresh', (
@@ -1187,6 +1314,60 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('failed refresh makes retained quota last known and unroutable', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    var collections = 0;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () async {
+            collections++;
+            if (collections == 1) return [quota];
+            throw StateError('private-token-value');
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('Next: Claude'), findsOneWidget);
+    expect(find.textContaining('80% free'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Refresh failed; showing previous data'), findsOneWidget);
+    expect(find.text('80% last known'), findsOneWidget);
+    expect(find.textContaining('80% free'), findsNothing);
+    expect(find.textContaining('Next: Claude'), findsNothing);
+    expect(find.textContaining('cached | account-wide'), findsOneWidget);
+    expect(find.text('live read failed - showing last known'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('Trusted quota headroom unavailable'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('private-token-value'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
   });

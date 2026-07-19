@@ -95,6 +95,70 @@ class _PairedTransport implements Transport {
   }
 }
 
+/// Models independent processes that can observe the same stale pre-transaction
+/// lease snapshot. Only [selectAndReserve] sees the serialized store state.
+class _StaleReadRouteLeaseStore implements RouteLeaseStore {
+  final InMemoryRouteLeaseStore _store;
+  int directReserveCalls = 0;
+  int transactionalReserveCalls = 0;
+
+  _StaleReadRouteLeaseStore({LeaseIdFactory? idFactory})
+      : _store = InMemoryRouteLeaseStore(idFactory: idFactory);
+
+  @override
+  List<RouteLease> active(int now) => const [];
+
+  List<RouteLease> transactionalActive(int now) => _store.active(now);
+
+  @override
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  }) {
+    transactionalReserveCalls++;
+    return _store.selectAndReserve(
+      select: select,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+      reuseWhere: reuseWhere,
+    );
+  }
+
+  @override
+  RouteLeaseReservation reserve({
+    required String provider,
+    required String account,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+  }) {
+    directReserveCalls++;
+    return _store.reserve(
+      provider: provider,
+      account: account,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  @override
+  RouteLeaseRelease release({required String leaseId, required int now}) =>
+      _store.release(leaseId: leaseId, now: now);
+}
+
 void main() {
   group('response builders', () {
     test('quotasSnapshot carries schema, time, and every provider', () {
@@ -1499,6 +1563,58 @@ void main() {
         unorderedEquals(['claude', 'codex']),
       );
       expect(store.active(_now), hasLength(2));
+    });
+
+    test('concurrent explicit reservations select and reserve atomically',
+        () async {
+      var nextId = 0;
+      final store = _StaleReadRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 80)]),
+        ],
+        leaseStore: store,
+      );
+
+      final reservations = await Future.wait([
+        client.callTool(
+          const CallToolRequest(
+            name: 'reserve_provider',
+            arguments: {'provider': 'claude', 'weight_percent': 30},
+          ),
+        ),
+        client.callTool(
+          const CallToolRequest(
+            name: 'reserve_provider',
+            arguments: {'provider': 'claude', 'weight_percent': 30},
+          ),
+        ),
+      ]);
+      final diagnostics = jsonEncode(
+        reservations
+            .map((reservation) => reservation.structuredContent)
+            .toList(),
+      );
+
+      expect(
+        reservations.map(
+          (reservation) => reservation.structuredContent?['reserved'],
+        ),
+        unorderedEquals([true, false]),
+        reason: diagnostics,
+      );
+      final rejected = reservations.singleWhere(
+        (reservation) => reservation.structuredContent?['reserved'] == false,
+      );
+      expect(
+        rejected.structuredContent?['reason'],
+        'claude has no effective headroom available',
+      );
+      expect(store.transactionalReserveCalls, 2);
+      expect(store.directReserveCalls, 0);
+      expect(store.transactionalActive(_now), hasLength(1));
     });
 
     test('reserve_provider reuses an auto-selected lease on idempotent retry',

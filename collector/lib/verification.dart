@@ -285,7 +285,7 @@ ProviderVerification _verifyProvider(
       !q.stale &&
       q.driftReason == null &&
       q.suspect == null &&
-      q.error?.isNotEmpty != true &&
+      _errorIsCompatibleWithSuccessfulLiveRead(q, now) &&
       !q.isManual &&
       checks.every((check) => check.status != VerifyStatus.fail);
   return ProviderVerification(
@@ -315,6 +315,27 @@ ProviderVerification _verifyProvider(
     checks: checks,
     crossCheck: kProviderCrossChecks[q.provider],
   );
+}
+
+const _passiveSpentStatusProviders = {
+  cursorProviderId,
+  windsurfProviderId,
+  kiroProviderId,
+};
+
+/// Cursor, Windsurf, and Kiro historically carry their valid out-of-quota
+/// status in [ProviderQuota.error] alongside a complete passive-state window.
+/// Strict verification accepts only that exact status convention. Transport
+/// failures still have `ok: false`, and stale, malformed, differently sourced,
+/// or non-spent rows remain unsuccessful.
+bool _errorIsCompatibleWithSuccessfulLiveRead(ProviderQuota q, int now) {
+  final error = q.error?.trim();
+  if (error == null || error.isEmpty) return true;
+  return _passiveSpentStatusProviders.contains(q.provider) &&
+      q.sourceClass == ProviderSourceClass.passiveLocalEvidence &&
+      error.startsWith('out of quota (resets ') &&
+      error.endsWith(')') &&
+      verifyState(q, now) == 'out_of_quota';
 }
 
 VerifyCheck _sourceClassCheck(

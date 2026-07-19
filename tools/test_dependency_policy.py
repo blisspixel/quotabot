@@ -344,6 +344,8 @@ class DependencyPolicyTest(unittest.TestCase):
                     self.assertIn(command, text)
 
     def test_ci_and_release_toolchains_are_reproducible(self) -> None:
+        flutter_version = "3.44.6"
+        flutter_commit = "ee80f08bbf97172ec030b8751ceab557177a34a6"
         flutter_workflows = (
             "ci.yml",
             "currency.yml",
@@ -355,8 +357,20 @@ class DependencyPolicyTest(unittest.TestCase):
                 text = (ROOT / ".github" / "workflows" / name).read_text(
                     encoding="utf-8"
                 )
-                self.assertIn("flutter-version: '3.44.2'", text)
+                self.assertIn("./tools/setup-flutter-ci.ps1", text)
+                self.assertIn(f"-FlutterVersion '{flutter_version}'", text)
+                self.assertIn(f"-ExpectedCommit '{flutter_commit}'", text)
+                self.assertNotIn("subosito/flutter-action@", text)
                 self.assertNotIn("channel: stable", text)
+
+        flutter_setup = (ROOT / "tools" / "setup-flutter-ci.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"[string]$FlutterVersion = '{flutter_version}'", flutter_setup)
+        self.assertIn(f"[string]$ExpectedCommit = '{flutter_commit}'", flutter_setup)
+        self.assertIn("https://github.com/flutter/flutter.git", flutter_setup)
+        self.assertIn("rev-parse HEAD", flutter_setup)
+        self.assertIn("if ($actualCommit -ne $ExpectedCommit)", flutter_setup)
 
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"

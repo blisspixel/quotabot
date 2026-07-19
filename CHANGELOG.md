@@ -2,7 +2,7 @@
 
 Notable changes to quotabot. Newest first.
 
-## 0.9.3 - 2026-07-18
+## 0.9.3 - 2026-07-19
 
 ### Security
 - Cursor and Windsurf now query exact provider-owned metadata rows and project
@@ -12,14 +12,18 @@ Notable changes to quotabot. Newest first.
 - Claude and Codex cache, drift, history, and profile identities are isolated by
   irreversible credential-generation fingerprints. Codex account identity and
   quotabot-owned grant identity survive access-token and refresh-token rotation.
-  Claude host credentials deliberately start a new identity when their refresh
-  token changes because Anthropic exposes no stable account id; this fail-closed
-  boundary can discard continuity but cannot lend one credential generation
-  another's evidence. Codex response email is ignored as an identity source.
+  Claude also hashes current provider profile account and organization ids into
+  a stable snapshot, cache, drift, and lease key, collapsing host and quotabot
+  credentials for the same subscription. If profile identity is unavailable,
+  only one successful Claude credential remains routable. This can under-route
+  but cannot count one plan twice. Codex response email is ignored as an
+  identity source.
 - OAuth token refreshes now load credentials and their owner as one immutable
-  record, serialize every writer with a per-slot cross-process lock, and replace
-  only the exact generation that was loaded. A stale refresh cannot overwrite a
-  completed login or account replacement.
+  record, serialize writers and refresh side effects with per-slot
+  process-and-isolate guards, and replace only the exact generation that was
+  loaded. The claim-backed native guard releases the native lock before its
+  owned claim, so a stale refresh cannot overwrite a completed login or account
+  replacement.
 - Draft release publication is bound to the exact audited GitHub release id and
   a digest of its complete asset manifest, then rechecks the tag, release, and
   current `main` tip immediately before publishing.
@@ -31,6 +35,9 @@ Notable changes to quotabot. Newest first.
   originless cross-site or same-site subresource requests before collection.
   Normal non-browser clients without Fetch Metadata and explicit user-activated
   top-level navigations remain supported.
+- Credential and loopback mutation-token readers now reject symlinks and other
+  non-regular files before permission hardening or content reads, so a planted
+  link cannot redirect quotabot into an unrelated file.
 
 ### Changed
 - Concrete CLI and MCP model suggestions now default to the no-surprise `quota`
@@ -51,6 +58,9 @@ Notable changes to quotabot. Newest first.
 - CI now builds and validates native CLI archives alongside desktop packages.
   CI, currency checks, and release builds enforce committed Dart and Flutter
   lockfiles instead of allowing dependency resolution to repair them silently.
+- CI and release workflows bootstrap the audited official Flutter 3.44.6 source
+  commit through a repository-owned helper. The build no longer executes a
+  nested mutable marketplace action for its toolchain.
 - Source setup and packaging helpers now enforce the same committed lockfiles,
   and desktop builds disable implicit dependency resolution after that check.
 - Prerelease version tags are published with GitHub's prerelease classification,
@@ -79,8 +89,9 @@ Notable changes to quotabot. Newest first.
   compatible.
 - Claude Fable 5 no longer carries the obsolete temporary catalog cutoff. It is
   quota-backed only when the current provider response contains a live scoped
-  Fable pool and current provider metadata confirms a Max or Team Premium
-  entitlement on or after the announced July 20, 2026 UTC policy boundary. A
+  Fable pool and current provider usage or profile metadata read with the same
+  credential confirms a Max or Team Premium entitlement on or after the
+  announced July 20, 2026 UTC policy boundary. A
   locally stored Claude `subscriptionType` is explicitly marked
   as host-credential evidence and cannot prove inclusion after an entitlement
   change or positively classify credit-backed spend. Pro, Team Standard,
@@ -89,6 +100,37 @@ Notable changes to quotabot. Newest first.
   budget. Doctor and desktop scoped rows state whether spend is included,
   credit-backed, or unproven. The dated July 20
   plan policy never substitutes for a measured balance.
+- A whole desktop or interactive refresh failure now preserves the last trusted
+  values with their original capture time and marks every retained row stale and
+  unroutable. One failed fleet read can no longer present old evidence as live.
+- Explicit provider reservations validate and write under one interprocess
+  transaction. Parallel dispatch cannot reserve stale eligibility or overstate
+  remaining headroom, including parallel isolates in one POSIX process. Lease
+  generations use exclusive random temporary files flushed before rename. Codex
+  provider health also treats 99% used as available; the router's comfort buffer
+  no longer masquerades as provider exhaustion.
+- Strict verification now distinguishes a valid exhausted live reading from a
+  failed adapter. Unknown Claude and Codex quota-shaped binding pools are
+  rejected atomically while benign additive metadata remains compatible.
+- Added explicit provider/account-scoped drift baseline recovery through
+  `quotabot verify --recover-drift=PROVIDER --account=EXACT_ACCOUNT --yes`.
+  Recovery requires a fresh targeted live verification plus atomic generation
+  checks, refuses failed, stale, malformed, duplicate, or superseded evidence,
+  and leaves history and other accounts untouched. Provider text is sanitized
+  before diagnostics or persistence, confirmation guidance never renders a
+  provider-controlled shell command, and injected test clocks are bounded
+  against real time before collection.
+- First-run loopback mutation-token creation is process- and isolate-safe. Two
+  servers starting together publish one complete owner-only token and cannot
+  overwrite one another.
+- Desktop setup preserves every Claude and Codex account row. A live host login
+  cannot hide a failed grant, and bounded opaque account labels make each repair
+  action target clear without exposing credentials.
+- Desktop connection recovery now succeeds only when the selected exact account
+  becomes live. Provider cards, setup actions, plan labels, and long reset
+  guidance remain bounded at a 320 pixel window and 2x text scale.
+- Grok fallback grants now require an exact stamped account owner. A legacy
+  unowned default grant is never used or refreshed for a requested account.
 - Codex no longer reads mixed-content rollout files for a this-machine quota
   fallback. It uses account-wide metadata or fails closed with a login repair,
   preserving the promise that quota collection never reads prompts or responses.

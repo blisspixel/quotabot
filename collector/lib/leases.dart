@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'file_guard.dart';
 import 'provider_ids.dart';
 import 'storage_keys.dart';
 import 'util.dart';
@@ -202,10 +203,10 @@ abstract class RouteLeaseStore {
 
   /// Selects a target from the latest active leases and creates its lease as
   /// one store transaction. File-backed stores serialize independent processes.
-  /// Callers must route all file-store operations in a POSIX process through one
-  /// isolate because Dart advisory file locks are process-scoped. Synchronous
-  /// calls within that isolate cannot interleave. A matching idempotency key
-  /// that fails [reuseWhere] is a scope conflict and is never reassigned.
+  /// The file store combines an exclusive claim with its native lock so POSIX
+  /// isolates and independent processes observe the same transaction boundary.
+  /// A matching idempotency key that fails [reuseWhere] is a scope conflict and
+  /// is never reassigned.
   RouteLeaseReservation selectAndReserve({
     required RouteLeaseSelector select,
     required int now,
@@ -598,17 +599,26 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     final dir = dirFactory();
     restrictOwnerOnlyDirectory(dir);
     final lockFile = _lockFile(dir);
-    if (!lockFile.existsSync()) lockFile.createSync(recursive: true);
+    if (!lockFile.existsSync()) {
+      try {
+        lockFile.createSync(recursive: true, exclusive: true);
+      } on FileSystemException {
+        if (!lockFile.existsSync()) rethrow;
+      }
+    }
+    if (FileSystemEntity.typeSync(lockFile.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      throw FileSystemException('invalid lease lock file', lockFile.path);
+    }
     restrictOwnerOnlyFile(lockFile);
-    final lock = lockFile.openSync(mode: FileMode.write);
+    final guard = acquireInterprocessFileGuardSync(
+      lockFile,
+      hardenClaim: restrictOwnerOnlyFile,
+    );
     try {
-      lock.lockSync(FileLock.blockingExclusive);
       return run(dir);
     } finally {
-      try {
-        lock.unlockSync();
-      } catch (_) {}
-      lock.closeSync();
+      guard.release();
     }
   }
 }
@@ -635,13 +645,36 @@ List<RouteLease> _readUnlocked(File file) {
 }
 
 void _writeUnlocked(File file, List<RouteLease> leases) {
-  final tmp = File('${file.path}.$pid.tmp');
-  if (!tmp.existsSync()) tmp.createSync(recursive: true);
-  restrictOwnerOnlyFile(tmp);
-  tmp.writeAsStringSync(
-      jsonEncode(leases.map((lease) => lease.toJson()).toList()));
-  tmp.renameSync(file.path);
-  restrictOwnerOnlyFile(file);
+  final tmp = _createLeaseTemporaryFile(file);
+  try {
+    restrictOwnerOnlyFile(tmp);
+    tmp.writeAsStringSync(
+      jsonEncode(leases.map((lease) => lease.toJson()).toList()),
+      flush: true,
+    );
+    tmp.renameSync(file.path);
+    restrictOwnerOnlyFile(file);
+  } finally {
+    try {
+      if (tmp.existsSync()) tmp.deleteSync();
+    } catch (_) {}
+  }
+}
+
+File _createLeaseTemporaryFile(File target) {
+  for (var attempt = 0; attempt < 16; attempt++) {
+    final temporary = File('${target.path}.$pid.${randomLeaseId()}.tmp');
+    try {
+      temporary.createSync(exclusive: true);
+      return temporary;
+    } on FileSystemException {
+      if (!temporary.existsSync()) rethrow;
+    }
+  }
+  throw FileSystemException(
+    'could not create lease temporary file',
+    target.path,
+  );
 }
 
 List<RouteLease> _activeOnly(List<RouteLease> leases, int now) =>

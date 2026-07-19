@@ -81,6 +81,25 @@ A source-class transition starts a new drift baseline rather than comparing
 unlike evidence. This prevents an account-wide live read and a machine-scoped
 fallback from being treated as interchangeable history.
 
+When a provider legitimately changes a quota shape and ordinary admission
+cannot establish a new baseline, recovery is explicit and exact:
+
+```text
+quotabot verify --recover-drift=PROVIDER --account=EXACT_ACCOUNT --yes
+```
+
+The command first requires an active drift or legacy quarantine for that exact
+provider/account. It then performs one targeted provider metadata read and
+requires exactly one matching row to pass the registered source contract, the
+full live verification checks, and the stricter cache trust boundary. Failed,
+stale, malformed, expired, future-dated, duplicate, or wrong-account evidence
+cannot recover a baseline. The final replacement is serialized with the same
+provider/account evidence lock and is refused if a newer cache or drift
+observation appeared after the live read began. Only that snapshot baseline and
+its older matching drift diagnostic change. History, analytics buckets,
+profiles, preferences, leases, credentials, and every other account remain
+untouched. This is quota metadata traffic only and makes no model call.
+
 ### Provenance design basis
 
 This contract follows the W3C PROV guidance to make provenance explicit and
@@ -161,7 +180,10 @@ PROV-DM conformance.
 
 ## Claude (Anthropic)
 
-- Source: `GET https://api.anthropic.com/api/oauth/usage`.
+- Source: `GET https://api.anthropic.com/api/oauth/usage`, with a companion
+  `GET https://api.anthropic.com/api/oauth/profile` metadata read using the same
+  credential when current account-pool or plan evidence is needed. Both are
+  zero-usage-token metadata reads, not model calls.
 - Auth, in priority order: the OAuth access token Claude Code stores in
   `~/.claude/.credentials.json` under `claudeAiOauth.accessToken` (used while its
   `claudeAiOauth.expiresAt` is still in the future), then quotabot's own
@@ -179,18 +201,33 @@ PROV-DM conformance.
   a malformed sibling. A null optional legacy Opus block means that scoped pool
   is absent. Unknown additive fields remain compatible. Model-scoped rows gate
   only the matching model and never become provider-wide binding windows.
+- The companion profile response can provide current Max, Pro, Team Premium, or
+  Team Standard entitlement when the usage response omits `subscription_type`.
+  It can also identify whether independently successful credentials point at
+  the same live subscription pool. Valid account and optional organization IDs
+  are combined and irreversibly hashed for that live deduplication check. Raw
+  provider account and organization IDs are not stored or emitted. If several
+  credentials succeed but any live pool identity is unavailable, quotabot
+  fails closed to one routable success and marks the other successes
+  unavailable rather than double-counting one plan. When profile identity
+  succeeds, that stable opaque pool hash becomes the snapshot account key used
+  consistently by cache, drift, leases, and routing. A credential fingerprint
+  is the fail-closed account-key fallback only when profile identity is
+  unavailable.
 - Fable 5 is admitted to the model registry as quota-backed only when the current
-  provider response contains a live scoped Fable row and current provider
-  metadata captured on or after July 20, 2026 UTC carries an explicit Max or
-  Team Premium entitlement. Its effective
+  usage response contains a live scoped Fable row and current provider metadata
+  from that usage read or its same-credential companion profile read, captured
+  on or after July 20, 2026 UTC, carries an explicit Max or Team Premium
+  entitlement. Its effective
   gate is the tighter of that scoped pool and the shared Claude binding window.
   A missing or expired Fable row fails closed for Fable without making unrelated
   Claude models unavailable. The local Claude credential's `subscriptionType`
   is serialized
   as `plan_evidence_source: "host_credential"` for diagnostics, but it can
-  outlive a downgrade and never satisfies `budget=quota`. Only same-response
-  `provider_metadata` evidence at or after the policy boundary can prove included
-  entitlement or a credit-backed plan classification. Pro, Team
+  outlive a downgrade and never satisfies `budget=quota`. Only current
+  `provider_metadata` evidence from one of those provider reads at or after the
+  policy boundary can prove included entitlement or a credit-backed plan
+  classification. Pro, Team
   Standard, host-label-only, and plan-unknown rows remain visible under the
   unrestricted budget; the catalog never invents a balance or spend class from
   plan policy.
@@ -204,14 +241,17 @@ PROV-DM conformance.
   the in-CLI `/usage` command. `/usage` can also show a separate approximate
   contribution breakdown based on local sessions; quotabot does not use that
   this-machine section as account-wide quota or burn evidence.
-- The usage response does not expose a stable account id. Claude snapshots are
-  therefore keyed by a full, irreversible `credential:<sha256>` identity
-  derived locally from the credential generation, with the provider name as a
-  domain separator. Raw access and refresh tokens never enter quota output,
-  cache, drift records, or history. quotabot's own grant preserves this opaque
-  identity across refresh-token rotation. A replaced host or quotabot grant
-  gets a different identity even when both credentials report the same plan,
-  so it cannot inherit the other credential's cache or drift evidence.
+- The usage response alone does not expose a stable account id. When companion
+  profile identity is unavailable, Claude snapshots use a full, irreversible
+  `credential:<sha256>` identity derived locally from the credential generation,
+  with the provider name as a domain separator. A valid profile account plus
+  optional organization identity instead produces a stable opaque pool hash
+  used for the successful snapshot's account key. Raw provider IDs,
+  access tokens, and refresh tokens never enter quota output, cache, drift
+  records, or history. quotabot's own grant preserves its opaque credential
+  fallback across refresh-token rotation. A replacement credential cannot
+  inherit another credential's fallback evidence unless current profile
+  metadata independently proves that both belong to the same provider pool.
   Profiles saved by an older version with a Claude plan such as `max` in the
   account filter remain fail-closed and are flagged for editing; quotabot never
   silently widens an exact account filter.

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
@@ -11,6 +12,120 @@ import 'package:test/test.dart';
 
 const _now = 1782000000;
 const _mutationToken = 'local-http-mutation-token-0123456789';
+
+class _LocalHttpAuthWorker {
+  final Process process;
+  final Future<String> stderrText;
+  final File resultFile;
+
+  _LocalHttpAuthWorker(this.process, this.stderrText, this.resultFile);
+
+  static Future<_LocalHttpAuthWorker> start({
+    required String script,
+    required Directory directory,
+    required String token,
+    required File readyFile,
+    required File startFile,
+    required File beforeCallFile,
+    required File factoryFile,
+    required File? releaseFile,
+    required File resultFile,
+  }) async {
+    final process = await Process.start(
+      Platform.resolvedExecutable,
+      [
+        '--packages=.dart_tool/package_config.json',
+        script,
+        directory.path,
+        token,
+        readyFile.path,
+        startFile.path,
+        beforeCallFile.path,
+        factoryFile.path,
+        releaseFile?.path ?? '-',
+        resultFile.path,
+      ],
+      workingDirectory: Directory.current.path,
+    );
+    return _LocalHttpAuthWorker(
+      process,
+      process.stderr.transform(utf8.decoder).join(),
+      resultFile,
+    );
+  }
+
+  Future<Map<String, dynamic>> result() async {
+    final exit = await process.exitCode;
+    final stderr = await stderrText;
+    if (!resultFile.existsSync()) {
+      throw StateError('token worker produced no result: $exit $stderr');
+    }
+    final decoded = jsonDecode(resultFile.readAsStringSync());
+    if (decoded is! Map<Object?, Object?>) {
+      throw StateError('token worker produced an invalid result: $decoded');
+    }
+    return {
+      ...decoded.cast<String, dynamic>(),
+      'exit_code': exit,
+      'stderr': stderr,
+    };
+  }
+
+  Future<void> stop() async {
+    process.kill();
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+    }
+    try {
+      await stderrText.timeout(const Duration(seconds: 1));
+    } on TimeoutException {
+      // Bounded cleanup keeps a failed worker from stalling the suite.
+    }
+  }
+}
+
+Future<void> _waitForFile(File file) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 15));
+  while (!file.existsSync()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('timed out waiting for ${file.path}');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
+Future<void> _createLocalHttpTokenInIsolate(List<Object?> arguments) async {
+  final id = arguments[0] as String;
+  final directory = Directory(arguments[1] as String);
+  final token = arguments[2] as String;
+  final releasePath = arguments[3] as String?;
+  final events = arguments[4] as SendPort;
+  final commands = ReceivePort();
+  events.send(<Object>[id, 'ready', commands.sendPort]);
+  await commands.first;
+  try {
+    final result = loadOrCreateLocalHttpMutationToken(
+      dirFactory: () => directory,
+      tokenFactory: () {
+        events.send(<Object>[id, 'factory']);
+        if (releasePath != null) {
+          final release = File(releasePath);
+          while (!release.existsSync()) {
+            sleep(const Duration(milliseconds: 2));
+          }
+        }
+        return token;
+      },
+    );
+    events.send(<Object>[id, 'result', result]);
+  } catch (error) {
+    events.send(<Object>[id, 'error', error.toString()]);
+  } finally {
+    commands.close();
+  }
+}
 
 ProviderQuota _q(
   String id,
@@ -479,6 +594,272 @@ void main() {
       if (root.existsSync()) root.deleteSync(recursive: true);
     }
   });
+
+  test('an existing invalid mutation token is never overwritten', () async {
+    final root = await Directory.systemTemp.createTemp('quotabot-http-token-');
+    final dir = Directory('${root.path}/config')..createSync();
+    final file = localHttpMutationTokenFile(dirFactory: () => dir);
+    const existing = 'existing-token-that-must-not-be-overwritten!\n';
+    file.writeAsStringSync(existing, flush: true);
+    var factoryCalls = 0;
+    try {
+      expect(
+        () => loadOrCreateLocalHttpMutationToken(
+          dirFactory: () => dir,
+          tokenFactory: () {
+            factoryCalls++;
+            return 'replacement-local-mutation-token-012345';
+          },
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(factoryCalls, 0);
+      expect(file.readAsStringSync(), existing);
+      if (!Platform.isWindows) {
+        expect(file.statSync().mode & 0x3f, 0);
+      }
+    } finally {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    }
+  });
+
+  test(
+    'a symbolic-link mutation token is rejected without reading its target',
+    () async {
+      final root = await Directory.systemTemp.createTemp('quotabot-http-link-');
+      final dir = Directory('${root.path}/config')..createSync();
+      const linkedToken = 'linked-local-mutation-token-0123456789';
+      final linkedTarget = File('${root.path}/target')
+        ..writeAsStringSync('$linkedToken\n', flush: true);
+      final file = localHttpMutationTokenFile(dirFactory: () => dir);
+      Link(file.path).createSync(linkedTarget.path);
+      try {
+        expect(
+          () => loadOrCreateLocalHttpMutationToken(dirFactory: () => dir),
+          throwsA(isA<FileSystemException>()),
+        );
+        expect(linkedTarget.readAsStringSync(), '$linkedToken\n');
+      } finally {
+        if (root.existsSync()) root.deleteSync(recursive: true);
+      }
+    },
+    skip: Platform.isWindows
+        ? 'ordinary Windows test accounts cannot create symbolic links'
+        : false,
+  );
+
+  test('a credential published during creation is not overwritten', () async {
+    final root = await Directory.systemTemp.createTemp('quotabot-http-token-');
+    final dir = Directory('${root.path}/config');
+    final file = localHttpMutationTokenFile(dirFactory: () => dir);
+    const existing = 'late-existing-mutation-token-0123456789';
+    try {
+      final result = loadOrCreateLocalHttpMutationToken(
+        dirFactory: () => dir,
+        tokenFactory: () {
+          file.writeAsStringSync('$existing\n', flush: true);
+          return 'replacement-local-mutation-token-012345';
+        },
+      );
+
+      expect(result, existing);
+      expect(file.readAsStringSync(), '$existing\n');
+      expect(
+        dir.listSync().where((entry) => entry.path.endsWith('.tmp')),
+        isEmpty,
+      );
+      if (!Platform.isWindows) {
+        expect(file.statSync().mode & 0x3f, 0);
+      }
+    } finally {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    }
+  });
+
+  test('concurrent first starts publish one complete mutation token', () async {
+    final root = await Directory.systemTemp.createTemp('quotabot-http-race-');
+    final dir = Directory('${root.path}/config');
+    final workerScript = File(
+      '${Directory.current.path}${Platform.pathSeparator}test'
+      '${Platform.pathSeparator}support${Platform.pathSeparator}'
+      'local_http_auth_worker.dart',
+    ).absolute.path;
+    final readyA = File('${root.path}/ready-a');
+    final readyB = File('${root.path}/ready-b');
+    final startA = File('${root.path}/start-a');
+    final startB = File('${root.path}/start-b');
+    final beforeA = File('${root.path}/before-a');
+    final beforeB = File('${root.path}/before-b');
+    final factoryA = File('${root.path}/factory-a');
+    final factoryB = File('${root.path}/factory-b');
+    final releaseA = File('${root.path}/release-a');
+    final resultA = File('${root.path}/result-a');
+    final resultB = File('${root.path}/result-b');
+    final workers = <_LocalHttpAuthWorker>[];
+    try {
+      expect(File(workerScript).existsSync(), isTrue);
+      workers.add(
+        await _LocalHttpAuthWorker.start(
+          script: workerScript,
+          directory: dir,
+          token: 'first-concurrent-mutation-token-012345',
+          readyFile: readyA,
+          startFile: startA,
+          beforeCallFile: beforeA,
+          factoryFile: factoryA,
+          releaseFile: releaseA,
+          resultFile: resultA,
+        ),
+      );
+      workers.add(
+        await _LocalHttpAuthWorker.start(
+          script: workerScript,
+          directory: dir,
+          token: 'second-concurrent-mutation-token-01234',
+          readyFile: readyB,
+          startFile: startB,
+          beforeCallFile: beforeB,
+          factoryFile: factoryB,
+          releaseFile: null,
+          resultFile: resultB,
+        ),
+      );
+      await Future.wait([_waitForFile(readyA), _waitForFile(readyB)]);
+
+      startA.writeAsStringSync('start\n', flush: true);
+      await _waitForFile(factoryA);
+      final tokenFile = localHttpMutationTokenFile(dirFactory: () => dir);
+      expect(
+        tokenFile.existsSync(),
+        isFalse,
+        reason: 'the final path must not expose an incomplete token',
+      );
+
+      startB.writeAsStringSync('start\n', flush: true);
+      await _waitForFile(beforeB);
+      releaseA.writeAsStringSync('continue\n', flush: true);
+      final results =
+          await Future.wait(workers.map((worker) => worker.result()))
+              .timeout(const Duration(seconds: 20));
+      final diagnostics = jsonEncode(results);
+
+      expect(results.map((result) => result['ok']), everyElement(isTrue),
+          reason: diagnostics);
+      expect(results.map((result) => result['exit_code']), everyElement(0),
+          reason: diagnostics);
+      expect(
+        results.map((result) => result['token']),
+        everyElement('first-concurrent-mutation-token-012345'),
+        reason: diagnostics,
+      );
+      expect(factoryB.existsSync(), isFalse,
+          reason: 'the losing creator must read rather than overwrite');
+      expect(
+        tokenFile.readAsStringSync(),
+        'first-concurrent-mutation-token-012345\n',
+      );
+      expect(
+        dir.listSync().where((entry) => entry.path.endsWith('.tmp')),
+        isEmpty,
+      );
+      if (!Platform.isWindows) {
+        expect(tokenFile.statSync().mode & 0x3f, 0);
+        expect(File('${tokenFile.path}.lock').statSync().mode & 0x3f, 0);
+      }
+    } finally {
+      await Future.wait(workers.map((worker) => worker.stop()));
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('concurrent isolates publish one complete mutation token', () async {
+    final root =
+        await Directory.systemTemp.createTemp('quotabot-http-isolate-');
+    final dir = Directory('${root.path}/config');
+    final releaseA = File('${root.path}/release-a');
+    final events = ReceivePort();
+    final ready = <String, Completer<SendPort>>{
+      'a': Completer<SendPort>(),
+      'b': Completer<SendPort>(),
+    };
+    final enteredFactory = <String>{};
+    final factoryA = Completer<void>();
+    final results = <String, Completer<String>>{
+      'a': Completer<String>(),
+      'b': Completer<String>(),
+    };
+    final subscription = events.listen((message) {
+      final event = (message as List<Object>).cast<Object>();
+      final id = event[0] as String;
+      final kind = event[1] as String;
+      if (kind == 'ready') ready[id]!.complete(event[2] as SendPort);
+      if (kind == 'factory') {
+        enteredFactory.add(id);
+        if (id == 'a' && !factoryA.isCompleted) factoryA.complete();
+      }
+      if (kind == 'result') results[id]!.complete(event[2] as String);
+      if (kind == 'error') {
+        results[id]!.completeError(StateError(event[2] as String));
+      }
+    });
+    Isolate? first;
+    Isolate? second;
+    try {
+      first = await Isolate.spawn<List<Object?>>(
+        _createLocalHttpTokenInIsolate,
+        <Object?>[
+          'a',
+          dir.path,
+          'first-isolate-mutation-token-012345678',
+          releaseA.path,
+          events.sendPort,
+        ],
+      );
+      second = await Isolate.spawn<List<Object?>>(
+        _createLocalHttpTokenInIsolate,
+        <Object?>[
+          'b',
+          dir.path,
+          'second-isolate-mutation-token-01234567',
+          null,
+          events.sendPort,
+        ],
+      );
+      final firstCommands =
+          await ready['a']!.future.timeout(const Duration(seconds: 3));
+      final secondCommands =
+          await ready['b']!.future.timeout(const Duration(seconds: 3));
+
+      firstCommands.send('start');
+      await factoryA.future.timeout(const Duration(seconds: 3));
+      secondCommands.send('start');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(enteredFactory, {'a'});
+
+      releaseA.writeAsStringSync('continue\n', flush: true);
+      final tokens = await Future.wait([
+        results['a']!.future,
+        results['b']!.future,
+      ]).timeout(const Duration(seconds: 5));
+      expect(
+        tokens,
+        everyElement('first-isolate-mutation-token-012345678'),
+      );
+      expect(enteredFactory, {'a'});
+      expect(
+        localHttpMutationTokenFile(dirFactory: () => dir)
+            .readAsStringSync()
+            .trim(),
+        tokens.first,
+      );
+    } finally {
+      first?.kill(priority: Isolate.immediate);
+      second?.kill(priority: Isolate.immediate);
+      await subscription.cancel();
+      events.close();
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
 
   test('/providers selects a live account after a spent first match', () async {
     final server = await startLocalQuotabotServer(

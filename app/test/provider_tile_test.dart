@@ -297,6 +297,59 @@ void main() {
     },
   );
 
+  testWidgets('narrow provider plan stays bounded at 2x text scale', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(210, 560));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const now = kClaudeFableIncludedQuotaEffectiveAt + 86400;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      plan: 'team_premium',
+      planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+      planEvidenceAsOf: now,
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 17,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 190,
+            child: ProviderTile(
+              quota: quota,
+              cardColor: const Color(0xFF1A1A1A),
+              nowEpochSeconds: now,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('team premium'), findsOneWidget);
+    expect(find.byTooltip('Plan: Team Premium'), findsOneWidget);
+    expect(find.bySemanticsLabel('Plan: Team Premium'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
   testWidgets('spent Claude scoped quota does not block the provider tile', (
     tester,
   ) async {
@@ -923,6 +976,39 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('available in'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('spent reset stays bounded at narrow width and 2x text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(210, 560));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final far = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3 * 86400;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 190,
+            child: ProviderTile(
+              quota: _q(100, resetsAt: far),
+              cardColor: const Color(0xFF1A1A1A),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('5h spent'), findsOneWidget);
+    expect(find.textContaining('available '), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

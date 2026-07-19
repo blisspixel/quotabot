@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,6 +9,7 @@ import 'package:quotabot_collector/auth/openai_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
+import 'package:quotabot_collector/provider_adapters.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -73,6 +75,256 @@ void main() {
     expect(q.account, isNot(contains('acct-1')));
     expect(q.account, isNot(contains('blisspixel')));
     expect(grantCalled, isFalse);
+  });
+
+  test('collectAccounts refreshes distinct host and grant identities',
+      () async {
+    final authFile = writeAuth('host-tok');
+    final grantIdentity =
+        opaqueCredentialIdentity(CodexAdapter.id, 'independent-grant');
+    final attempted = <String>[];
+    final quotas = await collectCodexProviderAccounts(
+      CodexAdapter(
+        authFile: authFile,
+        grantCredential: () async => OpenAiCredential(
+          accessToken: 'grant-tok',
+          identity: grantIdentity,
+        ),
+        client: MockClient((request) async {
+          attempted.add(request.headers['Authorization']!);
+          if (request.headers['Authorization'] == 'Bearer host-tok') {
+            expect(request.headers['chatgpt-account-id'], 'acct-1');
+          } else {
+            expect(request.headers.containsKey('chatgpt-account-id'), isFalse);
+          }
+          return http.Response(
+            jsonEncode(_wham(primary: 20, secondary: 50)),
+            200,
+          );
+        }),
+      ),
+    );
+
+    expect(quotas, hasLength(2));
+    expect(quotas.every((quota) => quota.ok && quota.hasWindows), isTrue);
+    expect(quotas.map((quota) => quota.account).toSet(), {
+      hostIdentity('acct-1'),
+      grantIdentity,
+    });
+    expect(attempted.toSet(), {'Bearer host-tok', 'Bearer grant-tok'});
+  });
+
+  test('collectAccounts emits one row for an exact duplicate identity',
+      () async {
+    final authFile = writeAuth('host-tok');
+    var requests = 0;
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      grantCredential: () async => OpenAiCredential(
+        accessToken: 'duplicate-grant-token',
+        identity: hostIdentity('acct-1'),
+      ),
+      client: MockClient((request) async {
+        requests++;
+        expect(request.headers['Authorization'], 'Bearer host-tok');
+        return http.Response(
+          jsonEncode(_wham(primary: 20, secondary: 50)),
+          200,
+        );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.account, hostIdentity('acct-1'));
+    expect(quotas.single.ok, isTrue);
+    expect(requests, 1);
+  });
+
+  test('production grant identity deduplicates the matching host account',
+      () async {
+    final authFile = writeAuth('host-tok', accountId: 'acct-1');
+    TokenStore.save(
+      OpenAiAuth.provider,
+      Tokens(
+        accessToken: _unsignedJwt({
+          'https://api.openai.com/auth': {
+            'chatgpt_account_id': 'acct-1',
+          },
+        }),
+        refreshToken: 'grant-refresh',
+        expiresAt: nowEpoch() + 3600,
+      ),
+    );
+    var usageRequests = 0;
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      client: MockClient((request) async {
+        usageRequests++;
+        expect(request.headers['Authorization'], 'Bearer host-tok');
+        expect(request.headers['chatgpt-account-id'], 'acct-1');
+        return http.Response(
+          jsonEncode(_wham(primary: 20, secondary: 50)),
+          200,
+        );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.account, hostIdentity('acct-1'));
+    expect(quotas.single.ok, isTrue);
+    expect(usageRequests, 1);
+    expect(
+      TokenStore.defaultOwner(OpenAiAuth.provider),
+      hostIdentity('acct-1'),
+    );
+  });
+
+  test('collectAccounts uses a duplicate grant after host failure', () async {
+    final authFile = writeAuth('host-tok');
+    final attempted = <String>[];
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      grantCredential: () async => OpenAiCredential(
+        accessToken: 'duplicate-grant-token',
+        identity: hostIdentity('acct-1'),
+      ),
+      client: MockClient((request) async {
+        final authorization = request.headers['Authorization']!;
+        attempted.add(authorization);
+        return authorization == 'Bearer host-tok'
+            ? http.Response('{}', 401)
+            : http.Response(
+                jsonEncode(_wham(primary: 20, secondary: 50)),
+                200,
+              );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.account, hostIdentity('acct-1'));
+    expect(attempted, ['Bearer host-tok', 'Bearer duplicate-grant-token']);
+  });
+
+  test('collectAccounts preserves a duplicate host throttle without retrying',
+      () async {
+    final authFile = writeAuth('host-tok');
+    var requests = 0;
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      grantCredential: () async => OpenAiCredential(
+        accessToken: 'duplicate-grant-token',
+        identity: hostIdentity('acct-1'),
+      ),
+      client: MockClient((request) async {
+        requests++;
+        expect(request.headers['Authorization'], 'Bearer host-tok');
+        return http.Response(
+          '{}',
+          429,
+          headers: {'retry-after': '120'},
+        );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isFalse);
+    expect(quotas.single.account, hostIdentity('acct-1'));
+    expect(quotas.single.error, 'HTTP 429');
+    expect(quotas.single.pipeHealth, providerPipeHealthThrottled);
+    expect(quotas.single.httpStatus, 429);
+    expect(quotas.single.retryAfterSeconds, 120);
+    expect(requests, 1);
+  });
+
+  test('collectAccounts preserves host evidence when grant refresh stalls',
+      () async {
+    final authFile = writeAuth('host-tok');
+    final grantIdentity =
+        opaqueCredentialIdentity(CodexAdapter.id, 'stalled-grant');
+    TokenStore.saveDefaultOwnedBy(
+      OpenAiAuth.provider,
+      Tokens(
+        accessToken: 'stored-grant',
+        refreshToken: 'stored-refresh',
+        expiresAt: nowEpoch() + 3600,
+      ),
+      grantIdentity,
+    );
+    final pending = Completer<OpenAiCredential?>();
+    final stopwatch = Stopwatch()..start();
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      grantCredential: () => pending.future,
+      grantResolutionDeadline: const Duration(milliseconds: 20),
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer host-tok');
+        return http.Response(
+          jsonEncode(_wham(primary: 20, secondary: 50)),
+          200,
+        );
+      }),
+    ).collectAccounts();
+    stopwatch.stop();
+
+    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
+    expect(quotas, hasLength(2));
+    expect(quotas.first.ok, isTrue);
+    expect(quotas.first.account, hostIdentity('acct-1'));
+    expect(quotas.last.ok, isFalse);
+    expect(quotas.last.account, grantIdentity);
+    expect(quotas.last.error, contains('unable to refresh Codex grant'));
+  });
+
+  test('collectAccounts keeps distinct success and failure rows', () async {
+    final authFile = writeAuth('host-tok');
+    final grantIdentity =
+        opaqueCredentialIdentity(CodexAdapter.id, 'healthy-grant');
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      grantCredential: () async => OpenAiCredential(
+        accessToken: 'grant-tok',
+        identity: grantIdentity,
+      ),
+      client: MockClient((request) async =>
+          request.headers['Authorization'] == 'Bearer host-tok'
+              ? http.Response('{}', 503)
+              : http.Response(
+                  jsonEncode(_wham(primary: 20, secondary: 50)),
+                  200,
+                )),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(2));
+    expect(quotas.first.account, hostIdentity('acct-1'));
+    expect(quotas.first.ok, isFalse);
+    expect(quotas.first.httpStatus, 503);
+    expect(quotas.last.account, grantIdentity);
+    expect(quotas.last.ok, isTrue);
+  });
+
+  test('collectAccounts represents an indexed grant refresh failure', () async {
+    final grantIdentity =
+        opaqueCredentialIdentity(CodexAdapter.id, 'unavailable-grant');
+    TokenStore.saveDefaultOwnedBy(
+      OpenAiAuth.provider,
+      Tokens(
+        accessToken: 'stored-grant',
+        refreshToken: 'stored-refresh',
+        expiresAt: nowEpoch() + 3600,
+      ),
+      grantIdentity,
+    );
+
+    final quotas = await CodexAdapter(
+      authFile: File('${temp.path}/missing-auth.json'),
+      grantCredential: () async => null,
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isFalse);
+    expect(quotas.single.account, grantIdentity);
+    expect(quotas.single.error, contains('unable to refresh Codex grant'));
   });
 
   test('falls through to the independent grant when host auth fails', () async {
@@ -509,4 +761,10 @@ Map<String, dynamic> _wham({
     if (resetCredits != null)
       'rate_limit_reset_credits': {'available_count': resetCredits},
   };
+}
+
+String _unsignedJwt(Map<String, dynamic> payload) {
+  String encode(Object value) =>
+      base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
+  return '${encode({})}.${encode(payload)}.sig';
 }

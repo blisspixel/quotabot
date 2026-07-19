@@ -94,6 +94,18 @@ identical read. A later read establishes a new baseline only after every retaine
 quota reset has
 advanced, or after an evidence-class transition.
 
+If a provider has legitimately changed its response shape, recover one exact
+quarantined baseline only after comparing it with the provider's own usage view:
+
+```bash
+quotabot verify --recover-drift=PROVIDER --account=EXACT_ACCOUNT --yes
+```
+
+This performs one targeted live metadata verification and replaces only that
+provider/account baseline. It refuses stale, malformed, failed, duplicate,
+wrong-account, or concurrently superseded evidence. History and all other local
+metadata remain unchanged.
+
 An ordinary live-read failure follows the same evidence rule. Cached quota keeps
 its original capture time and last observed percentage. A reset time passing does
 not prove the new window is unused, so stale evidence never becomes 100% free and
@@ -146,11 +158,14 @@ machine that needs an independent live read, then use `quotabot doctor` to
 confirm that machine's current result. Refresh and expired-host fall-through
 have deterministic test coverage; dated real-account validation after an idle
 interval remains a tracked 1.0 evidence gate.
-Because Anthropic's usage response does not include a stable account id,
-quotabot scopes Claude cache and drift evidence to an irreversible local
-credential-generation fingerprint. Replacing one Max credential with another
-cannot reuse the first credential's cached reading, and raw credentials never
-enter quota output or cache files.
+Anthropic's usage response does not include a stable account id, so quotabot
+also reads the zero-cost OAuth profile metadata with the same credential. Its
+account and organization ids are hashed locally into the stable account-pool key
+used by snapshots, cache, drift, routing leases, and duplicate collapse. If any
+profile identity is unavailable, quotabot falls back to an irreversible
+credential-generation fingerprint and keeps at most one successful Claude
+credential routable rather than double-counting the plan. Raw credentials and
+provider ids never enter quota output or cache files.
 Codex applies the same isolation using the ChatGPT account id stored with the
 host credential, or a quotabot grant-generation fingerprint when no account id
 is available. It ignores response email for evidence identity. Access-token and
@@ -204,9 +219,9 @@ policy, not a value quotabot hardcodes. It does not prove the account's current
 balance: quotabot requires a current scoped Fable row and applies the tighter of
 that row and the shared Claude window before marking Fable available. For the
 no-surprise `--budget=quota` filter, Fable additionally requires an explicit Max
-or Team Premium entitlement carried by a current provider response captured on
-or after July 20, 2026 UTC. A Max or Team Premium label read from this machine's
-stored Claude credential is shown as
+or Team Premium entitlement carried by current provider usage or profile
+metadata read with that credential on or after July 20, 2026 UTC. A Max or Team
+Premium label read from this machine's stored Claude credential is shown as
 diagnostic context but does not prove current inclusion after a plan change.
 Positive included-quota and credit-backed labels both require that current
 provider plan evidence; host-label-only evidence is called unproven. Pro, Team

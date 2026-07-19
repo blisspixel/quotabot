@@ -24,6 +24,59 @@ void _holdTokenFileOpen(List<Object> arguments) {
   events.send('done');
 }
 
+Future<void> _replaceTokenGenerationInIsolate(List<Object> arguments) async {
+  final id = arguments[0] as String;
+  final configPath = arguments[1] as String;
+  final provider = arguments[2] as String;
+  final peerStartedPath = arguments[3] as String;
+  final pauseBeforeFirstWrite = arguments[4] as bool;
+  final events = arguments[5] as SendPort;
+  final commands = ReceivePort();
+
+  setQuotabotDirOverrideForTesting(Directory(configPath));
+  setTokenPermissionHardeningForTesting(
+    fileHardener: (file) {
+      enforceOwnerOnlyFile(file);
+      if (!pauseBeforeFirstWrite || !file.path.endsWith('.tmp')) return;
+      events.send(<Object>[id, 'inside']);
+      final peerStarted = File(peerStartedPath);
+      while (!peerStarted.existsSync()) {
+        sleep(const Duration(milliseconds: 2));
+      }
+      // On POSIX the old process-scoped FileLock allowed the peer isolate to
+      // pass its revision check and publish during this deterministic window.
+      sleep(const Duration(milliseconds: 250));
+    },
+  );
+
+  final record = TokenStore.loadRecord(provider)!;
+  events.send(<Object>[id, 'ready', commands.sendPort]);
+  await commands.first;
+  if (!pauseBeforeFirstWrite) {
+    File(peerStartedPath).createSync();
+  }
+  final replaced = TokenStore.replaceIfCurrent(
+    record,
+    Tokens(accessToken: '$id-access', refreshToken: '$id-refresh'),
+  );
+  events.send(<Object>[id, 'result', replaced]);
+  commands.close();
+}
+
+Future<List<T>> _runSerializedRefreshPair<T>({
+  required Future<T> Function() call,
+  required Completer<void> requestStarted,
+  required Completer<void> releaseRequest,
+  required int Function() requestCount,
+}) async {
+  final calls = <Future<T>>[call(), call()];
+  await requestStarted.future.timeout(const Duration(seconds: 2));
+  await Future<void>.delayed(const Duration(milliseconds: 75));
+  expect(requestCount(), 1);
+  releaseRequest.complete();
+  return Future.wait(calls).timeout(const Duration(seconds: 3));
+}
+
 void main() {
   late Directory tempConfig;
 
@@ -197,6 +250,147 @@ void main() {
       expect(TokenStore.defaultOwner(provider), 'new@example.com');
     });
 
+    test('concurrent isolates admit exactly one CAS generation', () async {
+      const barrierTimeout = Duration(seconds: 15);
+      TokenStore.save(
+        provider,
+        const Tokens(accessToken: 'old', refreshToken: 'old-refresh'),
+      );
+      final peerStarted = File('${tempConfig.path}/peer-started');
+      final events = ReceivePort();
+      final ready = <String, Completer<SendPort>>{
+        'first': Completer<SendPort>(),
+        'second': Completer<SendPort>(),
+      };
+      final results = <String, Completer<bool>>{
+        'first': Completer<bool>(),
+        'second': Completer<bool>(),
+      };
+      final firstInside = Completer<void>();
+      final subscription = events.listen((message) {
+        final event = (message as List<Object>).cast<Object>();
+        final id = event[0] as String;
+        final kind = event[1] as String;
+        if (kind == 'ready') ready[id]!.complete(event[2] as SendPort);
+        if (kind == 'inside') firstInside.complete();
+        if (kind == 'result') results[id]!.complete(event[2] as bool);
+      });
+      Isolate? first;
+      Isolate? second;
+      try {
+        first = await Isolate.spawn<List<Object>>(
+          _replaceTokenGenerationInIsolate,
+          <Object>[
+            'first',
+            tempConfig.path,
+            provider,
+            peerStarted.path,
+            true,
+            events.sendPort,
+          ],
+        );
+        second = await Isolate.spawn<List<Object>>(
+          _replaceTokenGenerationInIsolate,
+          <Object>[
+            'second',
+            tempConfig.path,
+            provider,
+            peerStarted.path,
+            false,
+            events.sendPort,
+          ],
+        );
+        final firstCommands =
+            await ready['first']!.future.timeout(barrierTimeout);
+        final secondCommands =
+            await ready['second']!.future.timeout(barrierTimeout);
+
+        firstCommands.send('start');
+        await firstInside.future.timeout(barrierTimeout);
+        secondCommands.send('start');
+
+        final admitted = await Future.wait([
+          results['first']!.future,
+          results['second']!.future,
+        ]).timeout(barrierTimeout);
+        expect(admitted, [isTrue, isFalse]);
+        expect(TokenStore.load(provider)!.accessToken, 'first-access');
+      } finally {
+        first?.kill(priority: Isolate.immediate);
+        second?.kill(priority: Isolate.immediate);
+        await subscription.cancel();
+        events.close();
+      }
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
+    test('refresh transactions do not block unrelated account slots', () async {
+      const account = 'work@example.com';
+      TokenStore.save(provider, const Tokens(accessToken: 'default'));
+      TokenStore.save(
+        provider,
+        const Tokens(accessToken: 'work'),
+        account: account,
+      );
+      final defaultEntered = Completer<void>();
+      final releaseDefault = Completer<void>();
+      final defaultTransaction = TokenStore.refreshTransaction(
+        provider,
+        (record) async {
+          expect(record?.tokens.accessToken, 'default');
+          defaultEntered.complete();
+          await releaseDefault.future;
+          return 'default-done';
+        },
+      );
+      await defaultEntered.future;
+
+      final accountResult = await TokenStore.refreshTransaction(
+        provider,
+        (record) async => record?.tokens.accessToken,
+        account: account,
+      ).timeout(const Duration(seconds: 1));
+      expect(accountResult, 'work');
+      releaseDefault.complete();
+      expect(await defaultTransaction, 'default-done');
+    });
+
+    test('refresh transaction releases its guard after callback failure',
+        () async {
+      TokenStore.save(provider, const Tokens(accessToken: 'old'));
+      await expectLater(
+        TokenStore.refreshTransaction<void>(
+          provider,
+          (_) async => throw StateError('simulated callback failure'),
+        ),
+        throwsStateError,
+      );
+      expect(
+        await TokenStore.refreshTransaction(
+          provider,
+          (record) async => record?.tokens.accessToken,
+        ),
+        'old',
+      );
+    });
+
+    test('an abandoned same-process claim is reclaimed after its bound', () {
+      TokenStore.clear(provider);
+      final claim = File(
+        '${quotabotDir('auth').path}/$provider.json.lock.claim',
+      )..writeAsStringSync(
+          jsonEncode({'pid': pid, 'owner': '$pid.abandoned-test-claim'}),
+        );
+      enforceOwnerOnlyFile(claim);
+      claim.setLastModifiedSync(
+        DateTime.now().subtract(const Duration(minutes: 3)),
+      );
+
+      TokenStore.save(provider, const Tokens(accessToken: 'recovered'));
+
+      expect(TokenStore.load(provider)?.accessToken, 'recovered');
+      expect(claim.existsSync(), isFalse);
+    });
+
     test('save is atomic and leaves no temp file behind', () {
       TokenStore.save(provider, Tokens(accessToken: 'a', refreshToken: 'r'));
       final leftover = quotabotDir('auth')
@@ -209,6 +403,30 @@ void main() {
       // The rename must have produced a readable grant.
       expect(TokenStore.load(provider)!.refreshToken, 'r');
     });
+
+    test(
+      'load rejects a symbolic-link credential record',
+      () {
+        final linkedTarget = File('${tempConfig.path}/linked-token-target.json')
+          ..writeAsStringSync(
+            jsonEncode({
+              'access_token': 'linked-secret',
+              'refresh_token': 'linked-refresh',
+              'expires_at': nowEpoch() + 3600,
+            }),
+            flush: true,
+          );
+        final recordPath = '${quotabotDir('auth').path}/$provider.json';
+        Link(recordPath).createSync(linkedTarget.path);
+
+        expect(TokenStore.loadRecord(provider), isNull);
+        expect(TokenStore.load(provider), isNull);
+        expect(linkedTarget.readAsStringSync(), contains('linked-secret'));
+      },
+      skip: Platform.isWindows
+          ? 'ordinary Windows test accounts cannot create symbolic links'
+          : false,
+    );
 
     test('save tolerates a reader during atomic replacement', () async {
       TokenStore.save(
@@ -529,6 +747,48 @@ void main() {
       expect(TokenStore.accounts(provider), isEmpty);
     });
 
+    test('GoogleAuth serializes concurrent refreshes for one account',
+        () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      TokenStore.save(
+        provider,
+        const Tokens(accessToken: 'old', refreshToken: 'GR', expiresAt: 1),
+        account: account,
+      );
+      var requests = 0;
+      final requestStarted = Completer<void>();
+      final releaseRequest = Completer<void>();
+      final auth = GoogleAuth(
+        client: MockClient((_) async {
+          requests++;
+          if (!requestStarted.isCompleted) requestStarted.complete();
+          await releaseRequest.future;
+          return http.Response(
+            jsonEncode({'access_token': 'fresh', 'expires_in': 3600}),
+            200,
+          );
+        }),
+      );
+
+      final results = await _runSerializedRefreshPair<String?>(
+        call: () => auth.freshAccessToken(account: account),
+        requestStarted: requestStarted,
+        releaseRequest: releaseRequest,
+        requestCount: () => requests,
+      );
+      expect(results, ['fresh', 'fresh']);
+      expect(requests, 1);
+      expect(
+        TokenStore.load(provider, account: account)?.accessToken,
+        'fresh',
+      );
+    });
+
     test('GoogleAuth does not overwrite a replacement login after refresh',
         () async {
       const provider = GoogleAuth.provider;
@@ -637,6 +897,74 @@ void main() {
       expect(TokenStore.load(provider)!.accessToken, 'fresh');
     });
 
+    test('XaiAuth rejects an unowned default grant before refresh', () async {
+      const provider = XaiAuth.provider;
+      const requiredOwner = 'work@example.com';
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        const Tokens(
+          accessToken: 'legacy-old',
+          refreshToken: 'legacy-refresh',
+          expiresAt: 1,
+        ),
+      );
+      var requests = 0;
+      final auth = XaiAuth(
+        client: MockClient((_) async {
+          requests++;
+          return http.Response(
+            jsonEncode({'access_token': 'wrong-account', 'expires_in': 21600}),
+            200,
+          );
+        }),
+      );
+
+      expect(
+        await auth.freshAccessToken(requiredDefaultOwner: requiredOwner),
+        isNull,
+      );
+      expect(requests, 0);
+      expect(TokenStore.load(provider)!.accessToken, 'legacy-old');
+      expect(TokenStore.defaultOwner(provider), isNull);
+    });
+
+    test('XaiAuth serializes concurrent refreshes for one default owner',
+        () async {
+      const provider = XaiAuth.provider;
+      const owner = 'work@example.com';
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.saveDefaultOwnedBy(
+        provider,
+        const Tokens(accessToken: 'old', refreshToken: 'XR', expiresAt: 1),
+        owner,
+      );
+      var requests = 0;
+      final requestStarted = Completer<void>();
+      final releaseRequest = Completer<void>();
+      final auth = XaiAuth(
+        client: MockClient((_) async {
+          requests++;
+          if (!requestStarted.isCompleted) requestStarted.complete();
+          await releaseRequest.future;
+          return http.Response(
+            jsonEncode({'access_token': 'fresh', 'expires_in': 21600}),
+            200,
+          );
+        }),
+      );
+
+      final results = await _runSerializedRefreshPair<String?>(
+        call: () => auth.freshAccessToken(requiredDefaultOwner: owner),
+        requestStarted: requestStarted,
+        releaseRequest: releaseRequest,
+        requestCount: () => requests,
+      );
+      expect(results, ['fresh', 'fresh']);
+      expect(requests, 1);
+      expect(TokenStore.defaultOwner(provider), owner);
+    });
+
     test('XaiAuth does not overwrite a replacement login after refresh',
         () async {
       const provider = XaiAuth.provider;
@@ -740,6 +1068,45 @@ void main() {
       expect(AnthropicAuth.currentCredentialIdentity(), expectedIdentity);
     });
 
+    test('AnthropicAuth serializes concurrent rotating-token refreshes',
+        () async {
+      const provider = AnthropicAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        const Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
+      );
+      var requests = 0;
+      final requestStarted = Completer<void>();
+      final releaseRequest = Completer<void>();
+      final auth = AnthropicAuth(
+        client: MockClient((_) async {
+          requests++;
+          if (!requestStarted.isCompleted) requestStarted.complete();
+          await releaseRequest.future;
+          return http.Response(
+            jsonEncode({
+              'access_token': 'new',
+              'refresh_token': 'R1',
+              'expires_in': 3600,
+            }),
+            200,
+          );
+        }),
+      );
+
+      final results = await _runSerializedRefreshPair<AnthropicCredential?>(
+        call: auth.freshCredential,
+        requestStarted: requestStarted,
+        releaseRequest: releaseRequest,
+        requestCount: () => requests,
+      );
+      expect(results.map((value) => value?.accessToken), ['new', 'new']);
+      expect(results[0]?.identity, results[1]?.identity);
+      expect(requests, 1);
+      expect(TokenStore.load(provider)?.refreshToken, 'R1');
+    });
+
     test('replacement login wins an in-flight refresh', () async {
       const provider = AnthropicAuth.provider;
       addTearDown(() => TokenStore.clear(provider));
@@ -781,23 +1148,26 @@ void main() {
       );
     });
 
-    test('a genuine persistence failure keeps the refreshed token usable',
-        () async {
+    test('refresh-lock hardening failure spends no rotating token', () async {
       const provider = AnthropicAuth.provider;
       TokenStore.saveDefaultOwnedBy(
         provider,
         const Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
         opaqueCredentialIdentity(provider, 'R0'),
       );
+      var requests = 0;
       final auth = AnthropicAuth(
-        client: MockClient((_) async => http.Response(
-              jsonEncode({
-                'access_token': 'new',
-                'refresh_token': 'R1',
-                'expires_in': 3600,
-              }),
-              200,
-            )),
+        client: MockClient((_) async {
+          requests++;
+          return http.Response(
+            jsonEncode({
+              'access_token': 'new',
+              'refresh_token': 'R1',
+              'expires_in': 3600,
+            }),
+            200,
+          );
+        }),
       );
       setTokenPermissionHardeningForTesting(
         directoryHardener: (_) => throw const FileSystemException(
@@ -806,12 +1176,11 @@ void main() {
       );
 
       try {
-        final credential = await auth.freshCredential();
-        expect(credential?.accessToken, 'new');
-        expect(
-          credential?.identity,
-          opaqueCredentialIdentity(provider, 'R0'),
+        await expectLater(
+          auth.freshCredential(),
+          throwsA(isA<FileSystemException>()),
         );
+        expect(requests, 0);
         expect(TokenStore.load(provider)!.refreshToken, 'R0');
       } finally {
         setTokenPermissionHardeningForTesting();
@@ -929,6 +1298,124 @@ void main() {
       expect(TokenStore.load(provider)!.refreshToken, 'R1');
       expect(TokenStore.defaultOwner(provider), expectedIdentity);
       expect(OpenAiAuth.currentCredentialIdentity(), expectedIdentity);
+    });
+
+    test('OpenAiAuth serializes concurrent rotating-token refreshes', () async {
+      const provider = OpenAiAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        const Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
+      );
+      var requests = 0;
+      final requestStarted = Completer<void>();
+      final releaseRequest = Completer<void>();
+      final auth = OpenAiAuth(
+        client: MockClient((_) async {
+          requests++;
+          if (!requestStarted.isCompleted) requestStarted.complete();
+          await releaseRequest.future;
+          return http.Response(
+            jsonEncode({
+              'access_token': 'new',
+              'refresh_token': 'R1',
+              'expires_in': 3600,
+            }),
+            200,
+          );
+        }),
+      );
+
+      final results = await _runSerializedRefreshPair<OpenAiCredential?>(
+        call: auth.freshCredential,
+        requestStarted: requestStarted,
+        releaseRequest: releaseRequest,
+        requestCount: () => requests,
+      );
+      expect(results.map((value) => value?.accessToken), ['new', 'new']);
+      expect(results[0]?.identity, results[1]?.identity);
+      expect(requests, 1);
+      expect(TokenStore.load(provider)?.refreshToken, 'R1');
+    });
+
+    test('OpenAiAuth normalizes an access-token account claim', () async {
+      const provider = OpenAiAuth.provider;
+      const accountId = 'acct-stable';
+      addTearDown(() => TokenStore.clear(provider));
+      final accessToken = _unsignedJwt({
+        'https://api.openai.com/auth': {
+          'chatgpt_account_id': accountId,
+        },
+      });
+      TokenStore.save(
+        provider,
+        Tokens(
+          accessToken: accessToken,
+          refreshToken: 'R0',
+          expiresAt: nowEpoch() + 3600,
+        ),
+      );
+
+      final credential = await OpenAiAuth(
+        client: MockClient((_) async => throw StateError('unexpected network')),
+      ).freshCredential();
+      final expected =
+          opaqueCredentialIdentity(provider, 'account-id:$accountId');
+      expect(credential?.identity, expected);
+      expect(OpenAiAuth.currentCredentialIdentity(), expected);
+      expect(TokenStore.defaultOwner(provider), expected);
+    });
+
+    test('OpenAiAuth adopts an id-token account claim after refresh', () async {
+      const provider = OpenAiAuth.provider;
+      const accountId = 'acct-from-id-token';
+      addTearDown(() => TokenStore.clear(provider));
+      TokenStore.save(
+        provider,
+        const Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
+      );
+      final auth = OpenAiAuth(
+        client: MockClient((_) async => http.Response(
+              jsonEncode({
+                'access_token': 'new',
+                'refresh_token': 'R1',
+                'expires_in': 3600,
+                'id_token': _unsignedJwt({
+                  'chatgpt_account_id': accountId,
+                }),
+              }),
+              200,
+            )),
+      );
+
+      final credential = await auth.freshCredential();
+      final expected =
+          opaqueCredentialIdentity(provider, 'account-id:$accountId');
+      expect(credential?.accessToken, 'new');
+      expect(credential?.identity, expected);
+      expect(TokenStore.defaultOwner(provider), expected);
+    });
+
+    test('OpenAiAuth rejects an oversized account claim', () async {
+      const provider = OpenAiAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      final oversized = List<String>.filled(513, 'a').join();
+      TokenStore.save(
+        provider,
+        Tokens(
+          accessToken: _unsignedJwt({'chatgpt_account_id': oversized}),
+          refreshToken: 'R0',
+          expiresAt: nowEpoch() + 3600,
+        ),
+      );
+
+      final credential = await OpenAiAuth(
+        client: MockClient((_) async => throw StateError('unexpected network')),
+      ).freshCredential();
+      expect(
+        credential?.identity,
+        opaqueCredentialIdentity(provider, 'R0'),
+      );
     });
 
     test('replacement login wins an in-flight refresh', () async {

@@ -293,6 +293,50 @@ void main() {
       expect(windows.single.usedPercent, 63);
     });
 
+    test('unknown quota-shaped live windows reject the whole response', () {
+      final complete = _validCodexLiveResponse();
+      (complete['rate_limit'] as Map<String, dynamic>)['tertiary_window'] =
+          _codexLiveWindow(
+        usedPercent: 100,
+        durationSeconds: 2592000,
+      );
+
+      expect(codexLiveUsage(complete), isNull);
+      expect(codexUsageWindows(complete), isEmpty);
+
+      for (final marker in const [
+        'used_percent',
+        'reset_at',
+        'limit_window_seconds',
+      ]) {
+        final malformed = _validCodexLiveResponse();
+        (malformed['rate_limit'] as Map<String, dynamic>)['future_pool'] = {
+          marker: 1,
+        };
+        expect(
+          codexLiveUsage(malformed),
+          isNull,
+          reason: 'unknown pool marker $marker must reject the observation',
+        );
+      }
+
+      final namedButIncomplete = _validCodexLiveResponse();
+      (namedButIncomplete['rate_limit']
+          as Map<String, dynamic>)['monthly_window'] = null;
+      expect(codexLiveUsage(namedButIncomplete), isNull);
+    });
+
+    test('benign additive live rate-limit metadata remains compatible', () {
+      final response = _validCodexLiveResponse();
+      (response['rate_limit'] as Map<String, dynamic>)
+        ..['future_scalar'] = 2
+        ..['future_metadata'] = {'version': 2, 'opaque': true};
+
+      final usage = codexLiveUsage(response);
+      expect(usage, isNotNull);
+      expect(usage!.windows, hasLength(1));
+    });
+
     test('duplicate scoped limits reduce conservatively in either order', () {
       Map<String, dynamic> scoped({
         required String model,
@@ -461,11 +505,14 @@ void main() {
         ..['limit_reached'] = true;
       expect(codexLiveUsage(falselySpent), isNull);
 
-      final nearSpent = _validCodexLiveResponse(usedPercent: 99);
-      (nearSpent['rate_limit'] as Map<String, dynamic>)
+      final nearLimitAllowed = _validCodexLiveResponse(usedPercent: 99);
+      expect(codexLiveUsage(nearLimitAllowed), isNotNull);
+
+      final falselySpentNearLimit = _validCodexLiveResponse(usedPercent: 99);
+      (falselySpentNearLimit['rate_limit'] as Map<String, dynamic>)
         ..['allowed'] = false
         ..['limit_reached'] = true;
-      expect(codexLiveUsage(nearSpent), isNotNull);
+      expect(codexLiveUsage(falselySpentNearLimit), isNull);
     });
 
     test('a scoped boolean contradiction rejects valid shared quota', () {
@@ -1256,6 +1303,71 @@ void main() {
       expect(usage, isNotNull);
       expect(usage!.windows.map((window) => window.label), ['5h', 'weekly']);
       expect(usage.modelQuotas, isEmpty);
+    });
+
+    test('unknown canonical quota rows reject the whole observation', () {
+      Map<String, dynamic> responseWith(Map<String, Object?> unknown) => {
+            'limits': [
+              {
+                'kind': 'session',
+                'group': 'session',
+                'scope': null,
+                'percent': 45,
+                'resets_at': '2026-07-18T17:00:00Z',
+              },
+              {
+                'kind': 'weekly_all',
+                'group': 'weekly',
+                'scope': null,
+                'percent': 17,
+                'resets_at': '2026-07-24T09:00:00Z',
+              },
+              unknown,
+            ],
+          };
+
+      final complete = responseWith({
+        'kind': 'monthly_all',
+        'group': 'monthly',
+        'scope': null,
+        'percent': 100,
+        'resets_at': '2026-08-01T00:00:00Z',
+      });
+      expect(claudeLiveUsage(complete), isNull);
+      expect(claudeWindows(complete), isEmpty);
+      expect(claudeModelQuotas(complete), isEmpty);
+
+      for (final partial in <Map<String, Object?>>[
+        {'kind': 'future_pool', 'percent': 25},
+        {'kind': 'future_pool', 'resets_at': '2026-08-01T00:00:00Z'},
+      ]) {
+        expect(
+          claudeLiveUsage(responseWith(partial)),
+          isNull,
+          reason: 'partial unknown quota row must fail closed: $partial',
+        );
+      }
+    });
+
+    test('unknown root quota blocks reject the whole observation', () {
+      final data = <String, dynamic>{
+        'five_hour': {
+          'utilization': 45,
+          'resets_at': '2026-07-18T17:00:00Z',
+        },
+        'seven_day': {
+          'utilization': 17,
+          'resets_at': '2026-07-24T09:00:00Z',
+        },
+        'monthly_all': {
+          'utilization': 100,
+          'resets_at': '2026-08-01T00:00:00Z',
+        },
+      };
+
+      expect(claudeLiveUsage(data), isNull);
+      expect(claudeWindows(data), isEmpty);
+      expect(claudeModelQuotas(data), isEmpty);
     });
 
     test('rejects out-of-range legacy utilization instead of clamping it', () {

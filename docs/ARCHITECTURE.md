@@ -37,8 +37,9 @@ collector/ (Dart package)
   cache.dart         last-known-good snapshot cache (per-account keyed where a
                      provider reads several logins); recent burn stats
   expiring_single_flight.dart short-lived MCP live-read coalescing
+  file_guard.dart     claim-backed native process/isolate transaction guard
   leases.dart        local routing leases for parallel-agent reservation and
-                     release, backed by file locking in production
+                     release, backed by the file guard in production
   litellm_metrics.dart  bounded parser and summarizer for local LiteLLM
                      routed-request JSONL metrics
   ansi.dart          shared ANSI styling and color-depth detection
@@ -137,7 +138,10 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   duration, an explicit null window is treated as absent, and named
   `additional_rate_limits` become sparse model-budget overlays. No model call.
 - Claude, Grok, and Antigravity call live metadata endpoints (no model calls, no
-  token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
+  token cost). Claude reuses the token Claude Code stores for concurrent usage
+  and profile reads. The profile plan is current provider evidence, and its
+  account plus organization ids are hashed into one stable quota-pool identity.
+  No raw profile id is retained. Grok and Antigravity
   prefer quotabot's own OAuth grant (see Authentication) and fall back to the
   token the host CLI or IDE currently holds. Grok reads every account in the CLI
   auth file and caches them separately. Antigravity scans the active account and
@@ -179,9 +183,13 @@ shows that as "no live data" instead of a gap.
   use a hash of the account id rather than the raw email. Rotated refresh tokens
   are saved on every successful refresh or the next refresh would fail. A load
   returns tokens and owner from one immutable file generation. Every writer
-  takes the same per-slot cross-process lock, and refresh conditionally replaces
-  only the generation it loaded, so a late refresh cannot overwrite a completed
-  login or account replacement.
+  takes the same per-slot process-and-isolate guard. The guard combines an
+  exclusive claim file with a native file lock and removes its owned claim only
+  after native unlock. Each refresh side effect is separately serialized before
+  reloading the slot, and refresh conditionally replaces only the generation it
+  loaded, so a late refresh cannot overwrite a completed login or account
+  replacement. Existing credential paths must resolve as regular files without
+  following links before quotabot changes permissions or reads content.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -278,7 +286,9 @@ forecast helpers `riskAdjustedHeadroom`, `strandProbability`, and `suggestRoute`
 `suggestRoute` can accept active local lease discounts so concurrent routers see
 reduced effective headroom for the provider/account another caller already
 reserved. `leases.dart` owns those reservations: production uses a small
-file-backed store protected by a lock file, while tests use an in-memory store.
+file-backed store protected across processes and same-process isolates by the
+same claim-backed native guard, while tests use an in-memory store. Lease
+generations are flushed through unique exclusive temporary files before rename.
 Leases are advisory local metadata with TTLs and idempotency keys; they never
 contact providers and never sit in the prompt or inference data path.
 `suggestRoute` also accepts an explicit local-first policy. The default remains
@@ -327,9 +337,11 @@ first routing policy and `GET /suggest?cost_penalty=codex:2` for explicit
 caller-owned cost discounting. Its read endpoints are unauthenticated loopback
 metadata. The only write endpoints are authenticated, bounded lease reserve and
 release operations. Server startup creates and permission-checks a stable
-per-user bearer token without printing it. A reserve request submits only
+per-user bearer token without printing it. First-start token creation uses the
+same process-and-isolate guard plus an owner-only flushed temporary file, so
+parallel servers publish one complete token. A reserve request submits only
 provider/account targets and lease policy, then selects and writes under one
-ledger lock. It never receives task text, prompts, source code, or model output.
+ledger guard. It never receives task text, prompts, source code, or model output.
 Before any provider work, the server also validates browser `Origin` and Fetch
 Metadata. Non-loopback and null origins are rejected, as are originless
 same-site or cross-site subresource fetches. Normal non-browser clients without

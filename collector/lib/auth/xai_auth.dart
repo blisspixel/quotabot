@@ -102,28 +102,31 @@ class XaiAuth {
         'requiredDefaultOwner applies only to the default grant',
       );
     }
-    final record = TokenStore.loadRecord(provider, account: account);
-    if (record == null) return null;
-    if (requiredDefaultOwner != null &&
-        record.owner != null &&
-        record.owner != requiredDefaultOwner) {
-      return null;
-    }
-    final stored = record.tokens;
-    if (stored.isFresh) return stored.accessToken;
-    if (stored.refreshToken == null) return null;
-    final refreshed = await refresh(stored.refreshToken!);
-    if (refreshed?.accessToken == null) return null;
-    // Persist the rotated token only to the slot it was loaded from. Writing
-    // the default slot here too would let a background refresh of one account
-    // overwrite the provider-default grant with that account's tokens, so a
-    // later default-slot fallback could return the wrong account's token.
-    // Best-effort: a save failure must not discard the just-minted access token
-    // (the old refresh token is already burned). See AnthropicAuth.
-    try {
-      if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
-    } catch (_) {}
-    return refreshed!.accessToken;
+    return TokenStore.refreshTransaction(
+      provider,
+      (record) async {
+        if (record == null) return null;
+        // Validate ownership only after entering the same transaction that
+        // governs the refresh. A concurrent login cannot swap the default slot
+        // between this guard and the token-endpoint request.
+        if (requiredDefaultOwner != null &&
+            record.owner != requiredDefaultOwner) {
+          return null;
+        }
+        final stored = record.tokens;
+        if (stored.isFresh) return stored.accessToken;
+        if (stored.refreshToken == null) return null;
+        final refreshed = await refresh(stored.refreshToken!);
+        if (refreshed?.accessToken == null) return null;
+        // Persist only to the slot loaded above. Cross-account fallback must
+        // never lend a background-refreshed grant to another account.
+        try {
+          if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
+        } catch (_) {}
+        return refreshed!.accessToken;
+      },
+      account: account,
+    );
   }
 
   /// Establishes the grant at login: the account-scoped slot when the email is

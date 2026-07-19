@@ -208,6 +208,14 @@ void main() {
             .every((entry) => entry.currentAccounts != null),
         isTrue,
       );
+      expect(
+        providerAdapterById(claudeProviderId)!.collect,
+        collectClaudeProviderAccounts,
+      );
+      expect(
+        providerAdapterById(codexProviderId)!.collect,
+        collectCodexProviderAccounts,
+      );
     });
   });
 }

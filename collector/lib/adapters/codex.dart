@@ -32,12 +32,14 @@ class CodexAdapter {
   static const id = codexProviderId;
   static const name = codexProviderName;
   static const _usageEndpoint = 'https://chatgpt.com/backend-api/wham/usage';
+  static const _duplicateFallbackDeadline = Duration(seconds: 8);
 
   final File? _authFile;
   final CodexUsageFetcher? _usageFetcher;
   final String? _usageCredentialIdentity;
   final http.Client? _http;
   final CodexGrantCredential _grantCredential;
+  final Duration _grantResolutionDeadline;
 
   CodexAdapter({
     File? authFile,
@@ -46,14 +48,17 @@ class CodexAdapter {
     http.Client? client,
     CodexGrantToken? grantToken,
     CodexGrantCredential? grantCredential,
+    Duration grantResolutionDeadline = const Duration(seconds: 8),
   })  : assert(
           grantToken == null || grantCredential == null,
           'provide grantToken or grantCredential, not both',
         ),
+        assert(grantResolutionDeadline.inMicroseconds > 0),
         _authFile = authFile,
         _usageFetcher = usageFetcher,
         _usageCredentialIdentity = usageCredentialIdentity,
         _http = client,
+        _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
                 ? () async {
@@ -85,17 +90,7 @@ class CodexAdapter {
 
       // The quotabot grant can belong to a different ChatGPT account. Never
       // reuse the host account selector or identity for this request.
-      OpenAiCredential? grant;
-      try {
-        final candidate = await _grantCredential();
-        if (candidate != null &&
-            candidate.accessToken.isNotEmpty &&
-            isOpaqueCredentialIdentity(candidate.identity)) {
-          grant = candidate;
-        }
-      } catch (_) {
-        grant = null;
-      }
+      final grant = await _resolveGrantCredential();
       if (grant != null) {
         final outcome = await _read(grant, null, asOf);
         if (outcome.quota != null) return outcome.quota!;
@@ -112,6 +107,95 @@ class CodexAdapter {
         asOf,
       );
     }
+  }
+
+  /// Reads every active Codex credential identity. The host login and
+  /// quotabot's refreshable grant can point at different ChatGPT accounts, so a
+  /// successful host read must not prevent the grant account from refreshing.
+  /// Exact duplicate identities use the host token first and emit one row.
+  Future<List<ProviderQuota>> collectAccounts() async {
+    final asOf = nowEpoch();
+    if (_usageFetcher != null) return [await _collectInjected(asOf)];
+
+    try {
+      final host = _readHostCredential();
+      final indexedGrantIdentity = OpenAiAuth.currentCredentialIdentity();
+
+      // Start the host request before grant refresh. This keeps a slow grant
+      // from consuming the registered adapter's outer deadline and discarding
+      // a healthy host observation.
+      final hostOutcomeFuture =
+          host == null ? null : _read(host.credential, host.accountId, asOf);
+      final grant = await _resolveGrantCredential().timeout(
+        _grantResolutionDeadline,
+        onTimeout: () => null,
+      );
+      final sameIdentity = host != null &&
+          grant != null &&
+          host.credential.identity == grant.identity;
+      final grantOutcomeFuture =
+          grant == null || sameIdentity ? null : _read(grant, null, asOf);
+
+      final hostOutcome = await hostOutcomeFuture;
+      if (sameIdentity) {
+        if (hostOutcome!.quota != null ||
+            hostOutcome.error?.httpStatus != 401) {
+          return [hostOutcome.quota ?? hostOutcome.error!];
+        }
+        final fallback = await _read(
+          grant,
+          null,
+          asOf,
+          timeout: _duplicateFallbackDeadline,
+        );
+        return [fallback.quota ?? fallback.error!];
+      }
+
+      final results = <ProviderQuota>[];
+      if (hostOutcome != null) {
+        results.add(hostOutcome.quota ?? hostOutcome.error!);
+      }
+      if (grantOutcomeFuture != null) {
+        final outcome = await grantOutcomeFuture;
+        results.add(outcome.quota ?? outcome.error!);
+      } else if (isOpaqueCredentialIdentity(indexedGrantIdentity) &&
+          indexedGrantIdentity != host?.credential.identity) {
+        results.add(_unavailableGrant(asOf, indexedGrantIdentity!));
+      }
+      return results.isEmpty ? [_noUsage(asOf)] : results;
+    } catch (_) {
+      return [
+        ProviderQuota.error(
+          id,
+          name,
+          'unable to read Codex usage',
+          asOf,
+        ),
+      ];
+    }
+  }
+
+  ProviderQuota _unavailableGrant(int asOf, String identity) =>
+      ProviderQuota.error(
+        id,
+        name,
+        'unable to refresh Codex grant (run quotabot login codex)',
+        asOf,
+        account: identity,
+      );
+
+  Future<OpenAiCredential?> _resolveGrantCredential() async {
+    try {
+      final candidate = await _grantCredential();
+      if (candidate != null &&
+          candidate.accessToken.isNotEmpty &&
+          isOpaqueCredentialIdentity(candidate.identity)) {
+        return candidate;
+      }
+    } catch (_) {
+      // A corrupt or unavailable grant must not suppress the host credential.
+    }
+    return null;
   }
 
   /// A parser injection still needs an explicit opaque identity. This prevents
@@ -152,8 +236,9 @@ class CodexAdapter {
   Future<_ReadOutcome> _read(
     OpenAiCredential credential,
     String? accountId,
-    int asOf,
-  ) async {
+    int asOf, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
     http.Response response;
     try {
       final get = _http?.get ?? http.get;
@@ -164,7 +249,7 @@ class CodexAdapter {
           if (accountId != null && accountId.isNotEmpty)
             'chatgpt-account-id': accountId,
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(timeout);
     } catch (_) {
       return _ReadOutcome.error(
         ProviderQuota.error(

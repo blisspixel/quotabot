@@ -190,6 +190,32 @@ labels either form `PROVIDER DRIFT` and identifies the `provider_drift` failure.
 The provider stays unavailable to routing, and no new measured analytics sample
 is recorded until recovery. Earlier trusted history remains intact.
 
+If a provider has intentionally changed its quota shape and clean reads cannot
+advance the quarantined baseline automatically, use the explicit targeted
+recovery mode. Obtain the exact `account` value from `quotabot verify --json`,
+then name both identity dimensions and confirm noninteractively:
+
+```bash
+quotabot verify --recover-drift=codex --account=EXACT_ACCOUNT --yes
+quotabot verify --recover-drift=codex --account=EXACT_ACCOUNT --yes --json
+```
+
+Recovery is not a general cache clear. Before contacting the provider, it
+requires an active drift or legacy quarantine for that exact identity. It
+invokes only the selected provider adapter, requires one exact account row to
+pass full live verification plus the stricter quota trust boundary, and refuses
+failed, stale, malformed, expired, future-dated, duplicate, or wrong-account
+evidence. `--profile`, `--exclude`, and simulation flags are rejected so they
+cannot make the target ambiguous. `--yes` is mandatory and no interactive
+prompt is used, which makes the confirmation safe for scripts. A successful
+transaction replaces only the exact snapshot baseline and its older matching
+drift diagnostic. It leaves history, analytics, profiles, preferences, leases,
+credentials, and every other account unchanged. A concurrent newer cache or
+drift observation wins and makes recovery fail instead of being overwritten.
+The JSON result is `quotabot.drift-recovery.v1`. Exit code is `0` only when the
+baseline was replaced, `64` for invalid or unconfirmed usage, and `65` when live
+verification or the safe transaction does not recover it.
+
 ```bash
 quotabot verify           # human summary, one line per provider
 quotabot verify --json    # quotabot.verify.v1 record for scripts and archives
@@ -456,15 +482,23 @@ it is included for Max and Team Premium at 50% of limits; Pro and Team Standard
 retain access through usage credits and receive a one-time $100 credit. That
 dated policy does not reveal a current balance. quotabot admits Fable as
 quota-backed only when the provider response contains a current scoped Fable row
-and same-response provider metadata captured on or after July 20, 2026 UTC
-confirms a Max or Team Premium entitlement. Before that effective boundary, the
-row remains available for inspection but included quota is not proven.
+and current provider metadata from `/api/oauth/usage` or the same-credential
+companion `/api/oauth/profile` read, captured on or after July 20, 2026 UTC,
+confirms a Max or Team Premium entitlement. The profile call is zero-token
+metadata, not a model request. Before that effective boundary, the row remains
+available for inspection but included quota is not proven.
 The Max or Team Premium label in a local Claude credential can outlive a plan
 change, so it is exposed as host-credential provenance but never proves included
 spend. Positive included-quota and credit-backed labels both require current
-same-response provider plan metadata. Pro, Team Standard, host-label-only, and
-plan-unknown Fable rows stay visible under `--budget=any` but are excluded from
-`--budget=quota`. Doctor and
+provider plan metadata from one of those two provider reads. Valid profile
+account and optional organization IDs are irreversibly hashed for live
+subscription-pool deduplication; the raw IDs are not stored or output. When
+several credential reads succeed but any pool identity is unknown, only one
+success remains routable. A successful profile identity becomes the stable
+opaque account key used by cache, drift, leases, and routing. The credential
+fingerprint remains the fail-closed account-key fallback when profile identity
+is unavailable. Pro, Team Standard, host-label-only, and plan-unknown Fable
+rows stay visible under `--budget=any` but are excluded from `--budget=quota`. Doctor and
 the desktop scoped row say `included quota`, `credit-backed availability`, or
 `included quota not proven`. The effective budget uses the tighter of the
 scoped row and the shared Claude window, and Fable exhaustion never blocks

@@ -174,8 +174,9 @@ announcement](https://x.com/claudeai/status/2078302415804379218).
 The product implication is to keep entitlement policy separate from measured
 capacity. Fable carries no calendar cutoff or hardcoded 50% balance in quotabot.
 It becomes quota-backed only when the current provider response contains a
-scoped Fable pool and same-response provider metadata confirms a Max or Team
-Premium entitlement at or after the July 20, 2026 UTC policy boundary. A host
+scoped Fable pool and current provider usage or profile metadata read with the
+same credential confirms a Max or Team Premium entitlement at or after the July
+20, 2026 UTC policy boundary. A host
 credential's plan label is diagnostic context, not
 current included or credit-backed entitlement proof. Pro, Team Standard,
 host-label-only, and plan-unknown

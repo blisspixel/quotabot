@@ -1,6 +1,6 @@
 # Building from source
 
-Prerequisites: Flutter 3.44.2 with Dart 3.12.2, the exact toolchain pinned in CI
+Prerequisites: Flutter 3.44.6 with Dart 3.12.2, the exact toolchain pinned in CI
 and release builds. Install it from the
 [Flutter SDK archive](https://docs.flutter.dev/install/archive); Flutter includes
 Dart. Per-OS build tools: Visual Studio with "Desktop development

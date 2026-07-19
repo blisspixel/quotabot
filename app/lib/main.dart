@@ -1113,17 +1113,25 @@ class _DashboardState extends State<Dashboard>
       // .first on empty) surfaces as an Error, and the isolate-failure fallback
       // rethrows it on the main isolate. Catching only Exception let it escape
       // as an unhandled async error every poll while the UI showed no failure.
-      // A failed or timed-out refresh keeps the last data on screen; the next
-      // poll (scheduled in finally) retries.
+      // A failed or timed-out refresh keeps the last data on screen as
+      // explicitly stale evidence; the next poll (scheduled in finally)
+      // retries. This prevents a previously live account-wide value from
+      // remaining routable after the collector can no longer confirm it.
       _failStreak += 1;
       if (mounted) {
+        final message = refreshFailureMessage(
+          error,
+          hasPreviousData: _data.isNotEmpty,
+        );
         setState(() {
+          _data = retainSnapshotAfterRefreshFailure(_data, note: message);
+          _setupData = retainSnapshotAfterRefreshFailure(
+            _setupData,
+            note: message,
+          );
           _loading = false;
           _updated = DateTime.now();
-          _lastRefreshError = refreshFailureMessage(
-            error,
-            hasPreviousData: _data.isNotEmpty,
-          );
+          _lastRefreshError = message;
         });
       }
     } finally {
@@ -1409,7 +1417,7 @@ class _DashboardState extends State<Dashboard>
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                _connectAndValidate(q.provider);
+                _connectAndValidate(q.provider, account: q.account);
               },
               child: const Text('Connect now'),
             ),
@@ -1850,6 +1858,94 @@ class _DashboardState extends State<Dashboard>
       now,
       showAccounts: _showAccounts,
     );
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final titleCluster = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        () {
+          final pool = _poolHeadroom();
+          final track = chrome.gaugeTrack;
+          return Semantics(
+            label: pool == null
+                ? 'Trusted quota headroom unavailable'
+                : 'Average trusted quota headroom ${pool.round()} percent',
+            excludeSemantics: true,
+            child: AppGauge(
+              size: 17,
+              value: (pool ?? 0) / 100.0,
+              fillColor: pool == null ? track : _availColor(pool),
+              trackColor: track,
+            ),
+          );
+        }(),
+        const SizedBox(width: 7),
+        Text(
+          _showingAnalytics ? 'Analytics' : 'Quota',
+          style: TextStyle(
+            fontSize: AppType.title,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+            color: chrome.foreground,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            checkedAtLabel(_updated),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: AppType.caption, color: muted),
+          ),
+        ),
+        if (_activeProfile.name != defaultProfileName) ...[
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              profileLabel(_activeProfile),
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppType.label,
+                fontWeight: FontWeight.w600,
+                color: muted,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+    final actions = <Widget>[
+      _iconButton(
+        _isRefreshing ? Icons.sync : Icons.refresh_rounded,
+        muted,
+        _isRefreshing ? null : _refresh,
+        tooltip: _isRefreshing ? 'Refreshing quotas' : 'Refresh now',
+      ),
+      _iconButton(
+        _showingAnalytics ? Icons.arrow_back_rounded : Icons.bar_chart_rounded,
+        muted,
+        _showingAnalytics ? _closeFleet : _showFleet,
+        tooltip: _showingAnalytics ? 'Back to quotas' : 'Quota analytics',
+      ),
+      _iconButton(
+        Icons.close_fullscreen_rounded,
+        muted,
+        _toggleCompact,
+        tooltip: 'Collapse',
+      ),
+      _menuButton(muted),
+      _iconButton(
+        Icons.help_outline_rounded,
+        muted,
+        _showHelp,
+        tooltip: 'Setup and help',
+      ),
+      _iconButton(
+        Icons.close_rounded,
+        muted,
+        widget._hostIntegration ? windowManager.close : null,
+        tooltip: 'Close',
+      ),
+    ];
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: widget._hostIntegration
@@ -1860,107 +1956,19 @@ class _DashboardState extends State<Dashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      () {
-                        final pool = _poolHeadroom();
-                        final track = chrome.gaugeTrack;
-                        return Semantics(
-                          label: pool == null
-                              ? 'Trusted quota headroom unavailable'
-                              : 'Average trusted quota headroom '
-                                    '${pool.round()} percent',
-                          excludeSemantics: true,
-                          child: AppGauge(
-                            size: 17,
-                            value: (pool ?? 0) / 100.0,
-                            fillColor: pool == null ? track : _availColor(pool),
-                            trackColor: track,
-                          ),
-                        );
-                      }(),
-                      const SizedBox(width: 7),
-                      Text(
-                        _showingAnalytics ? 'Analytics' : 'Quota',
-                        style: TextStyle(
-                          fontSize: AppType.title,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
-                          color: chrome.foreground,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          checkedAtLabel(_updated),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.caption,
-                            color: muted,
-                          ),
-                        ),
-                      ),
-                      if (_activeProfile.name != defaultProfileName) ...[
-                        const SizedBox(width: 7),
-                        Flexible(
-                          child: Text(
-                            profileLabel(_activeProfile),
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppType.label,
-                              fontWeight: FontWeight.w600,
-                              color: muted,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                // Order: the two things you actively do (refresh, open analytics),
-                // then the view toggle, then settings and help, then close last.
-                _iconButton(
-                  _isRefreshing ? Icons.sync : Icons.refresh_rounded,
-                  muted,
-                  _isRefreshing ? null : _refresh,
-                  tooltip: _isRefreshing ? 'Refreshing quotas' : 'Refresh now',
-                ),
-                _iconButton(
-                  _showingAnalytics
-                      ? Icons.arrow_back_rounded
-                      : Icons.bar_chart_rounded,
-                  muted,
-                  _showingAnalytics ? _closeFleet : _showFleet,
-                  tooltip: _showingAnalytics
-                      ? 'Back to quotas'
-                      : 'Quota analytics',
-                ),
-                _iconButton(
-                  Icons.close_fullscreen_rounded,
-                  muted,
-                  _toggleCompact,
-                  tooltip: 'Collapse',
-                ),
-                _menuButton(muted),
-                _iconButton(
-                  Icons.help_outline_rounded,
-                  muted,
-                  _showHelp,
-                  tooltip: 'Setup and help',
-                ),
-                _iconButton(
-                  Icons.close_rounded,
-                  muted,
-                  widget._hostIntegration ? windowManager.close : null,
-                  tooltip: 'Close',
-                ),
-              ],
-            ),
+            if (largeText) ...[
+              titleCluster,
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(mainAxisSize: MainAxisSize.min, children: actions),
+              ),
+            ] else
+              Row(
+                children: [
+                  Expanded(child: titleCluster),
+                  ...actions,
+                ],
+              ),
             if (routeLine != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4, right: 4),
@@ -2680,8 +2688,8 @@ class _DashboardState extends State<Dashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
-  /// Compact setup/help panel: a short intro, then every provider from the
-  /// latest snapshot with its live status and an inline Connect for
+  /// Compact setup/help panel: a short intro, then every provider account from
+  /// the latest snapshot with its live status and an inline Connect for
   /// Grok/Antigravity. Reachable from the help button; never pops up on its own.
   /// All path/state reads are portable, so it works the same on every OS.
   void _showSetup() {
@@ -2698,6 +2706,7 @@ class _DashboardState extends State<Dashboard>
           builder: (ctx, setDlg) {
             final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
             final setupRows = _currentSetupRows(now);
+            final setupCounts = _providerCounts(setupRows);
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
@@ -2716,15 +2725,18 @@ class _DashboardState extends State<Dashboard>
                     children: [
                       Row(
                         children: [
-                          Text(
-                            'Providers',
-                            style: TextStyle(
-                              fontSize: AppType.title,
-                              fontWeight: FontWeight.w700,
-                              color: fg,
+                          Expanded(
+                            child: Text(
+                              'Providers',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.title,
+                                fontWeight: FontWeight.w700,
+                                color: fg,
+                              ),
                             ),
                           ),
-                          const Spacer(),
                           IconButton(
                             tooltip: 'Close providers',
                             icon: Icon(
@@ -2741,23 +2753,24 @@ class _DashboardState extends State<Dashboard>
                           ),
                         ],
                       ),
-                      Text(
-                        'Quota reads use metadata only and spend no model '
-                        'tokens. Cards distinguish account-wide, this-machine, '
-                        'cached, and unavailable evidence.',
-                        style: TextStyle(
-                          fontSize: AppType.bodySmall,
-                          height: 1.3,
-                          color: muted,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
                       Flexible(
                         child: SingleChildScrollView(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Text(
+                                'Quota reads use metadata only and spend no '
+                                'model tokens. Cards distinguish account-wide, '
+                                'this-machine, cached, and unavailable '
+                                'evidence.',
+                                style: TextStyle(
+                                  fontSize: AppType.bodySmall,
+                                  height: 1.3,
+                                  color: muted,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
                               for (final q in setupRows)
                                 _setupRow(
                                   ctx,
@@ -2766,17 +2779,22 @@ class _DashboardState extends State<Dashboard>
                                   fg,
                                   connecting,
                                   setDlg,
+                                  showAccount: quotaShouldShowAccountLabel(
+                                    q,
+                                    setupCounts,
+                                  ),
                                 ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Tip: right-click any card to set it up or hide '
+                                'it.',
+                                style: TextStyle(
+                                  fontSize: AppType.caption,
+                                  color: muted,
+                                ),
+                              ),
                             ],
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Tip: right-click any card to set it up or hide it.',
-                        style: TextStyle(
-                          fontSize: AppType.caption,
-                          color: muted,
                         ),
                       ),
                     ],
@@ -2792,15 +2810,16 @@ class _DashboardState extends State<Dashboard>
 
   List<ProviderQuota> _currentSetupRows(int now) {
     final source = _setupData.isEmpty ? _data : _setupData;
-    final rowsByProvider = <String, ProviderQuota>{};
+    final rowsByAccount = <String, ProviderQuota>{};
     for (final quota in source) {
-      final current = rowsByProvider[quota.provider];
+      final key = quotaDisplayKey(quota);
+      final current = rowsByAccount[key];
       if (current == null ||
           _setupRowRank(quota, now) > _setupRowRank(current, now)) {
-        rowsByProvider[quota.provider] = quota;
+        rowsByAccount[key] = quota;
       }
     }
-    return rowsByProvider.values.toList();
+    return rowsByAccount.values.toList();
   }
 
   static int _setupRowRank(ProviderQuota quota, int now) {
@@ -2828,8 +2847,9 @@ class _DashboardState extends State<Dashboard>
     Color muted,
     Color fg,
     Set<String> connecting,
-    StateSetter setDlg,
-  ) {
+    StateSetter setDlg, {
+    required bool showAccount,
+  }) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final (label, color) = _stateChip(
       q,
@@ -2841,62 +2861,113 @@ class _DashboardState extends State<Dashboard>
         : widget._hostIntegration && _canConnectProvider(q.provider);
     final isLive = label == 'live' || label == 'in use';
     final busy = connecting.contains(q.provider);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          ProviderLogo(q.provider, size: 18, color: fg),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              q.displayName,
-              style: TextStyle(fontSize: AppType.subtitle, color: fg),
-            ),
-          ),
-          if (busy)
-            const SizedBox(
+    final displayLabel = showAccount
+        ? '${q.displayName} (${quotaAccountDisplayLabel(q.account)})'
+        : q.displayName;
+    final state = Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: label,
+        excludeSemantics: true,
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: AppType.caption, color: color),
+        ),
+      ),
+    );
+    final Widget action = busy
+        ? Semantics(
+            label: 'Connecting $displayLabel',
+            liveRegion: true,
+            child: const SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            Text(
-              label,
-              style: TextStyle(fontSize: AppType.caption, color: color),
             ),
-          const SizedBox(width: 8),
-          if (canConnect && !isLive && !busy)
-            TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: const Size(0, 30),
-              ),
-              onPressed: () async {
-                setDlg(() => connecting.add(q.provider));
-                await _connectAndValidate(q.provider);
-                if (ctx.mounted) setDlg(() => connecting.remove(q.provider));
-              },
-              child: const Text(
-                'Connect',
-                style: TextStyle(fontSize: AppType.bodySmall),
-              ),
-            )
-          else if (!busy)
-            IconButton(
-              tooltip: 'Set up ${q.displayName}',
-              icon: Icon(Icons.help_outline_rounded, size: 16, color: muted),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-              onPressed: () => _showProviderSetup(q),
+          )
+        : canConnect && !isLive
+        ? TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
             ),
-        ],
-      ),
+            onPressed: () async {
+              setDlg(() => connecting.add(q.provider));
+              await _connectAndValidate(q.provider, account: q.account);
+              if (ctx.mounted) setDlg(() => connecting.remove(q.provider));
+            },
+            child: const Text(
+              'Connect',
+              style: TextStyle(fontSize: AppType.bodySmall),
+            ),
+          )
+        : IconButton(
+            tooltip: 'Set up $displayLabel',
+            icon: Icon(Icons.help_outline_rounded, size: 16, color: muted),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            onPressed: () => _showProviderSetup(q),
+          );
+    final largeText = MediaQuery.textScalerOf(ctx).scale(10) > 14;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: largeText
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    ProviderLogo(q.provider, size: 18, color: fg),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        displayLabel,
+                        style: TextStyle(fontSize: AppType.subtitle, color: fg),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 27),
+                  child: Row(
+                    children: [
+                      Expanded(child: state),
+                      const SizedBox(width: 8),
+                      action,
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                ProviderLogo(q.provider, size: 18, color: fg),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    displayLabel,
+                    style: TextStyle(fontSize: AppType.subtitle, color: fg),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Flexible(child: state),
+                const SizedBox(width: 8),
+                action,
+              ],
+            ),
     );
   }
 
   /// Runs quotabot's own login for a provider, then re-collects so the setup
-  /// row reflects the new state. Returns whether the provider is now live.
-  Future<bool> _connectAndValidate(String provider) async {
+  /// row reflects the new state. When an account-specific row initiated the
+  /// flow, only that same account identity can satisfy validation.
+  Future<bool> _connectAndValidate(String provider, {String? account}) async {
     final messenger = ScaffoldMessenger.of(context);
     // The connect flow only handles these two, and their display names are
     // fixed, so the toast can use the same capitalized label as the dialog
@@ -2958,17 +3029,28 @@ class _DashboardState extends State<Dashboard>
       if (priorRefresh != null) await priorRefresh;
       await _refresh();
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final match = _data.where((x) => x.provider == provider);
-      final ok = match.any(
-        (quota) =>
-            isTrustedQuotaEvidenceAt(quota, now) &&
-            providerHeadroom(quota, now) != null,
-      );
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(ok ? '$label connected' : '$label not live yet'),
-        ),
-      );
+      final live = _data
+          .where(
+            (quota) =>
+                quota.provider == provider &&
+                isTrustedQuotaEvidenceAt(quota, now) &&
+                providerHeadroom(quota, now) != null,
+          )
+          .toList(growable: false);
+      final target = account?.trim();
+      final hasSpecificTarget =
+          target != null &&
+          target.isNotEmpty &&
+          !genericAccountLabels.contains(target.toLowerCase());
+      final ok = !hasSpecificTarget
+          ? live.isNotEmpty
+          : live.any((quota) => quota.account == target);
+      final message = ok
+          ? '$label connected'
+          : hasSpecificTarget && live.isNotEmpty
+          ? '$label connected, but the selected account is still unconfirmed'
+          : '$label not live yet';
+      messenger.showSnackBar(SnackBar(content: Text(message)));
       return ok;
     } catch (_) {
       messenger.showSnackBar(
@@ -3275,6 +3357,24 @@ class _FocusableProviderCardState extends State<_FocusableProviderCard> {
   }
 }
 
+String _providerPlanTitle(String raw) {
+  final cleaned = raw.trim().replaceAll(RegExp(r'[_-]+'), ' ');
+  final normalized = cleaned.toLowerCase();
+  return switch (normalized) {
+    'team premium' => 'Team Premium',
+    'team standard' => 'Team Standard',
+    'ai pro' => 'AI Pro',
+    'chatgpt plus' => 'ChatGPT Plus',
+    _ when cleaned == normalized =>
+      cleaned
+          .split(RegExp(r'\s+'))
+          .where((word) => word.isNotEmpty)
+          .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+          .join(' '),
+    _ => cleaned,
+  };
+}
+
 class ProviderTile extends StatelessWidget {
   final ProviderQuota quota;
   final Color cardColor;
@@ -3352,6 +3452,13 @@ class ProviderTile extends StatelessWidget {
     final expandable = hasInsights && onToggle != null;
     final trustLine = desktopProviderTrustLine(quota, now);
     final trustDetail = desktopProviderTrustDetail(quota, now);
+    final rawPlan = quota.plan?.trim();
+    final planLabel = rawPlan == null || rawPlan.isEmpty
+        ? null
+        : rawPlan.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ');
+    final planDetail = planLabel == null
+        ? null
+        : 'Plan: ${_providerPlanTitle(rawPlan!)}';
     // A redeemable off-cycle reset is the most actionable thing on a tight card,
     // so it renders as a prominent green banner, not a muted detail line.
     final resetMessage = resetAvailableMessage(quota);
@@ -3452,15 +3559,29 @@ class ProviderTile extends StatelessWidget {
                     _Dot(statusColor)
                   else if (quota.windows.isNotEmpty)
                     _Dot(statusColor),
-                  if (quota.plan != null)
-                    Text(
-                      quota.plan!.toLowerCase(),
-                      style: TextStyle(
-                        fontSize: AppType.caption,
-                        fontWeight: FontWeight.w500,
-                        color: muted,
+                  if (planLabel != null) ...[
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Semantics(
+                        label: planDetail,
+                        excludeSemantics: true,
+                        child: Tooltip(
+                          message: planDetail!,
+                          excludeFromSemantics: true,
+                          child: Text(
+                            planLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppType.caption,
+                              fontWeight: FontWeight.w500,
+                              color: muted,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
+                  ],
                   if (hasInsights) ...[
                     const SizedBox(width: 4),
                     Icon(
@@ -3552,7 +3673,13 @@ class ProviderTile extends StatelessWidget {
                   muted,
                 )
               else if (blocked) ...[
-                _blockedRow(binding, now, muted, evidenceLabel: evidenceLabel),
+                _blockedRow(
+                  binding,
+                  now,
+                  muted,
+                  evidenceLabel: evidenceLabel,
+                  largeText: MediaQuery.textScalerOf(context).scale(10) > 14,
+                ),
                 if (secondaryWin != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 6),
@@ -3935,7 +4062,13 @@ class ProviderTile extends StatelessWidget {
   }
 
   /// Single collapsed line shown when the binding window is exhausted.
-  Widget _blockedRow(WinView v, int now, Color muted, {String? evidenceLabel}) {
+  Widget _blockedRow(
+    WinView v,
+    int now,
+    Color muted, {
+    String? evidenceLabel,
+    required bool largeText,
+  }) {
     const red = Color(0xFFF85149);
     final status = evidenceLabel == null
         ? '${v.label} spent'
@@ -3950,7 +4083,7 @@ class ProviderTile extends StatelessWidget {
         ? 'available ${backLabel(v.resetsAt, now)}'
         : 'reset ${backLabel(v.resetsAt, now)}';
     final stateColor = evidenceLabel == null ? red : muted;
-    return Row(
+    final statusRow = Row(
       children: [
         _Dot(stateColor),
         const SizedBox(width: 8),
@@ -3964,15 +4097,46 @@ class ProviderTile extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
+      ],
+    );
+    final availabilityText = Semantics(
+      label: availability,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: availability,
+        excludeFromSemantics: true,
+        child: Text(
           availability,
+          maxLines: largeText ? 3 : 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: AppType.caption,
             fontWeight: FontWeight.w600,
             color: muted,
           ),
         ),
+      ),
+    );
+    if (largeText) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          statusRow,
+          if (availability.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3, left: 15),
+              child: availabilityText,
+            ),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: statusRow),
+        if (availability.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Flexible(child: availabilityText),
+        ],
       ],
     );
   }

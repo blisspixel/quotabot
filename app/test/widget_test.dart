@@ -629,6 +629,19 @@ void main() {
       expect(quotaDisplayKey(_provider('grok', 'unknown')), 'grok');
     });
 
+    test('keeps distinct provider accounts in setup recovery rows', () {
+      final host = _provider(
+        'claude',
+        'credential:${List.filled(64, 'a').join()}',
+      );
+      final grant = _provider(
+        'claude',
+        'credential:${List.filled(64, 'b').join()}',
+      );
+
+      expect(providerSetupRows([host, grant]), [host, grant]);
+    });
+
     test('targets one account when hiding a multi-account provider', () {
       final work = _provider('antigravity', 'work@example.com');
       final home = _provider('antigravity', 'home@example.com');
@@ -803,6 +816,19 @@ void main() {
         desktopRouteDetailLine(zeroBurnRisk, [claude], now),
         contains('75% after forecast risk'),
       );
+    });
+
+    test('ages route detail from the selected evidence capture', () {
+      const now = 1782046566;
+      final captured = ProviderQuota.fromJson({
+        ..._quota('claude', 'Claude', 'solo@example.com').toJson(),
+        'as_of': now - 125,
+      });
+      final suggestion = suggestRoute([captured], now);
+
+      final detail = desktopRouteDetailLine(suggestion, [captured], now);
+
+      expect(detail, contains('as of 2m ago'));
     });
 
     test('uses account labels only to disambiguate duplicate providers', () {

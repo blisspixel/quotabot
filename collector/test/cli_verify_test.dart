@@ -124,6 +124,100 @@ void main() {
     expect(drift['detail'], contains('not routable'));
   });
 
+  test('drift recovery requires an explicit noninteractive confirmation',
+      () async {
+    const unsafeAccount = 'work@example.com;Write-Output injected';
+    final result = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--account=$unsafeAccount',
+      '--json',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('changes one local quota baseline'));
+    expect(result.stderr, contains('rerunning the same command with --yes'));
+    expect(result.stderr, isNot(contains(unsafeAccount)));
+    expect(result.stderr, isNot(contains('--recover-drift=codex')));
+  });
+
+  test('drift recovery rejects filters and simulation before any live read',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--recover-drift=claude',
+      '--account=credential:test-account',
+      '--yes',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('cannot be combined'));
+    expect(result.stderr, contains('--mock-provider'));
+    expect(result.stderr, contains('--state'));
+  });
+
+  test('drift recovery reports an exact missing baseline without collecting',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--account=credential:missing-account',
+      '--yes',
+      '--json',
+    ]);
+
+    expectExitCode(result, 65);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.drift-recovery.v1');
+    expect(json['provider'], 'codex');
+    expect(json['account'], 'credential:missing-account');
+    expect(json['recovered'], isFalse);
+    expect(json['status'], 'baseline_not_found');
+    expect(json, isNot(contains('runtime_access')));
+  });
+
+  test('drift recovery rejects incomplete and unsupported targets', () async {
+    final missingAccount = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--yes',
+    ]);
+    final unsupported = await runCli([
+      'verify',
+      '--recover-drift=not-a-provider',
+      '--account=exact',
+      '--yes',
+      '--json',
+    ]);
+
+    expectExitCode(missingAccount, 64);
+    expect(missingAccount.stderr, contains('--account=EXACT_ACCOUNT'));
+    expectExitCode(unsupported, 64);
+    final json =
+        jsonDecode(unsupported.stdout as String) as Map<String, dynamic>;
+    expect(json['status'], 'unsupported_target');
+    expect(json['recovered'], isFalse);
+  });
+
+  test('drift recovery rejects conflicting repeated exact targets', () async {
+    final result = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--recover-drift=claude',
+      '--account=first',
+      '--account=second',
+      '--yes',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('one exact provider and account'));
+  });
+
   test('verify prints a human summary with cross-check pointers', () async {
     final result = await runCli([
       'verify',

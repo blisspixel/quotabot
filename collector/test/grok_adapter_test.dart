@@ -183,9 +183,10 @@ void main() {
       TokenStore.clear(XaiAuth.provider);
       TokenStore.clearAccounts(XaiAuth.provider);
     });
-    TokenStore.save(
+    TokenStore.saveDefaultOwnedBy(
       XaiAuth.provider,
       Tokens(accessToken: 'default-token', expiresAt: nowEpoch() + 3600),
+      'a@example.com',
     );
     writeAuth({
       'a': {'email': 'a@example.com'},

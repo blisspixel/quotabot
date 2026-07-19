@@ -59,6 +59,14 @@ void main() {
     );
     expect(
       claudeNetwork.any((record) =>
+          record['host'] == 'api.anthropic.com' &&
+          record['path'] == '/api/oauth/profile' &&
+          record['spends_tokens'] == false &&
+          record['data_class'] == 'account_metadata'),
+      isTrue,
+    );
+    expect(
+      claudeNetwork.any((record) =>
           record['host'] == 'console.anthropic.com' &&
           record['path'] == '/v1/oauth/token' &&
           record['data_class'] == 'credential_exchange' &&

@@ -273,11 +273,16 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       network: [
         _https('GET', 'api.anthropic.com', '/api/oauth/usage',
             'Claude usage metadata'),
+        _https('GET', 'api.anthropic.com', '/api/oauth/profile',
+            'Claude account and plan metadata',
+            dataClass: 'account_metadata'),
         _https('POST', 'console.anthropic.com', '/v1/oauth/token',
             'Claude OAuth token refresh',
             dataClass: 'credential_exchange'),
       ],
-      notes: const ['Response bodies are parsed only for quota windows.'],
+      notes: const [
+        'Response bodies are parsed only for quota windows, opaque account-pool identity, and current plan metadata.',
+      ],
     ),
     ProviderRuntimeAccess(
       provider: codexProviderId,

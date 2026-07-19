@@ -128,25 +128,26 @@ class GoogleAuth {
 
   /// Fresh access token from quotabot's own grant, refreshing and persisting as
   /// needed. Null when there is no stored grant.
-  Future<String?> freshAccessToken({String? account}) async {
-    final record = TokenStore.loadRecord(provider, account: account);
-    if (record == null) return null;
-    final stored = record.tokens;
-    if (stored.isFresh) return stored.accessToken;
-    if (stored.refreshToken == null) return null;
-    final refreshed = await refresh(stored.refreshToken!);
-    if (refreshed?.accessToken == null) return null;
-    // Persist the rotated token only to the slot it was loaded from. Writing
-    // the default slot here too would let a background refresh of one account
-    // overwrite the provider-default grant with that account's tokens, so a
-    // later default-slot fallback could return the wrong account's token.
-    // Best-effort: a save failure must not discard the just-minted access token
-    // (the old refresh token is already burned). See AnthropicAuth.
-    try {
-      if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
-    } catch (_) {}
-    return refreshed!.accessToken;
-  }
+  Future<String?> freshAccessToken({String? account}) =>
+      TokenStore.refreshTransaction(
+        provider,
+        (record) async {
+          if (record == null) return null;
+          final stored = record.tokens;
+          if (stored.isFresh) return stored.accessToken;
+          if (stored.refreshToken == null) return null;
+          final refreshed = await refresh(stored.refreshToken!);
+          if (refreshed?.accessToken == null) return null;
+          // Persist the rotated token only to the slot it was loaded from.
+          // Writing the default slot too would let one account overwrite the
+          // provider-default grant and lend that token to another account.
+          try {
+            if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
+          } catch (_) {}
+          return refreshed!.accessToken;
+        },
+        account: account,
+      );
 
   /// Establishes the grant at login: the account-scoped slot when the email is
   /// known, and always the provider-default slot so the primary-account

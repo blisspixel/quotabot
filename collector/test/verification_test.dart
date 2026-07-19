@@ -126,6 +126,86 @@ void main() {
       expect(report.passed, isTrue);
     });
 
+    test('fresh passive spent metadata satisfies strict live verification', () {
+      final providers = <(String, String)>[
+        (cursorProviderId, cursorProviderName),
+        (windsurfProviderId, windsurfProviderName),
+        (kiroProviderId, kiroProviderName),
+      ];
+      final report = buildVerificationReport(
+        [
+          for (final (provider, displayName) in providers)
+            ProviderQuota(
+              provider: provider,
+              displayName: displayName,
+              account: 'default',
+              asOf: now - 5,
+              perMachine: true,
+              error: 'out of quota (resets in 2h)',
+              windows: [
+                QuotaWindow(
+                  label: 'monthly',
+                  usedPercent: 100,
+                  resetsAt: now + 2 * 3600,
+                ),
+              ],
+            ),
+        ],
+        now,
+        os: 'windows',
+        filtered: true,
+        requireLive: true,
+      );
+
+      expect(report.providers, hasLength(3));
+      for (final provider in report.providers) {
+        expect(provider.state, 'out_of_quota', reason: provider.provider);
+        expect(provider.liveReadSucceeded, isTrue, reason: provider.provider);
+      }
+      expect(report.allLiveReadsSucceeded, isTrue);
+      expect(report.passed, isTrue);
+    });
+
+    test('genuine and non-status adapter failures remain strict failures', () {
+      final failures = <ProviderQuota>[
+        ProviderQuota.error(
+          cursorProviderId,
+          cursorProviderName,
+          'unable to read Cursor state',
+          now,
+        ),
+        ProviderQuota(
+          provider: cursorProviderId,
+          displayName: cursorProviderName,
+          account: 'default',
+          asOf: now,
+          perMachine: true,
+          error: 'unable to read Cursor state',
+          windows: [
+            QuotaWindow(
+              label: 'monthly',
+              usedPercent: 100,
+              resetsAt: now + 2 * 3600,
+            ),
+          ],
+        ),
+      ];
+
+      for (final failure in failures) {
+        final report = buildVerificationReport(
+          [failure],
+          now,
+          os: 'windows',
+          filtered: true,
+          requireLive: true,
+        );
+
+        expect(report.providers.single.liveReadSucceeded, isFalse);
+        expect(report.allLiveReadsSucceeded, isFalse);
+        expect(report.passed, isFalse);
+      }
+    });
+
     test('stale passed resets retain their last observed usage', () {
       final stale = ProviderQuota(
         provider: 'claude',

@@ -87,7 +87,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     displayName: claudeProviderName,
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
-    collect: _collectClaude,
+    collect: collectClaudeProviderAccounts,
     multiAccount: true,
     currentAccounts: _claudeCurrentAccounts,
     fixtureKind: ProviderFixtureKind.claudeUsage,
@@ -98,7 +98,7 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     displayName: codexProviderName,
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
-    collect: _collectCodex,
+    collect: collectCodexProviderAccounts,
     multiAccount: true,
     currentAccounts: _codexCurrentAccounts,
     fixtureKind: ProviderFixtureKind.codexUsage,
@@ -235,11 +235,18 @@ String? registeredSourceClassViolation(
   return null;
 }
 
-Future<List<ProviderQuota>> _collectClaude() async =>
-    [await ClaudeAdapter().collect()];
+/// Production Claude registration path. The optional adapter keeps the exact
+/// registered path testable without replacing global credentials or network.
+Future<List<ProviderQuota>> collectClaudeProviderAccounts([
+  ClaudeAdapter? adapter,
+]) =>
+    (adapter ?? ClaudeAdapter()).collectAccounts();
 
-Future<List<ProviderQuota>> _collectCodex() async =>
-    [await CodexAdapter().collect()];
+/// Production Codex registration path. See [collectClaudeProviderAccounts].
+Future<List<ProviderQuota>> collectCodexProviderAccounts([
+  CodexAdapter? adapter,
+]) =>
+    (adapter ?? CodexAdapter()).collectAccounts();
 
 Future<List<ProviderQuota>> _collectCursor() async =>
     [await CursorAdapter().collect()];

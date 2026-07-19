@@ -35,6 +35,9 @@ class OpenAiCredential {
 /// port rather than an OS-selected one.
 class OpenAiAuth {
   static const provider = 'codex';
+  static const _maxIdentityJwtBytes = 64 * 1024;
+  static const _maxIdentityPayloadBytes = 32 * 1024;
+  static const _maxAccountIdLength = 512;
 
   // Codex CLI's public OAuth client. Confirm the client id / redirect port /
   // scopes on the first real `quotabot login codex` and adjust here if OpenAI
@@ -127,12 +130,16 @@ class OpenAiAuth {
       'code_verifier': pkce.verifier,
     });
     if (json == null) throw StateError('token exchange failed');
-    final tokens = Tokens.fromOAuth(json);
-    _saveGrant(tokens, account: account);
-    return tokens;
+    final response = _tokenResponse(json);
+    _saveGrant(
+      response.tokens,
+      account: account,
+      accountId: response.accountId,
+    );
+    return response.tokens;
   }
 
-  Future<Tokens?> refresh(String refreshToken) async {
+  Future<_OpenAiTokenResponse?> _refreshResponse(String refreshToken) async {
     final json = await _post({
       'grant_type': 'refresh_token',
       'refresh_token': refreshToken,
@@ -140,8 +147,11 @@ class OpenAiAuth {
       'scope': _scope,
     });
     if (json == null) return null;
-    return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    return _tokenResponse(json, priorRefresh: refreshToken);
   }
+
+  Future<Tokens?> refresh(String refreshToken) async =>
+      (await _refreshResponse(refreshToken))?.tokens;
 
   /// Returns the current default grant identity without exposing its tokens.
   /// Legacy grants are upgraded deterministically from their strongest stored
@@ -155,47 +165,57 @@ class OpenAiAuth {
   /// Fresh default access credential from quotabot's own grant, refreshing and
   /// persisting rotated tokens as needed. The identity remains stable through
   /// refresh-token rotation, while a replacement login receives a new one.
-  Future<OpenAiCredential?> freshCredential() async {
-    final record = TokenStore.loadRecord(provider);
-    if (record == null) return null;
-    final stored = record.tokens;
-    final owner = record.owner;
-    final identity = _identityFor(stored, owner: owner);
-    if (identity == null) return null;
-    if (stored.isFresh) {
-      if (owner != identity) {
+  Future<OpenAiCredential?> freshCredential() =>
+      TokenStore.refreshTransaction(provider, (record) async {
+        if (record == null) return null;
+        final stored = record.tokens;
+        final owner = record.owner;
+        final identity = _identityFor(stored, owner: owner);
+        if (identity == null) return null;
+        if (stored.isFresh) {
+          if (owner != identity) {
+            final persisted = _stampDefaultIdentityBestEffort(
+              record,
+              stored,
+              identity,
+            );
+            if (persisted == false) return null;
+          }
+          return OpenAiCredential(
+            accessToken: stored.accessToken!,
+            identity: identity,
+          );
+        }
+        final refreshToken = stored.refreshToken;
+        if (refreshToken == null || refreshToken.isEmpty) return null;
+        final response = await _refreshResponse(refreshToken);
+        final refreshed = response?.tokens;
+        final accessToken = refreshed?.accessToken;
+        if (refreshed == null || accessToken == null || accessToken.isEmpty) {
+          return null;
+        }
+        // Prefer the provider-stable account claim when this response reveals
+        // it. Otherwise preserve the legacy grant generation identity.
+        final refreshedIdentity = _identityFor(
+          refreshed,
+          // Preserve the generation identity derived before refresh when the
+          // response has no stable account claim. The response may rotate the
+          // refresh token, but that rotation is not a new account or grant.
+          owner: identity,
+          accountId: response?.accountId,
+        );
+        if (refreshedIdentity == null) return null;
         final persisted = _stampDefaultIdentityBestEffort(
           record,
-          stored,
-          identity,
+          refreshed,
+          refreshedIdentity,
         );
         if (persisted == false) return null;
-      }
-      return OpenAiCredential(
-        accessToken: stored.accessToken!,
-        identity: identity,
-      );
-    }
-    final refreshToken = stored.refreshToken;
-    if (refreshToken == null || refreshToken.isEmpty) return null;
-    final refreshed = await refresh(refreshToken);
-    final accessToken = refreshed?.accessToken;
-    if (refreshed == null || accessToken == null || accessToken.isEmpty) {
-      return null;
-    }
-    // A rotated refresh token still belongs to the same grant. Preserve the
-    // identity established before refresh while persisting the new token set.
-    final persisted = _stampDefaultIdentityBestEffort(
-      record,
-      refreshed,
-      identity,
-    );
-    if (persisted == false) return null;
-    return OpenAiCredential(
-      accessToken: accessToken,
-      identity: identity,
-    );
-  }
+        return OpenAiCredential(
+          accessToken: accessToken,
+          identity: refreshedIdentity,
+        );
+      });
 
   /// Fresh access token from quotabot's own grant. The default-slot path uses
   /// [freshCredential] so the Codex adapter can isolate cached evidence. The
@@ -204,24 +224,31 @@ class OpenAiAuth {
     if (account == null) {
       return (await freshCredential())?.accessToken;
     }
-    final record = TokenStore.loadRecord(provider, account: account);
-    if (record == null) return null;
-    final stored = record.tokens;
-    if (stored.isFresh) return stored.accessToken;
-    if (stored.refreshToken == null) return null;
-    final refreshed = await refresh(stored.refreshToken!);
-    if (refreshed?.accessToken == null) return null;
-    // Best-effort persist of the rotated token: the old refresh token is already
-    // burned, so a save failure must not discard the valid access token and fail
-    // this read. See AnthropicAuth.freshAccessToken.
-    try {
-      if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
-    } catch (_) {}
-    return refreshed!.accessToken;
+    return TokenStore.refreshTransaction(
+      provider,
+      (record) async {
+        if (record == null) return null;
+        final stored = record.tokens;
+        if (stored.isFresh) return stored.accessToken;
+        if (stored.refreshToken == null) return null;
+        final response = await _refreshResponse(stored.refreshToken!);
+        final refreshed = response?.tokens;
+        if (refreshed?.accessToken == null) return null;
+        try {
+          if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
+        } catch (_) {}
+        return refreshed!.accessToken;
+      },
+      account: account,
+    );
   }
 
-  static void _saveGrant(Tokens tokens, {String? account}) {
-    final identity = _identityFor(tokens);
+  static void _saveGrant(
+    Tokens tokens, {
+    String? account,
+    String? accountId,
+  }) {
+    final identity = _identityFor(tokens, accountId: accountId);
     if (identity == null) {
       throw StateError('token exchange returned no usable credential');
     }
@@ -231,7 +258,19 @@ class OpenAiAuth {
     }
   }
 
-  static String? _identityFor(Tokens tokens, {String? owner}) {
+  static String? _identityFor(
+    Tokens tokens, {
+    String? owner,
+    String? accountId,
+  }) {
+    final stableAccountId = _boundedAccountId(accountId) ??
+        _chatGptAccountIdFromJwt(tokens.accessToken);
+    if (stableAccountId != null) {
+      return opaqueCredentialIdentity(
+        provider,
+        'account-id:$stableAccountId',
+      );
+    }
     if (isOpaqueCredentialIdentity(owner)) return owner;
     final refresh = tokens.refreshToken;
     final access = tokens.accessToken;
@@ -243,6 +282,56 @@ class OpenAiAuth {
     return material == null
         ? null
         : opaqueCredentialIdentity(provider, material);
+  }
+
+  static _OpenAiTokenResponse _tokenResponse(
+    Map<String, dynamic> json, {
+    String? priorRefresh,
+  }) {
+    final tokens = Tokens.fromOAuth(json, priorRefresh: priorRefresh);
+    final idToken = json['id_token'];
+    return _OpenAiTokenResponse(
+      tokens,
+      _chatGptAccountIdFromJwt(idToken is String ? idToken : null) ??
+          _chatGptAccountIdFromJwt(tokens.accessToken),
+    );
+  }
+
+  static String? _chatGptAccountIdFromJwt(String? token) {
+    if (token == null || token.isEmpty || token.length > _maxIdentityJwtBytes) {
+      return null;
+    }
+    final parts = token.split('.');
+    if (parts.length != 3 ||
+        parts[1].isEmpty ||
+        parts[1].length > _maxIdentityPayloadBytes) {
+      return null;
+    }
+    try {
+      final bytes = base64Url.decode(base64Url.normalize(parts[1]));
+      if (bytes.length > _maxIdentityPayloadBytes) return null;
+      final decoded = jsonDecode(utf8.decode(bytes));
+      if (decoded is! Map) return null;
+      final claims = decoded.cast<String, dynamic>();
+      final direct = _boundedAccountId(claims['chatgpt_account_id']);
+      if (direct != null) return direct;
+      final namespaced = claims['https://api.openai.com/auth'];
+      if (namespaced is! Map) return null;
+      return _boundedAccountId(namespaced['chatgpt_account_id']);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _boundedAccountId(Object? value) {
+    if (value is! String) return null;
+    final accountId = value.trim();
+    if (accountId.isEmpty ||
+        accountId.length > _maxAccountIdLength ||
+        accountId.runes.any((code) => code < 0x20 || code == 0x7f)) {
+      return null;
+    }
+    return accountId;
   }
 
   static bool? _stampDefaultIdentityBestEffort(
@@ -277,4 +366,11 @@ class OpenAiAuth {
       return null;
     }
   }
+}
+
+class _OpenAiTokenResponse {
+  final Tokens tokens;
+  final String? accountId;
+
+  const _OpenAiTokenResponse(this.tokens, this.accountId);
 }

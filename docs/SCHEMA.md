@@ -22,10 +22,12 @@ Provider snapshots keep these stable fields:
   `windows`.
 - `account` is the exact local evidence identity. It is normally a provider
   account label. Claude and Codex use `credential:` plus a full irreversible
-  SHA-256 fingerprint so credential replacement cannot cross cache or drift
-  boundaries. Consumers must treat that value as an opaque exact-match key,
-  not as a user-facing name or a token. Raw credential material is never
-  serialized in this field.
+  SHA-256 fingerprint. Codex hashes its stable ChatGPT account id when known;
+  Claude hashes the current profile account and organization ids when available.
+  A credential-generation fingerprint is the fail-closed fallback. Consumers
+  must treat the value as an opaque exact-match key, not as a user-facing name
+  or a token. Raw credentials and provider account ids are never serialized in
+  this field.
 - Optional `plan`, `plan_evidence_source`, `plan_evidence_as_of`, `source`,
   `source_class`, `status`, `active`, `details`,
   `error`, `models`, `local_hardware`, `model_quotas`, `suspect`, `drift_reason`,
@@ -40,8 +42,8 @@ Provider snapshots keep these stable fields:
 - `plan_evidence_source` is `host_credential` or `provider_metadata`, and appears
   with `plan_evidence_as_of`. A host-credential label is local diagnostic
   context, not current entitlement proof. Spend-sensitive included-plan routing
-  requires same-response provider metadata at or after any dated policy
-  boundary.
+  requires current provider usage or profile metadata read with the same
+  credential at or after any dated policy boundary.
   Positive included-quota and credit-backed Fable labels both require this
   current provider metadata; a host-credential plan label stays diagnostic.
 - `source_class` is the normalized provenance class. Current producers always

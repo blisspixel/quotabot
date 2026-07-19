@@ -108,6 +108,9 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
   dynamic raw,
 ) {
   if (raw is! Map) return (valid: false, windows: const []);
+  if (_codexHasUnknownQuotaWindow(raw)) {
+    return (valid: false, windows: const []);
+  }
   final out = <QuotaWindow>[];
   for (final key in const ['primary_window', 'secondary_window']) {
     if (!raw.containsKey(key)) continue;
@@ -137,6 +140,43 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
     return (valid: false, windows: const []);
   }
   return (valid: true, windows: out);
+}
+
+const _codexKnownRateLimitKeys = {
+  'allowed',
+  'limit_reached',
+  'primary_window',
+  'secondary_window',
+};
+
+const _codexQuotaWindowMarkers = {
+  'used_percent',
+  'reset_at',
+  'limit_window_seconds',
+};
+
+/// A newly added binding pool must not be mistaken for harmless metadata. Its
+/// schema is unknown, so the only safe result is to reject the atomic provider
+/// observation until the pool can be parsed and included in routing.
+bool _codexHasUnknownQuotaWindow(Map<dynamic, dynamic> rateLimit) {
+  for (final entry in rateLimit.entries) {
+    final key = entry.key;
+    if (key is String && _codexKnownRateLimitKeys.contains(key)) continue;
+
+    final normalizedKey = key is String ? key.toLowerCase() : '';
+    if (normalizedKey.endsWith('_window')) return true;
+
+    final value = entry.value;
+    if (value is Map &&
+        value.keys.any(
+          (candidate) =>
+              candidate is String &&
+              _codexQuotaWindowMarkers.contains(candidate.toLowerCase()),
+        )) {
+      return true;
+    }
+  }
+  return false;
 }
 
 double? _codexLivePercent(dynamic raw) =>
@@ -171,7 +211,14 @@ bool _codexLiveFlagsAreConsistent(
   if (allowed != null && limitReached != null && allowed == limitReached) {
     return false;
   }
-  final observedLimitReached = windows.any((window) => window.exhausted);
+  // Provider status flags describe the provider's hard limit, not quotabot's
+  // earlier routing comfort floor. A valid 99% observation can be unavailable
+  // for new routing while the provider still truthfully reports that its hard
+  // limit has not been reached.
+  final observedLimitReached = windows.any((window) {
+    final percent = window.percent;
+    return percent != null && percent >= 100;
+  });
   if (allowed != null && allowed == observedLimitReached) {
     return false;
   }
@@ -305,14 +352,16 @@ typedef ClaudeLiveUsage = ({
 /// The shared session and weekly rows are both binding pools. Dropping either
 /// one can overstate immediate availability, so an admitted response must prove
 /// both. Every recognized canonical row and every present known legacy block
-/// must also be structurally valid. Unknown additive root fields and unknown
-/// canonical kinds remain compatible because they are not interpreted as known
-/// quota evidence.
+/// must also be structurally valid. Unknown additive root fields and
+/// advisory-only canonical kinds remain compatible. An unknown row or root
+/// block carrying quota markers rejects the atomic observation because it may
+/// be a newly introduced binding pool.
 ClaudeLiveUsage? claudeLiveUsage(
   Map<String, dynamic>? data, {
   int? observedAt,
 }) {
   if (data == null) return null;
+  if (_claudeHasUnknownRootQuotaBlock(data)) return null;
   final observation = observedAt ?? nowEpoch();
 
   var canonical = (
@@ -362,7 +411,8 @@ List<ModelQuota> claudeModelQuotas(
 /// Parses Anthropic's current `limits` array. Recognized rows need a complete
 /// kind/group/scope pairing, bounded numeric percent, and positive ISO reset.
 /// `is_active` is advisory: Claude reports enforced weekly rows as inactive
-/// while still displaying them in `/usage`.
+/// while still displaying them in `/usage`. Unknown kinds remain additive only
+/// when they do not carry any canonical quota marker.
 ({
   bool valid,
   List<QuotaWindow> windows,
@@ -435,6 +485,15 @@ List<ModelQuota> claudeModelQuotas(
           _preferClaudeModelQuota(candidate, current, observedAt)) {
         byModel[key] = candidate;
       }
+      continue;
+    }
+
+    if (_claudeUnknownLimitIsQuotaShaped(row)) {
+      return (
+        valid: false,
+        windows: const [],
+        modelQuotas: const [],
+      );
     }
   }
   return (
@@ -443,6 +502,50 @@ List<ModelQuota> claudeModelQuotas(
     modelQuotas: byModel.values.toList(growable: false),
   );
 }
+
+const _claudeCanonicalQuotaMarkers = {
+  'percent',
+  'utilization',
+  'resets_at',
+  'group',
+  'scope',
+  'is_active',
+};
+
+const _claudeKnownRootQuotaKeys = {
+  'limits',
+  'five_hour',
+  'seven_day',
+  'seven_day_opus',
+};
+
+const _claudeRootQuotaMarkers = {
+  ..._claudeCanonicalQuotaMarkers,
+  'used_percent',
+  'reset_at',
+};
+
+bool _claudeUnknownLimitIsQuotaShaped(Map<dynamic, dynamic> row) =>
+    _hasDirectQuotaMarker(row, _claudeCanonicalQuotaMarkers);
+
+bool _claudeHasUnknownRootQuotaBlock(Map<String, dynamic> data) {
+  for (final entry in data.entries) {
+    if (_claudeKnownRootQuotaKeys.contains(entry.key)) continue;
+    final value = entry.value;
+    if (value is Map && _hasDirectQuotaMarker(value, _claudeRootQuotaMarkers)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _hasDirectQuotaMarker(
+  Map<dynamic, dynamic> value,
+  Set<String> markers,
+) =>
+    value.keys.any(
+      (key) => key is String && markers.contains(key.toLowerCase()),
+    );
 
 /// Combines transitional response shapes without duplicate pools. Canonical
 /// rows win by label, while legacy fields can fill a missing primary. The

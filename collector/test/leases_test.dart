@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:quotabot_collector/leases.dart';
 import 'package:test/test.dart';
@@ -99,6 +100,52 @@ class _LeaseSelectionWorker {
       // The process pipes should close with the process. Do not let diagnostics
       // prevent bounded cleanup on an abnormal platform failure.
     }
+  }
+}
+
+Future<void> _reserveLeaseInIsolate(List<Object?> arguments) async {
+  final id = arguments[0] as String;
+  final directory = Directory(arguments[1] as String);
+  final releasePath = arguments[2] as String?;
+  final events = arguments[3] as SendPort;
+  final commands = ReceivePort();
+  events.send(<Object>[id, 'ready', commands.sendPort]);
+  await commands.first;
+  try {
+    final store = FileRouteLeaseStore(
+      dirFactory: () => directory,
+      idFactory: () => 'lease-$id',
+    );
+    final reservation = store.selectAndReserve(
+      select: (active) {
+        events.send(<Object>[id, 'select', active.length]);
+        if (releasePath != null) {
+          final release = File(releasePath);
+          while (!release.existsSync()) {
+            sleep(const Duration(milliseconds: 2));
+          }
+        }
+        final provider = active.any((lease) => lease.provider == 'claude')
+            ? 'codex'
+            : 'claude';
+        return RouteLeaseSelection.selected(
+          RouteLeaseTarget(provider: provider, account: 'a'),
+        );
+      },
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 30,
+    );
+    events.send(<Object>[
+      id,
+      'result',
+      reservation.reserved,
+      reservation.lease?.provider ?? '',
+    ]);
+  } catch (error) {
+    events.send(<Object>[id, 'error', error.toString()]);
+  } finally {
+    commands.close();
   }
 }
 
@@ -572,6 +619,110 @@ void main() {
       if (dir.existsSync()) dir.deleteSync(recursive: true);
     }
   }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('file store atomically selects targets across POSIX isolates', () async {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-isolate-');
+    final releaseA = File('${dir.path}/release-a');
+    final events = ReceivePort();
+    final ready = <String, Completer<SendPort>>{
+      'a': Completer<SendPort>(),
+      'b': Completer<SendPort>(),
+    };
+    final enteredSelection = <String>{};
+    final selectionA = Completer<void>();
+    final results = <String, Completer<String>>{
+      'a': Completer<String>(),
+      'b': Completer<String>(),
+    };
+    final subscription = events.listen((message) {
+      final event = (message as List<Object>).cast<Object>();
+      final id = event[0] as String;
+      final kind = event[1] as String;
+      if (kind == 'ready') ready[id]!.complete(event[2] as SendPort);
+      if (kind == 'select') {
+        enteredSelection.add(id);
+        if (id == 'a' && !selectionA.isCompleted) selectionA.complete();
+      }
+      if (kind == 'result') {
+        if (event[2] != true) {
+          results[id]!.completeError(StateError('reservation failed'));
+        } else {
+          results[id]!.complete(event[3] as String);
+        }
+      }
+      if (kind == 'error') {
+        results[id]!.completeError(StateError(event[2] as String));
+      }
+    });
+    Isolate? first;
+    Isolate? second;
+    try {
+      first = await Isolate.spawn<List<Object?>>(
+        _reserveLeaseInIsolate,
+        <Object?>['a', dir.path, releaseA.path, events.sendPort],
+      );
+      second = await Isolate.spawn<List<Object?>>(
+        _reserveLeaseInIsolate,
+        <Object?>['b', dir.path, null, events.sendPort],
+      );
+      final firstCommands =
+          await ready['a']!.future.timeout(const Duration(seconds: 3));
+      final secondCommands =
+          await ready['b']!.future.timeout(const Duration(seconds: 3));
+
+      firstCommands.send('start');
+      await selectionA.future.timeout(const Duration(seconds: 3));
+      secondCommands.send('start');
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(enteredSelection, {'a'});
+
+      releaseA.writeAsStringSync('continue\n', flush: true);
+      final providers = await Future.wait([
+        results['a']!.future,
+        results['b']!.future,
+      ]).timeout(const Duration(seconds: 5));
+      expect(providers, unorderedEquals(['claude', 'codex']));
+      expect(enteredSelection, {'a', 'b'});
+      expect(
+        FileRouteLeaseStore(dirFactory: () => dir)
+            .active(100)
+            .map((lease) => lease.provider),
+        unorderedEquals(['claude', 'codex']),
+      );
+    } finally {
+      first?.kill(priority: Isolate.immediate);
+      second?.kill(priority: Isolate.immediate);
+      await subscription.cancel();
+      events.close();
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('file store does not reuse a PID-only temporary path', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-temp-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final legacyTemporary = File('${dir.path}/route_leases.json.$pid.tmp')
+      ..writeAsStringSync('sentinel', flush: true);
+
+    final reservation = FileRouteLeaseStore(dirFactory: () => dir).reserve(
+      provider: 'claude',
+      account: 'a',
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 10,
+    );
+
+    expect(reservation.reserved, isTrue);
+    expect(legacyTemporary.readAsStringSync(), 'sentinel');
+    final temporaryNames = dir
+        .listSync()
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.tmp'))
+        .map((file) => file.uri.pathSegments.last);
+    expect(temporaryNames, ['route_leases.json.$pid.tmp']);
+  });
 
   test('file store rejects reservations after pruning reaches the active cap',
       () {

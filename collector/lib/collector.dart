@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'analysis.dart';
@@ -10,6 +11,7 @@ import 'models.dart';
 import 'provider_adapters.dart';
 import 'runtime_audit.dart';
 import 'util.dart';
+import 'verification.dart';
 
 export 'alerts.dart';
 export 'cache.dart'
@@ -62,6 +64,301 @@ class CollectedQuotaSnapshot {
     required this.providers,
     required this.runtimeAccess,
   });
+}
+
+const quotabotDriftRecoveryV1SchemaId = 'quotabot.drift-recovery.v1';
+
+/// Result of one explicit, targeted live verification and drift-baseline
+/// recovery attempt. It contains quota metadata only.
+class ProviderDriftRecoveryReport {
+  final int generatedAt;
+  final String provider;
+  final String displayName;
+  final String account;
+  final bool recovered;
+  final String status;
+  final String detail;
+  final ProviderVerification? verification;
+  final RuntimeAccessReport? runtimeAccess;
+
+  const ProviderDriftRecoveryReport({
+    required this.generatedAt,
+    required this.provider,
+    required this.displayName,
+    required this.account,
+    required this.recovered,
+    required this.status,
+    required this.detail,
+    this.verification,
+    this.runtimeAccess,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'schema': quotabotDriftRecoveryV1SchemaId,
+        'generated_at': generatedAt,
+        'provider': provider,
+        'display_name': displayName,
+        'account': account,
+        'recovered': recovered,
+        'status': status,
+        'detail': detail,
+        if (verification != null) 'verification': verification!.toJson(),
+        if (runtimeAccess != null) 'runtime_access': runtimeAccess!.toJson(),
+      };
+}
+
+ProviderDriftRecoveryReport _driftRecoveryFailure({
+  required int generatedAt,
+  required String provider,
+  required String displayName,
+  required String account,
+  required String status,
+  required String detail,
+  ProviderVerification? verification,
+  RuntimeAccessReport? runtimeAccess,
+}) =>
+    ProviderDriftRecoveryReport(
+      generatedAt: generatedAt,
+      provider: provider,
+      displayName: displayName,
+      account: account,
+      recovered: false,
+      status: status,
+      detail: detail,
+      verification: verification,
+      runtimeAccess: runtimeAccess,
+    );
+
+ProviderQuota? _driftRecoveryBaseline(
+  ProviderAdapterRegistration entry,
+  String account,
+) =>
+    entry.accountScopedCache
+        ? loadAccountSnapshotForAdmission(entry.id, account)
+        : loadSnapshotForAdmission(entry.id);
+
+/// Performs the only supported explicit drift-baseline recovery flow.
+///
+/// A recoverable exact baseline is required before any provider call. The
+/// adapter is then invoked once under the ordinary collection deadline. One
+/// exact provider/account row must pass the registered source contract, the
+/// full targeted verification report, and the stricter cache trust boundary.
+/// Only then may [recoverProviderDriftBaseline] replace that identity's local
+/// baseline. No model endpoint is called by this flow.
+Future<ProviderDriftRecoveryReport> verifyAndRecoverProviderDriftBaseline({
+  required String provider,
+  required String account,
+  ProviderAdapterRegistration? registration,
+  int? observedAt,
+  int? observedAtMicros,
+  Duration deadline = kAdapterDeadline,
+}) async {
+  final resolved = providerAdapterById(provider);
+  final entry = registration ?? resolved;
+  final wallClockAtStart = nowEpoch();
+  final inspectedAt = observedAt ?? wallClockAtStart;
+  final observationTimeIsSafe = observedAt == null ||
+      (observedAt >= wallClockAtStart - kQuotaEvidenceClockSkewSeconds &&
+          observedAt <= wallClockAtStart + kQuotaEvidenceClockSkewSeconds);
+  final cleanProvider = stripTerminalControl(provider.trim().toLowerCase());
+  final targetProvider = entry?.id ??
+      (cleanProvider.length <= 64
+          ? cleanProvider
+          : cleanProvider.substring(0, 64));
+  final targetDisplayName = entry?.displayName ?? targetProvider;
+  final accountIsSafe = account.trim().isNotEmpty &&
+      account.length <= 512 &&
+      stripTerminalControl(account) == account;
+  final reportAccount = accountIsSafe ? account : 'invalid';
+  if (!observationTimeIsSafe) {
+    return _driftRecoveryFailure(
+      generatedAt: wallClockAtStart,
+      provider: targetProvider,
+      displayName: targetDisplayName,
+      account: reportAccount,
+      status: 'invalid_live_evidence',
+      detail: 'recovery observation time is outside the real-clock trust '
+          'boundary',
+    );
+  }
+  if (entry == null ||
+      resolved == null ||
+      resolved.id != entry.id ||
+      !entry.cached ||
+      entry.localRuntime ||
+      !accountIsSafe ||
+      deadline <= Duration.zero) {
+    return _driftRecoveryFailure(
+      generatedAt: inspectedAt,
+      provider: targetProvider,
+      displayName: targetDisplayName,
+      account: reportAccount,
+      status: 'unsupported_target',
+      detail:
+          'recovery requires one registered cached provider and exact account',
+    );
+  }
+
+  final baseline = _driftRecoveryBaseline(entry, account);
+  if (baseline == null ||
+      baseline.provider != entry.id ||
+      baseline.account != account) {
+    return _driftRecoveryFailure(
+      generatedAt: inspectedAt,
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'baseline_not_found',
+      detail: 'no recoverable baseline exists for the exact provider account',
+    );
+  }
+  if (!isLegacySuspectQuotaEvidence(baseline) &&
+      attachProviderDriftObservation(baseline, now: inspectedAt).driftReason ==
+          null) {
+    return _driftRecoveryFailure(
+      generatedAt: inspectedAt,
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'no_active_drift',
+      detail: 'the exact provider account has no active drift quarantine',
+    );
+  }
+
+  final generationMicros =
+      observedAtMicros ?? DateTime.now().microsecondsSinceEpoch;
+  RuntimeAccessReport attemptedRuntimeAccess(int generatedAt) =>
+      buildRuntimeAccessReport(
+        generatedAt: generatedAt,
+        includeReads: true,
+        includeNetwork: true,
+        observedProviderIds: {entry.id},
+        collectionExecuted: true,
+      );
+  late List<ProviderQuota> collected;
+  try {
+    collected = await entry.collect().timeout(deadline);
+  } on TimeoutException {
+    final failedAt = observedAt ?? nowEpoch();
+    return _driftRecoveryFailure(
+      generatedAt: failedAt,
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'live_read_failed',
+      detail: 'provider metadata read timed out before verification',
+      runtimeAccess: attemptedRuntimeAccess(failedAt),
+    );
+  } catch (_) {
+    final failedAt = observedAt ?? nowEpoch();
+    return _driftRecoveryFailure(
+      generatedAt: failedAt,
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'live_read_failed',
+      detail: 'provider metadata read failed before verification',
+      runtimeAccess: attemptedRuntimeAccess(failedAt),
+    );
+  }
+
+  final verifiedAt = observedAt ?? nowEpoch();
+  final runtimeAccess = attemptedRuntimeAccess(verifiedAt);
+  final accountMatches = [
+    for (final quota in collected)
+      if (quota.account == account) quota,
+  ];
+  if (accountMatches.isEmpty) {
+    return _driftRecoveryFailure(
+      generatedAt: observedAt ?? nowEpoch(),
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'target_not_returned',
+      detail: 'the live provider read did not return the exact account',
+      runtimeAccess: runtimeAccess,
+    );
+  }
+  if (accountMatches.length != 1) {
+    return _driftRecoveryFailure(
+      generatedAt: observedAt ?? nowEpoch(),
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'ambiguous_live_read',
+      detail:
+          'the live provider read returned the exact account more than once',
+      runtimeAccess: runtimeAccess,
+    );
+  }
+
+  final rawFresh = flagStalePassiveRolloverEvidence(
+    accountMatches.single,
+    verifiedAt,
+  );
+  final fresh = sanitizeProviderQuota(rawFresh);
+  final verificationReport = buildVerificationReport(
+    [fresh],
+    verifiedAt,
+    os: Platform.operatingSystem,
+    filtered: true,
+    requireLive: true,
+    registry: [entry],
+    runtimeAccess: runtimeAccess,
+  );
+  final verification = verificationReport.providers.single;
+  final sourceViolation = registeredSourceClassViolation(
+    rawFresh,
+    entry,
+    allowManual: false,
+  );
+  if (rawFresh.provider != entry.id ||
+      rawFresh.account != account ||
+      sourceViolation != null ||
+      !isTrustedQuotaEvidenceAt(rawFresh, verifiedAt) ||
+      !isTrustedQuotaEvidenceAt(fresh, verifiedAt) ||
+      !verificationReport.passed ||
+      !verification.liveReadSucceeded) {
+    return _driftRecoveryFailure(
+      generatedAt: verifiedAt,
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: 'live_verification_failed',
+      detail: 'fresh provider evidence did not pass every recovery gate',
+      verification: verification,
+      runtimeAccess: runtimeAccess,
+    );
+  }
+
+  final recovery = recoverProviderDriftBaseline(
+    fresh,
+    observedAt: verifiedAt,
+    observedAtMicros: generationMicros,
+  );
+  if (!recovery.recovered) {
+    return _driftRecoveryFailure(
+      generatedAt: verifiedAt,
+      provider: entry.id,
+      displayName: entry.displayName,
+      account: account,
+      status: recovery.status,
+      detail: recovery.detail,
+      verification: verification,
+      runtimeAccess: runtimeAccess,
+    );
+  }
+  return ProviderDriftRecoveryReport(
+    generatedAt: verifiedAt,
+    provider: entry.id,
+    displayName: entry.displayName,
+    account: account,
+    recovered: true,
+    status: recovery.status,
+    detail: recovery.detail,
+    verification: verification,
+    runtimeAccess: runtimeAccess,
+  );
 }
 
 /// A single fail-soft error quota for [entry], shaped like a real read so

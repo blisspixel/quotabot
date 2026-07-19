@@ -152,51 +152,51 @@ class AnthropicAuth {
   /// Fresh default access credential from quotabot's own grant, refreshing and
   /// persisting the rotated token as needed. The identity remains stable across
   /// refresh-token rotation, but a replacement login receives a new identity.
-  Future<AnthropicCredential?> freshCredential() async {
-    final record = TokenStore.loadRecord(provider);
-    if (record == null) return null;
-    final stored = record.tokens;
-    final owner = record.owner;
-    final identity = _identityFor(
-      stored,
-      owner: owner,
-    );
-    if (identity == null) return null;
-    if (stored.isFresh) {
-      if (owner != identity) {
+  Future<AnthropicCredential?> freshCredential() =>
+      TokenStore.refreshTransaction(provider, (record) async {
+        if (record == null) return null;
+        final stored = record.tokens;
+        final owner = record.owner;
+        final identity = _identityFor(
+          stored,
+          owner: owner,
+        );
+        if (identity == null) return null;
+        if (stored.isFresh) {
+          if (owner != identity) {
+            final persisted = _stampDefaultIdentityBestEffort(
+              record,
+              stored,
+              identity,
+            );
+            if (persisted == false) return null;
+          }
+          return AnthropicCredential(
+            accessToken: stored.accessToken!,
+            identity: identity,
+          );
+        }
+        final refreshToken = stored.refreshToken;
+        if (refreshToken == null || refreshToken.isEmpty) return null;
+        final refreshed = await refresh(refreshToken);
+        final accessToken = refreshed?.accessToken;
+        if (refreshed == null || accessToken == null || accessToken.isEmpty) {
+          return null;
+        }
+        // Persist the rotated refresh token (providers rotate single-use
+        // tokens), but keep the identity derived before refresh. A rotation is
+        // still the same grant; only a later login is a new generation.
         final persisted = _stampDefaultIdentityBestEffort(
           record,
-          stored,
+          refreshed,
           identity,
         );
         if (persisted == false) return null;
-      }
-      return AnthropicCredential(
-        accessToken: stored.accessToken!,
-        identity: identity,
-      );
-    }
-    final refreshToken = stored.refreshToken;
-    if (refreshToken == null || refreshToken.isEmpty) return null;
-    final refreshed = await refresh(refreshToken);
-    final accessToken = refreshed?.accessToken;
-    if (refreshed == null || accessToken == null || accessToken.isEmpty) {
-      return null;
-    }
-    // Persist the rotated refresh token (providers rotate single-use tokens),
-    // but keep the identity derived before refresh. A rotation is still the
-    // same grant; only a later login is a new credential generation.
-    final persisted = _stampDefaultIdentityBestEffort(
-      record,
-      refreshed,
-      identity,
-    );
-    if (persisted == false) return null;
-    return AnthropicCredential(
-      accessToken: accessToken,
-      identity: identity,
-    );
-  }
+        return AnthropicCredential(
+          accessToken: accessToken,
+          identity: identity,
+        );
+      });
 
   /// Fresh access token from quotabot's own grant. The default-slot path uses
   /// [freshCredential] so the Claude adapter can keep cache evidence isolated.
@@ -205,18 +205,23 @@ class AnthropicAuth {
     if (account == null) {
       return (await freshCredential())?.accessToken;
     }
-    final record = TokenStore.loadRecord(provider, account: account);
-    if (record == null) return null;
-    final stored = record.tokens;
-    if (stored.isFresh) return stored.accessToken;
-    if (stored.refreshToken == null) return null;
-    final refreshed = await refresh(stored.refreshToken!);
-    if (refreshed?.accessToken == null) return null;
-    // The named-slot compatibility path has no default-slot ownership marker.
-    try {
-      if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
-    } catch (_) {}
-    return refreshed!.accessToken;
+    return TokenStore.refreshTransaction(
+      provider,
+      (record) async {
+        if (record == null) return null;
+        final stored = record.tokens;
+        if (stored.isFresh) return stored.accessToken;
+        if (stored.refreshToken == null) return null;
+        final refreshed = await refresh(stored.refreshToken!);
+        if (refreshed?.accessToken == null) return null;
+        // Named compatibility slots have no default ownership marker.
+        try {
+          if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
+        } catch (_) {}
+        return refreshed!.accessToken;
+      },
+      account: account,
+    );
   }
 
   static void _saveGrant(Tokens tokens, {String? account}) {

@@ -4,6 +4,23 @@ library;
 
 import 'dart:async';
 
+import 'models.dart';
+
+/// Keeps the previous snapshot visible after a whole-refresh failure while
+/// ensuring no previously current row remains routable or looks live.
+///
+/// Rows that were already stale or failed keep their more specific failure
+/// state. All other rows retain their capture time and quota values as
+/// last-known evidence.
+List<ProviderQuota> retainSnapshotAfterRefreshFailure(
+  Iterable<ProviderQuota> previous, {
+  required String note,
+}) =>
+    [
+      for (final quota in previous)
+        if (!quota.ok || quota.stale) quota else quota.asStale(note),
+    ];
+
 typedef TopRefreshTimerFactory = Timer Function(
   Duration delay,
   void Function() callback,

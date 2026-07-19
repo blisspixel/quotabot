@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/claude.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/provider_adapters.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
@@ -15,6 +17,7 @@ void main() {
   late File credentials;
 
   setUp(() {
+    ClaudeAdapter.resetPoolIdentityMemoryForTesting();
     temp = Directory.systemTemp.createTempSync('quotabot_claude_adapter_');
     setQuotabotDirOverrideForTesting(Directory('${temp.path}/quotabot'));
     credentials = File('${temp.path}/credentials.json');
@@ -35,6 +38,14 @@ void main() {
 
   String hostIdentity([String refreshToken = hostRefreshToken]) =>
       opaqueCredentialIdentity(ClaudeAdapter.id, refreshToken);
+
+  String profileIdentity(String accountUuid, [String? organizationUuid]) =>
+      opaqueCredentialIdentity(
+        ClaudeAdapter.id,
+        organizationUuid == null
+            ? 'account-id:$accountUuid'
+            : 'account-id:$accountUuid\u0000organization-id:$organizationUuid',
+      );
 
   test('preserves throttled metadata from the usage endpoint', () async {
     final q = await ClaudeAdapter(
@@ -126,6 +137,222 @@ void main() {
     expect(grantCalled, isFalse);
   });
 
+  test('collectAccounts refreshes distinct host and grant identities',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'independent-grant');
+    final attempted = <String>[];
+    final quotas = await collectClaudeProviderAccounts(
+      ClaudeAdapter(
+        credentialsFile: credentials,
+        grantCredential: () async => ClaudeCredential(
+          accessToken: 'grant-token',
+          identity: grantIdentity,
+        ),
+        client: MockClient((request) async {
+          attempted.add(request.headers['Authorization']!);
+          if (_isProfileRequest(request)) {
+            final host =
+                request.headers['Authorization'] == 'Bearer host-token';
+            return http.Response(
+              _profileBody(
+                accountUuid: host ? 'account-host' : 'account-grant',
+              ),
+              200,
+            );
+          }
+          return http.Response(_usageBody(), 200);
+        }),
+      ),
+    );
+
+    expect(quotas, hasLength(2));
+    expect(quotas.every((quota) => quota.ok && quota.hasWindows), isTrue);
+    expect(quotas.map((quota) => quota.account).toSet(), {
+      profileIdentity('account-host'),
+      profileIdentity('account-grant'),
+    });
+    expect(attempted.toSet(), {'Bearer host-token', 'Bearer grant-token'});
+    expect(attempted, hasLength(4));
+  });
+
+  test('collectAccounts emits one row for an exact duplicate identity',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    var requests = 0;
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'duplicate-grant-token',
+        identity: hostIdentity(),
+      ),
+      client: MockClient((request) async {
+        if (!_isProfileRequest(request)) requests++;
+        expect(request.headers['Authorization'], 'Bearer host-token');
+        return http.Response(
+          _isProfileRequest(request)
+              ? _profileBody(accountUuid: 'account-shared')
+              : _usageBody(),
+          200,
+        );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.account, profileIdentity('account-shared'));
+    expect(quotas.single.ok, isTrue);
+    expect(requests, 1);
+  });
+
+  test('collectAccounts uses a duplicate grant after host failure', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final attempted = <String>[];
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'duplicate-grant-token',
+        identity: hostIdentity(),
+      ),
+      client: MockClient((request) async {
+        final authorization = request.headers['Authorization']!;
+        if (!_isProfileRequest(request)) attempted.add(authorization);
+        return authorization == 'Bearer host-token'
+            ? http.Response('{}', 401)
+            : http.Response(
+                _isProfileRequest(request)
+                    ? _profileBody(accountUuid: 'account-shared')
+                    : _usageBody(),
+                200,
+              );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.account, profileIdentity('account-shared'));
+    expect(attempted, [
+      'Bearer host-token',
+      'Bearer duplicate-grant-token',
+    ]);
+  });
+
+  test('collectAccounts preserves a duplicate host throttle without retrying',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    var requests = 0;
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'duplicate-grant-token',
+        identity: hostIdentity(),
+      ),
+      client: MockClient((request) async {
+        if (!_isProfileRequest(request)) requests++;
+        expect(request.headers['Authorization'], 'Bearer host-token');
+        return http.Response(
+          '{}',
+          429,
+          headers: {'retry-after': '120'},
+        );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isFalse);
+    expect(quotas.single.account, hostIdentity());
+    expect(quotas.single.error, 'HTTP 429');
+    expect(quotas.single.pipeHealth, providerPipeHealthThrottled);
+    expect(quotas.single.httpStatus, 429);
+    expect(quotas.single.retryAfterSeconds, 120);
+    expect(requests, 1);
+  });
+
+  test('collectAccounts preserves host evidence when grant refresh stalls',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'stalled-grant');
+    TokenStore.saveDefaultOwnedBy(
+      ClaudeAdapter.id,
+      Tokens(
+        accessToken: 'stored-grant',
+        refreshToken: 'stored-refresh',
+        expiresAt: nowEpoch() + 3600,
+      ),
+      grantIdentity,
+    );
+    final pending = Completer<ClaudeCredential?>();
+    final stopwatch = Stopwatch()..start();
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () => pending.future,
+      grantResolutionDeadline: const Duration(milliseconds: 20),
+      client: MockClient((request) async {
+        expect(request.headers['Authorization'], 'Bearer host-token');
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collectAccounts();
+    stopwatch.stop();
+
+    expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
+    expect(quotas, hasLength(2));
+    expect(quotas.first.ok, isTrue);
+    expect(quotas.first.account, hostIdentity());
+    expect(quotas.last.ok, isFalse);
+    expect(quotas.last.account, grantIdentity);
+    expect(quotas.last.error, contains('unable to refresh Claude grant'));
+  });
+
+  test('collectAccounts keeps distinct success and failure rows', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'healthy-grant');
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'grant-token',
+        identity: grantIdentity,
+      ),
+      client: MockClient((request) async =>
+          request.headers['Authorization'] == 'Bearer host-token'
+              ? http.Response('{}', 503)
+              : http.Response(_usageBody(), 200)),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(2));
+    expect(quotas.first.account, hostIdentity());
+    expect(quotas.first.ok, isFalse);
+    expect(quotas.first.httpStatus, 503);
+    expect(quotas.last.account, grantIdentity);
+    expect(quotas.last.ok, isTrue);
+  });
+
+  test('collectAccounts represents an indexed grant refresh failure', () async {
+    credentials.deleteSync();
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'unavailable-grant');
+    TokenStore.saveDefaultOwnedBy(
+      ClaudeAdapter.id,
+      Tokens(
+        accessToken: 'stored-grant',
+        refreshToken: 'stored-refresh',
+        expiresAt: nowEpoch() + 3600,
+      ),
+      grantIdentity,
+    );
+
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => null,
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isFalse);
+    expect(quotas.single.account, grantIdentity);
+    expect(quotas.single.error, contains('unable to refresh Claude grant'));
+  });
+
   test('maps the current limits payload to live quota windows', () async {
     final q = await ClaudeAdapter(
       credentialsFile: credentials,
@@ -162,13 +389,115 @@ void main() {
     expect(q.planEvidenceAsOf, q.asOf);
   });
 
+  test('current Claude profile proves a Max plan when usage omits it',
+      () async {
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? _profileBody(
+                    accountUuid: 'account-max',
+                    hasMax: true,
+                  )
+                : _currentUsageBody(),
+            200,
+          )),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.plan, 'max');
+    expect(
+      q.planEvidenceSource,
+      ProviderPlanEvidenceSource.providerMetadata,
+    );
+    expect(q.planEvidenceAsOf, q.asOf);
+  });
+
+  test('current Claude profile proves a Team Premium plan', () async {
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? _profileBody(
+                    accountUuid: 'account-team',
+                    organizationUuid: 'organization-team',
+                    organizationType: 'claude_team',
+                    rateLimitTier: 'default_claude_max_20x',
+                  )
+                : _currentUsageBody(),
+            200,
+          )),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.plan, 'team_premium');
+    expect(
+      q.planEvidenceSource,
+      ProviderPlanEvidenceSource.providerMetadata,
+    );
+    expect(q.planEvidenceAsOf, q.asOf);
+  });
+
+  for (final scenario in [
+    (
+      name: 'Pro',
+      expectedPlan: 'pro',
+      hasPro: true,
+      organizationUuid: null,
+      organizationType: null,
+      rateLimitTier: null,
+    ),
+    (
+      name: 'Team Standard',
+      expectedPlan: 'team_standard',
+      hasPro: false,
+      organizationUuid: 'organization-standard',
+      organizationType: 'claude_team',
+      rateLimitTier: 'default_claude_team',
+    ),
+  ]) {
+    test('current Claude profile proves a ${scenario.name} plan', () async {
+      final q = await ClaudeAdapter(
+        credentialsFile: credentials,
+        client: MockClient((request) async => http.Response(
+              _isProfileRequest(request)
+                  ? _profileBody(
+                      accountUuid: 'account-plan',
+                      organizationUuid: scenario.organizationUuid,
+                      hasPro: scenario.hasPro,
+                      organizationType: scenario.organizationType,
+                      rateLimitTier: scenario.rateLimitTier,
+                    )
+                  : _currentUsageBody(),
+              200,
+            )),
+      ).collect();
+
+      expect(q.ok, isTrue);
+      expect(q.plan, scenario.expectedPlan);
+      expect(
+        q.planEvidenceSource,
+        ProviderPlanEvidenceSource.providerMetadata,
+      );
+      expect(q.planEvidenceAsOf, q.asOf);
+    });
+  }
+
   test('malformed provider plan metadata cannot fall back to the host label',
       () async {
     final payload = (jsonDecode(_currentUsageBody()) as Map<String, dynamic>)
       ..['subscription_type'] = {'unexpected': 'max'};
     final q = await ClaudeAdapter(
       credentialsFile: credentials,
-      client: MockClient((_) async => http.Response(jsonEncode(payload), 200)),
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? _profileBody(
+                    accountUuid: 'account-max',
+                    hasMax: true,
+                  )
+                : jsonEncode(payload),
+            200,
+          )),
     ).collect();
 
     expect(q.ok, isTrue);
@@ -176,6 +505,159 @@ void main() {
     expect(q.plan, isNull);
     expect(q.planEvidenceSource, isNull);
     expect(q.planEvidenceAsOf, isNull);
+  });
+
+  test('same provider account collapses distinct local credentials', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'grant-token',
+        identity: opaqueCredentialIdentity(
+          ClaudeAdapter.id,
+          'different-local-generation',
+        ),
+      ),
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? _profileBody(
+                    accountUuid: 'account-shared',
+                    organizationUuid: 'organization-shared',
+                  )
+                : _usageBody(),
+            200,
+          )),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isTrue);
+    expect(
+      quotas.single.account,
+      profileIdentity('account-shared', 'organization-shared'),
+    );
+    expect(
+      ClaudeAdapter.currentCredentialIdentities(credentialsFile: credentials),
+      {profileIdentity('account-shared', 'organization-shared')},
+    );
+  });
+
+  test('provider pool identity survives local credential replacement',
+      () async {
+    writeCreds(
+      expiresAtMs: (nowEpoch() + 3600) * 1000,
+      accessToken: 'host-token-a',
+      refreshToken: 'host-refresh-a',
+    );
+    final client = MockClient((request) async => http.Response(
+          _isProfileRequest(request)
+              ? _profileBody(
+                  accountUuid: 'account-stable',
+                  organizationUuid: 'organization-stable',
+                )
+              : _usageBody(),
+          200,
+        ));
+    final first = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+
+    writeCreds(
+      expiresAtMs: (nowEpoch() + 3600) * 1000,
+      accessToken: 'host-token-b',
+      refreshToken: 'host-refresh-b',
+    );
+    final second = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+
+    final expected = profileIdentity('account-stable', 'organization-stable');
+    expect(first.account, expected);
+    expect(second.account, expected);
+    expect(first.account, second.account);
+  });
+
+  test('distinct provider accounts remain separately routable', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'distinct-grant');
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'grant-token',
+        identity: grantIdentity,
+      ),
+      client: MockClient((request) async {
+        if (!_isProfileRequest(request)) {
+          return http.Response(_usageBody(), 200);
+        }
+        final host = request.headers['Authorization'] == 'Bearer host-token';
+        return http.Response(
+          _profileBody(accountUuid: host ? 'account-host' : 'account-grant'),
+          200,
+        );
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(2));
+    expect(quotas.every((quota) => quota.ok), isTrue);
+    expect(quotas.map((quota) => quota.account).toSet(), {
+      profileIdentity('account-host'),
+      profileIdentity('account-grant'),
+    });
+  });
+
+  test('multiple successes fail closed when profile identity is unavailable',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'unidentified-grant');
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'grant-token',
+        identity: grantIdentity,
+      ),
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request) ? '{}' : _usageBody(),
+            200,
+          )),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(2));
+    expect(quotas.where((quota) => quota.ok), hasLength(1));
+    final excluded = quotas.singleWhere((quota) => !quota.ok);
+    expect(excluded.account, grantIdentity);
+    expect(excluded.hasWindows, isFalse);
+    expect(excluded.error, contains('identity unavailable'));
+  });
+
+  test('malformed profile identity never leaks provider identifiers', () async {
+    const rawAccount = 'account-secret';
+    const rawOrganization = 'organization-secret';
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? jsonEncode({
+                    'account': {
+                      'uuid': '$rawAccount\n',
+                      'has_claude_max': true,
+                      'has_claude_pro': false,
+                    },
+                    'organization': {'uuid': rawOrganization},
+                  })
+                : _usageBody(),
+            200,
+          )),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.plan, 'max');
+    final encoded = jsonEncode(q.toJson());
+    expect(encoded, isNot(contains(rawAccount)));
+    expect(encoded, isNot(contains(rawOrganization)));
   });
 
   test('rejects a canonical response missing the binding weekly row', () async {
@@ -387,7 +869,7 @@ void main() {
       grantToken: () async => 'grant-token',
       client: MockClient((request) async {
         final auth = request.headers['Authorization']!;
-        tried.add(auth);
+        if (!_isProfileRequest(request)) tried.add(auth);
         if (auth == 'Bearer host-token') {
           return http.Response(_usageBody(), 200);
         }
@@ -424,7 +906,7 @@ void main() {
       grantToken: () async => 'grant-token',
       client: MockClient((request) async {
         final auth = request.headers['Authorization']!;
-        tried.add(auth);
+        if (!_isProfileRequest(request)) tried.add(auth);
         if (auth == 'Bearer grant-token') {
           return http.Response(_usageBody(), 200);
         }
@@ -536,4 +1018,29 @@ String _currentUsageBody() => jsonEncode({
           'is_active': false,
         },
       ],
+    });
+
+bool _isProfileRequest(http.Request request) =>
+    request.url.path.endsWith('/profile');
+
+String _profileBody({
+  required String accountUuid,
+  String? organizationUuid,
+  bool hasMax = false,
+  bool hasPro = false,
+  String? organizationType,
+  String? rateLimitTier,
+}) =>
+    jsonEncode({
+      'account': {
+        'uuid': accountUuid,
+        'has_claude_max': hasMax,
+        'has_claude_pro': hasPro,
+      },
+      if (organizationUuid != null)
+        'organization': {
+          'uuid': organizationUuid,
+          if (organizationType != null) 'organization_type': organizationType,
+          if (rateLimitTier != null) 'rate_limit_tier': rateLimitTier,
+        },
     });

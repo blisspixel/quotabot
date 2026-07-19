@@ -47,22 +47,32 @@ class ClaudeAdapter {
   static const id = claudeProviderId;
   static const name = claudeProviderName;
   static const _endpoint = 'https://api.anthropic.com/api/oauth/usage';
+  static const _profileEndpoint = 'https://api.anthropic.com/api/oauth/profile';
+  static const _profileDeadline = Duration(seconds: 4);
+  static const _maxProfileBodyBytes = 64 * 1024;
+  static const _duplicateFallbackDeadline = Duration(seconds: 8);
+  static const _maxRememberedPoolIdentities = 32;
+  static final Map<String, String> _poolByCredential = {};
 
   final http.Client? _http;
   final File? _credentialsFile;
   final ClaudeGrantCredential _grantCredential;
+  final Duration _grantResolutionDeadline;
 
   ClaudeAdapter({
     http.Client? client,
     File? credentialsFile,
     ClaudeGrantToken? grantToken,
     ClaudeGrantCredential? grantCredential,
+    Duration grantResolutionDeadline = const Duration(seconds: 8),
   })  : assert(
           grantToken == null || grantCredential == null,
           'provide grantToken or grantCredential, not both',
         ),
+        assert(grantResolutionDeadline.inMicroseconds > 0),
         _http = client,
         _credentialsFile = credentialsFile,
+        _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
                 ? () async {
@@ -109,24 +119,13 @@ class ClaudeAdapter {
       // The optional quotabot grant is independent of Claude Code's host
       // credential. A corrupt grant file or failed refresh must not prevent a
       // stale host token from getting its documented last-chance read.
-      ClaudeCredential? grantCredential;
-      try {
-        final candidate = await _grantCredential();
-        if (candidate != null &&
-            candidate.accessToken.isNotEmpty &&
-            isOpaqueCredentialIdentity(candidate.identity)) {
-          grantCredential = candidate;
-        }
-      } catch (_) {
-        grantCredential = null;
-      }
+      final grantCredential = await _resolveGrantCredential();
       if (grantCredential != null) {
         final outcome = await _read(
           grantCredential,
           // The quotabot grant is independent of the host credential and may
-          // belong to another Claude account. The usage endpoint does not
-          // expose a stable account id or plan, so do not borrow either label
-          // from a host token that was not used for this successful reading.
+          // belong to another Claude account. Do not borrow identity or plan
+          // from a host token that was not used for this provider read.
           null,
           asOf,
           knownExpired: false,
@@ -177,6 +176,171 @@ class ClaudeAdapter {
     }
   }
 
+  /// Reads every active Claude credential identity instead of treating the
+  /// first successful token as evidence for the whole provider. Host and
+  /// quotabot grants can belong to different accounts, so each distinct
+  /// identity receives its own live result. Exact duplicate identities share a
+  /// fallback chain and produce one row.
+  Future<List<ProviderQuota>> collectAccounts() async {
+    final asOf = nowEpoch();
+    try {
+      final host = _readHostCredential();
+      final indexedGrantIdentity = AnthropicAuth.currentCredentialIdentity();
+
+      // Start a healthy host read before resolving the independent grant. A
+      // slow or broken grant must never consume the provider-wide deadline and
+      // hide current host evidence.
+      final hostOutcomeFuture = host == null
+          ? null
+          : _read(
+              host.credential,
+              host.planEvidence,
+              asOf,
+              knownExpired: host.knownExpired,
+            );
+      final grant = await _resolveGrantCredential().timeout(
+        _grantResolutionDeadline,
+        onTimeout: () => null,
+      );
+      final sameIdentity =
+          host != null && grant != null && host.identity == grant.identity;
+      final grantOutcomeFuture = grant == null || sameIdentity
+          ? null
+          : _read(
+              grant,
+              null,
+              asOf,
+              knownExpired: false,
+            );
+
+      final hostOutcome = await hostOutcomeFuture;
+      if (sameIdentity) {
+        if (hostOutcome!.quota != null || !hostOutcome.unauthorized) {
+          return [hostOutcome.quota ?? hostOutcome.error!];
+        }
+        final fallback = await _read(
+          grant,
+          null,
+          asOf,
+          knownExpired: false,
+          timeout: _duplicateFallbackDeadline,
+        );
+        return [fallback.quota ?? fallback.error!];
+      }
+
+      final outcomes = <_ReadOutcome>[];
+      if (hostOutcome != null) {
+        outcomes.add(hostOutcome);
+      }
+      if (grantOutcomeFuture != null) {
+        final outcome = await grantOutcomeFuture;
+        outcomes.add(outcome);
+      }
+      final results = _safeAccountRows(outcomes, asOf);
+      final indexedGrantAccount = indexedGrantIdentity == null
+          ? null
+          : _accountForCredential(indexedGrantIdentity);
+      if (grantOutcomeFuture == null &&
+          isOpaqueCredentialIdentity(indexedGrantIdentity) &&
+          !results.any((quota) => quota.account == indexedGrantAccount)) {
+        results.add(_unavailableGrant(asOf, indexedGrantAccount!));
+      }
+      if (results.isNotEmpty) return results;
+      return [
+        ProviderQuota.error(
+          id,
+          name,
+          'no usable Claude login (run claude, or quotabot login claude)',
+          asOf,
+        ),
+      ];
+    } catch (_) {
+      return [
+        ProviderQuota.error(id, name, 'unable to read Claude usage', asOf),
+      ];
+    }
+  }
+
+  ProviderQuota _unavailableGrant(int asOf, String identity) =>
+      ProviderQuota.error(
+        id,
+        name,
+        'unable to refresh Claude grant (run quotabot login claude)',
+        asOf,
+        account: identity,
+      );
+
+  /// Keeps independently proven provider accounts separate while preventing
+  /// two credential generations for one subscription from becoming two
+  /// routable quota pools. If profile identity is unavailable for any of
+  /// several successful reads, only one remains routable until the provider's
+  /// profile metadata recovers. This deliberately favors under-routing over
+  /// spending the same subscription twice through parallel leases.
+  List<ProviderQuota> _safeAccountRows(
+    List<_ReadOutcome> outcomes,
+    int asOf,
+  ) {
+    final successes =
+        outcomes.where((outcome) => outcome.quota != null).toList();
+    if (successes.length <= 1) {
+      return [
+        for (final outcome in outcomes) outcome.quota ?? outcome.error!,
+      ];
+    }
+
+    final allIdentified =
+        successes.every((outcome) => outcome.poolIdentity != null);
+    if (allIdentified) {
+      final seenPools = <String>{};
+      return [
+        for (final outcome in outcomes)
+          if (outcome.quota == null)
+            outcome.error!
+          else if (seenPools.add(outcome.poolIdentity!))
+            outcome.quota!,
+      ];
+    }
+
+    final primary = successes.firstWhere(
+      (outcome) => outcome.poolIdentity != null,
+      orElse: () => successes.first,
+    );
+    return [
+      for (final outcome in outcomes)
+        if (outcome.quota == null)
+          outcome.error!
+        else if (identical(outcome, primary))
+          outcome.quota!
+        else
+          ProviderQuota.error(
+            id,
+            name,
+            'account identity unavailable; quota excluded to prevent '
+            'duplicate routing',
+            asOf,
+            account: outcome.quota!.account,
+            plan: outcome.quota!.plan,
+            planEvidenceSource: outcome.quota!.planEvidenceSource,
+            planEvidenceAsOf: outcome.quota!.planEvidenceAsOf,
+          ),
+    ];
+  }
+
+  Future<ClaudeCredential?> _resolveGrantCredential() async {
+    try {
+      final candidate = await _grantCredential();
+      if (candidate != null &&
+          candidate.accessToken.isNotEmpty &&
+          isOpaqueCredentialIdentity(candidate.identity)) {
+        return candidate;
+      }
+    } catch (_) {
+      // A corrupt or unavailable independent grant must not suppress the host
+      // credential's live metadata read.
+    }
+    return null;
+  }
+
   /// Reads usage with one bearer token. Returns a quota on success, an
   /// `unauthorized` marker on 401 (caller should try the next token), or a
   /// terminal error for any other non-200.
@@ -185,7 +349,15 @@ class ClaudeAdapter {
     _PlanEvidence? fallbackPlanEvidence,
     int asOf, {
     required bool knownExpired,
+    Duration timeout = const Duration(seconds: 10),
   }) async {
+    final knownAccount = _accountForCredential(credential.identity);
+    // Profile metadata is a zero-cost provider read using the same credential.
+    // Start it alongside usage so stable account-pool identity and current plan
+    // proof add no serial network round trip. _readProfile catches every failure
+    // and resolves to null, so an early usage error cannot leave an unhandled
+    // asynchronous exception behind.
+    final profileFuture = _readProfile(credential, asOf);
     http.Response resp;
     try {
       final get = _http?.get ?? http.get;
@@ -196,7 +368,7 @@ class ClaudeAdapter {
           'anthropic-beta': 'oauth-2025-04-20',
           'anthropic-version': '2023-06-01',
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(timeout);
     } catch (_) {
       return _ReadOutcome.error(
         ProviderQuota.error(
@@ -204,7 +376,7 @@ class ClaudeAdapter {
           name,
           'unable to read Claude usage',
           asOf,
-          account: credential.identity,
+          account: knownAccount,
           plan: fallbackPlanEvidence?.plan,
           planEvidenceSource: fallbackPlanEvidence?.source,
           planEvidenceAsOf: fallbackPlanEvidence?.asOf,
@@ -219,7 +391,7 @@ class ClaudeAdapter {
           name,
           'token expired (re-run claude, or quotabot login claude)',
           asOf,
-          account: credential.identity,
+          account: knownAccount,
           plan: fallbackPlanEvidence?.plan,
           planEvidenceSource: fallbackPlanEvidence?.source,
           planEvidenceAsOf: fallbackPlanEvidence?.asOf,
@@ -240,7 +412,7 @@ class ClaudeAdapter {
           name,
           'HTTP ${resp.statusCode}$recovery',
           asOf,
-          account: credential.identity,
+          account: knownAccount,
           plan: fallbackPlanEvidence?.plan,
           planEvidenceSource: fallbackPlanEvidence?.source,
           planEvidenceAsOf: fallbackPlanEvidence?.asOf,
@@ -260,14 +432,18 @@ class ClaudeAdapter {
       if (usage == null) {
         throw const FormatException('incomplete Claude usage response');
       }
+      final profile = await profileFuture;
+      final poolIdentity = profile?.poolIdentity ??
+          _poolIdentityForCredential(credential.identity);
+      final account = poolIdentity ?? credential.identity;
       final planEvidence = decoded.containsKey('subscription_type')
           ? _providerPlanEvidence(decoded, asOf)
-          : fallbackPlanEvidence;
+          : profile?.planEvidence ?? fallbackPlanEvidence;
       return _ReadOutcome.ok(
         ProviderQuota(
           provider: id,
           displayName: name,
-          account: credential.identity,
+          account: account,
           plan: planEvidence?.plan,
           planEvidenceSource: planEvidence?.source,
           planEvidenceAsOf: planEvidence?.asOf,
@@ -275,6 +451,7 @@ class ClaudeAdapter {
           windows: usage.windows,
           modelQuotas: usage.modelQuotas,
         ),
+        poolIdentity: poolIdentity,
       );
     } catch (_) {
       return _ReadOutcome.error(
@@ -283,12 +460,45 @@ class ClaudeAdapter {
           name,
           'invalid Claude usage response',
           asOf,
-          account: credential.identity,
+          account: knownAccount,
           plan: fallbackPlanEvidence?.plan,
           planEvidenceSource: fallbackPlanEvidence?.source,
           planEvidenceAsOf: fallbackPlanEvidence?.asOf,
         ),
       );
+    }
+  }
+
+  Future<_ProfileEvidence?> _readProfile(
+    ClaudeCredential credential,
+    int asOf,
+  ) async {
+    try {
+      final get = _http?.get ?? http.get;
+      final response = await get(
+        Uri.parse(_profileEndpoint),
+        headers: {
+          'Authorization': 'Bearer ${credential.accessToken}',
+          'Content-Type': 'application/json',
+          'anthropic-beta': 'oauth-2025-04-20',
+          'anthropic-version': '2023-06-01',
+        },
+      ).timeout(_profileDeadline);
+      if (response.statusCode != 200 ||
+          response.bodyBytes.length > _maxProfileBodyBytes) {
+        return null;
+      }
+      final decoded = jsonDecode(
+        utf8.decode(response.bodyBytes, allowMalformed: false),
+      );
+      if (decoded is! Map<String, dynamic>) return null;
+      final evidence = _profileEvidence(decoded, asOf);
+      if (evidence != null) {
+        _rememberPoolIdentity(credential.identity, evidence.poolIdentity);
+      }
+      return evidence;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -302,9 +512,10 @@ class ClaudeAdapter {
     return _readHostCredentialFile(credFile);
   }
 
-  /// Credential generations currently present on this machine. The provider
-  /// does not expose a stable account id from its usage endpoint, so these
-  /// opaque identities are the only safe boundary for cached evidence.
+  /// Credential generations currently present on this machine. The usage
+  /// endpoint alone has no stable account id, so persisted cache admission uses
+  /// these opaque identities even though a successful companion profile read
+  /// can detect duplicate live subscription pools.
   static Set<String> get currentAccounts => currentCredentialIdentities();
 
   static Set<String> currentCredentialIdentities({File? credentialsFile}) {
@@ -312,10 +523,43 @@ class ClaudeAdapter {
     final host = _readHostCredentialFile(
       credentialsFile ?? File('${home()}/.claude/.credentials.json'),
     );
-    if (host != null) found.add(host.identity);
+    if (host != null) {
+      found.add(_accountForCredential(host.identity));
+    }
     final grant = AnthropicAuth.currentCredentialIdentity();
-    if (isOpaqueCredentialIdentity(grant)) found.add(grant!);
+    if (isOpaqueCredentialIdentity(grant)) {
+      found.add(_accountForCredential(grant!));
+    }
     return found;
+  }
+
+  /// Clears the in-memory credential-to-pool index between isolated tests.
+  /// Production code must never call this method.
+  static void resetPoolIdentityMemoryForTesting() {
+    var assertsEnabled = false;
+    assert(() {
+      assertsEnabled = true;
+      return true;
+    }());
+    if (!assertsEnabled) {
+      throw StateError('pool identity reset is testing-only');
+    }
+    _poolByCredential.clear();
+  }
+
+  static String? _poolIdentityForCredential(String identity) =>
+      _poolByCredential[identity];
+
+  static String _accountForCredential(String identity) =>
+      _poolIdentityForCredential(identity) ?? identity;
+
+  static void _rememberPoolIdentity(String credential, String pool) {
+    if (_poolByCredential[credential] == pool) return;
+    _poolByCredential.remove(credential);
+    while (_poolByCredential.length >= _maxRememberedPoolIdentities) {
+      _poolByCredential.remove(_poolByCredential.keys.first);
+    }
+    _poolByCredential[credential] = pool;
   }
 
   static _HostCredential? _readHostCredentialFile(File credFile) {
@@ -395,6 +639,88 @@ class _PlanEvidence {
   });
 }
 
+class _ProfileEvidence {
+  final String poolIdentity;
+  final _PlanEvidence? planEvidence;
+
+  const _ProfileEvidence({
+    required this.poolIdentity,
+    required this.planEvidence,
+  });
+}
+
+_ProfileEvidence? _profileEvidence(
+  Map<String, dynamic> profile,
+  int asOf,
+) {
+  final account = profile['account'];
+  if (account is! Map) return null;
+  final accountId = _boundedProfileId(account['uuid']);
+  if (accountId == null) return null;
+
+  String? organizationId;
+  String? organizationType;
+  String? rateLimitTier;
+  final organization = profile['organization'];
+  if (organization != null) {
+    if (organization is! Map) return null;
+    organizationId = _boundedProfileId(organization['uuid']);
+    if (organizationId == null) return null;
+    organizationType = _boundedProfileLabel(organization['organization_type']);
+    rateLimitTier = _boundedProfileLabel(organization['rate_limit_tier']);
+  }
+
+  final hasMax = account['has_claude_max'];
+  final hasPro = account['has_claude_pro'];
+  String? plan;
+  if (hasMax is bool && hasPro is bool && hasMax != hasPro) {
+    plan = hasMax ? 'max' : 'pro';
+  } else if (hasMax == false &&
+      hasPro == false &&
+      organizationType?.toLowerCase() == 'claude_team') {
+    plan = rateLimitTier?.toLowerCase().contains('claude_max') == true
+        ? 'team_premium'
+        : 'team_standard';
+  }
+
+  final poolMaterial = organizationId == null
+      ? 'account-id:$accountId'
+      : 'account-id:$accountId\u0000organization-id:$organizationId';
+  return _ProfileEvidence(
+    poolIdentity: opaqueCredentialIdentity(ClaudeAdapter.id, poolMaterial),
+    planEvidence: plan == null
+        ? null
+        : _PlanEvidence(
+            plan: plan,
+            source: ProviderPlanEvidenceSource.providerMetadata,
+            asOf: asOf,
+          ),
+  );
+}
+
+String? _boundedProfileId(Object? value) {
+  if (value is! String) return null;
+  final id = value.trim();
+  if (id.isEmpty ||
+      id.length > 128 ||
+      stripTerminalControl(id) != id ||
+      !RegExp(r'^[A-Za-z0-9][A-Za-z0-9._:-]*$').hasMatch(id)) {
+    return null;
+  }
+  return id;
+}
+
+String? _boundedProfileLabel(Object? value) {
+  if (value is! String) return null;
+  final label = value.trim();
+  if (label.isEmpty ||
+      label.length > 128 ||
+      stripTerminalControl(label) != label) {
+    return null;
+  }
+  return label;
+}
+
 _PlanEvidence? _providerPlanEvidence(
   Map<String, dynamic> usage,
   int asOf,
@@ -421,9 +747,20 @@ class _ReadOutcome {
   final ProviderQuota? quota;
   final ProviderQuota? error;
   final bool unauthorized;
-  _ReadOutcome._(this.quota, this.error, this.unauthorized);
-  factory _ReadOutcome.ok(ProviderQuota q) => _ReadOutcome._(q, null, false);
-  factory _ReadOutcome.error(ProviderQuota e) => _ReadOutcome._(null, e, false);
+  final String? poolIdentity;
+  _ReadOutcome._(
+    this.quota,
+    this.error,
+    this.unauthorized,
+    this.poolIdentity,
+  );
+  factory _ReadOutcome.ok(
+    ProviderQuota q, {
+    String? poolIdentity,
+  }) =>
+      _ReadOutcome._(q, null, false, poolIdentity);
+  factory _ReadOutcome.error(ProviderQuota e) =>
+      _ReadOutcome._(null, e, false, null);
   factory _ReadOutcome.unauthorized(ProviderQuota e) =>
-      _ReadOutcome._(null, e, true);
+      _ReadOutcome._(null, e, true, null);
 }

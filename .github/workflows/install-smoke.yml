@@ -93,10 +93,12 @@ jobs:
           target_sha="$(resolve_tag_commit "$target")"
           previous_sha="$(resolve_tag_commit "$previous")"
 
-          echo "target_tag=$target" >> "$GITHUB_OUTPUT"
-          echo "previous_tag=$previous" >> "$GITHUB_OUTPUT"
-          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
-          echo "previous_sha=$previous_sha" >> "$GITHUB_OUTPUT"
+          {
+            echo "target_tag=$target"
+            echo "previous_tag=$previous"
+            echo "target_sha=$target_sha"
+            echo "previous_sha=$previous_sha"
+          } >> "$GITHUB_OUTPUT"
           echo "Target: $target"
           echo "Target commit: $target_sha"
           echo "Upgrade from: $previous"
@@ -290,10 +292,12 @@ jobs:
           name: verified-current-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/quotabot-current
 
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: '3.44.2'
-          cache: true
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
 
       - name: Verify target version matches source
         shell: bash
@@ -384,7 +388,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
           expected_version="quotabot ${PREVIOUS_TAG#v}"
-          actual_version="$($HOME/.local/bin/quotabot --version)"
+          actual_version="$("$HOME/.local/bin/quotabot" --version)"
           [[ "$actual_version" == "$expected_version" ]] || { echo "Expected $expected_version, got $actual_version" >&2; exit 1; }
 
           config_root="${XDG_CONFIG_HOME:-$HOME/.config}"

@@ -2177,62 +2177,55 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         );
       }
 
-      final activeLeases = leaseStore.active(n);
-      final target = _explicitReserveTarget(
-        results,
-        n,
-        args,
-        activeLeases,
-        burnStats,
-        pipePenalties,
-        catalog,
-        preferenceOrder: profiled.preferenceOrder,
-      );
-      if (target == null) {
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(
-            _reserveUnavailable(
+      final requestedProvider =
+          normalizeLeaseText(args['provider'])?.toLowerCase();
+      final requestedAccount = normalizeLeaseText(args['account']);
+      final reservation = leaseStore.selectAndReserve(
+        select: (activeLeases) {
+          final target = _explicitReserveTarget(
+            results,
+            n,
+            args,
+            activeLeases,
+            burnStats,
+            pipePenalties,
+            catalog,
+            preferenceOrder: profiled.preferenceOrder,
+          );
+          if (target == null) {
+            return const RouteLeaseSelection.unavailable(
               'requested provider/account unavailable',
-              n,
-              activeLeases,
-            ),
-            profiled,
-          ),
-        );
-      }
-      if (target.isLocal) {
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(
-            _reserveUnavailable(
+            );
+          }
+          if (target.isLocal) {
+            return const RouteLeaseSelection.unavailable(
               'local runtimes do not need quota leases',
-              n,
-              activeLeases,
-            ),
-            profiled,
-          ),
-        );
-      }
-      if (!target.available || (target.effectiveHeadroom ?? 0) <= 0) {
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(
-            _reserveUnavailable(
+            );
+          }
+          if (!target.available || (target.effectiveHeadroom ?? 0) <= 0) {
+            return RouteLeaseSelection.unavailable(
               '${target.provider} has no effective headroom available',
-              n,
-              activeLeases,
+            );
+          }
+          return RouteLeaseSelection.selected(
+            RouteLeaseTarget(
+              provider: target.provider,
+              account: target.account,
             ),
-            profiled,
-          ),
-        );
-      }
-
-      final reservation = leaseStore.reserve(
-        provider: target.provider,
-        account: target.account,
+          );
+        },
         now: n,
         leaseSeconds: leaseSeconds,
         weightPercent: weightPercent,
         client: client,
         idempotencyKey: idempotencyKey,
+        reuseWhere: (lease) => results.any(
+          (quota) =>
+              quota.provider == requestedProvider &&
+              (requestedAccount == null || quota.account == requestedAccount) &&
+              normalizeLeaseProvider(quota.provider) == lease.provider &&
+              normalizeLeaseAccount(quota.account) == lease.account,
+        ),
       );
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(_reserveJson(reservation, n), profiled),

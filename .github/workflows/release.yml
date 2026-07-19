@@ -364,10 +364,12 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
-        with:
-          flutter-version: '3.44.2'
-          cache: true
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
       - name: Install Linux desktop build prerequisites
         if: runner.os == 'Linux'
         run: |
