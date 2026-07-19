@@ -49,12 +49,10 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             rf"^version:\s*({VERSION})\+[0-9]+\s*$",
             "Flutter pubspec",
         ),
-        "Flutter collector lock": _locked_collector_version(
-            app / "pubspec.lock"
-        ),
+        "Flutter collector lock": _locked_collector_version(app / "pubspec.lock"),
         "ROADMAP current line": _required_match(
             root / "ROADMAP.md",
-            rf"^The current line, \*\*({VERSION})\*\*, is best$",
+            rf"^The current line, \*\*({VERSION})\*\*,",
             "ROADMAP current line",
         ),
         "CHANGELOG latest release": _required_match(
@@ -82,7 +80,9 @@ def _locked_collector_version(path: Path) -> str:
         raise VersionCheckError(
             f"Flutter collector lock: package block not found in {path}"
         )
-    match = re.search(rf'^    version: "({VERSION})"$', block.group("body"), re.MULTILINE)
+    match = re.search(
+        rf'^    version: "({VERSION})"$', block.group("body"), re.MULTILINE
+    )
     if match is None:
         raise VersionCheckError(
             f"Flutter collector lock: version marker not found in {path}"

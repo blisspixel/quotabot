@@ -62,7 +62,10 @@ void main() {
           expect(request.url.toString(),
               'https://integrate.api.nvidia.com/v1/models');
           expect(request.headers['Authorization'], 'Bearer nvapi-test');
-          return http.Response('{"object":"list","data":[]}', 200);
+          return http.Response(
+            '{"object":"list","data":[{"id":"nvidia/test-model"}]}',
+            200,
+          );
         }),
       ).collect();
 
@@ -71,6 +74,25 @@ void main() {
       expect(q.status, contains('balance unknown'));
       expect(q.sourceClass, ProviderSourceClass.statusOnly);
       expect(q.windows, isEmpty);
+    });
+
+    test('a 200 response must contain a usable model listing', () async {
+      for (final body in [
+        '<html>captive portal</html>',
+        '{}',
+        '{"data":"not-a-list"}',
+        '{"data":[]}',
+        '{"data":[{"id":""}]}',
+      ]) {
+        final q = await NvidiaAdapter(
+          keySource: () => 'nvapi-test',
+          client: MockClient((_) async => http.Response(body, 200)),
+        ).collect();
+
+        expect(q.ok, isFalse, reason: body);
+        expect(q.httpStatus, 200, reason: body);
+        expect(q.error, contains('invalid or empty response'), reason: body);
+      }
     });
 
     test('fails softly when model discovery rejects the key', () async {

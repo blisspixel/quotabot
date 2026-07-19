@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
 
@@ -139,6 +140,38 @@ void main() {
     expect(singleRows.single.key, 'claude');
     expect(singleRows.single.label, 'claude');
     expect(loaded, ['claude/work/true']);
+  });
+
+  test('stats keys keep raw identities while labels abbreviate them', () {
+    final first = opaqueCredentialIdentity('claude', 'stats-grant-a');
+    final second = opaqueCredentialIdentity('claude', 'stats-grant-b');
+    ProviderQuota quota(String account) => ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: account,
+          asOf: 1000,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+        );
+
+    final rows = cli.buildStatsSeries(
+      [quota(first), quota(second)],
+      null,
+      (_, {account, fallbackToProvider = true}) => const <HeadroomBucket>[],
+    );
+
+    expect(
+      rows.map((row) => row.key).toSet(),
+      {'claude:$first', 'claude:$second'},
+    );
+    expect(
+      rows.map((row) => row.label).toSet(),
+      {
+        'claude (${quotaAccountDisplayLabel(first)})',
+        'claude (${quotaAccountDisplayLabel(second)})',
+      },
+    );
+    expect(rows.any((row) => row.label.contains(first)), isFalse);
+    expect(rows.any((row) => row.label.contains(second)), isFalse);
   });
 
   test('stats json includes a reset-aware schedule hint when supported',

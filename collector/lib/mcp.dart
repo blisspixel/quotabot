@@ -32,11 +32,12 @@ import 'models.dart';
 import 'profiles.dart';
 import 'provider_filters.dart';
 import 'registry.dart';
+import 'routing_context.dart';
 import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.9.2';
+const quotabotMcpVersion = '0.9.3';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -106,26 +107,20 @@ Map<String, dynamic> suggestResponse(
   ModelRequirements? routeRequirements,
   List<String> preferenceOrder = const [],
 }) {
-  final capabilityGates = providerRouteCapabilityGates(
-    providers,
-    now,
-    catalog: catalog,
-    requirements: routeRequirements,
-  );
   final response = decide(
     providers,
     now,
-    context: DecisionContext(
+    context: providerRouteDecisionContext(
+      providers,
+      now,
       burnStatsByProvider: burnStatsByProvider,
-      leaseDiscountFor: (provider, account) =>
-          leaseDiscountFor(activeLeases, provider, account),
+      activeLeases: activeLeases,
       preferLocal: preferLocal,
       costPenaltyByProvider: costPenaltyByProvider,
       costWeight: costWeight,
       pipePenaltyByProvider: pipePenaltyByProvider,
-      capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-      capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
-      capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
+      catalog: catalog,
+      routeRequirements: routeRequirements,
       preferenceOrder: preferenceOrder,
     ),
   ).route.toJson();
@@ -193,29 +188,29 @@ Map<String, dynamic> decideNowResponse(
       cached.asOf == null ||
       cached.asOf! > now + kQuotaEvidenceClockSkewSeconds ||
       (age != null && age > maxAgeSeconds) ||
-      providers.any((provider) => provider.stale || provider.asOf <= 0);
-  final capabilityGates = providerRouteCapabilityGates(
-    providers,
-    now,
-    catalog: catalog,
-    requirements: routeRequirements,
-  );
+      providers.any((provider) =>
+          provider.stale ||
+          provider.asOf <= 0 ||
+          hasExpiredQuotaWindowAt(provider, now) ||
+          hasImplausibleFutureQuotaWindowAt(provider, now) ||
+          provider.modelQuotas.any(
+              (quota) => quota.resetsAt != null && quota.resetsAt! <= now));
   // Same decide front door as suggest_provider so cache-only routing cannot
   // drift from the live recommendation engine (preference, capability, cost).
   final suggestion = decide(
     providers,
     now,
-    context: DecisionContext(
+    context: providerRouteDecisionContext(
+      providers,
+      now,
       burnStatsByProvider: burnStatsByProvider,
-      leaseDiscountFor: (provider, account) =>
-          leaseDiscountFor(activeLeases, provider, account),
+      activeLeases: activeLeases,
       preferLocal: preferLocal,
       costPenaltyByProvider: costPenaltyByProvider,
       costWeight: costWeight,
       pipePenaltyByProvider: pipePenaltyByProvider,
-      capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-      capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
-      capabilityBudgetResetByQuotaKey: capabilityGates.budgetResetByQuotaKey,
+      catalog: catalog,
+      routeRequirements: routeRequirements,
       preferenceOrder: preferenceOrder,
       snapshotSource: cached.source,
       snapshotAsOf: cached.asOf,
@@ -236,6 +231,7 @@ Map<String, dynamic> decideNowResponse(
     'snapshot_as_of': cached.asOf,
     'snapshot_age_seconds': age,
     'snapshot_stale': stale,
+    'snapshot_stale_scope': RouteSnapshotReceipt.staleScope,
     'max_age_seconds': maxAgeSeconds,
     'recommended': suggestion['recommended'],
     'reason': suggestion['reason'],
@@ -262,7 +258,11 @@ ProviderQuota _cacheOnlyProvider(
           ? 'cached quota capture time is materially in the future'
           : now - provider.asOf > maxAgeSeconds
               ? 'cached quota exceeds requested max age'
-              : null;
+              : hasExpiredQuotaWindowAt(provider, now)
+                  ? 'cached quota crossed a reset without a new quota window'
+                  : hasImplausibleFutureQuotaWindowAt(provider, now)
+                      ? 'cached quota reset is implausibly far in the future'
+                      : null;
   return reason == null ? provider : provider.asStale(reason);
 }
 
@@ -274,7 +274,7 @@ ProviderQuota _cacheOnlyProvider(
   final rawBudget = args['budget'];
   final budget = rawBudget == null
       ? defaultBudgetPolicy
-      : rawBudget is String
+      : rawBudget is String && rawBudget.trim().isNotEmpty
           ? modelBudgetPolicyFromName(rawBudget.trim().toLowerCase())
           : null;
   if (budget == null) {
@@ -407,12 +407,16 @@ Map<String, dynamic> availabilityResponse(
 ) {
   final name = providerId?.toLowerCase();
   final account = _accountFilter(accountId);
-  final match = providers.where((q) {
+  final matches = providers.where((q) {
     if (q.provider != name) return false;
-    if (account == null) return true;
-    return q.account == account;
+    return true;
   });
-  if (match.isEmpty) {
+  final q = bestProviderAccountForCheck(
+    matches,
+    now,
+    account: account,
+  );
+  if (q == null) {
     return {
       'schema': quotabotCheckV1SchemaId,
       'as_of': now,
@@ -422,7 +426,6 @@ Map<String, dynamic> availabilityResponse(
           account == null ? 'unknown provider' : 'unknown provider/account',
     };
   }
-  final q = match.first;
   final a = providerAvailability(q, now);
   return {
     'schema': quotabotCheckV1SchemaId,
@@ -434,6 +437,7 @@ Map<String, dynamic> availabilityResponse(
     'headroom_percent': a.headroom,
     'resets_at': a.resetsAt,
     'stale': q.stale,
+    if (q.error?.isNotEmpty == true) 'error': q.error,
     if (q.driftReason != null) 'drift_reason': q.driftReason,
     if (q.driftObservedAt != null) 'drift_observed_at': q.driftObservedAt,
   };
@@ -455,8 +459,9 @@ final _windowSchema = JsonSchema.object(
   required: ['label'],
 );
 
-/// One per-model quota entry, for providers that meter each model family from
-/// its own pool (Antigravity). The `windows` summary stays the headline.
+/// One per-model quota entry, either an exhaustive independent pool such as
+/// Antigravity or a sparse scoped overlay such as Claude Fable and Codex Spark.
+/// The shared `windows` summary stays the provider headline.
 final _modelQuotaSchema = JsonSchema.object(
   description: 'Per-model quota, when a provider meters models separately.',
   properties: {
@@ -464,6 +469,12 @@ final _modelQuotaSchema = JsonSchema.object(
     'used_percent': JsonSchema.number(
         description: 'Percent of the pool consumed (0..100).'),
     'resets_at': JsonSchema.integer(description: 'Reset epoch seconds.'),
+    'window_label': JsonSchema.string(
+      description: 'Provider window identity for this scoped quota.',
+      minLength: 1,
+      maxLength: kMaxModelQuotaWindowLabelCharacters,
+      pattern: r'^\S(?:[\s\S]*\S)?$',
+    ),
     'category':
         JsonSchema.string(description: 'Provider speed label, e.g. "Fast".'),
     'note':
@@ -502,6 +513,14 @@ final _providerSchema = JsonSchema.object(
     'display_name': JsonSchema.string(description: 'Human display name.'),
     'account': JsonSchema.string(),
     'plan': JsonSchema.string(),
+    'plan_evidence_source': JsonSchema.string(
+      description: 'Where the plan label came from. host_credential is local '
+          'diagnostic context; provider_metadata is current provider evidence.',
+      enumValues: ProviderPlanEvidenceSource.wireValues,
+    ),
+    'plan_evidence_as_of': JsonSchema.integer(
+      description: 'Epoch seconds when the plan label was captured.',
+    ),
     'source_class': _sourceClassSchema,
     'kind': JsonSchema.string(description: '"subscription" or "local".'),
     'ok': JsonSchema.boolean(description: 'False when the read failed.'),
@@ -802,8 +821,20 @@ final _decisionReceiptSchema = JsonSchema.object(
         'as_of': _nullable(JsonSchema.integer()),
         'age_seconds': _nullable(JsonSchema.integer()),
         'stale': JsonSchema.boolean(),
+        'stale_scope': JsonSchema.string(
+          description: 'Scope of stale: always "snapshot". Envelope age or '
+              'any unsafe provider can set it. Profile, account, and exclude '
+              'filters can narrow that whole snapshot; candidates carry their '
+              'own provider-level stale flags.',
+        ),
       },
-      required: ['source', 'as_of', 'age_seconds', 'stale'],
+      required: [
+        'source',
+        'as_of',
+        'age_seconds',
+        'stale',
+        'stale_scope',
+      ],
     ),
     'policy': JsonSchema.object(
       properties: {
@@ -906,6 +937,10 @@ final decideNowOutputSchema = JsonSchema.object(
     'snapshot_as_of': _nullable(JsonSchema.integer()),
     'snapshot_age_seconds': _nullable(JsonSchema.integer()),
     'snapshot_stale': JsonSchema.boolean(),
+    'snapshot_stale_scope': JsonSchema.string(
+      description: 'Scope of snapshot_stale: always "snapshot", meaning the '
+          'whole snapshot after profile, account, and exclude filters.',
+    ),
     'max_age_seconds': JsonSchema.integer(),
     'recommended': _nullable(_candidateSchema),
     'reason': JsonSchema.string(),
@@ -921,6 +956,7 @@ final decideNowOutputSchema = JsonSchema.object(
     'as_of',
     'source',
     'snapshot_stale',
+    'snapshot_stale_scope',
     'max_age_seconds',
     'reason',
     'decision_code',
@@ -1075,44 +1111,53 @@ final _modelEntrySchema = JsonSchema.object(
 
 /// Shared capability filter for `list_models` and `suggest_model`. quotabot never
 /// reads the task; the caller supplies the requirements it needs.
+final Map<String, JsonSchema> _modelFilterInputProperties = {
+  'profile': JsonSchema.string(
+    description: 'Optional local named profile to filter providers/accounts.',
+  ),
+  'account': JsonSchema.string(
+    description:
+        'Optional exact account label to route within after profile filtering.',
+  ),
+  'task': JsonSchema.string(
+    description:
+        'Coarse profile: simple, standard, hard, complex, or reasoning.',
+  ),
+  'min_context': JsonSchema.integer(
+    description: 'Require a context window of at least this many tokens.',
+  ),
+  'require_tools': JsonSchema.boolean(),
+  'require_vision': JsonSchema.boolean(),
+  'require_reasoning': JsonSchema.boolean(),
+  'tier_floor': JsonSchema.string(
+    description: 'Minimum provider tier: light, standard, or flagship.',
+  ),
+  'tier_ceiling': JsonSchema.string(
+    description: 'Maximum provider tier: light, standard, or flagship.',
+  ),
+  'budget': JsonSchema.string(
+    description:
+        'Classification filter: any, quota, or local. list_models defaults to any for inspection; suggest_model defaults to quota and requires explicit any for credit-backed or paid API candidates. quota allows measured built-in quota plans plus local-runtime entries, but not self-reported manual quota. Runtime classification does not prove execution location or cost.',
+  ),
+  'exclude': JsonSchema.array(
+    items: JsonSchema.string(),
+    description:
+        'Optional provider ids to ignore for this one request, after profile filtering.',
+  ),
+};
+
 final _modelFilterInputSchema = JsonSchema.object(
   description: 'Optional capability filter; all fields optional.',
+  properties: _modelFilterInputProperties,
+);
+
+final _modelSuggestionInputSchema = JsonSchema.object(
+  description: 'Optional capability and quota-use policy; all fields optional.',
   properties: {
-    'profile': JsonSchema.string(
-      description: 'Optional local named profile to filter providers/accounts.',
-    ),
-    'account': JsonSchema.string(
-      description:
-          'Optional exact account label to route within after profile filtering.',
-    ),
-    'task': JsonSchema.string(
-      description:
-          'Coarse profile: simple, standard, hard, complex, or reasoning.',
-    ),
-    'min_context': JsonSchema.integer(
-      description: 'Require a context window of at least this many tokens.',
-    ),
-    'require_tools': JsonSchema.boolean(),
-    'require_vision': JsonSchema.boolean(),
-    'require_reasoning': JsonSchema.boolean(),
-    'tier_floor': JsonSchema.string(
-      description: 'Minimum provider tier: light, standard, or flagship.',
-    ),
-    'tier_ceiling': JsonSchema.string(
-      description: 'Maximum provider tier: light, standard, or flagship.',
-    ),
-    'budget': JsonSchema.string(
-      description:
-          'Classification filter: any, quota, or local. quota allows measured built-in quota plans plus local-runtime entries, but not self-reported manual quota. Runtime classification does not prove execution location or cost.',
-    ),
+    ..._modelFilterInputProperties,
     'use_expiring_quota': JsonSchema.boolean(
       description:
           'Prefer a qualifying measured quota plan when local burn analytics project that included quota would expire unused soon.',
-    ),
-    'exclude': JsonSchema.array(
-      items: JsonSchema.string(),
-      description:
-          'Optional provider ids to ignore for this one request, after profile filtering.',
     ),
   },
 );
@@ -1246,6 +1291,10 @@ final availabilityOutputSchema = JsonSchema.object(
     'headroom_percent': _nullable(JsonSchema.number()),
     'resets_at': _nullable(JsonSchema.integer()),
     'stale': JsonSchema.boolean(),
+    'error': JsonSchema.string(
+      description: 'Plain reason a live read failed when stale last-known '
+          'evidence is being shown.',
+    ),
     'drift_reason': JsonSchema.string(
       description: 'Why fresh provider evidence was rejected. Headroom is '
           'last-trusted when present and null for a legacy quarantine.',
@@ -1487,6 +1536,7 @@ Map<String, dynamic> _releaseJson(
 class QuotaResourceSubscriptionHub {
   final SnapshotProvider snapshot;
   final BurnProvider burnByProvider;
+  final RouteLeaseStore leaseStore;
   final Map<String, List<ModelInfo>> catalog;
   final int Function() now;
   final Future<void> Function(String uri) notifyUpdated;
@@ -1505,6 +1555,7 @@ class QuotaResourceSubscriptionHub {
   QuotaResourceSubscriptionHub({
     required this.snapshot,
     required this.burnByProvider,
+    this.leaseStore = const NoopRouteLeaseStore(),
     this.catalog = kModelCatalog,
     required this.now,
     required this.notifyUpdated,
@@ -1542,24 +1593,20 @@ class QuotaResourceSubscriptionHub {
         await notifyUpdated(quotasCurrentResourceUri);
       }
       final burnStats = burnByProvider(data, n);
-      final capabilityGates = providerRouteCapabilityGates(
-        data,
-        n,
-        catalog: catalog,
-      );
+      final activeLeases = leaseStore.active(n);
       // Alert routing uses the same decide front door as live suggestions so
       // route_to recommendations cannot drift if DecisionContext gains fields.
       final suggestion = decide(
         data,
         n,
-        context: DecisionContext(
+        context: providerRouteDecisionContext(
+          data,
+          n,
           burnStatsByProvider: burnStats,
+          activeLeases: activeLeases,
           pipePenaltyByProvider:
               loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
-          capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-          capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
-          capabilityBudgetResetByQuotaKey:
-              capabilityGates.budgetResetByQuotaKey,
+          catalog: catalog,
         ),
       ).route;
       final alerts = computeAlerts(
@@ -1663,9 +1710,7 @@ RouteCandidate? _explicitReserveTarget(
   List<RouteLease> activeLeases,
   Map<String, BurnStat> burnStatsByProvider,
   Map<String, double> pipePenaltyByProvider,
-  Set<String>? capabilityKnownQuotaKeys,
-  Set<String>? capabilityAvailableQuotaKeys,
-  Map<String, int> capabilityBudgetResetByQuotaKey, {
+  Map<String, List<ModelInfo>> catalog, {
   List<String> preferenceOrder = const [],
 }) {
   final requestedProvider = normalizeLeaseText(args['provider'])?.toLowerCase();
@@ -1682,14 +1727,13 @@ RouteCandidate? _explicitReserveTarget(
   final ranked = decide(
     matches,
     now,
-    context: DecisionContext(
+    context: providerRouteDecisionContext(
+      matches,
+      now,
       burnStatsByProvider: burnStatsByProvider,
-      leaseDiscountFor: (provider, account) =>
-          leaseDiscountFor(activeLeases, provider, account),
+      activeLeases: activeLeases,
       pipePenaltyByProvider: pipePenaltyByProvider,
-      capabilityKnownQuotaKeys: capabilityKnownQuotaKeys,
-      capabilityAvailableQuotaKeys: capabilityAvailableQuotaKeys,
-      capabilityBudgetResetByQuotaKey: capabilityBudgetResetByQuotaKey,
+      catalog: catalog,
       preferenceOrder: preferenceOrder,
     ),
   ).route.ranked;
@@ -1723,7 +1767,7 @@ Map<String, dynamic> _modelRegistryError(int now, String error) => {
 Map<String, dynamic> _modelSuggestionError(int now, String error) => {
       'schema': 'quotabot.suggest_model.v1',
       'generated_at': now,
-      'budget_policy': ModelBudgetPolicy.any.wireName,
+      'budget_policy': ModelBudgetPolicy.quota.wireName,
       'recommended': null,
       'reason': error,
       'ranked': const <Object?>[],
@@ -1752,6 +1796,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
   subscriptionHub = QuotaResourceSubscriptionHub(
     snapshot: snapshot,
     burnByProvider: burnByProvider,
+    leaseStore: leaseStore,
     catalog: catalog,
     now: now,
     autoStart: enableSubscriptionTimers,
@@ -1771,11 +1816,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     'list_quotas',
     title: 'List quotas',
     description:
-        'Return the current usage quota for every connected AI subscription '
-        '(Codex, Claude, Grok, Antigravity, Kiro, Cursor, Windsurf) and local '
-        'runtime as JSON. Per provider: account, plan, ok/stale, and rolling '
-        'windows (label, used_percent or used/limit, resets_at). Longer windows '
-        'that are spent are the binding constraint.',
+        'Return normalized quota and runtime evidence for every connected '
+        'provider as JSON. Per provider: account, plan, source_class, ok/stale, '
+        'and rolling windows (label, used_percent or used/limit, resets_at). '
+        'Longer windows that are spent are the binding constraint.',
     inputSchema: _profileAndAccountInputSchema,
     outputSchema: quotasSnapshotOutputSchema,
     annotations: _liveCollection,
@@ -1882,9 +1926,11 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     description:
         'Return a routing decision from the latest cached quota snapshot without '
         'forcing a live provider collection. The response always states the '
-        'cache source, snapshot_as_of, snapshot_age_seconds, and snapshot_stale '
-        'so a router can decide whether the answer is fresh enough for a '
-        'per-request path. Active temporary leases are applied to effective '
+        'cache source, snapshot_as_of, snapshot_age_seconds, snapshot_stale, '
+        'and snapshot_stale_scope. The scope is the whole snapshot after any '
+        'profile, account, and exclude filters, while ranked candidates carry '
+        'provider-level staleness. This lets a router decide whether the answer '
+        'is fresh enough for a per-request path. Active temporary leases are applied to effective '
         'headroom; reading them may compact expired records in the local lease '
         'ledger. Accepts the same local_first and explicit cost_penalties routing '
         'policy as suggest_provider.',
@@ -2072,11 +2118,6 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final pipePenalties =
           loadRoutedRequestSummary().pipePenaltyByProvider(now: n);
       final explicit = normalizeLeaseText(args['provider']) != null;
-      final capabilityGates = providerRouteCapabilityGates(
-        results,
-        n,
-        catalog: catalog,
-      );
       final leaseSeconds = normalizeLeaseSeconds(args['lease_seconds']);
       final weightPercent = normalizeLeaseWeight(args['weight_percent']);
       final client = normalizeLeaseText(args['client']);
@@ -2088,16 +2129,13 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             final target = decide(
               results,
               n,
-              context: DecisionContext(
+              context: providerRouteDecisionContext(
+                results,
+                n,
                 burnStatsByProvider: burnStats,
-                leaseDiscountFor: (provider, account) =>
-                    leaseDiscountFor(activeLeases, provider, account),
+                activeLeases: activeLeases,
                 pipePenaltyByProvider: pipePenalties,
-                capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-                capabilityAvailableQuotaKeys:
-                    capabilityGates.availableQuotaKeys,
-                capabilityBudgetResetByQuotaKey:
-                    capabilityGates.budgetResetByQuotaKey,
+                catalog: catalog,
                 preferenceOrder: profiled.preferenceOrder,
               ),
             ).route.recommended;
@@ -2147,9 +2185,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         activeLeases,
         burnStats,
         pipePenalties,
-        capabilityGates.knownQuotaKeys,
-        capabilityGates.availableQuotaKeys,
-        capabilityGates.budgetResetByQuotaKey,
+        catalog,
         preferenceOrder: profiled.preferenceOrder,
       );
       if (target == null) {
@@ -2303,14 +2339,18 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'on-device before cloud-offloaded, loaded before cold, then passive '
         'hardware fit, provider-declared tier, and headroom. quotabot '
         'does not compare model prices or infer quality, and never reads the task. '
-        'Takes the same filter as list_models, including budget=local or '
-        'budget=quota.',
-    inputSchema: _modelFilterInputSchema,
+        'The default budget is quota, which admits measured included quota and '
+        'on-device local runtimes. Takes the same filter as list_models; pass '
+        'budget=any explicitly to admit credit-backed or paid API candidates.',
+    inputSchema: _modelSuggestionInputSchema,
     outputSchema: suggestModelOutputSchema,
     annotations: _liveCollection,
     callback: (args, extra) async {
       final n = now();
-      final requirements = _requirementsFromArgs(args);
+      final requirements = _requirementsFromArgs(
+        args,
+        defaultBudgetPolicy: ModelBudgetPolicy.quota,
+      );
       if (requirements.error != null) {
         final profiled = await _profiledSnapshot(
           args,

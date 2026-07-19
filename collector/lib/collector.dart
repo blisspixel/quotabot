@@ -31,15 +31,18 @@ export 'manual_quota.dart';
 export 'model_catalog.dart';
 export 'models.dart';
 export 'palette.dart';
+export 'plan_evidence.dart';
 export 'profiles.dart';
 export 'provider_adapters.dart';
 export 'provider_filters.dart';
 export 'provider_ids.dart';
 export 'registry.dart';
 export 'report.dart';
+export 'routing_context.dart';
 export 'runtime_audit.dart';
 export 'schema_contracts.dart';
 export 'simulation.dart';
+export 'top_refresh.dart';
 export 'verification.dart';
 
 /// Whether the one-time temp-file sweep has run this process.

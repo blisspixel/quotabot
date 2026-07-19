@@ -4,20 +4,24 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/claude.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 void main() {
+  const hostRefreshToken = 'host-refresh-token';
   late Directory temp;
   late File credentials;
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('quotabot_claude_adapter_');
+    setQuotabotDirOverrideForTesting(Directory('${temp.path}/quotabot'));
     credentials = File('${temp.path}/credentials.json');
     credentials.writeAsStringSync(jsonEncode({
       'claudeAiOauth': {
         'accessToken': 'claude-token',
+        'refreshToken': hostRefreshToken,
         'subscriptionType': 'max',
         'expiresAt': (nowEpoch() + 3600) * 1000,
       },
@@ -25,8 +29,12 @@ void main() {
   });
 
   tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
+
+  String hostIdentity([String refreshToken = hostRefreshToken]) =>
+      opaqueCredentialIdentity(ClaudeAdapter.id, refreshToken);
 
   test('preserves throttled metadata from the usage endpoint', () async {
     final q = await ClaudeAdapter(
@@ -43,7 +51,7 @@ void main() {
 
     expect(q.ok, isFalse);
     expect(q.error, 'HTTP 429');
-    expect(q.account, 'max');
+    expect(q.account, hostIdentity());
     expect(q.plan, 'max');
     expect(q.pipeHealth, providerPipeHealthThrottled);
     expect(q.httpStatus, 429);
@@ -70,16 +78,22 @@ void main() {
 
     expect(expired.ok, isFalse);
     expect(expired.error, contains('token expired'));
-    expect(expired.account, 'max');
+    expect(expired.account, hostIdentity());
     expect(expired.pipeHealth, isNull);
     expect(expired.httpStatus, 401);
   });
 
-  void writeCreds({required int expiresAtMs}) {
+  void writeCreds({
+    required int expiresAtMs,
+    String accessToken = 'host-token',
+    String refreshToken = hostRefreshToken,
+    String plan = 'max',
+  }) {
     credentials.writeAsStringSync(jsonEncode({
       'claudeAiOauth': {
-        'accessToken': 'host-token',
-        'subscriptionType': 'max',
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+        'subscriptionType': plan,
         'expiresAt': expiresAtMs,
       },
     }));
@@ -104,6 +118,11 @@ void main() {
     expect(q.hasWindows, isTrue);
     expect(q.perMachine, isFalse);
     expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+    expect(
+      q.planEvidenceSource,
+      ProviderPlanEvidenceSource.hostCredential,
+    );
+    expect(q.planEvidenceAsOf, isNotNull);
     expect(grantCalled, isFalse);
   });
 
@@ -120,8 +139,192 @@ void main() {
     expect(q.modelQuotas.map((quota) => quota.model), ['Fable']);
     expect(q.modelQuotas.single.usedPercent, 26);
     expect(q.modelQuotas.single.resetsAt, isNotNull);
+    expect(q.modelQuotas.single.windowLabel, 'weekly');
     expect(q.perMachine, isFalse);
     expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+  });
+
+  test('current provider plan metadata overrides the local host label',
+      () async {
+    final payload = (jsonDecode(_currentUsageBody()) as Map<String, dynamic>)
+      ..['subscription_type'] = 'team_premium';
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => http.Response(jsonEncode(payload), 200)),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.plan, 'team_premium');
+    expect(
+      q.planEvidenceSource,
+      ProviderPlanEvidenceSource.providerMetadata,
+    );
+    expect(q.planEvidenceAsOf, q.asOf);
+  });
+
+  test('malformed provider plan metadata cannot fall back to the host label',
+      () async {
+    final payload = (jsonDecode(_currentUsageBody()) as Map<String, dynamic>)
+      ..['subscription_type'] = {'unexpected': 'max'};
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => http.Response(jsonEncode(payload), 200)),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.hasWindows, isTrue);
+    expect(q.plan, isNull);
+    expect(q.planEvidenceSource, isNull);
+    expect(q.planEvidenceAsOf, isNull);
+  });
+
+  test('rejects a canonical response missing the binding weekly row', () async {
+    final body = jsonDecode(_currentUsageBody()) as Map<String, dynamic>;
+    (body['limits'] as List).removeWhere(
+      (row) => row is Map && row['kind'] == 'weekly_all',
+    );
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.error, 'invalid Claude usage response');
+    expect(q.windows, isEmpty);
+    expect(q.modelQuotas, isEmpty);
+  });
+
+  test('rejects valid Fable quota beside a malformed scoped sibling', () async {
+    final body = jsonDecode(_currentUsageBody()) as Map<String, dynamic>;
+    (body['limits'] as List).add({
+      'kind': 'weekly_scoped',
+      'group': 'weekly',
+      'percent': '99',
+      'resets_at': '2030-01-02T00:00:00Z',
+      'scope': {
+        'model': {'display_name': 'Fable'},
+      },
+    });
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.error, 'invalid Claude usage response');
+    expect(q.windows, isEmpty);
+    expect(q.modelQuotas, isEmpty);
+  });
+
+  test('rejects a present malformed known legacy block', () async {
+    final body = jsonDecode(_currentUsageBody()) as Map<String, dynamic>
+      ..['seven_day'] = {
+        'utilization': 17,
+        'resets_at': 'not-a-date',
+      };
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.error, 'invalid Claude usage response');
+    expect(q.windows, isEmpty);
+    expect(q.modelQuotas, isEmpty);
+  });
+
+  test('host identity is opaque and stable across access-token rotation',
+      () async {
+    writeCreds(
+      expiresAtMs: (nowEpoch() + 3600) * 1000,
+      accessToken: 'host-access-a',
+    );
+    final client = MockClient((_) async => http.Response(_usageBody(), 200));
+    final first = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+
+    writeCreds(
+      expiresAtMs: (nowEpoch() + 3600) * 1000,
+      accessToken: 'host-access-b',
+    );
+    final second = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+
+    expect(first.account, hostIdentity());
+    expect(second.account, first.account);
+    expect(isOpaqueCredentialIdentity(first.account), isTrue);
+    expect(first.account, isNot(contains('host-access')));
+    expect(first.account, isNot(contains(hostRefreshToken)));
+  });
+
+  test('same-plan host credential replacement gets a new identity', () async {
+    final client = MockClient((_) async => http.Response(_usageBody(), 200));
+    writeCreds(
+      expiresAtMs: (nowEpoch() + 3600) * 1000,
+      refreshToken: 'host-grant-a',
+    );
+    final first = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+
+    writeCreds(
+      expiresAtMs: (nowEpoch() + 3600) * 1000,
+      refreshToken: 'host-grant-b',
+    );
+    final second = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: client,
+    ).collect();
+
+    expect(first.plan, 'max');
+    expect(second.plan, 'max');
+    expect(first.account, hostIdentity('host-grant-a'));
+    expect(second.account, hostIdentity('host-grant-b'));
+    expect(second.account, isNot(first.account));
+  });
+
+  test('independent grant replacements get distinct identities', () async {
+    credentials.deleteSync();
+    final client = MockClient((_) async => http.Response(_usageBody(), 200));
+    Future<ProviderQuota> read(String token) => ClaudeAdapter(
+          credentialsFile: credentials,
+          grantToken: () async => token,
+          client: client,
+        ).collect();
+
+    final first = await read('grant-generation-a');
+    final second = await read('grant-generation-b');
+
+    expect(first.account, isNot(second.account));
+    expect(isOpaqueCredentialIdentity(first.account), isTrue);
+    expect(isOpaqueCredentialIdentity(second.account), isTrue);
+    expect(first.plan, isNull);
+    expect(second.plan, isNull);
+  });
+
+  test('current account index contains only opaque credential identities', () {
+    final accounts = ClaudeAdapter.currentCredentialIdentities(
+      credentialsFile: credentials,
+    );
+
+    expect(accounts, {hostIdentity()});
+    expect(accounts.every(isOpaqueCredentialIdentity), isTrue);
+  });
+
+  test('network failures retain the attempted credential identity', () async {
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((_) async => throw StateError('offline')),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.account, hostIdentity());
+    expect(q.error, 'unable to read Claude usage');
   });
 
   test('a throwing grant loader cannot break a fresh host-token read',
@@ -233,6 +436,32 @@ void main() {
     expect(tried, ['Bearer host-token', 'Bearer grant-token']);
   });
 
+  test('independent grant never borrows failed host identity', () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantToken: () async => 'other-account-grant',
+      client: MockClient((request) async {
+        if (request.headers['Authorization'] == 'Bearer host-token') {
+          return http.Response('{}', 401);
+        }
+        expect(
+          request.headers['Authorization'],
+          'Bearer other-account-grant',
+        );
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(
+      q.account,
+      opaqueCredentialIdentity(ClaudeAdapter.id, 'other-account-grant'),
+    );
+    expect(q.plan, isNull);
+    expect(q.sourceClass, ProviderSourceClass.authoritativeLive);
+  });
+
   test('points at both recovery paths when expired with no grant', () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
@@ -264,7 +493,7 @@ void main() {
     expect(q.error, contains('saved Claude login expired'));
     expect(q.error, contains('re-run claude'));
     expect(q.error, contains('quotabot login claude'));
-    expect(q.account, 'max');
+    expect(q.account, hostIdentity());
     expect(q.plan, 'max');
     expect(q.pipeHealth, providerPipeHealthThrottled);
     expect(q.httpStatus, 429);

@@ -38,7 +38,7 @@ void main() {
         '--limit',
         '10',
         '--reset',
-        '1893456000',
+        _futureReset(),
         '--json',
       ]);
 
@@ -99,7 +99,7 @@ void main() {
         '--limit',
         '10',
         '--reset',
-        '1893456000',
+        _futureReset(),
       ]);
       expectExitCode(result, 0);
     }
@@ -113,6 +113,64 @@ void main() {
     expect(out, contains('[live, manual, work, captured'));
     expect(out, contains('[live, manual, home, captured'));
   });
+
+  test('check selects a live account after a spent first manual account',
+      () async {
+    for (final spec in const [
+      (account: 'spent', used: '10'),
+      (account: 'live', used: '2'),
+    ]) {
+      final saved = await runCli([
+        'manual',
+        'set',
+        'custom-check',
+        '--account',
+        spec.account,
+        '--used',
+        spec.used,
+        '--limit',
+        '10',
+        '--reset',
+        _futureReset(),
+      ]);
+      expectExitCode(saved, 0);
+    }
+
+    final checked = await runCli(['check', 'custom-check', '--json']);
+
+    expectExitCode(checked, 0);
+    final json = jsonDecode(checked.stdout as String) as Map<String, dynamic>;
+    expect(json['account'], 'live');
+    expect(json['available'], isTrue);
+    expect(json['headroom_percent'], 80);
+  }, timeout: Timeout.factor(2));
+
+  test('check resolves equal manual accounts by stable account key', () async {
+    for (final account in const ['zeta', 'alpha']) {
+      final saved = await runCli([
+        'manual',
+        'set',
+        'custom-tie',
+        '--account',
+        account,
+        '--used',
+        '2',
+        '--limit',
+        '10',
+        '--reset',
+        _futureReset(),
+      ]);
+      expectExitCode(saved, 0);
+    }
+
+    final checked = await runCli(['check', 'custom-tie', '--json']);
+
+    expectExitCode(checked, 0);
+    final json = jsonDecode(checked.stdout as String) as Map<String, dynamic>;
+    expect(json['account'], 'alpha');
+    expect(json['available'], isTrue);
+    expect(json['headroom_percent'], 80);
+  }, timeout: Timeout.factor(2));
 
   test('watch preserves safe non-email manual account provenance', () async {
     final set = await runCli([
@@ -130,7 +188,7 @@ void main() {
       '--limit',
       '10',
       '--reset',
-      '1893456000',
+      _futureReset(),
     ]);
     expectExitCode(set, 0);
 
@@ -142,6 +200,13 @@ void main() {
     expect(out, contains('[live, manual, work, captured'));
   });
 }
+
+String _futureReset() => (DateTime.now()
+            .toUtc()
+            .add(const Duration(days: 30))
+            .millisecondsSinceEpoch ~/
+        1000)
+    .toString();
 
 Map<String, String> _isolatedEnv(Directory temp) => {
       'LOCALAPPDATA': '${temp.path}${Platform.pathSeparator}LocalAppData',

@@ -110,13 +110,65 @@ void main() {
       'grok': {'work@example.com'},
     });
     expect(profile.hiddenProviders, {'cursor'});
-    expect(profile.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+    expect(profile.routingPolicy, ProfileRoutingPolicy.balanced);
     expect(profile.theme, 'forest');
     expect(profile.sort, 'mostAvailable');
 
     final back = QuotaProfile.fromJson(profile.toJson());
     expect(back.providers, profile.providers);
     expect(back.accounts, profile.accounts);
+  });
+
+  test('legacy Claude account filters are detected but remain fail-closed', () {
+    final opaque = 'credential:${List.filled(64, 'a').join()}';
+    expect(isLegacyClaudeProfileAccountFilter('claude', 'max'), isTrue);
+    expect(isLegacyClaudeProfileAccountFilter(' CLAUDE ', 'Pro'), isTrue);
+    expect(isLegacyClaudeProfileAccountFilter('claude', opaque), isFalse);
+    expect(isLegacyClaudeProfileAccountFilter('codex', 'max'), isFalse);
+    expect(isLegacyClaudeProfileAccountFilter('claude', '  '), isFalse);
+
+    final legacy = QuotaProfile.fromJson({
+      'schema': profileSchema,
+      'name': 'old-claude',
+      'accounts': {
+        'claude': ['max'],
+      },
+    });
+    final current = q('claude', account: opaque);
+
+    expect(legacy.accounts['claude'], {'max'});
+    expect(legacy.allows(current), isFalse);
+    expect(legacy.toJson()['accounts'], {
+      'claude': ['max'],
+    });
+  });
+
+  test('legacy Codex account filters are detected but remain fail-closed', () {
+    final opaque = 'credential:${List.filled(64, 'b').join()}';
+    expect(isLegacyCodexProfileAccountFilter('codex', 'pro'), isTrue);
+    expect(
+      isLegacyCodexProfileAccountFilter(' CODEX ', 'user@example.com'),
+      isTrue,
+    );
+    expect(isLegacyCodexProfileAccountFilter('codex', opaque), isFalse);
+    expect(isLegacyCodexProfileAccountFilter('claude', 'pro'), isFalse);
+    expect(isLegacyCodexProfileAccountFilter('codex', '  '), isFalse);
+    expect(
+      isLegacyCredentialProfileAccountFilter('codex', 'pro'),
+      isTrue,
+    );
+
+    final legacy = QuotaProfile.fromJson({
+      'schema': profileSchema,
+      'name': 'old-codex',
+      'accounts': {
+        'codex': ['pro'],
+      },
+    });
+    final current = q('codex', account: opaque);
+
+    expect(legacy.accounts['codex'], {'pro'});
+    expect(legacy.allows(current), isFalse);
   });
 
   test('preference order persists, keeps order, and normalizes', () {
@@ -193,7 +245,7 @@ void main() {
     expect(loaded!.name, 'work');
     expect(loaded.providers, {'grok'});
     expect(loaded.hiddenProviders, {'cursor'});
-    expect(loaded.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+    expect(loaded.routingPolicy, ProfileRoutingPolicy.balanced);
 
     expect(loadProfile('missing', dir: temp), isNull);
     expect(loadProfile('default', dir: temp)!.name, defaultProfileName);

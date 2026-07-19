@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show SemanticsAction, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +11,7 @@ import 'package:quotabot/quota_loading_indicator.dart';
 import 'package:quotabot/theme_spec.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/drift.dart';
 
 ProviderQuota _provider(
   String id,
@@ -57,6 +59,7 @@ void main() {
   testWidgets(
     'desktop chrome icon button exposes tooltip and semantics label',
     (tester) async {
+      final semantics = tester.ensureSemantics();
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -74,6 +77,34 @@ void main() {
 
       expect(find.byTooltip('Expand'), findsOneWidget);
       expect(find.bySemanticsLabel('Expand'), findsOneWidget);
+      var node = tester.getSemantics(find.bySemanticsLabel('Expand'));
+      expect(
+        node.getSemanticsData().flagsCollection.isEnabled,
+        Tristate.isTrue,
+      );
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isTrue);
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: AppChromeIconButton(
+                icon: Icons.sync,
+                color: Colors.black,
+                onTap: null,
+                tooltip: 'Refreshing quotas',
+              ),
+            ),
+          ),
+        ),
+      );
+      node = tester.getSemantics(find.bySemanticsLabel('Refreshing quotas'));
+      expect(
+        node.getSemanticsData().flagsCollection.isEnabled,
+        Tristate.isFalse,
+      );
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isFalse);
+      semantics.dispose();
     },
   );
 
@@ -106,8 +137,10 @@ void main() {
   test('provider setup copy matches live and status-only sources', () {
     final codex = providerSetupText('codex');
     expect(codex, contains('ChatGPT usage endpoint'));
-    expect(codex, contains('this-machine session snapshots'));
-    expect(codex, contains('No quotabot login needed'));
+    expect(codex, contains('account-wide'));
+    expect(codex, contains('shows no current quota'));
+    expect(codex, contains('quotabot login codex'));
+    expect(codex, isNot(contains('session snapshots')));
 
     final claude = providerSetupText('claude');
     expect(claude, contains('account-wide usage endpoint'));
@@ -206,6 +239,157 @@ void main() {
     expect(timeout, isNot(contains('secret')));
     expect(failure, isNot(contains('secret')));
     expect(initial, isNot(contains('secret')));
+  });
+
+  test('completed refresh without current evidence is called out', () {
+    expect(
+      refreshNoCurrentDataMessage(hasRows: true),
+      'No current quota data; showing cached or unavailable providers',
+    );
+    expect(
+      refreshNoCurrentDataMessage(hasRows: false),
+      'No current quota data; retrying automatically',
+    );
+  });
+
+  test('reset notifications require current trusted quota evidence', () {
+    const now = 1782046566;
+    final fresh = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 90, resetsAt: now + 3600),
+      ],
+    );
+    final invalidSource = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      perMachine: true,
+      sourceClass: ProviderSourceClass.passiveLocalEvidence,
+      windows: fresh.windows,
+    );
+    final failed = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      ok: false,
+      error: 'read failed',
+      windows: fresh.windows,
+    );
+
+    expect(canScheduleQuotaResetAlert(fresh, now), isTrue);
+    expect(canScheduleQuotaResetAlert(fresh.asStale('cached'), now), isFalse);
+    expect(
+      canScheduleQuotaResetAlert(fresh.withSuspect('review'), now),
+      isFalse,
+    );
+    expect(canScheduleQuotaResetAlert(invalidSource, now), isFalse);
+    expect(canScheduleQuotaResetAlert(failed, now), isFalse);
+    expect(
+      canScheduleQuotaResetAlert(
+        ProviderQuota.fromJson({
+          ...fresh.toJson(),
+          'as_of': now + kQuotaEvidenceClockSkewSeconds + 1,
+        }),
+        now,
+      ),
+      isFalse,
+    );
+  });
+
+  test('native quota alerts honor multi-account name visibility', () {
+    const now = 1782046566;
+    final work = _quota('claude', 'Claude', 'work@example.com', used: 95);
+    final personal = _quota(
+      'claude',
+      'Claude',
+      'personal@example.com',
+      used: 20,
+    );
+    final alert = QuotaAlert(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'work@example.com',
+      sourceClass: ProviderSourceClass.authoritativeLive,
+      window: 'weekly',
+      severity: AlertSeverity.red,
+      freePercent: 5,
+      asOf: now,
+      routeTo: 'claude',
+      routeDisplayName: 'Claude',
+      routeAccount: 'personal@example.com',
+      routeSourceClass: ProviderSourceClass.authoritativeLive,
+      routeFreePercent: 80,
+    );
+
+    expect(
+      desktopQuotaAlertNotificationMessage(alert, [
+        work,
+        personal,
+      ], showAccounts: false),
+      'Claude weekly at 5% free - route next to Claude (80% free)',
+    );
+    expect(
+      desktopQuotaAlertNotificationMessage(alert, [
+        work,
+        personal,
+      ], showAccounts: true),
+      'Claude (work@example.com) weekly at 5% free - route next to '
+      'Claude (personal@example.com) (80% free)',
+    );
+  });
+
+  test('native reset alerts use the same account visibility policy', () {
+    final work = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'work@example.com',
+      asOf: 1782046566,
+      resetCreditsAvailable: 2,
+    );
+    final personal = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'personal@example.com',
+      asOf: 1782046566,
+    );
+    const signal = ResetSignal(
+      provider: 'codex',
+      account: 'work@example.com',
+      displayName: 'Codex',
+      message: '2 resets available in Codex - redeem now',
+    );
+    final snapshot = [work, personal];
+
+    expect(
+      desktopNotificationProviderLabel(work, snapshot, showAccounts: false),
+      'Codex',
+    );
+    expect(
+      desktopResetAvailableNotificationMessage(
+        signal,
+        snapshot,
+        showAccounts: false,
+      ),
+      '2 resets available in Codex - redeem now',
+    );
+    expect(
+      desktopNotificationProviderLabel(work, snapshot, showAccounts: true),
+      'Codex (work@example.com)',
+    );
+    expect(
+      desktopResetAvailableNotificationMessage(
+        signal,
+        snapshot,
+        showAccounts: true,
+      ),
+      '2 resets available in Codex (work@example.com) - redeem now',
+    );
   });
 
   group('Prefs', () {
@@ -317,7 +501,7 @@ void main() {
         expect(profile.providers, {'codex'});
         expect(profile.accounts['codex'], {'work@example.com'});
         expect(profile.hiddenProviders, {'grok'});
-        expect(profile.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+        expect(profile.routingPolicy, ProfileRoutingPolicy.balanced);
         expect(profile.sort, ProviderSort.alphabetical.name);
         // A UI-pref update must not disturb the routing preference.
         expect(profile.preferenceOrder, ['claude', 'codex']);
@@ -326,37 +510,53 @@ void main() {
         expect(routing.providers, {'codex'});
         expect(routing.accounts['codex'], {'work@example.com'});
         expect(routing.hiddenProviders, isEmpty);
-        expect(routing.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+        expect(routing.routingPolicy, ProfileRoutingPolicy.balanced);
         // Stripping UI prefs must keep the routing preference.
         expect(routing.preferenceOrder, ['claude', 'codex']);
       },
     );
 
-    test(
-      'builds provider options from live data and saved profile filters',
-      () {
-        final options = profileProviderOptions(
-          [
-            _provider('codex', 'default'),
-            _provider('grok', 'work@example.com'),
-          ],
-          profiles: [
-            const QuotaProfile(
-              name: 'archived',
-              providers: {'cursor'},
-              accounts: {
-                'cursor': {'old@example.com'},
-              },
-            ),
-          ],
-        );
+    test('builds provider options from live data and saved profile filters', () {
+      final options = profileProviderOptions(
+        [
+          _provider('codex', 'default'),
+          _provider(
+            'claude',
+            'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          ),
+          _provider('grok', 'work@example.com'),
+        ],
+        profiles: [
+          const QuotaProfile(
+            name: 'archived',
+            providers: {'cursor'},
+            accounts: {
+              'cursor': {'old@example.com'},
+            },
+          ),
+          const QuotaProfile(
+            name: 'legacy-credentials',
+            accounts: {
+              'claude': {'max'},
+              'codex': {'plus'},
+            },
+          ),
+        ],
+      );
 
-        expect(options.map((o) => o.provider), ['codex', 'cursor', 'grok']);
-        expect(options[0].accounts, isEmpty);
-        expect(options[1].accounts, ['old@example.com']);
-        expect(options[2].accounts, ['work@example.com']);
-      },
-    );
+      expect(options.map((o) => o.provider), [
+        'claude',
+        'codex',
+        'cursor',
+        'grok',
+      ]);
+      expect(options[0].accounts, [
+        'credential:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ]);
+      expect(options[1].accounts, isEmpty);
+      expect(options[2].accounts, ['old@example.com']);
+      expect(options[3].accounts, ['work@example.com']);
+    });
 
     test('builds compact profile filters from editor selection', () {
       final options = [
@@ -401,7 +601,7 @@ void main() {
       expect(work.providers, {'grok'});
       expect(work.accounts['grok'], {'work@example.com'});
       expect(work.hiddenProviders, {'cursor'});
-      expect(work.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+      expect(work.routingPolicy, ProfileRoutingPolicy.balanced);
       expect(work.sort, ProviderSort.mostAvailable.name);
       expect(work.theme, 'dark');
 
@@ -542,13 +742,67 @@ void main() {
         now,
         showAccounts: true,
       );
-      expect(detail, contains('authoritative'));
+      expect(detail, contains('account-wide'));
       expect(detail, contains('60% after burn'));
       expect(detail, contains('medium confidence (67%)'));
       expect(detail, contains('Receipt: qb-$now-'));
       expect(detail, contains('Decision: ${suggestion.explanation}'));
       expect(detail, contains('Spend: measured quota-plan budget.'));
       expect(detail, contains('Fallback:'));
+    });
+
+    test('names only the route discounts that actually reduced headroom', () {
+      const now = 1782046566;
+      final claude = _quota('claude', 'Claude', 'solo@example.com');
+
+      String detail({double burn = 0, double lease = 0, double pipe = 0}) {
+        final suggestion = suggestRoute(
+          [claude],
+          now,
+          burnStatsByProvider: burn > 0
+              ? {'claude': BurnStat(perHour: burn, sePerHour: 0, samples: 8)}
+              : const {},
+          leaseDiscountFor: (_, _) => lease,
+          pipePenaltyByProvider: pipe > 0 ? {'claude': pipe} : const {},
+        );
+        return desktopRouteDetailLine(suggestion, [claude], now)!;
+      }
+
+      final burnOnly = detail(burn: 20);
+      expect(burnOnly, contains('60% after burn'));
+      expect(burnOnly, isNot(contains('after burn/leases')));
+      expect(burnOnly, isNot(contains('after burn/pipe')));
+
+      final leaseOnly = detail(lease: 20);
+      expect(leaseOnly, contains('60% after leases'));
+      expect(leaseOnly, isNot(contains('after burn')));
+      expect(leaseOnly, isNot(contains('after leases/pipe')));
+
+      final pipeOnly = detail(pipe: 20);
+      expect(pipeOnly, contains('60% after pipe'));
+      expect(pipeOnly, isNot(contains('after burn')));
+      expect(pipeOnly, isNot(contains('after leases')));
+
+      expect(detail(burn: 10, lease: 10), contains('60% after burn/leases'));
+      expect(detail(burn: 10, pipe: 10), contains('60% after burn/pipe'));
+      expect(detail(lease: 10, pipe: 10), contains('60% after leases/pipe'));
+      expect(
+        detail(burn: 10, lease: 10, pipe: 10),
+        contains('50% after burn/leases/pipe'),
+      );
+
+      final zeroBurnRisk = suggestRoute(
+        [claude],
+        now,
+        burnStatsByProvider: const {
+          'claude': BurnStat(perHour: 0, sePerHour: 5, samples: 8),
+        },
+        riskZ: 1,
+      );
+      expect(
+        desktopRouteDetailLine(zeroBurnRisk, [claude], now),
+        contains('75% after forecast risk'),
+      );
     });
 
     test('uses account labels only to disambiguate duplicate providers', () {
@@ -571,14 +825,14 @@ void main() {
         now,
         showAccounts: true,
       );
-      expect(detail, contains('authoritative'));
+      expect(detail, contains('account-wide'));
     });
 
     test('names machine fallback provenance without a duplicate scope tag', () {
       const now = 1782046566;
-      final codex = ProviderQuota(
-        provider: 'codex',
-        displayName: 'Codex',
+      final antigravity = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
         account: 'default',
         asOf: now,
         sourceClass: ProviderSourceClass.thisMachineFallback,
@@ -586,8 +840,8 @@ void main() {
         windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
       );
 
-      final detail = desktopRouteDetailLine(suggestRoute([codex], now), [
-        codex,
+      final detail = desktopRouteDetailLine(suggestRoute([antigravity], now), [
+        antigravity,
       ], now);
 
       expect(detail, contains('this-machine fallback'));
@@ -602,6 +856,7 @@ void main() {
         account: 'local',
         asOf: now,
         kind: ProviderQuotaKind.local,
+        models: const [ModelInfo(id: 'qwen:7b', local: true)],
       );
 
       final suggestion = suggestRoute([ollama], now, preferLocal: true);
@@ -622,7 +877,7 @@ void main() {
         now,
       );
 
-      expect(line, 'live | authoritative | quota plan | captured 0s ago');
+      expect(line, 'live | account-wide | quota plan | captured 0s ago');
     });
 
     test('labels cached manual quota without plan identity noise', () {
@@ -656,7 +911,7 @@ void main() {
 
       expect(
         line,
-        'provider drift | authoritative | quota plan | captured 0s ago',
+        'provider drift | account-wide | quota plan | captured 0s ago',
       );
     });
 
@@ -671,6 +926,7 @@ void main() {
           active: true,
           perMachine: true,
           asOf: now,
+          models: const [ModelInfo(id: 'qwen:7b', local: true, loaded: true)],
         ),
         now,
       );
@@ -688,11 +944,31 @@ void main() {
           kind: ProviderQuotaKind.local,
           perMachine: true,
           asOf: now,
+          models: const [ModelInfo(id: 'qwen:7b', local: true)],
         ),
         now,
       );
 
       expect(line, 'available | local runtime | captured 0s ago');
+    });
+
+    test('labels a rejected local configuration as an error', () {
+      const now = 1782046566;
+      final line = desktopProviderTrustLine(
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'Ollama',
+          account: 'local',
+          kind: ProviderQuotaKind.local,
+          asOf: now,
+          ok: true,
+          status: 'configured host is not loopback',
+          error: 'non-loopback runtime host is not eligible as local capacity',
+        ),
+        now,
+      );
+
+      expect(line, 'error | local runtime | captured 0s ago');
     });
 
     test('labels status-only metadata without claiming live quota', () {
@@ -743,6 +1019,80 @@ void main() {
       );
 
       expect(line, 'live | passive local | metered plan | captured 0s ago');
+    });
+
+    test('states when passive evidence has no capture provenance', () {
+      const now = 1782046566;
+      final quota = ProviderQuota(
+        provider: 'cursor',
+        displayName: 'Cursor',
+        account: 'user@example.com',
+        asOf: 0,
+        stale: true,
+        perMachine: true,
+        windows: [QuotaWindow(label: 'monthly', usedPercent: 20)],
+      );
+
+      expect(
+        desktopProviderTrustLine(quota, now),
+        'cached | passive local | metered plan | capture time unknown',
+      );
+      expect(
+        desktopProviderTrustDetail(quota, now),
+        contains('Capture time is unavailable.'),
+      );
+    });
+
+    test('explains account-wide and this-machine scope in plain language', () {
+      const now = 1782046566;
+      final accountWide = _quota('claude', 'Claude', 'pro');
+      final localFallback = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        asOf: now,
+        sourceClass: ProviderSourceClass.thisMachineFallback,
+        perMachine: true,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+
+      expect(
+        desktopProviderTrustDetail(accountWide, now),
+        contains('Account-wide quota read from provider metadata.'),
+      );
+      expect(
+        desktopProviderTrustDetail(localFallback, now),
+        contains('this machine only; other devices may not be included'),
+      );
+    });
+
+    test('never calls questionable or clock-invalid evidence live', () {
+      const now = 1782046566;
+      final suspect = _quota(
+        'claude',
+        'Claude',
+        'pro',
+      ).withSuspect('weekly usage changed unexpectedly');
+      final future = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'pro',
+        asOf: now + 3600,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+
+      expect(
+        desktopProviderTrustLine(suspect, now),
+        startsWith('review reading | account-wide'),
+      );
+      expect(
+        desktopProviderTrustDetail(suspect, now),
+        contains('Reading needs review: weekly usage changed unexpectedly.'),
+      );
+      expect(
+        desktopProviderTrustLine(future, now),
+        startsWith('unverified | account-wide'),
+      );
     });
   });
 }

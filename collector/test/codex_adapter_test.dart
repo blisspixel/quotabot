@@ -4,35 +4,54 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/codex.dart';
+import 'package:quotabot_collector/auth/openai_auth.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 void main() {
+  final injectedIdentity =
+      opaqueCredentialIdentity(CodexAdapter.id, 'injected-usage-credential');
   late Directory temp;
 
   setUp(() {
     temp = Directory.systemTemp.createTempSync('quotabot_codex_adapter_');
+    setQuotabotDirOverrideForTesting(Directory('${temp.path}/quotabot'));
   });
 
   tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 
-  Directory writeAuth(String accessToken) {
-    final sessions = Directory('${temp.path}/sessions')..createSync();
-    File('${temp.path}/auth.json').writeAsStringSync(jsonEncode({
-      'tokens': {'access_token': accessToken, 'account_id': 'acct-1'},
-    }));
-    return sessions;
+  File writeAuth(
+    String accessToken, {
+    String? accountId = 'acct-1',
+    String? refreshToken = 'host-refresh-token',
+  }) {
+    final authFile = File('${temp.path}/auth.json');
+    authFile.writeAsStringSync(
+      jsonEncode({
+        'tokens': {
+          'access_token': accessToken,
+          if (accountId != null) 'account_id': accountId,
+          if (refreshToken != null) 'refresh_token': refreshToken,
+        },
+      }),
+    );
+    return authFile;
   }
 
-  test('uses the host auth.json token for the live read', () async {
-    final sessions = writeAuth('host-tok');
+  String hostIdentity(String accountId) =>
+      opaqueCredentialIdentity(CodexAdapter.id, 'account-id:$accountId');
+
+  test('uses the host auth.json token for the account-wide read', () async {
+    final authFile = writeAuth('host-tok');
     var grantCalled = false;
     final q = await CodexAdapter(
-      sessionsDir: sessions,
+      authFile: authFile,
       grantToken: () async {
         grantCalled = true;
         throw StateError('the grant must not be resolved');
@@ -41,317 +60,437 @@ void main() {
         expect(request.headers['Authorization'], 'Bearer host-tok');
         expect(request.headers['chatgpt-account-id'], 'acct-1');
         return http.Response(
-            jsonEncode(_wham(primary: 20, secondary: 50)), 200);
+          jsonEncode(_wham(primary: 20, secondary: 50)),
+          200,
+        );
       }),
     ).collect();
 
     expect(q.ok, isTrue);
-    expect(q.perMachine, isFalse, reason: 'the live read is account-wide');
+    expect(q.perMachine, isFalse);
     expect(q.hasWindows, isTrue);
+    expect(q.account, hostIdentity('acct-1'));
+    expect(q.account, isNot(contains('acct-1')));
+    expect(q.account, isNot(contains('blisspixel')));
     expect(grantCalled, isFalse);
   });
 
-  test('falls through to the quotabot grant when the host token 401s',
-      () async {
-    final sessions = writeAuth('stale-host-tok');
+  test('falls through to the independent grant when host auth fails', () async {
+    final authFile = writeAuth('stale-host-tok');
     final tried = <String>[];
     final q = await CodexAdapter(
-      sessionsDir: sessions,
+      authFile: authFile,
       grantToken: () async => 'grant-tok',
       client: MockClient((request) async {
         final auth = request.headers['Authorization']!;
         tried.add(auth);
-        // The account id still rides along from auth.json even on the grant.
-        expect(request.headers['chatgpt-account-id'], 'acct-1');
         if (auth == 'Bearer grant-tok') {
+          expect(request.headers.containsKey('chatgpt-account-id'), isFalse);
           return http.Response(
-              jsonEncode(_wham(primary: 20, secondary: 50)), 200);
+            jsonEncode(_wham(primary: 20, secondary: 50)),
+            200,
+          );
         }
+        expect(request.headers['chatgpt-account-id'], 'acct-1');
         return http.Response('{}', 401);
       }),
     ).collect();
 
     expect(q.ok, isTrue);
+    expect(q.perMachine, isFalse);
+    expect(
+      q.account,
+      opaqueCredentialIdentity(CodexAdapter.id, 'grant-tok'),
+    );
     expect(tried, ['Bearer stale-host-tok', 'Bearer grant-tok']);
   });
 
-  test('reports a missing sessions directory plainly', () async {
+  test('falls through when a host 200 has an invalid scoped quota sibling',
+      () async {
+    final authFile = writeAuth('host-tok');
+    final tried = <String>[];
     final q = await CodexAdapter(
-      sessionsDir: Directory('${temp.path}/missing'),
+      authFile: authFile,
+      grantToken: () async => 'grant-tok',
+      client: MockClient((request) async {
+        final auth = request.headers['Authorization']!;
+        tried.add(auth);
+        if (auth == 'Bearer host-tok') {
+          final malformed = _wham(primary: 20, secondary: 50)
+            ..['additional_rate_limits'] = [
+              {
+                'limit_name': 'GPT-5.3-Codex-Spark',
+                'rate_limit': {
+                  'primary_window': {
+                    'used_percent': 0,
+                    'limit_window_seconds': 61,
+                    'reset_at': nowEpoch() + 3600,
+                  },
+                },
+              },
+            ];
+          return http.Response(jsonEncode(malformed), 200);
+        }
+        return http.Response(
+          jsonEncode(_wham(primary: 25, secondary: 40)),
+          200,
+        );
+      }),
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(
+      q.account,
+      opaqueCredentialIdentity(CodexAdapter.id, 'grant-tok'),
+    );
+    expect(tried, ['Bearer host-tok', 'Bearer grant-tok']);
+  });
+
+  test('malformed host auth cannot suppress the independent grant', () async {
+    final authFile = File('${temp.path}/auth.json')..writeAsStringSync('{bad');
+    var calls = 0;
+    final q = await CodexAdapter(
+      authFile: authFile,
+      grantToken: () async => 'grant-tok',
+      client: MockClient((request) async {
+        calls++;
+        expect(request.headers['Authorization'], 'Bearer grant-tok');
+        expect(request.headers.containsKey('chatgpt-account-id'), isFalse);
+        return http.Response(
+          jsonEncode(_wham(primary: 25, secondary: 50)),
+          200,
+        );
+      }),
+    ).collect();
+
+    expect(calls, 1);
+    expect(q.ok, isTrue);
+    expect(q.windows, hasLength(2));
+  });
+
+  test('no live metadata fails closed without a session-file fallback',
+      () async {
+    final sessions = Directory('${temp.path}/sessions')..createSync();
+    File('${sessions.path}/rollout-content.jsonl').writeAsStringSync(
+      '{"prompt":"private","rate_limits":{"primary":{"used_percent":1}}}\n',
+    );
+
+    final q = await CodexAdapter(
+      authFile: File('${temp.path}/missing-auth.json'),
+      usageFetcher: () async => null,
+      usageCredentialIdentity: injectedIdentity,
+      grantToken: () async => null,
     ).collect();
 
     expect(q.ok, isFalse);
-    expect(q.error, 'no ~/.codex/sessions');
+    expect(q.windows, isEmpty);
+    expect(q.error, contains('no account-wide Codex usage'));
+    expect(q.error, isNot(contains('session')));
   });
 
-  test('reports when recent rollout files contain no rate limits', () async {
-    _writeRollout(
-      temp,
-      'rollout-empty.jsonl',
-      [
-        {'timestamp': _iso(nowEpoch()), 'event': 'message'},
-      ],
-    );
-
-    final q = await CodexAdapter(sessionsDir: temp).collect();
-
-    expect(q.ok, isFalse);
-    expect(q.error, 'no rate_limits in recent sessions');
-  });
-
-  test('keeps the newest snapshot of each Codex limit bucket', () async {
-    final now = nowEpoch();
-    _writeRollout(
-      temp,
-      'rollout-standard-old.jsonl',
-      [
-        {
-          'timestamp': _iso(now - 120),
-          'rate_limits': _limits('standard', primary: 10, weekly: 95),
-        },
-      ],
-      modifiedAt: now - 120,
-    );
-    _writeRollout(
-      temp,
-      'rollout-standard-new.jsonl',
-      [
-        {
-          'timestamp': _iso(now - 30),
-          'rate_limits': _limits('standard', primary: 20, weekly: 15),
-        },
-      ],
-      modifiedAt: now - 30,
-    );
-    _writeRollout(
-      temp,
-      'rollout-spark.jsonl',
-      [
-        {
-          'timestamp': _iso(now - 10),
-          'rate_limits': {
-            'limit_id': 'spark',
-            'plan_type': 'pro',
-            'primary': {
-              'used_percent': 70,
-              'window_minutes': 300,
-              'resets_at': now + 1000,
-            },
-          },
-        },
-      ],
-      modifiedAt: now - 10,
-    );
-
-    final q = await CodexAdapter(sessionsDir: temp).collect();
-
-    expect(q.ok, isTrue);
-    expect(q.stale, isFalse);
-    expect(q.plan, 'pro');
-    expect(q.windows.firstWhere((w) => w.label == '5h').usedPercent, 70);
-    expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 15);
-  });
-
-  test('marks old rate-limit snapshots stale even when the file is new',
-      () async {
-    final now = nowEpoch();
-    _writeRollout(
-      temp,
-      'rollout-stale.jsonl',
-      [
-        {
-          'timestamp': _iso(now - 7200),
-          'rate_limits': _limits(
-            'standard',
-            primary: 42,
-            weekly: 10,
-            primaryMinutes: 60,
-          ),
-        },
-      ],
-      modifiedAt: now,
-    );
-
-    final q = await CodexAdapter(sessionsDir: temp).collect();
-
-    expect(q.ok, isTrue);
-    expect(q.stale, isTrue);
-    expect(q.error, contains('snapshot 2h old'));
-    expect(q.windows.firstWhere((w) => w.label == '1h').usedPercent, 42);
-  });
-
-  test('prefers the authoritative live usage endpoint over local sessions',
-      () async {
-    // A local session says barely used; the account was hammered on another
-    // machine, so the live read (weekly spent) must win.
-    _writeRollout(temp, 'rollout-standard.jsonl', [
-      {
-        'timestamp': _iso(nowEpoch()),
-        'rate_limits': _limits('standard', primary: 5, weekly: 5),
-      },
-    ]);
-
+  test('authoritative endpoint wins regardless of local files', () async {
     final q = await CodexAdapter(
-      sessionsDir: temp,
       usageFetcher: () async => _wham(primary: 0, secondary: 100),
+      usageCredentialIdentity: injectedIdentity,
     ).collect();
 
     expect(q.ok, isTrue);
-    expect(q.account, 'blisspixel@example.com');
+    expect(q.account, injectedIdentity);
     expect(q.plan, 'pro');
     expect(q.windows.firstWhere((w) => w.label == '5h').usedPercent, 0);
     expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 100);
-    expect(q.perMachine, isFalse); // authoritative, cross-device
+    expect(q.perMachine, isFalse);
     expect(q.sourceClass.wireName, 'authoritative_live');
   });
 
-  test('falls back to local sessions when the live read is unavailable',
-      () async {
-    _writeRollout(temp, 'rollout-standard.jsonl', [
-      {
-        'timestamp': _iso(nowEpoch()),
-        'rate_limits': _limits('standard', primary: 20, weekly: 15),
-      },
-    ]);
-
-    final q = await CodexAdapter(
-      sessionsDir: temp,
-      usageFetcher: () async => null, // no token, expired, or offline
-    ).collect();
-
-    expect(q.ok, isTrue);
-    expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 15);
-    expect(q.perMachine, isTrue); // this-machine session fallback
-    expect(q.sourceClass.wireName, 'this_machine_fallback');
-  });
-
-  test('a malformed session primary does not discard the weekly window',
-      () async {
-    // rate_limits.primary is not a Map. The stale-window sizing must not throw
-    // on it and abort _toQuota, dropping the perfectly good weekly bucket.
-    _writeRollout(temp, 'rollout-bad.jsonl', [
-      {
-        'timestamp': _iso(nowEpoch()),
-        'rate_limits': {
-          'plan_type': 'pro',
-          'primary': 'unexpected',
-          'secondary': {
-            'used_percent': 42,
-            'window_minutes': 10080,
-            'resets_at': nowEpoch() + 2000,
-          },
-        },
-      },
-    ]);
-
-    final q = await CodexAdapter(
-      sessionsDir: temp,
-      usageFetcher: () async => null,
-    ).collect();
-
-    expect(q.ok, isTrue);
-    expect(q.windows.firstWhere((w) => w.label == 'weekly').usedPercent, 42);
-  });
-
-  test('codexUsageWindows maps the live rate_limit windows', () {
-    final w = codexUsageWindows(_wham(primary: 12, secondary: 100));
-    expect(w.firstWhere((x) => x.label == '5h').usedPercent, 12);
-    expect(w.firstWhere((x) => x.label == 'weekly').usedPercent, 100);
+  test('codexUsageWindows maps only valid live rate-limit windows', () {
+    final windows = codexUsageWindows(_wham(primary: 12, secondary: 100));
+    expect(windows.firstWhere((x) => x.label == '5h').usedPercent, 12);
+    expect(windows.firstWhere((x) => x.label == 'weekly').usedPercent, 100);
     expect(codexUsageWindows(const {}), isEmpty);
+    expect(
+      codexUsageWindows({
+        'rate_limit': {
+          'primary_window': {'used_percent': 101},
+        },
+      }),
+      isEmpty,
+    );
+  });
+
+  test('accepts a weekly-only plan with a separate scoped model pool',
+      () async {
+    final q = await CodexAdapter(
+      usageFetcher: () async => {
+        'plan_type': 'pro',
+        'rate_limit': {
+          'allowed': true,
+          'limit_reached': false,
+          'primary_window': {
+            'used_percent': 63,
+            'limit_window_seconds': 604800,
+            'reset_at': 1785011368,
+          },
+          'secondary_window': null,
+        },
+        'additional_rate_limits': [
+          {
+            'limit_name': 'GPT-5.3-Codex-Spark',
+            'rate_limit': {
+              'allowed': true,
+              'limit_reached': false,
+              'primary_window': {
+                'used_percent': 0,
+                'limit_window_seconds': 604800,
+                'reset_at': 1785034650,
+              },
+              'secondary_window': null,
+            },
+          },
+        ],
+      },
+      usageCredentialIdentity: injectedIdentity,
+    ).collect();
+
+    expect(q.ok, isTrue);
+    expect(q.plan, 'pro');
+    expect(q.windows, hasLength(1));
+    expect(q.windows.single.label, 'weekly');
+    expect(q.windows.single.usedPercent, 63);
+    expect(q.modelQuotas, hasLength(1));
+    expect(q.modelQuotas.single.model, 'GPT-5.3-Codex-Spark');
+    expect(q.modelQuotas.single.usedPercent, 0);
+  });
+
+  test('rejects the complete response when one additional limit is malformed',
+      () async {
+    final q = await CodexAdapter(
+      usageFetcher: () async => {
+        ..._wham(primary: 20, secondary: 40),
+        'additional_rate_limits': [
+          {
+            'limit_name': 'GPT-5.3-Codex-Spark',
+            'rate_limit': {
+              'allowed': true,
+              'limit_reached': false,
+              'primary_window': {
+                'used_percent': 0,
+                'limit_window_seconds': 604800,
+                'reset_at': nowEpoch() + 604800,
+              },
+            },
+          },
+          {
+            'limit_name': '',
+            'rate_limit': {
+              'primary_window': {
+                'used_percent': 0,
+                'limit_window_seconds': 604800,
+                'reset_at': nowEpoch() + 604800,
+              },
+            },
+          },
+        ],
+      },
+      usageCredentialIdentity: injectedIdentity,
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.windows, isEmpty);
+    expect(q.modelQuotas, isEmpty);
+    expect(q.error, contains('invalid Codex usage response'));
   });
 
   test('surfaces redeemable reset credits as a structured signal', () async {
     final q = await CodexAdapter(
-      sessionsDir: temp,
       usageFetcher: () async =>
           _wham(primary: 95, secondary: 40, resetCredits: 2),
+      usageCredentialIdentity: injectedIdentity,
     ).collect();
 
     expect(q.ok, isTrue);
     expect(q.resetCreditsAvailable, 2);
-    // The shared escape-hatch phrasing names the count and the action.
     expect(
       resetAvailableMessage(q),
       allOf(contains('2 resets available in Codex'), contains('redeem')),
     );
   });
 
-  test('reset credits are zero when none are available or the field is absent',
-      () async {
+  test('reset credits are zero when absent or explicitly empty', () async {
     final none = await CodexAdapter(
-      sessionsDir: temp,
       usageFetcher: () async =>
           _wham(primary: 95, secondary: 40, resetCredits: 0),
+      usageCredentialIdentity: injectedIdentity,
     ).collect();
     expect(none.resetCreditsAvailable, 0);
     expect(resetAvailableMessage(none), isNull);
 
     final absent = await CodexAdapter(
-      sessionsDir: temp,
       usageFetcher: () async => _wham(primary: 95, secondary: 40),
+      usageCredentialIdentity: injectedIdentity,
     ).collect();
     expect(absent.resetCreditsAvailable, 0);
     expect(resetAvailableMessage(absent), isNull);
   });
 
-  test('a single redeemable reset reads in the singular', () async {
+  test('one redeemable reset reads in the singular', () async {
     final one = await CodexAdapter(
-      sessionsDir: temp,
       usageFetcher: () async =>
           _wham(primary: 95, secondary: 40, resetCredits: 1),
+      usageCredentialIdentity: injectedIdentity,
     ).collect();
     expect(one.resetCreditsAvailable, 1);
     expect(resetAvailableMessage(one), contains('1 reset available in Codex'));
   });
-}
 
-void _writeRollout(
-  Directory dir,
-  String name,
-  List<Map<String, dynamic>> rows, {
-  int? modifiedAt,
-}) {
-  final file = File('${dir.path}/$name');
-  file.writeAsStringSync('${rows.map(jsonEncode).join('\n')}\n');
-  if (modifiedAt != null) {
-    file.setLastModifiedSync(
-      DateTime.fromMillisecondsSinceEpoch(modifiedAt * 1000),
+  test('host identity survives access and refresh rotation', () async {
+    final authFile = writeAuth(
+      'host-access-a',
+      accountId: 'stable-account',
+      refreshToken: 'host-refresh-a',
     );
-  }
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(_wham(primary: 10, secondary: 20, includeEmail: false)),
+          200,
+        ));
+    final first = await CodexAdapter(
+      authFile: authFile,
+      client: client,
+    ).collect();
+
+    writeAuth(
+      'host-access-b',
+      accountId: 'stable-account',
+      refreshToken: 'host-refresh-b',
+    );
+    final second = await CodexAdapter(
+      authFile: authFile,
+      client: client,
+    ).collect();
+
+    expect(first.account, hostIdentity('stable-account'));
+    expect(second.account, first.account);
+    expect(isOpaqueCredentialIdentity(second.account), isTrue);
+  });
+
+  test('same-plan account replacement receives a separate identity', () async {
+    final authFile = writeAuth(
+      'account-a-access',
+      accountId: 'account-a',
+      refreshToken: 'account-a-refresh',
+    );
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(_wham(primary: 10, secondary: 20, includeEmail: false)),
+          200,
+        ));
+    final first = await CodexAdapter(
+      authFile: authFile,
+      client: client,
+    ).collect();
+
+    writeAuth(
+      'account-b-access',
+      accountId: 'account-b',
+      refreshToken: 'account-b-refresh',
+    );
+    final second = await CodexAdapter(
+      authFile: authFile,
+      client: client,
+    ).collect();
+
+    expect(first.plan, 'pro');
+    expect(second.plan, 'pro');
+    expect(first.account, hostIdentity('account-a'));
+    expect(second.account, hostIdentity('account-b'));
+    expect(second.account, isNot(first.account));
+  });
+
+  test('grant token rotation keeps its supplied stable identity', () async {
+    final authFile = File('${temp.path}/missing-auth.json');
+    final identity =
+        opaqueCredentialIdentity(CodexAdapter.id, 'grant-generation');
+    Future<ProviderQuota> read(String token) => CodexAdapter(
+          authFile: authFile,
+          grantCredential: () async => OpenAiCredential(
+            accessToken: token,
+            identity: identity,
+          ),
+          client: MockClient((request) async {
+            expect(request.headers.containsKey('chatgpt-account-id'), isFalse);
+            return http.Response(
+              jsonEncode(
+                _wham(primary: 10, secondary: 20, includeEmail: false),
+              ),
+              200,
+            );
+          }),
+        ).collect();
+
+    final first = await read('grant-access-a');
+    final second = await read('grant-access-b');
+
+    expect(first.account, identity);
+    expect(second.account, identity);
+  });
+
+  test('replacement grants receive separate opaque identities', () async {
+    final authFile = File('${temp.path}/missing-auth.json');
+    final client = MockClient((_) async => http.Response(
+          jsonEncode(_wham(primary: 10, secondary: 20, includeEmail: false)),
+          200,
+        ));
+    Future<ProviderQuota> read(String generation) => CodexAdapter(
+          authFile: authFile,
+          grantCredential: () async => OpenAiCredential(
+            accessToken: '$generation-access',
+            identity: opaqueCredentialIdentity(CodexAdapter.id, generation),
+          ),
+          client: client,
+        ).collect();
+
+    final first = await read('grant-a');
+    final second = await read('grant-b');
+
+    expect(first.account, isNot(second.account));
+    expect(isOpaqueCredentialIdentity(first.account), isTrue);
+    expect(isOpaqueCredentialIdentity(second.account), isTrue);
+  });
+
+  test('current account index contains only active opaque identities', () {
+    final authFile = writeAuth(
+      'host-access',
+      accountId: 'indexed-account',
+    );
+    final grantIdentity =
+        opaqueCredentialIdentity(CodexAdapter.id, 'indexed-grant');
+    TokenStore.saveDefaultOwnedBy(
+      OpenAiAuth.provider,
+      Tokens(
+        accessToken: 'grant-access',
+        refreshToken: 'grant-refresh',
+        expiresAt: nowEpoch() + 3600,
+      ),
+      grantIdentity,
+    );
+
+    final accounts = CodexAdapter.currentCredentialIdentities(
+      authFile: authFile,
+    );
+
+    expect(accounts, {hostIdentity('indexed-account'), grantIdentity});
+    expect(accounts.every(isOpaqueCredentialIdentity), isTrue);
+  });
 }
 
-Map<String, dynamic> _limits(
-  String id, {
-  required num primary,
-  required num weekly,
-  int primaryMinutes = 300,
-}) {
-  final now = nowEpoch();
-  return {
-    'limit_id': id,
-    'plan_type': 'pro',
-    'primary': {
-      'used_percent': primary,
-      'window_minutes': primaryMinutes,
-      'resets_at': now + 1000,
-    },
-    'secondary': {
-      'used_percent': weekly,
-      'window_minutes': 10080,
-      'resets_at': now + 2000,
-    },
-  };
-}
-
-/// The live `/backend-api/wham/usage` response shape (sanitized).
 Map<String, dynamic> _wham({
   required num primary,
   required num secondary,
   int? resetCredits,
+  bool includeEmail = true,
 }) {
   final now = nowEpoch();
   return {
-    'email': 'blisspixel@example.com',
+    if (includeEmail) 'email': 'blisspixel@example.com',
     'plan_type': 'pro',
     'rate_limit': {
       'allowed': secondary < 100,
@@ -371,7 +510,3 @@ Map<String, dynamic> _wham({
       'rate_limit_reset_credits': {'available_count': resetCredits},
   };
 }
-
-String _iso(int epoch) =>
-    DateTime.fromMillisecondsSinceEpoch(epoch * 1000, isUtc: true)
-        .toIso8601String();

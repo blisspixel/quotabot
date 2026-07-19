@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -57,6 +58,9 @@ class NvidiaAdapter {
           pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
           retryAfterSeconds: retryAfter,
         );
+      }
+      if (!_hasUsableModelListing(resp.bodyBytes)) {
+        return _keyInvalid(asOf, httpStatus: 200);
       }
       // Success: key works. NVIDIA does not expose a zero-cost numeric balance
       // endpoint, so this is availability only rather than a quota window.
@@ -124,10 +128,32 @@ String _modelsFailureMessage(int? httpStatus, String? pipeHealth) {
   if (pipeHealth == providerPipeHealthDegraded) {
     return 'NVIDIA /models degraded$status';
   }
+  if (httpStatus == 200) {
+    return 'NVIDIA /models returned an invalid or empty response';
+  }
   if (httpStatus != null) {
     return 'NVIDIA key rejected by /models$status';
   }
   return 'NVIDIA key present but /models failed (network or invalid response)';
+}
+
+const int _maxNvidiaModelsBytes = 2 * 1024 * 1024;
+
+bool _hasUsableModelListing(List<int> bytes) {
+  if (bytes.isEmpty || bytes.length > _maxNvidiaModelsBytes) return false;
+  try {
+    final decoded = jsonDecode(utf8.decode(bytes));
+    final data = decoded is Map ? decoded['data'] : null;
+    if (data is! List) return false;
+    return data.any(
+      (model) =>
+          model is Map &&
+          model['id'] is String &&
+          (model['id'] as String).trim().isNotEmpty,
+    );
+  } catch (_) {
+    return false;
+  }
 }
 
 String? resolveNvidiaApiKey({

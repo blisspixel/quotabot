@@ -365,6 +365,15 @@ class InMemoryRouteLeaseStore implements RouteLeaseStore {
         activeLeases: List.unmodifiable(_leases),
       );
     }
+    if (_idempotencyKeyTargetsDifferentLease(_leases, request)) {
+      return RouteLeaseReservation(
+        reserved: false,
+        reused: false,
+        reason: 'idempotency key belongs to a different lease target',
+        lease: null,
+        activeLeases: List.unmodifiable(_leases),
+      );
+    }
     if (_leases.length >= maxActiveLeases) {
       return RouteLeaseReservation(
         reserved: false,
@@ -507,6 +516,16 @@ class FileRouteLeaseStore implements RouteLeaseStore {
             reused: true,
             reason: 'existing lease reused',
             lease: existing,
+            activeLeases: List.unmodifiable(active),
+          );
+        }
+        if (_idempotencyKeyTargetsDifferentLease(active, request)) {
+          _writeUnlocked(file, active);
+          return RouteLeaseReservation(
+            reserved: false,
+            reused: false,
+            reason: 'idempotency key belongs to a different lease target',
+            lease: null,
             activeLeases: List.unmodifiable(active),
           );
         }
@@ -745,6 +764,20 @@ RouteLease? _matchingIdempotencyLease(
     }
   }
   return null;
+}
+
+bool _idempotencyKeyTargetsDifferentLease(
+  List<RouteLease> active,
+  RouteLease request,
+) {
+  final key = request.idempotencyKey;
+  if (key == null) return false;
+  return active.any(
+    (lease) =>
+        lease.idempotencyKey == key &&
+        (lease.provider != request.provider ||
+            lease.account != request.account),
+  );
 }
 
 List<LeaseTargetDiscount> leaseDiscounts(Iterable<RouteLease> leases) {

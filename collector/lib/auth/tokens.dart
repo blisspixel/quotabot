@@ -3,10 +3,31 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 
+import '../credential_identity.dart';
 import '../util.dart';
+
+export '../credential_identity.dart';
 
 typedef TokenDirectoryHardener = void Function(Directory directory);
 typedef TokenFileHardener = void Function(File file);
+
+const _credentialIdentityDomain = 'quotabot-credential-identity-v1';
+
+/// Returns an irreversible, collision-resistant identity for one credential
+/// generation. The provider name is domain-separated so the same secret cannot
+/// join evidence across providers. Callers may persist the result, never the
+/// credential material used to derive it.
+String opaqueCredentialIdentity(String provider, String credentialMaterial) {
+  if (provider.isEmpty || credentialMaterial.isEmpty) {
+    throw ArgumentError('provider and credential material must be non-empty');
+  }
+  final digest = sha256.convert(
+    utf8.encode(
+      '$_credentialIdentityDomain\u0000$provider\u0000$credentialMaterial',
+    ),
+  );
+  return '$opaqueCredentialIdentityPrefix$digest';
+}
 
 TokenDirectoryHardener _hardenTokenDirectory = enforceOwnerOnlyDirectory;
 TokenFileHardener _hardenTokenFile = enforceOwnerOnlyFile;
@@ -72,6 +93,29 @@ class Tokens {
       );
 }
 
+/// One immutable parse of a stored grant file.
+///
+/// [tokens] and [owner] always come from the same file generation. The private
+/// revision and slot fields let [TokenStore.replaceIfCurrent] perform a
+/// cross-process compare-and-swap without exposing credential-derived state.
+class TokenRecord {
+  final Tokens tokens;
+  final String? owner;
+  final String _provider;
+  final String? _account;
+  final String _revision;
+
+  const TokenRecord._({
+    required this.tokens,
+    required this.owner,
+    required String provider,
+    required String? account,
+    required String revision,
+  })  : _provider = provider,
+        _account = account,
+        _revision = revision;
+}
+
 /// Persists quotabot's own OAuth tokens per provider, separately from the host
 /// applications' credentials. Critically, rotated refresh tokens must be saved
 /// on every refresh, or the next refresh will fail.
@@ -118,18 +162,50 @@ class TokenStore {
   static String _accountHash(String account) =>
       sha256.convert(utf8.encode(account)).toString();
 
-  static Tokens? load(String provider, {String? account}) {
-    final f = _file(provider, account: account);
+  /// Reads tokens and their ownership marker from one atomic file snapshot.
+  static TokenRecord? loadRecord(String provider, {String? account}) {
+    final accountName = _normalizeAccount(account);
+    final f = _file(provider, account: accountName);
+    return _readRecord(
+      f,
+      provider: provider,
+      account: accountName,
+      suppressIoErrors: true,
+    );
+  }
+
+  static TokenRecord? _readRecord(
+    File f, {
+    required String provider,
+    required String? account,
+    required bool suppressIoErrors,
+  }) {
     try {
       if (!f.existsSync()) return null;
       if (f.lengthSync() > _maxTokenBytes) return null;
-      return Tokens.fromJson(
-        jsonDecode(f.readAsStringSync()) as Map<String, dynamic>,
+      final raw = f.readAsStringSync();
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final json = decoded.cast<String, dynamic>();
+      final rawOwner = json[_accountKey];
+      final owner = rawOwner is String ? _normalizeAccount(rawOwner) : null;
+      return TokenRecord._(
+        tokens: Tokens.fromJson(json),
+        owner: owner,
+        provider: provider,
+        account: account,
+        revision: sha256.convert(utf8.encode(raw)).toString(),
       );
+    } on FileSystemException {
+      if (!suppressIoErrors) rethrow;
+      return null;
     } catch (_) {
       return null;
     }
   }
+
+  static Tokens? load(String provider, {String? account}) =>
+      loadRecord(provider, account: account)?.tokens;
 
   static void save(String provider, Tokens tokens, {String? account}) {
     final accountName = _normalizeAccount(account);
@@ -152,12 +228,51 @@ class TokenStore {
     required String? ownerStamp,
   }) {
     final f = _file(provider, account: fileAccount);
+    _withFileLock(f, () {
+      _writeUnlocked(f, tokens, ownerStamp: ownerStamp);
+    });
+  }
+
+  /// Replaces [current] only when its slot still contains the exact generation
+  /// that was loaded. All TokenStore writers take the same per-slot file lock,
+  /// so a completed login or another refresh cannot be overwritten by a stale
+  /// refresh response from this or another process.
+  ///
+  /// Returns false for a generation conflict. File-system failures still throw
+  /// so callers can retain the existing best-effort behavior for an already
+  /// rotated provider token without confusing that failure with a conflict.
+  static bool replaceIfCurrent(
+    TokenRecord current,
+    Tokens tokens, {
+    String? owner,
+  }) {
+    final f = _file(current._provider, account: current._account);
+    final ownerStamp = owner == null ? current.owner : _normalizeAccount(owner);
+    return _withFileLock(f, () {
+      final latest = _readRecord(
+        f,
+        provider: current._provider,
+        account: current._account,
+        suppressIoErrors: false,
+      );
+      if (latest == null || latest._revision != current._revision) {
+        return false;
+      }
+      _writeUnlocked(f, tokens, ownerStamp: ownerStamp);
+      return true;
+    });
+  }
+
+  static void _writeUnlocked(
+    File f,
+    Tokens tokens, {
+    required String? ownerStamp,
+  }) {
     // Write to a temp file and rename over the target so a crash or a
     // concurrent read never leaves a truncated grant: losing a rotated refresh
     // token this way would break every later refresh. Lock the temp down BEFORE
     // the secret lands so it is never briefly world-readable under the default
     // umask. The same-directory rename preserves that checked descriptor.
-    _hardenTokenDirectory(f.parent);
     final tmp = File('${f.path}.$pid.tmp');
     try {
       if (!tmp.existsSync()) {
@@ -168,7 +283,7 @@ class TokenStore {
         ...tokens.toJson(),
         if (ownerStamp != null) _accountKey: ownerStamp,
       }));
-      tmp.renameSync(f.path);
+      _replaceAtomically(tmp, f);
       // A same-directory rename preserves the checked temporary file's security
       // descriptor. Do not reset permissions after the secret has been written.
     } catch (_) {
@@ -179,24 +294,72 @@ class TokenStore {
     }
   }
 
+  static void _replaceAtomically(File temporary, File target) {
+    // Windows can reject a replace for the few milliseconds in which another
+    // process has the old generation open for reading. The reader still sees a
+    // complete old snapshot, so retry only that transient sharing condition.
+    // Other access failures remain immediate, and the bounded delay prevents a
+    // permanently blocked destination from stalling login or collection.
+    const attempts = 9;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        temporary.renameSync(target.path);
+        return;
+      } on FileSystemException catch (error) {
+        final code = error.osError?.errorCode;
+        final transientWindowsSharing = Platform.isWindows &&
+            target.existsSync() &&
+            (code == 5 || code == 32);
+        if (!transientWindowsSharing || attempt == attempts - 1) rethrow;
+        sleep(Duration(milliseconds: 1 << attempt));
+      }
+    }
+  }
+
+  static T _withFileLock<T>(File target, T Function() run) {
+    final lockFile = File('${target.path}.lock');
+    _hardenTokenDirectory(lockFile.parent);
+    var created = false;
+    if (!lockFile.existsSync()) {
+      try {
+        lockFile.createSync(recursive: true, exclusive: true);
+        created = true;
+      } on FileSystemException {
+        if (!lockFile.existsSync()) rethrow;
+      }
+    }
+    try {
+      _hardenTokenFile(lockFile);
+    } catch (_) {
+      if (created) {
+        try {
+          lockFile.deleteSync();
+        } catch (_) {}
+      }
+      rethrow;
+    }
+    final lock = lockFile.openSync(mode: FileMode.write);
+    try {
+      lock.lockSync(FileLock.blockingExclusive);
+      return run();
+    } finally {
+      try {
+        lock.unlockSync();
+      } catch (_) {}
+      lock.closeSync();
+    }
+  }
+
   /// The account a provider-default grant is stamped for, or null when the
   /// default slot is absent, unreadable, or a legacy grant written without a
   /// stamp. Reads only the ownership marker, never exposing the token.
-  static String? defaultOwner(String provider) {
-    final f = _file(provider);
-    try {
-      if (!f.existsSync() || f.lengthSync() > _maxTokenBytes) return null;
-      final decoded = jsonDecode(f.readAsStringSync());
-      if (decoded is Map && decoded[_accountKey] is String) {
-        return _normalizeAccount(decoded[_accountKey] as String);
-      }
-    } catch (_) {}
-    return null;
-  }
+  static String? defaultOwner(String provider) => loadRecord(provider)?.owner;
 
   static void clear(String provider, {String? account}) {
     final f = _file(provider, account: account);
-    if (f.existsSync()) f.deleteSync();
+    _withFileLock(f, () {
+      if (f.existsSync()) f.deleteSync();
+    });
   }
 
   static bool exists(String provider, {String? account}) =>

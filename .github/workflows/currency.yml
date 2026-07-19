@@ -21,15 +21,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
-          channel: stable
+          flutter-version: '3.44.2'
           cache: true
 
       - name: Collector dependencies
         working-directory: collector
-        run: dart pub get
+        run: dart pub get --enforce-lockfile
 
       - name: Drift and catalog tests
         working-directory: collector

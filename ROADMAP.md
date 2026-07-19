@@ -55,16 +55,23 @@ by being correct, quiet, and predictable, not by being large.
   binding window overrides a healthier shorter window.
 - **Correct across a user's machines.** When a provider exposes an account-wide
   usage read, that read is the source of truth even on a machine the user has
-  not actively used the tool on recently; quotabot keeps it live by refreshing
-  its own credentials rather than depending on the host app to have run here. A
-  machine-scoped fallback is only ever shown when nothing account-wide is
-  available, and it is always labeled as this-machine.
+  not actively used the tool on recently. A configured refreshable quotabot
+  grant must keep that read live by refreshing its own grant rather than
+  depending on the host app to have run there. The implementation and fixtures
+  exist; dated real-account idle-machine evidence remains a 1.0 gate. Without a
+  usable host credential or local grant, it preserves last-trusted evidence as
+  stale and gives an explicit repair step. A machine-scoped fallback is only
+  ever shown when nothing account-wide is available, and it is always labeled
+  as this-machine.
 - **Stale resets prove nothing.** Cached quota keeps its original capture time
   and last observed percentage. A reset boundary passing after a failed live
   read never turns stale evidence into 100% free capacity or a routable result.
 - **Scoped limits stay scoped.** A provider-reported model allowance can gate
   that model, but spending it never blocks unrelated models while the
-  provider's shared subscription windows still have headroom.
+  provider's shared subscription windows still have headroom. A measured scoped
+  balance does not prove included-quota spend classification when entitlement
+  differs by plan; that classification fails closed without explicit plan
+  evidence.
 - **Fail soft.** If quotabot is unavailable or lacks a safe route, callers keep
   their original behavior or receive an explicit no-safe-route result. Routing
   is an optimization, not a dependency.
@@ -80,25 +87,29 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Current state
 
-The current line, **0.9.2**, is best
-understood as having closed the first three milestones of the ladder below:
-the truthful substrate (0.6), one calibrated forecast behind a single decision
-core (0.7), and the self-tuning calibration moat (0.8). The core product
-surface exists: CLI, `top`, desktop, analytics, MCP, loopback HTTP, model
-registry, profiles, alerts, reports, leases, LiteLLM integration, verification
-commands, release automation, and cross-platform CI. New breadth is frozen
-until the remaining 1.0 trust gates close.
+The current line, **0.9.3**, contains the implemented core of the first three
+milestones below: the truthful substrate (0.6), one calibrated forecast behind a
+single decision core (0.7), and the self-tuning calibration moat (0.8). Those
+implementation milestones are not the same as closing every 1.0 evidence gate.
+The core product surface exists: CLI, `top`, desktop, analytics, MCP, loopback
+HTTP, model registry, profiles, alerts, reports, leases, LiteLLM integration,
+verification commands, release automation, and cross-platform CI. New breadth
+is frozen until the remaining field validation, migration hardening,
+accessibility, signing, and native release evidence below are complete.
+Here, "current line" means the version prepared in source. The default
+installer continues to resolve GitHub's latest published stable release, which
+can remain the preceding version until this line's tag workflow completes.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
 | Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
-| Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; the LiteLLM example now requires a bearer key and an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
+| Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; HTTP writes are authenticated lease-only metadata; LiteLLM atomically reserves remote routes and requires its own client bearer key on an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
 | Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, upgrade quarantine, `verify`, source docs, cache provenance, grant implementations, and expired-host fall-through fixtures exist | Validate connected Claude/Codex grants on idle real-account machines; link dated Windows evidence; close identity aliases, remaining response-shape fixtures, and current local-runtime compatibility gaps |
 | Native provider evidence | Partial | Windows validation has been reported; WSL covers truthful Linux failure behavior | Link dated Windows evidence and confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
-| Installation and update | Partial | CLI archives and installers plus native portable desktop archives, required checksums, attestations, exact-asset and clean-runner lifecycle barriers, source setup, lifecycle docs, and a three-OS smoke workflow exist | Sign and notarize desktop apps and record one green tagged clean-host lifecycle run |
+| Installation and update | Ready for candidate rerun | CLI and desktop archives have required checksums, restricted attestations, exact-asset barriers, and clean-runner lifecycle gates. The v0.9.2 published CLI passed clean install and prior-version upgrade smoke on Windows, macOS, and Linux. Official `v*` tags cannot be moved or deleted, and releases published after the July 18 immutability activation are locked | Run every gate on the exact candidate, then sign and notarize desktop apps and repeat the complete lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation, backed by the content-blind decision receipt and setup recovery guidance | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
 | Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, structured errors, `verify`, and `explain` exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Open | 0.9.1 release artifacts and provenance have been exercised | Run the true 1.0 tag-candidate workflow, install its artifacts on clean native hosts, then cut 1.0 |
+| Release rehearsal | In progress | v0.9.2 passed the exact-asset and provenance audit plus clean native install, upgrade, source-setup, and persistent-state smoke | Run the same complete rehearsal on the frozen 1.0 candidate, including interactive desktop checks, then cut 1.0 |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -129,18 +140,14 @@ which is why calibration lands before 1.0 rather than after it.
   patches for provider truth, cross-machine correctness, install and update,
   desktop robustness, and documentation. No new breadth. This line ends when the
   1.0 evidence gates pass.
-- **0.6 - Truthful substrate.** Every advertised route means exactly what it says,
-  on every claimed provider, before anything is built on top. Close the remaining
-  observation-layer gaps so the data feeding the forecast is trustworthy. A
-  forecast built on untrustworthy observations is worse than no forecast, so this
-  is first.
-- **0.7 - One forecast, one engine.** Refactor the decision and windowing spine
-  into a single pure, replayable core that every surface is a view of, and ship the
-  deterministic replay and simulation harness it makes possible. The structural
-  keystone: calibration, the decision receipt, and self-tuning are all impossible
-  to do well until one forecast object exists, and cheap once it does. Mostly
-  invisible by design.
-- **0.8 - The moat: a forecast that grades itself.** On the forecast core, add the
+- **0.6 - Truthful substrate, core shipped.** Every advertised route means
+  exactly what it says on every admitted provider. The remaining field evidence
+  and migration hardening listed below are 1.0 acceptance work, not a second
+  observation core.
+- **0.7 - One forecast, one engine, shipped.** The decision and windowing spine
+  is one pure, replayable core that every routing surface consumes, with a
+  deterministic replay and simulation harness. Mostly invisible by design.
+- **0.8 - The moat: a forecast that grades itself, shipped.** On the forecast core, add the
   calibration ledger - log every prediction with the outcome later snapshots
   reveal, score it (Brier, reliability), and tune the free parameters on the user's
   own history - and surface it at the hood as "~94% calibrated over your last 30
@@ -265,9 +272,11 @@ provider, before a forecast is built on top of it.
   local-only or free execution. Never estimate throughput by generating content.
 - Grant implementation and deterministic expired-host-token fall-through
   fixtures are shipped for Claude and Codex. Remaining: validate the connected
-  login flows on idle real-account machines, and find a provider-backed stable
-  identity for two Claude accounts on the same subscription tier before
-  automatic same-tier multi-account cache separation can be promised.
+  login flows on idle real-account machines. Claude now uses irreversible
+  credential-generation identities so same-tier credential replacements cannot
+  share cache or drift evidence. A provider-backed stable identity is still
+  needed for durable account labels and deduplication when multiple credentials
+  belong to the same Claude account.
 - Keep the LiteLLM loopback, bearer-auth, and unauthenticated-denial regression
   green as its pinned dependency changes.
 - Already shipped on 0.5.x: the normalized six-value `source_class` contract
@@ -298,14 +307,13 @@ that object can be replayed and simulated deterministically.
 - **Shipped:** `replay(frames)` folds the pure core over recorded observation
   frames deterministically; the `--mock-provider` simulation (`simulateFleet`)
   drives the whole pipeline through `decide` with no network. Both pinned by test.
-- **Remaining:** migrate the secondary route surfaces (`top`, the remaining MCP
-  tools) to source from `decide` too, and wire the public decision replay harness
-  to real recorded history for the oracle benchmark. The shipped calibration
-  ledger has its own pinned replay of hourly history.
+- **Shipped:** secondary route surfaces, including `top`, desktop, HTTP, and MCP,
+  receive their recommendation from `decide`; the calibration ledger keeps its
+  pinned replay of hourly history.
 - No public contract change and no visible behavior change: existing SEE / ROUTE /
   `suggest` output stays stable, `decide().route` equals `suggestRoute()`.
 
-Acceptance (met by the pure core and its tests; surface migration finishing):
+Acceptance (met by the pure core, its tests, and routing surfaces):
 the pure core has no I/O; SEE, ROUTE, and ALERT are all expressed as views of its
 output; a recorded-history replay reproduces current decisions; the simulation
 mode drives the full pipeline from fixtures with no network.
@@ -385,9 +393,10 @@ recommendation is aligned to what the user actually wants.
 - Remaining local-first QOL: thread declared local tool/vision capabilities into
   capability gates, and add local-first stretch behavior when cloud quota is
   low.
-- Multi-account: a work-and-home account per provider visible in one dashboard,
-  generalizing the existing per-account model, without cross-contaminating
-  profiles, cache, or history.
+- **Done (multi-account):** provider accounts discovered on one machine can be
+  shown together in one dashboard. Account-scoped profiles, cache, drift,
+  history, and expansion state prevent work and personal evidence from being
+  combined or visually confused.
 - **Done:** Spent-window escape hatch. Codex's authoritative usage metadata
   carries `rate_limit_reset_credits.available_count` - the redeemable off-cycle
   resets a user can spend to refresh their limit early - verified against a live

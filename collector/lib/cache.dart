@@ -335,6 +335,8 @@ ProviderQuota _lockUnavailableAdmissionResult(
     displayName: fresh.displayName,
     account: fresh.account,
     plan: fresh.plan,
+    planEvidenceSource: fresh.planEvidenceSource,
+    planEvidenceAsOf: fresh.planEvidenceAsOf,
     source: fresh.source,
     sourceClass: fresh.sourceClass,
     ok: false,
@@ -1270,7 +1272,8 @@ List<ProviderQuota> _loadHistoryFile(
       if (quota.provider == provider &&
           (exactAccount == null || quota.account == exactAccount) &&
           _isRegisteredCacheEvidence(quota) &&
-          isTrustedQuotaEvidenceAt(quota, observedAt)) {
+          quota.asOf <= observedAt + kQuotaEvidenceClockSkewSeconds &&
+          isTrustedQuotaEvidenceAtCapture(quota)) {
         results.add(quota);
       }
     }

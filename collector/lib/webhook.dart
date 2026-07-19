@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -56,13 +57,25 @@ Future<WebhookResult> postAlert(
     );
   }
   final c = client ?? http.Client();
+  final stopwatch = Stopwatch()..start();
+  Duration remainingTimeout() {
+    final remaining = timeout - stopwatch.elapsed;
+    if (remaining.isNegative || remaining == Duration.zero) {
+      throw TimeoutException('webhook delivery deadline exceeded');
+    }
+    return remaining;
+  }
+
   try {
     final request = http.Request('POST', uri)
       ..followRedirects = allowExternal
       ..headers['content-type'] = 'application/json'
       ..body = jsonEncode(payload);
-    final resp =
-        await c.send(request).then(http.Response.fromStream).timeout(timeout);
+    final resp = await c.send(request).timeout(remainingTimeout());
+    // The webhook contract needs only the status code. Cancel the response body
+    // instead of buffering attacker- or operator-controlled bytes into memory;
+    // this also prevents an endless body from holding alert delivery open.
+    await resp.stream.listen((_) {}).cancel().timeout(remainingTimeout());
     final ok = resp.statusCode >= 200 && resp.statusCode < 300;
     return WebhookResult(ok: ok, statusCode: resp.statusCode);
   } catch (_) {

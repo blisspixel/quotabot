@@ -36,7 +36,9 @@ asset="quotabot-${os}-${arch}.tar.gz"
 out="$release_dir/$asset"
 
 rm -rf "$build_dir"
-(cd "$collector_dir" && dart build cli --target=bin/collect.dart --output="$build_dir")
+(cd "$collector_dir" && \
+  dart pub get --enforce-lockfile && \
+  dart build cli --target=bin/collect.dart --output="$build_dir")
 bundle="$build_dir/bundle"
 if [ ! -f "$bundle/bin/collect" ]; then
   echo "CLI build did not produce $bundle/bin/collect" >&2

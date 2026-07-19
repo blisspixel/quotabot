@@ -2,6 +2,164 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.9.3 - 2026-07-18
+
+### Security
+- Cursor and Windsurf now query exact provider-owned metadata rows and project
+  only approved quota, reset, capture-time, and identity fields. Prompt,
+  conversation, code-context, and unrelated SQLite rows cannot become quota or
+  account evidence even when their text contains quota-like keys.
+- Claude and Codex cache, drift, history, and profile identities are isolated by
+  irreversible credential-generation fingerprints. Codex account identity and
+  quotabot-owned grant identity survive access-token and refresh-token rotation.
+  Claude host credentials deliberately start a new identity when their refresh
+  token changes because Anthropic exposes no stable account id; this fail-closed
+  boundary can discard continuity but cannot lend one credential generation
+  another's evidence. Codex response email is ignored as an identity source.
+- OAuth token refreshes now load credentials and their owner as one immutable
+  record, serialize every writer with a per-slot cross-process lock, and replace
+  only the exact generation that was loaded. A stale refresh cannot overwrite a
+  completed login or account replacement.
+- Draft release publication is bound to the exact audited GitHub release id and
+  a digest of its complete asset manifest, then rechecks the tag, release, and
+  current `main` tip immediately before publishing.
+- The loopback HTTP server now limits writes to authenticated lease reserve and
+  release operations. It creates a stable owner-only bearer token before
+  startup, never prints it, rejects unbounded or malformed bodies before quota
+  collection, and accepts only bounded provider-routing metadata.
+- The plain loopback HTTP server rejects external or null browser origins and
+  originless cross-site or same-site subresource requests before collection.
+  Normal non-browser clients without Fetch Metadata and explicit user-activated
+  top-level navigations remain supported.
+
+### Changed
+- Concrete CLI and MCP model suggestions now default to the no-surprise `quota`
+  budget. Model listing remains unrestricted for inspection, while selecting a
+  credit-backed or paid catalog entry requires explicit `budget=any` and states
+  that included quota is not proven.
+- Saved profile provider preferences now apply consistently to recommendations
+  in `doctor`, `top`, `watch`, and weekly reports, matching `suggest` and MCP.
+- CLI, desktop, loopback HTTP, MCP, alerts, and reservations now build routing
+  decisions from the same capability, preference, burn, pipe-health, and active
+  lease context.
+- The deprecated `subscriptionsFirst` profile value remains readable as a wire
+  alias but is saved and shown as the single honest cloud-first policy.
+- Release builds now verify exact CLI archive paths before attestation and
+  upload. Four clean native runners redownload the draft archives, reverify
+  restricted provenance, and require both the tagged version and demo-mode
+  doctor schema to work before publication.
+- CI now builds and validates native CLI archives alongside desktop packages.
+  CI, currency checks, and release builds enforce committed Dart and Flutter
+  lockfiles instead of allowing dependency resolution to repair them silently.
+- Source setup and packaging helpers now enforce the same committed lockfiles,
+  and desktop builds disable implicit dependency resolution after that check.
+- Prerelease version tags are published with GitHub's prerelease classification,
+  and a resumed draft must already have the matching classification. The
+  published install smoke resolves GitHub's canonical latest stable release
+  instead of relying on release-list ordering.
+- Release creation now verifies the existing remote tag, and both draft resume
+  and publication recheck that its peeled commit still matches the workflow
+  commit. Checkout credentials are not persisted in jobs that execute candidate
+  binaries. The official repository also blocks `v*` tag updates and deletion
+  and enables GitHub release immutability for publications after the setting
+  was activated on July 18, 2026.
+
+### Fixed
+- Claude account-wide reads no longer become a false 100% free after a cached
+  reset passes. Invalid percentages are rejected, model-scoped Fable limits
+  remain scoped, and same-plan host or grant replacements cannot borrow another
+  credential generation's cache or drift identity. Legacy Claude profile
+  filters that used a plan as the account remain exact and surface for repair
+  instead of being silently broadened.
+- Claude admits each live usage body atomically. A valid session row cannot
+  survive a missing or malformed binding weekly row, and valid Fable or other
+  model rows cannot survive a malformed recognized scoped sibling. Present
+  known legacy blocks are validated with the same fail-closed rule, while an
+  explicit null optional legacy Opus block and unknown additive fields remain
+  compatible.
+- Claude Fable 5 no longer carries the obsolete temporary catalog cutoff. It is
+  quota-backed only when the current provider response contains a live scoped
+  Fable pool and current provider metadata confirms a Max or Team Premium
+  entitlement on or after the announced July 20, 2026 UTC policy boundary. A
+  locally stored Claude `subscriptionType` is explicitly marked
+  as host-credential evidence and cannot prove inclusion after an entitlement
+  change or positively classify credit-backed spend. Pro, Team Standard,
+  host-label-only, and plan-unknown rows stay visible
+  under the unrestricted model budget but cannot enter the no-surprise quota
+  budget. Doctor and desktop scoped rows state whether spend is included,
+  credit-backed, or unproven. The dated July 20
+  plan policy never substitutes for a measured balance.
+- Codex no longer reads mixed-content rollout files for a this-machine quota
+  fallback. It uses account-wide metadata or fails closed with a login repair,
+  preserving the promise that quota collection never reads prompts or responses.
+- Codex accepts the current Pro response shape with a weekly primary window and
+  an explicit null secondary window. Labels follow the provider's duration, and
+  named `additional_rate_limits` such as GPT-5.3-Codex-Spark remain sparse
+  model-scoped gates instead of replacing or blocking the shared account limit.
+  Live windows now require a bounded minute-aligned duration and positive reset,
+  sparse rows are admitted atomically, and each scoped gate preserves its
+  provider window identity through cache, JSON, MCP, routing, drift checks, and
+  the desktop. Window identities are bounded and validated before they can
+  influence routing or presentation.
+- Codex plan and email labels no longer key cache or drift evidence. Legacy
+  provider-wide cache and old profile account labels fail closed until a fresh
+  credential-scoped read or explicit profile repair.
+- Quota adapters now reject impossible fractions, preserve exhausted binding
+  windows, normalize timestamp units, merge duplicate pools conservatively,
+  validate Grok trailers, and fail closed on malformed provider responses.
+- Antigravity admits its live model quota table atomically, so one malformed or
+  incomplete sibling rejects the whole response instead of hiding a binding
+  pool. Kiro projects quota only from the exact
+  `kiro.resourceNotifications.usageState` child and ignores unrelated agent
+  state.
+- Passive Cursor, Windsurf, and Kiro quota now requires a row-owned capture
+  timestamp before routing. Unrelated SQLite or WAL writes cannot renew old
+  quota evidence; missing-time values remain visible as unverified.
+- Ollama, LM Studio, and Lemonade refuse non-loopback host overrides without
+  contacting them. Cloud-offloaded or errored runtimes cannot become a local
+  fallback, while their configuration problem remains visible for repair.
+- Desktop refresh copy distinguishes when evidence was checked from when it was
+  captured, preserves the last observed value on failure, explains account-wide
+  versus this-machine scope, and never forecasts from suspect evidence.
+- Interactive `top` serializes collections, coalesces repeated refresh keys,
+  owns one refresh timer, rejects late results after exit, and never recommends
+  a provider hidden from the current view.
+- Routing no longer revives a cloud candidate whose burn, lease, or pipe-health
+  adjustments depleted its effective headroom. Provider-only availability
+  checks in CLI, MCP, and HTTP choose the best current account deterministically
+  instead of trusting the first account returned.
+- The LiteLLM hook now atomically reserves from its complete eligible remote
+  target set before dispatch. Parallel requests see each other's local lease
+  discounts, completion and failure callbacks release their leases, and TTL
+  expiry covers abandoned callbacks. Missing mutation authentication falls back
+  locally or fails a managed route closed.
+- Desktop route details name only adjustments that actually applied. Alert
+  delivery is single-flight under slow webhooks, legacy Codex filters get the
+  same repair path as Claude, and an empty profile now renders its actionable
+  state even when account labels are hidden.
+- Compact provider chips are keyboard-focusable and scroll the focused item into
+  view. Analytics sparklines and heatmaps expose assistive semantics, custom
+  charts honor composed text scaling and repaint when it changes, and native
+  low-quota, scheduled-reset, and reset-available notifications apply the
+  account-name preference consistently to their body and Windows subtitle.
+- The loopback HTTP, webhook, LiteLLM, and MCP client boundaries now cap work and
+  response sizes, validate exact loopback origins, resist routing metadata
+  spoofing, coalesce collection, and remain responsive during slow reads.
+- Provider OAuth helpers no longer retain default HTTP connection pools across
+  calls. Injected clients remain caller-owned and refresh-token persistence is
+  unchanged.
+- CLI installers and source setup now activate one complete versioned payload
+  generation, so a concurrent launch cannot combine a new executable with an
+  old native library. Activation is serialized, a failed replacement restores
+  the prior target, and uninstall guidance removes the private generation store
+  without deleting quota data. Full macOS and Linux source setup stages both CLI
+  and desktop generations before activation and restores both stable payload
+  targets if either activation fails. Windows source setup also restarts a
+  desktop app that it stopped even when activation fails and restores the prior
+  bundle. Full Windows source setup now stages and validates both candidates,
+  activates them under paired locks, and restores both prior payloads if either
+  activation fails.
+
 ## 0.9.2 - 2026-07-18
 
 ### Security

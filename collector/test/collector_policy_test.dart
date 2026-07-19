@@ -1,5 +1,9 @@
 import 'dart:io';
 
+import 'package:quotabot_collector/adapters/codex.dart';
+import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/auth/openai_auth.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/util.dart';
@@ -85,6 +89,118 @@ void main() {
     expect(claude.driftReason, rejected.driftReason);
     expect(codex.driftReason, isNull);
     expect(codex.windows.single.usedPercent, 30);
+  });
+
+  test('same-account Codex parser failure serves stale shared and scoped cache',
+      () async {
+    final now = nowEpoch();
+    final account = opaqueCredentialIdentity(
+      codexProviderId,
+      'same-account-parser-failure',
+    );
+    final sharedReset = now + 6 * 86400;
+    final sparkReset = now + 5 * 86400;
+    final trusted = ProviderQuota(
+      provider: codexProviderId,
+      displayName: codexProviderName,
+      account: account,
+      plan: 'pro',
+      asOf: now - 10,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 63,
+          resetsAt: sharedReset,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 20,
+          resetsAt: sparkReset,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    TokenStore.saveDefaultOwnedBy(
+      OpenAiAuth.provider,
+      Tokens(
+        accessToken: 'test-access',
+        refreshToken: 'test-refresh',
+        expiresAt: now + 3600,
+      ),
+      account,
+    );
+    saveSnapshot(
+      trusted,
+      observedAtMicros: (now - 10) * Duration.microsecondsPerSecond,
+    );
+
+    final failedRead = await CodexAdapter(
+      usageCredentialIdentity: account,
+      usageFetcher: () async => {
+        'plan_type': 'pro',
+        'rate_limit': {
+          'primary_window': {
+            'used_percent': 63,
+            'limit_window_seconds': 604800,
+            'reset_at': sharedReset,
+          },
+          'secondary_window': null,
+        },
+        'additional_rate_limits': [
+          {
+            'limit_name': 'GPT-5.3-Codex-Spark',
+            'rate_limit': {
+              'primary_window': {
+                'used_percent': 0,
+                'limit_window_seconds': 61,
+                'reset_at': sparkReset,
+              },
+              'secondary_window': null,
+            },
+          },
+        ],
+      },
+    ).collect();
+
+    expect(failedRead.ok, isFalse);
+    expect(failedRead.account, account);
+    expect(failedRead.error, contains('invalid Codex usage response'));
+
+    final fallback = admitRegisteredProviderObservation(
+      providerAdapterById(codexProviderId)!,
+      failedRead,
+      evidenceGenerationMicros: DateTime.now().microsecondsSinceEpoch + 1000,
+      observedAt: now,
+    );
+
+    expect(fallback.ok, isTrue);
+    expect(fallback.stale, isTrue);
+    expect(fallback.account, account);
+    expect(fallback.error, contains('invalid Codex usage response'));
+    expect(fallback.windows.single.label, 'weekly');
+    expect(fallback.windows.single.usedPercent, 63);
+    expect(fallback.windows.single.resetsAt, sharedReset);
+    expect(fallback.modelQuotas.single.model, 'GPT-5.3-Codex-Spark');
+    expect(fallback.modelQuotas.single.usedPercent, 20);
+    expect(fallback.modelQuotas.single.resetsAt, sparkReset);
+    expect(fallback.modelQuotas.single.windowLabel, 'weekly');
+    expect(providerAvailability(fallback, now).available, isFalse);
+    expect(suggestRoute([fallback], now).recommended, isNull);
+
+    final persisted = loadAccountSnapshot(codexProviderId, account);
+    expect(persisted, isNotNull);
+    expect(persisted!.stale, isFalse);
+    expect(persisted.error, isNull);
+    expect(persisted.asOf, trusted.asOf);
+    expect(persisted.windows.single.label, 'weekly');
+    expect(persisted.windows.single.usedPercent, 63);
+    expect(persisted.windows.single.resetsAt, sharedReset);
+    expect(persisted.modelQuotas.single.model, 'GPT-5.3-Codex-Spark');
+    expect(persisted.modelQuotas.single.usedPercent, 20);
+    expect(persisted.modelQuotas.single.resetsAt, sparkReset);
+    expect(persisted.modelQuotas.single.windowLabel, 'weekly');
   });
 
   test('adapter output ids must already be canonical', () {

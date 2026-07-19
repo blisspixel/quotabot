@@ -56,8 +56,9 @@ collector/ (Dart package)
   mcp_http.dart      Opt-in Streamable HTTP MCP wrapper with loopback guards
   collector.dart     collectAll(): run adapters, apply cache; package exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
-                     ollama, lmstudio, lemonade (thin I/O shells)
-  auth/              tokens + store, PKCE/loopback util, xai + google OAuth
+                     nvidia, ollama, lmstudio, lemonade (thin I/O shells)
+  auth/              tokens + store, PKCE/loopback util, anthropic, openai,
+                     xai, and google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
   bin/collect.dart        CLI: status/doctor, top, watch, models, suggest,
                           verify/explain, stats/report/calibration, manual,
@@ -114,20 +115,27 @@ This is why the core has high test coverage even though the adapters do I/O.
 burn-history influence. It is intentionally separate from `demo.dart`, which is a
 believable multi-provider screenshot fleet rather than an exact assertion tool.
 The parser test layer includes seeded property/fuzz tests over malformed JSON,
-protobuf-like byte streams, gRPC-web frames, and embedded-token blobs, plus
-sanitized provider-shape fixtures loaded from `collector/test/fixtures/` so the
-pure parsers are checked against stable recorded shapes without touching live
-credentials or provider APIs. `provider_adapters.dart` is the compile-time
-registry for all built-in adapters and their required sanitized fixtures; tests
-fail when a new adapter lacks a registry row or fixture.
+protobuf-like byte streams, gRPC-web frames, embedded-token blobs, and passive
+SQLite rows, plus sanitized provider-shape fixtures loaded from
+`collector/test/fixtures/` so the pure parsers are checked against stable
+recorded shapes without touching live credentials or provider APIs.
+Antigravity admits its live model table atomically, rejecting the full response
+if any advertised sibling lacks a complete quota row. Kiro projects only the
+exact `kiro.resourceNotifications.usageState` child, so unrelated agent state
+cannot become quota or freshness evidence. `provider_adapters.dart` is the
+compile-time registry for all built-in adapters and their required sanitized
+fixtures; tests fail when a new adapter lacks a registry row or fixture.
 
 ## Adapters
 
 Each adapter has a single `collect()` method returning a `ProviderQuota`:
 
 - Codex calls the ChatGPT usage metadata endpoint with the OAuth access token
-  Codex stores locally, then falls back to the newest local session
-  `rate_limits` snapshot when the live read is unavailable. No model call.
+  Codex stores locally or a quotabot-owned grant. If no account-wide read
+  succeeds, it fails closed with a login repair instead of opening mixed-content
+  session files. Primary and secondary window labels come from the reported
+  duration, an explicit null window is treated as absent, and named
+  `additional_rate_limits` become sparse model-budget overlays. No model call.
 - Claude, Grok, and Antigravity call live metadata endpoints (no model calls, no
   token cost). Claude reuses the token Claude Code stores. Grok and Antigravity
   prefer quotabot's own OAuth grant (see Authentication) and fall back to the
@@ -139,7 +147,11 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
 - Claude's current usage response separates shared session and weekly windows
   from optional model-scoped weekly limits. Shared windows govern provider
   routing; a scoped row is a sparse model-budget overlay, so spending it cannot
-  block unrelated Claude models.
+  block unrelated Claude models. The parser admits the whole response or none
+  of it: both shared binding rows and every recognized scoped row must be valid.
+  Present known legacy blocks follow the same rule, preventing a malformed
+  weekly or model sibling from being silently discarded while healthier rows
+  continue to route.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
   Cursor's current included-usage pool is normalized as a monthly quota window
@@ -147,9 +159,11 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   Desktop daily and weekly Cascade quota shapes are normalized from local SQLite
   state, with account and plan labels surfaced when present.
 - Ollama, LM Studio, and Lemonade are local-runtime adapters: they report
-  installed and loaded models instead of a quota window and act as a routing
-  fallback. Any OpenAI-compatible runtime can be added with the shared
-  `localRuntimeQuota` helper.
+  installed and loaded models instead of a quota window. A reachable, error-free
+  loopback daemon acts as a routing fallback only when it represents at least
+  one on-device model; cloud-offloaded-only and empty runtimes do not. Any
+  OpenAI-compatible runtime can be added with the shared `localRuntimeQuota`
+  helper.
 
 An adapter that cannot produce live windows still returns a `ProviderQuota` with
 account and plan and an explanatory `error` note, rather than throwing. The UI
@@ -163,7 +177,11 @@ shows that as "no live data" instead of a gap.
   provider, and optionally per provider account, under the config directory,
   only after checked owner-only permission hardening. Account-scoped filenames
   use a hash of the account id rather than the raw email. Rotated refresh tokens
-  are saved on every successful refresh or the next refresh would fail.
+  are saved on every successful refresh or the next refresh would fail. A load
+  returns tokens and owner from one immutable file generation. Every writer
+  takes the same per-slot cross-process lock, and refresh conditionally replaces
+  only the generation it loaded, so a late refresh cannot overwrite a completed
+  login or account replacement.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -282,8 +300,10 @@ non-read-only and non-idempotent even though they never invoke a model. They can
 also apply exact `account` filters after named profile filters for routers that
 need one provider account without creating a profile. `decide_now` is
 deliberately different: it reads the in-memory or disk last-known snapshot only,
-returns `source`, `snapshot_as_of`, age, and staleness, and never forces a live
-collect. It can still compact expired records while reading the local lease
+returns `source`, `snapshot_as_of`, age, and whole-snapshot staleness with
+explicit `snapshot` scope, and never forces a live collect. Envelope age or an
+unsafe provider can set that flag. Winner and alternative
+records retain their own provider-level stale flags. It can still compact expired records while reading the local lease
 ledger, so it is not annotated read-only or idempotent. `suggest_provider` and
 `decide_now` both accept `local_first` for cost-sensitive dispatch plus explicit
 `cost_penalties` for caller-owned cost policy. `reserve_provider` and
@@ -304,7 +324,17 @@ MCP clients for both stdio and Streamable HTTP.
 `bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
 consumers, including `GET /suggest?local_first=true` for the same opt-in local
 first routing policy and `GET /suggest?cost_penalty=codex:2` for explicit
-caller-owned cost discounting. The reasoning behind the routing math (risk-adjusted
+caller-owned cost discounting. Its read endpoints are unauthenticated loopback
+metadata. The only write endpoints are authenticated, bounded lease reserve and
+release operations. Server startup creates and permission-checks a stable
+per-user bearer token without printing it. A reserve request submits only
+provider/account targets and lease policy, then selects and writes under one
+ledger lock. It never receives task text, prompts, source code, or model output.
+Before any provider work, the server also validates browser `Origin` and Fetch
+Metadata. Non-loopback and null origins are rejected, as are originless
+same-site or cross-site subresource fetches. Normal non-browser clients without
+Fetch Metadata and explicit user-activated top-level navigations remain valid.
+The reasoning behind the routing math (risk-adjusted
 headroom, strand probability, burn-stat shrinkage, reliability shrinkage,
 heatmap usable-rate shrinkage, routing score, projected-waste route boosts, and
 cost/lease discounts) is written up in
@@ -373,9 +403,11 @@ provider price catalogs.
 `integrations/litellm/` is the shipped example of using quotabot as a routing
 signal without putting quotabot in the request data path. The Python
 `quotabot_router.py` plugin registers a LiteLLM `async_pre_call_hook` that reads
-only the local quotabot `/suggest` quota recommendation and rewrites a logical
-model to a concrete LiteLLM deployment. Unmanaged model names still pass through
-unchanged so the proxy can serve ordinary LiteLLM traffic.
+the local quotabot `/suggest` quota recommendation, atomically reserves from the
+complete eligible remote target set, and rewrites a logical model to the
+reserved LiteLLM deployment. Success and failure callbacks release the lease;
+TTL expiry handles a callback that never runs. Unmanaged model names still pass
+through unchanged so the proxy can serve ordinary LiteLLM traffic.
 For managed logical models, the plugin now has a stricter billing guardrail:
 normal API-key deployments are `spend: paid_api` and skipped unless
 `allow_paid_api` is explicitly true; included quota-plan deployments must be
@@ -390,11 +422,12 @@ surprise API spend.
 The integration is covered at two layers. Unit tests import the hook directly to
 check policy precedence, trusted key alias/user_id agent identity, spend-class
 guardrails, local-fallback ordering, loopback URL hardening, no-redirect quotabot
-fetches, and metrics path containment under `~/.quotabot`. CI also installs the
-current `litellm[proxy]` package and starts a real LiteLLM proxy on loopback with
-a fake quotabot `/suggest` server and a fake OpenAI-compatible backend. That test
-proves the actual proxy `async_pre_call_hook` path rewrites a logical model to
-the provider with budget, spends no model tokens, and performs no external
+fetches, authenticated concurrent reservation, callback release, and metrics
+path containment under `~/.quotabot`. CI also installs the current
+`litellm[proxy]` package and starts a real LiteLLM proxy on loopback with a fake
+quotabot suggestion and lease server plus a fake OpenAI-compatible backend. That
+test proves the actual proxy hook reserves and rewrites a logical model, releases
+its lease after completion, spends no model tokens, and performs no external
 network calls. The plugin uses plain value classes rather than dataclasses
 because LiteLLM's current config-relative custom-callback loader executes
 modules before registering them in `sys.modules`, which breaks dataclass
@@ -448,12 +481,13 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   shared `classifyForecast` (the same forecast `top` shows): a runway estimate or,
   once a strand is material, a plain warning. It is shown only with a real burn
   signal, never invented.
-- `fleet.dart` is the Quota Analytics screen, opened from the header and pushed as
-  a route over the strip (the window resizes to a steady portrait and restores on
-  Back). It is a range switch (Now / 7d / 90d): the live view ranks headroom and
-  shows a consumption donut; the historical views recompute `Insights` and the
-  heatmap from the raw buckets. Its header reuses the same compact quota gauge
-  and window controls as the main quota view.
+- `fleet.dart` is the Quota Analytics body, opened under the same dashboard
+  header and menu as the quota view. It swaps the body in place without pushing
+  a route, moving, or resizing the window; the body scrolls within the current
+  size and the header's Back to quotas control restores the quota body. It is a
+  range switch (Now / 7d / 90d): the live view ranks headroom and shows a
+  consumption donut; the historical views recompute `Insights` and the heatmap
+  from the raw buckets.
 - Provider logos are vector `CustomPainter`s (`logos.dart`) so they stay sharp
   at any size and recolor for light or dark. The in-app header shows a small
   dynamic radial "pool gauge" (`AppGauge` in `logos.dart`) next to the "Quota"
@@ -467,10 +501,10 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   groups distinct account identities when work and personal accounts coexist,
   and expansion state is keyed by provider/account so opening one account's
   details does not open its sibling. Duplicate-provider cards always show their
-  account to avoid ambiguity; the "Show account names" toggle still exposes
-  usernames for single-account providers. `prefs.dart` persists hidden providers,
-  compact state, cadence, always on top, taskbar visibility, enable
-  notifications, showAccounts, and window position across restarts.
+  account when the "Show account names" preference is enabled; single-account
+  labels remain hidden. `prefs.dart` persists hidden providers, compact state,
+  cadence, always on top, taskbar visibility, enable notifications,
+  showAccounts, and window position across restarts.
 - Named profiles live under the per-user quotabot config directory as
   `quotabot.profile.v1` JSON files. Profile names and provider ids are validated
   against safe filename/id characters, profile files are bounded in size, and
@@ -486,13 +520,17 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   display, notifications, webhook alerts, and analytics, and persists
   non-default profile hidden-provider, sort, and theme preferences back into the
   profile file. The `default` profile keeps the legacy app prefs file.
-- A thirty second timer repaints so the age label ("as of HH:MM AM") and reset
-  countdowns stay current; actual data refresh is on a separate adaptive timer.
+- A thirty second timer repaints so the last-check label ("checked HH:MM AM")
+  and reset countdowns stay current. Provider cards carry their own evidence
+  capture age; actual data refresh is on a separate adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a
   "usually ~X% free (last N)" line in expanded tiles when an average is present
   ("N recent checks" otherwise).
-- Notifications toggle drives guarded immediate low-headroom alerts and
-  scheduled reset notifications via flutter_local_notifications.
+- Notifications toggle drives guarded immediate low-headroom alerts, scheduled
+  reset reminders, and edge-triggered redeemable-reset notifications via
+  flutter_local_notifications. Native notification bodies and Windows subtitles
+  follow the account-name preference and expose an account only when duplicate
+  provider accounts need disambiguation.
 
 ## Adaptive refresh
 
@@ -511,6 +549,10 @@ Flutter desktop app also produces native portable Windows x64, macOS arm64, and
 Linux x64 archives with checksum sidecars, shape validation, provenance
 attestations, clean-runner lifecycle checks, and a draft-release publication
 barrier. Source setup remains available when a launcher or shortcut is wanted.
+The official repository also blocks `v*` tag updates and deletion. GitHub
+release immutability locks the tag and assets when a draft is published after
+the setting activation; it does not retroactively alter releases published
+before July 18, 2026.
 Application signing, notarization, and interactive native evidence remain 1.0
 gates. Platform prerequisites and artifacts are documented in
 [BUILDING.md](BUILDING.md), [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md),

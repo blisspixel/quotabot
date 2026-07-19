@@ -171,6 +171,34 @@ void main() {
     expect(store.release(leaseId: 'lease-1', now: 103).released, isFalse);
   });
 
+  test('memory store rejects an idempotency key for a different target', () {
+    final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
+    final first = store.reserve(
+      provider: 'claude',
+      account: 'work',
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: 'retry-1',
+    );
+
+    final conflict = store.reserve(
+      provider: 'codex',
+      account: 'home',
+      now: 101,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: 'retry-1',
+    );
+
+    expect(first.reserved, isTrue);
+    expect(conflict.reserved, isFalse);
+    expect(conflict.reused, isFalse);
+    expect(conflict.lease, isNull);
+    expect(conflict.reason, contains('different lease target'));
+    expect(conflict.activeLeases, hasLength(1));
+  });
+
   test('auto reservation rejects an idempotency key outside reuse scope', () {
     final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
     store.reserve(
@@ -433,6 +461,41 @@ void main() {
       weightPercent: 15,
     );
     expect(secondStore.active(138), isEmpty);
+  });
+
+  test('file store rejects an idempotency key for a different target', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final store = FileRouteLeaseStore(
+      dirFactory: () => dir,
+      idFactory: _idFactory(),
+    );
+    final first = store.reserve(
+      provider: 'claude',
+      account: 'work',
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: 'retry-file',
+    );
+
+    final conflict = FileRouteLeaseStore(dirFactory: () => dir).reserve(
+      provider: 'codex',
+      account: 'home',
+      now: 101,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: 'retry-file',
+    );
+
+    expect(first.reserved, isTrue);
+    expect(conflict.reserved, isFalse);
+    expect(conflict.reused, isFalse);
+    expect(conflict.lease, isNull);
+    expect(conflict.reason, contains('different lease target'));
+    expect(conflict.activeLeases, hasLength(1));
   });
 
   test('file store selects against leases persisted in its transaction', () {

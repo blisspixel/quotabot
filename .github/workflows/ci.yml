@@ -14,6 +14,39 @@ permissions:
   contents: read
 
 jobs:
+  static-quality:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Ruff lint
+        uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+        with:
+          version: '0.15.16'
+          args: 'check --output-format=github'
+          src: '.'
+      - name: Ruff format
+        uses: astral-sh/ruff-action@278981a28ce3188b1e39527901f38254bf3aac89 # v4.1.0
+        with:
+          version: '0.15.16'
+          args: 'format --check'
+          src: '.'
+      - name: actionlint
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/actionlint_1.7.7_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --proto '=https' --tlsv1.2 \
+            'https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz' \
+            --output "$archive"
+          echo '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  '"$archive" \
+            | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
   test:
     if: github.actor != 'dependabot[bot]'
     # Run the full suite on every claimed platform (Linux, macOS, Windows) so the
@@ -35,6 +68,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
 
       # Pin Python so `python` resolves on every runner (macOS ships only
       # python3), for the coverage gate and the LiteLLM router tests.
@@ -48,7 +83,7 @@ jobs:
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
-          channel: stable
+          flutter-version: '3.44.2'
           cache: true
 
       - name: Windows architecture helper tests
@@ -61,14 +96,14 @@ jobs:
         run: bash tools/test-write-desktop-entry.sh
 
       - name: Coverage checker and policy tests
-        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_verify_desktop_archive
+        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_verify_cli_archive tools.test_verify_desktop_archive
 
       - name: Release version consistency
         run: python tools/check_release_version.py
 
       - name: Collector dependencies
         working-directory: collector
-        run: dart pub get
+        run: dart pub get --enforce-lockfile
 
       - name: Collector format
         working-directory: collector
@@ -82,8 +117,7 @@ jobs:
         working-directory: collector
         run: |
           dart test --coverage=coverage
-          dart pub global activate coverage
-          dart pub global run coverage:format_coverage \
+          dart run coverage:format_coverage \
             --lcov \
             --check-ignore \
             --in=coverage \
@@ -92,9 +126,26 @@ jobs:
             --report-on=lib
           python ../tools/check_lcov.py coverage/lcov.info 90
 
+      - name: Verify Windows CLI package build
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./tools/package-cli.ps1
+          python tools/verify_cli_archive.py release/quotabot-windows-x64.zip
+
+      - name: Verify macOS or Linux CLI package build
+        if: runner.os != 'Windows'
+        run: |
+          bash tools/package-cli.sh
+          archive="$(find release -maxdepth 1 -type f \( \
+            -name 'quotabot-darwin-*.tar.gz' -o \
+            -name 'quotabot-linux-*.tar.gz' \) -print -quit)"
+          test -n "$archive"
+          python tools/verify_cli_archive.py "$archive"
+
       - name: Flutter dependencies
         working-directory: app
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Flutter format
         working-directory: app
@@ -102,12 +153,12 @@ jobs:
 
       - name: Flutter analyze
         working-directory: app
-        run: flutter analyze
+        run: flutter analyze --no-pub
 
       - name: Flutter tests with coverage
         working-directory: app
         run: |
-          flutter test --coverage
+          flutter test --no-pub --coverage
           python ../tools/check_lcov.py coverage/lcov.info 80
 
       - name: Verify Windows desktop package build

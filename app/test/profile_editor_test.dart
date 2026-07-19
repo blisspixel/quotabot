@@ -150,7 +150,6 @@ void main() {
     await tester.pump();
     expect(_button(tester, 'Save').onPressed, isNotNull);
 
-    await _choose(tester, 'Balanced', 'Subscriptions first');
     await _choose(tester, 'System', 'Hacker');
 
     await tester.tap(find.widgetWithText(CheckboxListTile, 'Codex'));
@@ -168,7 +167,7 @@ void main() {
     expect(saved?.accounts, {
       'grok': {'work@example.com'},
     });
-    expect(saved?.routingPolicy, ProfileRoutingPolicy.subscriptionsFirst);
+    expect(saved?.routingPolicy, ProfileRoutingPolicy.balanced);
     expect(saved?.theme, appThemeHacker);
     expect(saved?.sort, ProviderSort.defaultOrder.name);
   });
@@ -285,7 +284,7 @@ void main() {
     expect(_button(tester, 'Save').onPressed, isNotNull);
     expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
 
-    await _choose(tester, 'Subscriptions first', 'Local only');
+    await _choose(tester, 'Cloud first, local fallback', 'Local only');
     await _choose(tester, 'Dark', 'Light');
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
@@ -326,13 +325,52 @@ void main() {
     expect(result.value?.profile?.preferenceOrder, ['grok', 'codex']);
   });
 
+  testWidgets('legacy credential filter requires a current selection', (
+    tester,
+  ) async {
+    const current =
+        'credential:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const legacy = QuotaProfile(
+      name: 'legacy-codex',
+      accounts: {
+        'codex': {'plus'},
+      },
+    );
+    final currentQuota = _provider('codex', 'Codex', current);
+    final result = await _openEditor(
+      tester,
+      profiles: [QuotaProfile.defaultProfile(), legacy],
+      providers: [currentQuota],
+      activeProfile: legacy.name,
+    );
+
+    expect(find.text('plus'), findsNothing);
+    expect(
+      find.text('Select at least one current Codex credential'),
+      findsOneWidget,
+    );
+    expect(_button(tester, 'Save').onPressed, isNull);
+
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'account bbbbbbbb'));
+    await tester.pump();
+    expect(_button(tester, 'Save').onPressed, isNotNull);
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    // Selecting the only current credential compacts to an unfiltered account
+    // map, which includes that credential without retaining the obsolete label.
+    final saved = result.value!.profile!;
+    expect(saved.accounts, isEmpty);
+    expect(applyProfile([currentQuota], saved), [currentQuota]);
+  });
+
   testWidgets('switching profiles loads that profile stored UI preferences', (
     tester,
   ) async {
     final result = await _openEditor(tester);
 
     await _choose(tester, 'Default', 'Work');
-    expect(find.text('Subscriptions first'), findsOneWidget);
+    expect(find.text('Cloud first, local fallback'), findsOneWidget);
     expect(find.text('Dark'), findsOneWidget);
     expect(
       tester

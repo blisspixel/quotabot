@@ -48,7 +48,7 @@ jobs:
             exit 1
           fi
 
-          latest="${tags[0]}"
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
           target="${INPUT_TARGET_TAG:-$latest}"
           if [[ "$target" != "$latest" ]]; then
             echo "target_tag must equal the latest published release ($latest)." >&2
@@ -61,8 +61,8 @@ jobs:
 
           previous="${INPUT_PREVIOUS_TAG:-}"
           if [[ -z "$previous" ]]; then
-            for tag in "${tags[@]:1}"; do
-              if [[ "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+            for tag in "${tags[@]}"; do
+              if [[ "$tag" != "$latest" && "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
                 previous="$tag"
                 break
               fi
@@ -125,6 +125,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ needs.resolve-releases.outputs.target_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
 
       - name: Verify and clean-install Windows release
         if: runner.os == 'Windows'
@@ -157,6 +161,7 @@ jobs:
           $trackedText = (Get-Content -LiteralPath install.ps1 -Raw).Replace($crlf, $lf).Replace($cr, $lf)
           $servedText = (Get-Content -LiteralPath $served -Raw).Replace($crlf, $lf).Replace($cr, $lf)
           if ($trackedText -cne $servedText) { throw 'Served installer differs from the target commit.' }
+          $env:QUOTABOT_VERSION = $env:TARGET_TAG
           & pwsh -NoProfile -ExecutionPolicy Bypass -File $served
           if ($LASTEXITCODE -ne 0) { throw "Installer exited $LASTEXITCODE" }
 
@@ -230,7 +235,7 @@ jobs:
 
           curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TARGET_SHA/install.sh" -o "$served"
           cmp install.sh "$served"
-          bash "$served"
+          QUOTABOT_VERSION="$TARGET_TAG" bash "$served"
           diff -qr "$expanded/bin" "$HOME/.local/share/quotabot/bin"
           diff -qr "$expanded/lib" "$HOME/.local/share/quotabot/lib"
           executable="$HOME/.local/bin/quotabot"
@@ -274,6 +279,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           ref: ${{ needs.resolve-releases.outputs.target_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
 
       - name: Restore verified current release archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -283,7 +292,7 @@ jobs:
 
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
-          channel: stable
+          flutter-version: '3.44.2'
           cache: true
 
       - name: Verify target version matches source
@@ -395,6 +404,7 @@ jobs:
           $trackedText = (Get-Content -LiteralPath install.ps1 -Raw).Replace($crlf, $lf).Replace($cr, $lf)
           $servedText = (Get-Content -LiteralPath $served -Raw).Replace($crlf, $lf).Replace($cr, $lf)
           if ($trackedText -cne $servedText) { throw 'Served installer differs from the checked-out script.' }
+          $env:QUOTABOT_VERSION = $env:TARGET_TAG
           & pwsh -NoProfile -ExecutionPolicy Bypass -File $served
           if ($LASTEXITCODE -ne 0) { throw "Installer exited $LASTEXITCODE" }
 
@@ -443,7 +453,7 @@ jobs:
           served="$RUNNER_TEMP/install.sh"
           curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TARGET_SHA/install.sh" -o "$served"
           cmp install.sh "$served"
-          bash "$served"
+          QUOTABOT_VERSION="$TARGET_TAG" bash "$served"
           case "$(uname -s)" in
             Darwin) asset_os=darwin ;;
             Linux) asset_os=linux ;;

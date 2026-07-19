@@ -40,7 +40,7 @@ def launch_command(
             if shutil.which(dependency) is None:
                 raise RuntimeError(
                     f"Required desktop smoke dependency not found: {dependency}"
-            )
+                )
         return ["dbus-run-session", "--", "xvfb-run", "-a", str(executable)]
     if platform == "macos":
         app_bundle = executable.parent.parent.parent
@@ -83,11 +83,7 @@ def validate_payload(payload: Any, expected_platform: str) -> bool:
 
 
 def valid_windows_tray_rect(result_code: int, rect: Any) -> bool:
-    return (
-        result_code == 0
-        and rect.right > rect.left
-        and rect.bottom > rect.top
-    )
+    return result_code == 0 and rect.right > rect.left and rect.bottom > rect.top
 
 
 def windows_tray_rect(process_id: int) -> tuple[int, int, int, int] | None:
@@ -344,11 +340,13 @@ def main() -> int:
                     await_windows_tray(process)
             except RuntimeError as error:
                 output.flush()
-                log_tail = log_file.read_text(
-                    encoding="utf-8", errors="replace"
-                )[-4000:]
+                log_tail = log_file.read_text(encoding="utf-8", errors="replace")[
+                    -4000:
+                ]
                 if log_tail.strip():
-                    raise RuntimeError(f"{error}\nDesktop log tail:\n{log_tail}") from error
+                    raise RuntimeError(
+                        f"{error}\nDesktop log tail:\n{log_tail}"
+                    ) from error
                 raise
             finally:
                 try:

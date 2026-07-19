@@ -274,10 +274,13 @@ String? _displayNameOf(
   return null;
 }
 
-String _displayLabel(String displayName, String? account) =>
-    account != null && account.contains('@') && hasSpecificQuotaAccount(account)
-        ? '$displayName ($account)'
-        : displayName;
+String _displayLabel(String displayName, String? account) {
+  if (account == null || !hasSpecificQuotaAccount(account)) return displayName;
+  if (!account.contains('@') && !isOpaqueCredentialIdentity(account)) {
+    return displayName;
+  }
+  return '$displayName (${quotaAccountDisplayLabel(account)})';
+}
 
 /// A newly available redeemable reset for one provider account: the escape
 /// hatch worth telling the user about once, the moment it appears.

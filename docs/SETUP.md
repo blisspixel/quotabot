@@ -5,8 +5,8 @@ quotabot has two parts, and you can use either on its own:
 1. A **CLI** you install with one command. It prints your quota in the terminal
    and powers routing. Works on Windows, macOS, and Linux.
 2. A **desktop widget** (a small always-available card per provider). You run it
-   from source today; the source setup command builds and installs it on Windows,
-   macOS, and Linux.
+   from a verified portable release bundle, or build and install it from source
+   on Windows, macOS, and Linux.
 
 quotabot reads quota metadata from the safest source each provider exposes. Most
 reads come from local files your existing AI tools already wrote; live providers
@@ -46,8 +46,8 @@ pinning. There is no quotabot account.
 
 | Provider class | Default evidence | Optional quotabot action | Refresh and scope |
 |---|---|---|---|
-| Claude | Claude Code OAuth token | `quotabot login claude` | live while the host credential is valid; the grant keeps the account-wide read live on an idle machine |
-| Codex | Codex OAuth token, then newest local session snapshot | `quotabot login codex` | live when possible; the grant keeps the account-wide read live on an idle machine; local snapshot fallback is visibly this-machine |
+| Claude | Claude Code OAuth token | `quotabot login claude` | live while the host credential is valid; the grant is designed to keep the account-wide read live on an idle machine |
+| Codex | Account-wide Codex OAuth usage metadata | `quotabot login codex` | the grant is designed to keep the account-wide read live on an idle machine; mixed session files are never read |
 | Grok | current Grok CLI token and account file | `quotabot login grok` | own grant refreshes a matching locally discovered account and can pin it |
 | Antigravity | signed-in IDE account and refresh material, then local state fallback | `quotabot login antigravity` | own grant refreshes a matching locally discovered account and can pin it |
 | Cursor, Windsurf/Devin, Kiro | passive local application state | none | opportunistic this-machine evidence |
@@ -58,8 +58,11 @@ pinning. There is no quotabot account.
 Quotabot-owned grants are stored locally and are not synchronized. Run the
 relevant `quotabot login` once on each idle machine that needs its own live read.
 
-If a tool has never run here, that provider simply shows "no live data" until you
-use it once.
+Providers that depend on local host-app account discovery show "no live data"
+until that app has run on this machine. A quotabot-owned grant is also local to
+the machine where it was created; it is not synchronized from another computer.
+Grok and Antigravity still need a locally discovered account before a matching
+grant can be selected.
 
 ### Key-based status-only providers
 
@@ -74,6 +77,12 @@ NIM as a model-budget route while no measured quota windows are known.
 A local runtime only appears in quotabot while its **local server** is running,
 because quotabot reads its models over a local HTTP API. If you have one
 installed but do not see it, start its server:
+
+Host overrides must name an exact loopback destination: `localhost`, an IPv4
+loopback address, or `::1`. quotabot does not contact credential-bearing, LAN,
+or public values supplied through `OLLAMA_HOST`, `LMSTUDIO_HOST`, or
+`LEMONADE_HOST`; it keeps the runtime visible as an unavailable configuration
+error so the setting can be repaired.
 
 - **Ollama:** runs as a background service once installed (port 11434). Honors
   `OLLAMA_HOST`. Ollama cloud models (a `-cloud` tag) can be reached through the
@@ -146,8 +155,8 @@ verify quotabot-windows-x64.zip --repo blisspixel/quotabot`. Use the matching
 archive name on macOS or Linux. The checksum proves the archive matches the
 published sidecar; this basic attestation command verifies repository provenance
 but does not by itself constrain the signer workflow or expected tag. The release
-smoke workflow adds `--signer-workflow`, `--source-ref`, `--source-digest`, and
-`--deny-self-hosted-runners` for the strict release gate.
+and install-smoke workflows add `--signer-workflow`, `--source-ref`,
+`--source-digest`, and `--deny-self-hosted-runners` for their strict gates.
 
 > No prebuilt binary for your platform yet, or you would rather not run one? Skip
 > to [Run everything from source](#run-everything-from-source) at the bottom.
@@ -162,7 +171,7 @@ Each row shows a state and, when useful, the exact next step:
 
 | State           | Meaning                                                        |
 |-----------------|---------------------------------------------------------------|
-| `live`          | Working now; for Claude/Codex this means the host app is signed in. |
+| `live`          | Working now; Claude/Codex have a usable host credential or quotabot grant. |
 | `cached`        | Last good read (age shown in the row); reopen that app or connect quotabot (step 4). |
 | `PROVIDER DRIFT` | A fresh read was rejected; the row is unavailable for routing and shows stale last-trusted quota only when one exists. |
 | `no live data`  | That tool is not installed, not signed in, or has not run on this machine yet. |
@@ -175,9 +184,20 @@ machine-scoped read can still be useful, but it is not the same evidence as a
 fresh account-level live read. Cached cloud quota is shown as last-known evidence
 and is not treated as currently available for routing.
 
+For Claude, read the shared session and weekly windows separately from any
+model-scoped Fable row. A spent or missing Fable pool does not mean the whole
+Claude plan is spent, and quotabot never turns a shared healthy window into
+Fable availability without current scoped evidence. The no-surprise quota budget
+also requires a Max or Team Premium entitlement returned by current provider
+metadata captured on or after July 20, 2026 UTC. The local Claude credential's
+plan label is diagnostic only and never
+proves current included spend or credit-backed classification. Pro, Team
+Standard, host-label-only, and
+plan-unknown Fable rows remain visible only under the unrestricted budget.
+
 | Source label | What it proves |
 |---|---|
-| `authoritative` | A provider-owned account-level quota read; freshness is reported separately |
+| `authoritative` | CLI and report label for a provider-owned account-level quota read; the desktop says `account-wide`; freshness is reported separately |
 | `this-machine fallback` | A local fallback that can miss use on another device |
 | `passive local` | Opportunistic evidence from a local IDE or CLI state store |
 | `local runtime` | A supported loopback runtime is reachable; not proof that every model executes locally |
@@ -200,14 +220,16 @@ quotabot suggest          # where to send the next request (step 6)
 
 ## 4. Keep a provider live on an idle machine or pin an account (optional)
 
-Every provider reads with its host credentials on a machine you actively use its
-app on. Because a host token only refreshes while its app runs on that machine,
-Claude and Codex can show a stale number on a machine you have not opened the app
-on recently (Codex can also fall back to this-machine session snapshots). A
-one-time quotabot login creates a separate refreshable grant that keeps the
-account-wide read live there, or pins a specific account, or covers a short-lived
-host credential. It does not replace initial account discovery: run the provider
-app on this machine first, and retain its local account identity state.
+Claude, Codex, Grok, and Antigravity can reuse a valid credential from their host
+app for a zero-setup live read. Because a Claude or Codex host token refreshes
+only while that app runs on the machine, its account-wide read can become stale
+on an idle host. An optional quotabot login creates a separate refreshable grant
+designed to keep the read live there. Refresh and expired-host fall-through have
+deterministic automated coverage, but dated real-account evidence after an idle
+interval remains a tracked 1.0 acceptance item. Always confirm the actual machine
+with `quotabot doctor`. Grok and Antigravity account pinning still relies on
+locally discovered account identity, so run that provider app on this machine
+first and retain its local account state.
 
 ```bash
 quotabot login claude        # opens a browser; paste back the code it shows
@@ -218,12 +240,14 @@ quotabot doctor              # confirm they now read "live"
 quotabot logout claude       # or: codex | grok | antigravity
 ```
 
-Neither needs any cloud setup. quotabot stores its own refreshing grant for the
-account you pick, separate from the host apps, so it never disturbs their
-credentials. When an account-specific grant exists, quotabot prefers it for that
-account; otherwise it falls back to the provider-default grant or the host app's
-current token. Grok and Antigravity login save both when the provider returns an
-account email. (Advanced: override the Antigravity OAuth client with
+These flows need no manual cloud project setup. Antigravity performs its
+provider-required account onboarding request automatically. quotabot stores its
+refreshing grant separately and never writes a host app's credentials. Claude
+and Codex try a current host token first, then their independent grant when
+needed. Grok and Antigravity can use an account-scoped grant when its discovered
+identity matches; their login saves the account slot when the provider returns
+an email.
+(Advanced: override the Antigravity OAuth client with
 `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`.)
 
 ## 5. Run the desktop widget (optional)
@@ -274,9 +298,12 @@ route eligible. It runs the same on all three platforms.
 ### Update the release CLI
 
 Re-run the same one-line installer. It replaces the CLI bundle and preserves
-quotabot's separate config, history, grants, profiles, and manual entries. Close
-`quotabot top`, MCP, and other running quotabot processes first on Windows so the
-executable can be replaced. Then run `quotabot --version` and `quotabot doctor`.
+quotabot's separate config, history, grants, profiles, and manual entries. The
+installer stages a complete versioned payload and switches the stable entry only
+after validation. If activation fails, the previous entry is restored. A
+long-running process can continue using its previous generation, so close and
+restart `quotabot top`, MCP, and other servers before checking the new version.
+Then run `quotabot --version` and `quotabot doctor`.
 
 ### Uninstall the release CLI but preserve data
 
@@ -285,6 +312,7 @@ macOS and Linux:
 ```bash
 rm -f "$HOME/.local/bin/quotabot"
 rm -rf "$HOME/.local/share/quotabot"
+rm -rf "$HOME/.local/share/.quotabot-versions"
 ```
 
 Windows PowerShell removes only the installed bundle and its user PATH entry,
@@ -292,11 +320,21 @@ leaving other `%LOCALAPPDATA%\quotabot` metadata intact:
 
 ```powershell
 $installDir = Join-Path $env:LOCALAPPDATA 'quotabot\bin'
+$installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $kept = @($userPath -split ';' | Where-Object { $_ -and $_ -ne $installDir })
 [Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
-Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\bin') -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\lib') -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($name in @('bin', 'lib')) {
+  $path = Join-Path $installRoot $name
+  $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+  if (-not $item) { continue }
+  if ($item.LinkType) {
+    Remove-Item -LiteralPath $path -Force
+  } else {
+    Remove-Item -LiteralPath $path -Recurse -Force
+  }
+}
+Remove-Item -LiteralPath (Join-Path $installRoot 'cli-versions') -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 Open a new terminal after uninstalling. Desktop release bundles and source-setup
@@ -306,6 +344,29 @@ are `%LOCALAPPDATA%\quotabot\desktop` on Windows,
 `~/Applications/quotabot.app` on macOS. Portable desktop lifecycle instructions
 are in [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md); source build and
 launcher behavior remain in [BUILDING.md](BUILDING.md).
+
+Source setup uses sibling version stores on macOS and Linux. To remove a source
+desktop install while preserving quotabot data, close the app and remove both
+its stable path and private generations. On Linux, also remove the menu entry:
+
+```bash
+# Linux
+rm -rf "$HOME/.local/share/quotabot-desktop"
+rm -rf "$HOME/.local/share/.quotabot-desktop-versions"
+rm -f "$HOME/.local/share/applications/quotabot.desktop"
+
+# macOS
+rm -rf "$HOME/Applications/quotabot.app"
+rm -rf "$HOME/Applications/.quotabot.app-versions"
+```
+
+On Windows, close the app, then remove its stable bundle and shortcut:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\desktop') -Recurse -Force -ErrorAction SilentlyContinue
+$shortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'quotabot.lnk'
+Remove-Item -LiteralPath $shortcut -Force -ErrorAction SilentlyContinue
+```
 
 ### Roll back
 
@@ -334,21 +395,23 @@ Only exact `vMAJOR.MINOR.PATCH` tags are accepted. Run `quotabot --version` and
 
 ### Reset all local quotabot data
 
-This is destructive and is not required for uninstall. Sign out any quotabot-
-owned provider grants if possible. On macOS or Linux, remove the per-user data
-directory in the table below. On Windows, the same root also contains the
-release CLI, so preserve `bin` and `lib` when resetting data in place:
+This is destructive and is not required for uninstall. Stop quotabot processes
+and make sure setup is not running. Sign out any quotabot-owned provider grants
+if possible. On macOS or Linux, remove the per-user data directory in the table
+below. On Windows, the same root also contains installed binaries, so preserve
+`bin`, `lib`, `cli-versions`, and `desktop` when resetting data in place:
 
 ```powershell
 $root = Join-Path $env:LOCALAPPDATA 'quotabot'
 Get-ChildItem -LiteralPath $root -Force |
-  Where-Object { $_.Name -notin @('bin', 'lib') } |
+  Where-Object { $_.Name -notin @('bin', 'lib', 'cli-versions', 'desktop') } |
   Remove-Item -Recurse -Force
 ```
 
 This deletes cache, history, preferences, profiles, manual entries, grants,
-leases, and alert state while leaving the Windows CLI on PATH. For a complete
-Windows removal, run the PATH-aware uninstall first, then remove the remaining
+leases, and alert state while leaving the Windows CLI and source desktop install
+in place. For a complete Windows removal, run the PATH-aware CLI uninstall and
+the source desktop removal above, then remove the remaining
 `%LOCALAPPDATA%\quotabot` directory.
 
 ## Where quotabot stores its data
@@ -375,18 +438,32 @@ safe defaults, and shows a warning. It does not delete the file automatically;
 secure or remove that file before retrying. The same warning distinguishes an
 invalid, unreadable, non-regular, or oversized preferences file instead of
 misreporting every load failure as a permission problem.
-The Windows directory also contains the release `bin` and `lib` folders, so
-reset and uninstall require the separate procedures above.
+The Windows directory also contains the release `bin` and `lib` entry points and
+the `cli-versions` payload store, so reset and uninstall require the separate
+procedures above.
 
 ## Troubleshooting
 
 - **"no live data" for a provider you use:** open that provider's app once so it
-  writes local state, then re-run `quotabot doctor`.
+  writes or refreshes local state, then re-run `quotabot doctor`. On an idle
+  machine, use `quotabot login claude` or `quotabot login codex` to establish a
+  separately refreshable path, then confirm the account-wide read with
+  `quotabot doctor`.
 - **NVIDIA NIM stays missing:** make sure `NVIDIA_API_KEY` or `nvapi` is visible
   in the same shell that starts quotabot. A valid key shows availability with
   unknown numeric quota, not a percentage window.
 - **Everything reads as "cached":** your machine was offline or asleep; reopen a
-  provider app, or connect Grok/Antigravity once (step 4).
+  provider app, or connect the affected live provider once (step 4).
+- **Claude disagrees with interactive `/usage`:** check the row's source and age,
+  then run `quotabot check claude --json` and `quotabot verify`. Compare the
+  current-window bars and reset times, not `/usage`'s approximate contribution
+  breakdown based on local sessions. On an idle machine, use `quotabot login
+  claude` so quotabot can refresh its own account-wide grant. A cached value
+  whose reset passed stays stale and unavailable; it never becomes an inferred
+  100% free. Do not automate `claude -p /usage` or `/quota`, because print mode
+  executes a prompt rather than exposing a stable quota API. If a fresh
+  authoritative row still differs, retain the redacted verification output and
+  report the mismatch.
 - **A row says "PROVIDER DRIFT":** run `quotabot verify`, then compare the named
   provider and any reported windows with the provider's own usage view. quotabot
   keeps last-trusted quota visible when it exists, but will not route to it or

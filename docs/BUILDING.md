@@ -1,7 +1,9 @@
 # Building from source
 
-Prerequisites: the [Flutter SDK](https://docs.flutter.dev/get-started/install)
-(it includes Dart). Per-OS build tools: Visual Studio with "Desktop development
+Prerequisites: Flutter 3.44.2 with Dart 3.12.2, the exact toolchain pinned in CI
+and release builds. Install it from the
+[Flutter SDK archive](https://docs.flutter.dev/install/archive); Flutter includes
+Dart. Per-OS build tools: Visual Studio with "Desktop development
 with C++" plus C++ ATL support for your installed MSVC toolset (Windows), Xcode
 and CocoaPods (macOS), or
 `clang cmake ninja-build pkg-config libgtk-3-dev libayatana-appindicator3-dev`
@@ -19,10 +21,12 @@ pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
 bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
 ```
 
-The CLI is installed to your per-user bin (`%LOCALAPPDATA%\quotabot\bin` on
-Windows, `~/.local/bin` on macOS and Linux). Windows setup adds that directory
-to the user PATH. On macOS and Linux, setup reports the exact shell-profile
-change when `~/.local/bin` is not already on PATH. Windows creates a Desktop
+The CLI command is exposed through your per-user bin
+(`%LOCALAPPDATA%\quotabot\bin` on Windows, `~/.local/bin` on macOS and Linux).
+On macOS and Linux, that command shim launches the stable complete payload at
+`~/.local/share/quotabot`. Windows setup adds its bin directory to the user
+PATH. On macOS and Linux, setup reports the exact shell-profile change when
+`~/.local/bin` is not already on PATH. Windows creates a Desktop
 shortcut to `%LOCALAPPDATA%\quotabot\desktop`, Linux installs the app under
 `~/.local/share/quotabot-desktop` with an application-menu entry, and macOS
 installs `~/Applications/quotabot.app`. These launchers remain valid if the
@@ -30,6 +34,16 @@ source checkout moves or is removed. Re-run after a `git pull` to update. On
 Windows, setup restarts a running installed desktop app after activation so the
 tray app is not left on old code. The manual steps below are the same thing by
 hand.
+
+Setup stages each CLI or desktop payload as one complete versioned generation
+before switching its stable entry path. On macOS and Linux, the active target is
+a relative symlink and its private sibling version store retains the immediate
+predecessor for recovery. Uninstall must remove both paths; the exact commands
+are in [SETUP.md](SETUP.md#uninstall-the-release-cli-but-preserve-data).
+On macOS and Linux, full source setup stages and validates both payload
+generations before activating either stable target. If either payload activation
+fails, setup restores both prior stable targets before returning an error. The
+CLI-only path remains one versioned transaction.
 
 ## Run from source
 
@@ -48,7 +62,8 @@ flutter run -d windows   # or macos / linux
 
 ```bash
 cd app
-flutter build windows --release   # or macos / linux, on the target OS
+flutter pub get --enforce-lockfile
+flutter build windows --release --no-pub   # or macos / linux, on the target OS
 ```
 
 Notes:
@@ -64,11 +79,13 @@ Notes:
   check. The desktop notification plugin uses Visual Studio ATL headers; if a
   build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
   ATL support for your installed MSVC toolset.
-- **macOS:** `bash tools/package-macos.sh` runs `flutter build macos --release`
+- **macOS:** `bash tools/package-macos.sh` verifies the committed lockfile, then
+  runs `flutter build macos --release --no-pub`
   on a macOS host, verifies the `.app` bundle, and writes a portable desktop ZIP
   plus its checksum sidecar. Production distribution still needs Developer ID
   signing, notarization, and stapling.
-- **Linux:** `bash tools/package-linux.sh` runs `flutter build linux --release`
+- **Linux:** `bash tools/package-linux.sh` verifies the committed lockfile, then
+  runs `flutter build linux --release --no-pub`
   on a Linux host, verifies the executable bundle plus `.desktop` and icon
   assets, and creates a portable tarball plus its checksum sidecar. You can also
   repackage that bundle as an AppImage (`appimagetool`) or deb/rpm.
@@ -76,10 +93,13 @@ Notes:
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
   writing a `dart build cli` bundle archive plus a `.sha256` sidecar. The
   GitHub `Release` workflow runs the CLI and desktop helpers on `v*` tags,
-  validates every desktop archive, performs native Windows and Linux readiness
-  smoke checks, attests every archive, exercises versioned update, rollback, and
-  data-preserving uninstall mechanics on clean native runners, and publishes
-  only after every asset has passed.
+  validates every CLI and desktop archive, and attests each exact archive path.
+  Clean native runners then redownload all four draft CLI archives, reverify
+  checksum and provenance, and require the packaged version and demo-mode
+  `doctor --json` to run. Three more native runners reverify the desktop
+  archives and exercise their portable lifecycle before the exact-asset audit
+  allows publication. The separate `Install smoke` workflow tests the published
+  one-line installer, a versioned upgrade, persistent data, and source setup.
 
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners and validates each resulting archive plus checksum, so
@@ -129,10 +149,20 @@ maintainer will consume it:
    directory.
 5. Commit the release metadata on `main`, push it, and wait for hosted Windows,
    macOS, and Ubuntu CI plus CodeQL and secret scanning to pass before tagging.
-6. Push an annotated `vX.Y.Z` tag. Wait for both tag-triggered CI and every
-   `Release` workflow job, including four CLI builds, three desktop builds, and
-   three clean archive-verification legs, to pass.
-7. Confirm that the published release is neither draft nor prerelease and has
+6. Before tagging, repeat the package and execution smoke on each claimed native
+   host and complete the interactive launcher, tray, and accessibility checks
+   that hosted automation cannot prove. Record an unavailable cell explicitly
+   rather than treating a shared-code test as native evidence.
+7. Verify the official repository still has the active `v*` tag ruleset that
+   blocks updates and deletion, plus GitHub release immutability. Immutability
+   applies only to releases published after the setting was enabled on July 18,
+   2026; it does not retroactively change v0.9.2 or earlier releases.
+8. Push an annotated `vX.Y.Z` tag. Wait for every `Release` workflow job,
+   including its reusable CI quality gate, four CLI builds, four clean CLI
+   execution legs, three desktop builds, and three clean desktop
+   archive-verification legs, to pass.
+9. Confirm that the published stable release is neither draft nor prerelease,
+   is marked immutable, and has
    these CLI archive and `.sha256` sidecar pairs:
    `quotabot-windows-x64.zip`, `quotabot-darwin-arm64.tar.gz`,
    `quotabot-linux-x64.tar.gz`, and `quotabot-linux-arm64.tar.gz`.
@@ -140,15 +170,16 @@ maintainer will consume it:
    `quotabot-windows-x64-desktop.zip`,
    `quotabot-darwin-arm64-desktop.zip`, and
    `quotabot-linux-x64-desktop.tar.gz`.
-8. Download every archive, compare it with its SHA-256 sidecar, and verify its
+10. Download every archive, compare it with its SHA-256 sidecar, and verify its
    repository provenance with `gh attestation verify <archive> --repo
    blisspixel/quotabot`. That basic command does not constrain the signer or tag;
-   the install-smoke workflow adds signer-workflow, source-ref, source-digest,
-   and self-hosted-runner restrictions for the release gate.
+   the release and install-smoke workflows add signer-workflow, source-ref,
+   source-digest, and self-hosted-runner restrictions.
    The release workflow creates the attestation before uploading each pair.
-9. Install and smoke-test the packaged CLI and portable desktop app on clean
-   Windows, macOS, and Linux hosts before promoting a stable release candidate.
-10. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
+11. After publication, dispatch `Install smoke` immediately and require its
+    clean install, prior-version upgrade, persistent-state, and source-setup
+    matrix to pass on Windows, macOS, and Linux.
+12. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
 
 The `Install smoke` workflow automates the post-release clean-host portion of

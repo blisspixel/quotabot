@@ -35,7 +35,7 @@ enum ProviderAdapterClass {
 }
 
 enum ProviderFixtureKind {
-  codexRateLimits,
+  codexUsage,
   claudeUsage,
   antigravityQuota,
   grokGrpcBytes,
@@ -88,6 +88,8 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: _collectClaude,
+    multiAccount: true,
+    currentAccounts: _claudeCurrentAccounts,
     fixtureKind: ProviderFixtureKind.claudeUsage,
     fixtureFile: 'claude_usage.json',
   ),
@@ -95,10 +97,12 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: codexProviderId,
     displayName: codexProviderName,
     adapterClass: ProviderAdapterClass.subscription,
-    sourceClasses: kLiveOrMachineFallbackSourceClasses,
+    sourceClasses: kAuthoritativeLiveSourceClasses,
     collect: _collectCodex,
-    fixtureKind: ProviderFixtureKind.codexRateLimits,
-    fixtureFile: 'codex_rate_limits.json',
+    multiAccount: true,
+    currentAccounts: _codexCurrentAccounts,
+    fixtureKind: ProviderFixtureKind.codexUsage,
+    fixtureFile: 'codex_usage.json',
   ),
   ProviderAdapterRegistration(
     id: cursorProviderId,
@@ -264,5 +268,9 @@ Future<List<ProviderQuota>> _collectAntigravity() =>
     AntigravityAdapter().collectAccounts();
 
 Set<String> _grokCurrentAccounts() => GrokAdapter.currentAccounts;
+
+Set<String> _claudeCurrentAccounts() => ClaudeAdapter.currentAccounts;
+
+Set<String> _codexCurrentAccounts() => CodexAdapter.currentAccounts;
 
 Set<String> _antigravityCurrentAccounts() => AntigravityAdapter.currentAccounts;

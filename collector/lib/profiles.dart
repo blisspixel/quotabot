@@ -10,16 +10,27 @@ const defaultProfileName = 'default';
 
 enum ProfileRoutingPolicy {
   balanced,
+
+  /// Deprecated wire alias for [balanced]. Kept so older profile files remain
+  /// readable; new writes always serialize the canonical policy.
   subscriptionsFirst,
   localOnly;
 
   static ProfileRoutingPolicy parse(Object? value) {
     final s = value?.toString();
+    if (s == ProfileRoutingPolicy.subscriptionsFirst.name) {
+      return ProfileRoutingPolicy.balanced;
+    }
     return ProfileRoutingPolicy.values.firstWhere(
       (p) => p.name == s,
       orElse: () => ProfileRoutingPolicy.balanced,
     );
   }
+
+  ProfileRoutingPolicy get canonical =>
+      this == ProfileRoutingPolicy.subscriptionsFirst
+          ? ProfileRoutingPolicy.balanced
+          : this;
 }
 
 class QuotaProfile {
@@ -91,7 +102,7 @@ class QuotaProfile {
             entry: _sorted(normalizedAccounts[entry] ?? const {}),
         },
       if (normalizedHidden.isNotEmpty) 'hidden': _sorted(normalizedHidden),
-      'routing_policy': routingPolicy.name,
+      'routing_policy': routingPolicy.canonical.name,
       // Order matters (most-preferred first), so this is a list, not a sorted
       // set like the filter fields above.
       if (normalizedPreference.isNotEmpty)
@@ -254,6 +265,32 @@ String? normalizeProviderId(String? provider) {
   // funnel through here. Identity until a rename is registered.
   return canonicalizeProviderId(s);
 }
+
+/// True when a saved account filter predates opaque credential identities.
+/// Older releases used a plan or response label for Claude and Codex accounts,
+/// so those filters cannot safely match a current credential. Callers should
+/// offer an edit-profile repair and keep the filter fail-closed.
+bool isLegacyCredentialProfileAccountFilter(
+  String provider,
+  String account,
+) {
+  final normalizedProvider = normalizeProviderId(provider);
+  final normalizedAccount = account.trim();
+  return (normalizedProvider == claudeProviderId ||
+          normalizedProvider == codexProviderId) &&
+      normalizedAccount.isNotEmpty &&
+      !isOpaqueCredentialIdentity(normalizedAccount);
+}
+
+/// Backward-compatible Claude-specific predicate.
+bool isLegacyClaudeProfileAccountFilter(String provider, String account) =>
+    normalizeProviderId(provider) == claudeProviderId &&
+    isLegacyCredentialProfileAccountFilter(provider, account);
+
+/// True for a pre-0.9.3 Codex plan or response-label account filter.
+bool isLegacyCodexProfileAccountFilter(String provider, String account) =>
+    normalizeProviderId(provider) == codexProviderId &&
+    isLegacyCredentialProfileAccountFilter(provider, account);
 
 const _maxProfileBytes = 256 * 1024;
 

@@ -97,13 +97,26 @@ void main(List<String> args) {
   outDir.createSync(recursive: true);
 
   final demoFleet = demo.demoProviders(_now);
-  final demoSuggestion = suggestRoute(
+  final demoSuggestion = decide(
     demoFleet,
     _now,
-    burnStatsByProvider: demo.demoBurnStats(),
-  );
+    context: providerRouteDecisionContext(
+      demoFleet,
+      _now,
+      burnStatsByProvider: demo.demoBurnStats(),
+      catalog: kModelCatalog,
+    ),
+  ).route;
   final stress = _stressFleet(_now);
-  final stressSuggestion = suggestRoute(stress, _now);
+  final stressSuggestion = decide(
+    stress,
+    _now,
+    context: providerRouteDecisionContext(
+      stress,
+      _now,
+      catalog: kModelCatalog,
+    ),
+  ).route;
 
   void render(
     String name, {

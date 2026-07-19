@@ -34,6 +34,21 @@ void main() {
       expect(windows.map((w) => w.label), ['5h']);
       expect(windows.single.usedPercent, 45);
     });
+
+    test('live weekly-only plans and sparse model pools remain separate', () {
+      final response = _edge('codex_weekly_only_with_spark.json');
+      final usage = codexLiveUsage(response);
+
+      expect(usage, isNotNull);
+      expect(usage!.windows, hasLength(1));
+      expect(usage.windows.single.label, 'weekly');
+      expect(usage.windows.single.usedPercent, 63);
+      expect(usage.modelQuotas, hasLength(1));
+      expect(usage.modelQuotas.single.model, 'GPT-5.3-Codex-Spark');
+      expect(usage.modelQuotas.single.usedPercent, 0);
+      expect(usage.modelQuotas.single.resetsAt, 1785034650);
+      expect(usage.modelQuotas.single.windowLabel, 'weekly');
+    });
   });
 
   group('lm studio v1 shape (captured from a real 0.4.0+ server)', () {

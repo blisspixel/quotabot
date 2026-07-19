@@ -35,6 +35,10 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.verify.v1');
     expect(json['passed'], isTrue);
+    expect(json['honesty_passed'], isTrue);
+    expect(json['require_live'], isFalse);
+    expect(json['all_live_reads_succeeded'], isFalse,
+        reason: 'simulation must never claim that a live adapter ran');
     expect(json['os'], Platform.operatingSystem);
     final providers = json['providers'] as List;
     expect(providers, hasLength(1));
@@ -43,6 +47,7 @@ void main() {
     expect(claude['source_class'], 'authoritative_live');
     expect(claude['state'], 'live');
     expect(claude['passed'], isTrue);
+    expect(claude['live_read_succeeded'], isFalse);
     final providerChecks =
         (claude['checks'] as List).cast<Map<String, dynamic>>();
     expect(
@@ -89,6 +94,7 @@ void main() {
     expect(grok['source_class'], 'authoritative_live');
     expect(grok['state'], 'error');
     expect(grok['passed'], isTrue);
+    expect(grok['live_read_succeeded'], isFalse);
     final checks = (grok['checks'] as List).cast<Map<String, dynamic>>();
     final readOrReason = checks.firstWhere((c) => c['id'] == 'read_or_reason');
     expect(readOrReason['status'], 'pass');
@@ -128,7 +134,9 @@ void main() {
     expectExitCode(result, 0);
     final out = result.stdout as String;
     expect(out, contains('quotabot verify'));
-    expect(out, contains('PASS'));
+    expect(out, contains('honesty checks over one snapshot'));
+    expect(out, isNot(contains('honesty checks over one live read')));
+    expect(out, contains('HONEST'));
     expect(out, contains('/usage'));
     expect(out, contains('runtime access manifest only'));
     expect(out, contains('quotabot verify --json'));
@@ -160,6 +168,7 @@ void main() {
     expect(out, contains('[error, authoritative, quota plan, captured'));
     expect(out, contains('read_or_reason'));
     expect(out, contains('simulated signed-out state'));
+    expect(out, contains('HONEST'));
   });
 
   test('verify human output explains cached snapshots', () async {
@@ -178,6 +187,25 @@ void main() {
     );
     expect(out, contains('stale_honesty'));
     expect(out, contains('simulated stale cache'));
+    expect(out, contains('HONEST'));
+  });
+
+  test('verify --require-live turns an honest simulation into a strict failure',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--json',
+      '--require-live',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 65);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['require_live'], isTrue);
+    expect(json['honesty_passed'], isTrue);
+    expect(json['all_live_reads_succeeded'], isFalse);
+    expect(json['passed'], isFalse);
   });
 
   test('verify human output names provider drift and trusted provenance',

@@ -16,11 +16,13 @@ class XaiAuth {
 
   /// The public grok-cli OAuth client id (overridable for tests).
   final String clientId;
-  final http.Client _http;
+  // Injected clients remain caller-owned. Default requests are one-shot so the
+  // short-lived auth objects created during collection do not leak pools.
+  final http.Client? _client;
   XaiAuth({
     this.clientId = 'b1a00492-073a-47ea-816f-4c329264a828',
     http.Client? client,
-  }) : _http = client ?? http.Client();
+  }) : _client = client;
 
   /// Runs the device flow: prints the verification URL and code via [prompt],
   /// then polls until the user authorizes. Saves and returns the tokens.
@@ -91,9 +93,23 @@ class XaiAuth {
 
   /// Returns a fresh access token from quotabot's own grant, refreshing and
   /// persisting as needed. Null when there is no stored grant.
-  Future<String?> freshAccessToken({String? account}) async {
-    final stored = TokenStore.load(provider, account: account);
-    if (stored == null) return null;
+  Future<String?> freshAccessToken({
+    String? account,
+    String? requiredDefaultOwner,
+  }) async {
+    if (account != null && requiredDefaultOwner != null) {
+      throw ArgumentError(
+        'requiredDefaultOwner applies only to the default grant',
+      );
+    }
+    final record = TokenStore.loadRecord(provider, account: account);
+    if (record == null) return null;
+    if (requiredDefaultOwner != null &&
+        record.owner != null &&
+        record.owner != requiredDefaultOwner) {
+      return null;
+    }
+    final stored = record.tokens;
     if (stored.isFresh) return stored.accessToken;
     if (stored.refreshToken == null) return null;
     final refreshed = await refresh(stored.refreshToken!);
@@ -105,17 +121,7 @@ class XaiAuth {
     // Best-effort: a save failure must not discard the just-minted access token
     // (the old refresh token is already burned). See AnthropicAuth.
     try {
-      if (account == null) {
-        // Refreshing the default slot in place: keep its owner stamp so the
-        // adapter's cross-account guard still knows who the default belongs to.
-        // A plain save would drop the stamp and reopen that guard.
-        final owner = TokenStore.defaultOwner(provider);
-        owner != null
-            ? TokenStore.saveDefaultOwnedBy(provider, refreshed!, owner)
-            : TokenStore.save(provider, refreshed!);
-      } else {
-        TokenStore.save(provider, refreshed!, account: account);
-      }
+      if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
     } catch (_) {}
     return refreshed!.accessToken;
   }
@@ -162,12 +168,14 @@ class XaiAuth {
   }
 
   Future<http.Response> _postRaw(String url, Map<String, String> form) {
-    return _http
-        .post(
-          Uri.parse(url),
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: form,
-        )
-        .timeout(const Duration(seconds: 15));
+    final uri = Uri.parse(url);
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+    final client = _client;
+    final request = client == null
+        ? http.post(uri, headers: headers, body: form)
+        : client.post(uri, headers: headers, body: form);
+    return request.timeout(const Duration(seconds: 15));
   }
 }

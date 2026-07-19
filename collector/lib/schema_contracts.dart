@@ -61,6 +61,11 @@ const quotabotV1JsonSchema = <String, Object?>{
         'display_name': {'type': 'string', 'minLength': 1},
         'account': {'type': 'string', 'minLength': 1},
         'plan': {'type': 'string'},
+        'plan_evidence_source': {
+          'type': 'string',
+          'enum': ProviderPlanEvidenceSource.wireValues,
+        },
+        'plan_evidence_as_of': {'type': 'integer', 'minimum': 1},
         'source': {'type': 'string'},
         'source_class': {
           'type': 'string',
@@ -100,6 +105,8 @@ const quotabotV1JsonSchema = <String, Object?>{
           'pattern': r'\S',
         },
         'drift_observed_at': {'type': 'integer', 'minimum': 0},
+        'per_machine': {'type': 'boolean'},
+        'reset_credits_available': {'type': 'integer', 'minimum': 0},
         'windows': {
           'type': 'array',
           'items': {r'$ref': r'#/$defs/quotaWindow'},
@@ -109,6 +116,10 @@ const quotabotV1JsonSchema = <String, Object?>{
           'items': {r'$ref': r'#/$defs/modelInfo'},
         },
         'local_hardware': {r'$ref': r'#/$defs/localHardware'},
+        'model_quotas': {
+          'type': 'array',
+          'items': {r'$ref': r'#/$defs/modelQuota'},
+        },
       },
     },
     'localHardware': {
@@ -158,6 +169,24 @@ const quotabotV1JsonSchema = <String, Object?>{
         'quant': {'type': 'string'},
       },
     },
+    'modelQuota': {
+      'type': 'object',
+      'additionalProperties': true,
+      'required': ['model'],
+      'properties': {
+        'model': {'type': 'string', 'minLength': 1},
+        'used_percent': {'type': 'number', 'minimum': 0, 'maximum': 100},
+        'resets_at': {'type': 'integer', 'minimum': 0},
+        'window_label': {
+          'type': 'string',
+          'minLength': 1,
+          'maxLength': kMaxModelQuotaWindowLabelCharacters,
+          'pattern': r'^\S(?:[\s\S]*\S)?$',
+        },
+        'category': {'type': 'string'},
+        'note': {'type': 'string'},
+      },
+    },
   },
 };
 
@@ -201,6 +230,33 @@ void _validateProvider(
   _checkNonEmptyString(provider, 'display_name', path, errors);
   _checkNonEmptyString(provider, 'account', path, errors);
   _checkOptionalString(provider, 'plan', path, errors);
+  _checkStringEnum(
+    provider,
+    'plan_evidence_source',
+    path,
+    ProviderPlanEvidenceSource.wireValues.toSet(),
+    errors,
+    required: false,
+  );
+  _checkIntRange(
+    provider,
+    'plan_evidence_as_of',
+    path,
+    errors,
+    min: 1,
+    max: 0x7FFFFFFFFFFFFFFF,
+    required: false,
+  );
+  final hasPlanEvidenceSource = provider['plan_evidence_source'] != null;
+  final hasPlanEvidenceAsOf = provider['plan_evidence_as_of'] != null;
+  if (hasPlanEvidenceSource != hasPlanEvidenceAsOf) {
+    errors.add(
+      '$path.plan_evidence_source and plan_evidence_as_of must appear together',
+    );
+  }
+  if (hasPlanEvidenceSource && provider['plan'] is! String) {
+    errors.add('$path.plan evidence requires a plan label');
+  }
   _checkOptionalString(provider, 'source', path, errors);
   _checkStringEnum(
     provider,
@@ -238,6 +294,14 @@ void _validateProvider(
   }
   _checkNonNegativeInt(provider, 'drift_observed_at', path, errors,
       required: false);
+  _checkBool(provider, 'per_machine', path, errors, required: false);
+  _checkNonNegativeInt(
+    provider,
+    'reset_credits_available',
+    path,
+    errors,
+    required: false,
+  );
 
   final windows = provider['windows'];
   if (windows is! List) {
@@ -290,6 +354,29 @@ void _validateProvider(
       );
     } else {
       errors.add('$path.local_hardware must be an object');
+    }
+  }
+
+  final modelQuotas = provider['model_quotas'];
+  if (modelQuotas != null) {
+    if (modelQuotas is! List) {
+      errors.add('$path.model_quotas must be an array');
+    } else {
+      for (var i = 0; i < modelQuotas.length; i++) {
+        final modelQuota = modelQuotas[i];
+        final modelQuotaPath = '$path.model_quotas[$i]';
+        if (modelQuota is Map<String, dynamic>) {
+          _validateModelQuota(modelQuota, modelQuotaPath, errors);
+        } else if (modelQuota is Map) {
+          _validateModelQuota(
+            modelQuota.cast<String, dynamic>(),
+            modelQuotaPath,
+            errors,
+          );
+        } else {
+          errors.add('$modelQuotaPath must be an object');
+        }
+      }
     }
   }
 }
@@ -404,6 +491,49 @@ void _validateModel(
   _checkBool(model, 'loaded', path, errors, required: false);
   _checkNonNegativeInt(model, 'size_bytes', path, errors, required: false);
   _checkNonNegativeInt(model, 'vram_bytes', path, errors, required: false);
+}
+
+void _validateModelQuota(
+  Map<String, dynamic> quota,
+  String path,
+  List<String> errors,
+) {
+  _checkRequired(quota, const ['model'], path, errors);
+  _checkNonEmptyString(quota, 'model', path, errors);
+  final usedPercent = quota['used_percent'];
+  if (usedPercent != null &&
+      !_finiteNumberInRange(usedPercent, min: 0, max: 100)) {
+    errors.add('$path.used_percent must be a finite number from 0 to 100');
+  }
+  _checkNonNegativeInt(quota, 'resets_at', path, errors, required: false);
+  _checkModelQuotaWindowLabel(quota, path, errors);
+  _checkOptionalString(quota, 'category', path, errors);
+  _checkOptionalString(quota, 'note', path, errors);
+}
+
+void _checkModelQuotaWindowLabel(
+  Map<String, dynamic> quota,
+  String path,
+  List<String> errors,
+) {
+  if (!quota.containsKey('window_label') || quota['window_label'] == null) {
+    return;
+  }
+  final value = quota['window_label'];
+  if (value is! String) {
+    errors.add('$path.window_label must be a string');
+    return;
+  }
+  final stripped = stripTerminalControl(value);
+  if (value.isEmpty ||
+      value.length > kMaxModelQuotaWindowLabelCharacters ||
+      value.trim() != value ||
+      stripped != value) {
+    errors.add(
+      '$path.window_label must be a trimmed, non-empty, control-free string '
+      'up to $kMaxModelQuotaWindowLabelCharacters characters',
+    );
+  }
 }
 
 void _checkRequired(

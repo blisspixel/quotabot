@@ -29,7 +29,12 @@ class AppChromeIconButton extends StatelessWidget {
       message: tooltip,
       excludeFromSemantics: true,
       waitDuration: const Duration(milliseconds: 500),
-      child: Semantics(label: tooltip, button: true, child: button),
+      child: Semantics(
+        label: tooltip,
+        button: true,
+        enabled: onTap != null,
+        child: button,
+      ),
     );
   }
 }

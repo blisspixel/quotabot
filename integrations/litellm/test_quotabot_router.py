@@ -4,10 +4,11 @@ import os
 import tempfile
 import unittest
 import unittest.mock
+import urllib.request
 import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 
 from quotabot_router import (
     AgentRule,
@@ -15,7 +16,13 @@ from quotabot_router import (
     Policy,
     QuotabotRouter,
     UnsafeRouteError,
+    _LeaseChoice,
+    _NO_REDIRECT_OPENER,
+    _best_ranked_candidate,
+    _candidate_for_reserved_target,
     _is_loopback_url,
+    _load_local_http_token,
+    _metric_info_for_candidate,
 )
 
 
@@ -24,7 +31,47 @@ class _Key:
     user_id = None
 
 
+async def _unit_reserve_remote(
+    router,
+    candidates,
+    ranked,
+    floor,
+    prior_decision_id,
+):
+    remote = _best_ranked_candidate(candidates, ranked, floor)
+    if remote is None:
+        return None
+    candidate, info = remote
+    decision_id = prior_decision_id
+    return _LeaseChoice(
+        candidate,
+        _metric_info_for_candidate(info, ranked, candidate),
+        "unit-test-lease",
+        decision_id,
+    )
+
+
+async def _unit_release_route_lease(router, route_meta):
+    return None
+
+
 class RouterTests(unittest.TestCase):
+    def setUp(self):
+        self.reserve_patch = unittest.mock.patch.object(
+            QuotabotRouter,
+            "_reserve_remote",
+            _unit_reserve_remote,
+        )
+        self.release_patch = unittest.mock.patch.object(
+            QuotabotRouter,
+            "_release_route_lease",
+            _unit_release_route_lease,
+        )
+        self.reserve_patch.start()
+        self.release_patch.start()
+        self.addCleanup(self.reserve_patch.stop)
+        self.addCleanup(self.release_patch.stop)
+
     def test_shipped_proxy_example_requires_auth_and_loopback(self):
         root = Path(__file__).resolve().parent
         config = (root / "config.example.yaml").read_text(encoding="utf-8")
@@ -359,6 +406,27 @@ models:
             data,
             {"model": "some-other-model", "metadata": "client-value"},
         )
+
+    def test_unmanaged_model_cannot_spoof_reserved_routing_metadata(self):
+        router = QuotabotRouter()
+        data = {
+            "model": "some-other-model",
+            "metadata": {
+                "client_value": "preserved",
+                "quotabot_routed": True,
+                "quotabot_spend": "local",
+                "quotabot_provider": "claude",
+                "quotabot_account": "spoofed@example.com",
+                "quotabot_decision_id": "qb-1782000000-0123456789abcdef",
+                "quotabot_lease_id": "spoofed-lease-0001",
+                "quotabot_original_model": "frontier",
+            },
+        }
+
+        result = asyncio.run(router.async_pre_call_hook(None, None, data, "completion"))
+
+        self.assertIs(result, data)
+        self.assertEqual(data["metadata"], {"client_value": "preserved"})
 
     def test_unexpected_unmanaged_route_error_retains_fail_soft_passthrough(self):
         router = QuotabotRouter()
@@ -777,9 +845,46 @@ models:
         self.assertTrue(_is_loopback_url("http://localhost:8721"))
         self.assertFalse(_is_loopback_url("file:///etc/passwd"))
         self.assertFalse(_is_loopback_url("http://169.254.169.254/latest"))
+        self.assertFalse(_is_loopback_url("http://user:secret@localhost:8721"))
+        self.assertFalse(_is_loopback_url("http://localhost:8721?profile=work"))
+        self.assertFalse(_is_loopback_url("http://localhost:8721/proxy-prefix"))
+        self.assertFalse(_is_loopback_url("http://localhost:8721/#fragment"))
+        self.assertFalse(_is_loopback_url("http://localhost:99999"))
+        self.assertFalse(_is_loopback_url(" http://localhost:8721"))
 
         policy = Policy(quotabot_url="http://169.254.169.254/latest")
         self.assertEqual(policy.quotabot_url, "http://127.0.0.1:8721")
+
+    def test_loopback_opener_never_inherits_environment_proxies(self):
+        proxy_handlers = [
+            handler
+            for handler in _NO_REDIRECT_OPENER.handlers
+            if isinstance(handler, urllib.request.ProxyHandler)
+        ]
+        self.assertEqual(proxy_handlers, [])
+
+    def test_reserved_account_prefers_exact_candidate_over_wildcard(self):
+        wildcard = Candidate(
+            deployment="claude-default",
+            provider="claude",
+            spend="quota_plan",
+            overages_disabled=True,
+        )
+        exact = Candidate(
+            deployment="claude-work",
+            provider="claude",
+            account="work-account",
+            spend="quota_plan",
+            overages_disabled=True,
+        )
+
+        selected = _candidate_for_reserved_target(
+            [wildcard, exact],
+            "claude",
+            "work-account",
+        )
+
+        self.assertIs(selected, exact)
 
     def test_empty_availability_is_cached_not_refetched_every_call(self):
         # A legitimately empty ranked list (e.g. only local runtimes connected)
@@ -790,7 +895,7 @@ models:
 
         def fake_fetch():
             calls["n"] += 1
-            return {"ranked": []}
+            return {"schema": "quotabot.suggest.v1", "ranked": []}
 
         router._fetch_suggest = fake_fetch  # type: ignore[method-assign]
 
@@ -803,6 +908,60 @@ models:
         self.assertEqual(first, [])
         self.assertEqual(second, [])
         self.assertEqual(calls["n"], 1, "empty availability must be cached")
+
+    def test_unavailable_response_cache_expires_and_recovers(self):
+        router = QuotabotRouter()
+        router.policy = Policy(snapshot_ttl_seconds=30)
+        calls = {"n": 0}
+        clock = {"now": 100.0}
+
+        def fake_fetch():
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return {
+                "schema": "quotabot.suggest.v1",
+                "ranked": [
+                    {
+                        "provider": "claude",
+                        "available": True,
+                        "effective_headroom_percent": 75,
+                    }
+                ],
+            }
+
+        router._fetch_suggest = fake_fetch  # type: ignore[method-assign]
+
+        async def exercise_cache():
+            first = await router._availability()
+            clock["now"] += 4.9
+            cached_failure = await router._availability()
+            clock["now"] += 0.2
+            recovered = await router._availability()
+            cached_success = await router._availability()
+            return first, cached_failure, recovered, cached_success
+
+        with unittest.mock.patch(
+            "quotabot_router.time.monotonic",
+            side_effect=lambda: clock["now"],
+        ):
+            first, cached_failure, recovered, cached_success = asyncio.run(
+                exercise_cache()
+            )
+        self.assertIsNone(first)
+        self.assertIsNone(cached_failure)
+        self.assertEqual(recovered[0]["provider"], "claude")
+        self.assertIs(cached_success, recovered)
+        self.assertEqual(calls["n"], 2)
+
+    def test_unknown_suggest_schema_fails_closed(self):
+        router = QuotabotRouter()
+        router._fetch_suggest = lambda: {  # type: ignore[method-assign]
+            "schema": "quotabot.suggest.v999",
+            "ranked": [],
+        }
+
+        self.assertIsNone(asyncio.run(router._availability()))
 
     def test_route_propagates_content_blind_decision_id(self):
         router = QuotabotRouter()
@@ -819,6 +978,7 @@ models:
             }
         )
         router._fetch_suggest = lambda: {  # type: ignore[method-assign]
+            "schema": "quotabot.suggest.v1",
             "ranked": [
                 {
                     "provider": "codex",
@@ -842,11 +1002,37 @@ models:
         )
 
     def test_fetch_suggest_does_not_follow_redirects(self):
+        requests = {"suggest": 0, "redirected": 0}
+
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
-                self.send_response(302)
-                self.send_header("Location", "http://127.0.0.1:9/redirected")
-                self.end_headers()
+                if self.path == "/suggest":
+                    requests["suggest"] += 1
+                    self.send_response(302)
+                    self.send_header("Location", "/redirected")
+                    self.end_headers()
+                    return
+                if self.path == "/redirected":
+                    requests["redirected"] += 1
+                    body = json.dumps(
+                        {
+                            "schema": "quotabot.suggest.v1",
+                            "ranked": [
+                                {
+                                    "provider": "claude",
+                                    "available": True,
+                                    "effective_headroom_percent": 75,
+                                }
+                            ],
+                        }
+                    ).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_error(404)
 
             def log_message(self, format, *args):
                 return
@@ -862,6 +1048,12 @@ models:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", ResourceWarning)
             self.assertIsNone(router._fetch_suggest())
+        self.assertEqual(requests["suggest"], 1)
+        self.assertEqual(
+            requests["redirected"],
+            0,
+            "redirect target must never receive a request",
+        )
         self.assertFalse(
             any(item.category is ResourceWarning for item in caught),
             "redirect response must be closed explicitly",
@@ -889,6 +1081,8 @@ models:
                 """
 allow_paid_api: true
 block_unsafe_passthrough: false
+lease_seconds: 300
+lease_weight_percent: 22.5
 models:
   frontier:
     candidates:
@@ -918,6 +1112,8 @@ agents:
 
         self.assertTrue(policy.allow_paid_api)
         self.assertFalse(policy.block_unsafe_passthrough)
+        self.assertEqual(policy.lease_seconds, 300)
+        self.assertEqual(policy.lease_weight_percent, 22.5)
         self.assertEqual(policy.models["frontier"][0].spend, "paid_api")
         self.assertEqual(policy.models["frontier"][1].spend, "quota_plan")
         self.assertEqual(policy.models["frontier"][1].account, "work@example.com")
@@ -949,6 +1145,27 @@ models:
         self.assertTrue(policy.models["frontier"][0].local)
         self.assertEqual(policy.models["frontier"][0].spend, "local")
 
+    def test_local_mutation_token_file_is_loaded_and_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "quotabot" / "http" / "mutation_token"
+            token_file.parent.mkdir(parents=True)
+            token_file.write_text(
+                "file-backed-local-mutation-token-0123456789\n",
+                encoding="utf-8",
+            )
+            environment = {
+                "LOCALAPPDATA": tmp,
+                "QUOTABOT_HTTP_TOKEN": "",
+                "QUOTABOT_HTTP_TOKEN_FILE": "",
+            }
+            with unittest.mock.patch.dict(os.environ, environment):
+                self.assertEqual(
+                    _load_local_http_token(),
+                    "file-backed-local-mutation-token-0123456789",
+                )
+                token_file.write_text("invalid token", encoding="utf-8")
+                self.assertIsNone(_load_local_http_token())
+
     def test_success_metrics_include_spend_class(self):
         class Usage:
             prompt_tokens = 10
@@ -978,6 +1195,7 @@ models:
                             "response_cost": 0,
                             "litellm_params": {
                                 "metadata": {
+                                    "quotabot_routed": True,
                                     "quotabot_original_model": "cheap-bulk",
                                     "quotabot_spend": "local",
                                     "quotabot_decision_id": "qb-1782000000-0123456789abcdef",
@@ -1031,6 +1249,7 @@ models:
                         },
                         "litellm_params": {
                             "metadata": {
+                                "quotabot_routed": True,
                                 "quotabot_original_model": "frontier",
                                 "quotabot_spend": "quota_plan",
                                 "quotabot_provider": "claude",
@@ -1060,6 +1279,262 @@ models:
         self.assertEqual(record["completion_tokens"], 4)
         self.assertEqual(record["cost"], 0.03)
         self.assertNotIn("do not log", json.dumps(record))
+
+
+class LeaseHttpTests(unittest.TestCase):
+    def test_malformed_reserved_candidate_is_released_and_rejected(self):
+        token = "local-test-mutation-token-0123456789"
+        releases = []
+        router = QuotabotRouter()
+        router.policy = Policy()
+
+        def mutation(path, payload, supplied_token):
+            self.assertEqual(supplied_token, token)
+            if path == "/leases/release":
+                releases.append(payload["lease_id"])
+                return {"schema": "quotabot.release.v1", "released": True}
+            return {
+                "schema": "quotabot.reserve.v1",
+                "reserved": True,
+                "reused": False,
+                "lease": {
+                    "id": "malformed-test-lease-0001",
+                    "provider": "claude",
+                    "account": "work-account",
+                    "created_at": 100,
+                    "expires_at": 220,
+                    "weight_percent": 15,
+                    "client": "litellm",
+                    "idempotency_key": payload["idempotency_key"],
+                },
+                "selected": {
+                    "provider": "claude",
+                    "account": "work-account",
+                    "available": True,
+                    "stale": "false",
+                    "effective_headroom_percent": 80,
+                },
+                "decision_id": "qb-1782000000-0123456789abcdef",
+            }
+
+        router._post_mutation = mutation  # type: ignore[method-assign]
+        candidate = Candidate(
+            deployment="claude-work",
+            provider="claude",
+            account="work-account",
+            spend="quota_plan",
+            overages_disabled=True,
+        )
+        with unittest.mock.patch.dict(os.environ, {"QUOTABOT_HTTP_TOKEN": token}):
+            selected = asyncio.run(router._reserve_remote([candidate], [], 15, None))
+
+        self.assertIsNone(selected)
+        self.assertEqual(releases, ["malformed-test-lease-0001"])
+
+    def test_parallel_routes_reserve_distinct_providers_and_release(self):
+        token = "local-test-mutation-token-0123456789"
+        state = {
+            "authorizations": [],
+            "reservations": [],
+            "releases": [],
+        }
+        state_lock = Lock()
+
+        class Handler(BaseHTTPRequestHandler):
+            def _write_json(self, status, payload):
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path != "/suggest":
+                    self._write_json(404, {"error": "not found"})
+                    return
+                self._write_json(
+                    200,
+                    {
+                        "schema": "quotabot.suggest.v1",
+                        "ranked": [
+                            {
+                                "provider": "claude",
+                                "account": "claude-account",
+                                "available": True,
+                                "effective_headroom_percent": 80,
+                            },
+                            {
+                                "provider": "codex",
+                                "account": "codex-account",
+                                "available": True,
+                                "effective_headroom_percent": 70,
+                            },
+                        ],
+                        "receipt": {
+                            "schema": "quotabot.receipt.v1",
+                            "decision_id": "qb-1782000000-0123456789abcdef",
+                        },
+                    },
+                )
+
+            def do_POST(self):
+                authorization = self.headers.get("Authorization")
+                with state_lock:
+                    state["authorizations"].append(authorization)
+                if authorization != f"Bearer {token}":
+                    self._write_json(401, {"error": "unauthorized"})
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                except (UnicodeError, ValueError):
+                    self._write_json(400, {"error": "invalid body"})
+                    return
+                if self.path == "/leases/reserve":
+                    with state_lock:
+                        reservation_number = len(state["reservations"]) + 1
+                        state["reservations"].append(payload)
+                    if reservation_number == 1:
+                        provider, account = "claude", "claude-account"
+                    else:
+                        provider, account = "codex", "codex-account"
+                    lease_id = f"lease-test-{reservation_number:04d}"
+                    self._write_json(
+                        200,
+                        {
+                            "schema": "quotabot.reserve.v1",
+                            "reserved": True,
+                            "reused": False,
+                            "lease": {
+                                "id": lease_id,
+                                "provider": provider,
+                                "account": account,
+                                "created_at": 1782000000,
+                                "expires_at": 1782000120,
+                                "weight_percent": payload["weight_percent"],
+                                "client": payload["client"],
+                                "idempotency_key": payload["idempotency_key"],
+                            },
+                            "selected": {
+                                "provider": provider,
+                                "account": account,
+                                "available": True,
+                                "effective_headroom_percent": 65,
+                            },
+                            "decision_id": (
+                                "qb-1782000000-0000000000000001"
+                                if reservation_number == 1
+                                else "qb-1782000000-0000000000000002"
+                            ),
+                        },
+                    )
+                    return
+                if self.path == "/leases/release":
+                    with state_lock:
+                        state["releases"].append(payload.get("lease_id"))
+                    self._write_json(
+                        200,
+                        {
+                            "schema": "quotabot.release.v1",
+                            "released": True,
+                        },
+                    )
+                    return
+                self._write_json(404, {"error": "not found"})
+
+            def log_message(self, format, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        router = QuotabotRouter()
+        router.policy = Policy(
+            quotabot_url=f"http://127.0.0.1:{server.server_port}",
+            lease_weight_percent=50,
+            models={
+                "frontier": [
+                    Candidate(
+                        deployment="claude-sonnet",
+                        provider="claude",
+                        account="claude-account",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    ),
+                    Candidate(
+                        deployment="codex-gpt",
+                        provider="codex",
+                        account="codex-account",
+                        spend="quota_plan",
+                        overages_disabled=True,
+                    ),
+                ]
+            },
+        )
+
+        async def exercise():
+            first = {"model": "frontier"}
+            second = {"model": "frontier"}
+            await asyncio.gather(
+                router.async_pre_call_hook(None, None, first, "completion"),
+                router.async_pre_call_hook(None, None, second, "completion"),
+            )
+            await asyncio.gather(
+                router.async_log_success_event(
+                    {
+                        "model": first["model"],
+                        "litellm_params": {"metadata": first["metadata"]},
+                    },
+                    None,
+                    None,
+                    None,
+                ),
+                router.async_log_failure_event(
+                    {
+                        "model": second["model"],
+                        "litellm_params": {"metadata": second["metadata"]},
+                    },
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            return first, second
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"QUOTABOT_HTTP_TOKEN": token},
+        ):
+            first, second = asyncio.run(exercise())
+
+        self.assertEqual(
+            {first["model"], second["model"]}, {"claude-sonnet", "codex-gpt"}
+        )
+        lease_ids = {
+            first["metadata"]["quotabot_lease_id"],
+            second["metadata"]["quotabot_lease_id"],
+        }
+        self.assertEqual(lease_ids, {"lease-test-0001", "lease-test-0002"})
+        self.assertEqual(len(state["reservations"]), 2)
+        for reservation in state["reservations"]:
+            self.assertEqual(
+                reservation["targets"],
+                [
+                    {"provider": "claude", "account": "claude-account"},
+                    {"provider": "codex", "account": "codex-account"},
+                ],
+            )
+            self.assertEqual(reservation["weight_percent"], 50.0)
+        self.assertEqual(set(state["releases"]), lease_ids)
+        self.assertEqual(
+            state["authorizations"],
+            [f"Bearer {token}"] * 4,
+        )
 
 
 if __name__ == "__main__":

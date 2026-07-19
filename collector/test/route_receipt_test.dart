@@ -26,6 +26,9 @@ ProviderQuota _quota(
       kind: kind,
       source: source,
       perMachine: perMachine,
+      models: kind == ProviderQuotaKind.local
+          ? const [ModelInfo(id: 'local-test', local: true)]
+          : const [],
       windows: kind == ProviderQuotaKind.local
           ? const []
           : [
@@ -81,6 +84,7 @@ void main() {
         'as_of': _now,
         'age_seconds': 0,
         'stale': false,
+        'stale_scope': 'snapshot',
       });
       final policy = receipt['policy'] as Map<String, dynamic>;
       expect(policy['routing'], 'balanced');

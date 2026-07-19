@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-07-10. Revisit this document when provider quota models, the MCP
+Updated 2026-07-18. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order lives in [ROADMAP.md](../ROADMAP.md).
 
@@ -98,10 +98,12 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop now has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. The remaining acquisition work is operating-system signing,
-notarization, and clean-host lifecycle evidence. Update, uninstall, data
-preservation, destructive reset, and rollback remain separate documented
-operations.
+barrier. Clean native runners now exercise install, update, rollback, and data
+preservation before publication. That mechanism still has to pass on each exact
+release candidate before it becomes published evidence. The remaining 1.0
+acquisition work is operating-system signing and notarization. Update,
+uninstall, data preservation, destructive reset, and rollback remain separate
+documented operations.
 
 ### Content-blind auditability
 
@@ -137,15 +139,16 @@ turns into paid API spend.
 - Advanced routing choices are documented across long command lists instead of
   one intent matrix.
 - Portable desktop assets are not yet Authenticode-signed, Developer ID-signed,
-  or notarized, and have not completed the clean-host lifecycle record required
-  for a first-class 1.0 acquisition path.
-- Trust copy sometimes says read-only or never leaves the machine even though
-  bounded local writes, provider metadata calls, Antigravity account onboarding,
-  and explicitly enabled external webhooks exist.
+  or notarized, which remains the largest acquisition gap for a first-class 1.0
+  release.
+- Native keyboard and screen-reader evidence is still incomplete even though
+  automated focus, scaling, contrast, and semantics coverage is strong.
+- Claude and Codex grants still need dated idle-machine validation against real
+  accounts. Claude credential generations now fail closed and cannot share
+  cache or drift evidence, but the usage endpoint still provides no
+  provider-backed identity for durable account labels or deduplication.
 - The canonical roadmap had accumulated shipped history and speculative
   provider detail, obscuring the few remaining release gates.
-- LM Studio's native API and Ollama's cloud-offload behavior have evolved beyond
-  the assumptions in the current adapters.
 
 ### Too much relative to current need
 
@@ -156,8 +159,30 @@ turns into paid API spend.
 
 ## Current external evidence
 
-Research was refreshed on 2026-07-10. External material is evidence, not product
-policy.
+Research was refreshed through 2026-07-18. External material is evidence, not
+product policy.
+
+### Included-model entitlements can change faster than quota shapes
+
+Anthropic announced that beginning July 20, 2026, Fable 5 is included for Max
+and Team Premium at 50% of limits. Pro and Team Standard retain access through
+usage credits and receive a one-time $100 credit.
+
+Source: [Anthropic's July 17 Fable plan
+announcement](https://x.com/claudeai/status/2078302415804379218).
+
+The product implication is to keep entitlement policy separate from measured
+capacity. Fable carries no calendar cutoff or hardcoded 50% balance in quotabot.
+It becomes quota-backed only when the current provider response contains a
+scoped Fable pool and same-response provider metadata confirms a Max or Team
+Premium entitlement at or after the July 20, 2026 UTC policy boundary. A host
+credential's plan label is diagnostic context, not
+current included or credit-backed entitlement proof. Pro, Team Standard,
+host-label-only, and plan-unknown
+rows stay visible under the unrestricted budget without being called included
+quota. The scoped pool gates Fable without blocking unrelated Claude models. A
+dated plan announcement can
+classify expected inclusion, but it cannot prove what remains in an account now.
 
 ### MCP is about to change substantially
 

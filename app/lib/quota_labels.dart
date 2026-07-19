@@ -51,16 +51,17 @@ String backLabel(int? resetsAt, int now) {
   return s < 18 * 3600 ? 'in $label' : label;
 }
 
-/// The snapshot's capture time as an absolute clock ("as of 8:38 AM"), with a
-/// short date appended once it is no longer today so a stale snapshot cannot
-/// masquerade as fresh.
-String asOfLabel(DateTime t) {
+/// The time the desktop last finished checking providers, as an absolute clock
+/// ("checked 8:38 AM"). Provider cards carry their own capture ages, so calling
+/// this an "as of" time would incorrectly imply that every displayed quota was
+/// captured during the latest refresh.
+String checkedAtLabel(DateTime t) {
   final now = DateTime.now();
   final clock = formatClockTime(t);
   final sameDay =
       now.year == t.year && now.month == t.month && now.day == t.day;
-  if (sameDay) return 'as of $clock';
-  return 'as of $clock ${t.month}/${t.day}';
+  if (sameDay) return 'checked $clock';
+  return 'checked $clock ${t.month}/${t.day}';
 }
 
 /// 12-hour clock time, e.g. "5:00 PM".

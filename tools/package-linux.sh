@@ -40,7 +40,9 @@ case "$arch" in
 esac
 
 flutter config --enable-linux-desktop >/dev/null
-(cd "$app_dir" && flutter build linux --release)
+(cd "$app_dir" && \
+  flutter pub get --enforce-lockfile && \
+  flutter build linux --release --no-pub)
 
 bundle="$app_dir/build/linux/$arch/release/bundle"
 binary="$bundle/quotabot"

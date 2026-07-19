@@ -287,8 +287,6 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _file(_joinPath(h, '.codex/auth.json'),
             'Codex ChatGPT OAuth access token',
             dataClass: 'credential'),
-        _file(_joinPath(h, '.codex/sessions/**/rollout-*.jsonl'),
-            'Codex local rate-limit fallback snapshots'),
         _file(_joinPath(config, 'quotabot/auth/codex*.json'),
             'quotabot stored Codex OAuth grant',
             dataClass: 'credential'),

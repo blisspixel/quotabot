@@ -24,6 +24,122 @@ void main() {
     return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
 
+  test('doctor keeps sparse model quota separate from shared limits', () {
+    const now = 1782046566;
+    final summary = cli.doctorModelSummary(
+      claudeProviderId,
+      const [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 26,
+          windowLabel: 'weekly',
+        ),
+      ],
+      now,
+    );
+
+    expect(summary, contains('model-specific'));
+    expect(summary, contains('Fable 26%'));
+    expect(summary, contains('(weekly)'));
+    expect(summary, contains('separate from shared account limits'));
+    expect(
+      cli.doctorModelSummary(
+        codexProviderId,
+        const [
+          ModelQuota(
+            model: 'GPT-5.3-Codex-Spark',
+            usedPercent: 0,
+            windowLabel: 'weekly',
+          ),
+        ],
+        now,
+      ),
+      allOf(
+        contains('model-specific'),
+        contains('GPT-5.3-Codex-Spark 0%'),
+        contains('(weekly)'),
+        contains('separate from shared account limits'),
+      ),
+    );
+    expect(
+      cli.doctorModelSummary(
+        antigravityProviderId,
+        const [ModelQuota(model: 'Gemini', usedPercent: 26)],
+        now,
+      ),
+      isNot(contains('shared account limits')),
+    );
+  });
+
+  test('doctor labels Fable spend evidence without trusting host plan claims',
+      () {
+    const now = kClaudeFableIncludedQuotaEffectiveAt + 86400;
+    const scoped = [
+      ModelQuota(model: 'Fable', usedPercent: 26, windowLabel: 'weekly'),
+    ];
+    ProviderQuota quota(
+      String plan,
+      ProviderPlanEvidenceSource source,
+    ) =>
+        ProviderQuota(
+          provider: claudeProviderId,
+          displayName: claudeProviderName,
+          account: 'opaque',
+          plan: plan,
+          planEvidenceSource: source,
+          planEvidenceAsOf: now,
+          asOf: now,
+          windows: [
+            QuotaWindow(label: 'weekly', usedPercent: 17),
+          ],
+          modelQuotas: scoped,
+        );
+
+    final host = quota('max', ProviderPlanEvidenceSource.hostCredential);
+    expect(
+      cli.doctorModelSummary(
+        claudeProviderId,
+        scoped,
+        now,
+        providerQuota: host,
+      ),
+      contains('Fable spend: included quota not proven'),
+    );
+
+    final included = quota('max', ProviderPlanEvidenceSource.providerMetadata);
+    expect(
+      cli.doctorModelSummary(
+        claudeProviderId,
+        scoped,
+        now,
+        providerQuota: included,
+      ),
+      contains('Fable spend: included quota'),
+    );
+
+    final pro = quota('pro', ProviderPlanEvidenceSource.providerMetadata);
+    expect(
+      cli.doctorModelSummary(
+        claudeProviderId,
+        scoped,
+        now,
+        providerQuota: pro,
+      ),
+      contains('Fable spend: credit-backed availability'),
+    );
+
+    final hostPro = quota('pro', ProviderPlanEvidenceSource.hostCredential);
+    expect(
+      cli.doctorModelSummary(
+        claudeProviderId,
+        scoped,
+        now,
+        providerQuota: hostPro,
+      ),
+      contains('Fable spend: included quota not proven'),
+    );
+  });
+
   test('json snapshot accepts separated simulation flag values', () async {
     final result = await runCli([
       '--json',
@@ -172,6 +288,23 @@ void main() {
     expect(json['available'], isFalse);
     expect(json['stale'], isTrue);
     expect(json['headroom_percent'], 48);
+    expect(json['error'], contains('simulated stale cache'));
+  });
+
+  test('check human output explains a failed live read behind cached quota',
+      () async {
+    final result = await runCli([
+      'check',
+      'grok',
+      '--no-color',
+      '--mock-provider=grok',
+      '--state=stale',
+    ]);
+
+    expectExitCode(result, 69);
+    final out = result.stdout as String;
+    expect(out, contains('live read failed: simulated stale cache'));
+    expect(out, contains('showing last-known quota'));
   });
 
   test('check reports provider drift as unavailable trusted cache', () async {
@@ -225,6 +358,39 @@ void main() {
     expect(json['schema'], 'quotabot.suggest.v1');
     expect((json['recommended'] as Map)['provider'], 'claude');
     expect((json['ranked'] as List), hasLength(1));
+  });
+
+  test('suggest applies active cross-process leases to simulated quota',
+      () async {
+    final leaseStore = FileRouteLeaseStore(
+      dirFactory: () => Directory('${temp.path}/quotabot/leases'),
+      idFactory: () => 'cli-lease',
+    );
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final reservation = leaseStore.reserve(
+      provider: 'claude',
+      account: 'simulated',
+      now: now,
+      leaseSeconds: 300,
+      weightPercent: 50,
+    );
+    expect(reservation.reserved, isTrue);
+
+    final result = await runCli([
+      'suggest',
+      '--json',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    final claude = (json['ranked'] as List).single as Map<String, dynamic>;
+    expect(claude['lease_discount_percent'], 50.0);
+    expect(
+      (claude['effective_headroom_percent'] as num).toDouble(),
+      lessThan((claude['headroom_percent'] as num).toDouble()),
+    );
   });
 
   test('suggest human output names trust provenance', () async {
@@ -361,6 +527,41 @@ void main() {
     final out = result.stdout as String;
     expect(out, contains('[live, authoritative, quota plan, captured'));
     expect(out, isNot(contains('Claude (simulated)')));
+  });
+
+  test('doctor shows cached failure before generic login guidance', () async {
+    final doctor = await runCli([
+      'doctor',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=stale',
+    ]);
+    final help = await runCli(['help', '--no-color']);
+
+    expectExitCode(doctor, 0);
+    expectExitCode(help, 0);
+    expect(doctor.stdout as String, contains('simulated stale cache'));
+    expect(doctor.stdout as String, isNot(contains('quotabot login claude')));
+    expect(help.stdout as String, contains('adds a refreshable path'));
+    expect(help.stdout as String, contains('confirm with doctor'));
+    expect(
+      help.stdout as String,
+      contains(
+        'Quota and routing reads use metadata only and cost no usage tokens.',
+      ),
+    );
+    expect(
+      help.stdout as String,
+      contains(
+        'Live reads may contact provider endpoints; state commands can write bounded local metadata.',
+      ),
+    );
+    expect(
+      help.stdout as String,
+      isNot(contains('Every command is a local metadata read')),
+    );
+    expect(doctor.stdout as String, isNot(contains('keeps it live')));
+    expect(help.stdout as String, isNot(contains('keeps it live')));
   });
 
   test('doctor human output labels failed quota-plan provenance', () async {
