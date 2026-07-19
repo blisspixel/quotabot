@@ -296,10 +296,24 @@ assert_rejected_prior_target \
   generation-symlink '.quotabot-versions/generation-20260718010101-1234' generation-symlink
 
 # Exercise the two-target source-setup transaction directly from setup.sh. The
-# harness sources only the marked production functions, so no build runs.
-source <(sed -n \
+# harness sources only the marked production functions, so no build runs. Use a
+# checked regular file because macOS still ships Bash 3.2, whose process
+# substitution can leave a sourced function block unavailable to later calls.
+transaction_functions="$test_root/setup-transaction-functions.sh"
+sed -n \
   '/^# BEGIN POSIX INSTALL TRANSACTION FUNCTIONS$/,/^# END POSIX INSTALL TRANSACTION FUNCTIONS$/p' \
-  "$repository_root/tools/setup.sh")
+  "$repository_root/tools/setup.sh" > "$transaction_functions"
+if ! grep -q '^install_versioned_single() {' "$transaction_functions" || \
+   ! grep -q '^install_versioned_pair() {' "$transaction_functions"; then
+  echo 'Could not extract the POSIX install transaction functions.' >&2
+  exit 1
+fi
+source "$transaction_functions"
+if ! declare -F install_versioned_single >/dev/null || \
+   ! declare -F install_versioned_pair >/dev/null; then
+  echo 'Could not load the POSIX install transaction functions.' >&2
+  exit 1
+fi
 os="$transaction_os"
 
 setup_invalid_source="$test_root/setup-invalid-source"
