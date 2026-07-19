@@ -141,6 +141,18 @@ Notable changes to quotabot. Newest first.
   macOS `/var` alias cannot bypass injected activation-failure assertions. The
   harness also loads its marked production functions through a checked regular
   file, keeping them available under the system Bash 3.2 shipped by macOS.
+- Windows hardware-fit discovery reads physical memory through the local
+  `ComputerInfo` API and falls back to CIM inside the same bounded PowerShell
+  process. Values are integer KiB with invariant formatting. A host metadata
+  command can still fail soft to unknown, and the live smoke test now honors
+  that documented advisory contract instead of intermittently failing CI.
+- Concurrent credential-refresh tests now isolate operating-system permission
+  subprocesses from serialization, while dedicated security tests retain real
+  owner-only enforcement. They always release their test gate and perform a
+  bounded drain before temporary-directory cleanup. The multi-process
+  manual-quota doctor test has an explicit integration-test allowance, and
+  Windows test-suite fanout is capped to keep process and file-lock integration
+  checks deterministic on high-core hosts.
 - Codex no longer reads mixed-content rollout files for a this-machine quota
   fallback. It uses account-wide metadata or fails closed with a login repair,
   preserving the promise that quota collection never reads prompts or responses.

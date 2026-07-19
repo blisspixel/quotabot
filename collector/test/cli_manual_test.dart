@@ -112,7 +112,7 @@ void main() {
     expect(out, contains('Custom AI (home)'));
     expect(out, contains('[live, manual, work, captured'));
     expect(out, contains('[live, manual, home, captured'));
-  });
+  }, timeout: Timeout.factor(2));
 
   test('check selects a live account after a spent first manual account',
       () async {

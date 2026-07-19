@@ -463,12 +463,14 @@ actually down). All three built-in runtime adapters emit
 
 When at least one reachable runtime exposes an on-device model, the collector
 also reads passive machine memory metadata. Linux uses `/proc/meminfo`; Windows
-uses `Win32_OperatingSystem` through the system Windows PowerShell executable;
-macOS uses `/usr/sbin/sysctl hw.memsize` and `/usr/bin/vm_stat`. On Windows and
-Linux, an installed NVIDIA driver can add its largest single GPU through a
-bounded `nvidia-smi` memory query. Separate GPU pools are never summed. The read
-is cached for 30 seconds, has bounded output and deadlines, and fails soft. It
-does not load a model, reserve memory, execute inference, or measure throughput.
+uses the local `Microsoft.VisualBasic.Devices.ComputerInfo` memory API with
+`Win32_OperatingSystem` as a compatibility fallback, both inside one bounded
+system Windows PowerShell process; macOS uses `/usr/sbin/sysctl hw.memsize` and
+`/usr/bin/vm_stat`. On Windows and Linux, an installed NVIDIA driver can add its
+largest single GPU through a bounded `nvidia-smi` memory query. Separate GPU
+pools are never summed. The read is cached for 30 seconds, has bounded output
+and deadlines, and fails soft. It does not load a model, reserve memory, execute
+inference, or measure throughput.
 
 For a cold model with an installed byte size, quotabot estimates required memory
 as the file size plus the larger of 25 percent or 512 MiB. Each observed memory

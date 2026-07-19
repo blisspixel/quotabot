@@ -124,6 +124,7 @@ void main() {
     expect(
       shared.any((r) =>
           r['kind'] == 'process' &&
+          (r['target'] as String).contains('ComputerInfo') &&
           (r['target'] as String).contains('Win32_OperatingSystem') &&
           r['data_class'] == 'hardware_metadata' &&
           r['spends_tokens'] == false),

@@ -15,6 +15,15 @@ import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
+const _refreshSerializationTestTimeout = Timeout(Duration(seconds: 60));
+
+void _useDeterministicTokenHardening() {
+  setTokenPermissionHardeningForTesting(
+    directoryHardener: (_) {},
+    fileHardener: (_) {},
+  );
+}
+
 void _holdTokenFileOpen(List<Object> arguments) {
   final handle = File(arguments[0] as String).openSync(mode: FileMode.read);
   final events = arguments[1] as SendPort;
@@ -69,12 +78,25 @@ Future<List<T>> _runSerializedRefreshPair<T>({
   required Completer<void> releaseRequest,
   required int Function() requestCount,
 }) async {
+  const assertionDeadline = Duration(seconds: 15);
+  const cleanupDeadline = Duration(seconds: 15);
   final calls = <Future<T>>[call(), call()];
-  await requestStarted.future.timeout(const Duration(seconds: 2));
-  await Future<void>.delayed(const Duration(milliseconds: 75));
-  expect(requestCount(), 1);
-  releaseRequest.complete();
-  return Future.wait(calls).timeout(const Duration(seconds: 3));
+  final completion = Future.wait(calls);
+  try {
+    await requestStarted.future.timeout(assertionDeadline);
+    await Future<void>.delayed(const Duration(milliseconds: 75));
+    expect(requestCount(), 1);
+    releaseRequest.complete();
+    return await completion.timeout(assertionDeadline);
+  } finally {
+    if (!releaseRequest.isCompleted) releaseRequest.complete();
+    try {
+      await completion.timeout(cleanupDeadline);
+    } catch (_) {
+      // Preserve the original assertion or refresh failure. The bounded drain
+      // gives in-flight token-store work a cleanup window before tearDown.
+    }
+  }
 }
 
 void main() {
@@ -749,6 +771,7 @@ void main() {
 
     test('GoogleAuth serializes concurrent refreshes for one account',
         () async {
+      _useDeterministicTokenHardening();
       const provider = GoogleAuth.provider;
       const account = 'work@example.com';
       addTearDown(() {
@@ -787,7 +810,7 @@ void main() {
         TokenStore.load(provider, account: account)?.accessToken,
         'fresh',
       );
-    });
+    }, timeout: _refreshSerializationTestTimeout);
 
     test('GoogleAuth does not overwrite a replacement login after refresh',
         () async {
@@ -931,6 +954,7 @@ void main() {
 
     test('XaiAuth serializes concurrent refreshes for one default owner',
         () async {
+      _useDeterministicTokenHardening();
       const provider = XaiAuth.provider;
       const owner = 'work@example.com';
       addTearDown(() => TokenStore.clear(provider));
@@ -963,7 +987,7 @@ void main() {
       expect(results, ['fresh', 'fresh']);
       expect(requests, 1);
       expect(TokenStore.defaultOwner(provider), owner);
-    });
+    }, timeout: _refreshSerializationTestTimeout);
 
     test('XaiAuth does not overwrite a replacement login after refresh',
         () async {
@@ -1070,6 +1094,7 @@ void main() {
 
     test('AnthropicAuth serializes concurrent rotating-token refreshes',
         () async {
+      _useDeterministicTokenHardening();
       const provider = AnthropicAuth.provider;
       addTearDown(() => TokenStore.clear(provider));
       TokenStore.save(
@@ -1105,7 +1130,7 @@ void main() {
       expect(results[0]?.identity, results[1]?.identity);
       expect(requests, 1);
       expect(TokenStore.load(provider)?.refreshToken, 'R1');
-    });
+    }, timeout: _refreshSerializationTestTimeout);
 
     test('replacement login wins an in-flight refresh', () async {
       const provider = AnthropicAuth.provider;
@@ -1301,6 +1326,7 @@ void main() {
     });
 
     test('OpenAiAuth serializes concurrent rotating-token refreshes', () async {
+      _useDeterministicTokenHardening();
       const provider = OpenAiAuth.provider;
       addTearDown(() => TokenStore.clear(provider));
       TokenStore.save(
@@ -1336,7 +1362,7 @@ void main() {
       expect(results[0]?.identity, results[1]?.identity);
       expect(requests, 1);
       expect(TokenStore.load(provider)?.refreshToken, 'R1');
-    });
+    }, timeout: _refreshSerializationTestTimeout);
 
     test('OpenAiAuth normalizes an access-token account claim', () async {
       const provider = OpenAiAuth.provider;

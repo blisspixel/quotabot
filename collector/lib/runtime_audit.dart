@@ -502,7 +502,7 @@ List<RuntimeAccessRecord> _localHardwareAccess(
         ],
       'windows' => [
           _process(
-            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe Get-CimInstance Win32_OperatingSystem',
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe ComputerInfo or Get-CimInstance Win32_OperatingSystem',
             'passive system memory capacity',
           ),
           _process(
