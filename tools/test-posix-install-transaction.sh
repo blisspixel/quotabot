@@ -5,6 +5,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "$script_dir/.." && pwd)"
 test_root="$(mktemp -d)"
+test_root="$(cd "$test_root" && pwd -P)"
 test_parent="$(cd "$(dirname "$test_root")" && pwd -P)"
 test_name="$(basename "$test_root")"
 configured_temp="${TMPDIR:-/tmp}"

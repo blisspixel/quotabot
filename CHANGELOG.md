@@ -131,6 +131,8 @@ Notable changes to quotabot. Newest first.
   guidance remain bounded at a 320 pixel window and 2x text scale.
 - Grok fallback grants now require an exact stamped account owner. A legacy
   unowned default grant is never used or refreshed for a requested account.
+- POSIX installer transaction tests canonicalize their temporary root so the
+  macOS `/var` alias cannot bypass injected activation-failure assertions.
 - Codex no longer reads mixed-content rollout files for a this-machine quota
   fallback. It uses account-wide metadata or fails closed with a login repair,
   preserving the promise that quota collection never reads prompts or responses.
