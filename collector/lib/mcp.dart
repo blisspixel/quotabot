@@ -99,6 +99,8 @@ Map<String, dynamic> suggestResponse(
   int now, {
   Map<String, BurnStat> burnStatsByProvider = const {},
   List<RouteLease> activeLeases = const [],
+  bool leaseStoreAvailable = true,
+  String? leaseStoreReason,
   bool preferLocal = false,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
@@ -127,6 +129,10 @@ Map<String, dynamic> suggestResponse(
   response['active_leases'] = leaseDiscounts(activeLeases)
       .map((discount) => discount.toJson())
       .toList();
+  response['lease_store_available'] = leaseStoreAvailable;
+  if (!leaseStoreAvailable && leaseStoreReason != null) {
+    response['lease_store_reason'] = leaseStoreReason;
+  }
   return response;
 }
 
@@ -170,6 +176,8 @@ Map<String, dynamic> decideNowResponse(
   int maxAgeSeconds = 300,
   Map<String, BurnStat> burnStatsByProvider = const {},
   List<RouteLease> activeLeases = const [],
+  bool leaseStoreAvailable = true,
+  String? leaseStoreReason,
   bool preferLocal = false,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
@@ -243,6 +251,9 @@ Map<String, dynamic> decideNowResponse(
     'active_leases': leaseDiscounts(activeLeases)
         .map((discount) => discount.toJson())
         .toList(),
+    'lease_store_available': leaseStoreAvailable,
+    if (!leaseStoreAvailable && leaseStoreReason != null)
+      'lease_store_reason': leaseStoreReason,
   };
 }
 
@@ -903,6 +914,10 @@ final suggestOutputSchema = JsonSchema.object(
     'fallback': _fallbackSchema,
     'ranked': JsonSchema.array(items: _candidateSchema),
     'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+    'lease_store_available': JsonSchema.boolean(
+      description: 'Whether active_leases is a trusted complete local read.',
+    ),
+    'lease_store_reason': JsonSchema.string(),
     'receipt': _decisionReceiptSchema,
   },
   required: [
@@ -913,6 +928,7 @@ final suggestOutputSchema = JsonSchema.object(
     'using_local_fallback',
     'fallback',
     'ranked',
+    'lease_store_available',
     'receipt',
   ],
 );
@@ -949,6 +965,10 @@ final decideNowOutputSchema = JsonSchema.object(
     'fallback': _fallbackSchema,
     'ranked': JsonSchema.array(items: _candidateSchema),
     'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+    'lease_store_available': JsonSchema.boolean(
+      description: 'Whether active_leases is a trusted complete local read.',
+    ),
+    'lease_store_reason': JsonSchema.string(),
     'receipt': _decisionReceiptSchema,
   },
   required: [
@@ -964,6 +984,7 @@ final decideNowOutputSchema = JsonSchema.object(
     'using_local_fallback',
     'fallback',
     'ranked',
+    'lease_store_available',
     'receipt',
   ],
 );
@@ -979,6 +1000,8 @@ final reserveProviderOutputSchema = JsonSchema.object(
     'reason': JsonSchema.string(),
     'lease': _nullable(_routeLeaseSchema),
     'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+    'lease_store_available': JsonSchema.boolean(),
+    'lease_store_reason': JsonSchema.string(),
   },
   required: [
     'schema',
@@ -986,7 +1009,8 @@ final reserveProviderOutputSchema = JsonSchema.object(
     'reserved',
     'reused',
     'reason',
-    'active_leases'
+    'active_leases',
+    'lease_store_available'
   ],
 );
 
@@ -1000,6 +1024,8 @@ final releaseProviderOutputSchema = JsonSchema.object(
     'lease_id': JsonSchema.string(),
     'lease': _nullable(_routeLeaseSchema),
     'active_leases': JsonSchema.array(items: _leaseDiscountSchema),
+    'lease_store_available': JsonSchema.boolean(),
+    'lease_store_reason': JsonSchema.string(),
   },
   required: [
     'schema',
@@ -1007,7 +1033,8 @@ final releaseProviderOutputSchema = JsonSchema.object(
     'released',
     'reason',
     'lease_id',
-    'active_leases'
+    'active_leases',
+    'lease_store_available'
   ],
 );
 
@@ -1507,31 +1534,43 @@ List<Map<String, dynamic>> _leaseDiscountJson(List<RouteLease> activeLeases) =>
 Map<String, dynamic> _reserveJson(
   RouteLeaseReservation reservation,
   int now,
-) =>
-    {
-      'schema': 'quotabot.reserve.v1',
-      'as_of': now,
-      'reserved': reservation.reserved,
-      'reused': reservation.reused,
-      'reason': reservation.reason,
-      'lease': reservation.lease?.toJson(),
-      'active_leases': _leaseDiscountJson(reservation.activeLeases),
-    };
+) {
+  final storeAvailable = reservation.reason != 'lease store unavailable';
+  return {
+    'schema': 'quotabot.reserve.v1',
+    'as_of': now,
+    'reserved': reservation.reserved,
+    'reused': reservation.reused,
+    'reason': reservation.reason,
+    'lease': reservation.lease?.toJson(),
+    'active_leases': _leaseDiscountJson(reservation.activeLeases),
+    'lease_store_available': storeAvailable,
+    if (!storeAvailable) 'lease_store_reason': reservation.reason,
+  };
+}
 
 Map<String, dynamic> _releaseJson(
   RouteLeaseRelease release,
   String leaseId,
-  int now,
-) =>
-    {
-      'schema': 'quotabot.release.v1',
-      'as_of': now,
-      'released': release.released,
-      'reason': release.reason,
-      'lease_id': leaseId,
-      'lease': release.lease?.toJson(),
-      'active_leases': _leaseDiscountJson(release.activeLeases),
-    };
+  int now, {
+  bool? leaseStoreAvailable,
+  String? leaseStoreReason,
+}) {
+  final storeAvailable =
+      leaseStoreAvailable ?? release.reason != 'lease store unavailable';
+  return {
+    'schema': 'quotabot.release.v1',
+    'as_of': now,
+    'released': release.released,
+    'reason': release.reason,
+    'lease_id': leaseId,
+    'lease': release.lease?.toJson(),
+    'active_leases': _leaseDiscountJson(release.activeLeases),
+    'lease_store_available': storeAvailable,
+    if (!storeAvailable)
+      'lease_store_reason': leaseStoreReason ?? release.reason,
+  };
+}
 
 class QuotaResourceSubscriptionHub {
   final SnapshotProvider snapshot;
@@ -1593,7 +1632,7 @@ class QuotaResourceSubscriptionHub {
         await notifyUpdated(quotasCurrentResourceUri);
       }
       final burnStats = burnByProvider(data, n);
-      final activeLeases = leaseStore.active(n);
+      final leaseState = leaseStore.activeState(n);
       // Alert routing uses the same decide front door as live suggestions so
       // route_to recommendations cannot drift if DecisionContext gains fields.
       final suggestion = decide(
@@ -1603,7 +1642,7 @@ class QuotaResourceSubscriptionHub {
           data,
           n,
           burnStatsByProvider: burnStats,
-          activeLeases: activeLeases,
+          activeLeases: leaseState.activeLeases,
           pipePenaltyByProvider:
               loadRoutedRequestSummary().pipePenaltyByProvider(now: n),
           catalog: catalog,
@@ -1743,7 +1782,7 @@ RouteCandidate? _explicitReserveTarget(
 Map<String, dynamic> _reserveUnavailable(
   String reason,
   int now,
-  List<RouteLease> activeLeases,
+  RouteLeaseState leaseState,
 ) =>
     {
       'schema': 'quotabot.reserve.v1',
@@ -1752,7 +1791,10 @@ Map<String, dynamic> _reserveUnavailable(
       'reused': false,
       'reason': reason,
       'lease': null,
-      'active_leases': _leaseDiscountJson(activeLeases),
+      'active_leases': _leaseDiscountJson(leaseState.activeLeases),
+      'lease_store_available': leaseState.available,
+      if (!leaseState.available && leaseState.reason != null)
+        'lease_store_reason': leaseState.reason,
     };
 
 Map<String, dynamic> _modelRegistryError(int now, String error) => {
@@ -1891,20 +1933,25 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         );
         final response = decide(const [], n).route.toJson();
         response['error'] = routeRequirements.error ?? costPolicy.error;
+        // This validation error returns before any lease read, so the empty
+        // active_leases is a complete view, matching the schema's required flag.
+        response['lease_store_available'] = true;
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(response, profiled),
         );
       }
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final results = profiled.providers;
-      final activeLeases = leaseStore.active(n);
+      final leaseState = leaseStore.activeState(n);
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           suggestResponse(
             results,
             n,
             burnStatsByProvider: burnByProvider(results, n),
-            activeLeases: activeLeases,
+            activeLeases: leaseState.activeLeases,
+            leaseStoreAvailable: leaseState.available,
+            leaseStoreReason: leaseState.reason,
             preferLocal: args['local_first'] == true,
             costPenaltyByProvider: costPolicy.penalties,
             costWeight: costPolicy.weight,
@@ -1998,7 +2045,7 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         profileLoader,
       );
       final n = now();
-      final activeLeases = leaseStore.active(n);
+      final leaseState = leaseStore.activeState(n);
       final maxAge = (args['max_age_seconds'] as num?)?.toInt() ?? 300;
       final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
       final costPolicy = _routingCostPolicy(args);
@@ -2038,7 +2085,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             n,
             maxAgeSeconds: boundedMaxAge,
             burnStatsByProvider: burnByProvider(profiled.providers, n),
-            activeLeases: activeLeases,
+            activeLeases: leaseState.activeLeases,
+            leaseStoreAvailable: leaseState.available,
+            leaseStoreReason: leaseState.reason,
             preferLocal: args['local_first'] == true,
             costPenaltyByProvider: costPolicy.penalties,
             costWeight: costPolicy.weight,
@@ -2104,10 +2153,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
       if (profiled.error != null) {
-        final activeLeases = leaseStore.active(n);
+        final leaseState = leaseStore.activeState(n);
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(
-            _reserveUnavailable(profiled.error!, n, activeLeases),
+            _reserveUnavailable(profiled.error!, n, leaseState),
             profiled,
           ),
         );
@@ -2253,16 +2302,19 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final n = now();
       final leaseId = normalizeLeaseText(args['lease_id'], maxLength: 96);
       if (leaseId == null) {
+        final leaseState = leaseStore.activeState(n);
         return CallToolResult.fromStructuredContent(
           _releaseJson(
             RouteLeaseRelease(
               released: false,
               reason: 'lease_id is required',
               lease: null,
-              activeLeases: leaseStore.active(n),
+              activeLeases: leaseState.activeLeases,
             ),
             '',
             n,
+            leaseStoreAvailable: leaseState.available,
+            leaseStoreReason: leaseState.reason,
           ),
         );
       }

@@ -106,6 +106,9 @@ class _StaleReadRouteLeaseStore implements RouteLeaseStore {
       : _store = InMemoryRouteLeaseStore(idFactory: idFactory);
 
   @override
+  RouteLeaseState activeState(int now) => RouteLeaseState.available(const []);
+
+  @override
   List<RouteLease> active(int now) => const [];
 
   List<RouteLease> transactionalActive(int now) => _store.active(now);

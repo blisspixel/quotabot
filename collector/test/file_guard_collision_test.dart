@@ -13,7 +13,7 @@ FileSystemException _failure(int? code) => FileSystemException(
 
 void main() {
   test('known exclusive-create collisions retry after file churn', () {
-    for (final code in [17, 80, 183]) {
+    for (final code in [17, 32, 33, 80, 183]) {
       expect(
         shouldRetryExclusiveCreateFailure(
           _failure(code),
@@ -34,7 +34,7 @@ void main() {
   });
 
   test('non-collision failures stay fatal for regular or vanished claims', () {
-    for (final code in <int?>[null, 2, 3, 5, 32]) {
+    for (final code in <int?>[null, 2, 3, 5, 13]) {
       expect(
         shouldRetryExclusiveCreateFailure(
           _failure(code),
@@ -141,5 +141,59 @@ void main() {
       ),
       throwsA(isA<FileSystemException>()),
     );
+  });
+
+  test('fresh claim contention stops at the acquisition deadline', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-guard-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final lockFile = File('${dir.path}${Platform.pathSeparator}store.lock')
+      ..createSync();
+    File('${lockFile.path}.claim').writeAsStringSync(
+      jsonEncode({'pid': pid, 'owner': 'active-owner'}),
+      flush: true,
+    );
+    final elapsed = Stopwatch()..start();
+
+    expect(
+      () => acquireInterprocessFileGuardSync(
+        lockFile,
+        hardenClaim: (_) {},
+        acquisitionTimeout: const Duration(milliseconds: 25),
+      ),
+      throwsA(
+        isA<FileSystemException>().having(
+          (error) => error.message,
+          'message',
+          contains('timed out acquiring file guard'),
+        ),
+      ),
+    );
+    expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
+  });
+
+  test('async claim contention stops at the acquisition deadline', () async {
+    final dir = Directory.systemTemp.createTempSync('quotabot-guard-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final lockFile = File('${dir.path}${Platform.pathSeparator}store.lock')
+      ..createSync();
+    File('${lockFile.path}.claim').writeAsStringSync(
+      jsonEncode({'pid': pid, 'owner': 'active-owner'}),
+      flush: true,
+    );
+    final elapsed = Stopwatch()..start();
+
+    await expectLater(
+      acquireInterprocessFileGuard(
+        lockFile,
+        hardenClaim: (_) {},
+        acquisitionTimeout: const Duration(milliseconds: 25),
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
   });
 }

@@ -171,6 +171,12 @@ void main() {
   test('noop store is a safe unavailable implementation', () {
     const store = NoopRouteLeaseStore();
     expect(store.active(100), isEmpty);
+    // A disabled store has definitively no leases, so its read is complete and
+    // trusted even though its mutations are unavailable.
+    final state = store.activeState(100);
+    expect(state.available, isTrue);
+    expect(state.reason, isNull);
+    expect(state.activeLeases, isEmpty);
     final reservation = store.reserve(
       provider: 'claude',
       account: 'work',
@@ -321,6 +327,10 @@ void main() {
     expect(reserveBest().lease!.provider, 'claude');
     expect(reserveBest().lease!.provider, 'codex');
     expect(store.active(100), hasLength(2));
+    final state = store.activeState(100);
+    expect(state.available, isTrue);
+    expect(state.reason, isNull);
+    expect(state.activeLeases, hasLength(2));
   });
 
   test('memory store rejects reservations after the active lease cap', () {
@@ -443,6 +453,7 @@ void main() {
       dirFactory: () => throw const FileSystemException('no lease dir'),
       idFactory: _idFactory(),
     );
+    expect(store.activeState(100).available, isFalse);
     expect(store.active(100), isEmpty);
     final reservation = store.reserve(
       provider: 'grok',
@@ -758,14 +769,56 @@ void main() {
     expect(rejected.reason, 'too many active leases');
   });
 
-  test('file store treats malformed lease files as empty', () {
+  test('file store reports malformed ledgers and blocks mutation', () {
     final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
     addTearDown(() {
       if (dir.existsSync()) dir.deleteSync(recursive: true);
     });
-    File('${dir.path}/route_leases.json').writeAsStringSync('{not json');
+    final ledger = File('${dir.path}/route_leases.json')
+      ..writeAsStringSync('{not json');
     final store = FileRouteLeaseStore(dirFactory: () => dir);
+    final state = store.activeState(100);
+
+    expect(state.available, isFalse);
+    expect(state.reason, 'lease store unavailable');
     expect(store.active(100), isEmpty);
+    final reservation = store.reserve(
+      provider: 'claude',
+      account: 'work',
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 10,
+    );
+    expect(reservation.reserved, isFalse);
+    expect(reservation.reason, 'lease store unavailable');
+    expect(ledger.readAsStringSync(), '{not json');
+  });
+
+  test('file store reads an atomic ledger without creating lock artifacts', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-leases-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    File('${dir.path}/route_leases.json').writeAsStringSync(
+      jsonEncode([
+        const RouteLease(
+          id: 'seed',
+          provider: 'claude',
+          account: 'work',
+          createdAt: 100,
+          expiresAt: 160,
+          weightPercent: 10,
+        ).toJson(),
+      ]),
+    );
+
+    final state = FileRouteLeaseStore(dirFactory: () => dir).activeState(100);
+
+    expect(state.available, isTrue);
+    expect(state.reason, isNull);
+    expect(state.activeLeases.map((lease) => lease.id), ['seed']);
+    expect(File('${dir.path}/route_leases.lock').existsSync(), isFalse);
+    expect(File('${dir.path}/route_leases.lock.claim').existsSync(), isFalse);
   });
 
   test('random lease ids are url-safe tokens', () {

@@ -9,6 +9,7 @@ typedef GuardFileHardener = void Function(File file);
 const _claimProbeGrace = Duration(seconds: 2);
 const _sameProcessClaimStaleAfter = Duration(minutes: 2);
 const _maxClaimBytes = 1024;
+const defaultFileGuardAcquisitionTimeout = Duration(seconds: 30);
 
 /// A claim-backed native file guard that serializes both processes and isolates.
 ///
@@ -51,17 +52,43 @@ class InterprocessFileGuard {
 InterprocessFileGuard acquireInterprocessFileGuardSync(
   File lockFile, {
   required GuardFileHardener hardenClaim,
+  Duration acquisitionTimeout = defaultFileGuardAcquisitionTimeout,
 }) {
+  final elapsed = Stopwatch()..start();
+  var attempted = false;
   var delayMs = 1;
   while (true) {
+    if (attempted) {
+      _requireAcquisitionTime(lockFile, elapsed, acquisitionTimeout);
+    }
+    attempted = true;
     final claim = _tryCreateClaim(lockFile, hardenClaim);
     if (claim != null) {
-      final guard = _lockClaimSync(lockFile, claim);
-      if (guard != null) return guard;
+      try {
+        final guard = _lockClaimSync(lockFile, claim);
+        if (guard != null) return guard;
+      } on _NativeLockContended {
+        _waitForGuardRetrySync(
+          lockFile,
+          elapsed,
+          acquisitionTimeout,
+          delayMs,
+        );
+        if (delayMs < 32) delayMs *= 2;
+      }
       continue;
     }
-    if (_tryReclaimStaleClaim(lockFile)) continue;
-    sleep(Duration(milliseconds: delayMs));
+    try {
+      if (_tryReclaimStaleClaim(lockFile)) continue;
+    } on FileSystemException catch (error) {
+      if (!_isTransientWindowsContention(error)) rethrow;
+    }
+    _waitForGuardRetrySync(
+      lockFile,
+      elapsed,
+      acquisitionTimeout,
+      delayMs,
+    );
     if (delayMs < 32) delayMs *= 2;
   }
 }
@@ -69,19 +96,92 @@ InterprocessFileGuard acquireInterprocessFileGuardSync(
 Future<InterprocessFileGuard> acquireInterprocessFileGuard(
   File lockFile, {
   required GuardFileHardener hardenClaim,
+  Duration acquisitionTimeout = defaultFileGuardAcquisitionTimeout,
 }) async {
+  final elapsed = Stopwatch()..start();
+  var attempted = false;
   var delayMs = 1;
   while (true) {
+    if (attempted) {
+      _requireAcquisitionTime(lockFile, elapsed, acquisitionTimeout);
+    }
+    attempted = true;
     final claim = _tryCreateClaim(lockFile, hardenClaim);
     if (claim != null) {
-      final guard = await _lockClaim(lockFile, claim);
-      if (guard != null) return guard;
+      try {
+        final guard = await _lockClaim(lockFile, claim);
+        if (guard != null) return guard;
+      } on _NativeLockContended {
+        await _waitForGuardRetry(
+          lockFile,
+          elapsed,
+          acquisitionTimeout,
+          delayMs,
+        );
+        if (delayMs < 32) delayMs *= 2;
+      }
       continue;
     }
-    if (_tryReclaimStaleClaim(lockFile)) continue;
-    await Future<void>.delayed(Duration(milliseconds: delayMs));
+    try {
+      if (_tryReclaimStaleClaim(lockFile)) continue;
+    } on FileSystemException catch (error) {
+      if (!_isTransientWindowsContention(error)) rethrow;
+    }
+    await _waitForGuardRetry(
+      lockFile,
+      elapsed,
+      acquisitionTimeout,
+      delayMs,
+    );
     if (delayMs < 32) delayMs *= 2;
   }
+}
+
+void _requireAcquisitionTime(
+  File lockFile,
+  Stopwatch elapsed,
+  Duration timeout,
+) {
+  if (timeout.isNegative || elapsed.elapsed >= timeout) {
+    throw FileSystemException(
+      'timed out acquiring file guard',
+      lockFile.path,
+    );
+  }
+}
+
+Duration _guardRetryDelay(
+  File lockFile,
+  Stopwatch elapsed,
+  Duration timeout,
+  int delayMs,
+) {
+  _requireAcquisitionTime(lockFile, elapsed, timeout);
+  final remaining = timeout - elapsed.elapsed;
+  final requested = Duration(milliseconds: delayMs);
+  return requested < remaining ? requested : remaining;
+}
+
+void _waitForGuardRetrySync(
+  File lockFile,
+  Stopwatch elapsed,
+  Duration timeout,
+  int delayMs,
+) {
+  sleep(_guardRetryDelay(lockFile, elapsed, timeout, delayMs));
+  _requireAcquisitionTime(lockFile, elapsed, timeout);
+}
+
+Future<void> _waitForGuardRetry(
+  File lockFile,
+  Stopwatch elapsed,
+  Duration timeout,
+  int delayMs,
+) async {
+  await Future<void>.delayed(
+    _guardRetryDelay(lockFile, elapsed, timeout, delayMs),
+  );
+  _requireAcquisitionTime(lockFile, elapsed, timeout);
 }
 
 _FileClaim? _tryCreateClaim(
@@ -125,7 +225,12 @@ _FileClaim? _tryCreateClaim(
 InterprocessFileGuard? _lockClaimSync(File lockFile, _FileClaim claim) {
   final lock = lockFile.openSync(mode: FileMode.write);
   try {
-    lock.lockSync(FileLock.blockingExclusive);
+    try {
+      lock.lockSync(FileLock.exclusive);
+    } on FileSystemException catch (error) {
+      if (_isNativeLockContention(error)) throw const _NativeLockContended();
+      rethrow;
+    }
     if (!_claimIsOwnedBy(claim.file, claim.owner)) {
       if (!_releaseNativeLock(lock)) {
         throw FileSystemException('could not release lock', lockFile.path);
@@ -147,7 +252,12 @@ Future<InterprocessFileGuard?> _lockClaim(
 ) async {
   final lock = lockFile.openSync(mode: FileMode.write);
   try {
-    await lock.lock(FileLock.blockingExclusive);
+    try {
+      await lock.lock(FileLock.exclusive);
+    } on FileSystemException catch (error) {
+      if (_isNativeLockContention(error)) throw const _NativeLockContended();
+      rethrow;
+    }
     if (!_claimIsOwnedBy(claim.file, claim.owner)) {
       if (!_releaseNativeLock(lock)) {
         throw FileSystemException('could not release lock', lockFile.path);
@@ -186,8 +296,9 @@ bool _tryReclaimStaleClaim(File lockFile) {
     try {
       lock.lockSync(FileLock.exclusive);
       locked = true;
-    } on FileSystemException {
-      return false;
+    } on FileSystemException catch (error) {
+      if (_isNativeLockContention(error)) return false;
+      rethrow;
     }
     final after = _readClaimSnapshot(claimFile);
     if (after == null) return true;
@@ -247,6 +358,21 @@ bool _releaseNativeLock(RandomAccessFile lock) {
     released = true;
   } catch (_) {}
   return released;
+}
+
+bool _isNativeLockContention(FileSystemException error) {
+  final code = error.osError?.errorCode;
+  if (Platform.isWindows) return code == 32 || code == 33;
+  // POSIX F_SETLK reports a held lock as EAGAIN or EACCES. EAGAIN is 11 on
+  // Linux but 35 on macOS/BSD; EACCES is 13. The handle is already open for
+  // write, so an EACCES here is lock contention, not a permission failure.
+  return code == 11 || code == 13 || code == 35;
+}
+
+bool _isTransientWindowsContention(FileSystemException error) {
+  if (!Platform.isWindows) return false;
+  final code = error.osError?.errorCode;
+  return code == 32 || code == 33;
 }
 
 _FileClaimSnapshot? _readClaimSnapshot(File claimFile) {
@@ -324,6 +450,10 @@ class _FileClaim {
   final String owner;
 
   const _FileClaim(this.file, this.owner);
+}
+
+class _NativeLockContended implements Exception {
+  const _NativeLockContended();
 }
 
 class _FileClaimSnapshot {
