@@ -8,7 +8,7 @@ void main() {
   group('windsurfWindows fallbacks', () {
     final now = nowEpoch();
 
-    test('reads a usageBreakdowns list', () {
+    test('reads a usageBreakdowns list and merges duplicate pools', () {
       final w = windsurfWindows({
         'usageBreakdowns': [
           {'displayName': 'Prompts', 'currentUsage': 50, 'usageLimit': 100},
@@ -16,10 +16,9 @@ void main() {
           'not a map', // skipped
         ],
       }, now);
-      expect(w.length, 2);
-      expect(w.first.label, 'prompts');
-      expect(w.first.usedPercent, 50);
-      expect(w[1].usedPercent, 25);
+      expect(w, hasLength(1));
+      expect(w.single.label, 'prompts');
+      expect(w.single.usedPercent, 50);
     });
 
     test('does not invent quota from an undecodable raw blob', () {

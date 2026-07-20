@@ -225,12 +225,8 @@ class DesktopReadinessTests(unittest.TestCase):
         process.wait.return_value = 0
 
         with (
-            unittest.mock.patch(
-                "tools.desktop_readiness_smoke.os.name", "nt"
-            ),
-            unittest.mock.patch(
-                "tools.desktop_readiness_smoke.subprocess.run"
-            ) as run,
+            unittest.mock.patch("tools.desktop_readiness_smoke.os.name", "nt"),
+            unittest.mock.patch("tools.desktop_readiness_smoke.subprocess.run") as run,
         ):
             stop_process(process)
 
@@ -252,9 +248,7 @@ class DesktopReadinessTests(unittest.TestCase):
         ]
 
         with (
-            unittest.mock.patch(
-                "tools.desktop_readiness_smoke.os.name", "nt"
-            ),
+            unittest.mock.patch("tools.desktop_readiness_smoke.os.name", "nt"),
             unittest.mock.patch("tools.desktop_readiness_smoke.subprocess.run"),
         ):
             stop_process(process)

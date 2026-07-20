@@ -58,7 +58,8 @@ def _flutter_target() -> tuple[str, Path]:
     if system == "darwin":
         return (
             "macos",
-            APP_DIR / "build/macos/Build/Products/Debug/quotabot.app/Contents/MacOS/quotabot",
+            APP_DIR
+            / "build/macos/Build/Products/Debug/quotabot.app/Contents/MacOS/quotabot",
         )
     if system == "linux":
         machine = platform.machine().lower()

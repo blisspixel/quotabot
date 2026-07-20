@@ -22,6 +22,12 @@ const int kQuotaEvidenceClockSkewSeconds = 60;
 /// regression, absorbing minor clock and reporting noise.
 const int _resetRegressToleranceSeconds = 300;
 
+/// Generous upper bound for a provider-reported quota reset. Quota windows in
+/// this project reset within hours, weeks, or occasionally months; a timestamp
+/// more than 400 days from the observation is malformed evidence, not durable
+/// account capacity.
+const int _maxQuotaResetHorizonSeconds = 400 * 86400;
+
 /// Used-percent must fall by more than this many points, within an unreset
 /// window, before it counts as an implausible headroom gain (absorbs rounding).
 const double _headroomGainTolerancePoints = 2.0;
@@ -40,9 +46,12 @@ const _syntheticWindowProviders = {antigravityProviderId};
 
 /// Providers whose model quotas are optional overlays on shared provider
 /// windows rather than an exhaustive list of independent model pools. Claude
-/// can add or remove a promotional or plan-specific scoped limit without
-/// invalidating the account-wide session and weekly evidence.
-const _optionalModelQuotaProviders = {claudeProviderId};
+/// and Codex can add or remove a promotional or plan-specific scoped limit
+/// without invalidating the account-wide session and weekly evidence.
+const _optionalModelQuotaProviders = {
+  claudeProviderId,
+  codexProviderId,
+};
 
 /// Claude Code briefly exposed scoped family caps in response shapes that older
 /// quotabot builds normalized as provider-wide windows. Those labels are not
@@ -78,44 +87,32 @@ const _reRatingWindows = <String, Set<String>>{
   codexProviderId: {'weekly'},
 };
 
-/// Whether the vanished [gone] window is explained by the account folding into a
-/// longer cap: some surviving [fresh] window has a reset at least as far out as
-/// [gone]'s (within tolerance). This distinguishes a legitimate collapse to a
-/// longer window (the observed Codex 5h+weekly to single-weekly restructure)
-/// from losing the longest cap, which stays drift. Conservative on missing reset
-/// times: without a comparable reset on both sides it returns false, so the
-/// disappearance is flagged rather than quietly accepted.
-bool _collapsedIntoLongerWindow(QuotaWindow gone, ProviderQuota fresh) {
-  final goneReset = gone.resetsAt;
-  if (goneReset == null) return false;
-  for (final w in fresh.windows) {
-    final r = w.resetsAt;
-    if (r != null && r >= goneReset - _resetRegressToleranceSeconds) {
-      return true;
-    }
-  }
-  return false;
-}
+/// Providers that can legitimately start a new reset generation before the
+/// prior reset boundary. Codex exposes redeemable rate-limit reset credits, so
+/// an advancing reset plus restored headroom is a real refill. This exemption
+/// applies only to the advanced-generation check in [_pairDrift]; an unexplained
+/// drop inside the same Codex 5 hour generation remains drift.
+const _earlyResetGenerationProviders = {codexProviderId};
+
+/// Whether the vanished [gone] window is the exact observed Codex migration:
+/// a shared 5 hour plus weekly shape collapsing to the surviving weekly pool.
+/// Reset timestamps cannot establish window duration. Near a weekly reset, a
+/// shorter 5 hour pool can reset later, so using reset order here could wrongly
+/// admit the loss of the binding weekly cap.
+bool _isKnownCodexWindowCollapse(
+  QuotaWindow gone,
+  ProviderQuota previous,
+  ProviderQuota fresh,
+) =>
+    gone.label == '5h' &&
+    previous.windows.any((window) => window.label == 'weekly') &&
+    fresh.windows.any((window) => window.label == 'weekly');
 
 /// Whether a used-percent drop in [label] for [provider] is expected re-rating
 /// rather than drift.
 bool _isReRatingWindow(String provider, String? label) =>
     _reRatingProviders.contains(provider) ||
     (label != null && (_reRatingWindows[provider]?.contains(label) ?? false));
-
-/// Providers whose set of quota windows is defined by the provider and can
-/// legitimately change shape - a window bucket appearing or disappearing as the
-/// provider restructures its plan - rather than a fixed schema. Codex qualifies:
-/// OpenAI has been observed collapsing the separate 5 hour and weekly buckets
-/// into a single weekly window on the Pro plan, so a window vanishing is a
-/// provider restructure, not a parser regression. Holding the pre-restructure
-/// snapshot would then keep reporting a spent old window as current and hide the
-/// real headroom the account now has (for example a fresh weekly at 4% used
-/// after an off-cycle reset would read as the stale 93% used it held before).
-/// This exemption only relaxes the window-disappeared check; a surviving
-/// window's own value still passes the monotonicity and re-rating checks, so a
-/// genuinely implausible number is still caught.
-const _variableWindowSetProviders = {codexProviderId};
 
 /// Whether [quota]'s status and window shape are structurally eligible for
 /// trusted evidence. Time-aware persistence and routing must use
@@ -145,8 +142,51 @@ bool isTrustedQuotaEvidenceAt(ProviderQuota quota, int observedAt) =>
     isTrustedQuotaEvidence(quota) &&
     quota.asOf > 0 &&
     quota.asOf <= observedAt + kQuotaEvidenceClockSkewSeconds &&
+    !hasExpiredQuotaWindowAt(quota, observedAt) &&
+    !hasImplausibleFutureQuotaWindowAt(quota, observedAt) &&
     quota.modelQuotas.every((modelQuota) =>
         _unusableModelQuotaReason(modelQuota, observedAt: observedAt) == null);
+
+/// Whether persisted evidence was trustworthy at its own capture time.
+///
+/// This is intentionally weaker than evaluating the same row at the current
+/// time: a reset that passed after capture makes the evidence non-routable now,
+/// but does not erase the last observed value or invalidate a historical
+/// sample. Callers must still use [isTrustedQuotaEvidenceAt] with the current
+/// observation time for availability and routing decisions.
+bool isTrustedQuotaEvidenceAtCapture(ProviderQuota quota) =>
+    isTrustedQuotaEvidenceAt(quota, quota.asOf);
+
+/// Whether a model-scoped quota still describes the active pool at
+/// [observedAt]. A passed reset preserves useful last-observed display evidence,
+/// but cannot prove how much of the replacement pool remains.
+bool isCurrentModelQuotaEvidenceAt(ModelQuota quota, int observedAt) {
+  final reset = quota.resetsAt;
+  return reset == null || reset > observedAt;
+}
+
+/// Whether a shared quota window has crossed its reset boundary without a new
+/// provider observation that names the next window. A reset timestamp proves
+/// when the old pool ended, not how much account-wide quota remains afterward.
+/// Treating it as zero usage would synthesize 100% headroom and can miss work
+/// performed on another machine between the reset and this read.
+bool hasExpiredQuotaWindowAt(ProviderQuota quota, int observedAt) =>
+    quota.windows.any((window) {
+      final reset = window.resetsAt;
+      return reset != null && reset <= observedAt;
+    });
+
+/// Whether a shared quota reset is too far from its observation to be credible.
+/// This mirrors the model-scoped reset boundary so cache-only and live routing
+/// cannot trust a malformed year-9999 timestamp indefinitely.
+bool hasImplausibleFutureQuotaWindowAt(
+  ProviderQuota quota,
+  int observedAt,
+) =>
+    quota.windows.any((window) {
+      final reset = window.resetsAt;
+      return reset != null && reset > observedAt + _maxQuotaResetHorizonSeconds;
+    });
 
 /// Returns a bounded drift diagnostic when an otherwise successful fresh read
 /// contains a quota window that cannot produce a finite percent in 0..100.
@@ -196,6 +236,24 @@ String? unusableQuotaEvidenceDriftReason(
         '$namedWindow produced a percent outside 0..100',
       );
     }
+    final reset = window.resetsAt;
+    if (reset != null && reset <= 0) {
+      return boundedQuotaDriftReason(
+        '$namedWindow has a non-positive reset timestamp',
+      );
+    }
+    if (reset != null && observedAt != null && reset <= observedAt) {
+      return boundedQuotaDriftReason(
+        '$namedWindow reset passed without a new quota window',
+      );
+    }
+    if (reset != null &&
+        observedAt != null &&
+        reset > observedAt + _maxQuotaResetHorizonSeconds) {
+      return boundedQuotaDriftReason(
+        '$namedWindow reset is implausibly far in the future',
+      );
+    }
   }
   for (final modelQuota in quota.modelQuotas) {
     final reason = _unusableModelQuotaReason(
@@ -222,11 +280,21 @@ String? _unusableModelQuotaReason(
   if (percent != null && (!percent.isFinite || percent < 0 || percent > 100)) {
     return '$model model quota produced a percent outside 0..100';
   }
+  final rawWindowLabel = quota.windowLabel;
+  if (rawWindowLabel != null &&
+      (rawWindowLabel.isEmpty ||
+          rawWindowLabel.length > kMaxModelQuotaWindowLabelCharacters ||
+          rawWindowLabel.trim() != rawWindowLabel ||
+          stripTerminalControl(rawWindowLabel) != rawWindowLabel)) {
+    return '$model model quota has an invalid window label';
+  }
   final reset = quota.resetsAt;
   if (reset != null && reset <= 0) {
     return '$model model quota has a non-positive reset timestamp';
   }
-  if (reset != null && observedAt != null && reset > observedAt + 400 * 86400) {
+  if (reset != null &&
+      observedAt != null &&
+      reset > observedAt + _maxQuotaResetHorizonSeconds) {
     return '$model model quota reset is implausibly far in the future';
   }
   return null;
@@ -295,7 +363,7 @@ QuotaEvidenceAdmission admitQuotaEvidence(
         );
   if (unusableReason != null) {
     if (previous != null &&
-        isTrustedQuotaEvidenceAt(previous, observedAt) &&
+        isTrustedQuotaEvidenceAtCapture(previous) &&
         (forcedRejection || isComparableQuotaEvidence(fresh, previous))) {
       return QuotaEvidenceAdmission(
         snapshot: previous.withProviderDrift(unusableReason, observedAt),
@@ -389,6 +457,8 @@ ProviderQuota quarantineUnusableQuotaEvidence(
     account: fresh.account,
     asOf: validTimestamp ? fresh.asOf : observedAt,
     plan: fresh.plan,
+    planEvidenceSource: fresh.planEvidenceSource,
+    planEvidenceAsOf: fresh.planEvidenceAsOf,
     source: fresh.source,
     sourceClass: fresh.sourceClass,
     ok: false,
@@ -490,19 +560,14 @@ String? detectQuotaDrift(
   if (!_syntheticWindowProviders.contains(fresh.provider)) {
     final prev = {for (final w in previous.windows) w.label: w};
     final freshLabels = {for (final w in fresh.windows) w.label};
-    final windowSetIsVariable =
-        _variableWindowSetProviders.contains(fresh.provider);
     for (final prior in previous.windows) {
       if (freshLabels.contains(prior.label)) continue;
       if (_isLegacyClaudeScopedWindow(previous, prior)) continue;
-      // A window vanished. For a provider whose window set can restructure
-      // (Codex), that is a legitimate collapse only when a window reaching at
-      // least as far as the vanished one survives - the account folded into its
-      // longer cap, as when the 5h and weekly buckets became a single weekly.
-      // If instead the longest cap vanished, the binding constraint (or a parser
-      // that dropped it) is lost, so it is still flagged. A blanket exemption
-      // would silently accept losing the weekly cap.
-      if (windowSetIsVariable && _collapsedIntoLongerWindow(prior, fresh)) {
+      // The one admitted Codex shape change is the observed 5h plus weekly to
+      // weekly-only collapse. Losing weekly is always drift, even when its reset
+      // is sooner than a surviving 5h reset.
+      if (fresh.provider == codexProviderId &&
+          _isKnownCodexWindowCollapse(prior, previous, fresh)) {
         continue;
       }
       return boundedQuotaDriftReason(
@@ -528,12 +593,17 @@ String? detectQuotaDrift(
   }
   // Per-model pools keep the same monotonicity checks when a model survives in
   // both snapshots. Antigravity's list is exhaustive, so disappearance is also
-  // drift. Claude's scoped list is optional, so addition or removal can reflect
-  // a legitimate plan-policy change without invalidating shared windows.
-  final prevModels = {for (final m in previous.modelQuotas) m.model: m};
-  final freshModelNames = {for (final m in fresh.modelQuotas) m.model};
+  // drift. Claude and Codex scoped lists are optional, so addition or removal
+  // can reflect a legitimate plan-policy change without invalidating shared
+  // windows.
+  final prevModels = {
+    for (final m in previous.modelQuotas) _modelQuotaDriftKey(m): m,
+  };
+  final freshModelKeys = {
+    for (final m in fresh.modelQuotas) _modelQuotaDriftKey(m),
+  };
   for (final prior in previous.modelQuotas) {
-    if (!freshModelNames.contains(prior.model) &&
+    if (!freshModelKeys.contains(_modelQuotaDriftKey(prior)) &&
         !_optionalModelQuotaProviders.contains(fresh.provider)) {
       return boundedQuotaDriftReason(
         '${prior.model} model quota disappeared',
@@ -541,7 +611,7 @@ String? detectQuotaDrift(
     }
   }
   for (final m in fresh.modelQuotas) {
-    final p = prevModels[m.model];
+    final p = prevModels[_modelQuotaDriftKey(m)];
     if (p == null) continue;
     final reason = _pairDrift(
       fresh.provider,
@@ -550,6 +620,7 @@ String? detectQuotaDrift(
       p.usedPercent,
       p.resetsAt,
       observation,
+      windowLabel: m.windowLabel,
     );
     if (reason != null) {
       return boundedQuotaDriftReason('${m.model} $reason');
@@ -557,6 +628,9 @@ String? detectQuotaDrift(
   }
   return null;
 }
+
+String _modelQuotaDriftKey(ModelQuota quota) =>
+    '${quota.model}\u0000${quota.windowLabel ?? ''}';
 
 /// The monotonicity checks shared by windows and per-model pools, given a fresh
 /// and previous `(usedPercent, resetsAt)` pair.
@@ -594,6 +668,7 @@ String? _pairDrift(
     }
   }
   if (!reRating &&
+      !_earlyResetGenerationProviders.contains(provider) &&
       fr != null &&
       pr != null &&
       fr > pr + _resetRegressToleranceSeconds &&

@@ -32,7 +32,9 @@ LocalRuntimeOrigin resolveLocalRuntimeOrigin(
   final withScheme =
       trimmed.startsWith('http://') || trimmed.startsWith('https://')
           ? trimmed
-          : 'http://$trimmed';
+          : trimmed == '::1'
+              ? 'http://[::1]'
+              : 'http://$trimmed';
   try {
     final parsed = Uri.parse(withScheme);
     if (parsed.host.isEmpty) {
@@ -46,6 +48,45 @@ LocalRuntimeOrigin resolveLocalRuntimeOrigin(
     return _origin(scheme, parsed.host, port);
   } on FormatException {
     return _origin('http', '127.0.0.1', configuredPort ?? defaultPort);
+  }
+}
+
+/// Whether a configured runtime host is an exact loopback destination.
+///
+/// Runtime adapters are eligible as local routing capacity only when their
+/// metadata endpoint is on this host. Environment overrides remain visible in
+/// the runtime-access audit, but a LAN or public endpoint must not be promoted
+/// to an on-device fallback. User-info is refused even when the parsed host is
+/// loopback so credential-bearing lookalikes never cross this trust boundary.
+bool isLoopbackRuntimeHost(String? rawHost) {
+  final trimmed = rawHost?.trim();
+  if (trimmed == null || trimmed.isEmpty) return true;
+
+  final withScheme =
+      trimmed.startsWith('http://') || trimmed.startsWith('https://')
+          ? trimmed
+          : trimmed == '::1'
+              ? 'http://[::1]'
+              : 'http://$trimmed';
+  try {
+    final parsed = Uri.parse(withScheme);
+    if (parsed.host.isEmpty || parsed.userInfo.isNotEmpty) return false;
+    final host = parsed.host.toLowerCase();
+    if (host == 'localhost' || host == 'localhost.' || host == '::1') {
+      return true;
+    }
+    final octets = host.split('.');
+    if (octets.length != 4) return false;
+    final values = <int>[];
+    for (final octet in octets) {
+      if (octet.isEmpty || !RegExp(r'^\d{1,3}$').hasMatch(octet)) return false;
+      final value = int.parse(octet);
+      if (value > 255) return false;
+      values.add(value);
+    }
+    return values.first == 127;
+  } on FormatException {
+    return false;
   }
 }
 

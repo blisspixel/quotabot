@@ -16,6 +16,7 @@ enum RouteDecisionCode {
   bestRunway('best_runway'),
   localFallback('local_fallback'),
   lowQuota('low_quota'),
+  adjustedHeadroomDepleted('adjusted_headroom_depleted'),
   capabilityBudgetBlocked('capability_budget_blocked'),
   capabilityBlocked('capability_blocked'),
   providerDrift('provider_drift'),
@@ -42,6 +43,10 @@ enum RouteCandidateVerdict {
   belowComfort(
     'below_comfort',
     'effective headroom is below the comfort threshold',
+  ),
+  adjustedHeadroomDepleted(
+    'adjusted_headroom_depleted',
+    'routing adjustments consumed the usable effective headroom',
   ),
   unavailable('unavailable', 'current evidence does not prove availability'),
   spent('spent', 'the binding quota pool is spent'),
@@ -161,6 +166,11 @@ class RouteSnapshotReceipt {
   final int? ageSeconds;
   final bool stale;
 
+  /// The [stale] flag covers the complete filtered snapshot, not the selected
+  /// winner. It can be caused by envelope age or by any unsafe provider row.
+  /// Candidate receipts carry their own provider-level `stale` flag.
+  static const staleScope = 'snapshot';
+
   const RouteSnapshotReceipt({
     required this.source,
     required this.asOf,
@@ -173,6 +183,7 @@ class RouteSnapshotReceipt {
         'as_of': asOf,
         'age_seconds': ageSeconds,
         'stale': stale,
+        'stale_scope': staleScope,
       };
 }
 

@@ -79,13 +79,15 @@ for that surface.
     caller finishes or abandons the dispatch.
   - `provider_with_most_headroom` - the account with the most remaining budget.
   - `check_provider_availability` - whether a named provider is usable now and
-    when it resets.
+    when it resets. A failed live read returns its plain `error`; any accompanying
+    stale headroom is last-known evidence and remains unavailable.
   - `list_models` - matching models for providers represented in the current
     registry, ordered by routability with explicit availability, gating budget,
     capability hints, and tier. Accepts an optional capability filter (`task`, `min_context`,
     `require_tools`/`require_vision`/`require_reasoning`, `tier_floor`/
     `tier_ceiling`) plus `budget` (`local`, `quota`, or `any`) so you can ask
     for "a reasoning model with budget" without quotabot ever seeing the task.
+    Listing defaults to `budget: "any"` for inspection.
     `budget: "quota"` means measured built-in quota plans plus local runtimes;
     it excludes self-reported manual quota and entries catalogued as paid API.
     Local-runtime model entries include `local_readiness` (`loaded` or `cold`);
@@ -98,7 +100,9 @@ for that surface.
     local-only or free execution.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): available first, then local-runtime readiness, provider tier,
-    and headroom. Pass `use_expiring_quota: true` to let a measured quota-backed
+    and headroom. It defaults to `budget: "quota"`; pass `budget: "any"`
+    explicitly to admit credit-backed or paid catalog entries. Pass
+    `use_expiring_quota: true` to let a measured quota-backed
     model beat local only when local analytics project meaningful included quota
     would otherwise expire unused soon.
   - Resource `quotas://current` - the same unfiltered live snapshot.
@@ -115,9 +119,11 @@ for that surface.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics. Add `--local-first` to `suggest` when
-  you prefer local capacity before spending subscription quota, and
-  `--budget=local` or `--budget=quota` to filter model choices by quotabot's
-  runtime or measured-quota classification; both exclude Ollama cloud-offloaded
+  you prefer local capacity before spending subscription quota. Concrete model
+  suggestions default to `--budget=quota`, while model listings default to
+  `--budget=any`; use `--budget=any` explicitly on a suggestion to admit
+  credit-backed or paid catalog entries. `--budget=local` and `--budget=quota`
+  both exclude Ollama cloud-offloaded
   (`-cloud`) models, which run in the provider cloud rather than on-device. Add
   `--exclude=A,B` to quota-reading commands after `--profile` when one request
   should avoid specific providers. Add `--use-expiring-quota` to a profiled
@@ -132,7 +138,10 @@ for that surface.
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`). Add `?exclude=codex,grok` to ignore
   providers for one recommendation, or `?local_first=true` to prefer local
-  capacity.
+  capacity. The bundled LiteLLM router also uses authenticated
+  `POST /leases/reserve` and `POST /leases/release`. Server startup creates a
+  stable owner-only mutation token that is never printed or returned; mutation
+  bodies contain bounded quota target metadata only, never prompts or code.
 
 ## The routing contract
 
@@ -146,6 +155,16 @@ for that surface.
 4. **Fail soft.** If quotabot is unreachable or returns nothing, proceed with the
    model the user originally asked for. Routing is an optimization, never a hard
    dependency.
+
+Claude's interactive `/usage` view is a human cross-check, not an agent
+collector. Its current-window bars are separate from its approximate
+this-machine contribution breakdown. Never turn that local breakdown, or the
+announced Fable allowance of 50% of plan limits, into remaining headroom. Use
+the live scoped Fable row for balance; `quota_backed` additionally requires
+current Max or Team Premium provider usage or profile metadata read with the
+same credential on or after the announced July 20, 2026 UTC policy boundary.
+Do not invoke `claude -p /usage` or
+`/quota`, because print mode is a prompt-execution surface.
 
 ## Decision recipe
 
@@ -190,14 +209,14 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   `effective_headroom_percent`; treat low
   `confidence` or high `strand_probability` with appropriate caution.
   The nested `receipt` is `quotabot.receipt.v1`: a deterministic decision id,
-  snapshot source and age, policy, binding pool, spend classification, raw and
-  adjusted headroom, adjustment and confidence reasons, winner qualification,
+  snapshot source, age, and whole-snapshot stale scope after any filters, policy, binding pool, spend
+  classification, raw and adjusted headroom, adjustment and confidence reasons, winner qualification,
   rejection verdicts for alternatives, and the same fallback. It contains quota
   metadata and bounded identifiers only, never task text, prompts, source code,
   model responses, credentials, or exceptions.
 - `decide_now` is `quotabot.decision.v1`: a cache-only routing decision with
-  `source`, `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`,
-  `routing_policy`, the same nested decision receipt, ranked candidates,
+  `source`, `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`, and
+  `snapshot_stale_scope: "snapshot"`, plus `routing_policy`, the same nested decision receipt, ranked candidates,
   fallback, and active local leases. It never forces a live collect.
 - `reserve_provider` is `quotabot.reserve.v1`: a local lease write returning
   `reserved`, `lease`, and the chosen candidate when a cloud provider can be
@@ -240,9 +259,11 @@ The LiteLLM plugin is no-surprise-billing by default: candidates marked
 `spend: quota_plan` should be used only for real included quota plans with
 overages disabled and now requires `overages_disabled: true` or
 `overages: disabled` in the routing policy. Managed logical models fail closed
-when no safe route exists. Its local routed-request metrics include the selected
-spend class so the desktop analytics view can flag local, quota-plan, and
-paid-API traffic separately.
+when no safe route exists. Before dispatch, the hook atomically reserves from
+its complete eligible remote target set, then releases the lease on either
+completion callback; the TTL covers abandoned callbacks. Its local
+routed-request metrics include the selected spend class so the desktop analytics
+view can flag local, quota-plan, and paid-API traffic separately.
 The model-router `budget: "quota"` filter admits measured quota plans and
 local-runtime entries while rejecting catalogued manual and paid API classes.
 The Ollama execution-location caveat still applies.

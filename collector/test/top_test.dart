@@ -1,5 +1,6 @@
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/palette.dart';
 import 'package:quotabot_collector/top.dart';
@@ -21,6 +22,7 @@ ProviderQuota _q(
   String account = 'a',
   int asOf = _now,
   List<String> details = const [],
+  List<ModelInfo> models = const [],
   int resetCreditsAvailable = 0,
 }) =>
     ProviderQuota(
@@ -38,6 +40,7 @@ ProviderQuota _q(
       source: source,
       perMachine: perMachine,
       details: details,
+      models: models,
       resetCreditsAvailable: resetCreditsAvailable,
     );
 
@@ -61,6 +64,25 @@ List<String> _frame(
 }
 
 void main() {
+  test('hidden providers are removed before routing and rendering', () {
+    final claude = _q(
+      'claude',
+      [QuotaWindow(label: 'weekly', usedPercent: 10)],
+    );
+    final codex = _q(
+      'codex',
+      [QuotaWindow(label: 'weekly', usedPercent: 30)],
+    );
+    final visible = filterHiddenProvidersForTop(
+      [claude, codex],
+      {quotaIdentityKeyFor(claude)},
+    );
+    final suggestion = suggestRoute(visible, _now);
+
+    expect(visible.map((quota) => quota.provider), ['codex']);
+    expect(suggestion.recommended?.provider, 'codex');
+  });
+
   test('header carries the wordmark, pool gauge, and clock', () {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
@@ -178,7 +200,8 @@ void main() {
           kind: ProviderQuotaKind.local,
           status: '3 models, llama3 loaded',
           active: true,
-          perMachine: true),
+          perMachine: true,
+          models: const [ModelInfo(id: 'llama3', local: true, loaded: true)]),
     ], width: 100);
     final row = lines.firstWhere((l) => _plain(l).contains('ollama'));
     expect(_plain(row), contains('local'));
@@ -194,6 +217,7 @@ void main() {
         const [],
         kind: ProviderQuotaKind.local,
         status: '1 installed, idle',
+        models: const [ModelInfo(id: 'lemonade-local', local: true)],
       ),
     ], width: 100);
     final row =
@@ -241,6 +265,22 @@ void main() {
     expect(_plain(lines.join('\n')), isNot(contains('80% free')));
   });
 
+  test('a stale cloud provider shows the failed live-read reason', () {
+    final lines = _frame([
+      _q(
+        'claude',
+        [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        stale: true,
+        error: 'invalid Claude usage response',
+      ),
+    ], width: 100);
+
+    final rendered = _plain(lines.join('\n'));
+    expect(rendered, contains('80% last'));
+    expect(
+        rendered, contains('live read failed: invalid Claude usage response'));
+  });
+
   test('provider drift is distinct from an ordinary cached read', () {
     final trusted = _q(
       'claude',
@@ -284,7 +324,7 @@ void main() {
     final lines = _frame([
       _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
       _q(
-        'codex',
+        'antigravity',
         [QuotaWindow(label: 'weekly', usedPercent: 25)],
         perMachine: true,
       ),
@@ -300,6 +340,7 @@ void main() {
         status: 'llama3 loaded',
         active: true,
         perMachine: true,
+        models: const [ModelInfo(id: 'llama3', local: true, loaded: true)],
       ),
       _q('nvidia', const [], status: 'free trial available; balance unknown'),
       _q(
@@ -850,6 +891,27 @@ void main() {
     );
   });
 
+  test('duplicate opaque accounts render short labels, never full digests', () {
+    final first = opaqueCredentialIdentity('claude', 'top-grant-a');
+    final second = opaqueCredentialIdentity('claude', 'top-grant-b');
+    ProviderQuota claude(String account, double used) => ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: account,
+          asOf: _now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final text = _frame(
+      [claude(first, 20), claude(second, 40)],
+      width: 110,
+    ).map(_plain).join('\n');
+
+    expect(text, contains('@${quotaAccountDisplayLabel(first)}'));
+    expect(text, contains('@${quotaAccountDisplayLabel(second)}'));
+    expect(text, isNot(contains(first)));
+    expect(text, isNot(contains(second)));
+  });
+
   test('the route account tag yields whole before clipping', () {
     ProviderQuota grok(String account, double used) => ProviderQuota(
           provider: 'grok',
@@ -901,7 +963,10 @@ void main() {
         kind: ProviderQuotaKind.local,
         status: 'qwen2.5-coder 7B Q4_K_M loaded',
         active: true,
-        perMachine: true);
+        perMachine: true,
+        models: const [
+          ModelInfo(id: 'qwen2.5-coder', local: true, loaded: true),
+        ]);
     final wide = _frame([q], width: 110);
     final narrow = _frame([q], width: 60);
     expect(
@@ -920,7 +985,7 @@ void main() {
     expect(
         lines.any((l) => _plain(l).contains('no providers detected')), isTrue);
     expect(
-      lines.any((l) => _plain(l).contains('login supports Grok')),
+      lines.any((l) => _plain(l).contains('run quotabot doctor')),
       isTrue,
     );
     for (final line in lines) {

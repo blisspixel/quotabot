@@ -566,6 +566,44 @@ void main() {
     expect(q.single.perMachine, isTrue);
   });
 
+  test('an incomplete live model table falls back to local evidence', () async {
+    final reset =
+        DateTime.now().add(const Duration(hours: 2)).toUtc().toIso8601String();
+    const localQuota = ModelQuota(
+      model: 'Gemini 3.5 Flash',
+      usedPercent: 60,
+    );
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate(
+          'partial@example.com',
+          localModel: 'Gemini 3.5 Flash',
+          modelQuotas: const [localQuota],
+        ),
+      ],
+      tokenResolver: (_, __) async => 'token',
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => {
+        'models': {
+          'Gemini 3.5 Flash (Medium)': {
+            'quotaInfo': {
+              'remainingFraction': 0.9,
+              'resetTime': reset,
+            },
+          },
+          'Gemini 3.5 Flash (High)': <String, Object?>{},
+        },
+      },
+    ).collectAccounts();
+
+    expect(q.single.windows, isEmpty);
+    expect(q.single.modelQuotas, const [localQuota]);
+    expect(q.single.perMachine, isTrue);
+    expect(q.single.error, contains('live quota windows are not exposed'));
+  });
+
   test('collect returns the first account snapshot', () async {
     final q = await AntigravityAdapter(
       accountSource: () => [

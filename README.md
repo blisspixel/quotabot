@@ -57,12 +57,12 @@ Highlights:
   traffic - just a content-blind metadata signal that helps you use the
   subscriptions you already pay for.
 - **Local-first, your data is yours.** No quotabot account, hosted service, or
-  telemetry. Tokens, history, cache, preferences, profiles, and leases stay on
-  your machine. Some live adapters send credentials and quota metadata to that
-  provider's own metadata endpoint; Antigravity can also perform its provider-
-  required account onboarding step before reading quota. External alert webhooks remain
-  loopback-only unless you explicitly allow an external host. No path sends
-  prompts, code, model output, or other user content.
+  telemetry. Token storage, history, cache, preferences, profiles, and leases
+  stay on your machine. Some live adapters present an existing credential only
+  to that provider's own metadata endpoint; Antigravity can also perform its
+  provider-required account onboarding step before reading quota. External alert
+  webhooks remain loopback-only unless you explicitly allow an external host. No
+  path sends prompts, code, model output, or other user content.
 
 ## What it shows
 
@@ -94,6 +94,18 @@ identical read. A later read establishes a new baseline only after every retaine
 quota reset has
 advanced, or after an evidence-class transition.
 
+If a provider has legitimately changed its response shape, recover one exact
+quarantined baseline only after comparing it with the provider's own usage view:
+
+```bash
+quotabot verify --recover-drift=PROVIDER --account=EXACT_ACCOUNT --yes
+```
+
+This performs one targeted live metadata verification and replaces only that
+provider/account baseline. It refuses stale, malformed, failed, duplicate,
+wrong-account, or concurrently superseded evidence. History and all other local
+metadata remain unchanged.
+
 An ordinary live-read failure follows the same evidence rule. Cached quota keeps
 its original capture time and last observed percentage. A reset time passing does
 not prove the new window is unused, so stale evidence never becomes 100% free and
@@ -102,11 +114,13 @@ is never routable.
 Every observation also carries a normalized provenance class. Machine output
 uses `source_class` with one of six values: `authoritative_live`,
 `this_machine_fallback`, `passive_local_evidence`, `local_runtime`,
-`status_only`, or `manual`. Human views use the shorter labels
+`status_only`, or `manual`. CLI and report text use the shorter labels
 `authoritative`, `this-machine fallback`, `passive local`, `local runtime`,
-`status only`, and `manual`. This class is separate from freshness: a live
-machine-scoped read can still omit activity from another device, while an
-authoritative account read can become cached. Routing discounts measured
+`status only`, and `manual`. The desktop renders `authoritative_live` as the
+plainer scope label `account-wide`; both labels describe the same normalized
+class. This class is separate from freshness: a live machine-scoped read can
+still omit activity from another device, while an authoritative account read
+can become cached. Routing discounts measured
 machine-scoped evidence by a `0.7` confidence factor without changing the raw
 quota number. `quotabot verify` rejects a class that conflicts with its provider
 or data shape. The exact assignments and verification methods are documented in
@@ -122,7 +136,7 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 | Provider     | Source                                                   | Live usage      |
 |--------------|----------------------------------------------------------|-----------------|
 | Claude       | Account-wide OAuth usage endpoint; fresh Claude Code token or quotabot grant | Yes, while authenticated |
-| Codex        | ChatGPT usage endpoint; local session fallback           | Yes; local fallback marked this machine |
+| Codex        | Account-wide ChatGPT usage endpoint; host token or quotabot grant | Yes, while authenticated |
 | Antigravity  | Google Cloud Code API (Gemini), token reused and refreshed | Yes, signed-in account; local fallback marked this machine |
 | Grok         | gRPC-web billing endpoint, token reused from the CLI     | Yes, when fresh |
 | Cursor       | Local credits/state; passive detect for free/Pro          | opportunistic   |
@@ -135,20 +149,45 @@ CLI: [docs/USAGE.md](docs/USAGE.md).
 Claude and Codex are live with no quotabot login while their host apps maintain
 valid credentials. Credential-file presence alone does not make a result live.
 Codex reads the ChatGPT usage endpoint using the token Codex stores locally and
-falls back to this-machine session snapshots when the live read is unavailable.
-Because host tokens may expire on an idle machine, a one-time local
-`quotabot login claude` or `quotabot login codex` adds a separate refreshable
-grant so the account-wide read stays live there. Grants are local and are not
-synchronized, so run the login once on each idle machine that needs an
-independent live read.
-Antigravity and Grok are live for the account their app is signed into; quotabot
-refreshes that token on its own.
+fails closed when no account-wide read succeeds. It never opens mixed-content
+session files for quota evidence. Because host tokens may expire on an idle
+machine, a one-time local `quotabot login claude` or `quotabot login codex` adds
+a separate refreshable grant designed to keep the account-wide read live there.
+Grants are local and are not synchronized, so run the login once on each idle
+machine that needs an independent live read, then use `quotabot doctor` to
+confirm that machine's current result. Refresh and expired-host fall-through
+have deterministic test coverage; dated real-account validation after an idle
+interval remains a tracked 1.0 evidence gate.
+Anthropic's usage response does not include a stable account id, so quotabot
+also reads the zero-cost OAuth profile metadata with the same credential. Its
+account and organization ids are hashed locally into the stable account-pool key
+used by snapshots, cache, drift, routing leases, and duplicate collapse. If any
+profile identity is unavailable, quotabot falls back to an irreversible
+credential-generation fingerprint and keeps at most one successful Claude
+credential routable rather than double-counting the plan. Raw credentials and
+provider ids never enter quota output or cache files.
+Codex applies the same isolation using the ChatGPT account id stored with the
+host credential, or a quotabot grant-generation fingerprint when no account id
+is available. It ignores response email for evidence identity. Access-token and
+refresh-token rotation preserve the same account cache, while a replacement
+account or grant cannot borrow the prior account's quota or drift baseline.
+Codex also reports named `additional_rate_limits` as sparse model-scoped pools.
+For example, GPT-5.3-Codex-Spark can have its own weekly balance while other
+Codex models continue to use the shared account window. An explicit null
+secondary shared window is treated as absent, not as a broken or full pool.
+Antigravity and Grok are live for the account their app is signed into. A host
+app token is reused only while it remains fresh. After `quotabot login`,
+quotabot can refresh the separate grant it owns; it never rewrites or refreshes
+the host application's credential.
 Google's consumer Gemini CLI has been superseded by Antigravity, so Google
 coverage runs through the Antigravity adapter. Its live Cloud Code quota read is
 preferred; local Antigravity settings are only used for account discovery and
 offline last-known fallback, where the result is marked "(this machine)". Any
 supported OpenAI-compatible local server uses the same normalized local-runtime
-shape. NVIDIA NIM is an optional free trial signal when
+shape. Runtime host overrides are eligible as local capacity only when they name
+an exact loopback destination. quotabot does not contact a LAN or public host
+from these adapters and reports that configuration as unavailable instead.
+NVIDIA NIM is an optional free trial signal when
 `NVIDIA_API_KEY` or `nvapi` is present: quotabot confirms the key with a
 model-list metadata read, but does not invent a numeric balance because NVIDIA
 does not expose one without using the service. Because no quota windows are
@@ -161,9 +200,12 @@ For exactly where each number comes from, see
 [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md); for each provider's own usage
 command, [docs/PROVIDER_CLIS.md](docs/PROVIDER_CLIS.md).
 
-Claude's interactive `/usage` command is a human cross-check only. quotabot does
-not run `claude -p /usage` or `/quota`: print mode is a prompt-execution surface,
-not a stable quota API, and it conflicts with quotabot's zero-inference,
+Claude's interactive `/usage` command is a human cross-check only. Its current
+window bars and reset times are distinct from the contribution breakdown that
+Claude labels as approximate and based on local sessions; quotabot never treats
+that this-machine breakdown as account balance or cross-device burn. quotabot
+does not run `claude -p /usage` or `/quota`: print mode is a prompt-execution
+surface, not a stable quota API, and it conflicts with quotabot's zero-inference,
 content-blind boundary. quotabot calls the account-wide usage metadata endpoint
 directly instead. When that endpoint includes a model-scoped limit such as
 Fable, quotabot reports it separately from the shared session and weekly
@@ -173,7 +215,20 @@ make every Claude model unavailable while shared plan quota remains.
 Beginning July 20, 2026, Anthropic says Fable 5 is a standard included benefit
 for Max and Team Premium at 50% of limits. Pro and Team Standard retain access
 through usage credits and receive a one-time $100 credit. This is a dated plan
-policy, not a value quotabot hardcodes; see the
+policy, not a value quotabot hardcodes. It does not prove the account's current
+balance: quotabot requires a current scoped Fable row and applies the tighter of
+that row and the shared Claude window before marking Fable available. For the
+no-surprise `--budget=quota` filter, Fable additionally requires an explicit Max
+or Team Premium entitlement carried by current provider usage or profile
+metadata read with that credential on or after July 20, 2026 UTC. A Max or Team
+Premium label read from this machine's stored Claude credential is shown as
+diagnostic context but does not prove current inclusion after a plan change.
+Positive included-quota and credit-backed labels both require that current
+provider plan evidence; host-label-only evidence is called unproven. Pro, Team
+Standard, and plan-unknown Fable rows remain visible under `--budget=any` but
+are not called included quota. Doctor and the desktop
+scoped row label the result as `included quota`, `credit-backed availability`,
+or `included quota not proven`. See the
 [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
 
 For a tool quotabot does not read yet, `quotabot manual set` adds a local
@@ -197,6 +252,16 @@ These convenience commands trust the bootstrap script delivered by GitHub over
 TLS; the downloaded release archive is then checksum-verified. For an
 inspect-before-run path and provenance verification, see
 [docs/SETUP.md](docs/SETUP.md#inspect-before-running-the-installer).
+Before publication, the release workflow redownloads every draft CLI archive on
+its native architecture, verifies its checksum and restricted provenance, and
+requires both the tagged version and demo-mode `doctor --json` to run. The
+scheduled install smoke separately exercises the published one-line installer
+and prior-version upgrade on Windows, macOS, and Linux.
+The official repository also blocks updates and deletion of `v*` tags. GitHub
+[release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+is enabled prospectively, so releases published after it was enabled on July
+18, 2026 lock their tag and attached assets at publication; older releases are
+not retroactively made immutable.
 
 Restart your terminal, then run `quotabot doctor`. Claude and Codex should read
 live immediately when their host apps have current credentials. Full
@@ -235,10 +300,12 @@ quotabot doctor              # confirm it reads live
 ```
 
 Claude and Codex read the same zero-cost account-wide usage endpoints either way;
-the grant only changes how the token stays fresh. quotabot stores its own refresh
-token under your per-user config directory, independent of the app's credentials,
-and never writes the host app's credential files. A new or rotated grant is not
-written unless owner-only permission hardening succeeds. Details in
+the grant only changes how the token can be refreshed. quotabot stores its own
+refresh token under your per-user config directory, independent of the app's
+credentials, and never writes the host app's credential files. A new or rotated
+grant is not written unless owner-only permission hardening succeeds. Confirm a
+live result with `quotabot doctor`; real-account evidence after an idle interval
+is still tracked as a 1.0 acceptance item. Details in
 [docs/SETUP.md](docs/SETUP.md#4-keep-a-provider-live-on-an-idle-machine-or-pin-an-account-optional).
 
 ## Routing for tools and agents
@@ -246,10 +313,11 @@ written unless owner-only permission hardening succeeds. Details in
 ```bash
 quotabot suggest              # balanced provider recommendation
 quotabot suggest --local-first  # prefer a reachable local runtime
-quotabot suggest --task=hard  # one concrete model for supplied requirements
+quotabot suggest --task=hard  # one model, included quota/local by default
 quotabot models               # current registry entries, availability, budget, capabilities
 quotabot watch                # alert on a low binding window and name the next route
-quotabot verify               # test one live read for truthful behavior
+quotabot verify               # test one read for truthful behavior
+quotabot verify --require-live # also fail on a cached or failed adapter read
 ```
 
 The defaults are deliberate:
@@ -258,16 +326,26 @@ The defaults are deliberate:
 |---|---|---|
 | Pick a provider | `quotabot suggest` | measured subscriptions first, reachable local fallback |
 | Prefer local execution | `quotabot suggest --local-first` | reachable local runtime before subscriptions |
-| Pick a model | `quotabot suggest --task=hard` | available first; local-runtime, loaded, lighter provider tier, then headroom |
+| Pick a model | `quotabot suggest --task=hard` | safe `quota` budget by default: measured included quota plus on-device local runtime; then loaded, lighter provider tier, and headroom |
 | Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; excludes Ollama cloud-offloaded (`-cloud`) models |
-| Restrict to quota-plan and runtime classes | `quotabot suggest --task=hard --budget=quota` | measured included quota plus local-runtime entries; excludes catalogued manual and paid API classes |
-| Inspect candidates | `quotabot models` | entries for providers represented in the current registry, ordered by routability with availability explicit |
+| Opt into unrestricted model spend | `quotabot suggest --task=hard --budget=any` | may recommend credit-backed or paid catalog entries; output states when included quota is not proven |
+| Inspect candidates | `quotabot models` | unrestricted `any` listing for inspection; entries remain explicit about availability and `quota_backed` |
+
+`suggest_model` and task-profiled CLI suggestions default to `budget=quota`.
+`list_models` and `quotabot models` default to `budget=any` because listing is
+inspection, not permission to spend. Choosing one model from credit-backed or
+paid catalog entries therefore requires an explicit `budget=any` opt-in.
 
 Ollama can offload cloud models through its local daemon (a `-cloud` tag suffix,
 e.g. `qwen3-coder:480b-cloud`) that run on ollama.com, not on-device. quotabot
 detects the suffix, flags the model `cloud_offloaded`, and excludes it from
 `--budget=local` and free budgets, so an Ollama cloud model never satisfies a
 local-only or free policy; it stays listed only under `--budget=any`.
+
+The `OLLAMA_HOST`, `LMSTUDIO_HOST`, and `LEMONADE_HOST` overrides must target
+`localhost`, an IPv4 loopback address, or `::1` to qualify as local capacity.
+Credential-bearing, LAN, and public endpoints are never contacted by these
+local-runtime adapters.
 
 `--use-expiring-quota` applies only to a model suggestion and lets measured
 included quota beat local when local history projects meaningful quota would
@@ -293,8 +371,9 @@ local reservations over stdio or opt-in loopback HTTP with bearer auth available
 A smaller
 plain loopback JSON endpoint is available for clients that do not speak MCP.
 For an execution handoff, the [LiteLLM example](integrations/litellm/) consumes
-quotabot's advice with explicit loopback authentication and no-surprise spend
-classes. Python and TypeScript MCP examples live in
+quotabot's advice with authenticated atomic provider leases and no-surprise
+spend classes. Its mutation token is owner-only and never enters a prompt.
+Python and TypeScript MCP examples live in
 [integrations/mcp_clients/](integrations/mcp_clients/).
 
 ## Project layout

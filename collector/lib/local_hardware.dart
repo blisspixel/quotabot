@@ -20,6 +20,10 @@ typedef GpuMemorySample = ({
   int availableBytes,
   int count,
 });
+typedef HardwareMetadataCommand = Future<String?> Function(
+  String executable,
+  List<String> arguments,
+);
 
 LocalHardwareInfo? _cachedHardware;
 DateTime? _lastProbeAt;
@@ -81,19 +85,7 @@ Future<MemoryPoolSample?> _readSystemMemory() async {
       final executable =
           '$root\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
       if (!File(executable).existsSync()) return null;
-      const command = r'$o=Get-CimInstance -ClassName Win32_OperatingSystem '
-          r'-Property TotalVisibleMemorySize,FreePhysicalMemory '
-          r'-ErrorAction Stop; [Console]::Out.Write('
-          r'[string]::Concat($o.TotalVisibleMemorySize,",",'
-          r'$o.FreePhysicalMemory))';
-      final output = await _runBounded(executable, const [
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        command,
-      ]);
-      return output == null ? null : parseWindowsMemoryInfo(output);
+      return readWindowsMemoryMetadata(executable, _runBounded);
     case 'macos':
       final totalFuture = _runBounded(
         '/usr/sbin/sysctl',
@@ -105,6 +97,49 @@ Future<MemoryPoolSample?> _readSystemMemory() async {
       return total == null ? null : parseMacMemoryInfo(total, vm);
     default:
       return null;
+  }
+}
+
+/// Reads bounded Windows physical-memory metadata without localizing labels.
+///
+/// The direct operating-system API avoids a WMI dependency on the normal path.
+/// CIM remains a compatibility fallback for hosts where the built-in
+/// Microsoft.VisualBasic assembly is unavailable or restricted. Both paths run
+/// inside one process so the complete probe retains one bounded deadline.
+Future<MemoryPoolSample?> readWindowsMemoryMetadata(
+  String executable,
+  HardwareMetadataCommand run,
+) async {
+  const command = r'$ErrorActionPreference="Stop"; '
+      r'try { '
+      r'Add-Type -AssemblyName Microsoft.VisualBasic; '
+      r'$c=[Microsoft.VisualBasic.Devices.ComputerInfo]::new(); '
+      r'$total=[uint64]($c.TotalPhysicalMemory -shr 10); '
+      r'$free=[uint64]($c.AvailablePhysicalMemory -shr 10); '
+      r'if ($total -eq 0 -or $free -gt $total) { throw "invalid direct memory metadata" } '
+      r'} catch { '
+      r'$o=Get-CimInstance -ClassName Win32_OperatingSystem '
+      r'-Property TotalVisibleMemorySize,FreePhysicalMemory '
+      r'-ErrorAction Stop; '
+      r'if ($null -eq $o.TotalVisibleMemorySize -or $null -eq $o.FreePhysicalMemory) { throw "missing CIM memory metadata" }; '
+      r'$total=[uint64]$o.TotalVisibleMemorySize; '
+      r'$free=[uint64]$o.FreePhysicalMemory '
+      r'}; '
+      r'if ($total -eq 0 -or $free -gt $total) { throw "invalid memory metadata" }; '
+      r'$culture=[Globalization.CultureInfo]::InvariantCulture; '
+      r'[Console]::Out.Write([string]::Concat('
+      r'$total.ToString($culture),",",$free.ToString($culture)))';
+  try {
+    final output = await run(executable, const [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      command,
+    ]);
+    return output == null ? null : parseWindowsMemoryInfo(output);
+  } catch (_) {
+    return null;
   }
 }
 
@@ -155,8 +190,8 @@ MemoryPoolSample? parseLinuxMemoryInfo(String input) {
   );
 }
 
-/// Parses the bounded comma-separated Win32 operating-system memory response.
-/// The native values are KiB.
+/// Parses a bounded normalized Windows memory response. Both the ComputerInfo
+/// and CIM command paths emit integer KiB before reaching this parser.
 MemoryPoolSample? parseWindowsMemoryInfo(String input) {
   final parts = input.trim().split(',');
   if (parts.length != 2) return null;

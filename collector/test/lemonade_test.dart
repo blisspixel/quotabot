@@ -61,5 +61,23 @@ void main() {
       final q = await LemonadeAdapter(client: mock).collect();
       expect(q.ok, isFalse);
     });
+
+    test('refuses credential-bearing loopback without contacting it', () async {
+      var calls = 0;
+      final q = await LemonadeAdapter(
+        environment: const {
+          'LEMONADE_HOST': 'http://user:secret@localhost:13305',
+        },
+        client: MockClient((_) async {
+          calls += 1;
+          return http.Response('{}', 200);
+        }),
+      ).collect();
+
+      expect(calls, 0);
+      expect(q.ok, isTrue);
+      expect(q.error, contains('non-loopback'));
+      expect(q.models, isEmpty);
+    });
   });
 }

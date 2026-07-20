@@ -56,6 +56,9 @@ class _SilentHandler(BaseHTTPRequestHandler):
 
 class _FakeQuotabotHandler(_SilentHandler):
     requests_seen = 0
+    reservations_seen = 0
+    releases_seen = 0
+    mutation_token = "quotabot-proxy-mutation-token-012345"
 
     def do_GET(self) -> None:
         if self.path != "/suggest":
@@ -75,12 +78,16 @@ class _FakeQuotabotHandler(_SilentHandler):
                 "ranked": [
                     {
                         "provider": "claude",
+                        "account": "claude-account",
                         "headroom_percent": 72,
+                        "effective_headroom_percent": 72,
                         "available": True,
                     },
                     {
                         "provider": "codex",
+                        "account": "codex-account",
                         "headroom_percent": 8,
+                        "effective_headroom_percent": 8,
                         "available": True,
                     },
                 ],
@@ -97,6 +104,65 @@ class _FakeQuotabotHandler(_SilentHandler):
                 },
             },
         )
+
+    def do_POST(self) -> None:
+        if self.headers.get("Authorization") != f"Bearer {type(self).mutation_token}":
+            _json_response(self, 401, {"error": "unauthorized"})
+            return
+        length = int(self.headers.get("Content-Length") or "0")
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        if self.path == "/leases/reserve":
+            type(self).reservations_seen += 1
+            targets = payload.get("targets")
+            if not isinstance(targets, list) or not any(
+                target.get("provider") == "claude"
+                for target in targets
+                if isinstance(target, dict)
+            ):
+                _json_response(self, 400, {"error": "missing target"})
+                return
+            _json_response(
+                self,
+                200,
+                {
+                    "schema": "quotabot.reserve.v1",
+                    "reserved": True,
+                    "reused": False,
+                    "lease": {
+                        "id": "proxy-test-lease-0001",
+                        "provider": "claude",
+                        "account": "claude-account",
+                        "created_at": 1782000000,
+                        "expires_at": 1782000120,
+                        "weight_percent": payload["weight_percent"],
+                        "client": payload["client"],
+                        "idempotency_key": payload["idempotency_key"],
+                    },
+                    "selected": {
+                        "provider": "claude",
+                        "account": "claude-account",
+                        "available": True,
+                        "effective_headroom_percent": 72,
+                    },
+                    "decision_id": "qb-1782000000-0123456789abcdef",
+                },
+            )
+            return
+        if self.path == "/leases/release":
+            if payload.get("lease_id") != "proxy-test-lease-0001":
+                _json_response(self, 400, {"error": "invalid lease"})
+                return
+            type(self).releases_seen += 1
+            _json_response(
+                self,
+                200,
+                {
+                    "schema": "quotabot.release.v1",
+                    "released": True,
+                },
+            )
+            return
+        _json_response(self, 404, {"error": "not found"})
 
 
 class _FakeOpenAIHandler(_SilentHandler):
@@ -245,7 +311,9 @@ def _wait_for_proxy(
             last_error = error
             time.sleep(0.5)
     output = log_path.read_text(encoding="utf-8", errors="replace")[-6000:]
-    raise AssertionError(f"LiteLLM proxy did not become ready: {last_error!r}\n{output}")
+    raise AssertionError(
+        f"LiteLLM proxy did not become ready: {last_error!r}\n{output}"
+    )
 
 
 def _post_json(
@@ -297,6 +365,8 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
     def test_proxy_routes_logical_model_with_real_precall_hook(self) -> None:
         command = _litellm_command()
         _FakeQuotabotHandler.requests_seen = 0
+        _FakeQuotabotHandler.reservations_seen = 0
+        _FakeQuotabotHandler.releases_seen = 0
         _FakeOpenAIHandler.bodies_seen = []
 
         with (
@@ -317,6 +387,7 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
             env["LITELLM_LOG"] = "ERROR"
             env["LITELLM_DONT_SHOW_FEEDBACK_BOX"] = "true"
             env["LITELLM_MASTER_KEY"] = master_key
+            env["QUOTABOT_HTTP_TOKEN"] = _FakeQuotabotHandler.mutation_token
             env["NO_PROXY"] = "127.0.0.1,localhost"
             env["no_proxy"] = "127.0.0.1,localhost"
             env["PYTHONIOENCODING"] = "utf-8"
@@ -341,9 +412,7 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
                     stdout=log_file,
                     stderr=subprocess.STDOUT,
                     creationflags=(
-                        subprocess.CREATE_NEW_PROCESS_GROUP
-                        if os.name == "nt"
-                        else 0
+                        subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
                     ),
                     start_new_session=os.name != "nt",
                 )
@@ -383,11 +452,19 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
                         },
                         token=master_key,
                     )
+                    release_deadline = time.monotonic() + 5
+                    while (
+                        _FakeQuotabotHandler.releases_seen < 1
+                        and time.monotonic() < release_deadline
+                    ):
+                        time.sleep(0.05)
                 finally:
                     _stop_process_tree(process)
 
         self.assertEqual("ok", response["choices"][0]["message"]["content"])
         self.assertGreaterEqual(_FakeQuotabotHandler.requests_seen, 1)
+        self.assertEqual(_FakeQuotabotHandler.reservations_seen, 1)
+        self.assertEqual(_FakeQuotabotHandler.releases_seen, 1)
         self.assertTrue(_FakeOpenAIHandler.bodies_seen)
         self.assertEqual("fake-claude", _FakeOpenAIHandler.bodies_seen[-1]["model"])
 

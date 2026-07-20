@@ -26,18 +26,26 @@ class LmStudioAdapter {
   static const name = lmStudioProviderName;
 
   final http.Client? _http;
+  final Map<String, String> _environment;
 
-  LmStudioAdapter({http.Client? client}) : _http = client;
+  LmStudioAdapter({http.Client? client, Map<String, String>? environment})
+      : _http = client,
+        _environment = environment ?? Platform.environment;
 
-  static String baseUrl() =>
-      localBaseUrl(Platform.environment['LMSTUDIO_HOST'], lmStudioDefaultPort);
+  static String baseUrl({Map<String, String>? environment}) {
+    final env = environment ?? Platform.environment;
+    return localBaseUrl(env['LMSTUDIO_HOST'], lmStudioDefaultPort);
+  }
 
-  Future<http.Response> _get(String path) =>
-      (_http?.get ?? http.get)(Uri.parse('${baseUrl()}$path'))
-          .timeout(const Duration(seconds: 2));
+  Future<http.Response> _get(String path) => (_http?.get ?? http.get)(
+        Uri.parse('${baseUrl(environment: _environment)}$path'),
+      ).timeout(const Duration(seconds: 2));
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
+    if (!isLoopbackRuntimeHost(_environment['LMSTUDIO_HOST'])) {
+      return _nonLoopback(asOf);
+    }
     try {
       final native = await _v1Models() ?? await _nativeModels();
       if (native != null) {
@@ -106,6 +114,18 @@ class LmStudioAdapter {
         ok: false,
         error: 'not running',
       );
+
+  ProviderQuota _nonLoopback(int asOf) => ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: 'local',
+        plan: 'local',
+        kind: ProviderQuotaKind.local,
+        asOf: asOf,
+        ok: true,
+        status: 'configured host is not loopback',
+        error: 'non-loopback runtime host is not eligible as local capacity',
+      );
 }
 
 /// Parses LM Studio's current native `/api/v1/models` body (0.4.0+) into
@@ -123,23 +143,43 @@ class LmStudioAdapter {
   final loaded = <LocalModel>[];
   for (final m in list) {
     if (m is! Map || m['key'] is! String) continue;
+    final key = (m['key'] as String).trim();
+    if (key.isEmpty) continue;
     final instances = m['loaded_instances'];
-    final isLoaded = instances is List && instances.isNotEmpty;
-    final firstInstance =
-        isLoaded && instances.first is Map ? instances.first as Map : null;
+    Map<dynamic, dynamic>? firstInstance;
+    if (instances is List) {
+      for (final instance in instances) {
+        if (instance is Map) {
+          firstInstance = instance;
+          break;
+        }
+      }
+    }
+    final isLoaded = firstInstance != null;
     final loadedConfig = firstInstance?['config'];
     final loadedContext = loadedConfig is Map
-        ? finiteOrNull(loadedConfig['context_length'])?.toInt()
+        ? boundedIntFromWire(
+            loadedConfig['context_length'],
+            min: 1,
+            max: 100000000,
+          )
         : null;
     final quant = m['quantization'];
     final model = (
-      name: m['key'] as String,
-      bytes: finiteOrNull(m['size_bytes'])?.toInt(),
-      param: m['params_string'] as String?,
-      quant: quant is Map ? quant['name'] as String? : null,
+      name: key,
+      bytes: boundedIntFromWire(m['size_bytes'], min: 0),
+      param: m['params_string'] is String ? m['params_string'] as String : null,
+      quant: quant is Map && quant['name'] is String
+          ? quant['name'] as String
+          : null,
       vramBytes: null,
       expiresAt: null,
-      context: loadedContext ?? finiteOrNull(m['max_context_length'])?.toInt(),
+      context: loadedContext ??
+          boundedIntFromWire(
+            m['max_context_length'],
+            min: 1,
+            max: 100000000,
+          ),
       cloud: false,
     );
     installed.add(model);
@@ -160,18 +200,28 @@ class LmStudioAdapter {
   final loaded = <LocalModel>[];
   for (final m in list) {
     if (m is! Map || m['id'] is! String) continue;
+    final id = (m['id'] as String).trim();
+    if (id.isEmpty) continue;
     final model = (
-      name: m['id'] as String,
+      name: id,
       bytes: null,
       // LM Studio's v0 model shape carries `arch` (architecture, e.g. "llama"),
       // not a parameter size, and no parameter-count field. Leave param null
       // rather than mislabel the architecture as the model's size.
       param: null,
-      quant: m['quantization'] as String?,
+      quant: m['quantization'] is String ? m['quantization'] as String : null,
       vramBytes: null,
       expiresAt: null,
-      context: finiteOrNull(m['loaded_context_length'])?.toInt() ??
-          finiteOrNull(m['max_context_length'])?.toInt(),
+      context: boundedIntFromWire(
+            m['loaded_context_length'],
+            min: 1,
+            max: 100000000,
+          ) ??
+          boundedIntFromWire(
+            m['max_context_length'],
+            min: 1,
+            max: 100000000,
+          ),
       cloud: false,
     );
     installed.add(model);
@@ -187,9 +237,11 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
   if (list is! List) return null;
   return [
     for (final m in list)
-      if (m is Map && m['id'] is String)
+      if (m is Map &&
+          m['id'] is String &&
+          (m['id'] as String).trim().isNotEmpty)
         (
-          name: m['id'] as String,
+          name: (m['id'] as String).trim(),
           bytes: null,
           param: null,
           quant: null,

@@ -6,9 +6,23 @@ import 'package:http/http.dart' as http;
 import 'oauth_util.dart';
 import 'tokens.dart';
 
+/// One usable Anthropic access token plus its safe local evidence identity.
+/// [identity] is an irreversible credential-generation fingerprint, not an
+/// account name and never token material.
+class AnthropicCredential {
+  final String accessToken;
+  final String identity;
+
+  const AnthropicCredential({
+    required this.accessToken,
+    required this.identity,
+  });
+}
+
 /// Claude (Anthropic) OAuth via the authorization-code + PKCE flow against
 /// Claude Code's own public client. This mints a refresh token under quotabot's
-/// own grant, so an idle machine can read account-wide usage without the Claude
+/// own grant, providing an idle machine a separately refreshable path to
+/// account-wide usage without the Claude
 /// Code app being open and without ever touching `~/.claude/.credentials.json`.
 ///
 /// The read this grant authorizes is the same zero-cost usage *metadata*
@@ -43,10 +57,10 @@ class AnthropicAuth {
   static const _scope = 'user:profile user:inference';
 
   final String clientId;
-  // Lazily created so a collect that only reads the local grant (or finds none)
-  // never allocates an HTTP client. Adapters construct a fresh AnthropicAuth on
-  // every collect, so eager creation here would leak a client per refresh cycle.
-  http.Client? _client;
+  // Injected clients remain caller-owned. Without one, package-level requests
+  // use a short-lived client, so the fresh auth object created for each collect
+  // never leaves an owned connection pool behind.
+  final http.Client? _client;
 
   AnthropicAuth({String? clientId, http.Client? client})
       : clientId = _firstNonEmpty(
@@ -56,8 +70,6 @@ class AnthropicAuth {
           _defaultClientId,
         ),
         _client = client;
-
-  http.Client get _http => _client ??= http.Client();
 
   static String _firstNonEmpty(String? a, String? b, String c, String d) {
     if (a != null && a.isNotEmpty) return a;
@@ -128,47 +140,141 @@ class AnthropicAuth {
     return Tokens.fromOAuth(json, priorRefresh: refreshToken);
   }
 
-  /// Fresh access token from quotabot's own grant, refreshing and persisting the
-  /// rotated token as needed. Null when there is no stored grant. This is the
-  /// idle-machine path the adapter falls through to when the host app's token is
-  /// expired.
+  /// Returns the current default grant identity without exposing its tokens.
+  /// Legacy grants are upgraded deterministically from their strongest stored
+  /// credential on the next successful read.
+  static String? currentCredentialIdentity() {
+    final record = TokenStore.loadRecord(provider);
+    if (record == null) return null;
+    return _identityFor(record.tokens, owner: record.owner);
+  }
+
+  /// Fresh default access credential from quotabot's own grant, refreshing and
+  /// persisting the rotated token as needed. The identity remains stable across
+  /// refresh-token rotation, but a replacement login receives a new identity.
+  Future<AnthropicCredential?> freshCredential() =>
+      TokenStore.refreshTransaction(provider, (record) async {
+        if (record == null) return null;
+        final stored = record.tokens;
+        final owner = record.owner;
+        final identity = _identityFor(
+          stored,
+          owner: owner,
+        );
+        if (identity == null) return null;
+        if (stored.isFresh) {
+          if (owner != identity) {
+            final persisted = _stampDefaultIdentityBestEffort(
+              record,
+              stored,
+              identity,
+            );
+            if (persisted == false) return null;
+          }
+          return AnthropicCredential(
+            accessToken: stored.accessToken!,
+            identity: identity,
+          );
+        }
+        final refreshToken = stored.refreshToken;
+        if (refreshToken == null || refreshToken.isEmpty) return null;
+        final refreshed = await refresh(refreshToken);
+        final accessToken = refreshed?.accessToken;
+        if (refreshed == null || accessToken == null || accessToken.isEmpty) {
+          return null;
+        }
+        // Persist the rotated refresh token (providers rotate single-use
+        // tokens), but keep the identity derived before refresh. A rotation is
+        // still the same grant; only a later login is a new generation.
+        final persisted = _stampDefaultIdentityBestEffort(
+          record,
+          refreshed,
+          identity,
+        );
+        if (persisted == false) return null;
+        return AnthropicCredential(
+          accessToken: accessToken,
+          identity: identity,
+        );
+      });
+
+  /// Fresh access token from quotabot's own grant. The default-slot path uses
+  /// [freshCredential] so the Claude adapter can keep cache evidence isolated.
+  /// The account argument remains for compatibility with named auth slots.
   Future<String?> freshAccessToken({String? account}) async {
-    final stored = TokenStore.load(provider, account: account);
-    if (stored == null) return null;
-    if (stored.isFresh) return stored.accessToken;
-    if (stored.refreshToken == null) return null;
-    final refreshed = await refresh(stored.refreshToken!);
-    if (refreshed?.accessToken == null) return null;
-    // Persist the rotated refresh token (providers rotate single-use tokens),
-    // but best-effort: the provider already burned the old refresh token in the
-    // refresh above, so if the write fails (for example owner-only hardening
-    // fails and save refuses to write insecurely) we still return the valid
-    // access token for this read rather than discarding it and failing the whole
-    // collect. The grant degrades to needing a re-login, instead of crashing.
-    try {
-      TokenStore.save(provider, refreshed!, account: account);
-    } catch (_) {}
-    return refreshed!.accessToken;
+    if (account == null) {
+      return (await freshCredential())?.accessToken;
+    }
+    return TokenStore.refreshTransaction(
+      provider,
+      (record) async {
+        if (record == null) return null;
+        final stored = record.tokens;
+        if (stored.isFresh) return stored.accessToken;
+        if (stored.refreshToken == null) return null;
+        final refreshed = await refresh(stored.refreshToken!);
+        if (refreshed?.accessToken == null) return null;
+        // Named compatibility slots have no default ownership marker.
+        try {
+          if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
+        } catch (_) {}
+        return refreshed!.accessToken;
+      },
+      account: account,
+    );
   }
 
   static void _saveGrant(Tokens tokens, {String? account}) {
-    TokenStore.save(provider, tokens);
+    final identity = _identityFor(tokens);
+    if (identity == null) {
+      throw StateError('token exchange returned no usable credential');
+    }
+    TokenStore.saveDefaultOwnedBy(provider, tokens, identity);
     if (account != null) {
       TokenStore.save(provider, tokens, account: account);
     }
   }
 
+  static String? _identityFor(Tokens tokens, {String? owner}) {
+    if (isOpaqueCredentialIdentity(owner)) return owner;
+    final refresh = tokens.refreshToken;
+    final access = tokens.accessToken;
+    final material = refresh != null && refresh.isNotEmpty
+        ? refresh
+        : access != null && access.isNotEmpty
+            ? access
+            : null;
+    return material == null
+        ? null
+        : opaqueCredentialIdentity(provider, material);
+  }
+
+  static bool? _stampDefaultIdentityBestEffort(
+    TokenRecord current,
+    Tokens tokens,
+    String identity,
+  ) {
+    try {
+      return TokenStore.replaceIfCurrent(current, tokens, owner: identity);
+    } catch (_) {
+      // The provider may already have rotated the refresh token. Keep this
+      // access token usable for the current metadata read, then fail closed on
+      // future cache lookup if the stable identity could not be persisted.
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> _post(Map<String, String> form) async {
-    final resp = await _http
-        .post(
-          Uri.parse(_tokenEndpoint),
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'anthropic-beta': 'oauth-2025-04-20',
-          },
-          body: form,
-        )
-        .timeout(const Duration(seconds: 15));
+    final url = Uri.parse(_tokenEndpoint);
+    const headers = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'anthropic-beta': 'oauth-2025-04-20',
+    };
+    final client = _client;
+    final request = client == null
+        ? http.post(url, headers: headers, body: form)
+        : client.post(url, headers: headers, body: form);
+    final resp = await request.timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) return null;
     // Guard the decode: a malformed 200 body is token material, and a raw
     // FormatException would carry a slice of it into an error string.

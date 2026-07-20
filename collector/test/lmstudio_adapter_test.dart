@@ -90,5 +90,44 @@ void main() {
       expect(q.ok, isFalse);
       expect(q.error, 'not running');
     });
+
+    test('refuses a LAN host without contacting it', () async {
+      var calls = 0;
+      final q = await LmStudioAdapter(
+        environment: const {'LMSTUDIO_HOST': 'http://10.0.0.8:1234'},
+        client: MockClient((_) async {
+          calls += 1;
+          return http.Response('{}', 200);
+        }),
+      ).collect();
+
+      expect(calls, 0);
+      expect(q.ok, isTrue);
+      expect(q.error, contains('non-loopback'));
+      expect(q.models, isEmpty);
+    });
+  });
+
+  test('malformed optional v1 fields do not prove loaded state or abort', () {
+    final parsed = lmStudioV1FromJson({
+      'models': [
+        {
+          'key': 'valid/model',
+          'size_bytes': -1,
+          'params_string': 7,
+          'quantization': {'name': 4},
+          'max_context_length': -1,
+          'loaded_instances': ['not-an-instance'],
+        },
+      ],
+    });
+
+    expect(parsed, isNotNull);
+    expect(parsed!.installed.single.name, 'valid/model');
+    expect(parsed.loaded, isEmpty);
+    expect(parsed.installed.single.bytes, isNull);
+    expect(parsed.installed.single.param, isNull);
+    expect(parsed.installed.single.quant, isNull);
+    expect(parsed.installed.single.context, isNull);
   });
 }

@@ -22,6 +22,7 @@
   {"url": "ftp://localhost/mcp", "accepted": false},
   {"url": "//localhost/mcp", "accepted": false},
   {"url": "http://localhost:99999/mcp", "accepted": false},
+  {"url": "http://localhost:0/mcp", "accepted": false},
   {"url": "http://localhost/mcp#fragment", "accepted": false},
   {"url": " http://localhost/mcp", "accepted": false},
   {"url": "http://localhost\\@evil.example/mcp", "accepted": false}

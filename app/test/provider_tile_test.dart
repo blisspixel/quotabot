@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot_collector/collector.dart';
@@ -45,6 +46,7 @@ void main() {
   testWidgets('renders Claude scoped quota after shared provider windows', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final quota = ProviderQuota(
       provider: claudeProviderId,
@@ -60,7 +62,12 @@ void main() {
         ),
       ],
       modelQuotas: [
-        ModelQuota(model: 'Fable', usedPercent: 26, resetsAt: now + 5 * 86400),
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 26,
+          resetsAt: now + 60,
+          windowLabel: 'weekly',
+        ),
       ],
     );
 
@@ -70,15 +77,277 @@ void main() {
     await tester.pump();
 
     expect(find.text('5h'), findsOneWidget);
-    expect(find.text('weekly'), findsOneWidget);
+    expect(find.text('weekly'), findsNWidgets(2));
     expect(find.text('Fable'), findsOneWidget);
+    expect(find.text('included quota not proven'), findsOneWidget);
+    expect(find.text('quota'), findsNothing);
+    expect(find.text('Model-specific quota (separate)'), findsOneWidget);
     expect(find.textContaining('74% free'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Fable')).dy,
-      greaterThan(tester.getTopLeft(find.text('weekly')).dy),
+      find.bySemanticsLabel(
+        RegExp('Model-specific quota.*does not replace Claude.*shared'),
+      ),
+      findsOneWidget,
     );
+    expect(
+      tester.getTopLeft(find.text('Fable')).dy,
+      greaterThan(tester.getTopLeft(find.text('weekly').first).dy),
+    );
+    expect(providerTileQuotaRowCount(quota, now), 4);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('labels Fable spend from plan evidence without overclaiming', (
+    tester,
+  ) async {
+    const now = kClaudeFableIncludedQuotaEffectiveAt + 86400;
+
+    ProviderQuota quota(String plan, ProviderPlanEvidenceSource source) =>
+        ProviderQuota(
+          provider: claudeProviderId,
+          displayName: claudeProviderName,
+          account: 'opaque',
+          plan: plan,
+          planEvidenceSource: source,
+          planEvidenceAsOf: now,
+          asOf: now,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: 17,
+              resetsAt: now + 5 * 86400,
+            ),
+          ],
+          modelQuotas: [
+            ModelQuota(
+              model: 'Fable',
+              usedPercent: 26,
+              resetsAt: now + 5 * 86400,
+            ),
+          ],
+        );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota('max', ProviderPlanEvidenceSource.hostCredential),
+          cardColor: const Color(0xFF1A1A1A),
+          nowEpochSeconds: now,
+        ),
+      ),
+    );
+    expect(find.text('included quota not proven'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Tooltip &&
+            widget.message?.contains('stored Claude credential') == true,
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota('max', ProviderPlanEvidenceSource.providerMetadata),
+          cardColor: const Color(0xFF1A1A1A),
+          nowEpochSeconds: now,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('included quota'), findsOneWidget);
+    expect(find.text('included quota not proven'), findsNothing);
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota('pro', ProviderPlanEvidenceSource.providerMetadata),
+          cardColor: const Color(0xFF1A1A1A),
+          nowEpochSeconds: now,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('credit-backed availability'), findsOneWidget);
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota('pro', ProviderPlanEvidenceSource.hostCredential),
+          cardColor: const Color(0xFF1A1A1A),
+          nowEpochSeconds: now,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('included quota not proven'), findsOneWidget);
+    expect(find.text('credit-backed availability'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('renders Codex scoped quota without replacing shared quota', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: codexProviderId,
+      displayName: codexProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 63,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 0,
+          resetsAt: now + 6 * 86400,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(find.text('weekly'), findsOneWidget);
+    expect(find.text('GPT-5.3-Codex-Spark'), findsOneWidget);
+    expect(find.text('quota'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('Model-specific quota.*does not replace Codex.*shared'),
+      ),
+      findsOneWidget,
+    );
+    expect(desktopScopedModelQuotas(quota), hasLength(1));
     expect(providerTileQuotaRowCount(quota, now), 3);
     expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'narrow scoped quota keeps full labels accessible at 2x text scale',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.binding.setSurfaceSize(const Size(210, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      const modelLabel = 'GPT-5.3-Codex-Spark Preview with Extended Reasoning';
+      const windowLabel = 'provider-defined weekly allowance window';
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final quota = ProviderQuota(
+        provider: codexProviderId,
+        displayName: codexProviderName,
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 35,
+            resetsAt: now + 5 * 86400,
+          ),
+        ],
+        modelQuotas: [
+          ModelQuota(
+            model: modelLabel,
+            windowLabel: windowLabel,
+            usedPercent: 12,
+            resetsAt: now + 6 * 86400,
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: ProviderTile(
+              quota: quota,
+              cardColor: const Color(0xFF1A1A1A),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byTooltip(modelLabel), findsOneWidget);
+      expect(find.byTooltip(windowLabel), findsOneWidget);
+      expect(find.bySemanticsLabel(modelLabel), findsOneWidget);
+      expect(find.bySemanticsLabel(windowLabel), findsOneWidget);
+      final modelText = tester.widget<Text>(find.text(modelLabel));
+      final windowText = tester.widget<Text>(find.text(windowLabel));
+      expect(modelText.maxLines, 1);
+      expect(modelText.overflow, TextOverflow.ellipsis);
+      expect(windowText.maxLines, 1);
+      expect(windowText.overflow, TextOverflow.ellipsis);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    },
+  );
+
+  testWidgets('narrow provider plan stays bounded at 2x text scale', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(210, 560));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const now = kClaudeFableIncludedQuotaEffectiveAt + 86400;
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      plan: 'team_premium',
+      planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+      planEvidenceAsOf: now,
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 17,
+          resetsAt: now + 5 * 86400,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 190,
+            child: ProviderTile(
+              quota: quota,
+              cardColor: const Color(0xFF1A1A1A),
+              nowEpochSeconds: now,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('team premium'), findsOneWidget);
+    expect(find.byTooltip('Plan: Team Premium'), findsOneWidget);
+    expect(find.bySemanticsLabel('Plan: Team Premium'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('spent Claude scoped quota does not block the provider tile', (
@@ -113,6 +382,49 @@ void main() {
     expect(find.text('Fable'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'expired Claude scoped quota stays last observed without blocking shared quota',
+    (tester) async {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final expiredFable = ModelQuota(
+        model: 'Fable',
+        usedPercent: 51,
+        resetsAt: now - 60,
+      );
+      final quota = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: claudeProviderName,
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 17,
+            resetsAt: now + 5 * 86400,
+          ),
+        ],
+        modelQuotas: [expiredFable],
+      );
+
+      await tester.pumpWidget(
+        _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
+      );
+      await tester.pump();
+
+      expect(find.textContaining('83% free'), findsOneWidget);
+      expect(find.text('49% last observed'), findsOneWidget);
+      expect(find.textContaining('100% free'), findsNothing);
+      expect(
+        desktopScopedModelEvidenceLabel(quota, expiredFable, now),
+        'last observed',
+      );
+      final status = providerStatus(quota, now);
+      expect(status.hasData, isTrue);
+      expect(status.blocked, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('does not render Antigravity model-quota list on its tile', (
     tester,
@@ -283,6 +595,50 @@ void main() {
     );
   }
 
+  testWidgets('questionable readings are visibly unverified and not forecast', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final suspect = _q(
+      60,
+    ).withSuspect('weekly usage changed unexpectedly without a reset');
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: suspect,
+          cardColor: Colors.white,
+          insights: _ins(burn: 20, burnSe: 1),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text('reading needs review - not used for routing'),
+      findsOneWidget,
+    );
+    expect(find.text('40% unverified'), findsOneWidget);
+    expect(find.textContaining('% free'), findsNothing);
+    expect(find.textContaining('usage left'), findsNothing);
+    expect(find.textContaining('run out before'), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('Provider marked this reading for review.*not used.*Reason:'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      providerStatus(
+        suspect,
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      ).color,
+      const Color(0xFFD29922),
+    );
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
   testWidgets('provider drift guidance wraps without narrow overflow', (
     tester,
   ) async {
@@ -313,7 +669,7 @@ void main() {
     expect(find.text('provider drift - showing last trusted'), findsOneWidget);
     expect(find.textContaining('Run quotabot verify'), findsNothing);
     expect(
-      find.textContaining('provider drift | authoritative | quota plan'),
+      find.textContaining('provider drift | account-wide | quota plan'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -341,7 +697,7 @@ void main() {
     );
     expect(find.textContaining('Showing the last trusted quota'), findsNothing);
     expect(
-      find.textContaining('provider drift | authoritative | captured'),
+      find.textContaining('provider drift | account-wide | captured'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -361,7 +717,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('5h spent (last trusted)'), findsOneWidget);
+    expect(find.text('5h was spent (last trusted)'), findsOneWidget);
     expect(find.text('5h spent'), findsNothing);
     expect(find.textContaining('% free'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -379,6 +735,30 @@ void main() {
 
     expect(find.text('40% last known'), findsOneWidget);
     expect(find.textContaining('% free'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shows the live failure behind stale cloud quota', (
+    tester,
+  ) async {
+    final stale = _q(60).asStale('invalid Claude usage response');
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: stale, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('40% last known'), findsOneWidget);
+    expect(find.text('live read failed - showing last known'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          'latest live quota read failed.*invalid Claude usage response',
+          caseSensitive: false,
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -403,22 +783,21 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('renders reset-past exhausted snapshots as ready', (
+  testWidgets('reset-past snapshots require a confirming refresh', (
     tester,
   ) async {
     final past = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 60;
+    final quota = _q(100, resetsAt: past);
     await tester.pumpWidget(
-      _wrap(
-        ProviderTile(
-          quota: _q(100, resetsAt: past),
-          cardColor: const Color(0xFF1A1A1A),
-        ),
-      ),
+      _wrap(ProviderTile(quota: quota, cardColor: const Color(0xFF1A1A1A))),
     );
     await tester.pump();
 
-    expect(find.text('ready'), findsOneWidget);
-    expect(find.textContaining('spent'), findsNothing);
+    expect(find.text('5h was spent (unverified)'), findsOneWidget);
+    expect(find.text('refresh to confirm'), findsOneWidget);
+    expect(find.textContaining('unverified | account-wide'), findsOneWidget);
+    expect(find.text('ready'), findsNothing);
+    expect(find.textContaining('100% free'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -439,6 +818,116 @@ void main() {
     expect(find.text('5h spent'), findsOneWidget);
     expect(find.textContaining('1% free'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unknown window balance never renders as 100 percent free', (
+    tester,
+  ) async {
+    final quota = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'default',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: 'weekly')],
+    );
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: quota, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(
+      find.text('quota balance unavailable - not used for routing'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('100%'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(providerTileQuotaRowCount(quota, quota.asOf), 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('analytics cards are keyboard activatable and expose expansion', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    var toggles = 0;
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(40),
+          cardColor: Colors.white,
+          insights: _ins(burn: 2, burnSe: 1),
+          onToggle: () => toggles++,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.bySemanticsLabel('Claude quota card'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(toggles, 1);
+    final focusRing = tester.widget<DecoratedBox>(
+      find
+          .descendant(
+            of: find.byType(FocusableActionDetector),
+            matching: find.byType(DecoratedBox),
+          )
+          .first,
+    );
+    final decoration = focusRing.decoration as BoxDecoration;
+    expect(decoration.border, isNotNull);
+    semantics.dispose();
+  });
+
+  testWidgets('analytics card semantics disambiguate visible accounts', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    ProviderQuota account(String value) => ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: value,
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: '5h', usedPercent: 20)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Column(
+          children: [
+            ProviderTile(
+              quota: account('work@example.com'),
+              cardColor: Colors.white,
+              insights: _ins(burn: 2),
+              onToggle: () {},
+              showAccounts: true,
+            ),
+            ProviderTile(
+              quota: account('personal@example.com'),
+              cardColor: Colors.white,
+              insights: _ins(burn: 2),
+              onToggle: () {},
+              showAccounts: true,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.bySemanticsLabel('Claude (work@example.com) quota card'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('Claude (personal@example.com) quota card'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('spent window shows a near-term countdown to when it is back', (
@@ -487,6 +976,39 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('available in'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('spent reset stays bounded at narrow width and 2x text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(210, 560));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final far = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3 * 86400;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 190,
+            child: ProviderTile(
+              quota: _q(100, resetsAt: far),
+              cardColor: const Color(0xFF1A1A1A),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('5h spent'), findsOneWidget);
+    expect(find.textContaining('available '), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -567,6 +1089,66 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('NVIDIA NIM not configured'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('long provider remediation remains visible and accessible', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    const remediation =
+        'no live quota (this machine only) - run: quotabot login antigravity '
+        '(then sign in with this account)';
+    final q = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: antigravityProviderName,
+      account: 'default',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      error: remediation,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 220,
+          child: ProviderTile(quota: q, cardColor: Color(0xFF1A1A1A)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text(remediation), findsOneWidget);
+    expect(find.text('no live data'), findsNothing);
+    expect(find.bySemanticsLabel(remediation), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('invalid provenance is named before a generic read error', (
+    tester,
+  ) async {
+    final q = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: claudeProviderName,
+      account: 'default',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      ok: false,
+      error: 'invalid provider source class',
+      perMachine: true,
+      sourceClass: ProviderSourceClass.passiveLocalEvidence,
+    );
+    expect(q.sourceClassViolation, isNotNull);
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
+    );
+    await tester.pump();
+
+    expect(
+      find.textContaining('invalid evidence | passive local'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('error | passive local'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -654,7 +1236,7 @@ void main() {
     await tester.pump();
 
     expect(
-      find.textContaining('live | authoritative | quota plan | captured'),
+      find.textContaining('live | account-wide | quota plan | captured'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -695,6 +1277,7 @@ void main() {
       status: 'qwen loaded',
       active: true,
       perMachine: true,
+      models: const [ModelInfo(id: 'qwen:7b', local: true, loaded: true)],
     );
     await tester.pumpWidget(
       _wrap(ProviderTile(quota: q, cardColor: const Color(0xFF1A1A1A))),
@@ -705,6 +1288,38 @@ void main() {
       find.textContaining('in use | local runtime | captured'),
       findsOneWidget,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('unavailable local runtime never appears active', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final staleLocal = ProviderQuota(
+      provider: 'ollama',
+      displayName: 'Ollama',
+      account: '2 models',
+      kind: ProviderQuotaKind.local,
+      asOf: now - 3600,
+      status: 'qwen loaded',
+      active: true,
+      stale: true,
+      perMachine: true,
+      models: const [ModelInfo(id: 'qwen:7b', local: true, loaded: true)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(quota: staleLocal, cardColor: const Color(0xFF1A1A1A)),
+      ),
+    );
+    await tester.pump();
+
+    final status = providerStatus(staleLocal, now);
+    expect(status.hasData, isFalse);
+    expect(status.blocked, isFalse);
+    expect(find.textContaining('cached | local runtime'), findsOneWidget);
+    expect(find.text('local runtime unavailable'), findsOneWidget);
+    expect(find.text('qwen loaded'), findsNothing);
+    expect(find.text('in use'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -733,7 +1348,10 @@ void main() {
 
     expect(
       find.bySemanticsLabel(
-        RegExp(r'live \| passive local \| metered plan \| captured .* ago'),
+        RegExp(
+          r'State: live\. Passive quota evidence from this machine only; '
+          r'other devices may not be included\.',
+        ),
       ),
       findsOneWidget,
     );

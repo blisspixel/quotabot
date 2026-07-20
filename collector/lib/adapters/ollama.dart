@@ -42,14 +42,22 @@ class OllamaAdapter {
   static const name = ollamaProviderName;
 
   final http.Client? _http;
+  final Map<String, String> _environment;
 
-  OllamaAdapter({http.Client? client}) : _http = client;
+  OllamaAdapter({http.Client? client, Map<String, String>? environment})
+      : _http = client,
+        _environment = environment ?? Platform.environment;
 
-  static String baseUrl() =>
-      localBaseUrl(Platform.environment['OLLAMA_HOST'], ollamaDefaultPort);
+  static String baseUrl({Map<String, String>? environment}) {
+    final env = environment ?? Platform.environment;
+    return localBaseUrl(env['OLLAMA_HOST'], ollamaDefaultPort);
+  }
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
+    if (!isLoopbackRuntimeHost(_environment['OLLAMA_HOST'])) {
+      return _nonLoopback(asOf);
+    }
     try {
       final installed = await _models('/api/tags');
       if (installed == null) return _notRunning(asOf);
@@ -70,9 +78,9 @@ class OllamaAdapter {
   /// is unreachable.
   Future<List<LocalModel>?> _models(String path) async {
     try {
-      final resp =
-          await (_http?.get ?? http.get)(Uri.parse('${baseUrl()}$path'))
-              .timeout(const Duration(seconds: 2));
+      final resp = await (_http?.get ?? http.get)(
+        Uri.parse('${baseUrl(environment: _environment)}$path'),
+      ).timeout(const Duration(seconds: 2));
       if (resp.statusCode != 200) return null;
       return ollamaModelsFromJson(jsonDecode(resp.body));
     } catch (_) {
@@ -90,6 +98,18 @@ class OllamaAdapter {
         ok: false,
         error: 'not running',
       );
+
+  ProviderQuota _nonLoopback(int asOf) => ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: 'local',
+        plan: 'local',
+        kind: ProviderQuotaKind.local,
+        asOf: asOf,
+        ok: true,
+        status: 'configured host is not loopback',
+        error: 'non-loopback runtime host is not eligible as local capacity',
+      );
 }
 
 /// Parses an Ollama `/api/tags` or `/api/ps` response body into [LocalModel]s.
@@ -101,22 +121,31 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
   for (final m in models) {
     if (m is! Map || m['name'] is! String) continue;
     final details = m['details'];
-    final name = m['name'] as String;
+    final name = (m['name'] as String).trim();
+    if (name.isEmpty) continue;
     out.add((
       name: name,
-      // finiteOrNull: a rogue localhost server sending a non-finite size would
-      // otherwise throw in .toInt() (Infinity has no int form).
-      bytes: finiteOrNull(m['size'])?.toInt(),
-      vramBytes: finiteOrNull(m['size_vram'])?.toInt(),
-      param: details is Map ? details['parameter_size'] as String? : null,
-      quant: details is Map ? details['quantization_level'] as String? : null,
+      // Reject negative, fractional, and non-finite metadata from a rogue or
+      // drifted localhost server rather than poisoning the model inventory.
+      bytes: boundedIntFromWire(m['size'], min: 0),
+      vramBytes: boundedIntFromWire(m['size_vram'], min: 0),
+      param: details is Map && details['parameter_size'] is String
+          ? details['parameter_size'] as String
+          : null,
+      quant: details is Map && details['quantization_level'] is String
+          ? details['quantization_level'] as String
+          : null,
       expiresAt: parseIsoToEpoch(m['expires_at']),
       // `/api/ps` reports the running model's context window directly; `/api/tags`
       // omits it (stays null there). No `/api/show` call is needed.
-      context: finiteOrNull(m['context_length'])?.toInt(),
+      context: boundedIntFromWire(
+        m['context_length'],
+        min: 1,
+        max: 100000000,
+      ),
       // Ollama cloud models carry a `-cloud` tag suffix (e.g.
       // `qwen3-coder:480b-cloud`); they run on ollama.com, not on-device.
-      cloud: name.endsWith('-cloud'),
+      cloud: name.toLowerCase().endsWith('-cloud'),
     ));
   }
   return out;

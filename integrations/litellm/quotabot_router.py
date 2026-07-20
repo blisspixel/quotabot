@@ -40,6 +40,8 @@ import ipaddress
 import json
 import math
 import os
+import re
+import secrets
 import subprocess
 import time
 import urllib.error
@@ -65,11 +67,31 @@ def _default_metrics_dir() -> Path:
 
 
 def _is_loopback_url(url: str) -> bool:
-    parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
+    if (
+        not isinstance(url, str)
+        or not url
+        or url != url.strip()
+        or "\\" in url
+        or any(char.isspace() for char in url)
+    ):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        port = parsed.port
+    except ValueError:
         return False
     host = parsed.hostname
-    if not host:
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or port == 0
+    ):
         return False
     if host.lower() == "localhost":
         return True
@@ -166,11 +188,62 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+# Loopback quota reads and lease mutations must never inherit HTTP(S) proxy
+# settings. A configured proxy would otherwise receive the mutation bearer and
+# bounded account metadata even though the destination URL itself is loopback.
+_NO_REDIRECT_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    _NoRedirectHandler,
+)
 _SPEND_METADATA_KEY = "quotabot_spend"
 _PROVIDER_METADATA_KEY = "quotabot_provider"
 _ACCOUNT_METADATA_KEY = "quotabot_account"
 _DECISION_METADATA_KEY = "quotabot_decision_id"
+_LEASE_METADATA_KEY = "quotabot_lease_id"
+_ROUTE_METADATA_KEY = "quotabot_routed"
+_ORIGINAL_MODEL_METADATA_KEY = "quotabot_original_model"
+_RESERVED_METADATA_KEYS = {
+    _SPEND_METADATA_KEY,
+    _PROVIDER_METADATA_KEY,
+    _ACCOUNT_METADATA_KEY,
+    _DECISION_METADATA_KEY,
+    _LEASE_METADATA_KEY,
+    _ROUTE_METADATA_KEY,
+    _ORIGINAL_MODEL_METADATA_KEY,
+}
+_SUGGEST_SCHEMA = "quotabot.suggest.v1"
+_MAX_SUGGEST_RESPONSE_BYTES = 4 * 1024 * 1024
+_MAX_LEASE_RESPONSE_BYTES = 256 * 1024
+_UNAVAILABLE_RETRY_SECONDS = 5.0
+_LEASE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,96}$")
+
+
+def _default_http_token_path() -> Path:
+    configured = os.environ.get("QUOTABOT_HTTP_TOKEN_FILE")
+    if configured:
+        return _expand(configured)
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "quotabot" / "http" / "mutation_token"
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(config_home) if config_home else Path.home() / ".config"
+    return base / "quotabot" / "http" / "mutation_token"
+
+
+def _load_local_http_token() -> Optional[str]:
+    supplied = _optional_text(os.environ.get("QUOTABOT_HTTP_TOKEN"))
+    if supplied:
+        return supplied if re.fullmatch(r"[A-Za-z0-9_-]{32,128}", supplied) else None
+    try:
+        path = _default_http_token_path()
+        if not path.is_file() or path.stat().st_size > 4096:
+            return None
+        token = path.read_text(encoding="utf-8").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+            return None
+        return token
+    except (OSError, UnicodeError):
+        return None
 
 
 class _Availability(list[dict[str, Any]]):
@@ -182,6 +255,24 @@ class _Availability(list[dict[str, Any]]):
         decision_id: Optional[str],
     ) -> None:
         super().__init__(entries)
+        self.decision_id = decision_id
+
+
+class _LeaseChoice:
+    """One atomically reserved remote candidate."""
+
+    __slots__ = ("candidate", "info", "lease_id", "decision_id")
+
+    def __init__(
+        self,
+        candidate: Candidate,
+        info: dict[str, Any],
+        lease_id: str,
+        decision_id: Optional[str],
+    ) -> None:
+        self.candidate = candidate
+        self.info = info
+        self.lease_id = lease_id
         self.decision_id = decision_id
 
 
@@ -296,6 +387,8 @@ class Policy:
     default_comfort_threshold = 15.0
     default_allow_paid_api = False
     default_block_unsafe_passthrough = True
+    default_lease_seconds = 120
+    default_lease_weight_percent = 15.0
 
     def __init__(
         self,
@@ -304,6 +397,8 @@ class Policy:
         comfort_threshold: float = default_comfort_threshold,
         allow_paid_api: bool = default_allow_paid_api,
         block_unsafe_passthrough: bool = default_block_unsafe_passthrough,
+        lease_seconds: int = default_lease_seconds,
+        lease_weight_percent: float = default_lease_weight_percent,
         metrics_path: Optional[str] = None,
         models: Optional[dict[str, list[Candidate]]] = None,
         agents: Optional[dict[str, AgentRule]] = None,
@@ -315,6 +410,11 @@ class Policy:
         self.block_unsafe_passthrough = _bool_value(
             block_unsafe_passthrough,
             self.default_block_unsafe_passthrough,
+        )
+        self.lease_seconds = max(15, min(int(lease_seconds), 3600))
+        self.lease_weight_percent = max(
+            1.0,
+            min(float(lease_weight_percent), 50.0),
         )
         self.metrics_path = _safe_metrics_path(metrics_path)
         self.models = models or {}
@@ -378,6 +478,13 @@ class Policy:
                 raw.get("block_unsafe_passthrough"),
                 cls.default_block_unsafe_passthrough,
             ),
+            lease_seconds=int(raw.get("lease_seconds", cls.default_lease_seconds)),
+            lease_weight_percent=float(
+                raw.get(
+                    "lease_weight_percent",
+                    cls.default_lease_weight_percent,
+                )
+            ),
             metrics_path=raw.get("metrics_path"),
             models=models,
             agents=agents,
@@ -425,6 +532,10 @@ class QuotabotRouter(CustomLogger):
         # runtimes connected) must still be cached for the TTL, or every request
         # would trigger a fresh synchronous loopback fetch.
         self._cache_at: Optional[float] = None
+        # Briefly cache an unavailable or invalid response as well. Without a
+        # negative cache, every managed request can block on the same two-second
+        # loopback timeout during an outage, defeating the local fail-soft path.
+        self._unavailable_at: Optional[float] = None
         self._lock = asyncio.Lock()
 
     # -- routing ------------------------------------------------------------
@@ -436,12 +547,22 @@ class QuotabotRouter(CustomLogger):
         data: dict,
         call_type: str,
     ) -> Optional[dict]:
+        # Request metadata is client-controlled in many LiteLLM deployments.
+        # Remove our reserved analytics keys before routing so a passthrough
+        # request cannot claim that paid API traffic was local or quota-backed.
+        self._clear_route_metadata(data)
         requested = data.get("model")
         managed = self._request_is_managed(requested, data, user_api_key_dict)
+        if managed:
+            # Reject unusable client metadata before any provider reservation
+            # is written, so a malformed request cannot fill the lease ledger.
+            metadata = data.get("metadata")
+            if metadata is not None and not isinstance(metadata, dict):
+                raise UnsafeRouteError("metadata must be an object for a managed route")
         try:
             chosen = await self._route(requested, data, user_api_key_dict)
             if chosen and chosen != requested:
-                self._managed_metadata(data)["quotabot_original_model"] = requested
+                self._managed_metadata(data)[_ORIGINAL_MODEL_METADATA_KEY] = requested
                 data["model"] = chosen
         except UnsafeRouteError:
             raise
@@ -507,20 +628,22 @@ class QuotabotRouter(CustomLogger):
             )
             return allowed[0].deployment
 
-        remote = _best_ranked_candidate(
-            allowed,
+        remote_candidates = [candidate for candidate in allowed if not candidate.local]
+        reservation = await self._reserve_remote(
+            remote_candidates,
             ranked,
             self.policy.comfort_threshold,
+            decision_id,
         )
-        if remote:
-            candidate, info = remote
+        if reservation:
             self._mark_route(
                 data,
-                candidate=candidate,
-                info=_metric_info_for_candidate(info, ranked, candidate),
-                decision_id=decision_id,
+                candidate=reservation.candidate,
+                info=reservation.info,
+                decision_id=reservation.decision_id,
+                lease_id=reservation.lease_id,
             )
-            return candidate.deployment
+            return reservation.candidate.deployment
         if local:
             self._mark_route(
                 data,
@@ -529,16 +652,21 @@ class QuotabotRouter(CustomLogger):
             )
             return local.deployment
 
-        remote = _best_ranked_candidate(allowed, ranked, 0.5)
-        if remote:
-            candidate, info = remote
+        reservation = await self._reserve_remote(
+            remote_candidates,
+            ranked,
+            0.5,
+            decision_id,
+        )
+        if reservation:
             self._mark_route(
                 data,
-                candidate=candidate,
-                info=_metric_info_for_candidate(info, ranked, candidate),
-                decision_id=decision_id,
+                candidate=reservation.candidate,
+                info=reservation.info,
+                decision_id=reservation.decision_id,
+                lease_id=reservation.lease_id,
             )
-            return candidate.deployment
+            return reservation.candidate.deployment
         return self._unsafe_passthrough(requested)
 
     @staticmethod
@@ -548,8 +676,10 @@ class QuotabotRouter(CustomLogger):
         info: Optional[dict[str, Any]] = None,
         spend: Optional[str] = None,
         decision_id: Optional[str] = None,
+        lease_id: Optional[str] = None,
     ) -> None:
         meta = QuotabotRouter._managed_metadata(data)
+        meta[_ROUTE_METADATA_KEY] = True
         if spend is not None:
             route_spend = spend
         elif candidate:
@@ -569,6 +699,8 @@ class QuotabotRouter(CustomLogger):
             meta[_ACCOUNT_METADATA_KEY] = account
         if _valid_decision_id(decision_id):
             meta[_DECISION_METADATA_KEY] = decision_id
+        if _valid_lease_id(lease_id):
+            meta[_LEASE_METADATA_KEY] = lease_id
 
     @staticmethod
     def _managed_metadata(data: dict) -> dict[str, Any]:
@@ -579,6 +711,14 @@ class QuotabotRouter(CustomLogger):
         if not isinstance(metadata, dict):
             raise UnsafeRouteError("metadata must be an object for a managed route")
         return metadata
+
+    @staticmethod
+    def _clear_route_metadata(data: dict) -> None:
+        metadata = data.get("metadata")
+        if not isinstance(metadata, dict):
+            return
+        for key in _RESERVED_METADATA_KEYS:
+            metadata.pop(key, None)
 
     def _request_is_managed(
         self,
@@ -638,16 +778,29 @@ class QuotabotRouter(CustomLogger):
         """Returns ranked candidate info from quotabot's /suggest, cached for
         ``snapshot_ttl_seconds``. None when quotabot is unreachable."""
         async with self._lock:
+            current = time.monotonic()
             if (
                 self._cache_at is not None
-                and (time.monotonic() - self._cache_at)
-                < self.policy.snapshot_ttl_seconds
+                and (current - self._cache_at) < self.policy.snapshot_ttl_seconds
             ):
                 return self._cache
+            if self._unavailable_at is not None and (
+                current - self._unavailable_at
+            ) < min(self.policy.snapshot_ttl_seconds, _UNAVAILABLE_RETRY_SECONDS):
+                return None
             payload = await asyncio.to_thread(self._fetch_suggest)
             if payload is None:
+                self._unavailable_at = time.monotonic()
                 return None
-            if not isinstance(payload, dict):
+            if (
+                not isinstance(payload, dict)
+                or payload.get("schema") != _SUGGEST_SCHEMA
+            ):
+                self._unavailable_at = time.monotonic()
+                return None
+            ranked = payload.get("ranked")
+            if not isinstance(ranked, list):
+                self._unavailable_at = time.monotonic()
                 return None
             receipt = payload.get("receipt")
             versioned_receipt = (
@@ -658,7 +811,6 @@ class QuotabotRouter(CustomLogger):
             )
             candidate_id = _string_field(versioned_receipt, "decision_id")
             decision_id = candidate_id if _valid_decision_id(candidate_id) else None
-            ranked = payload.get("ranked") or []
             self._cache = _Availability(
                 [
                     c
@@ -668,6 +820,7 @@ class QuotabotRouter(CustomLogger):
                 decision_id,
             )
             self._cache_at = time.monotonic()
+            self._unavailable_at = None
             return self._cache
 
     def _fetch_suggest(self) -> Optional[dict]:
@@ -676,78 +829,267 @@ class QuotabotRouter(CustomLogger):
         url = self.policy.quotabot_url.rstrip("/") + "/suggest"
         try:
             with _NO_REDIRECT_OPENER.open(url, timeout=2) as resp:  # noqa: S310 (local only)
-                return json.loads(resp.read().decode("utf-8"))
+                raw = resp.read(_MAX_SUGGEST_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_SUGGEST_RESPONSE_BYTES:
+                    return None
+                return json.loads(raw.decode("utf-8"))
         except urllib.error.HTTPError as error:
             error.close()
             return None
         except (urllib.error.URLError, OSError, ValueError):
             return None
 
+    async def _reserve_remote(
+        self,
+        candidates: list[Candidate],
+        ranked: list[dict[str, Any]],
+        floor: float,
+        prior_decision_id: Optional[str],
+    ) -> Optional[_LeaseChoice]:
+        """Atomically chooses and leases one eligible remote candidate.
+
+        The local server evaluates the complete candidate set while holding the
+        lease ledger lock. A cached ``/suggest`` result can therefore provide
+        display metadata without letting parallel requests dogpile its winner.
+        """
+        targets: list[dict[str, str]] = []
+        seen: set[tuple[str, Optional[str]]] = set()
+        for candidate in candidates:
+            provider = candidate.provider
+            if not provider:
+                continue
+            key = (provider, candidate.account)
+            if key in seen:
+                continue
+            seen.add(key)
+            target = {"provider": provider}
+            if candidate.account:
+                target["account"] = candidate.account
+            targets.append(target)
+        token = _load_local_http_token()
+        if not targets or token is None:
+            return None
+        idempotency_key = secrets.token_urlsafe(18)
+        payload = {
+            "targets": targets,
+            "minimum_effective_headroom": floor,
+            "lease_seconds": self.policy.lease_seconds,
+            "weight_percent": self.policy.lease_weight_percent,
+            "client": "litellm",
+            "idempotency_key": idempotency_key,
+        }
+        response = await asyncio.to_thread(
+            self._post_mutation,
+            "/leases/reserve",
+            payload,
+            token,
+        )
+        if not isinstance(response, dict):
+            return None
+        if response.get("schema") != "quotabot.reserve.v1":
+            return None
+        if response.get("reserved") is not True:
+            return None
+        lease = response.get("lease")
+        selected = response.get("selected")
+        if not isinstance(lease, dict) or not isinstance(selected, dict):
+            return None
+        lease_id = _string_field(lease, "id")
+        owns_lease = (
+            _valid_lease_id(lease_id)
+            and _string_field(lease, "client") == "litellm"
+            and _string_field(lease, "idempotency_key") == idempotency_key
+        )
+
+        async def reject_reserved_lease() -> None:
+            if owns_lease:
+                await asyncio.to_thread(
+                    self._post_mutation,
+                    "/leases/release",
+                    {"lease_id": lease_id},
+                    token,
+                )
+
+        provider = _string_field(lease, "provider")
+        account = _string_field(lease, "account")
+        if not owns_lease or not provider or not account:
+            return None
+        reused = response.get("reused")
+        created_at = _non_negative_int(lease.get("created_at"))
+        expires_at = _non_negative_int(lease.get("expires_at"))
+        weight = _non_negative_float(lease.get("weight_percent"))
+        if (
+            not isinstance(reused, bool)
+            or created_at is None
+            or expires_at is None
+            or expires_at <= created_at
+            or weight is None
+            or not 1 <= weight <= 50
+        ):
+            await reject_reserved_lease()
+            return None
+        stale = selected.get("stale")
+        selected_local = selected.get("local")
+        if (
+            provider != _string_field(selected, "provider")
+            or account != _string_field(selected, "account")
+            or selected.get("available") is not True
+            or (stale is not None and (not isinstance(stale, bool) or stale))
+            or (
+                selected_local is not None
+                and (not isinstance(selected_local, bool) or selected_local)
+            )
+            or selected.get("drift_reason") is not None
+        ):
+            await reject_reserved_lease()
+            return None
+        headroom = _effective_headroom(selected)
+        if headroom is None or headroom < floor:
+            await reject_reserved_lease()
+            return None
+        candidate = _candidate_for_reserved_target(candidates, provider, account)
+        if candidate is None:
+            await reject_reserved_lease()
+            return None
+        info = dict(selected)
+        info["provider"] = provider
+        info["account"] = account
+        decision_id = _string_field(response, "decision_id")
+        if not _valid_decision_id(decision_id):
+            await reject_reserved_lease()
+            return None
+        return _LeaseChoice(candidate, info, lease_id, decision_id)
+
+    def _post_mutation(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        token: str,
+    ) -> Optional[dict[str, Any]]:
+        if not _is_loopback_url(self.policy.quotabot_url):
+            return None
+        url = self.policy.quotabot_url.rstrip("/") + path
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with _NO_REDIRECT_OPENER.open(request, timeout=2) as response:  # noqa: S310
+                raw = response.read(_MAX_LEASE_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_LEASE_RESPONSE_BYTES:
+                    return None
+                decoded = json.loads(raw.decode("utf-8"))
+                return decoded if isinstance(decoded, dict) else None
+        except urllib.error.HTTPError as error:
+            error.close()
+            return None
+        except (urllib.error.URLError, OSError, UnicodeError, ValueError):
+            return None
+
+    async def _release_route_lease(self, route_meta: dict[str, Any]) -> None:
+        lease_id = _string_field(route_meta, _LEASE_METADATA_KEY)
+        token = _load_local_http_token()
+        if not _valid_lease_id(lease_id) or token is None:
+            return
+        await asyncio.to_thread(
+            self._post_mutation,
+            "/leases/release",
+            {"lease_id": lease_id},
+            token,
+        )
+
     # -- metrics ------------------------------------------------------------
 
     async def async_log_success_event(
         self, kwargs: dict, response_obj: Any, start_time: Any, end_time: Any
     ) -> None:
-        if not self.policy.metrics_path:
-            return
+        route_meta = self._route_metadata(kwargs)
         try:
-            meta = (kwargs.get("litellm_params") or {}).get("metadata") or {}
-            prompt_tokens, completion_tokens = _usage_counts(response_obj, kwargs)
-            record = {
-                "at": int(time.time()),
-                "event": "success",
-                "provider": meta.get(_PROVIDER_METADATA_KEY),
-                "account": meta.get(_ACCOUNT_METADATA_KEY),
-                "requested_model": meta.get("quotabot_original_model"),
-                "served_model": kwargs.get("model"),
-                "spend": meta.get(_SPEND_METADATA_KEY),
-                "decision_id": meta.get(_DECISION_METADATA_KEY),
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "cost": _metric_cost(kwargs),
-                "latency_ms": _latency_ms(start_time, end_time),
-            }
-            await asyncio.to_thread(self._append_metric, record)
+            if self.policy.metrics_path:
+                prompt_tokens, completion_tokens = _usage_counts(
+                    response_obj,
+                    kwargs,
+                )
+                record = {
+                    "at": int(time.time()),
+                    "event": "success",
+                    "provider": route_meta.get(_PROVIDER_METADATA_KEY),
+                    "account": route_meta.get(_ACCOUNT_METADATA_KEY),
+                    "requested_model": route_meta.get(_ORIGINAL_MODEL_METADATA_KEY),
+                    "served_model": kwargs.get("model"),
+                    "spend": route_meta.get(_SPEND_METADATA_KEY),
+                    "decision_id": route_meta.get(_DECISION_METADATA_KEY),
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost": _metric_cost(kwargs),
+                    "latency_ms": _latency_ms(start_time, end_time),
+                }
+                await asyncio.to_thread(self._append_metric, record)
         except Exception:
-            return
+            pass
+        finally:
+            try:
+                await self._release_route_lease(route_meta)
+            except Exception:
+                pass
 
     async def async_log_failure_event(
         self, kwargs: dict, response_obj: Any, start_time: Any, end_time: Any
     ) -> None:
-        if not self.policy.metrics_path:
-            return
+        route_meta = self._route_metadata(kwargs)
         try:
-            meta = (kwargs.get("litellm_params") or {}).get("metadata") or {}
-            exception = kwargs.get("exception")
-            prompt_tokens, completion_tokens = _usage_counts(response_obj, kwargs)
-            record = {
-                "at": int(time.time()),
-                "event": "failure",
-                "provider": meta.get(_PROVIDER_METADATA_KEY),
-                "account": meta.get(_ACCOUNT_METADATA_KEY),
-                "requested_model": meta.get("quotabot_original_model"),
-                "served_model": kwargs.get("model"),
-                "spend": meta.get(_SPEND_METADATA_KEY),
-                "decision_id": meta.get(_DECISION_METADATA_KEY),
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "cost": _metric_cost(kwargs),
-                "latency_ms": _latency_ms(start_time, end_time),
-                "http_status": _extract_http_status(
-                    kwargs,
+            if self.policy.metrics_path:
+                exception = kwargs.get("exception")
+                prompt_tokens, completion_tokens = _usage_counts(
                     response_obj,
-                    exception,
-                ),
-                "retry_after_seconds": _extract_retry_after_seconds(
                     kwargs,
-                    response_obj,
-                    exception,
-                ),
-                "error_type": _error_type(exception),
-            }
-            await asyncio.to_thread(self._append_metric, record)
+                )
+                record = {
+                    "at": int(time.time()),
+                    "event": "failure",
+                    "provider": route_meta.get(_PROVIDER_METADATA_KEY),
+                    "account": route_meta.get(_ACCOUNT_METADATA_KEY),
+                    "requested_model": route_meta.get(_ORIGINAL_MODEL_METADATA_KEY),
+                    "served_model": kwargs.get("model"),
+                    "spend": route_meta.get(_SPEND_METADATA_KEY),
+                    "decision_id": route_meta.get(_DECISION_METADATA_KEY),
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost": _metric_cost(kwargs),
+                    "latency_ms": _latency_ms(start_time, end_time),
+                    "http_status": _extract_http_status(
+                        kwargs,
+                        response_obj,
+                        exception,
+                    ),
+                    "retry_after_seconds": _extract_retry_after_seconds(
+                        kwargs,
+                        response_obj,
+                        exception,
+                    ),
+                    "error_type": _error_type(exception),
+                }
+                await asyncio.to_thread(self._append_metric, record)
         except Exception:
-            return
+            pass
+        finally:
+            try:
+                await self._release_route_lease(route_meta)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _route_metadata(kwargs: dict[str, Any]) -> dict[str, Any]:
+        raw_params = kwargs.get("litellm_params")
+        params = raw_params if isinstance(raw_params, dict) else {}
+        raw_meta = params.get("metadata")
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
+        return meta if meta.get(_ROUTE_METADATA_KEY) is True else {}
 
     def _append_metric(self, record: dict) -> None:
         if not self.policy.metrics_path:
@@ -813,6 +1155,32 @@ def _candidate_matches_info(candidate: Candidate, info: dict[str, Any]) -> bool:
     return candidate.account is None or candidate.account == account
 
 
+def _candidate_for_reserved_target(
+    candidates: list[Candidate],
+    provider: str,
+    account: str,
+) -> Optional[Candidate]:
+    # An explicit account binding is more specific than a provider wildcard.
+    # Prefer it even when a wildcard candidate appears earlier in policy order,
+    # otherwise the lease can discount one account while LiteLLM dispatches a
+    # different deployment.
+    for candidate in candidates:
+        if (
+            not candidate.local
+            and candidate.provider == provider
+            and candidate.account == account
+        ):
+            return candidate
+    for candidate in candidates:
+        if (
+            not candidate.local
+            and candidate.provider == provider
+            and candidate.account is None
+        ):
+            return candidate
+    return None
+
+
 def _metric_info_for_candidate(
     info: dict[str, Any],
     ranked: list[dict[str, Any]],
@@ -866,6 +1234,10 @@ def _valid_decision_id(value: Optional[str]) -> bool:
         and len(parts[2]) == 16
         and all(char in "0123456789abcdef" for char in parts[2])
     )
+
+
+def _valid_lease_id(value: Optional[str]) -> bool:
+    return value is not None and _LEASE_ID_PATTERN.fullmatch(value) is not None
 
 
 def _availability_decision_id(value: Any) -> Optional[str]:
@@ -1024,8 +1396,13 @@ def _extract_retry_after_seconds(*sources: Any) -> Optional[int]:
 
 
 def _retry_after_seconds(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        seconds = int(value)
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            return None
+        seconds = int(parsed)
         return seconds if seconds >= 0 else None
     if not isinstance(value, str):
         return None
@@ -1033,9 +1410,12 @@ def _retry_after_seconds(value: Any) -> Optional[int]:
     if not text:
         return None
     try:
-        seconds = int(float(text))
+        parsed = float(text)
+        if not math.isfinite(parsed):
+            return None
+        seconds = int(parsed)
         return seconds if seconds >= 0 else None
-    except ValueError:
+    except (ValueError, OverflowError):
         pass
     try:
         dt = email.utils.parsedate_to_datetime(text)

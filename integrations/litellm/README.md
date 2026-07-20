@@ -20,7 +20,8 @@ This works the same on Windows, macOS, and Linux.
   client / agent ---> LiteLLM proxy ---> quotabot_router (pre-call hook)
                                               |
                                               v
-                                   quotabot /suggest  (local, 0 tokens)
+                              quotabot /suggest + lease reserve
+                                      (local, 0 tokens)
                                               |
                           picks the freest provider with budget,
                           or a local model when subscriptions are low
@@ -29,9 +30,14 @@ This works the same on Windows, macOS, and Linux.
                           request is sent to the chosen deployment
 ```
 
-The hook reuses quotabot's own decision logic (the binding-window and
-local-fallback rules live in the Dart collector and are exposed at `/suggest`),
-so routing here stays consistent with the desktop widget and the MCP server.
+The hook reuses quotabot's own decision logic. It reads `/suggest`, then submits
+the complete eligible provider/account set to the authenticated
+`/leases/reserve` endpoint. The server reevaluates that set while holding the
+local lease ledger lock, so parallel proxy requests do not all choose the same
+apparently freest account. The hook releases the lease from either LiteLLM
+completion callback; its bounded TTL is the fallback if a callback never runs.
+Binding-window and local-fallback rules stay in the Dart collector, keeping the
+proxy consistent with the desktop widget and MCP server.
 
 ## Setup
 
@@ -46,6 +52,15 @@ so routing here stays consistent with the desktop widget and the MCP server.
    recommendation.
    The router accepts only loopback `quotabot_url` values, so it cannot be
    pointed at arbitrary network or file URLs by policy.
+
+   Startup also creates a stable owner-only mutation token. The server never
+   prints or serves it, and the plugin reads it automatically from
+   `%LOCALAPPDATA%\quotabot\http\mutation_token` on Windows or
+   `${XDG_CONFIG_HOME:-~/.config}/quotabot/http/mutation_token` on macOS and
+   Linux. `QUOTABOT_HTTP_TOKEN_FILE` can select another protected file, while
+   `QUOTABOT_HTTP_TOKEN` is intended only for ephemeral testing. Remote managed
+   routes fail closed when the token is absent or invalid; a configured local
+   fallback remains available.
 
 2. Install LiteLLM and copy the example files:
 
@@ -138,9 +153,20 @@ cost is bounded by that quota plan and has overages disabled, then mark that
 candidate `spend: quota_plan` plus `overages_disabled: true`.
 When quotabot reports multiple accounts for the same provider, add
 `account: <quotabot account label>` to a candidate to bind that LiteLLM
-deployment to the matching account. Without an account binding, the router still
-uses provider-level ranking, but it omits account from metrics when multiple
-accounts would make attribution ambiguous.
+deployment to the matching account. Without an account binding, the atomic
+reservation can select any eligible account for that provider and records the
+account it actually reserved in local routing metadata.
+
+Two bounded lease settings are available:
+
+```yaml
+lease_seconds: 120
+lease_weight_percent: 15
+```
+
+The TTL is clamped to 15 through 3600 seconds. The effective-headroom discount
+is clamped to 1 through 50 percent. Increase the weight only when one routed
+request represents a large share of a provider window.
 
 ## Steering specific agents
 
@@ -188,6 +214,9 @@ Recent provider/account pipe failures from this file feed back into local
 `/suggest` ranking as a bounded `pipe_discount_percent`. Managed LiteLLM routes
 consume that ranked response, so a funded route that is actively throttling or
 failing can be skipped without hiding its raw quota headroom.
+The lease id itself is kept only in LiteLLM callback metadata long enough to
+release the local reservation. It is not prompt content and is not written to
+the metrics record.
 
 ## Failure behavior
 
@@ -199,15 +228,19 @@ The proxy keeps working for other routes, but that managed request is rejected
 rather than silently spending API money. A configured local fallback is attempted
 without a separate health probe when quotabot cannot answer, so its daemon can
 still fail at request time.
+The same rule applies when the authenticated lease mutation is unavailable:
+the plugin never routes a managed remote request from a stale unreserved winner.
 
 ## Testing
 
-The unit tests cover policy parsing, precedence, local fallback ordering, and
-loopback URL hardening. CI also runs a real LiteLLM proxy integration test:
+The unit tests cover policy parsing, precedence, local fallback ordering,
+loopback URL hardening, authenticated reservation, concurrent distribution, and
+release on both success and failure. CI also runs a real LiteLLM proxy integration test:
 it starts LiteLLM on loopback with the actual `async_pre_call_hook`, a fake
-quotabot `/suggest` endpoint, and a fake OpenAI-compatible backend, then proves
-that a logical model is rewritten to the provider with budget. The test spends
-no model tokens and never leaves the machine.
+quotabot suggestion and lease server, and a fake OpenAI-compatible backend. It
+proves that a logical model is rewritten to the reserved provider and that the
+lease is released after completion. The test spends no model tokens and never
+leaves the machine.
 
 ## Using it from coding agents
 

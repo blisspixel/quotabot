@@ -19,6 +19,8 @@ void main() {
       if (input is! Map<String, dynamic>) continue;
 
       _expectWindowsSafe(codexBindingWindows([input], now));
+      final liveCodex = codexLiveUsage(input);
+      if (liveCodex != null) _expectCodexLiveSafe(liveCodex);
       _expectWindowsSafe(claudeWindows(input));
       for (final model in claudeModelQuotas(input)) {
         expect(model.model.trim(), isNotEmpty);
@@ -34,6 +36,25 @@ void main() {
       for (final model in ollamaModelsFromJson(input)) {
         expect(model.name.trim(), isNotEmpty);
       }
+    }
+  });
+
+  test('Codex live parser tolerates nested quota mutations', () {
+    final random = Random(0xC0DE5);
+    for (var i = 0; i < 750; i++) {
+      final input = _validCodexLiveSeed();
+      final mutationCount = 1 + random.nextInt(4);
+      for (var mutation = 0; mutation < mutationCount; mutation++) {
+        _mutateCodexLive(input, random);
+      }
+
+      CodexLiveUsage? usage;
+      expect(
+        () => usage = codexLiveUsage(input),
+        returnsNormally,
+        reason: 'mutation $i must not throw: $input',
+      );
+      if (usage != null) _expectCodexLiveSafe(usage!);
     }
   });
 
@@ -92,6 +113,152 @@ void _expectWindowsSafe(List<QuotaWindow> windows) {
       expect(percent, inInclusiveRange(0, 100));
     }
   }
+}
+
+void _expectCodexLiveSafe(CodexLiveUsage usage) {
+  expect(usage.windows, isNotEmpty);
+  _expectWindowsSafe(usage.windows);
+  for (final window in usage.windows) {
+    expect(window.resetsAt, isNotNull);
+    expect(window.resetsAt, isPositive);
+  }
+  for (final model in usage.modelQuotas) {
+    expect(model.model, model.model.trim());
+    expect(model.model, isNotEmpty);
+    expect(model.model.length, lessThanOrEqualTo(160));
+    expect(model.usedPercent, isNotNull);
+    expect(model.usedPercent!.isFinite, isTrue);
+    expect(model.usedPercent, inInclusiveRange(0, 100));
+    expect(model.resetsAt, isNotNull);
+    expect(model.resetsAt, isPositive);
+    expect(model.windowLabel, isNotNull);
+    expect(model.windowLabel, isNotEmpty);
+  }
+}
+
+Map<String, dynamic> _validCodexLiveSeed() => {
+      'rate_limit': <String, dynamic>{
+        'allowed': true,
+        'limit_reached': false,
+        'primary_window': <String, dynamic>{
+          'used_percent': 35,
+          'limit_window_seconds': 18000,
+          'reset_at': 1782088200,
+        },
+        'secondary_window': null,
+      },
+      'additional_rate_limits': <dynamic>[
+        <String, dynamic>{
+          'limit_name': 'GPT-5.3-Codex-Spark',
+          'rate_limit': <String, dynamic>{
+            'allowed': true,
+            'limit_reached': false,
+            'primary_window': <String, dynamic>{
+              'used_percent': 20,
+              'limit_window_seconds': 604800,
+              'reset_at': 1782518400,
+            },
+            'secondary_window': null,
+          },
+        },
+      ],
+    };
+
+void _mutateCodexLive(Map<String, dynamic> input, Random random) {
+  final value = _jsonish(random);
+  final shared = input['rate_limit'];
+  final additional = input['additional_rate_limits'];
+
+  switch (random.nextInt(12)) {
+    case 0:
+      input['rate_limit'] = value;
+      break;
+    case 1:
+      if (shared is Map) {
+        shared[random.nextBool() ? 'allowed' : 'limit_reached'] = value;
+      }
+      break;
+    case 2:
+      if (shared is Map) {
+        shared[random.nextBool() ? 'primary_window' : 'secondary_window'] =
+            value;
+      }
+      break;
+    case 3:
+      if (shared is Map) {
+        final window = shared['primary_window'];
+        if (window is Map) {
+          const fields = [
+            'used_percent',
+            'limit_window_seconds',
+            'reset_at',
+          ];
+          window[fields[random.nextInt(fields.length)]] = value;
+        }
+      }
+      break;
+    case 4:
+      input['additional_rate_limits'] = value;
+      break;
+    case 5:
+      if (additional is List) additional.add(value);
+      break;
+    case 6:
+      final row = _randomCodexAdditionalRow(additional, random);
+      if (row != null) row['limit_name'] = value;
+      break;
+    case 7:
+      final row = _randomCodexAdditionalRow(additional, random);
+      if (row != null) row['rate_limit'] = value;
+      break;
+    case 8:
+      final rateLimit = _randomCodexAdditionalRateLimit(additional, random);
+      if (rateLimit != null) {
+        rateLimit[random.nextBool() ? 'primary_window' : 'secondary_window'] =
+            value;
+      }
+      break;
+    case 9:
+      final rateLimit = _randomCodexAdditionalRateLimit(additional, random);
+      final window = rateLimit?['primary_window'];
+      if (window is Map) {
+        const fields = [
+          'used_percent',
+          'limit_window_seconds',
+          'reset_at',
+        ];
+        window[fields[random.nextInt(fields.length)]] = value;
+      }
+      break;
+    case 10:
+      input.remove('additional_rate_limits');
+      break;
+    case 11:
+      if (shared is Map) {
+        shared.remove(
+          random.nextBool() ? 'primary_window' : 'secondary_window',
+        );
+      }
+      break;
+  }
+}
+
+Map<dynamic, dynamic>? _randomCodexAdditionalRow(
+  dynamic additional,
+  Random random,
+) {
+  if (additional is! List || additional.isEmpty) return null;
+  final row = additional[random.nextInt(additional.length)];
+  return row is Map ? row : null;
+}
+
+Map<dynamic, dynamic>? _randomCodexAdditionalRateLimit(
+  dynamic additional,
+  Random random,
+) {
+  final row = _randomCodexAdditionalRow(additional, random);
+  final rateLimit = row?['rate_limit'];
+  return rateLimit is Map ? rateLimit : null;
 }
 
 dynamic _jsonish(Random random, [int depth = 0]) {

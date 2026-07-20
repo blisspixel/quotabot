@@ -39,9 +39,22 @@ ProviderQuota _q(
       driftObservedAt: driftObservedAt,
     );
 
-// A local runtime carries no quota windows; it is available simply by running.
-ProviderQuota _local(String id) =>
-    _q(id, const [], kind: ProviderQuotaKind.local);
+// A local runtime carries no quota windows. Availability also requires at least
+// one represented model that executes on-device.
+ProviderQuota _local(
+  String id, {
+  List<ModelInfo> models = const [ModelInfo(id: 'local-model', local: true)],
+  String? error,
+}) =>
+    ProviderQuota(
+      provider: id,
+      displayName: id,
+      account: 'local',
+      asOf: _now,
+      kind: ProviderQuotaKind.local,
+      models: models,
+      error: error,
+    );
 
 void main() {
   test('providerHeadroom is governed by the most constrained window', () {
@@ -172,7 +185,7 @@ void main() {
     final healthy =
         _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]);
     expect(anyProviderUsable([spent, healthy], _now), isTrue);
-    // A running local runtime is a usable fallback even with everything spent.
+    // A running local runtime with a represented model is a usable fallback.
     expect(anyProviderUsable([spent, _local('ollama')], _now), isTrue);
     final cached = _q('grok', [QuotaWindow(label: 'weekly', usedPercent: 20)],
         stale: true);
@@ -204,21 +217,21 @@ void main() {
     }
   });
 
-  test('window helpers treat reached resets as fresh', () {
+  test('window helpers expose reset timing without inventing capacity', () {
     final w = QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now);
     expect(windowHasRolledOver(w, _now), isTrue);
-    expect(windowUsedPercent(w, _now), 0);
-    expect(windowHeadroom(w, _now), 100);
+    expect(windowUsedPercent(w, _now), 100);
+    expect(windowHeadroom(w, _now), 0);
   });
 
-  test('providerHeadroom treats a passed or reached reset as fresh', () {
+  test('providerHeadroom never infers capacity from a passed reset', () {
     final q = _q('codex', [
       QuotaWindow(label: '5h', usedPercent: 100, resetsAt: _now),
     ]);
-    expect(providerHeadroom(q, _now), 100);
+    expect(providerHeadroom(q, _now), 0);
     final availability = providerAvailability(q, _now);
-    expect(availability.available, isTrue);
-    expect(bindingWindow(q, _now), isNull);
+    expect(availability.available, isFalse);
+    expect(bindingWindow(q, _now), same(q.windows.single));
   });
 
   test('stale quota keeps last-known headroom after its reset passes', () {
@@ -298,6 +311,70 @@ void main() {
     final a = providerAvailability(_q('grok', const []), _now);
     expect(a.available, isFalse);
     expect(a.headroom, isNull);
+  });
+
+  group('bestProviderAccountForCheck', () {
+    ProviderQuota account(
+      String account,
+      double usedPercent, {
+      bool stale = false,
+    }) =>
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: account,
+          asOf: _now,
+          stale: stale,
+          windows: [
+            QuotaWindow(label: 'weekly', usedPercent: usedPercent),
+          ],
+        );
+
+    test('a later live account wins over the first spent account', () {
+      final selected = bestProviderAccountForCheck(
+        [account('spent', 100), account('live', 20)],
+        _now,
+      );
+
+      expect(selected?.account, 'live');
+    });
+
+    test('equal accounts use their stable account key independent of order',
+        () {
+      final alpha = account('alpha', 20);
+      final zeta = account('zeta', 20);
+
+      expect(
+        bestProviderAccountForCheck([zeta, alpha], _now)?.account,
+        'alpha',
+      );
+      expect(
+        bestProviderAccountForCheck([alpha, zeta], _now)?.account,
+        'alpha',
+      );
+    });
+
+    test(
+        'an exact account remains exact even when another account is healthier',
+        () {
+      final selected = bestProviderAccountForCheck(
+        [account('spent', 100), account('live', 20)],
+        _now,
+        account: 'spent',
+      );
+
+      expect(selected?.account, 'spent');
+      expect(providerAvailability(selected!, _now).available, isFalse);
+    });
+
+    test('fresh spent evidence wins over a fuller stale account', () {
+      final selected = bestProviderAccountForCheck(
+        [account('stale', 1, stale: true), account('spent', 100)],
+        _now,
+      );
+
+      expect(selected?.account, 'spent');
+    });
   });
 
   group('secondaryVisibleWindow', () {
@@ -520,6 +597,106 @@ void main() {
       expect(s.routingPolicy, 'local_first');
     });
 
+    test('cloud-only local daemon is never an on-device provider fallback', () {
+      final cloudOnly = _local(
+        'ollama',
+        models: const [
+          ModelInfo(
+            id: 'qwen:480b-cloud',
+            local: true,
+            cloudOffloaded: true,
+          ),
+        ],
+      );
+
+      expect(isLocalRuntimeReachableAt(cloudOnly, _now), isTrue);
+      expect(isLocalRuntimeAvailableAt(cloudOnly, _now), isFalse);
+      expect(anyProviderUsable([cloudOnly], _now), isFalse);
+
+      final localFirst = suggestRoute(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+          cloudOnly,
+        ],
+        _now,
+        preferLocal: true,
+      );
+      expect(localFirst.recommended?.provider, 'claude');
+      expect(localFirst.usingLocalFallback, isFalse);
+
+      final noFallback = suggestRoute([
+        _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 100)]),
+        cloudOnly,
+      ], _now);
+      expect(noFallback.recommended, isNull);
+      expect(noFallback.ranked.any((candidate) => candidate.isLocal), isFalse);
+    });
+
+    test('errored empty local observation is never a provider fallback', () {
+      final remoteOnly = _local(
+        'ollama',
+        error: 'remote Ollama endpoints are not treated as local capacity',
+      );
+
+      expect(isLocalRuntimeReachableAt(remoteOnly, _now), isTrue);
+      expect(isLocalRuntimeAvailableAt(remoteOnly, _now), isFalse);
+      expect(anyProviderUsable([remoteOnly], _now), isFalse);
+
+      final suggestion = suggestRoute(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 100)]),
+          remoteOnly,
+        ],
+        _now,
+      );
+      expect(suggestion.recommended, isNull);
+      expect(suggestion.ranked.any((candidate) => candidate.isLocal), isFalse);
+    });
+
+    test('reachable empty local inventory is never a provider fallback', () {
+      final empty = _local('ollama', models: const []);
+
+      expect(isLocalRuntimeReachableAt(empty, _now), isTrue);
+      expect(isLocalRuntimeAvailableAt(empty, _now), isFalse);
+      expect(anyProviderUsable([empty], _now), isFalse);
+
+      final suggestion = suggestRoute(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 100)]),
+          empty,
+        ],
+        _now,
+      );
+      expect(suggestion.recommended, isNull);
+      expect(suggestion.ranked.any((candidate) => candidate.isLocal), isFalse);
+    });
+
+    test('mixed local and cloud-offloaded daemon remains a local fallback', () {
+      final mixed = _local(
+        'ollama',
+        models: const [
+          ModelInfo(id: 'qwen:7b', local: true),
+          ModelInfo(
+            id: 'qwen:480b-cloud',
+            local: true,
+            cloudOffloaded: true,
+          ),
+        ],
+      );
+
+      expect(isLocalRuntimeAvailableAt(mixed, _now), isTrue);
+      final suggestion = suggestRoute(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
+          mixed
+        ],
+        _now,
+        preferLocal: true,
+      );
+      expect(suggestion.recommended?.provider, 'ollama');
+      expect(suggestion.usingLocalFallback, isTrue);
+    });
+
     test('without a local fallback, recommends the least-bad subscription', () {
       final s = suggestRoute([
         _q('codex', [QuotaWindow(label: 'w', usedPercent: 95)]), // 5% free
@@ -713,7 +890,7 @@ void main() {
           .recommended!;
       final fallback = suggestRoute([
         _q(
-          'codex',
+          'antigravity',
           [QuotaWindow(label: 'weekly', usedPercent: 20)],
           sourceClass: ProviderSourceClass.thisMachineFallback,
           perMachine: true,
@@ -858,6 +1035,72 @@ void main() {
       );
       expect(s.recommended?.provider, 'ollama');
       expect(s.usingLocalFallback, isTrue);
+    });
+
+    test('a lease-only depletion never selects zero effective headroom', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: 80,
+              resetsAt: _now + 3600,
+            ),
+          ]),
+        ],
+        _now,
+        leaseDiscountFor: (_, __) => 25,
+      );
+
+      expect(s.recommended, isNull);
+      expect(s.decisionCode.wireName, 'adjusted_headroom_depleted');
+      expect(s.reason, contains('20% raw but 0% after leases'));
+      expect(s.reason, isNot(contains('Everything is spent')));
+      final receipt = s.receipt.toJson();
+      expect(receipt['outcome'], 'adjusted_headroom_depleted');
+      expect(receipt['winner'], isNull);
+      final rejected =
+          (receipt['alternatives'] as List).single as Map<String, dynamic>;
+      expect(rejected['verdict'], 'adjusted_headroom_depleted');
+      expect(
+        (rejected['adjustments'] as List)
+            .cast<Map<String, dynamic>>()
+            .any((adjustment) => adjustment['kind'] == 'lease'),
+        isTrue,
+      );
+    });
+
+    test('a pipe-only depletion never selects zero effective headroom', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: 80,
+              resetsAt: _now + 3600,
+            ),
+          ]),
+        ],
+        _now,
+        pipePenaltyByProvider: const {'claude': 25},
+      );
+
+      expect(s.recommended, isNull);
+      expect(s.decisionCode.wireName, 'adjusted_headroom_depleted');
+      expect(s.reason, contains('20% raw but 0% after pipe'));
+      expect(s.reason, isNot(contains('Everything is spent')));
+      final receipt = s.receipt.toJson();
+      expect(receipt['outcome'], 'adjusted_headroom_depleted');
+      expect(receipt['winner'], isNull);
+      final rejected =
+          (receipt['alternatives'] as List).single as Map<String, dynamic>;
+      expect(rejected['verdict'], 'adjusted_headroom_depleted');
+      expect(
+        (rejected['adjustments'] as List)
+            .cast<Map<String, dynamic>>()
+            .any((adjustment) => adjustment['kind'] == 'pipe_health'),
+        isTrue,
+      );
     });
 
     test('pipe-health discount can route around a throttled provider', () {
@@ -1567,9 +1810,10 @@ void main() {
       expect(providerHeadroom(spentFlagged, _now), 0);
     });
 
-    test('server-refreshing evidence keeps its genuine rollover', () {
-      // Codex is authoritative-live: a passed reset really did roll the window
-      // over, so it must NOT be marked stale.
+    test('server-refreshing evidence does not synthesize post-reset quota', () {
+      // Even an authoritative observation cannot say what another device used
+      // after its captured reset. Preserve the last percent and stop routing
+      // until a new provider response supplies the next window.
       final codex = _q('codex', [
         QuotaWindow(
           label: 'weekly',
@@ -1579,7 +1823,8 @@ void main() {
       ]);
       final flagged = flagStalePassiveRolloverEvidence(codex, _now);
       expect(flagged.stale, isFalse);
-      expect(providerHeadroom(flagged, _now), 100); // rollover still applies
+      expect(providerHeadroom(flagged, _now), 10);
+      expect(providerAvailability(flagged, _now).available, isFalse);
     });
 
     test('an already-stale or windowless passive-local read is unchanged', () {

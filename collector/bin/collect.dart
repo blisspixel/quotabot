@@ -12,6 +12,7 @@ import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
+import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/route_render.dart';
@@ -19,14 +20,16 @@ import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
 
-/// quotabot CLI. Run `quotabot help` for the full command list. Every read is a
-/// local metadata lookup, not a model call, so it costs no usage tokens.
+/// quotabot CLI. Run `quotabot help` for the full command list. Quota and
+/// routing reads use metadata, not model calls, so they cost no usage tokens.
+/// Live reads may contact provider metadata endpoints and refresh bounded local
+/// state.
 
-const _version = '0.9.2';
+const _version = '0.9.3';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
-/// `verify` run found at least one snapshot failing its honesty checks; 69 the
+/// `verify` run failed an honesty check or its requested strict live-read gate; 69 the
 /// requested provider, or the whole fleet, has no usable quota right now.
 const int _exitUsage = 64;
 const int _exitVerifyFailed = 65;
@@ -208,6 +211,19 @@ Future<void> main(List<String> rawArgs) async {
     return;
   }
   final profile = profileSelection.profile;
+  final legacyCredentialFilters = profile == null
+      ? const <String>[]
+      : _profileLegacyCredentialFilterProviders(profile);
+  if (!wantsJson && profile != null && legacyCredentialFilters.isNotEmpty) {
+    final providers = _joinedProviderNames(legacyCredentialFilters);
+    final plural = legacyCredentialFilters.length > 1;
+    stderr.writeln(
+      'quotabot: profile "${profile.name}" uses ${plural ? 'older' : 'an older'} '
+      '$providers account ${plural ? 'filters' : 'filter'}; edit the profile '
+      'in the desktop app and select the current '
+      '${plural ? 'credentials' : '$providers credential'}',
+    );
+  }
   final simulationSelection = _simulationFromFlags(flags);
   if (!simulationSelection.ok) {
     exitCode = _exitUsage;
@@ -253,7 +269,10 @@ Future<void> main(List<String> rawArgs) async {
           exitCode = _exitUsage;
           return;
         }
-        final reqs = _modelRequirements(flags);
+        final reqs = _modelRequirements(
+          flags,
+          defaultBudgetPolicy: ModelBudgetPolicy.quota,
+        );
         if (!reqs.ok) {
           exitCode = _exitUsage;
           return;
@@ -376,7 +395,20 @@ Future<void> main(List<String> rawArgs) async {
       _runExplain(flags, wantsJson, profile, excludedProviders);
       return;
     case 'verify':
-      await _runVerify(wantsJson, profile, excludedProviders);
+      final recoveryRequested =
+          _stringOption(flags, 'recover-drift', null) != null ||
+              _stringOption(flags, 'account', null) != null ||
+              flags.contains('--yes');
+      if (recoveryRequested) {
+        await _runDriftRecovery(flags, wantsJson);
+      } else {
+        await _runVerify(
+          wantsJson,
+          profile,
+          excludedProviders,
+          requireLive: flags.contains('--require-live'),
+        );
+      }
       return;
   }
 
@@ -389,9 +421,37 @@ Future<void> main(List<String> rawArgs) async {
   if (cmd.isEmpty || cmd == 'status' || cmd == 'doctor') {
     wantsJson
         ? print(_jsonPretty(_snapshot(results, profile)))
-        : _printDoctor(results);
+        : _printDoctor(
+            results,
+            preferenceOrder: profile?.preferenceOrder ?? const [],
+          );
     return;
   }
+}
+
+List<String> _profileLegacyCredentialFilterProviders(QuotaProfile profile) {
+  final providers = <String>{};
+  for (final entry in profile.accounts.entries) {
+    if (entry.value.any(
+      (account) => isLegacyCredentialProfileAccountFilter(entry.key, account),
+    )) {
+      providers.add(entry.key.trim().toLowerCase());
+    }
+  }
+  final ordered = providers.toList()..sort();
+  return ordered;
+}
+
+String _joinedProviderNames(List<String> providers) {
+  final names = providers
+      .map((provider) => switch (provider) {
+            'claude' => 'Claude',
+            'codex' => 'Codex',
+            _ => provider,
+          })
+      .toList(growable: false);
+  if (names.length < 2) return names.single;
+  return '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
 }
 
 bool _isKnownCommand(String command) =>
@@ -462,26 +522,24 @@ RouteSuggestion _suggestFor(
   List<String> preferenceOrder = const [],
 }) =>
     () {
-      final capabilityGates = providerRouteCapabilityGates(
-        results,
-        now,
-        catalog: kModelCatalog,
-        requirements: routeRequirements,
-      );
+      final activeLeases = Platform.environment['QUOTABOT_DEMO'] == '1'
+          ? const <RouteLease>[]
+          : const FileRouteLeaseStore().active(now);
       return decide(
         results,
         now,
-        context: DecisionContext(
+        context: providerRouteDecisionContext(
+          results,
+          now,
           burnStatsByProvider: _burnStatsFor(results, now, tuned: tunedBurn),
           riskZ: riskZ,
+          activeLeases: activeLeases,
           preferLocal: preferLocal,
           costPenaltyByProvider: costPenaltyByProvider,
           costWeight: costWeight,
           pipePenaltyByProvider: _pipePenaltyFor(results, now),
-          capabilityKnownQuotaKeys: capabilityGates.knownQuotaKeys,
-          capabilityAvailableQuotaKeys: capabilityGates.availableQuotaKeys,
-          capabilityBudgetResetByQuotaKey:
-              capabilityGates.budgetResetByQuotaKey,
+          catalog: kModelCatalog,
+          routeRequirements: routeRequirements,
           preferenceOrder: preferenceOrder,
           snapshotSource: _simulatedSnapshot == null ? 'live' : 'simulation',
           snapshotAsOf: now,
@@ -594,13 +652,16 @@ StatsSeries _statsSeriesFor(
   StatsSeriesBucketLoader loadBucketsFor,
 ) {
   final account = stripTerminalControl(quota.account);
+  final displayAccount = quotaAccountDisplayLabel(account);
   final duplicateProvider = providerCount > 1;
   final bucketAccount =
       hasSpecificQuotaAccount(quota.account) ? quota.account : null;
   final fallbackToProvider = !duplicateProvider;
   return (
     key: duplicateProvider ? '${quota.provider}:$account' : quota.provider,
-    label: duplicateProvider ? '${quota.provider} ($account)' : quota.provider,
+    label: duplicateProvider
+        ? '${quota.provider} ($displayAccount)'
+        : quota.provider,
     quota: quota,
     buckets: loadBucketsFor(
       quota.provider,
@@ -649,7 +710,9 @@ int? _parseContext(String? s) {
   final rawBudget = _stringOption(flags, 'budget', null);
   final budget = rawBudget == null
       ? defaultBudgetPolicy
-      : modelBudgetPolicyFromName(rawBudget);
+      : rawBudget.trim().isEmpty
+          ? null
+          : modelBudgetPolicyFromName(rawBudget);
   if (budget == null) {
     stderr.writeln(
       'quotabot: unknown --budget value "$rawBudget" '
@@ -928,11 +991,7 @@ void _printSuggestModel(ModelSuggestion s, int now) {
                 : style.health(e.headroomPercent!,
                     '${e.headroomPercent!.round()}% free'.padRight(9)));
     final tier = m.tier == null ? '' : style.dim('  ${m.tier}');
-    final spent = e.available
-        ? ''
-        : e.stale
-            ? style.dim('  unavailable')
-            : style.red('  spent');
+    final spent = _modelAvailabilitySuffix(e);
     final provenance = _modelEntryProvenance(e, now);
     print(
       '    ${m.id.padRight(22)} ${e.provider.padRight(11)} '
@@ -965,6 +1024,7 @@ const _valueOptions = {
   'plan',
   'prefer',
   'profile',
+  'recover-drift',
   'risk',
   'sort',
   'state',
@@ -992,6 +1052,7 @@ const _switchOptions = {
   '--once',
   '--provider-route',
   '--reads',
+  '--require-live',
   '--require-reasoning',
   '--require-tools',
   '--require-vision',
@@ -999,6 +1060,7 @@ const _switchOptions = {
   '--tuned-burn',
   '--use-expiring-quota',
   '--version',
+  '--yes',
   '-h',
   '-v',
 };
@@ -1114,6 +1176,13 @@ String? _commandOptionError(String command, Set<String> flags) {
       });
     case 'explain':
       allowed.addAll(const {'network', 'reads'});
+    case 'verify':
+      allowed.addAll(const {
+        'account',
+        'recover-drift',
+        'require-live',
+        'yes',
+      });
   }
   for (final flag in flags) {
     final name = _optionName(flag);
@@ -1277,7 +1346,8 @@ Future<void> _runManual(
         }));
       } else {
         stdout.writeln(
-          'saved ${entry.provider} (${entry.account}) '
+          'saved ${entry.provider} '
+          '(${quotaAccountDisplayLabel(entry.account)}) '
           '${_manualNumber(entry.used)}/${_manualNumber(entry.limit)} '
           '${entry.window}',
         );
@@ -1322,7 +1392,7 @@ void _printManualEntries(List<ManualQuotaEntry> entries) {
   for (final entry in entries) {
     stdout.writeln(
       '${entry.provider.padRight(14)} '
-      '${entry.account.padRight(18)} '
+      '${quotaAccountDisplayLabel(entry.account).padRight(18)} '
       '${_manualNumber(entry.used)}/${_manualNumber(entry.limit)} '
       '${entry.window} '
       'resets in ${countdown(entry.resetsAt, now)}',
@@ -1380,6 +1450,7 @@ Future<void> _runTop(
   QuotaProfile? profile,
   Set<String> excludedProviders,
 ) async {
+  final preferenceOrder = profile?.preferenceOrder ?? const <String>[];
   final color = _useColor(flags);
   final depth = flags.contains('--truecolor')
       ? ColorDepth.truecolor
@@ -1411,7 +1482,11 @@ Future<void> _runTop(
     final data =
         await _collectProfiled(profile, excludedProviders: excludedProviders);
     final now = nowEpoch();
-    final suggestion = _suggestFor(data, now);
+    final suggestion = _suggestFor(
+      data,
+      now,
+      preferenceOrder: preferenceOrder,
+    );
     final lines = renderTopFrame(
       providers: sortProvidersForTop(data, suggestion, now, sort),
       suggestion: suggestion,
@@ -1431,6 +1506,7 @@ Future<void> _runTop(
   var loading = true;
   var lastCollect = 0;
   var failStreak = 0;
+  var refreshFailure = '';
   var selected = 0; // cursor index into the visible (sorted, unhidden) list
   // Provider/account identities hidden this session with the x key. Keyed by
   // account, not bare provider, so hiding one account of a duplicated provider
@@ -1439,20 +1515,24 @@ Future<void> _runTop(
   var copied = ''; // transient confirmation shown after the copy-route key
   final quit = Completer<void>();
   Timer? repaint;
-  Timer? refresh;
+  var terminalActive = true;
 
   // The sorted, unhidden providers plus the routing suggestion for this frame,
   // computed together so the cursor, the rows, and the route line agree.
   ({List<ProviderQuota> visible, RouteSuggestion suggestion}) frame() {
     final now = nowEpoch();
-    final suggestion = _suggestFor(data, now);
-    final visible = sortProvidersForTop(data, suggestion, now, sort)
-        .where((q) => !hidden.contains(quotaIdentityKeyFor(q)))
-        .toList();
+    final routable = filterHiddenProvidersForTop(data, hidden);
+    final suggestion = _suggestFor(
+      routable,
+      now,
+      preferenceOrder: preferenceOrder,
+    );
+    final visible = sortProvidersForTop(routable, suggestion, now, sort);
     return (visible: visible, suggestion: suggestion);
   }
 
   void draw() {
+    if (!terminalActive) return;
     final now = nowEpoch();
     final List<String> lines;
     if (loading && data.isEmpty) {
@@ -1471,7 +1551,9 @@ Future<void> _runTop(
         clock: _clock(),
         depth: depth,
         palette: palette,
-        updated: _agoLabel(lastCollect, now),
+        updated: refreshFailure.isEmpty
+            ? _agoLabel(lastCollect, now)
+            : refreshFailure,
         sort: sort.label,
         selected: (selected >= 0 && selected < visible.length)
             ? visible[selected].provider
@@ -1498,33 +1580,34 @@ Future<void> _runTop(
     stdout.write(buf.toString());
   }
 
-  // scheduleRefresh and reload reference each other, so both are late bindings.
-  late final void Function() scheduleRefresh;
-  late final Future<void> Function() reload;
-
-  scheduleRefresh = () {
-    final secs = fixedInterval ??
-        nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak);
-    refresh = Timer(Duration(seconds: secs), reload);
-  };
-
-  // Re-collect, update the failure streak, redraw, and schedule the next refresh
-  // on the adaptive cadence.
-  reload = () async {
-    try {
-      final fresh =
-          await _collectProfiled(profile, excludedProviders: excludedProviders);
+  final reloader = TopRefreshCoordinator<List<ProviderQuota>>(
+    collect: () =>
+        _collectProfiled(profile, excludedProviders: excludedProviders),
+    apply: (fresh) {
       data = fresh;
       lastCollect = nowEpoch();
       loading = false;
+      refreshFailure = '';
       final anyLive = fresh.any((q) => q.ok && q.hasWindows && !q.stale);
       failStreak = anyLive ? 0 : failStreak + 1;
       draw();
-    } catch (_) {
-      // Keep the last good frame on a transient collection error.
-    }
-    scheduleRefresh();
-  };
+    },
+    onFailure: () {
+      final note = data.isEmpty
+          ? 'refresh failed - no quota data'
+          : 'refresh failed - showing last known';
+      data = retainSnapshotAfterRefreshFailure(data, note: note);
+      loading = false;
+      refreshFailure = note;
+      failStreak += 1;
+      draw();
+    },
+    // Keep retrying after a transient collection error.
+    nextDelay: () => Duration(
+      seconds: fixedInterval ??
+          nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak),
+    ),
+  );
 
   final priorEcho = stdin.echoMode;
   final priorLine = stdin.lineMode;
@@ -1537,7 +1620,11 @@ Future<void> _runTop(
   }
 
   void stop() {
-    if (!quit.isCompleted) quit.complete();
+    if (quit.isCompleted) return;
+    terminalActive = false;
+    repaint?.cancel();
+    reloader.dispose();
+    quit.complete();
   }
 
   void moveSel(int delta) {
@@ -1581,8 +1668,7 @@ Future<void> _runTop(
       if (b == 113 || b == 81 || b == 3) return stop(); // q, Q, Ctrl-C
       if (b == 114 || b == 82) {
         copied = '';
-        refresh?.cancel();
-        reload(); // r, R: refresh now and reschedule
+        unawaited(reloader.refreshNow()); // r, R: coalesced refresh now
       } else if (b == 115 || b == 83) {
         copied = '';
         sort = sort.next; // s, S: cycle the ordering
@@ -1605,12 +1691,14 @@ Future<void> _runTop(
   final sigint = ProcessSignal.sigint.watch().listen((_) => stop());
 
   draw(); // immediate "reading quota" frame
-  await reload(); // first real snapshot (also schedules the next refresh)
-  repaint = Timer.periodic(const Duration(seconds: 1), (_) => draw());
+  unawaited(reloader.refreshNow());
+  if (!quit.isCompleted) {
+    repaint = Timer.periodic(const Duration(seconds: 1), (_) => draw());
+  }
 
   await quit.future;
-  repaint.cancel();
-  refresh?.cancel();
+  repaint?.cancel();
+  reloader.dispose();
   await keys.cancel();
   await sigint.cancel();
   try {
@@ -1661,7 +1749,10 @@ void _printHelp() {
     '  report              weekly quota health markdown export',
   );
   stdout.writeln(
-    '  verify              honesty checks over one live read (exit 65 on any failure)',
+    '  verify              honesty checks over one read; add --require-live for adapter health',
+  );
+  stdout.writeln(
+    '                      recover one quarantined baseline with --recover-drift, --account, and --yes',
   );
   stdout.writeln(
     '  explain             show local reads and network hosts in the runtime trust boundary',
@@ -1676,7 +1767,7 @@ void _printHelp() {
   stdout.writeln(head('CONNECT'));
   stdout.writeln(
     '  login <provider>    connect grok, antigravity, claude, or codex '
-    '(keeps it live on an idle machine)',
+    '(adds a refreshable path; confirm with doctor)',
   );
   stdout.writeln('  logout <provider>   disconnect a provider');
   stdout.writeln(
@@ -1753,7 +1844,13 @@ void _printHelp() {
     '  --task=LEVEL        models/suggest: simple|standard|hard (coarse needs)',
   );
   stdout.writeln(
-    '  --budget=POLICY     models/suggest: any|quota|local class filter',
+    '  --budget=POLICY     any|quota|local; models defaults any, model suggest quota',
+  );
+  stdout.writeln(
+    '  --require-live      verify: fail unless every selected provider read is fresh',
+  );
+  stdout.writeln(
+    '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
   );
   stdout.writeln(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
@@ -1765,7 +1862,11 @@ void _printHelp() {
   stdout.writeln('');
   stdout.writeln(
     style.dim(
-        '  Every command is a local metadata read and costs no usage tokens.'),
+        '  Quota and routing reads use metadata only and cost no usage tokens.'),
+  );
+  stdout.writeln(
+    style.dim(
+        '  Live reads may contact provider endpoints; state commands can write bounded local metadata.'),
   );
   stdout.writeln(
     style.dim(
@@ -1794,6 +1895,7 @@ Future<void> _runWatch(
   QuotaProfile? profile,
   Set<String> excludedProviders,
 ) async {
+  final preferenceOrder = profile?.preferenceOrder ?? const <String>[];
   final webhook = _stringOption(flags, 'webhook', null);
   final allowExternal = flags.contains('--allow-external');
   final wantsJson = flags.contains('--json');
@@ -1836,7 +1938,11 @@ Future<void> _runWatch(
     final now = nowEpoch();
     final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
     failStreak = anyLive ? 0 : failStreak + 1;
-    final suggestion = _suggestFor(data, now);
+    final suggestion = _suggestFor(
+      data,
+      now,
+      preferenceOrder: preferenceOrder,
+    );
     final result = computeAlerts(
         snapshot: data, suggestion: suggestion, now: now, armed: armed);
     armed = result.armed;
@@ -2005,7 +2111,11 @@ Future<void> _runReport(
   final report = buildQuotaHealthReport(
     results,
     now,
-    _suggestFor(results, now),
+    _suggestFor(
+      results,
+      now,
+      preferenceOrder: profile?.preferenceOrder ?? const [],
+    ),
     insightsByProvider: shrunkInsights,
     tzOffset: tz,
   );
@@ -2024,13 +2134,12 @@ Future<void> _check(
   final results = await _read(profile, excludedProviders);
   final now = nowEpoch();
   final key = name.toLowerCase();
-  ProviderQuota? q;
-  for (final r in results) {
-    if (r.provider == key || r.displayName.toLowerCase() == key) {
-      q = r;
-      break;
-    }
-  }
+  final q = bestProviderAccountForCheck(
+    results.where(
+      (r) => r.provider == key || r.displayName.toLowerCase() == key,
+    ),
+    now,
+  );
   if (q == null) {
     if (wantsJson) {
       print(_jsonPretty({
@@ -2052,9 +2161,9 @@ Future<void> _check(
   final head = providerHeadroom(q, now);
   final binding = bindingWindow(q, now);
   final availability = providerAvailability(q, now);
-  final available = q.isLocal
-      ? q.ok && q.sourceClassViolation == null
-      : availability.available;
+  final available =
+      q.isLocal ? isLocalRuntimeAvailableAt(q, now) : availability.available;
+  final trusted = !q.isLocal && isTrustedQuotaEvidenceAt(q, now);
   // Stable exit code so a script can branch on usability without parsing output.
   exitCode = available ? 0 : _exitUnavailable;
   final reset = binding?.resetsAt;
@@ -2069,6 +2178,7 @@ Future<void> _check(
       'headroom_percent': head,
       'resets_at': reset,
       'stale': q.stale,
+      if (q.error?.isNotEmpty == true) 'error': q.error,
       if (q.driftReason != null) 'drift_reason': q.driftReason,
       if (q.driftObservedAt != null) 'drift_observed_at': q.driftObservedAt,
     }));
@@ -2077,16 +2187,29 @@ Future<void> _check(
   final label = available ? style.green('available') : style.red('unavailable');
   final pct = head == null
       ? ''
-      : q.stale
-          ? '  ${style.dim('last ${head.round()}% free')}'
-          : '  ${style.health(head, '${head.round()}% free')}';
-  final rs =
-      reset == null ? '' : style.dim('  resets ${countdown(reset, now)}');
+      : q.driftReason != null
+          ? '  ${style.dim('${head.round()}% last trusted')}'
+          : q.stale
+              ? '  ${style.dim('${head.round()}% last known')}'
+              : !trusted
+                  ? '  ${style.dim('${head.round()}% unverified')}'
+                  : '  ${style.health(head, '${head.round()}% free')}';
+  final rs = reset == null
+      ? ''
+      : !trusted && reset <= now
+          ? style.dim('  reset passed; refresh to confirm')
+          : trusted
+              ? style.dim('  resets ${countdown(reset, now)}')
+              : style.dim('  reset ${countdown(reset, now)}');
   final staleTag = q.driftReason != null
       ? style.dim(' (provider drift)')
       : q.stale
           ? style.dim(' (cached)')
-          : '';
+          : q.suspect != null
+              ? style.dim(' (review reading)')
+              : !q.isLocal && !trusted && q.windows.isNotEmpty
+                  ? style.dim(' (unverified)')
+                  : '';
   final sourceTag = style.dim(' (${q.sourceClass.label})');
   stdout.writeln(
       '${style.bold(q.displayName)}: $label$pct$rs$staleTag$sourceTag');
@@ -2095,6 +2218,15 @@ Future<void> _check(
       style.red(
         '  provider drift: ${q.driftReason}; '
         '${_providerDriftEvidenceSummary(q)}',
+      ),
+    );
+  } else if (q.stale && q.error?.isNotEmpty == true) {
+    final evidence = q.hasWindows
+        ? 'showing last-known quota'
+        : 'no current quota is available';
+    stdout.writeln(
+      style.dim(
+        '  live read failed: ${q.error}; $evidence',
       ),
     );
   }
@@ -2230,6 +2362,8 @@ String _stateStyled(String state) {
     case 'local':
       return style.cyan(padded);
     case 'cached':
+    case 'NEEDS REVIEW':
+    case 'UNVERIFIED':
       return style.yellow(padded);
     case 'OUT OF QUOTA':
     case 'PROVIDER DRIFT':
@@ -2245,7 +2379,7 @@ String _stateStyled(String state) {
 /// gets its identity in the provenance tag instead of the row label.
 String _doctorAccountSuffix(ProviderQuota q, Map<String, int> counts) =>
     (counts[q.provider] ?? 0) > 1 && _providerHasDoctorAccountIdentity(q)
-        ? ' (${q.account})'
+        ? ' (${quotaAccountDisplayLabel(q.account)})'
         : '';
 
 String _providerProvenance(ProviderQuota q, int now, String state) {
@@ -2266,7 +2400,7 @@ List<String> _providerProvenanceParts(
   final spendClass = providerSpendClass(q);
   if (spendClass != null) parts.add(spendClass);
   if (includeAccount && providerHasDoctorProvenanceIdentity(q)) {
-    parts.add(q.account);
+    parts.add(quotaAccountDisplayLabel(q.account));
   }
   final captured = routeCaptureAgeLabel(q.asOf, now);
   if (captured.isNotEmpty) parts.add(captured);
@@ -2284,7 +2418,7 @@ String quotaAlertProvenance(
       : _providerProvenanceParts(
           q,
           now,
-          _providerAlertState(q),
+          _providerAlertState(q, now),
           includeAccount: !_alertMessageShowsAccount(alert.account),
         );
   final route = alert.routeTo == null
@@ -2294,7 +2428,7 @@ String quotaAlertProvenance(
     final routeParts = _providerProvenanceParts(
       route,
       now,
-      _providerAlertState(route),
+      _providerAlertState(route, now),
       includeAccount: !_alertMessageShowsAccount(alert.routeAccount),
     );
     parts.addAll(routeParts.map((part) => 'route $part'));
@@ -2316,9 +2450,15 @@ String _quotaAlertFallback(RouteFallback fallback, int now) {
   }
 }
 
-String _providerAlertState(ProviderQuota q) {
-  if (q.isLocal) return q.active ? 'in use' : 'available';
-  return q.stale ? 'cached' : 'live';
+String _providerAlertState(ProviderQuota q, int now) {
+  if (q.isLocal) {
+    if (!isLocalRuntimeAvailableAt(q, now)) return 'unavailable';
+    return q.active ? 'in use' : 'available';
+  }
+  if (q.driftReason != null) return 'provider drift';
+  if (q.stale) return 'cached';
+  if (!isTrustedQuotaEvidenceAt(q, now)) return 'unverified';
+  return 'live';
 }
 
 bool _alertMessageShowsAccount(String? account) =>
@@ -2345,6 +2485,8 @@ ProviderQuota? _findQuota(
 String _providerReadStateLabel(String state) => switch (state) {
       'OUT OF QUOTA' => 'live',
       'PROVIDER DRIFT' => 'provider drift',
+      'NEEDS REVIEW' => 'review reading',
+      'UNVERIFIED' => 'unverified',
       'ERROR' => 'error',
       _ => state,
     };
@@ -2358,16 +2500,127 @@ bool _providerHasDoctorAccountIdentity(ProviderQuota q) {
 
 bool providerHasDoctorProvenanceIdentity(ProviderQuota q) =>
     _providerHasDoctorAccountIdentity(q) &&
-    (q.isManual || q.account.contains('@'));
+    (q.isManual ||
+        q.account.contains('@') ||
+        isOpaqueCredentialIdentity(q.account));
 
 List<QuotaWindow> _doctorVisibleWindows(ProviderQuota quota, int now) {
-  final used = quota.windows
-      .where((w) => quotaWindowUsedPercent(quota, w, now) > 0.5)
-      .toList();
+  final used = quota.windows.where((w) {
+    final percent = w.percent;
+    return percent == null ||
+        !percent.isFinite ||
+        percent < 0 ||
+        percent > 100 ||
+        quotaWindowUsedPercent(quota, w, now) > 0.5;
+  }).toList();
   return used.isEmpty ? quota.windows : used;
 }
 
-void _printDoctor(List<ProviderQuota> results) {
+String _doctorState(ProviderQuota q, int now) {
+  if (q.isLocal) {
+    if (!q.ok || q.error != null || q.sourceClassViolation != null) {
+      return 'ERROR';
+    }
+    if (q.stale) return 'cached';
+    if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+      return 'UNVERIFIED';
+    }
+    if (!isLocalRuntimeAvailableAt(q, now)) return 'unavailable';
+    return q.active ? 'in use' : 'available';
+  }
+  if (q.driftReason != null) return 'PROVIDER DRIFT';
+  if (!q.ok || q.sourceClassViolation != null) return 'ERROR';
+  if (q.stale) return 'cached';
+  if (q.suspect != null) return 'NEEDS REVIEW';
+  if (q.windows.isEmpty) {
+    return (q.status ?? '').isNotEmpty ? 'metadata' : 'no live data';
+  }
+  if (!isTrustedQuotaEvidenceAt(q, now)) return 'UNVERIFIED';
+  final headroom = providerHeadroom(q, now);
+  if (headroom == null) return 'UNVERIFIED';
+  return headroom <= kSpentHeadroomFloor ? 'OUT OF QUOTA' : 'live';
+}
+
+String _doctorWindowDetail(
+  QuotaWindow window,
+  int now,
+  String state,
+) {
+  final percent = window.percent;
+  final valid =
+      percent != null && percent.isFinite && percent >= 0 && percent <= 100;
+  final usage = valid ? '${percent.round()}% used' : 'usage unavailable';
+  final qualifier = switch (state) {
+    'PROVIDER DRIFT' => 'last trusted',
+    'cached' => 'last known',
+    'NEEDS REVIEW' || 'UNVERIFIED' => 'unverified',
+    _ => null,
+  };
+  final resetAt = window.resetsAt;
+  final reset = resetAt == null
+      ? ''
+      : qualifier != null && resetAt <= now
+          ? '; reset passed, refresh to confirm'
+          : qualifier == null
+              ? '; resets ${countdown(resetAt, now)}'
+              : '; reset ${countdown(resetAt, now)}';
+  return '${window.label} $usage${qualifier == null ? '' : ' ($qualifier)'}$reset';
+}
+
+String doctorModelSummary(
+  String provider,
+  List<ModelQuota> quotas,
+  int now, {
+  ProviderQuota? providerQuota,
+}) {
+  final known = quotas
+      .where((quota) => quota.remainingPercent != null)
+      .toList(growable: false);
+  final unknown = quotas.length - known.length;
+  final expired =
+      known.where((quota) => !isCurrentModelQuotaEvidenceAt(quota, now)).length;
+  String summary;
+  if (known.isEmpty) {
+    summary = '${quotas.length} models tracked, balances unavailable';
+  } else {
+    final mostUsed = known.reduce(
+      (a, b) => a.usedPercent! >= b.usedPercent! ? a : b,
+    );
+    final windowLabel = mostUsed.windowLabel;
+    summary = '${quotas.length} models tracked, most used: '
+        '${mostUsed.model} ${mostUsed.usedPercent!.round()}%'
+        '${windowLabel == null ? '' : ' ($windowLabel)'}';
+  }
+  if (expired > 0) {
+    summary +=
+        '; $expired expired ${expired == 1 ? 'allowance' : 'allowances'} '
+        'shown last observed';
+  }
+  if (unknown > 0 && known.isNotEmpty) {
+    summary +=
+        '; $unknown ${unknown == 1 ? 'balance' : 'balances'} unavailable';
+  }
+  if (provider == claudeProviderId || provider == codexProviderId) {
+    summary = 'model-specific: $summary; separate from shared account limits';
+  }
+  if (provider == claudeProviderId && providerQuota != null) {
+    final fable = quotas
+        .where((quota) => isClaudeFableModelLabel(quota.model))
+        .firstOrNull;
+    final spend = fable == null
+        ? null
+        : claudeFableSpendEvidenceAt(providerQuota, fable.model, now);
+    if (spend != null) {
+      summary += '; Fable spend: ${spend.compactLabel}';
+    }
+  }
+  return summary;
+}
+
+void _printDoctor(
+  List<ProviderQuota> results, {
+  List<String> preferenceOrder = const [],
+}) {
   final now = nowEpoch();
   print(
     '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
@@ -2386,38 +2639,19 @@ void _printDoctor(List<ProviderQuota> results) {
       .fold(28, (w, len) => len > w ? len : w);
   final indent = ' '.padRight(nameWidth);
   for (final q in results) {
-    bool exhausted = false;
-    if (q.windows.isNotEmpty) {
-      final minRem = providerHeadroom(q, now) ?? 100;
-      exhausted = minRem <= 0.5;
-    }
-    final state = q.isLocal
-        ? (q.active ? 'in use' : 'available')
-        : q.driftReason != null
-            ? 'PROVIDER DRIFT'
-            : !q.ok
-                ? 'ERROR'
-                : q.windows.isEmpty
-                    ? 'no live data'
-                    : q.stale
-                        ? 'cached'
-                        : exhausted
-                            ? 'OUT OF QUOTA'
-                            : 'live';
+    final state = _doctorState(q, now);
     final detail = q.isLocal
-        ? (q.status ?? '')
+        ? (isLocalRuntimeAvailableAt(q, now)
+            ? q.status ?? 'ready'
+            : q.error ?? 'local runtime unavailable')
         : q.windows.isEmpty
             // A no-window row shows its status if it has one (a setup or
             // availability state), otherwise its error. A real failure sets
             // error, not status, so an ERROR row still shows the failure.
             ? (q.status ?? q.error ?? '')
-            : _doctorVisibleWindows(q, now).map((w) {
-                final pct = quotaWindowUsedPercent(q, w, now).round();
-                final reset = w.resetsAt == null
-                    ? ''
-                    : ' (resets ${countdown(w.resetsAt!, now)})';
-                return '${w.label} $pct% used$reset';
-              }).join(', ');
+            : _doctorVisibleWindows(q, now)
+                .map((w) => _doctorWindowDetail(w, now, state))
+                .join(', ');
     final namePart =
         '${q.displayName}${_doctorAccountSuffix(q, accountCounts)}';
     final provenance = _providerProvenance(q, now, state);
@@ -2438,14 +2672,12 @@ void _printDoctor(List<ProviderQuota> results) {
     if (q.modelQuotas.isNotEmpty) {
       // Compact human summary; the full per-model table is in `quotabot json`
       // and over MCP, so this stays one short line.
-      final mostUsed = q.modelQuotas.reduce(
-        (a, b) => (a.usedPercent ?? 0) >= (b.usedPercent ?? 0) ? a : b,
+      final summary = doctorModelSummary(
+        q.provider,
+        q.modelQuotas,
+        now,
+        providerQuota: q,
       );
-      final u = mostUsed.usedPercent?.round() ?? 0;
-      final n = q.modelQuotas.length;
-      final summary = u <= 0
-          ? '$n models tracked, all fresh'
-          : '$n models tracked, most used: ${mostUsed.model} $u%';
       print('  $indent ${_stateColumn('models')} $summary');
     }
     if (q.driftReason != null) {
@@ -2469,7 +2701,11 @@ void _printDoctor(List<ProviderQuota> results) {
   }
 
   // Close the loop: tell the user where to route work next.
-  final suggestion = _suggestFor(results, now);
+  final suggestion = _suggestFor(
+    results,
+    now,
+    preferenceOrder: preferenceOrder,
+  );
   print('\nSuggested: ${suggestion.explanation}');
   print('  (run "quotabot suggest" for the full ranked list)');
 
@@ -2588,14 +2824,16 @@ void _printAccessRecord(RuntimeAccessRecord record) {
   print('      ${style.dim(record.purpose)}');
 }
 
-/// `verify`: mechanical honesty checks over one live read, for the 1.0
-/// release-candidate provider verification matrix. Exit code 0 when every
-/// snapshot passes, 65 when any check fails, so a matrix script can branch.
+/// `verify`: mechanical honesty checks over one read, for the 1.0
+/// release-candidate provider verification matrix. Exit code 0 when the
+/// selected contract passes, or 65 when an honesty check or the optional strict
+/// live-read requirement fails, so a matrix script can branch.
 Future<void> _runVerify(
   bool wantsJson,
   QuotaProfile? profile,
-  Set<String> excludedProviders,
-) async {
+  Set<String> excludedProviders, {
+  bool requireLive = false,
+}) async {
   final read = await _readForVerify(profile, excludedProviders);
   final results = read.results;
   final report = buildVerificationReport(
@@ -2604,14 +2842,122 @@ Future<void> _runVerify(
     os: Platform.operatingSystem,
     filtered:
         profile != null || excludedProviders.isNotEmpty || _usingSimulation,
+    requireLive: requireLive,
     runtimeAccess: read.runtimeAccess,
   );
   if (wantsJson) {
     print(_jsonPretty(report.toJson()));
   } else {
-    _printVerify(report, results);
+    _printVerify(report, results, requireLive: requireLive);
   }
   if (!report.passed) exitCode = _exitVerifyFailed;
+}
+
+Future<void> _runDriftRecovery(
+  Set<String> flags,
+  bool wantsJson,
+) async {
+  final providerOptions =
+      flags.where((flag) => flag.startsWith('--recover-drift=')).toList();
+  final accountOptions =
+      flags.where((flag) => flag.startsWith('--account=')).toList();
+  if (providerOptions.length > 1 || accountOptions.length > 1) {
+    stderr.writeln(
+      'quotabot: drift recovery requires one exact provider and account',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  final provider = _stringOption(flags, 'recover-drift', null);
+  final account = _stringOption(flags, 'account', null);
+  if (provider == null || provider.trim().isEmpty) {
+    stderr.writeln(
+      'quotabot: drift recovery requires --recover-drift=PROVIDER',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (account == null || account.trim().isEmpty) {
+    stderr.writeln('quotabot: drift recovery requires --account=EXACT_ACCOUNT');
+    exitCode = _exitUsage;
+    return;
+  }
+  if (provider.length > 64 ||
+      stripTerminalControl(provider) != provider ||
+      account.length > 512 ||
+      stripTerminalControl(account) != account) {
+    stderr.writeln('quotabot: drift recovery target is malformed');
+    exitCode = _exitUsage;
+    return;
+  }
+  final conflicts = <String>[
+    if (flags.any((flag) => flag.startsWith('--profile='))) '--profile',
+    if (flags.any((flag) => flag.startsWith('--exclude='))) '--exclude',
+    if (flags.any((flag) => flag.startsWith('--mock-provider=')))
+      '--mock-provider',
+    if (flags.any((flag) => flag.startsWith('--state='))) '--state',
+  ];
+  if (conflicts.isNotEmpty) {
+    stderr.writeln(
+      'quotabot: drift recovery cannot be combined with ${conflicts.join(', ')}',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (!flags.contains('--yes')) {
+    stderr.writeln(
+      'quotabot: drift recovery changes one local quota baseline; confirm the '
+      'exact target by rerunning the same command with --yes',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+
+  final report = await _withSpinner(
+    'verifying quota',
+    () => verifyAndRecoverProviderDriftBaseline(
+      provider: provider,
+      account: account,
+    ),
+  );
+  if (wantsJson) {
+    print(_jsonPretty(report.toJson()));
+  } else {
+    _printDriftRecovery(report);
+  }
+  if (!report.recovered) {
+    exitCode =
+        report.status == 'unsupported_target' ? _exitUsage : _exitVerifyFailed;
+  }
+}
+
+void _printDriftRecovery(ProviderDriftRecoveryReport report) {
+  final account = quotaAccountDisplayLabel(report.account);
+  final target = '${report.displayName} ($account)';
+  print(
+    '${style.bold('quotabot verify drift recovery')}  '
+    '${style.dim('fresh provider metadata, 0 usage tokens')}',
+  );
+  if (report.recovered) {
+    print('  ${style.green('RECOVERED')} $target');
+    print('  ${report.detail}');
+    print(
+      style.dim(
+        '  History and every other provider/account record were left unchanged.',
+      ),
+    );
+    return;
+  }
+  print('  ${style.red('NOT RECOVERED')} $target');
+  print('  ${style.dim(report.status)}: ${report.detail}');
+  final verification = report.verification;
+  if (verification != null) {
+    for (final check in verification.checks.where(
+      (check) => check.status == VerifyStatus.fail,
+    )) {
+      print('  ${style.dim(check.id)}: ${check.detail}');
+    }
+  }
 }
 
 String _verifyStateLabel(String state) => switch (state) {
@@ -2626,9 +2972,13 @@ String _providerVerificationStateLabel(ProviderVerification verification) =>
         ? _verifyStateLabel(verification.state)
         : 'PROVIDER DRIFT';
 
-void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
+void _printVerify(
+  VerificationReport report,
+  List<ProviderQuota> snapshot, {
+  bool requireLive = false,
+}) {
   print(
-    '${style.bold('quotabot verify')}  ${style.dim('mechanical honesty checks over one live read, 0 usage tokens')}\n',
+    '${style.bold('quotabot verify')}  ${style.dim('mechanical honesty checks over one snapshot, 0 usage tokens')}\n',
   );
   for (var i = 0; i < report.providers.length; i++) {
     final p = report.providers[i];
@@ -2637,9 +2987,15 @@ void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
             p.account != 'none' &&
             p.account != 'installed' &&
             p.account != 'cli')
-        ? ' (${p.account})'
+        ? ' (${quotaAccountDisplayLabel(p.account)})'
         : '';
-    final verdict = p.passed ? style.green('PASS') : style.red('FAIL');
+    final verdict = !p.passed
+        ? style.red('FAIL')
+        : p.liveReadSucceeded
+            ? style.green('PASS')
+            : requireLive
+                ? style.red('NO LIVE READ')
+                : style.dim('HONEST');
     final provenance =
         _verificationProvenance(p, snapshot, i, report.generatedAt);
     print(
@@ -2675,10 +3031,22 @@ void _printVerify(VerificationReport report, List<ProviderQuota> snapshot) {
   }
   final failed = report.failCount;
   print('');
-  print(failed == 0
-      ? style.green(
-          '  every snapshot is reading correctly or failing with a plain reason')
-      : style.red('  $failed check(s) failed; see details above'));
+  if (failed != 0) {
+    print(style.red('  $failed check(s) failed; see details above'));
+  } else if (requireLive && !report.allLiveReadsSucceeded) {
+    print(
+      style.red(
+        '  ${report.liveReadFailureCount} selected provider read(s) did not '
+        'succeed live',
+      ),
+    );
+  } else {
+    print(
+      style.green(
+        '  every snapshot is reading correctly or failing with a plain reason',
+      ),
+    );
+  }
   final crossChecks = [
     for (final p in report.providers)
       if (p.crossCheck != null && p.state != 'undetected')
@@ -2889,11 +3257,7 @@ void _printModels(
       if (m.reasoning != null) 'reason',
     ].join(',');
     final capStr = caps.isEmpty ? '' : style.dim('  $caps');
-    final spent = e.available
-        ? ''
-        : e.stale
-            ? style.dim('  unavailable')
-            : style.red('  spent');
+    final spent = _modelAvailabilitySuffix(e);
     final provenance = _modelEntryProvenance(e, now);
     // Pad the context cell to a fixed width so the capability column lines up
     // across "1M ctx", "400K ctx", and context-less local models. Only pad when
@@ -2914,11 +3278,7 @@ void _printModels(
 
 String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
   final parts = <String>[
-    e.driftReason != null
-        ? 'provider drift'
-        : e.stale
-            ? 'cached'
-            : 'live',
+    _modelEntryReadState(e),
     e.sourceClass.label,
   ];
   final spendClass = _modelSpendClass(e);
@@ -2927,10 +3287,36 @@ String _modelEntryProvenance(ModelEntry e, int decisionAsOf) {
   if (e.local && fit != null && fit != LocalHardwareFitStatus.loaded) {
     parts.add('${fit.wireName} fit');
   }
-  if (_modelHasAccountIdentity(e)) parts.add(e.account);
+  if (_modelHasAccountIdentity(e)) {
+    parts.add(quotaAccountDisplayLabel(e.account));
+  }
   final captured = routeCaptureAgeLabel(e.asOf, decisionAsOf);
   if (captured.isNotEmpty) parts.add(captured);
   return style.dim('[${parts.join(', ')}]');
+}
+
+String _modelEntryReadState(ModelEntry entry) {
+  if (entry.driftReason != null) return 'provider drift';
+  if (entry.stale) return 'cached';
+  if (entry.available) return entry.local ? entry.localReadiness! : 'live';
+  final headroom = entry.headroomPercent;
+  if (!entry.local && headroom != null && headroom <= kSpentHeadroomFloor) {
+    return 'spent';
+  }
+  return 'unavailable';
+}
+
+String _modelAvailabilitySuffix(ModelEntry entry) {
+  if (entry.available) return '';
+  final headroom = entry.headroomPercent;
+  if (!entry.local &&
+      !entry.stale &&
+      entry.driftReason == null &&
+      headroom != null &&
+      headroom <= kSpentHeadroomFloor) {
+    return style.red('  spent');
+  }
+  return style.dim('  unavailable');
 }
 
 String? _modelSpendClass(ModelEntry e) {
@@ -2939,11 +3325,13 @@ String? _modelSpendClass(ModelEntry e) {
     return readiness;
   }
   if (e.sourceClass == ProviderSourceClass.manual) return null;
-  return e.quotaBacked ? 'quota plan' : 'metered plan';
+  return e.quotaBacked ? 'quota plan' : 'not included quota';
 }
 
 bool _modelHasAccountIdentity(ModelEntry e) =>
-    !e.local && e.account.contains('@') && hasSpecificQuotaAccount(e.account);
+    !e.local &&
+    hasSpecificQuotaAccount(e.account) &&
+    (e.account.contains('@') || isOpaqueCredentialIdentity(e.account));
 
 /// Prints a routing recommendation: where to send the next request and why,
 /// with the ranked alternatives below it.
@@ -2983,8 +3371,9 @@ void _printSuggest(RouteSuggestion s) {
   }
 }
 
-String _routeAccountLabel(RouteCandidate c) =>
-    _routeHasAccountIdentity(c) ? ' (${c.account})' : '';
+String _routeAccountLabel(RouteCandidate c) => _routeHasAccountIdentity(c)
+    ? ' (${quotaAccountDisplayLabel(c.account)})'
+    : '';
 
 String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
   final parts = <String>[
@@ -2998,14 +3387,18 @@ String _routeCandidateProvenance(RouteCandidate c, int decisionAsOf) {
   if (!c.isLocal && c.sourceClass != ProviderSourceClass.manual) {
     parts.add(c.spendClass);
   }
-  if (_routeHasAccountIdentity(c)) parts.add(c.account);
+  if (_routeHasAccountIdentity(c)) {
+    parts.add(quotaAccountDisplayLabel(c.account));
+  }
   final captured = routeCaptureAgeLabel(c.asOf, decisionAsOf);
   if (captured.isNotEmpty) parts.add(captured);
   return style.dim('[${parts.join(', ')}]');
 }
 
 bool _routeHasAccountIdentity(RouteCandidate c) =>
-    !c.isLocal && c.account.contains('@') && hasSpecificQuotaAccount(c.account);
+    !c.isLocal &&
+    hasSpecificQuotaAccount(c.account) &&
+    (c.account.contains('@') || isOpaqueCredentialIdentity(c.account));
 
 const routeFutureCaptureLabel = 'captured in the future';
 
@@ -3231,11 +3624,26 @@ String? _doctorHint(ProviderQuota q, String state) {
   if (state == 'PROVIDER DRIFT') {
     return 'run: quotabot verify  (${_providerDriftEvidenceSummary(q)})';
   }
-  if (state == 'cached' && canLogin.contains(q.provider)) {
-    return 'run: quotabot login ${q.provider}  (keeps it live without reopening the app)';
+  if (state == 'NEEDS REVIEW' || state == 'UNVERIFIED') {
+    return 'run: quotabot verify  (refresh before routing)';
+  }
+  if (state == 'unavailable' && q.isLocal) {
+    return q.error ??
+        'start the local runtime and expose an on-device model, then re-run';
   }
   if (state == 'cached' && q.error?.isNotEmpty == true) {
-    return q.error;
+    final error = q.error!;
+    if (canLogin.contains(q.provider) &&
+        _looksLikeCredentialFailure(error) &&
+        !error.toLowerCase().contains('quotabot login')) {
+      return '$error; run: quotabot login ${q.provider} '
+          '(adds a refreshable path; re-run doctor)';
+    }
+    return error;
+  }
+  if (state == 'cached' && canLogin.contains(q.provider)) {
+    return 'run: quotabot login ${q.provider}  '
+        '(adds a refreshable path; re-run doctor)';
   }
   if (state == 'no live data' && !q.isLocal) {
     // NVIDIA NIM is an env-key provider, not an installed app, so the generic
@@ -3250,4 +3658,20 @@ String? _doctorHint(ProviderQuota q, String state) {
     return 'open the ${q.displayName} app once so it writes local state, then re-run';
   }
   return null;
+}
+
+bool _looksLikeCredentialFailure(String message) {
+  final value = message.toLowerCase();
+  return const [
+    'auth',
+    'credential',
+    'forbidden',
+    'login',
+    'sign in',
+    'signed out',
+    'token',
+    'unauthorized',
+    '401',
+    '403',
+  ].any(value.contains);
 }

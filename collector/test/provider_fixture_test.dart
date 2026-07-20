@@ -20,8 +20,8 @@ void main() {
 
 void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
   switch (entry.fixtureKind) {
-    case ProviderFixtureKind.codexRateLimits:
-      final windows = codexWindows(_fixtureMap(entry.fixtureFile));
+    case ProviderFixtureKind.codexUsage:
+      final windows = codexUsageWindows(_fixtureMap(entry.fixtureFile));
       expect(windows.map((w) => w.label), ['5h', 'weekly']);
       expect(windows[1].usedPercent, 73);
     case ProviderFixtureKind.claudeUsage:

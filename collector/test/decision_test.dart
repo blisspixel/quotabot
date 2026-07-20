@@ -20,8 +20,14 @@ ProviderQuota _q(
       kind: kind,
     );
 
-ProviderQuota _local(String id) =>
-    _q(id, const [], kind: ProviderQuotaKind.local);
+ProviderQuota _local(String id) => ProviderQuota(
+      provider: id,
+      displayName: id,
+      account: 'a',
+      asOf: _now,
+      kind: ProviderQuotaKind.local,
+      models: const [ModelInfo(id: 'local-test', local: true)],
+    );
 
 QuotaWindow _win(String label, double used) =>
     QuotaWindow(label: label, usedPercent: used);

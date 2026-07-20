@@ -24,7 +24,8 @@ export function requireLoopbackMcpUrl(value: string): URL {
     !LOOPBACK_MCP_HOSTS.has(parsed.hostname.toLowerCase()) ||
     parsed.username.length > 0 ||
     parsed.password.length > 0 ||
-    parsed.hash.length > 0
+    parsed.hash.length > 0 ||
+    parsed.port === "0"
   ) {
     throw new Error(LOOPBACK_MCP_URL_ERROR);
   }

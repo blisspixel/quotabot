@@ -28,7 +28,7 @@ def require_loopback_mcp_url(value: str) -> str:
 
     try:
         parsed = urlsplit(value)
-        parsed.port
+        port = parsed.port
     except ValueError as error:
         raise ValueError(_LOOPBACK_MCP_URL_ERROR) from error
 
@@ -40,6 +40,7 @@ def require_loopback_mcp_url(value: str) -> str:
         or parsed.username is not None
         or parsed.password is not None
         or parsed.fragment
+        or port == 0
     ):
         raise ValueError(_LOOPBACK_MCP_URL_ERROR)
     return value

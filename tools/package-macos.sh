@@ -40,7 +40,9 @@ case "$arch" in
 esac
 
 flutter config --enable-macos-desktop >/dev/null
-(cd "$app_dir" && flutter build macos --release)
+(cd "$app_dir" && \
+  flutter pub get --enforce-lockfile && \
+  flutter build macos --release --no-pub)
 
 app_bundle="$app_dir/build/macos/Build/Products/Release/quotabot.app"
 binary="$app_bundle/Contents/MacOS/quotabot"

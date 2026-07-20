@@ -32,6 +32,8 @@ void main() {
       expect(QuotaWindow(label: 'w', usedPercent: 98.6).exhausted, isTrue);
       expect(QuotaWindow(label: 'w', usedPercent: 98.4).exhausted, isFalse);
       expect(QuotaWindow(label: 'w', usedPercent: 90).exhausted, isFalse);
+      expect(QuotaWindow(label: 'w', usedPercent: -1).exhausted, isTrue);
+      expect(QuotaWindow(label: 'w', usedPercent: 101).exhausted, isTrue);
     });
 
     test('toJson omits null fields', () {
@@ -68,13 +70,89 @@ void main() {
       expect(() => jsonEncode(w.toJson()), returnsNormally);
     });
 
-    test('fromJson bounds an out-of-range percent to 0..100', () {
-      final w = QuotaWindow.fromJson({'label': 'w', 'used_percent': 250});
-      expect(w.usedPercent, 100);
+    test('fromJson preserves finite invalid percents for trust validation', () {
+      final high = QuotaWindow.fromJson({'label': 'w', 'used_percent': 250});
+      final negative =
+          QuotaWindow.fromJson({'label': 'w', 'used_percent': -25});
+
+      expect(high.usedPercent, 250);
+      expect(negative.usedPercent, -25);
+    });
+  });
+
+  group('ModelQuota', () {
+    test('preserves provider window identity through JSON and sanitization',
+        () {
+      const quota = ModelQuota(
+        model: 'GPT-5.3-Codex-Spark',
+        usedPercent: 20,
+        resetsAt: 2000,
+        windowLabel: 'weekly',
+      );
+
+      expect(quota.toJson()['window_label'], 'weekly');
+      expect(ModelQuota.fromJson(quota.toJson()).windowLabel, 'weekly');
+
+      final provider = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'opaque',
+        asOf: 1000,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        modelQuotas: const [quota],
+      );
+      expect(
+        sanitizeProviderQuota(provider).modelQuotas.single.windowLabel,
+        'weekly',
+      );
     });
   });
 
   group('ProviderQuota', () {
+    test('plan evidence provenance round-trips and survives safe copies', () {
+      final q = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'opaque',
+        plan: 'max',
+        planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+        planEvidenceAsOf: 1000,
+        asOf: 1000,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+
+      final json = q.toJson();
+      expect(json['plan_evidence_source'], 'provider_metadata');
+      expect(json['plan_evidence_as_of'], 1000);
+      final decoded = ProviderQuota.fromJson(json);
+      expect(
+        decoded.planEvidenceSource,
+        ProviderPlanEvidenceSource.providerMetadata,
+      );
+      expect(decoded.planEvidenceAsOf, 1000);
+      expect(
+        sanitizeProviderQuota(q).planEvidenceSource,
+        ProviderPlanEvidenceSource.providerMetadata,
+      );
+      expect(
+        q.withSuspect('review').planEvidenceAsOf,
+        1000,
+      );
+      expect(
+        q.withProviderDrift('changed', 1001).planEvidenceAsOf,
+        1000,
+      );
+
+      final corrupt = ProviderQuota.fromJson({
+        ...json,
+        'plan_evidence_source': 'unknown_source',
+      });
+      expect(corrupt.planEvidenceSource, isNull);
+      expect(corrupt.planEvidenceAsOf, isNull);
+      expect(corrupt.toJson().containsKey('plan_evidence_source'), isFalse);
+      expect(corrupt.toJson().containsKey('plan_evidence_as_of'), isFalse);
+    });
+
     test('error factory marks not ok with no windows', () {
       final q = ProviderQuota.error(
         'grok',

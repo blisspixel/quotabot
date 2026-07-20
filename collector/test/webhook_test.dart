@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -71,6 +72,58 @@ void main() {
           await postAlert('http://127.0.0.1:9000', payload, client: client);
       expect(r.ok, isFalse);
       expect(r.statusCode, 500);
+    });
+
+    test('does not buffer or wait for the webhook response body', () async {
+      final cancelled = Completer<void>();
+      final controller = StreamController<List<int>>(
+        onCancel: () {
+          if (!cancelled.isCompleted) cancelled.complete();
+        },
+      );
+      final client = _StreamClient(
+        (request) => http.StreamedResponse(
+          controller.stream,
+          HttpStatus.noContent,
+          request: request,
+        ),
+      );
+
+      final r = await postAlert(
+        'http://127.0.0.1:9000',
+        payload,
+        client: client,
+      ).timeout(const Duration(seconds: 1));
+
+      expect(r.ok, isTrue);
+      expect(r.statusCode, HttpStatus.noContent);
+      await cancelled.future.timeout(const Duration(seconds: 1));
+      await controller.close();
+    });
+
+    test('uses one deadline for headers and response cancellation', () async {
+      final client = _DeadlineClient();
+      addTearDown(client.dispose);
+      final stopwatch = Stopwatch()..start();
+      final resultFuture = postAlert(
+        'http://127.0.0.1:9000',
+        payload,
+        timeout: const Duration(milliseconds: 600),
+        client: client,
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      client.releaseResponse();
+      await client.cancellationStarted.future.timeout(
+        const Duration(milliseconds: 150),
+      );
+      final result = await resultFuture.timeout(const Duration(seconds: 1));
+      stopwatch.stop();
+
+      expect(result.ok, isFalse);
+      expect(result.error, 'transport failure');
+      expect(stopwatch.elapsedMilliseconds, greaterThanOrEqualTo(500));
+      expect(stopwatch.elapsedMilliseconds, lessThan(750));
     });
 
     test('refuses to follow a loopback redirect to another destination',
@@ -159,5 +212,56 @@ class MockClient extends http.BaseClient {
       headers: resp.headers,
       request: request,
     );
+  }
+}
+
+class _StreamClient extends http.BaseClient {
+  final http.StreamedResponse Function(http.BaseRequest) handler;
+  _StreamClient(this.handler);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      handler(request);
+}
+
+class _DeadlineClient extends http.BaseClient {
+  final cancellationStarted = Completer<void>();
+  final _cancellationFinished = Completer<void>();
+  final _response = Completer<http.StreamedResponse>();
+  late final StreamController<List<int>> _controller;
+  http.BaseRequest? _request;
+
+  _DeadlineClient() {
+    _controller = StreamController<List<int>>(
+      onCancel: () {
+        if (!cancellationStarted.isCompleted) {
+          cancellationStarted.complete();
+        }
+        return _cancellationFinished.future;
+      },
+    );
+  }
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    _request = request;
+    return _response.future;
+  }
+
+  void releaseResponse() {
+    _response.complete(
+      http.StreamedResponse(
+        _controller.stream,
+        HttpStatus.noContent,
+        request: _request,
+      ),
+    );
+  }
+
+  Future<void> dispose() async {
+    if (!_cancellationFinished.isCompleted) {
+      _cancellationFinished.complete();
+    }
+    await _controller.close();
   }
 }

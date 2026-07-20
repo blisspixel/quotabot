@@ -26,26 +26,26 @@ function Install-QuotabotPayload {
     $transaction = [guid]::NewGuid().ToString('N')
     $binDst = Join-Path $InstallRoot 'bin'
     $libDst = Join-Path $InstallRoot 'lib'
-    $stagedBin = Join-Path $InstallRoot ".quotabot-bin-new-$transaction"
-    $stagedLib = Join-Path $InstallRoot ".quotabot-lib-new-$transaction"
+    $versionsRoot = Join-Path $InstallRoot 'cli-versions'
+    $stagedPayload = Join-Path $InstallRoot ".quotabot-payload-new-$transaction"
+    $versionRoot = Join-Path $versionsRoot $transaction
+    $versionBin = Join-Path $versionRoot 'bin'
+    $versionLib = Join-Path $versionRoot 'lib'
+    $stagedBinLink = Join-Path $InstallRoot ".quotabot-bin-link-new-$transaction"
+    $stagedLibLink = Join-Path $InstallRoot ".quotabot-lib-link-new-$transaction"
     $backupBin = Join-Path $InstallRoot ".quotabot-bin-previous-$transaction"
     $backupLib = Join-Path $InstallRoot ".quotabot-lib-previous-$transaction"
     $binBackedUp = $false
     $libBackedUp = $false
-    $binInstalled = $false
-    $libInstalled = $false
+    $binActivated = $false
+    $libActivated = $false
+    $versionStaged = $false
+    $activationSucceeded = $false
+    $rollbackComplete = $false
     $lockPath = Join-Path $InstallRoot '.quotabot-install.lock'
     $installLock = $null
 
     try {
-        Copy-Item -LiteralPath (Join-Path $SourceRoot 'bin') -Destination $stagedBin -Recurse
-        Copy-Item -LiteralPath (Join-Path $SourceRoot 'lib') -Destination $stagedLib -Recurse
-        if (-not (Test-Path -LiteralPath (Join-Path $stagedBin 'quotabot.exe') -PathType Leaf)) {
-            throw 'Staged payload is missing bin\quotabot.exe'
-        }
-        if (-not (Test-Path -LiteralPath (Join-Path $stagedLib 'sqlite3.dll') -PathType Leaf)) {
-            throw 'Staged payload is missing lib\sqlite3.dll'
-        }
         try {
             $installLock = [IO.File]::Open(
                 $lockPath,
@@ -57,26 +57,53 @@ function Install-QuotabotPayload {
             throw 'Another quotabot install is already activating a bundle. Re-run after it finishes.'
         }
 
+        if (Test-Path -LiteralPath $versionsRoot) {
+            $versionsItem = Get-Item -LiteralPath $versionsRoot -Force
+            if ($versionsItem.LinkType) {
+                throw "Refusing to use a link as the CLI generation directory: $versionsRoot"
+            }
+        } else {
+            New-Item -ItemType Directory -Path $versionsRoot | Out-Null
+        }
+        New-Item -ItemType Directory -Force -Path $stagedPayload | Out-Null
+        Copy-Item -LiteralPath (Join-Path $SourceRoot 'bin') -Destination $stagedPayload -Recurse
+        Copy-Item -LiteralPath (Join-Path $SourceRoot 'lib') -Destination $stagedPayload -Recurse
+        if (-not (Test-Path -LiteralPath (Join-Path $stagedPayload 'bin\quotabot.exe') -PathType Leaf)) {
+            throw 'Staged payload is missing bin\quotabot.exe'
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $stagedPayload 'lib\sqlite3.dll') -PathType Leaf)) {
+            throw 'Staged payload is missing lib\sqlite3.dll'
+        }
+        Move-Item -LiteralPath $stagedPayload -Destination $versionRoot
+        $versionStaged = $true
+        # Dart resolves native assets through the final target of the bin
+        # junction. Each invocation therefore sees the executable and sibling
+        # lib directory from one complete generation, even while the
+        # compatibility lib junction is being aligned.
+        New-Item -ItemType Junction -Path $stagedBinLink -Target $versionBin | Out-Null
+        New-Item -ItemType Junction -Path $stagedLibLink -Target $versionLib | Out-Null
+
         if (Test-Path -LiteralPath $binDst) {
             Move-Item -LiteralPath $binDst -Destination $backupBin
             $binBackedUp = $true
         }
+        Move-Item -LiteralPath $stagedBinLink -Destination $binDst
+        $binActivated = $true
         if (Test-Path -LiteralPath $libDst) {
             Move-Item -LiteralPath $libDst -Destination $backupLib
             $libBackedUp = $true
         }
-        Move-Item -LiteralPath $stagedBin -Destination $binDst
-        $binInstalled = $true
-        Move-Item -LiteralPath $stagedLib -Destination $libDst
-        $libInstalled = $true
+        Move-Item -LiteralPath $stagedLibLink -Destination $libDst
+        $libActivated = $true
+        $activationSucceeded = $true
     } catch {
         $installError = $_.Exception.Message
         try {
-            if ($binInstalled -and (Test-Path -LiteralPath $binDst)) {
-                Remove-Item -LiteralPath $binDst -Recurse -Force
+            if ($binActivated -and (Test-Path -LiteralPath $binDst)) {
+                Remove-Item -LiteralPath $binDst -Force
             }
-            if ($libInstalled -and (Test-Path -LiteralPath $libDst)) {
-                Remove-Item -LiteralPath $libDst -Recurse -Force
+            if ($libActivated -and (Test-Path -LiteralPath $libDst)) {
+                Remove-Item -LiteralPath $libDst -Force
             }
             if ($binBackedUp -and (Test-Path -LiteralPath $backupBin)) {
                 Move-Item -LiteralPath $backupBin -Destination $binDst
@@ -86,15 +113,45 @@ function Install-QuotabotPayload {
                 Move-Item -LiteralPath $backupLib -Destination $libDst
                 $libBackedUp = $false
             }
+            $rollbackComplete = $true
         } catch {
             throw "Install failed and rollback was incomplete. Recovery payloads remain under $InstallRoot. Original error: $installError. Rollback error: $($_.Exception.Message)"
         } finally {
-            Remove-Item -LiteralPath $stagedBin -Recurse -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $stagedLib -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $stagedBinLink -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $stagedLibLink -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $stagedPayload -Recurse -Force -ErrorAction SilentlyContinue
+            if ($rollbackComplete -and $versionStaged -and (Test-Path -LiteralPath $versionRoot)) {
+                Remove-Item -LiteralPath $versionRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
         }
         throw "Could not replace the existing install; it was left intact or restored. Close any running quotabot process and re-run. ($installError)"
     } finally {
         if ($installLock) {
+            if ($activationSucceeded) {
+                foreach ($candidate in Get-ChildItem -LiteralPath $versionsRoot -Directory -Force -ErrorAction SilentlyContinue) {
+                    if ($candidate.FullName -ine $versionRoot) {
+                        if ($candidate.LinkType -or $candidate.Name -notmatch '^[0-9a-f]{32}$') {
+                            Write-Warning "Skipping an unexpected entry under the CLI generation directory: $($candidate.FullName)"
+                            continue
+                        }
+                        try {
+                            $candidateExe = Join-Path $candidate.FullName 'bin\quotabot.exe'
+                            if (Test-Path -LiteralPath $candidateExe -PathType Leaf) {
+                                $exclusiveExe = [IO.File]::Open(
+                                    $candidateExe,
+                                    [IO.FileMode]::Open,
+                                    [IO.FileAccess]::ReadWrite,
+                                    [IO.FileShare]::None
+                                )
+                                $exclusiveExe.Dispose()
+                            }
+                            Remove-Item -LiteralPath $candidate.FullName -Recurse -Force
+                        } catch {
+                            Write-Warning "The old CLI generation is still in use and could not be removed: $($candidate.FullName)"
+                        }
+                    }
+                }
+            }
             $installLock.Dispose()
         }
         Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
@@ -103,7 +160,12 @@ function Install-QuotabotPayload {
     foreach ($backup in @($backupBin, $backupLib)) {
         if (Test-Path -LiteralPath $backup) {
             try {
-                Remove-Item -LiteralPath $backup -Recurse -Force
+                $backupItem = Get-Item -LiteralPath $backup -Force
+                if ($backupItem.LinkType) {
+                    Remove-Item -LiteralPath $backup -Force
+                } else {
+                    Remove-Item -LiteralPath $backup -Recurse -Force
+                }
             } catch {
                 Write-Warning "The new install is active, but the previous payload could not be removed: $backup"
             }

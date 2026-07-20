@@ -1,10 +1,6 @@
-import hashlib
 import os
 import shutil
-import stat
 import subprocess
-import tarfile
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,6 +25,35 @@ class InstallerSecurityTests(unittest.TestCase):
                 header = job.split("    steps:\n", 1)[0]
                 self.assertIn("QUOTABOT_DEMO: '1'", header)
 
+    def test_install_smoke_targets_githubs_canonical_latest_release(self) -> None:
+        smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        resolver = smoke.split("  resolve-releases:\n", 1)[1].split(
+            "  clean-install:\n", 1
+        )[0]
+
+        self.assertIn(
+            'gh api "repos/$GITHUB_REPOSITORY/releases/latest"',
+            resolver,
+        )
+        self.assertNotIn('latest="${tags[0]}"', resolver)
+        self.assertIn('"$tag" != "$latest"', resolver)
+
+    def test_install_smoke_pins_the_resolved_tag_during_install(self) -> None:
+        smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(
+            smoke.count("$env:QUOTABOT_VERSION = $env:TARGET_TAG"),
+            2,
+        )
+        self.assertEqual(
+            smoke.count('QUOTABOT_VERSION="$TARGET_TAG" bash "$served"'),
+            2,
+        )
+
     def test_windows_installer_requires_checksum_sidecar(self) -> None:
         script = (ROOT / "install.ps1").read_text(encoding="utf-8")
 
@@ -45,23 +70,50 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("| QUOTABOT_REPO=owner/quotabot bash", script)
         self.assertNotIn("QUOTABOT_REPO=owner/quotabot curl", script)
 
-    def test_posix_installers_stage_and_restore_payloads(self) -> None:
+    def test_posix_installers_use_versioned_atomic_activation(self) -> None:
         release = (ROOT / "install.sh").read_text(encoding="utf-8")
         source = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
 
+        self.assertIn("install_versioned_tree()", release)
+        self.assertIn("install_versioned_single()", source)
+        self.assertIn("install_versioned_pair()", source)
         for script, destructive_line in (
             (release, 'rm -rf "$INSTALL_ROOT"'),
             (source, 'rm -rf "$install_root"'),
         ):
             with self.subTest(destructive_line=destructive_line):
-                self.assertIn("replace_install_tree()", script)
-                self.assertIn('swap_backup="$workspace/previous"', script)
-                self.assertIn("acquire_swap_lock()", script)
+                self.assertIn('versions_name=".${target_name}-versions"', script)
+                self.assertIn("activate_install_link()", script)
+                self.assertIn('mv -fT "$candidate" "$target"', script)
+                self.assertIn('mv -fh "$candidate" "$target"', script)
                 self.assertIn("set -o noclobber", script)
                 self.assertIn("kill -0", script)
-                self.assertIn('mv "$swap_backup" "$swap_target"', script)
-                self.assertIn("the previous install was restored", script)
+                self.assertIn("validated_previous_generation()", script)
+                self.assertIn('"$active_name" == */*', script)
+                self.assertIn("^(generation|legacy)-[0-9]{14}-[0-9]+$", script)
+                self.assertIn('! -d "$candidate" || -L "$candidate"', script)
                 self.assertNotIn(destructive_line, script)
+
+        self.assertIn("acquire_install_lock()", release)
+        self.assertIn("acquire_pair_lock()", source)
+        self.assertIn("rollback_versioned_pair()", source)
+        self.assertIn("commit_versioned_pair()", source)
+        self.assertIn("! stage_pair_item 0 || ! stage_pair_item 1", source)
+        self.assertLess(
+            source.index("if ! activate_pair_item 1"),
+            source.index("if ! activate_pair_item 0"),
+        )
+
+    def test_posix_source_setup_builds_desktop_before_cli_activation(self) -> None:
+        script = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
+
+        cli_activation = script.index("step 'Activating the CLI and desktop app'")
+        for build in (
+            "flutter build macos --release --no-pub",
+            "flutter build linux --release --no-pub",
+        ):
+            with self.subTest(build=build):
+                self.assertLess(script.index(build), cli_activation)
 
     def test_posix_path_shim_is_replaced_only_after_it_is_complete(self) -> None:
         for path in (ROOT / "install.sh", ROOT / "tools" / "setup.sh"):
@@ -78,18 +130,136 @@ class InstallerSecurityTests(unittest.TestCase):
             script = path.read_text(encoding="utf-8")
             with self.subTest(path=path.name):
                 self.assertIn("function Install-QuotabotPayload", script)
-                self.assertIn('".quotabot-bin-new-$transaction"', script)
+                self.assertIn(
+                    "$versionsRoot = Join-Path $InstallRoot 'cli-versions'", script
+                )
+                self.assertIn('".quotabot-payload-new-$transaction"', script)
+                self.assertIn('".quotabot-bin-link-new-$transaction"', script)
                 self.assertIn('".quotabot-bin-previous-$transaction"', script)
                 self.assertIn("[IO.FileShare]::None", script)
+                self.assertIn("New-Item -ItemType Junction", script)
                 self.assertIn(
-                    "Move-Item -LiteralPath $backupBin -Destination $binDst",
+                    "Refusing to use a link as the CLI generation directory",
                     script,
                 )
+                if path.name == "setup.ps1":
+                    self.assertIn("-Target $State.VersionBin", script)
+                    self.assertIn("-Target $State.VersionLib", script)
+                    self.assertIn(
+                        "Move-Item -LiteralPath $State.BackupBin -Destination $State.BinDst",
+                        script,
+                    )
+                    self.assertLess(
+                        script.index(
+                            "Move-Item -LiteralPath $State.StagedBinLink -Destination $State.BinDst"
+                        ),
+                        script.index(
+                            "Move-Item -LiteralPath $State.LibDst -Destination $State.BackupLib"
+                        ),
+                    )
+                    self.assertIn(
+                        "$rollbackComplete = $rollbackErrors.Count -eq 0", script
+                    )
+                    self.assertIn(
+                        "if ($cli.VersionStaged) { Remove-TransactionPath",
+                        script,
+                    )
+                else:
+                    self.assertIn("-Target $versionBin", script)
+                    self.assertIn("-Target $versionLib", script)
+                    self.assertIn(
+                        "Move-Item -LiteralPath $backupBin -Destination $binDst",
+                        script,
+                    )
+                    self.assertLess(
+                        script.index("[IO.File]::Open("),
+                        script.index(
+                            "Copy-Item -LiteralPath (Join-Path $SourceRoot 'bin')"
+                        ),
+                    )
+                    self.assertLess(
+                        script.index(
+                            "Move-Item -LiteralPath $stagedBinLink -Destination $binDst"
+                        ),
+                        script.index(
+                            "Move-Item -LiteralPath $libDst -Destination $backupLib"
+                        ),
+                    )
+                    self.assertIn("$rollbackComplete = $true", script)
+                    self.assertIn("if ($rollbackComplete -and $versionStaged", script)
+                self.assertIn("$candidateExe", script)
+                self.assertIn("$candidate.LinkType", script)
+                self.assertIn("$candidate.Name -notmatch '^[0-9a-f]{32}$'", script)
+                self.assertIn("The old CLI generation is still in use", script)
                 self.assertIn("rollback was incomplete", script)
                 self.assertNotIn(
                     "if (Test-Path -LiteralPath $binDst) { Remove-Item",
                     script,
                 )
+
+    def test_windows_source_setup_pairs_cli_and_desktop_activation(self) -> None:
+        script = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+        transaction = script.split("function Invoke-QuotabotPayloadTransaction", 1)[
+            1
+        ].split("function Install-QuotabotPayload", 1)[0]
+
+        self.assertIn("function Install-QuotabotPayloadPair", script)
+        self.assertIn(
+            "[Array]::Sort($lockPaths, [StringComparer]::OrdinalIgnoreCase)",
+            transaction,
+        )
+        self.assertIn("'.quotabot-install.lock'", transaction)
+        self.assertIn("'.quotabot-desktop-install.lock'", transaction)
+        stage_cli = transaction.index("if ($cli) { Stage-CliPayload -State $cli }")
+        stage_desktop = transaction.index(
+            "if ($desktop) { Stage-DesktopPayload -State $desktop }"
+        )
+        activate_desktop = transaction.index(
+            "if ($desktop) { Activate-DesktopPayload -State $desktop }"
+        )
+        activate_cli = transaction.index(
+            "if ($cli) { Activate-CliPayload -State $cli }"
+        )
+        self.assertLess(stage_cli, activate_desktop)
+        self.assertLess(stage_desktop, activate_desktop)
+        self.assertLess(activate_desktop, activate_cli)
+        self.assertIn("Restore-CliPayload -State $cli", transaction)
+        self.assertIn("Restore-DesktopPayload -State $desktop", transaction)
+        self.assertLess(
+            script.index("& flutter build windows --release --no-pub"),
+            script.index("Install-QuotabotPayloadPair `"),
+        )
+        self.assertIn("if ($CliOnly -or $NoApp)", script)
+
+    def test_windows_source_setup_builds_before_normal_app_shutdown_and_restarts_in_finally(
+        self,
+    ) -> None:
+        script = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+
+        self.assertLess(
+            script.index("& flutter build windows --release --no-pub"),
+            script.index("Stopping the running desktop app for activation"),
+        )
+        self.assertIn("$restartRequested = $true", script)
+        self.assertIn("$desktopFailure = $_", script)
+        self.assertIn("if ($restartRequested)", script)
+        self.assertIn("if ($desktopActivated)", script)
+        self.assertIn("function Restart-QuotabotDesktopAfterSetup", script)
+        self.assertIn("@($RestartCandidates) + @($InstalledAppExe)", script)
+        self.assertIn("@($InstalledAppExe) + @($RestartCandidates)", script)
+        self.assertIn("Start-Process `", script)
+        self.assertIn("Restarted the newly installed desktop app after setup", script)
+        self.assertIn("Restarted the prior desktop app after setup failed", script)
+
+    def test_windows_data_reset_preserves_the_active_cli_generation(self) -> None:
+        setup = (ROOT / "docs" / "SETUP.md").read_text(encoding="utf-8")
+        reset = setup.split("### Reset all local quotabot data", 1)[1].split(
+            "## Where quotabot stores its data", 1
+        )[0]
+
+        self.assertIn("-notin", reset)
+        for retained in ("'bin'", "'lib'", "'cli-versions'", "'desktop'"):
+            self.assertIn(retained, reset)
 
     def test_windows_release_installer_uses_one_unique_temp_workspace(self) -> None:
         script = (ROOT / "install.ps1").read_text(encoding="utf-8")
@@ -147,9 +317,7 @@ class InstallerSecurityTests(unittest.TestCase):
     def test_package_helpers_preserve_old_artifacts_until_new_pair_is_ready(
         self,
     ) -> None:
-        posix_helper = (ROOT / "tools" / "package-pair.sh").read_text(
-            encoding="utf-8"
-        )
+        posix_helper = (ROOT / "tools" / "package-pair.sh").read_text(encoding="utf-8")
         self.assertIn('backup_archive="$workspace/previous-archive"', posix_helper)
         self.assertIn('backup_sidecar="$workspace/previous-sidecar"', posix_helper)
         self.assertIn('lock_path="$archive.quotabot-package.lock"', posix_helper)
@@ -203,8 +371,9 @@ class InstallerSecurityTests(unittest.TestCase):
 
         self.assertIn('applications="$HOME/Applications"', script)
         self.assertIn('installed_app="$applications/quotabot.app"', script)
-        self.assertIn('ditto "$built_app" "$staged_app"', script)
-        self.assertIn('replace_install_tree "$staged_app"', script)
+        self.assertIn('ditto "$source" "$staging"', script)
+        self.assertIn('desktop_target="$installed_app"', script)
+        self.assertIn("install_versioned_pair \\", script)
         self.assertIn("macOS installs the app\nunder `~/Applications`", readme)
         self.assertIn("macOS\ninstalls `~/Applications/quotabot.app`", building)
 
@@ -215,10 +384,9 @@ class InstallerSecurityTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn(
-            'installed_bundle="$HOME/.local/share/quotabot-desktop"', script
-        )
-        self.assertIn('replace_install_tree "$staged_bundle"', script)
+        self.assertIn('installed_bundle="$HOME/.local/share/quotabot-desktop"', script)
+        self.assertIn('desktop_target="$installed_bundle"', script)
+        self.assertIn("install_versioned_pair \\", script)
         self.assertIn('"$installed_bundle/quotabot" "$desktop"', script)
         self.assertNotIn('"$bundle/quotabot" "$desktop"', script)
         self.assertIn("~/.local/share/quotabot-desktop", building)
@@ -295,117 +463,34 @@ class InstallerSecurityTests(unittest.TestCase):
             completed.stdout + completed.stderr,
         )
 
-    @unittest.skipIf(os.name == "nt", "POSIX installer behavior runs on POSIX")
-    def test_posix_failed_activation_restores_previous_install(self) -> None:
+    def test_posix_install_transaction_behavior(self) -> None:
         bash = shutil.which("bash")
-        self.assertIsNotNone(bash, "bash is required for the POSIX installer test")
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            home = root / "home"
-            fake_bin = root / "fake-bin"
-            payload = root / "payload"
-            archive = root / "quotabot-linux-x64.tar.gz"
-            sidecar = root / "quotabot-linux-x64.tar.gz.sha256"
-            install_root = home / ".local" / "share" / "quotabot"
-            wrapper = home / ".local" / "bin" / "quotabot"
+        if os.name == "nt":
+            program_files = Path(os.environ.get("ProgramFiles", "C:/Program Files"))
+            candidate = program_files / "Git" / "bin" / "bash.exe"
+            if candidate.is_file():
+                bash = str(candidate)
+        if bash is None:
+            self.skipTest("bash is required for the POSIX installer test")
 
-            (payload / "bin").mkdir(parents=True)
-            (payload / "lib").mkdir()
-            executable = payload / "bin" / "quotabot"
-            executable.write_text("new", encoding="utf-8")
-            executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
-            (payload / "lib" / "sqlite3.test").write_text("new", encoding="utf-8")
-            with tarfile.open(archive, mode="w:gz") as bundle:
-                bundle.add(payload / "bin", arcname="bin")
-                bundle.add(payload / "lib", arcname="lib")
-            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-            sidecar.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+        environment = os.environ.copy()
+        if os.name == "nt":
+            environment["MSYS"] = "winsymlinks:nativestrict"
+        completed = subprocess.run(
+            [bash, str(ROOT / "tools" / "test-posix-install-transaction.sh")],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
 
-            (install_root / "bin").mkdir(parents=True)
-            (install_root / "lib").mkdir()
-            (install_root / "bin" / "quotabot").write_text("old", encoding="utf-8")
-            (install_root / "lib" / "sqlite3.test").write_text("old", encoding="utf-8")
-            install_lock = home / ".local" / "share" / ".quotabot-install.lock"
-            install_lock.write_text("not-a-live-pid\n", encoding="utf-8")
-            wrapper.parent.mkdir(parents=True)
-            wrapper.write_text("old wrapper", encoding="utf-8")
-            fake_bin.mkdir()
-
-            (fake_bin / "curl").write_text(
-                "#!/usr/bin/env sh\n"
-                "url=''\n"
-                "destination=''\n"
-                'while [ "$#" -gt 0 ]; do\n'
-                '  case "$1" in\n'
-                "    -o) shift; destination=$1 ;;\n"
-                "    http*) url=$1 ;;\n"
-                "  esac\n"
-                "  shift\n"
-                "done\n"
-                'case "$url" in\n'
-                '  *.sha256) cp "$FAKE_SIDECAR" "$destination" ;;\n'
-                '  *) cp "$FAKE_ARCHIVE" "$destination" ;;\n'
-                "esac\n",
-                encoding="utf-8",
-            )
-            (fake_bin / "uname").write_text(
-                "#!/usr/bin/env sh\n"
-                'case "$1" in\n'
-                "  -s) echo Linux ;;\n"
-                "  -m) echo x86_64 ;;\n"
-                "  *) exit 2 ;;\n"
-                "esac\n",
-                encoding="utf-8",
-            )
-            real_mv = shutil.which("mv")
-            self.assertIsNotNone(real_mv)
-            (fake_bin / "mv").write_text(
-                "#!/usr/bin/env sh\n"
-                'case "$1" in\n'
-                "  */new) exit 73 ;;\n"
-                "esac\n"
-                'exec "$REAL_MV" "$@"\n',
-                encoding="utf-8",
-            )
-            for executable_path in fake_bin.iterdir():
-                executable_path.chmod(executable_path.stat().st_mode | stat.S_IXUSR)
-
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "HOME": str(home),
-                    "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
-                    "FAKE_ARCHIVE": str(archive),
-                    "FAKE_SIDECAR": str(sidecar),
-                    "REAL_MV": real_mv,
-                    "QUOTABOT_REPO": "example/quotabot",
-                }
-            )
-            completed = subprocess.run(
-                [bash, str(ROOT / "install.sh")],
-                cwd=ROOT,
-                env=environment,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-
-            self.assertNotEqual(completed.returncode, 0)
-            self.assertEqual(
-                (install_root / "bin" / "quotabot").read_text(encoding="utf-8"),
-                "old",
-            )
-            self.assertEqual(
-                (install_root / "lib" / "sqlite3.test").read_text(encoding="utf-8"),
-                "old",
-            )
-            self.assertEqual(wrapper.read_text(encoding="utf-8"), "old wrapper")
-            self.assertEqual(
-                list((home / ".local" / "share").glob(".quotabot-install.*")),
-                [],
-            )
-            self.assertFalse(install_lock.exists())
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
 
 
 if __name__ == "__main__":

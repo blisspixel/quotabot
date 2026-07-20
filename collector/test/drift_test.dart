@@ -132,6 +132,21 @@ void main() {
           contains('weekly quota window disappeared'));
     });
 
+    test('a later 5h reset cannot hide a disappeared Codex weekly cap', () {
+      // Reset order is not duration order. A weekly pool near its reset can end
+      // before a fresh 5h pool while remaining the longer binding constraint.
+      final prev = snap(codexProviderId, [
+        win('5h', 40, 5000),
+        win('weekly', 30, 1100),
+      ]);
+      final fresh = snap(codexProviderId, [win('5h', 45, 5000)]);
+
+      expect(
+        detectQuotaDrift(fresh, prev),
+        contains('weekly quota window disappeared'),
+      );
+    });
+
     test('Antigravity is exempt: its window is a max over a changing set', () {
       final prev = snap(antigravityProviderId, [win('5h', 80, 2000)]);
       // Both a headroom gain and a reset regression, yet not flagged.
@@ -216,6 +231,59 @@ void main() {
       expect(detectQuotaDrift(withoutFable, withFable), isNull);
     });
 
+    test('Codex may add or remove an optional scoped model quota', () {
+      final withoutSpark = snapModels(codexProviderId, const []);
+      final withSpark = snapModels(codexProviderId, const [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 26,
+          resetsAt: 2000,
+        ),
+      ]);
+
+      expect(detectQuotaDrift(withSpark, withoutSpark), isNull);
+      expect(detectQuotaDrift(withoutSpark, withSpark), isNull);
+    });
+
+    test('Codex scoped quota uses its preserved window identity for drift', () {
+      ProviderQuota spark(double used, String windowLabel) => snapModels(
+            codexProviderId,
+            [
+              ModelQuota(
+                model: 'GPT-5.3-Codex-Spark',
+                usedPercent: used,
+                resetsAt: 5000,
+                windowLabel: windowLabel,
+              ),
+            ],
+          );
+
+      expect(
+          detectQuotaDrift(spark(20, 'weekly'), spark(80, 'weekly')), isNull);
+      expect(
+        detectQuotaDrift(spark(20, '5h'), spark(80, '5h')),
+        contains('usage fell'),
+      );
+    });
+
+    test('Codex does not compare usage across different scoped windows', () {
+      ProviderQuota spark(double used, String? windowLabel) => snapModels(
+            codexProviderId,
+            [
+              ModelQuota(
+                model: 'GPT-5.3-Codex-Spark',
+                usedPercent: used,
+                resetsAt: 5000,
+                windowLabel: windowLabel,
+              ),
+            ],
+          );
+
+      expect(detectQuotaDrift(spark(20, 'weekly'), spark(80, '5h')), isNull);
+      expect(detectQuotaDrift(spark(20, '5h'), spark(80, 'weekly')), isNull);
+      expect(detectQuotaDrift(spark(20, 'weekly'), spark(80, null)), isNull);
+    });
+
     test('Claude migrates legacy scoped windows out of provider windows', () {
       final previous = ProviderQuota(
         provider: claudeProviderId,
@@ -285,6 +353,7 @@ void main() {
     ProviderQuota evidence({
       required double used,
       required int asOf,
+      String provider = codexProviderId,
       String account = 'a',
       String? source,
       ProviderSourceClass? sourceClass,
@@ -296,8 +365,8 @@ void main() {
       int reset = 5000,
     }) =>
         ProviderQuota(
-          provider: codexProviderId,
-          displayName: 'Codex',
+          provider: provider,
+          displayName: provider,
           account: account,
           plan: plan,
           source: source,
@@ -376,6 +445,82 @@ void main() {
       expect(admission.snapshot.stale, isFalse);
     });
 
+    test('a redeemed Codex reset may advance the 5h generation early', () {
+      final previous = evidence(used: 92, asOf: 100, reset: 5000);
+      final redeemed = evidence(used: 15, asOf: 200, reset: 11000);
+
+      final admission = admitQuotaEvidence(
+        redeemed,
+        previous,
+        observedAt: 210,
+      );
+
+      expect(210, lessThan(5000), reason: 'the prior reset has not passed');
+      expect(admission.shouldPersist, isTrue);
+      expect(admission.driftReason, isNull);
+      expect(admission.snapshot, same(redeemed));
+    });
+
+    test('the early reset-generation exemption is Codex-only', () {
+      final previous = evidence(
+        provider: claudeProviderId,
+        used: 92,
+        asOf: 100,
+        reset: 5000,
+      );
+      final advanced = evidence(
+        provider: claudeProviderId,
+        used: 15,
+        asOf: 200,
+        reset: 11000,
+      );
+
+      final admission = admitQuotaEvidence(
+        advanced,
+        previous,
+        observedAt: 210,
+      );
+
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('before the prior reset'));
+      expect(admission.snapshot.stale, isTrue);
+    });
+
+    test('same-generation Codex 5h usage drop remains drift', () {
+      final previous = evidence(used: 92, asOf: 100, reset: 5000);
+      final dropped = evidence(used: 15, asOf: 200, reset: 5000);
+
+      final admission = admitQuotaEvidence(
+        dropped,
+        previous,
+        observedAt: 210,
+      );
+
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('with no reset'));
+      expect(admission.snapshot.stale, isTrue);
+    });
+
+    test('expired trusted baseline stays visible when fresh evidence fails',
+        () {
+      final previous = evidence(used: 72, asOf: 100, reset: 200);
+      final expiredFresh = evidence(used: 0, asOf: 300, reset: 200);
+
+      final admission = admitQuotaEvidence(
+        expiredFresh,
+        previous,
+        observedAt: 300,
+      );
+
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('reset passed'));
+      expect(admission.snapshot.stale, isTrue);
+      expect(admission.snapshot.asOf, previous.asOf);
+      expect(admission.snapshot.windows.single.usedPercent, 72);
+      expect(admission.snapshot.windows.single.resetsAt, 200);
+      expect(isTrustedQuotaEvidenceAt(admission.snapshot, 300), isFalse);
+    });
+
     test('an off-cycle Codex restructure admits the fresh single window', () {
       // The exact live case: a nearly-spent 5h+weekly snapshot, then OpenAI
       // restructures to one fresh weekly window at 4% used. The old 5h vanishes,
@@ -417,26 +562,42 @@ void main() {
         asOf: 200,
         account: 'other',
       );
+      final manualPrevious = evidence(
+        provider: 'manual-tool',
+        used: 60,
+        asOf: 100,
+      );
       final changedSource = evidence(
+        provider: 'manual-tool',
         used: 10,
         asOf: 200,
         source: providerQuotaManualSource,
       );
+      final antigravityPrevious = evidence(
+        provider: antigravityProviderId,
+        used: 60,
+        asOf: 100,
+      );
       final changedSourceClass = evidence(
+        provider: antigravityProviderId,
         used: 10,
         asOf: 200,
         sourceClass: ProviderSourceClass.thisMachineFallback,
         perMachine: true,
       );
 
-      for (final fresh in [changedAccount, changedSource, changedSourceClass]) {
+      for (final pair in [
+        (previous: previous, fresh: changedAccount),
+        (previous: manualPrevious, fresh: changedSource),
+        (previous: antigravityPrevious, fresh: changedSourceClass),
+      ]) {
         final admission = admitQuotaEvidence(
-          fresh,
-          previous,
+          pair.fresh,
+          pair.previous,
           observedAt: 210,
         );
         expect(admission.shouldPersist, isTrue);
-        expect(admission.snapshot, same(fresh));
+        expect(admission.snapshot, same(pair.fresh));
       }
     });
 
@@ -452,7 +613,7 @@ void main() {
       expect(admission.shouldPersist, isFalse);
       expect(admission.snapshot.ok, isFalse);
       expect(admission.snapshot.windows, isEmpty);
-      expect(admission.driftReason, contains('machine-scoped'));
+      expect(admission.driftReason, contains('not admitted for codex'));
 
       final disallowed = ProviderQuota(
         provider: claudeProviderId,
@@ -523,6 +684,37 @@ void main() {
       expect(admission.snapshot.modelQuotas, isEmpty);
     });
 
+    test('malformed model quota window labels cannot become trusted', () {
+      for (final label in [
+        '',
+        ' weekly',
+        'weekly ',
+        'week\u001b[31mly',
+        List.filled(kMaxModelQuotaWindowLabelCharacters + 1, 'w').join(),
+      ]) {
+        final invalid = ProviderQuota(
+          provider: codexProviderId,
+          displayName: 'Codex',
+          account: 'a',
+          asOf: 200,
+          windows: [win('weekly', 45, 5000)],
+          modelQuotas: [
+            ModelQuota(
+              model: 'GPT-5.3-Codex-Spark',
+              usedPercent: 20,
+              resetsAt: 5000,
+              windowLabel: label,
+            ),
+          ],
+        );
+
+        expect(isTrustedQuotaEvidence(invalid), isFalse, reason: label);
+        final admission = admitQuotaEvidence(invalid, null, observedAt: 210);
+        expect(admission.shouldPersist, isFalse, reason: label);
+        expect(admission.driftReason, contains('invalid window label'));
+      }
+    });
+
     test('implausibly distant model reset is not trusted', () {
       final invalid = ProviderQuota(
         provider: antigravityProviderId,
@@ -562,6 +754,19 @@ void main() {
       expect(admission.shouldPersist, isTrue);
       expect(admission.driftReason, isNull);
       expect(admission.snapshot.modelQuotas.single.usedPercent, isNull);
+    });
+
+    test('a model reset ends routable evidence without erasing its value', () {
+      const quota = ModelQuota(
+        model: 'Gemini 3.1 Pro',
+        usedPercent: 27,
+        resetsAt: 5000,
+      );
+
+      expect(isCurrentModelQuotaEvidenceAt(quota, 4999), isTrue);
+      expect(isCurrentModelQuotaEvidenceAt(quota, 5000), isFalse);
+      expect(quota.remainingPercent, 73);
+      expect(quota.resetsAt, 5000);
     });
 
     test('legacy suspect evidence cannot be laundered by a repeated read', () {

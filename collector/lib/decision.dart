@@ -40,6 +40,7 @@ class DecisionContext {
   final Set<String>? capabilityKnownQuotaKeys;
   final Set<String>? capabilityAvailableQuotaKeys;
   final Map<String, int> capabilityBudgetResetByQuotaKey;
+  final Map<String, double> capabilityHeadroomByQuotaKey;
   final String snapshotSource;
   final int? snapshotAsOf;
   final bool? snapshotStale;
@@ -65,6 +66,7 @@ class DecisionContext {
     this.capabilityKnownQuotaKeys,
     this.capabilityAvailableQuotaKeys,
     this.capabilityBudgetResetByQuotaKey = const {},
+    this.capabilityHeadroomByQuotaKey = const {},
     this.preferenceOrder = const [],
     this.snapshotSource = 'live',
     this.snapshotAsOf,
@@ -142,6 +144,7 @@ Decision decide(
         capabilityAvailableQuotaKeys: context.capabilityAvailableQuotaKeys,
         capabilityBudgetResetByQuotaKey:
             context.capabilityBudgetResetByQuotaKey,
+        capabilityHeadroomByQuotaKey: context.capabilityHeadroomByQuotaKey,
         preferenceOrder: context.preferenceOrder,
         snapshotSource: context.snapshotSource,
         snapshotAsOf: context.snapshotAsOf,

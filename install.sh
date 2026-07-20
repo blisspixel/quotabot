@@ -67,33 +67,36 @@ echo "Downloading ${ASSET} from ${VERSION}..."
 tmpfile=$(mktemp)
 checksum_file=$(mktemp)
 extract_dir=$(mktemp -d)
-swap_workspace=""
-swap_target=""
-swap_backup=""
-swap_old_moved=0
-swap_committed=0
-swap_lock=""
-swap_lock_owner=""
+transaction_versions_root=""
+transaction_staging=""
+transaction_generation=""
+transaction_link=""
+transaction_target=""
+transaction_legacy_backup=""
+transaction_legacy_moved=0
+transaction_committed=0
+transaction_lock=""
+transaction_lock_owner=""
 wrapper_tmp=""
-release_swap_lock() {
-  if [[ -n "$swap_lock" && -f "$swap_lock" && \
-        "$(cat "$swap_lock" 2>/dev/null)" == "$swap_lock_owner" ]]; then
-    rm -f "$swap_lock"
+release_install_lock() {
+  if [[ -n "$transaction_lock" && -f "$transaction_lock" && \
+        "$(cat "$transaction_lock" 2>/dev/null)" == "$transaction_lock_owner" ]]; then
+    rm -f "$transaction_lock"
   fi
-  swap_lock=""
-  swap_lock_owner=""
+  transaction_lock=""
+  transaction_lock_owner=""
 }
-acquire_swap_lock() {
+acquire_install_lock() {
   local lock_path="$1"
-  local existing_owner stale_lock
+  local existing_owner owner_is_live stale_lock
 
-  swap_lock="$lock_path"
-  swap_lock_owner="${BASHPID:-$$}"
-  if (set -o noclobber; printf '%s\n' "$swap_lock_owner" > "$swap_lock") 2>/dev/null; then
+  transaction_lock="$lock_path"
+  transaction_lock_owner="${BASHPID:-$$}"
+  if (set -o noclobber; printf '%s\n' "$transaction_lock_owner" > "$transaction_lock") 2>/dev/null; then
     return 0
   fi
 
-  existing_owner="$(cat "$swap_lock" 2>/dev/null || true)"
+  existing_owner="$(cat "$transaction_lock" 2>/dev/null || true)"
   case "$existing_owner" in
     ''|*[!0-9]*) owner_is_live=0 ;;
     *)
@@ -106,41 +109,80 @@ acquire_swap_lock() {
   esac
   if [[ "$owner_is_live" -eq 1 ]]; then
     echo 'Another quotabot install is already activating a bundle. Re-run after it finishes.' >&2
-    swap_lock=""
-    swap_lock_owner=""
+    transaction_lock=""
+    transaction_lock_owner=""
     return 1
   fi
 
-  stale_lock="$swap_lock.stale.$swap_lock_owner"
-  if ! mv "$swap_lock" "$stale_lock" 2>/dev/null; then
+  stale_lock="$transaction_lock.stale.$transaction_lock_owner"
+  if ! mv "$transaction_lock" "$stale_lock" 2>/dev/null; then
     echo 'Could not recover the stale quotabot install lock.' >&2
-    swap_lock=""
-    swap_lock_owner=""
+    transaction_lock=""
+    transaction_lock_owner=""
     return 1
   fi
   rm -f "$stale_lock"
-  if ! (set -o noclobber; printf '%s\n' "$swap_lock_owner" > "$swap_lock") 2>/dev/null; then
+  if ! (set -o noclobber; printf '%s\n' "$transaction_lock_owner" > "$transaction_lock") 2>/dev/null; then
     echo 'Another quotabot install started activating a bundle.' >&2
-    swap_lock=""
-    swap_lock_owner=""
+    transaction_lock=""
+    transaction_lock_owner=""
     return 1
   fi
+}
+safe_remove_versioned_tree() {
+  local candidate="$1"
+  local candidate_name
+  case "$candidate" in
+    "$transaction_versions_root"/*)
+      candidate_name="${candidate#"$transaction_versions_root"/}"
+      ;;
+    *)
+      echo "Refusing to remove a path outside the quotabot versions directory: $candidate" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$candidate_name" == */* || \
+        ! "$candidate_name" =~ ^(\.staging|generation|legacy)-[0-9]{14}-[0-9]+$ ]]; then
+    echo "Refusing to remove an unrecognized quotabot generation: $candidate" >&2
+    return 1
+  fi
+  rm -rf -- "$candidate"
+}
+reset_transaction_state() {
+  transaction_versions_root=""
+  transaction_staging=""
+  transaction_generation=""
+  transaction_link=""
+  transaction_target=""
+  transaction_legacy_backup=""
+  transaction_legacy_moved=0
+  transaction_committed=0
+  transaction_lock=""
+  transaction_lock_owner=""
 }
 cleanup() {
   status=$?
   set +e
-  preserve_swap=0
-  if [[ "$swap_old_moved" -eq 1 && "$swap_committed" -eq 0 && \
-        -e "$swap_backup" && ! -e "$swap_target" ]]; then
-    if ! mv "$swap_backup" "$swap_target"; then
-      echo "Install rollback failed. Previous bundle remains at $swap_backup" >&2
-      preserve_swap=1
+  preserve_generation=0
+  if [[ "$transaction_legacy_moved" -eq 1 && "$transaction_committed" -eq 0 && \
+        -d "$transaction_legacy_backup" && \
+        ! -e "$transaction_target" && ! -L "$transaction_target" ]]; then
+    if ! mv "$transaction_legacy_backup" "$transaction_target"; then
+      echo "Install rollback failed. Previous bundle remains at $transaction_legacy_backup" >&2
+      preserve_generation=1
     fi
   fi
-  if [[ -n "$swap_workspace" && "$preserve_swap" -eq 0 ]]; then
-    rm -rf "$swap_workspace"
+  if [[ -n "$transaction_link" ]]; then
+    rm -f "$transaction_link"
   fi
-  release_swap_lock
+  if [[ -n "$transaction_staging" && "$preserve_generation" -eq 0 ]]; then
+    safe_remove_versioned_tree "$transaction_staging"
+  fi
+  if [[ -n "$transaction_generation" && "$transaction_committed" -eq 0 && \
+        "$preserve_generation" -eq 0 ]]; then
+    safe_remove_versioned_tree "$transaction_generation"
+  fi
+  release_install_lock
   if [[ -n "$wrapper_tmp" ]]; then
     rm -f "$wrapper_tmp"
   fi
@@ -150,49 +192,186 @@ cleanup() {
 }
 trap cleanup EXIT
 
-replace_install_tree() {
-  local staged="$1"
+activate_install_link() {
+  local candidate="$1"
   local target="$2"
-  local workspace="$3"
+  if [[ ! -e "$target" && ! -L "$target" ]]; then
+    mv "$candidate" "$target"
+  elif [[ "$OS" == "darwin" ]]; then
+    # BSD mv needs -h to replace a symlink to a directory itself.
+    mv -fh "$candidate" "$target"
+  else
+    # GNU and BusyBox mv use -T to treat the destination as a path, not a dir.
+    mv -fT "$candidate" "$target"
+  fi
+}
+validated_previous_generation() {
+  local stable_target="$1"
+  local versions_name="$2"
+  local versions_root="$3"
+  local active_relative active_name candidate resolved_candidate
 
-  swap_workspace="$workspace"
-  swap_target="$target"
-  swap_backup="$workspace/previous"
-  swap_old_moved=0
-  swap_committed=0
-  swap_lock="$(dirname "$target")/.quotabot-install.lock"
+  active_relative="$(readlink "$stable_target")"
+  case "$active_relative" in
+    "$versions_name"/*) active_name="${active_relative#"$versions_name"/}" ;;
+    *)
+      echo "Refusing to replace an unrecognized install symlink: $stable_target" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$active_name" == */* || \
+        ! "$active_name" =~ ^(generation|legacy)-[0-9]{14}-[0-9]+$ ]]; then
+    echo "Refusing to replace an unrecognized install symlink: $stable_target" >&2
+    return 1
+  fi
+  candidate="$versions_root/$active_name"
+  if [[ ! -d "$candidate" || -L "$candidate" ]]; then
+    echo "Refusing to replace an invalid install generation: $candidate" >&2
+    return 1
+  fi
+  resolved_candidate="$(cd "$candidate" && pwd -P)"
+  if [[ "$resolved_candidate" != "$candidate" ]]; then
+    echo "Refusing to use an install generation outside its versions directory: $candidate" >&2
+    return 1
+  fi
+  printf '%s\n' "$candidate"
+}
+install_versioned_tree() {
+  local source="$1"
+  local requested_target="$2"
+  local payload_kind="$3"
+  local target_parent target_name versions_name generation_id previous_generation
+  local entry active_path
 
-  if ! acquire_swap_lock "$swap_lock"; then
+  target_parent="$(dirname "$requested_target")"
+  target_name="$(basename "$requested_target")"
+  case "$target_name" in
+    '' | '.' | '..' | *[!A-Za-z0-9._-]*)
+      echo "Invalid install target name: $target_name" >&2
+      return 1
+      ;;
+  esac
+  mkdir -p "$target_parent"
+  target_parent="$(cd "$target_parent" && pwd -P)"
+  transaction_target="$target_parent/$target_name"
+  versions_name=".${target_name}-versions"
+  transaction_versions_root="$target_parent/$versions_name"
+  if [[ -L "$transaction_versions_root" ]]; then
+    echo "Refusing to use a symlink as the quotabot versions directory: $transaction_versions_root" >&2
+    return 1
+  fi
+  mkdir -p "$transaction_versions_root"
+  transaction_versions_root="$(cd "$transaction_versions_root" && pwd -P)"
+  case "$transaction_versions_root" in
+    "$target_parent"/*) ;;
+    *)
+      echo 'The quotabot versions directory resolved outside its install parent.' >&2
+      return 1
+      ;;
+  esac
+
+  if ! acquire_install_lock "$target_parent/.${target_name}-install.lock"; then
     return 1
   fi
 
-  if [[ -e "$target" || -L "$target" ]]; then
-    mv "$target" "$swap_backup"
-    swap_old_moved=1
-  fi
-  if ! mv "$staged" "$target"; then
-    if [[ "$swap_old_moved" -eq 1 && ! -e "$target" ]]; then
-      mv "$swap_backup" "$target"
-      swap_old_moved=0
+  shopt -s nullglob
+  for entry in "$target_parent/.${target_name}-link-"*; do
+    if [[ -L "$entry" || -f "$entry" ]]; then
+      rm -f "$entry"
     fi
-    echo "Could not activate the new quotabot bundle; the previous install was restored." >&2
-    release_swap_lock
+  done
+  shopt -u nullglob
+
+  generation_id="$(date -u +%Y%m%d%H%M%S)-${BASHPID:-$$}"
+  transaction_staging="$transaction_versions_root/.staging-$generation_id"
+  transaction_generation="$transaction_versions_root/generation-$generation_id"
+  if [[ -e "$transaction_staging" || -e "$transaction_generation" ]]; then
+    echo 'Could not allocate a unique quotabot payload generation.' >&2
+    return 1
+  fi
+  mkdir "$transaction_staging"
+  if [[ "$payload_kind" == "macos-app" ]]; then
+    ditto "$source" "$transaction_staging"
+  else
+    cp -R "$source"/. "$transaction_staging"/
+  fi
+  case "$payload_kind" in
+    cli)
+      if [[ ! -x "$transaction_staging/bin/quotabot" || \
+            ! -d "$transaction_staging/lib" ]]; then
+        echo 'Could not stage a complete quotabot CLI payload.' >&2
+        return 1
+      fi
+      ;;
+    linux-desktop)
+      if [[ ! -x "$transaction_staging/quotabot" ]]; then
+        echo 'Could not stage the Linux desktop bundle.' >&2
+        return 1
+      fi
+      ;;
+    macos-app)
+      if [[ ! -x "$transaction_staging/Contents/MacOS/quotabot" ]]; then
+        echo 'Could not stage the macOS app bundle.' >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "Unknown quotabot payload kind: $payload_kind" >&2
+      return 1
+      ;;
+  esac
+  mv "$transaction_staging" "$transaction_generation"
+  transaction_staging=""
+  transaction_link="$target_parent/.${target_name}-link-$generation_id"
+  ln -s "$versions_name/$(basename "$transaction_generation")" "$transaction_link"
+
+  previous_generation=""
+  if [[ -L "$transaction_target" ]]; then
+    if ! previous_generation="$(validated_previous_generation \
+      "$transaction_target" "$versions_name" "$transaction_versions_root")"; then
+      return 1
+    fi
+  elif [[ -d "$transaction_target" ]]; then
+    transaction_legacy_backup="$transaction_versions_root/legacy-$generation_id"
+    mv "$transaction_target" "$transaction_legacy_backup"
+    transaction_legacy_moved=1
+    previous_generation="$transaction_legacy_backup"
+  elif [[ -e "$transaction_target" ]]; then
+    echo "Refusing to replace a non-directory install target: $transaction_target" >&2
     return 1
   fi
 
-  swap_committed=1
-  if [[ "$swap_old_moved" -eq 1 ]]; then
-    rm -rf "$swap_backup"
+  if ! activate_install_link "$transaction_link" "$transaction_target"; then
+    if [[ "$transaction_legacy_moved" -eq 1 && \
+          ! -e "$transaction_target" && ! -L "$transaction_target" ]]; then
+      mv "$transaction_legacy_backup" "$transaction_target"
+      transaction_legacy_moved=0
+      previous_generation=""
+    fi
+    echo 'Could not activate the new quotabot bundle; the previous install was restored.' >&2
+    return 1
   fi
-  rmdir "$workspace"
-  release_swap_lock
-  swap_workspace=""
-  swap_target=""
-  swap_backup=""
-  swap_old_moved=0
-  swap_committed=0
-  swap_lock=""
-  swap_lock_owner=""
+  transaction_link=""
+  transaction_committed=1
+  active_path="$transaction_generation"
+
+  # Retain only the active generation and its immediate predecessor. Any
+  # abandoned staging directories are safe to remove while the lock is held.
+  shopt -s nullglob
+  for entry in "$transaction_versions_root"/.staging-*; do
+    safe_remove_versioned_tree "$entry" || true
+  done
+  for entry in \
+    "$transaction_versions_root"/generation-* \
+    "$transaction_versions_root"/legacy-*; do
+    if [[ "$entry" != "$active_path" && "$entry" != "$previous_generation" ]]; then
+      safe_remove_versioned_tree "$entry" || true
+    fi
+  done
+  shopt -u nullglob
+
+  release_install_lock
+  reset_transaction_state
 }
 
 curl -fsSL "$URL" -o "$tmpfile"
@@ -221,19 +400,9 @@ if [[ ! -d "$extract_dir/lib" ]]; then
   exit 1
 fi
 
-# Stage the complete bundle beside the live install. Renames within one parent
-# are atomic, and the EXIT trap restores the previous tree if activation fails.
-install_parent=$(dirname "$INSTALL_ROOT")
-mkdir -p "$install_parent"
-swap_workspace=$(mktemp -d "$install_parent/.quotabot-install.XXXXXX")
-staged_root="$swap_workspace/new"
-mkdir -p "$staged_root"
-cp -R "$extract_dir/bin" "$extract_dir/lib" "$staged_root/"
-if [[ ! -x "$staged_root/bin/quotabot" || ! -d "$staged_root/lib" ]]; then
-  echo "Could not stage the downloaded quotabot bundle" >&2
-  exit 1
-fi
-replace_install_tree "$staged_root" "$INSTALL_ROOT" "$swap_workspace"
+# Each release lives in a complete versioned directory. The stable install path
+# is one symlink, so upgrades become visible through one atomic rename.
+install_versioned_tree "$extract_dir" "$INSTALL_ROOT" cli
 
 # Keep the PATH shim valid until its complete replacement is ready.
 wrapper_tmp=$(mktemp "$INSTALL_DIR/.quotabot.XXXXXX")

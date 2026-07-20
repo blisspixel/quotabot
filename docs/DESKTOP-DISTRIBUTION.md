@@ -20,6 +20,12 @@ asset audit rejects a draft with any missing, duplicate, or unexpected file,
 then downloads every CLI and desktop asset again and reverifies every checksum
 and provenance attestation immediately before publication.
 
+The official repository's active tag rules block updates and deletion of `v*`
+tags. Drafts remain writable while the workflow assembles and audits the exact
+asset set, then GitHub release immutability locks the associated tag and assets
+at publication. Immutability applies prospectively to releases published after
+it was enabled on July 18, 2026, not retroactively to v0.9.2 or earlier.
+
 The bundles are portable applications, not system installers. They do not
 replace the separately installed `quotabot` CLI and do not move or delete local
 quota metadata.

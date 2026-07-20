@@ -8,7 +8,7 @@ import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
 
 import 'headroom_colors.dart';
-import 'profile_ui.dart' show quotaDisplayKey;
+import 'profile_ui.dart' show quotaDisplayKey, quotaShouldShowAccountLabel;
 import 'theme_spec.dart';
 import 'typography.dart';
 
@@ -46,6 +46,7 @@ class FleetScreen extends StatefulWidget {
   final Map<String, List<HeadroomBucket>> buckets;
   final RoutedRequestSummary? routedRequests;
   final bool dark;
+  final bool showAccounts;
   final FleetRange initialRange;
 
   const FleetScreen({
@@ -54,6 +55,7 @@ class FleetScreen extends StatefulWidget {
     required this.buckets,
     required this.dark,
     this.routedRequests,
+    this.showAccounts = false,
     this.initialRange = FleetRange.now,
   });
 
@@ -85,12 +87,19 @@ class _FleetScreenState extends State<FleetScreen> {
     );
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final providerCounts = _providerCounts();
     final nodes = <_Node>[];
     for (final q in widget.data) {
       if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) continue;
       final h = providerHeadroom(q, now);
       if (h == null) continue;
-      nodes.add(_Node(q.displayName, h, bindingWindow(q, now)?.resetsAt));
+      nodes.add(
+        _Node(
+          _providerLabel(q, providerCounts),
+          h,
+          bindingWindow(q, now)?.resetsAt,
+        ),
+      );
     }
     nodes.sort((a, b) => a.free.compareTo(b.free)); // tightest first
 
@@ -116,11 +125,29 @@ class _FleetScreenState extends State<FleetScreen> {
     return nodes.map((n) => n.free).reduce((a, b) => a + b) / nodes.length;
   }
 
+  Map<String, int> _providerCounts() {
+    final counts = <String, int>{};
+    for (final quota in widget.data) {
+      counts[quota.provider] = (counts[quota.provider] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  String _providerLabel(ProviderQuota quota, Map<String, int> providerCounts) {
+    if (!widget.showAccounts ||
+        !quotaShouldShowAccountLabel(quota, providerCounts)) {
+      return quota.displayName;
+    }
+    return '${quota.displayName} '
+        '(${quotaAccountDisplayLabel(quota.account)})';
+  }
+
   Widget _liveView(
     List<_Node> nodes,
     int now,
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
+    final textScaler = MediaQuery.textScalerOf(context);
     if (nodes.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -167,8 +194,17 @@ class _FleetScreenState extends State<FleetScreen> {
             label: _liveHeadroomSemantics(nodes, now),
             excludeSemantics: true,
             child: SizedBox(
-              height: nodes.length * 30.0,
-              child: CustomPaint(painter: _BarsPainter(nodes, now, dark, c.fg)),
+              height:
+                  nodes.length *
+                  _scaledChartRowHeight(
+                    textScaler,
+                    fontSize: AppType.bodySmall,
+                    minimum: 30,
+                    padding: 9,
+                  ),
+              child: CustomPaint(
+                painter: _BarsPainter(nodes, now, dark, c.fg, textScaler),
+              ),
             ),
           ),
         ),
@@ -182,11 +218,17 @@ class _FleetScreenState extends State<FleetScreen> {
             label: _consumptionSemantics(nodes),
             excludeSemantics: true,
             child: SizedBox(
-              height: 150,
+              height: _donutChartHeight(nodes, textScaler),
               child: nodes.every((n) => n.used <= 0.5)
                   ? _empty('nothing spent yet', c.muted)
                   : CustomPaint(
-                      painter: _DonutPainter(nodes, dark, c.fg, c.muted),
+                      painter: _DonutPainter(
+                        nodes,
+                        dark,
+                        c.fg,
+                        c.muted,
+                        textScaler,
+                      ),
                     ),
             ),
           ),
@@ -330,9 +372,10 @@ class _FleetScreenState extends State<FleetScreen> {
   ) {
     final excluded = <String>[];
     final seen = <String>{};
+    final providerCounts = _providerCounts();
     for (final quota in widget.data) {
       if (quota.isLocal || isTrustedQuotaEvidenceAt(quota, now)) continue;
-      final label = _excludedEvidenceLabel(quota, now);
+      final label = _excludedEvidenceLabel(quota, now, providerCounts);
       if (seen.add(label)) excluded.add(label);
     }
     if (excluded.isEmpty) return const SizedBox.shrink();
@@ -360,7 +403,11 @@ class _FleetScreenState extends State<FleetScreen> {
     );
   }
 
-  String _excludedEvidenceLabel(ProviderQuota quota, int now) {
+  String _excludedEvidenceLabel(
+    ProviderQuota quota,
+    int now,
+    Map<String, int> providerCounts,
+  ) {
     final headroom = providerHeadroom(quota, now);
     final String state;
     if (quota.driftReason != null) {
@@ -380,7 +427,7 @@ class _FleetScreenState extends State<FleetScreen> {
     } else {
       state = 'untrusted evidence';
     }
-    return '${quota.displayName} ($state)';
+    return '${_providerLabel(quota, providerCounts)} ($state)';
   }
 
   // ---- history (7d / 90d) ---------------------------------------------
@@ -389,6 +436,7 @@ class _FleetScreenState extends State<FleetScreen> {
     int now,
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
+    final textScaler = MediaQuery.textScalerOf(context);
     final tz = DateTime.now().timeZoneOffset;
     final days = _range.days!;
     final cutoff = now - days * 86400;
@@ -400,6 +448,7 @@ class _FleetScreenState extends State<FleetScreen> {
     final insightKeys = <_Node, String>{};
     var maxSamples = 0;
     var maxSpan = 0;
+    final providerCounts = _providerCounts();
     for (final q in widget.data) {
       if (q.isLocal) continue;
       final all = _bucketsFor(q);
@@ -411,7 +460,8 @@ class _FleetScreenState extends State<FleetScreen> {
       fleetBuckets.addAll(win);
       final ins = Insights.from(win, now, tzOffset: tz);
       if (ins.samples == 0) continue;
-      final node = _Node(q.displayName, ins.p50 ?? 0, null)..insights = ins;
+      final node = _Node(_providerLabel(q, providerCounts), ins.p50 ?? 0, null)
+        ..insights = ins;
       final insightKey = rawInsights.length.toString();
       rawInsights[insightKey] = ins;
       insightKeys[node] = insightKey;
@@ -445,7 +495,7 @@ class _FleetScreenState extends State<FleetScreen> {
     );
     int? nextReset;
     for (final quota in widget.data) {
-      if (quota.isLocal) continue;
+      if (quota.isLocal || !isTrustedQuotaEvidenceAt(quota, now)) continue;
       final reset = bindingWindow(quota, now)?.resetsAt;
       if (reset == null || reset <= now) continue;
       if (nextReset == null || reset < nextReset) nextReset = reset;
@@ -468,9 +518,16 @@ class _FleetScreenState extends State<FleetScreen> {
             label: _distributionSemantics(stats),
             excludeSemantics: true,
             child: SizedBox(
-              height: stats.length * 26.0,
+              height:
+                  stats.length *
+                  _scaledChartRowHeight(
+                    textScaler,
+                    fontSize: AppType.bodySmall,
+                    minimum: 26,
+                    padding: 10,
+                  ),
               child: CustomPaint(
-                painter: _DistPainter(stats, dark, c.fg, c.muted),
+                painter: _DistPainter(stats, dark, c.fg, c.muted, textScaler),
               ),
             ),
           ),
@@ -497,7 +554,14 @@ class _FleetScreenState extends State<FleetScreen> {
             label: _calendarSemantics(stats),
             excludeSemantics: true,
             child: SizedBox(
-              height: stats.length * 18.0,
+              height:
+                  stats.length *
+                  _scaledChartRowHeight(
+                    textScaler,
+                    fontSize: AppType.bodySmall,
+                    minimum: 18,
+                    padding: 6,
+                  ),
               child: CustomPaint(
                 painter: _CalendarPainter(
                   stats,
@@ -505,6 +569,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   c.fg,
                   c.muted,
                   math.min(days, kRetentionDays),
+                  textScaler,
                 ),
               ),
             ),
@@ -523,11 +588,16 @@ class _FleetScreenState extends State<FleetScreen> {
                 label: _heatmapSemantics(grid, bestWindows),
                 excludeSemantics: true,
                 child: SizedBox(
-                  height: 120,
+                  height: _heatmapChartHeight(textScaler),
                   child: grid == null
                       ? _empty('not enough data', c.muted)
                       : CustomPaint(
-                          painter: _HeatmapPainter(grid, dark, c.muted),
+                          painter: _HeatmapPainter(
+                            grid,
+                            dark,
+                            c.muted,
+                            textScaler,
+                          ),
                         ),
                 ),
               ),
@@ -745,23 +815,37 @@ class _FleetScreenState extends State<FleetScreen> {
           children: [
             for (final r in FleetRange.values)
               Expanded(
-                child: GestureDetector(
+                child: Semantics(
+                  button: true,
+                  selected: _range == r,
+                  label: '${r.label} analytics range',
+                  excludeSemantics: true,
                   onTap: () => setState(() => _range = r),
-                  child: Container(
-                    height: 28,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: _range == r
-                          ? c.line.withValues(alpha: dark ? 0.82 : 0.58)
-                          : Colors.transparent,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: InkWell(
+                      excludeFromSemantics: true,
                       borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      r.label,
-                      style: TextStyle(
-                        fontSize: AppType.bodySmall,
-                        fontWeight: FontWeight.w700,
-                        color: _range == r ? c.fg : c.muted,
+                      focusColor: c.line.withValues(alpha: dark ? 0.65 : 0.45),
+                      hoverColor: c.line.withValues(alpha: dark ? 0.36 : 0.24),
+                      onTap: () => setState(() => _range = r),
+                      child: Container(
+                        height: 28,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _range == r
+                              ? c.line.withValues(alpha: dark ? 0.82 : 0.58)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          r.label,
+                          style: TextStyle(
+                            fontSize: AppType.bodySmall,
+                            fontWeight: FontWeight.w700,
+                            color: _range == r ? c.fg : c.muted,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -973,6 +1057,24 @@ class _FleetScreenState extends State<FleetScreen> {
   }
 }
 
+double _scaledChartRowHeight(
+  TextScaler textScaler, {
+  required double fontSize,
+  required double minimum,
+  required double padding,
+}) => math.max(minimum, textScaler.scale(fontSize) + padding);
+
+double _donutChartHeight(List<_Node> nodes, TextScaler textScaler) {
+  final rows = nodes.where((node) => node.used > 0.5).length;
+  final lineHeight = math.max(18.0, textScaler.scale(AppType.caption) + 4);
+  return math.max(150.0, rows * lineHeight + 18);
+}
+
+double _heatmapChartHeight(TextScaler textScaler) {
+  final labelHeight = textScaler.scale(AppType.micro);
+  return math.max(120.0, 7 * (labelHeight + 2) + labelHeight + 6);
+}
+
 // ---- painters ----------------------------------------------------------
 
 /// Horizontal headroom bars: free % per provider with its reset, tightest first.
@@ -981,16 +1083,30 @@ class _BarsPainter extends CustomPainter {
   final int now;
   final bool dark;
   final Color fg;
-  _BarsPainter(this.nodes, this.now, this.dark, this.fg);
+  final TextScaler textScaler;
+  _BarsPainter(this.nodes, this.now, this.dark, this.fg, this.textScaler);
 
   @override
   void paint(Canvas canvas, Size size) {
     final track = dark ? const Color(0xFF22262E) : const Color(0xFFEDEEF1);
     final rowH = size.height / nodes.length;
-    const labelW = 70.0;
-    const valW = 78.0;
+    final desiredLabelW = math.max(
+      70.0,
+      textScaler.scale(AppType.bodySmall) * 5.5,
+    );
+    final desiredValW = math.max(
+      78.0,
+      textScaler.scale(AppType.bodySmall) * 6.2,
+    );
+    final availableTextWidth = math.max(80.0, size.width - 28);
+    final widthScale = math.min(
+      1.0,
+      availableTextWidth / (desiredLabelW + desiredValW),
+    );
+    final labelW = desiredLabelW * widthScale;
+    final valW = desiredValW * widthScale;
     final barL = labelW + 6;
-    final barW = size.width - barL - valW - 6;
+    final barW = math.max(1.0, size.width - barL - valW - 6);
     for (var i = 0; i < nodes.length; i++) {
       final n = nodes[i];
       final cy = i * rowH + rowH / 2;
@@ -1038,6 +1154,7 @@ class _BarsPainter extends CustomPainter {
         ),
       ),
       textDirection: TextDirection.ltr,
+      textScaler: textScaler,
       maxLines: 1,
       ellipsis: '...',
     )..layout(maxWidth: width);
@@ -1075,14 +1192,21 @@ class _BarsPainter extends CustomPainter {
         ],
       ),
       textDirection: TextDirection.ltr,
+      textScaler: textScaler,
       textAlign: TextAlign.right,
       maxLines: 1,
+      ellipsis: '...',
     )..layout(maxWidth: width);
     tp.paint(canvas, Offset(rightEdge - tp.width, cy - tp.height / 2));
   }
 
   @override
-  bool shouldRepaint(_BarsPainter old) => old.nodes != nodes;
+  bool shouldRepaint(_BarsPainter old) =>
+      old.nodes != nodes ||
+      old.now != now ||
+      old.dark != dark ||
+      old.fg != fg ||
+      old.textScaler != textScaler;
 }
 
 /// Donut of consumption share: how spend concentrates across providers.
@@ -1091,7 +1215,8 @@ class _DonutPainter extends CustomPainter {
   final bool dark;
   final Color fg;
   final Color muted;
-  _DonutPainter(this.nodes, this.dark, this.fg, this.muted);
+  final TextScaler textScaler;
+  _DonutPainter(this.nodes, this.dark, this.fg, this.muted, this.textScaler);
 
   static const _palette = [
     Color(0xFF58A6FF),
@@ -1112,8 +1237,9 @@ class _DonutPainter extends CustomPainter {
     ];
     final total = spenders.fold<double>(0, (a, n) => a + n.used);
     if (total <= 0) return;
-    final center = Offset(size.height / 2 + 2, size.height / 2);
-    final outer = size.height / 2 - 6;
+    final diameter = math.min(size.height, math.max(70.0, size.width * 0.42));
+    final center = Offset(diameter / 2 + 2, size.height / 2);
+    final outer = diameter / 2 - 6;
     final inner = outer * 0.58;
     var start = -math.pi / 2;
     for (var i = 0; i < spenders.length; i++) {
@@ -1134,7 +1260,8 @@ class _DonutPainter extends CustomPainter {
     );
 
     final lx = center.dx + outer + 14;
-    var ly = center.dy - (spenders.length * 9.0);
+    final lineHeight = math.max(18.0, textScaler.scale(AppType.caption) + 4);
+    var ly = center.dy - (spenders.length * lineHeight / 2);
     for (var i = 0; i < spenders.length; i++) {
       canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -1162,16 +1289,22 @@ class _DonutPainter extends CustomPainter {
           ],
         ),
         textDirection: TextDirection.ltr,
+        textScaler: textScaler,
         maxLines: 1,
         ellipsis: '...',
       )..layout(maxWidth: math.max(40, size.width - lx - 4));
       tp.paint(canvas, Offset(lx + 14, ly));
-      ly += 18;
+      ly += lineHeight;
     }
   }
 
   @override
-  bool shouldRepaint(_DonutPainter old) => old.nodes != nodes;
+  bool shouldRepaint(_DonutPainter old) =>
+      old.nodes != nodes ||
+      old.dark != dark ||
+      old.fg != fg ||
+      old.muted != muted ||
+      old.textScaler != textScaler;
 }
 
 /// Floating distribution bars: the p10..p90 free range with a p50 tick.
@@ -1180,15 +1313,19 @@ class _DistPainter extends CustomPainter {
   final bool dark;
   final Color fg;
   final Color muted;
-  _DistPainter(this.nodes, this.dark, this.fg, this.muted);
+  final TextScaler textScaler;
+  _DistPainter(this.nodes, this.dark, this.fg, this.muted, this.textScaler);
 
   @override
   void paint(Canvas canvas, Size size) {
     final track = dark ? const Color(0xFF22262E) : const Color(0xFFEDEEF1);
     final rowH = size.height / nodes.length;
-    const labelW = 70.0;
+    final labelW = math.min(
+      size.width * 0.45,
+      math.max(70.0, textScaler.scale(AppType.bodySmall) * 5.5),
+    );
     final scaleL = labelW + 6;
-    final scaleW = size.width - scaleL - 8;
+    final scaleW = math.max(1.0, size.width - scaleL - 8);
     double x(double pct) => scaleL + (pct / 100).clamp(0.0, 1.0) * scaleW;
 
     final guide = Paint()
@@ -1232,6 +1369,7 @@ class _DistPainter extends CustomPainter {
         ),
       ),
       textDirection: TextDirection.ltr,
+      textScaler: textScaler,
       maxLines: 1,
       ellipsis: '...',
     )..layout(maxWidth: width);
@@ -1239,7 +1377,12 @@ class _DistPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_DistPainter old) => old.nodes != nodes;
+  bool shouldRepaint(_DistPainter old) =>
+      old.nodes != nodes ||
+      old.dark != dark ||
+      old.fg != fg ||
+      old.muted != muted ||
+      old.textScaler != textScaler;
 }
 
 /// Compact sampled-day contribution calendar, one row per provider.
@@ -1249,14 +1392,25 @@ class _CalendarPainter extends CustomPainter {
   final Color fg;
   final Color muted;
   final int maxDays;
+  final TextScaler textScaler;
 
-  _CalendarPainter(this.nodes, this.dark, this.fg, this.muted, this.maxDays);
+  _CalendarPainter(
+    this.nodes,
+    this.dark,
+    this.fg,
+    this.muted,
+    this.maxDays,
+    this.textScaler,
+  );
 
   @override
   void paint(Canvas canvas, Size size) {
     if (nodes.isEmpty) return;
     final rowH = size.height / nodes.length;
-    const labelW = 70.0;
+    final labelW = math.min(
+      size.width * 0.45,
+      math.max(70.0, textScaler.scale(AppType.bodySmall) * 5.5),
+    );
     final availableW = math.max(1.0, size.width - labelW - 8);
     for (var i = 0; i < nodes.length; i++) {
       final cy = i * rowH + rowH / 2;
@@ -1303,6 +1457,7 @@ class _CalendarPainter extends CustomPainter {
         ),
       ),
       textDirection: TextDirection.ltr,
+      textScaler: textScaler,
       maxLines: 1,
       ellipsis: '...',
     )..layout(maxWidth: width);
@@ -1315,7 +1470,8 @@ class _CalendarPainter extends CustomPainter {
       old.dark != dark ||
       old.fg != fg ||
       old.muted != muted ||
-      old.maxDays != maxDays;
+      old.maxDays != maxDays ||
+      old.textScaler != textScaler;
 }
 
 /// Fleet 7x24 heatmap with weekday labels: aggregate best-time-to-run.
@@ -1323,15 +1479,19 @@ class _HeatmapPainter extends CustomPainter {
   final List<List<double?>> grid;
   final bool dark;
   final Color muted;
-  _HeatmapPainter(this.grid, this.dark, this.muted);
+  final TextScaler textScaler;
+  _HeatmapPainter(this.grid, this.dark, this.muted, this.textScaler);
 
   static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   @override
   void paint(Canvas canvas, Size size) {
     const cols = 24, rows = 7;
-    const labelW = 30.0;
-    const axisH = 14.0;
+    final labelW = math.min(
+      size.width * 0.3,
+      math.max(30.0, textScaler.scale(AppType.micro) * 3.5),
+    );
+    final axisH = math.max(14.0, textScaler.scale(AppType.micro) + 4);
     final gw = size.width - labelW;
     final gh = size.height - axisH;
     final cw = gw / cols, ch = gh / rows;
@@ -1343,6 +1503,7 @@ class _HeatmapPainter extends CustomPainter {
           style: TextStyle(fontSize: AppType.micro, color: muted),
         ),
         textDirection: TextDirection.ltr,
+        textScaler: textScaler,
       )..layout();
       tp.paint(canvas, Offset(0, r * ch + ch / 2 - tp.height / 2));
       for (var col = 0; col < cols; col++) {
@@ -1362,13 +1523,18 @@ class _HeatmapPainter extends CustomPainter {
           style: TextStyle(fontSize: AppType.micro, color: muted),
         ),
         textDirection: TextDirection.ltr,
+        textScaler: textScaler,
       )..layout();
       tp.paint(canvas, Offset(labelW + hh * cw, gh + 2));
     }
   }
 
   @override
-  bool shouldRepaint(_HeatmapPainter old) => old.grid != grid;
+  bool shouldRepaint(_HeatmapPainter old) =>
+      old.grid != grid ||
+      old.dark != dark ||
+      old.muted != muted ||
+      old.textScaler != textScaler;
 }
 
 /// Compact reset countdown, e.g. "3h2m", "2d4h", "ready".

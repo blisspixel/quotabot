@@ -15,10 +15,20 @@ void main() {
       final provider = defs['providerQuota'] as Map<String, Object?>;
       final properties = provider['properties'] as Map<String, Object?>;
       expect(properties, contains('source_class'));
+      expect(properties, contains('plan_evidence_source'));
+      expect(properties, contains('plan_evidence_as_of'));
       final sourceClass = properties['source_class'] as Map<String, Object?>;
       expect(sourceClass['enum'], ProviderSourceClass.wireValues);
       expect(properties, contains('drift_reason'));
       expect(properties, contains('drift_observed_at'));
+      expect(properties, contains('per_machine'));
+      expect(properties, contains('reset_credits_available'));
+      expect(properties, contains('model_quotas'));
+      expect(defs, contains('modelQuota'));
+      final modelQuota = defs['modelQuota'] as Map<String, Object?>;
+      final modelQuotaProperties =
+          modelQuota['properties'] as Map<String, Object?>;
+      expect(modelQuotaProperties, contains('window_label'));
       final driftReason = properties['drift_reason'] as Map<String, Object?>;
       expect(driftReason['pattern'], r'\S');
     });
@@ -34,6 +44,8 @@ void main() {
             displayName: 'Claude',
             account: 'work@example.com',
             plan: 'max',
+            planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+            planEvidenceAsOf: 1782000000,
             source: providerQuotaManualSource,
             asOf: 1782000000,
             pipeHealth: providerPipeHealthThrottled,
@@ -97,6 +109,18 @@ void main() {
             models: const [
               ModelInfo(id: 'temp-promo', quotaIncludedUntil: 1785000000),
             ],
+            modelQuotas: const [
+              ModelQuota(
+                model: 'Gemini 3.1 Pro',
+                usedPercent: 25,
+                resetsAt: 1782604800,
+                windowLabel: 'weekly',
+                category: 'Fast',
+                note: 'Included',
+              ),
+            ],
+            perMachine: true,
+            resetCreditsAvailable: 2,
           ).toJson(),
         ],
       };
@@ -158,6 +182,30 @@ void main() {
       );
     });
 
+    test('requires plan evidence provenance to remain an atomic pair', () {
+      final provider = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'opaque',
+        plan: 'max',
+        asOf: 1782000000,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      ).toJson()
+        ..['plan_evidence_source'] = 'host_credential';
+      final errors = validateQuotabotV1Snapshot({
+        'schema': quotabotV1SchemaId,
+        'generated_at': 1782000000,
+        'providers': [provider],
+      });
+
+      expect(
+        errors,
+        contains(
+          r'$.providers[0].plan_evidence_source and plan_evidence_as_of must appear together',
+        ),
+      );
+    });
+
     test('rejects contract-breaking snapshots with precise paths', () {
       final errors = validateQuotabotV1Snapshot({
         'schema': 'quotabot.v2',
@@ -215,6 +263,9 @@ void main() {
             'drift_observed_at': -1,
             'windows': 'bad-windows',
             'models': 'bad-models',
+            'model_quotas': 'bad-model-quotas',
+            'per_machine': 'yes',
+            'reset_credits_available': -1,
           },
           {
             'provider': 'ollama',
@@ -252,6 +303,21 @@ void main() {
                 'vram_bytes': 'large',
               },
             ],
+            'model_quotas': [
+              'bad-model-quota',
+              {
+                'model': '',
+                'used_percent': 101,
+                'resets_at': -1,
+                'window_label': 1,
+                'category': 1,
+                'note': false,
+              },
+              {
+                'model': 'Spark',
+                'window_label': ' weekly ',
+              },
+            ],
             'local_hardware': {
               'as_of': -1,
               'system_memory_total_bytes': 100,
@@ -273,6 +339,9 @@ void main() {
           r'$.providers[0] must be an object',
           r'$.providers[1].windows must be an array',
           r'$.providers[1].models must be an array',
+          r'$.providers[1].model_quotas must be an array',
+          r'$.providers[1].per_machine must be a boolean',
+          r'$.providers[1].reset_credits_available must be a non-negative integer',
           r'$.providers[1].suspect must be a string',
           r'$.providers[1].drift_reason must be a string',
           r'$.providers[1].drift_observed_at must be a non-negative integer',
@@ -298,6 +367,14 @@ void main() {
           r'$.providers[2].models[1].loaded must be a boolean',
           r'$.providers[2].models[1].size_bytes must be a non-negative integer',
           r'$.providers[2].models[1].vram_bytes must be a non-negative integer',
+          r'$.providers[2].model_quotas[0] must be an object',
+          r'$.providers[2].model_quotas[1].model must be a non-empty string',
+          r'$.providers[2].model_quotas[1].used_percent must be a finite number from 0 to 100',
+          r'$.providers[2].model_quotas[1].resets_at must be a non-negative integer',
+          r'$.providers[2].model_quotas[1].window_label must be a string',
+          r'$.providers[2].model_quotas[1].category must be a string',
+          r'$.providers[2].model_quotas[1].note must be a string',
+          r'$.providers[2].model_quotas[2].window_label must be a trimmed, non-empty, control-free string up to 96 characters',
           r'$.providers[2].local_hardware.as_of must be a non-negative integer',
           r'$.providers[2].local_hardware.gpu_memory_total_bytes must be a positive integer',
           r'$.providers[2].local_hardware.gpu_memory_available_bytes must be a non-negative integer',

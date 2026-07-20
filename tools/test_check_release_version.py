@@ -50,9 +50,7 @@ class ReleaseVersionCheckTests(unittest.TestCase):
         files = {
             "collector/pubspec.yaml": "version: 1.2.3\n",
             "collector/bin/collect.dart": "const _version = '1.2.3';\n",
-            "collector/lib/mcp.dart": (
-                "const quotabotMcpVersion = '1.2.3';\n"
-            ),
+            "collector/lib/mcp.dart": ("const quotabotMcpVersion = '1.2.3';\n"),
             "app/pubspec.yaml": "version: 1.2.3+17\n",
             "app/pubspec.lock": (
                 "packages:\n"
@@ -63,7 +61,9 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 "    dependency: transitive\n"
                 '    version: "1.0.0"\n'
             ),
-            "ROADMAP.md": "The current line, **1.2.3**, is best\n",
+            "ROADMAP.md": (
+                "The current line, **1.2.3**, contains the release candidate.\n"
+            ),
             "CHANGELOG.md": "## Unreleased\n\n## 1.2.3 - 2026-07-09\n",
         }
         for relative_path, content in files.items():

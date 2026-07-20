@@ -19,11 +19,11 @@ const double kMachineScopedEvidenceConfidenceFactor = 0.7;
 bool windowHasRolledOver(QuotaWindow w, int now) =>
     w.resetsAt != null && w.resetsAt! <= now;
 
-/// Effective used percent for display and routing. A window whose reset boundary
-/// has passed is fresh, even if the last provider snapshot still says 100% used.
-double windowUsedPercent(QuotaWindow w, int now) => windowHasRolledOver(w, now)
-    ? 0.0
-    : (w.percent ?? 0).clamp(0, 100).toDouble();
+/// Effective used percent for a context-free window. A reset timestamp alone
+/// never proves the new account-wide balance, so preserve the reported value
+/// until a provider observation supplies a new window.
+double windowUsedPercent(QuotaWindow w, int now) =>
+    (w.percent ?? 0).clamp(0, 100).toDouble();
 
 /// Effective remaining percent for a single quota window.
 double windowHeadroom(QuotaWindow w, int now) =>
@@ -31,16 +31,16 @@ double windowHeadroom(QuotaWindow w, int now) =>
 
 /// Whether [w] can be treated as reset for this exact quota observation.
 ///
-/// A passed reset establishes fresh capacity only when the surrounding quota is
-/// trusted current evidence. Cached or integrity-rejected evidence still owns
-/// its last observed percentage; rolling that stale window to zero used would
-/// turn an offline, spent snapshot into a misleading 100% free reading.
+/// Reset metadata identifies the end of the observed pool, but it does not say
+/// what happened afterward on this or another device. A provider quota is only
+/// current again once a new observation supplies its next window, so quota-aware
+/// display and routing never synthesize zero usage at the boundary.
 bool quotaWindowHasRolledOver(
   ProviderQuota quota,
   QuotaWindow w,
   int now,
 ) =>
-    isTrustedQuotaEvidenceAt(quota, now) && windowHasRolledOver(w, now);
+    false;
 
 /// Used percent for [w], preserving the last observed value when [quota] is
 /// stale or otherwise untrusted.
@@ -67,9 +67,10 @@ double quotaWindowHeadroom(
 /// post-reset usage is unknown; presenting it as a confident 100% free asserts
 /// more than the evidence supports. Such a read is marked stale with a caveat, so
 /// routing declines to rely on it and the glance shows it as a last-known value
-/// rather than a live one. Server-refreshing evidence (authoritative live and
-/// this-machine fallback) is untouched: there a passed reset genuinely rolled the
-/// window over and the next read reflects the real post-reset state.
+/// rather than a live one. Authoritative and this-machine reads are not changed
+/// by this passive-specific helper: the shared trust boundary already makes any
+/// observation with a passed reset unavailable until a fresh response names the
+/// current pool.
 ProviderQuota flagStalePassiveRolloverEvidence(ProviderQuota q, int now) {
   if (q.sourceClass != ProviderSourceClass.passiveLocalEvidence) return q;
   if (!q.ok || q.stale || q.windows.isEmpty) return q;
@@ -115,8 +116,9 @@ typedef LeaseDiscountProvider = double Function(
 double _noLeaseDiscount(String provider, String account) => 0;
 
 /// Remaining headroom for a provider as a percent (0..100), governed by its
-/// most constrained window. A window whose reset time has passed is treated as
-/// fresh. Returns null when the provider has no usable windows.
+/// most constrained window. A passed reset preserves the last observed value
+/// until a new provider observation names the next window. Returns null when
+/// the provider has no usable windows.
 double? providerHeadroom(ProviderQuota q, int now) {
   if (q.windows.isEmpty) return null;
   double minRemaining = 100;
@@ -169,16 +171,74 @@ ProviderQuota? providerWithMostHeadroom(List<ProviderQuota> quotas, int now) {
   );
 }
 
-/// Whether a local-runtime observation proves that the runtime is reachable
-/// now. Local availability is never served from stale evidence and requires the
-/// same timestamp and provenance integrity used by cloud routing.
-bool isLocalRuntimeAvailableAt(ProviderQuota quota, int now) =>
+/// Selects one account for a provider-name availability check. An exact
+/// [account] keeps the caller's existing account-specific behavior. Without an
+/// account, current usable evidence wins, then current but unavailable evidence,
+/// then remaining headroom, with the account key as the stable tie-breaker.
+/// This keeps CLI, MCP, and loopback HTTP checks deterministic and prevents a
+/// spent first account from hiding a later healthy account.
+ProviderQuota? bestProviderAccountForCheck(
+  Iterable<ProviderQuota> matches,
+  int now, {
+  String? account,
+}) {
+  final candidates = matches.toList();
+  if (account != null) {
+    for (final candidate in candidates) {
+      if (candidate.account == account) return candidate;
+    }
+    return null;
+  }
+  if (candidates.isEmpty) return null;
+
+  bool available(ProviderQuota quota) => quota.isLocal
+      ? isLocalRuntimeAvailableAt(quota, now)
+      : providerAvailability(quota, now).available;
+  bool current(ProviderQuota quota) => quota.isLocal
+      ? isLocalRuntimeReachableAt(quota, now)
+      : isTrustedQuotaEvidenceAt(quota, now);
+  double headroom(ProviderQuota quota) => quota.isLocal && available(quota)
+      ? 100
+      : providerHeadroom(quota, now) ?? -1;
+
+  candidates.sort((a, b) {
+    final aAvailable = available(a);
+    final bAvailable = available(b);
+    if (aAvailable != bAvailable) return aAvailable ? -1 : 1;
+    final aCurrent = current(a);
+    final bCurrent = current(b);
+    if (aCurrent != bCurrent) return aCurrent ? -1 : 1;
+    final byHeadroom = headroom(b).compareTo(headroom(a));
+    if (byHeadroom != 0) return byHeadroom;
+    final byAccount = a.account.compareTo(b.account);
+    if (byAccount != 0) return byAccount;
+    final byCapture = b.asOf.compareTo(a.asOf);
+    if (byCapture != 0) return byCapture;
+    return a.sourceClass.wireName.compareTo(b.sourceClass.wireName);
+  });
+  return candidates.first;
+}
+
+/// Whether a local-runtime observation proves that its daemon is reachable now.
+/// This says nothing about where a represented model executes: an Ollama
+/// `-cloud` model is reachable through the daemon but is not on-device capacity.
+bool isLocalRuntimeReachableAt(ProviderQuota quota, int now) =>
     quota.isLocal &&
     quota.ok &&
     !quota.stale &&
     quota.asOf > 0 &&
     quota.asOf <= now + kQuotaEvidenceClockSkewSeconds &&
     quota.sourceClassViolation == null;
+
+/// Whether a local runtime supplies usable on-device capacity for provider
+/// routing. A runtime whose represented models are all cloud-offloaded must not
+/// satisfy local-first or local-fallback policy. Reachability without at least
+/// one represented on-device model proves only that the daemon answered, not
+/// that it can execute the next request.
+bool isLocalRuntimeAvailableAt(ProviderQuota quota, int now) =>
+    isLocalRuntimeReachableAt(quota, now) &&
+    quota.error == null &&
+    quota.models.any((model) => !model.cloudOffloaded);
 
 /// Whether any provider can take work right now: a running local runtime, or a
 /// metered subscription with headroom left. Lets a shell or agent branch on "is
@@ -789,6 +849,11 @@ RouteCandidateVerdict _receiptVerdict(
         ? RouteCandidateVerdict.spent
         : RouteCandidateVerdict.unavailable;
   }
+  if (!candidate.isLocal &&
+      (candidate.headroom ?? 0) > kSpentHeadroomFloor &&
+      (candidate.effectiveHeadroom ?? 0) <= kSpentHeadroomFloor) {
+    return RouteCandidateVerdict.adjustedHeadroomDepleted;
+  }
   if (candidate.isLocal && suggestion.recommended?.isLocal != true) {
     return RouteCandidateVerdict.localFallbackOnly;
   }
@@ -850,13 +915,15 @@ String _effectiveHeadroomNote(RouteCandidate c) {
     return '';
   }
   if (h - e < 1) return '';
-  final causes = <String>[
-    if (c.burnPerHour != null && c.burnPerHour! > 0) 'burn',
-    if (c.leaseDiscount > 0) 'leases',
-    if (c.pipeDiscount > 0) 'pipe',
-  ];
+  final causes = _effectiveHeadroomCauses(c);
   return ', ~${e.round()}% after ${causes.join('/')}';
 }
+
+List<String> _effectiveHeadroomCauses(RouteCandidate c) => <String>[
+      if (c.burnPerHour != null && c.burnPerHour! > 0) 'burn',
+      if (c.leaseDiscount > 0) 'leases',
+      if (c.pipeDiscount > 0) 'pipe',
+    ];
 
 String _localFallbackSubscriptionNote(RouteCandidate? candidate) {
   if (candidate == null) return '';
@@ -1274,6 +1341,7 @@ RouteSuggestion suggestRoute(
   Set<String>? capabilityKnownQuotaKeys,
   Set<String>? capabilityAvailableQuotaKeys,
   Map<String, int> capabilityBudgetResetByQuotaKey = const {},
+  Map<String, double> capabilityHeadroomByQuotaKey = const {},
   List<String> preferenceOrder = const [],
   String snapshotSource = 'live',
   int? snapshotAsOf,
@@ -1304,7 +1372,29 @@ RouteSuggestion suggestRoute(
     final capabilityLimited = cap.limited;
     final capabilityBudgetLimited = cap.budgetLimited;
     final capabilityBlocked = cap.blocked;
-    final candidateResetsAt = cap.resetsAt;
+    final rawCapabilityHeadroom = capabilityHeadroomByQuotaKey[quotaKey];
+    // Capability-scoped headroom is supplied only when the model registry has
+    // proved an eligible current model pool. It may replace a provider's
+    // synthetic worst-pool summary, but never revive stale, drifted, unknown, or
+    // otherwise blocked evidence.
+    final capabilityHeadroom = !q.isLocal &&
+            !capabilityBlocked &&
+            (capabilityAvailableQuotaKeys?.contains(quotaKey) ?? false) &&
+            isTrustedQuotaEvidenceAt(q, now) &&
+            rawCapabilityHeadroom != null &&
+            rawCapabilityHeadroom.isFinite &&
+            rawCapabilityHeadroom >= 0 &&
+            rawCapabilityHeadroom <= 100
+        ? rawCapabilityHeadroom
+        : null;
+    final routeHeadroom = capabilityHeadroom ?? headroom;
+    final routeAvailable = capabilityHeadroom == null
+        ? a.available
+        : capabilityHeadroom > kSpentHeadroomFloor;
+    // The synthetic provider reset can belong to the unrelated tightest model.
+    // Until capability gates carry the selected pool's reset, omit it instead of
+    // attaching false precision to the overridden model-budget headroom.
+    final candidateResetsAt = capabilityHeadroom == null ? cap.resetsAt : null;
     final accountStat = q.isLocal ? null : burnStatsByProvider[quotaKey];
     final providerStat = q.isLocal ? null : burnStatsByProvider[q.provider];
     final stat = q.isLocal ? null : (accountStat ?? providerStat);
@@ -1321,29 +1411,39 @@ RouteSuggestion suggestRoute(
             _pipePenaltyFor(q, pipePenaltyByProvider),
             _nativePipePenaltyFor(q),
           );
-    final effective = capabilityBlocked || headroom == null
+    final effective = capabilityBlocked || routeHeadroom == null
         ? null
-        : (riskAdjustedHeadroom(headroom, burn, burnSe, leadHours, riskZ) -
+        : (riskAdjustedHeadroom(
+                  routeHeadroom,
+                  burn,
+                  burnSe,
+                  leadHours,
+                  riskZ,
+                ) -
                 leaseDiscount -
                 pipeDiscount)
             .clamp(0.0, 100.0)
             .toDouble();
-    final strand = headroom == null
+    final strand = routeHeadroom == null
         ? null
-        : strandProbability(headroom, burn, burnSe, a.resetsAt, now);
+        : strandProbability(
+            routeHeadroom,
+            burn,
+            burnSe,
+            candidateResetsAt,
+            now,
+          );
     final confidence = _confidence(q, burnSe, samples, now);
     final wasteBurn = accountStat ??
         ((measuredProviderCounts[q.provider] ?? 0) == 1 ? providerStat : null);
     final projectedWaste = _projectedWastePercent(
       q,
-      capabilityBlocked
-          ? (
-              available: false,
-              headroom: a.headroom,
-              resetsAt: candidateResetsAt
-            )
-          : a,
-      headroom,
+      (
+        available: routeAvailable && !capabilityBlocked,
+        headroom: routeHeadroom,
+        resetsAt: candidateResetsAt,
+      ),
+      routeHeadroom,
       wasteBurn?.perHour,
       now,
       thresholdPercent: wasteThresholdPercent,
@@ -1359,7 +1459,7 @@ RouteSuggestion suggestRoute(
         : 0.0;
     final score = routingScoreBreakdown(
       isLocal: q.isLocal,
-      headroom: headroom,
+      headroom: routeHeadroom,
       effectiveHeadroom: effective,
       burnPerHour: burn,
       confidence: confidence,
@@ -1377,7 +1477,7 @@ RouteSuggestion suggestRoute(
       isLocal: q.isLocal,
       asOf: q.asOf,
       perMachine: q.perMachine,
-      headroom: headroom,
+      headroom: routeHeadroom,
       effectiveHeadroom: effective,
       burnPerHour: burn,
       burnSe: burnSe,
@@ -1393,16 +1493,18 @@ RouteSuggestion suggestRoute(
           score == null || score.costDiscount >= 1 ? null : score.costDiscount,
       bindingPool: q.isLocal
           ? 'runtime'
-          : capabilityBudgetLimited
+          : capabilityHeadroom != null
               ? 'model_budget'
-              : binding?.label,
+              : capabilityBudgetLimited
+                  ? 'model_budget'
+                  : binding?.label,
       resetsAt: candidateResetsAt,
       stale: q.stale,
       driftReason: q.driftReason,
       driftObservedAt: q.driftObservedAt,
       available: q.isLocal
           ? isLocalRuntimeAvailableAt(q, now)
-          : a.available && !capabilityBlocked,
+          : routeAvailable && !capabilityBlocked,
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
       capabilityLimited: capabilityLimited,
@@ -1546,16 +1648,43 @@ RouteSuggestion suggestRoute(
     );
   }
 
-  // No local fallback. Recommend the best subscription above the spent floor.
+  // No local fallback. Recommend the best subscription whose effective
+  // headroom remains above the spent floor after burn, leases, and pipe health.
   final withAny = liveSubs
-      .where((c) => c.available && (c.headroom ?? 0) > kSpentHeadroomFloor)
+      .where(
+        (c) => c.available && (c.effectiveHeadroom ?? 0) > kSpentHeadroomFloor,
+      )
       .toList();
   if (withAny.isNotEmpty) {
     final best = withAny.first;
+    final adjustmentNote = _effectiveHeadroomNote(best);
     return result(
       best,
-      'All subscriptions are low; ${best.provider} has the best runway (${best.headroom!.round()}% free).',
+      'All subscriptions are low; ${best.provider} has the best runway '
+      '(${best.headroom!.round()}% free$adjustmentNote).',
       decisionCode: RouteDecisionCode.lowQuota,
+    );
+  }
+
+  final adjustedDepleted = liveSubs
+      .where(
+        (c) =>
+            c.available &&
+            (c.headroom ?? 0) > kSpentHeadroomFloor &&
+            (c.effectiveHeadroom ?? 0) <= kSpentHeadroomFloor,
+      )
+      .toList();
+  if (adjustedDepleted.isNotEmpty) {
+    final best = adjustedDepleted.first;
+    final causes = _effectiveHeadroomCauses(best);
+    final cause = causes.isEmpty ? 'routing adjustments' : causes.join('/');
+    return result(
+      null,
+      'No subscription has usable effective headroom after routing '
+      'adjustments; ${best.provider} has ${best.headroom!.round()}% raw but '
+      '${best.effectiveHeadroom!.round()}% after $cause. Wait for those '
+      'adjustments to clear before routing.',
+      decisionCode: RouteDecisionCode.adjustedHeadroomDepleted,
     );
   }
 

@@ -29,8 +29,14 @@ ProviderQuota _q(
       modelQuotas: modelQuotas,
     );
 
-ProviderQuota _local(String id) =>
-    _q(id, const [], kind: ProviderQuotaKind.local);
+ProviderQuota _local(String id) => ProviderQuota(
+      provider: id,
+      displayName: id,
+      account: 'a',
+      asOf: _now,
+      kind: ProviderQuotaKind.local,
+      models: const [ModelInfo(id: 'local-test', local: true)],
+    );
 
 ProviderQuota _accountQ(String id, String account, double usedPercent) =>
     ProviderQuota(
@@ -89,6 +95,73 @@ class _PairedTransport implements Transport {
   }
 }
 
+/// Models independent processes that can observe the same stale pre-transaction
+/// lease snapshot. Only [selectAndReserve] sees the serialized store state.
+class _StaleReadRouteLeaseStore implements RouteLeaseStore {
+  final InMemoryRouteLeaseStore _store;
+  int directReserveCalls = 0;
+  int transactionalReserveCalls = 0;
+
+  _StaleReadRouteLeaseStore({LeaseIdFactory? idFactory})
+      : _store = InMemoryRouteLeaseStore(idFactory: idFactory);
+
+  @override
+  RouteLeaseState activeState(int now) => RouteLeaseState.available(const []);
+
+  @override
+  List<RouteLease> active(int now) => const [];
+
+  List<RouteLease> transactionalActive(int now) => _store.active(now);
+
+  @override
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  }) {
+    transactionalReserveCalls++;
+    return _store.selectAndReserve(
+      select: select,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+      reuseWhere: reuseWhere,
+    );
+  }
+
+  @override
+  RouteLeaseReservation reserve({
+    required String provider,
+    required String account,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+  }) {
+    directReserveCalls++;
+    return _store.reserve(
+      provider: provider,
+      account: account,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  @override
+  RouteLeaseRelease release({required String leaseId, required int now}) =>
+      _store.release(leaseId: leaseId, now: now);
+}
+
 void main() {
   group('response builders', () {
     test('quotasSnapshot carries schema, time, and every provider', () {
@@ -132,6 +205,71 @@ void main() {
       ], _now);
       expect(r['provider'], isNull);
       expect(r['reason'], isNotEmpty);
+    });
+
+    test('decideNow rejects a cache that crossed its reset boundary', () {
+      final response = decideNowResponse(
+        CachedQuotaSnapshot(
+          providers: [
+            ProviderQuota(
+              provider: 'claude',
+              displayName: 'Claude',
+              account: 'max',
+              asOf: _now - 10,
+              windows: [
+                QuotaWindow(
+                  label: 'weekly',
+                  usedPercent: 80,
+                  resetsAt: _now,
+                ),
+              ],
+            ),
+          ],
+          asOf: _now - 10,
+          source: 'memory',
+        ),
+        _now,
+      );
+
+      expect(response['snapshot_stale'], isTrue);
+      expect(response['snapshot_stale_scope'], 'snapshot');
+      expect(response['recommended'], isNull);
+      final claude = (response['ranked'] as List).single as Map;
+      expect(claude['headroom_percent'], 20);
+      expect(claude['stale'], isTrue);
+      expect(claude['available'], isFalse);
+    });
+
+    test('decideNow rejects an implausibly distant shared reset', () {
+      final response = decideNowResponse(
+        CachedQuotaSnapshot(
+          providers: [
+            ProviderQuota(
+              provider: 'claude',
+              displayName: 'Claude',
+              account: 'max',
+              asOf: _now - 10,
+              windows: [
+                QuotaWindow(
+                  label: 'weekly',
+                  usedPercent: 30,
+                  resetsAt: _now + 401 * 86400,
+                ),
+              ],
+            ),
+          ],
+          asOf: _now - 10,
+          source: 'memory',
+        ),
+        _now,
+      );
+
+      expect(response['snapshot_stale'], isTrue);
+      expect(response['recommended'], isNull);
+      final claude = (response['ranked'] as List).single as Map;
+      expect(claude['headroom_percent'], 70);
+      expect(claude['stale'], isTrue);
+      expect(claude['available'], isFalse);
     });
 
     test('mostHeadroomResponse ignores rounded-one-percent slivers', () {
@@ -212,18 +350,77 @@ void main() {
       expect(r['headroom_percent'], 80);
     });
 
+    test(
+        'availabilityResponse selects a live account after a spent first match',
+        () {
+      final r = availabilityResponse(
+        [
+          _accountQ('claude', 'spent', 100),
+          _accountQ('claude', 'live', 20),
+        ],
+        _now,
+        'claude',
+        null,
+      );
+
+      expect(r['account'], 'live');
+      expect(r['available'], isTrue);
+      expect(r['headroom_percent'], 80);
+    });
+
+    test('availabilityResponse resolves equal accounts by stable account key',
+        () {
+      for (final accounts in const [
+        ['zeta', 'alpha'],
+        ['alpha', 'zeta'],
+      ]) {
+        final r = availabilityResponse(
+          [
+            _accountQ('claude', accounts[0], 20),
+            _accountQ('claude', accounts[1], 20),
+          ],
+          _now,
+          'claude',
+          null,
+        );
+
+        expect(r['account'], 'alpha');
+      }
+    });
+
+    test('availabilityResponse preserves an exact spent account request', () {
+      final r = availabilityResponse(
+        [
+          _accountQ('claude', 'spent', 100),
+          _accountQ('claude', 'live', 20),
+        ],
+        _now,
+        'claude',
+        'spent',
+      );
+
+      expect(r['account'], 'spent');
+      expect(r['available'], isFalse);
+      expect(r['headroom_percent'], 0);
+    });
+
     test('availabilityResponse does not treat stale quota as available', () {
-      final r = availabilityResponse([
-        _q(
-          'grok',
-          [QuotaWindow(label: 'weekly', usedPercent: 66)],
-          stale: true,
-        ),
-      ], _now, 'grok', null);
+      final r = availabilityResponse(
+        [
+          _q(
+            'grok',
+            [QuotaWindow(label: 'weekly', usedPercent: 66)],
+          ).asStale('provider metadata endpoint unavailable'),
+        ],
+        _now,
+        'grok',
+        null,
+      );
       expect(r['provider'], 'grok');
       expect(r['available'], isFalse);
       expect(r['stale'], isTrue);
       expect(r['headroom_percent'], 34);
+      expect(r['error'], 'provider metadata endpoint unavailable');
     });
 
     test('availabilityResponse does not treat stale local runtime as available',
@@ -433,6 +630,15 @@ void main() {
           'local_hardware',
         ]),
       );
+      final modelQuotaProperties = (((providerProperties['model_quotas']
+          as Map)['items'] as Map)['properties'] as Map);
+      expect(modelQuotaProperties, contains('window_label'));
+      final modelQuotaWindowLabel = modelQuotaProperties['window_label'] as Map;
+      expect(modelQuotaWindowLabel['minLength'], 1);
+      expect(
+        modelQuotaWindowLabel['maxLength'],
+        kMaxModelQuotaWindowLabelCharacters,
+      );
       final suggestModelProperties = byName['suggest_model']!
           .outputSchema!
           .toJson()['properties'] as Map<String, dynamic>;
@@ -440,6 +646,14 @@ void main() {
         suggestModelProperties.keys,
         containsAll(['use_expiring_quota', 'expiring_quota']),
       );
+      final listModelsInput = byName['list_models']!
+          .inputSchema
+          .toJson()['properties'] as Map<String, dynamic>;
+      final suggestModelInput = byName['suggest_model']!
+          .inputSchema
+          .toJson()['properties'] as Map<String, dynamic>;
+      expect(listModelsInput, isNot(contains('use_expiring_quota')));
+      expect(suggestModelInput, contains('use_expiring_quota'));
       expect(
         byName['list_models']!.description,
         allOf(
@@ -447,6 +661,16 @@ void main() {
           contains('cloud-offloaded local model'),
           contains('excluded'),
           isNot(contains('every model')),
+        ),
+      );
+      expect(
+        byName['list_quotas']!.description,
+        allOf(
+          contains(
+            'normalized quota and runtime evidence for every connected provider',
+          ),
+          contains('source_class, ok/stale'),
+          isNot(contains('(Codex, Claude')),
         ),
       );
       expect(
@@ -487,6 +711,22 @@ void main() {
       expect(
         candidateProperties.keys,
         containsAll(['drift_reason', 'drift_observed_at']),
+      );
+      final availabilityProperties = byName['check_provider_availability']!
+          .outputSchema!
+          .toJson()['properties'] as Map<String, dynamic>;
+      expect(availabilityProperties, contains('error'));
+      final decideProperties = byName['decide_now']!
+          .outputSchema!
+          .toJson()['properties'] as Map<String, dynamic>;
+      expect(decideProperties, contains('snapshot_stale_scope'));
+      expect(
+        byName['decide_now']!.description,
+        allOf(
+          contains('whole snapshot after any profile, account, and exclude'),
+          contains('provider-level staleness'),
+          isNot(contains('fleet-wide')),
+        ),
       );
     });
 
@@ -547,6 +787,7 @@ void main() {
         const CallToolRequest(name: 'list_models'),
       );
       expect(models.structuredContent?['schema'], 'quotabot.models.v1');
+      expect(models.structuredContent?['budget_policy'], 'any');
       // The fixture catalog gives claude one model, gated by its live budget.
       final list = models.structuredContent?['models'] as List;
       final claude = list.firstWhere((m) => (m as Map)['id'] == 'claude-test');
@@ -569,14 +810,27 @@ void main() {
         ),
       );
       expect(localOnly.structuredContent?['budget_policy'], 'local');
-      expect(localOnly.structuredContent?['models'], isEmpty);
+      final localModels = localOnly.structuredContent?['models'] as List;
+      expect(localModels, hasLength(1));
+      expect((localModels.single as Map)['provider'], 'ollama');
+      expect((localModels.single as Map)['id'], 'local-test');
 
       final pick = await client.callTool(
         const CallToolRequest(name: 'suggest_model'),
       );
       expect(pick.structuredContent?['schema'], 'quotabot.suggest_model.v1');
-      expect(
-          (pick.structuredContent?['recommended'] as Map)['id'], 'claude-test');
+      expect(pick.structuredContent?['budget_policy'], 'quota');
+      final pickedModel = pick.structuredContent?['recommended'] as Map;
+      expect(pickedModel['id'], 'local-test');
+      expect(pickedModel['provider'], 'ollama');
+
+      final unrestrictedPick = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_model',
+          arguments: {'budget': 'any'},
+        ),
+      );
+      expect(unrestrictedPick.structuredContent?['budget_policy'], 'any');
 
       final badBudget = await client.callTool(
         const CallToolRequest(
@@ -717,6 +971,18 @@ void main() {
       expect(
         invalidContext.structuredContent?['error'],
         contains('min_context must be'),
+      );
+
+      final emptyBudget = await client.callTool(
+        const CallToolRequest(
+          name: 'list_models',
+          arguments: {'budget': ''},
+        ),
+      );
+      expect(emptyBudget.isError, isFalse);
+      expect(
+        emptyBudget.structuredContent?['error'],
+        'unknown budget policy: ""',
       );
 
       final invertedTiers = await client.callTool(
@@ -1302,6 +1568,58 @@ void main() {
       expect(store.active(_now), hasLength(2));
     });
 
+    test('concurrent explicit reservations select and reserve atomically',
+        () async {
+      var nextId = 0;
+      final store = _StaleReadRouteLeaseStore(
+        idFactory: () => 'lease-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 80)]),
+        ],
+        leaseStore: store,
+      );
+
+      final reservations = await Future.wait([
+        client.callTool(
+          const CallToolRequest(
+            name: 'reserve_provider',
+            arguments: {'provider': 'claude', 'weight_percent': 30},
+          ),
+        ),
+        client.callTool(
+          const CallToolRequest(
+            name: 'reserve_provider',
+            arguments: {'provider': 'claude', 'weight_percent': 30},
+          ),
+        ),
+      ]);
+      final diagnostics = jsonEncode(
+        reservations
+            .map((reservation) => reservation.structuredContent)
+            .toList(),
+      );
+
+      expect(
+        reservations.map(
+          (reservation) => reservation.structuredContent?['reserved'],
+        ),
+        unorderedEquals([true, false]),
+        reason: diagnostics,
+      );
+      final rejected = reservations.singleWhere(
+        (reservation) => reservation.structuredContent?['reserved'] == false,
+      );
+      expect(
+        rejected.structuredContent?['reason'],
+        'claude has no effective headroom available',
+      );
+      expect(store.transactionalReserveCalls, 2);
+      expect(store.directReserveCalls, 0);
+      expect(store.transactionalActive(_now), hasLength(1));
+    });
+
     test('reserve_provider reuses an auto-selected lease on idempotent retry',
         () async {
       var nextId = 0;
@@ -1541,6 +1859,10 @@ void main() {
       expect(decision.structuredContent?['snapshot_as_of'], _now - 10);
       expect(decision.structuredContent?['snapshot_age_seconds'], 10);
       expect(decision.structuredContent?['snapshot_stale'], isFalse);
+      expect(
+        decision.structuredContent?['snapshot_stale_scope'],
+        'snapshot',
+      );
       expect(decision.structuredContent?['decision_code'], 'local_first');
       final receipt =
           decision.structuredContent?['receipt'] as Map<String, dynamic>;
@@ -1549,6 +1871,7 @@ void main() {
       expect((receipt['snapshot'] as Map)['source'], 'disk');
       expect((receipt['snapshot'] as Map)['as_of'], _now - 10);
       expect((receipt['snapshot'] as Map)['age_seconds'], 10);
+      expect((receipt['snapshot'] as Map)['stale_scope'], 'snapshot');
       expect(receipt['explanation'], contains('Evidence: cached disk'));
       expect(
         (decision.structuredContent?['recommended'] as Map)['provider'],
@@ -1754,19 +2077,64 @@ void main() {
 
     test('resource subscriptions notify when a quota alert fires', () async {
       var snapshotIndex = 0;
+      final leases = InMemoryRouteLeaseStore();
+      expect(
+        leases
+            .reserve(
+              provider: 'codex',
+              account: 'home@example.com',
+              now: _now,
+              leaseSeconds: 300,
+              weightPercent: 30,
+            )
+            .reserved,
+        isTrue,
+      );
       final snapshots = [
         [
           _accountQ('claude', 'work@example.com', 20),
           _accountQ('codex', 'home@example.com', 30),
+          _accountQ('grok', 'other@example.com', 35),
         ],
         [
           _accountQ('claude', 'work@example.com', 95),
           _accountQ('codex', 'home@example.com', 30),
+          _accountQ('grok', 'other@example.com', 35),
         ],
       ];
       await connect(
         const [],
         snapshotProvider: () async => snapshots[snapshotIndex],
+        leaseStore: leases,
+        catalog: const {
+          'claude': [
+            ModelInfo(
+              id: 'claude-test',
+              contextTokens: 200000,
+              tools: true,
+              reasoning: 'reasoning',
+              tier: 'standard',
+            ),
+          ],
+          'codex': [
+            ModelInfo(
+              id: 'codex-test',
+              contextTokens: 200000,
+              tools: true,
+              reasoning: 'reasoning',
+              tier: 'standard',
+            ),
+          ],
+          'grok': [
+            ModelInfo(
+              id: 'grok-test',
+              contextTokens: 200000,
+              tools: true,
+              reasoning: 'reasoning',
+              tier: 'standard',
+            ),
+          ],
+        },
       );
       final updated = <String>[];
       client.setNotificationHandler<JsonRpcResourceUpdatedNotification>(
@@ -1803,6 +2171,7 @@ void main() {
       expect((fired.single as Map)['kind'], 'low_quota');
       expect((fired.single as Map)['provider'], 'claude');
       expect((fired.single as Map)['severity'], 'red');
+      expect((fired.single as Map)['route_to'], 'grok');
 
       await client.unsubscribeResource(
         const UnsubscribeRequest(uri: 'quotas://alerts'),

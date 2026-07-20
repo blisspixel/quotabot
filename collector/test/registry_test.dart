@@ -1,10 +1,13 @@
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/model_catalog.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/parsing.dart';
+import 'package:quotabot_collector/plan_evidence.dart';
 import 'package:quotabot_collector/provider_ids.dart';
 import 'package:quotabot_collector/registry.dart';
 import 'package:test/test.dart';
 
-const _now = 1782000000;
+const _now = kClaudeFableIncludedQuotaEffectiveAt + 86400;
 
 ProviderQuota _cloud(
   String id,
@@ -14,13 +17,20 @@ ProviderQuota _cloud(
   int? resetsAt,
   String account = 'a',
   bool? perMachine,
+  String? plan,
+  ProviderPlanEvidenceSource? planEvidenceSource,
+  int? planEvidenceAsOf,
+  int asOf = _now,
   List<ModelQuota> modelQuotas = const [],
 }) =>
     ProviderQuota(
       provider: id,
       displayName: id,
       account: account,
-      asOf: _now,
+      plan: plan,
+      planEvidenceSource: planEvidenceSource,
+      planEvidenceAsOf: planEvidenceAsOf,
+      asOf: asOf,
       perMachine:
           perMachine ?? const {'cursor', 'windsurf', 'kiro'}.contains(id),
       stale: stale,
@@ -158,6 +168,360 @@ void main() {
     expect(flash.available, isFalse);
   });
 
+  test('an exhausted Antigravity pool does not block a healthy sibling', () {
+    final antigravity = _cloud(
+      antigravityProviderId,
+      100,
+      resetsAt: _now + 7200,
+      modelQuotas: const [
+        ModelQuota(
+          model: 'Gemini 3.1 Pro',
+          usedPercent: 100,
+          resetsAt: _now + 7200,
+        ),
+        ModelQuota(
+          model: 'Gemini 3 Flash',
+          usedPercent: 20,
+          resetsAt: _now + 3600,
+        ),
+      ],
+    );
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.1-pro',
+          displayName: 'Gemini 3.1 Pro',
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+          id: 'gemini-3-flash',
+          displayName: 'Gemini 3 Flash',
+          tier: 'standard',
+        ),
+      ],
+    };
+
+    expect(providerAvailability(antigravity, _now).available, isFalse);
+    final registry = buildModelRegistry(
+      [antigravity],
+      _now,
+      catalog: catalog,
+    );
+    final pro = registry.singleWhere(
+      (entry) => entry.model.id == 'gemini-3.1-pro',
+    );
+    final flash = registry.singleWhere(
+      (entry) => entry.model.id == 'gemini-3-flash',
+    );
+
+    expect(pro.available, isFalse);
+    expect(pro.headroomPercent, 0);
+    expect(flash.available, isTrue);
+    expect(flash.headroomPercent, 80);
+  });
+
+  test('Antigravity capability route uses conservative eligible headroom', () {
+    final antigravity = _cloud(
+      antigravityProviderId,
+      100,
+      resetsAt: _now + 7200,
+      modelQuotas: const [
+        ModelQuota(
+          model: 'Gemini 3.1 Pro',
+          usedPercent: 40,
+          resetsAt: _now + 3600,
+        ),
+        ModelQuota(
+          model: 'Gemini 3.2 Pro',
+          usedPercent: 20,
+          resetsAt: _now + 5400,
+        ),
+        ModelQuota(
+          model: 'Gemini 3 Flash',
+          usedPercent: 100,
+          resetsAt: _now + 7200,
+        ),
+      ],
+    );
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.1-pro',
+          displayName: 'Gemini 3.1 Pro',
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+          id: 'gemini-3.2-pro',
+          displayName: 'Gemini 3.2 Pro',
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+          id: 'gemini-3-flash',
+          displayName: 'Gemini 3 Flash',
+          tier: 'standard',
+        ),
+      ],
+    };
+    final gates = providerRouteCapabilityGates(
+      [antigravity],
+      _now,
+      catalog: catalog,
+    );
+    final key = quotaIdentityKeyFor(antigravity);
+
+    expect(providerAvailability(antigravity, _now).headroom, 0);
+    expect(gates.availableQuotaKeys, contains(key));
+    expect(gates.headroomByQuotaKey[key], 60);
+
+    final route = suggestRoute(
+      [antigravity],
+      _now,
+      capabilityKnownQuotaKeys: gates.knownQuotaKeys,
+      capabilityAvailableQuotaKeys: gates.availableQuotaKeys,
+      capabilityBudgetResetByQuotaKey: gates.budgetResetByQuotaKey,
+      capabilityHeadroomByQuotaKey: gates.headroomByQuotaKey,
+    );
+
+    expect(route.recommended?.provider, antigravityProviderId);
+    expect(route.recommended?.available, isTrue);
+    expect(route.recommended?.headroom, 60);
+    expect(route.recommended?.bindingPool, 'model_budget');
+    expect(route.recommended?.resetsAt, isNull);
+
+    final staleRoute = suggestRoute(
+      [antigravity.asStale('cached')],
+      _now,
+      capabilityKnownQuotaKeys: gates.knownQuotaKeys,
+      capabilityAvailableQuotaKeys: gates.availableQuotaKeys,
+      capabilityBudgetResetByQuotaKey: gates.budgetResetByQuotaKey,
+      capabilityHeadroomByQuotaKey: gates.headroomByQuotaKey,
+    );
+    expect(staleRoute.recommended, isNull);
+    expect(staleRoute.ranked.single.available, isFalse);
+    expect(staleRoute.ranked.single.headroom, 0);
+  });
+
+  test('equal-best Antigravity variants aggregate independently of order', () {
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.5-flash',
+          displayName: 'Gemini 3.5 Flash',
+          tier: 'standard',
+        ),
+      ],
+    };
+    const medium = ModelQuota(
+      model: 'Gemini 3.5 Flash (Medium)',
+      usedPercent: 10,
+      resetsAt: _now + 3600,
+    );
+    const high = ModelQuota(
+      model: 'Gemini 3.5 Flash (High)',
+      usedPercent: 90,
+      resetsAt: _now + 7200,
+    );
+
+    for (final variants in const [
+      [medium, high],
+      [high, medium],
+    ]) {
+      final entry = buildModelRegistry(
+        [
+          _cloud(
+            antigravityProviderId,
+            20,
+            resetsAt: _now + 7200,
+            modelQuotas: variants,
+          ),
+        ],
+        _now,
+        catalog: catalog,
+      ).single;
+
+      expect(entry.headroomPercent, 10);
+      expect(entry.resetsAt, _now + 7200);
+      expect(entry.available, isTrue);
+    }
+  });
+
+  test('an incomplete Antigravity sibling cannot advertise 90% headroom', () {
+    final response = {
+      'models': {
+        'Gemini 3.5 Flash (Medium)': {
+          'quotaInfo': {
+            'remainingFraction': 0.9,
+            'resetTime': _now + 3600,
+          },
+        },
+        'Gemini 3.5 Flash (High)': <String, Object?>{},
+      },
+    };
+    final quota = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: 'Antigravity',
+      account: 'a',
+      asOf: _now,
+      windows: antigravityWindows(response, _now),
+      modelQuotas: antigravityModelQuotasFromLive(response),
+    );
+
+    final registry = buildModelRegistry(
+      [quota],
+      _now,
+      catalog: const {
+        antigravityProviderId: [
+          ModelInfo(
+            id: 'gemini-3.5-flash',
+            displayName: 'Gemini 3.5 Flash',
+            tier: 'standard',
+          ),
+        ],
+      },
+    );
+
+    expect(registry, isEmpty);
+  });
+
+  test('equal-best unknown or expired variants fail closed', () {
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.5-flash',
+          displayName: 'Gemini 3.5 Flash',
+          tier: 'standard',
+        ),
+      ],
+    };
+
+    ModelEntry entry(List<ModelQuota> variants) => buildModelRegistry(
+          [
+            _cloud(
+              antigravityProviderId,
+              20,
+              resetsAt: _now + 7200,
+              modelQuotas: variants,
+            ),
+          ],
+          _now,
+          catalog: catalog,
+        ).single;
+
+    for (final variants in const [
+      [
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (Medium)',
+          resetsAt: _now + 3600,
+        ),
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (High)',
+          usedPercent: 20,
+          resetsAt: _now + 7200,
+        ),
+      ],
+      [
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (High)',
+          usedPercent: 20,
+          resetsAt: _now + 7200,
+        ),
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (Medium)',
+          resetsAt: _now + 3600,
+        ),
+      ],
+    ]) {
+      final unknown = entry(variants);
+      expect(unknown.headroomPercent, isNull);
+      expect(unknown.available, isFalse);
+    }
+
+    for (final variants in const [
+      [
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (Medium)',
+          usedPercent: 10,
+          resetsAt: _now,
+        ),
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (High)',
+          usedPercent: 20,
+          resetsAt: _now + 7200,
+        ),
+      ],
+      [
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (High)',
+          usedPercent: 20,
+          resetsAt: _now + 7200,
+        ),
+        ModelQuota(
+          model: 'Gemini 3.5 Flash (Medium)',
+          usedPercent: 10,
+          resetsAt: _now,
+        ),
+      ],
+    ]) {
+      final expired = entry(variants);
+      expect(expired.headroomPercent, 80);
+      expect(expired.resetsAt, _now);
+      expect(expired.available, isFalse);
+    }
+  });
+
+  test('expired Antigravity model quota cannot win on live provider quota', () {
+    const catalog = {
+      antigravityProviderId: [
+        ModelInfo(
+          id: 'gemini-3.1-pro',
+          displayName: 'Gemini 3.1 Pro',
+          reasoning: 'reasoning',
+          tier: 'flagship',
+        ),
+        ModelInfo(
+          id: 'gemini-3-flash',
+          displayName: 'Gemini 3 Flash',
+          tier: 'standard',
+        ),
+      ],
+    };
+    final antigravity = _cloud(
+      antigravityProviderId,
+      20,
+      resetsAt: _now + 7200,
+      modelQuotas: const [
+        ModelQuota(
+          model: 'Gemini 3.1 Pro',
+          usedPercent: 1,
+          resetsAt: _now,
+        ),
+        ModelQuota(
+          model: 'Gemini 3 Flash',
+          usedPercent: 40,
+          resetsAt: _now + 3600,
+        ),
+      ],
+    );
+
+    expect(providerAvailability(antigravity, _now).available, isTrue);
+    final suggestion = suggestModel(
+      [antigravity],
+      _now,
+      catalog: catalog,
+    );
+
+    expect(suggestion.recommended?.model.id, 'gemini-3-flash');
+    final expired = suggestion.ranked.singleWhere(
+      (entry) => entry.model.id == 'gemini-3.1-pro',
+    );
+    expect(expired.available, isFalse);
+    expect(expired.headroomPercent, 99);
+    expect(expired.resetsAt, _now);
+  });
+
   test('per-model quota cannot bypass provider integrity rejection', () {
     final suspect = _cloud(
       'antigravity',
@@ -206,6 +570,43 @@ void main() {
     expect(reg.single.resetsAt, isNull);
     expect(reg.single.gatingWindow, isNull);
     expect(reg.single.available, isFalse);
+  });
+
+  test('unknown model budget never sorts as full headroom', () {
+    final suggestion = suggestModel(
+      [
+        _cloud(
+          'antigravity',
+          20,
+          modelQuotas: const [
+            ModelQuota(model: 'Gemini 3 Flash', usedPercent: 100),
+          ],
+        ),
+      ],
+      _now,
+      catalog: const {
+        'antigravity': [
+          ModelInfo(
+            id: 'gemini-3-flash',
+            displayName: 'Gemini 3 Flash',
+            tier: 'standard',
+          ),
+          ModelInfo(
+            id: 'gemini-3.1-pro',
+            displayName: 'Gemini 3.1 Pro',
+            tier: 'standard',
+          ),
+        ],
+      },
+    );
+
+    expect(suggestion.recommended, isNull);
+    expect(
+      suggestion.ranked.map((entry) => entry.model.id),
+      ['gemini-3-flash', 'gemini-3.1-pro'],
+    );
+    expect(suggestion.ranked.first.headroomPercent, 0);
+    expect(suggestion.ranked.last.headroomPercent, isNull);
   });
 
   test('Claude Fable quota is a sparse overlay on shared provider quota', () {
@@ -278,6 +679,82 @@ void main() {
     expect(gates.availableQuotaKeys, contains(key));
   });
 
+  test('Codex scoped quota overlays shared quota without blocking siblings',
+      () {
+    final providerReset = _now + 5 * 86400;
+    final sparkReset = _now + 24 * 3600;
+    final codex = _cloud(
+      codexProviderId,
+      63,
+      resetsAt: providerReset,
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 90,
+          resetsAt: sparkReset,
+          windowLabel: 'weekly',
+        ),
+      ],
+    );
+    const catalog = {
+      codexProviderId: [
+        ModelInfo(
+          id: 'gpt-5.3-codex-spark',
+          displayName: 'GPT-5.3-Codex-Spark',
+        ),
+        ModelInfo(id: 'gpt-5.5', displayName: 'GPT-5.5'),
+      ],
+    };
+
+    final registry = buildModelRegistry([codex], _now, catalog: catalog);
+    final spark = registry.singleWhere(
+      (entry) => entry.model.id == 'gpt-5.3-codex-spark',
+    );
+    final shared = registry.singleWhere((entry) => entry.model.id == 'gpt-5.5');
+
+    expect(spark.headroomPercent, 10);
+    expect(spark.resetsAt, sparkReset);
+    expect(spark.gatingWindow, 'weekly');
+    expect(spark.available, isTrue);
+    expect(shared.headroomPercent, 37);
+    expect(shared.resetsAt, providerReset);
+    expect(shared.available, isTrue);
+  });
+
+  test('Codex Spark needs a live scoped pool', () {
+    final registry = buildModelRegistry(
+      [_cloud(codexProviderId, 20)],
+      _now,
+      catalog: const {
+        codexProviderId: [
+          ModelInfo(
+            id: 'gpt-5.3-codex-spark',
+            displayName: 'GPT-5.3-Codex-Spark',
+          ),
+        ],
+      },
+    );
+
+    expect(registry.single.headroomPercent, isNull);
+    expect(registry.single.available, isFalse);
+    expect(registry.single.quotaBacked, isFalse);
+  });
+
+  test('Codex production catalog lists Spark without invented capabilities',
+      () {
+    final spark = kModelCatalog[codexProviderId]!.singleWhere(
+      (model) => model.id == 'gpt-5.3-codex-spark',
+    );
+
+    expect(spark.displayName, 'GPT-5.3-Codex-Spark');
+    expect(spark.contextTokens, isNull);
+    expect(spark.maxOutputTokens, isNull);
+    expect(spark.tools, isNull);
+    expect(spark.vision, isNull);
+    expect(spark.reasoning, isNull);
+    expect(spark.tier, isNull);
+  });
+
   test('Claude Fable uses the tighter shared or scoped quota gate', () {
     const catalog = {
       claudeProviderId: [
@@ -333,6 +810,47 @@ void main() {
     expect(sharedTighter.headroomPercent, 10);
     expect(sharedTighter.resetsAt, providerReset);
     expect(sharedTighter.gatingWindow, 'weekly');
+  });
+
+  test('Claude Fable reset never synthesizes full scoped headroom', () {
+    const catalog = {
+      claudeProviderId: [
+        ModelInfo(id: 'claude-fable-5', displayName: 'Claude Fable 5'),
+        ModelInfo(id: 'claude-opus-4-8', displayName: 'Claude Opus 4.8'),
+      ],
+    };
+    final claude = _cloud(
+      claudeProviderId,
+      30,
+      plan: 'max',
+      planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+      planEvidenceAsOf: _now,
+      resetsAt: _now + 5 * 86400,
+      modelQuotas: const [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: 51,
+          resetsAt: _now,
+        ),
+      ],
+    );
+    final reg = buildModelRegistry([claude], _now, catalog: catalog);
+
+    final fable =
+        reg.singleWhere((entry) => entry.model.id == 'claude-fable-5');
+    final opus =
+        reg.singleWhere((entry) => entry.model.id == 'claude-opus-4-8');
+    expect(fable.headroomPercent, 49);
+    expect(fable.available, isFalse);
+    expect(opus.headroomPercent, 70);
+    expect(opus.available, isTrue);
+
+    final suggestion = suggestModel([claude], _now, catalog: catalog);
+    expect(suggestion.recommended?.model.id, 'claude-opus-4-8');
+    final rankedFable = suggestion.ranked
+        .singleWhere((entry) => entry.model.id == 'claude-fable-5');
+    expect(rankedFable.headroomPercent, 49);
+    expect(rankedFable.available, isFalse);
   });
 
   test('Claude legacy family labels match only their scoped catalog model', () {
@@ -449,6 +967,9 @@ void main() {
         _cloud(
           claudeProviderId,
           20,
+          plan: 'max',
+          planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+          planEvidenceAsOf: _now,
           modelQuotas: const [
             ModelQuota(model: 'Fable', usedPercent: 25),
           ],
@@ -493,6 +1014,199 @@ void main() {
     expect(fableWithoutEvidence.quotaBacked, isFalse);
     expect(fableWithoutEvidence.available, isFalse);
     expect(fableWithoutEvidence.headroomPercent, isNull);
+  });
+
+  test('Fable quota budget requires current provider plan evidence', () {
+    const scoped = [
+      ModelQuota(model: 'Fable', usedPercent: 25, windowLabel: 'weekly'),
+    ];
+    const cases = <String?, bool>{
+      'max': true,
+      ' MAX ': false,
+      'team_premium': true,
+      'Team Premium': true,
+      'pro': false,
+      'team_standard': false,
+      'team': false,
+      'enterprise': false,
+      'm.a.x': false,
+      'ma\u0000x': false,
+      '': false,
+      null: false,
+    };
+
+    for (final entry in cases.entries) {
+      final allBudgets = buildModelRegistry(
+        [
+          _cloud(
+            claudeProviderId,
+            20,
+            plan: entry.key,
+            planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+            planEvidenceAsOf: _now,
+            modelQuotas: scoped,
+          ),
+        ],
+        _now,
+        catalog: kModelCatalog,
+      );
+      final fable = allBudgets.singleWhere(
+        (candidate) => candidate.model.id == 'claude-fable-5',
+      );
+      expect(
+        fable.quotaBacked,
+        entry.value,
+        reason: 'plan ${entry.key} must have explicit included-quota evidence',
+      );
+      expect(fable.available, isTrue);
+      expect(fable.headroomPercent, 75);
+
+      final quotaBudget = buildModelRegistry(
+        [
+          _cloud(
+            claudeProviderId,
+            20,
+            plan: entry.key,
+            planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+            planEvidenceAsOf: _now,
+            modelQuotas: scoped,
+          ),
+        ],
+        _now,
+        catalog: kModelCatalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.quota,
+        ),
+      );
+      expect(
+        quotaBudget.any((candidate) => candidate.model.id == 'claude-fable-5'),
+        entry.value,
+      );
+    }
+
+    for (final source in const <ProviderPlanEvidenceSource?>[
+      null,
+      ProviderPlanEvidenceSource.hostCredential,
+    ]) {
+      final fable = buildModelRegistry(
+        [
+          _cloud(
+            claudeProviderId,
+            20,
+            plan: 'max',
+            planEvidenceSource: source,
+            planEvidenceAsOf: source == null ? null : _now,
+            modelQuotas: scoped,
+          ),
+        ],
+        _now,
+        catalog: kModelCatalog,
+      ).singleWhere(
+        (candidate) => candidate.model.id == 'claude-fable-5',
+      );
+      expect(fable.available, isTrue);
+      expect(fable.quotaBacked, isFalse);
+    }
+
+    final mismatchedCapture = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          20,
+          plan: 'max',
+          planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+          planEvidenceAsOf: _now - 1,
+          modelQuotas: scoped,
+        ),
+      ],
+      _now,
+      catalog: kModelCatalog,
+    ).singleWhere((candidate) => candidate.model.id == 'claude-fable-5');
+    expect(mismatchedCapture.quotaBacked, isFalse);
+  });
+
+  test('Fable quota budget cannot activate before the policy boundary', () {
+    const before = kClaudeFableIncludedQuotaEffectiveAt - 1;
+    const scoped = [
+      ModelQuota(model: 'Fable', usedPercent: 25, windowLabel: 'weekly'),
+    ];
+    final allBudgets = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          20,
+          plan: 'max',
+          planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+          planEvidenceAsOf: before,
+          asOf: before,
+          modelQuotas: scoped,
+        ),
+      ],
+      before,
+      catalog: kModelCatalog,
+    );
+    final fable = allBudgets.singleWhere(
+      (candidate) => candidate.model.id == 'claude-fable-5',
+    );
+    expect(fable.available, isTrue);
+    expect(fable.quotaBacked, isFalse);
+
+    final safeBudget = buildModelRegistry(
+      [
+        _cloud(
+          claudeProviderId,
+          20,
+          plan: 'max',
+          planEvidenceSource: ProviderPlanEvidenceSource.providerMetadata,
+          planEvidenceAsOf: before,
+          asOf: before,
+          modelQuotas: scoped,
+        ),
+      ],
+      before,
+      catalog: kModelCatalog,
+      requirements: const ModelRequirements(
+        budgetPolicy: ModelBudgetPolicy.quota,
+      ),
+    );
+    expect(
+      safeBudget.any((candidate) => candidate.model.id == 'claude-fable-5'),
+      isFalse,
+    );
+  });
+
+  test('default model suggestion cannot select credit-backed Fable', () {
+    const fableOnly = {
+      claudeProviderId: [
+        ModelInfo(id: 'claude-fable-5', displayName: 'Claude Fable 5'),
+      ],
+    };
+    final pro = _cloud(
+      claudeProviderId,
+      20,
+      plan: 'pro',
+      modelQuotas: const [
+        ModelQuota(model: 'Fable', usedPercent: 25, windowLabel: 'weekly'),
+      ],
+    );
+
+    final safeDefault = suggestModel([pro], _now, catalog: fableOnly);
+    expect(safeDefault.budgetPolicy, ModelBudgetPolicy.quota);
+    expect(safeDefault.recommended, isNull);
+    expect(safeDefault.ranked, isEmpty);
+
+    final explicitAny = suggestModel(
+      [pro],
+      _now,
+      catalog: fableOnly,
+      requirements: const ModelRequirements(
+        budgetPolicy: ModelBudgetPolicy.any,
+      ),
+    );
+    expect(explicitAny.recommended?.model.id, 'claude-fable-5');
+    expect(explicitAny.recommended?.quotaBacked, isFalse);
+    expect(explicitAny.reason, contains('included quota is not proven'));
+    expect(explicitAny.toJson(_now)['budget_policy'], 'any');
   });
 
   test('local models come from the snapshot, no catalog needed', () {
@@ -697,6 +1411,29 @@ void main() {
     expect(reg.map((e) => e.model.id), ['z-on-device', 'a-cloud']);
     expect(reg.first.hardwareFit?.status, LocalHardwareFitStatus.unknown);
     expect(reg.last.hardwareFit, isNull);
+  });
+
+  test('any budget still exposes a cloud-only daemon model explicitly', () {
+    final reg = buildModelRegistry(
+      [
+        _local('ollama', const [
+          ModelInfo(
+            id: 'qwen:480b-cloud',
+            local: true,
+            cloudOffloaded: true,
+          ),
+        ]),
+      ],
+      _now,
+      requirements: const ModelRequirements(
+        budgetPolicy: ModelBudgetPolicy.any,
+      ),
+    );
+
+    expect(reg, hasLength(1));
+    expect(reg.single.model.id, 'qwen:480b-cloud');
+    expect(reg.single.model.cloudOffloaded, isTrue);
+    expect(reg.single.available, isTrue);
   });
 
   test('a cloud provider absent from the catalog contributes no models', () {

@@ -203,6 +203,163 @@ void _writeTrustedSnapshotUnlocked(ProviderQuota quota, int observedMicros) {
   );
 }
 
+/// Outcome of an explicit provider-drift baseline recovery attempt.
+///
+/// Status values are stable enough for the CLI's versioned recovery envelope.
+/// A failed result never changes the persisted baseline or drift marker.
+class ProviderDriftBaselineRecoveryResult {
+  final bool recovered;
+  final String status;
+  final String detail;
+  final ProviderQuota? snapshot;
+
+  const ProviderDriftBaselineRecoveryResult({
+    required this.recovered,
+    required this.status,
+    required this.detail,
+    this.snapshot,
+  });
+}
+
+ProviderDriftBaselineRecoveryResult _baselineRecoveryFailure(
+  String status,
+  String detail,
+) =>
+    ProviderDriftBaselineRecoveryResult(
+      recovered: false,
+      status: status,
+      detail: detail,
+    );
+
+/// Replaces one exact provider/account drift baseline with a separately
+/// verified fresh observation.
+///
+/// This exceptional path deliberately does not append or clear history. It
+/// changes only the exact snapshot baseline and its older matching drift
+/// diagnostic. The evidence lock and local observation generation prevent a
+/// live read that started earlier from overwriting a newer cache or drift
+/// decision.
+ProviderDriftBaselineRecoveryResult recoverProviderDriftBaseline(
+  ProviderQuota fresh, {
+  required int observedAt,
+  required int observedAtMicros,
+}) {
+  final registration = providerAdapterById(fresh.provider);
+  final sourceViolation = registeredSourceClassViolation(
+    fresh,
+    registration,
+    allowManual: false,
+  );
+  final newestAllowedMicros =
+      _nowMicros() + kQuotaEvidenceClockSkewSeconds * 1000000;
+  if (sourceViolation != null ||
+      !isTrustedQuotaEvidenceAt(fresh, observedAt) ||
+      observedAtMicros < 0 ||
+      observedAtMicros > newestAllowedMicros) {
+    return _baselineRecoveryFailure(
+      'invalid_live_evidence',
+      sourceViolation == null
+          ? 'fresh provider evidence did not pass the quota trust boundary'
+          : 'fresh provider evidence failed its registered source contract',
+    );
+  }
+
+  try {
+    return _withEvidenceLock(fresh.provider, fresh.account, () {
+      final evidence = _readSnapshotEvidenceForIdentity(
+        fresh.provider,
+        fresh.account,
+        newestAllowedAsOf: observedAt + kQuotaEvidenceClockSkewSeconds,
+        requireExactAccount: true,
+      );
+      final baseline = evidence?.quota;
+      if (baseline == null ||
+          (!isTrustedQuotaEvidence(baseline) &&
+              !isLegacySuspectQuotaEvidence(baseline))) {
+        return _baselineRecoveryFailure(
+          'baseline_not_found',
+          'no recoverable baseline exists for the exact provider account',
+        );
+      }
+      if (baseline.provider != fresh.provider ||
+          baseline.account != fresh.account) {
+        return _baselineRecoveryFailure(
+          'identity_mismatch',
+          'fresh evidence does not match the persisted baseline identity',
+        );
+      }
+
+      final baselineMicros = _cacheFileObservationMicros(evidence!.file) ??
+          _asOfObservationMicros(baseline.asOf);
+      if (baseline.asOf > fresh.asOf ||
+          (baselineMicros != null && baselineMicros >= observedAtMicros)) {
+        return _baselineRecoveryFailure(
+          'superseded',
+          'a newer baseline was stored after this live read began',
+        );
+      }
+
+      final legacyQuarantine = isLegacySuspectQuotaEvidence(baseline);
+      if (!legacyQuarantine) {
+        final visible = _attachProviderDriftObservationUnlocked(
+          baseline,
+          now: observedAt,
+        );
+        if (visible.driftReason == null) {
+          return _baselineRecoveryFailure(
+            'no_active_drift',
+            'the exact provider account has no active drift quarantine',
+          );
+        }
+      }
+
+      final latestDrift = _latestDriftRecord(
+        baseline.provider,
+        baseline.account,
+      );
+      final driftMicros =
+          latestDrift == null ? null : _driftObservationMicros(latestDrift);
+      if (driftMicros != null && driftMicros >= observedAtMicros) {
+        return _baselineRecoveryFailure(
+          'superseded',
+          'newer provider drift was recorded after this live read began',
+        );
+      }
+
+      _writeRecoveredBaselineUnlocked(fresh, observedAtMicros);
+      return ProviderDriftBaselineRecoveryResult(
+        recovered: true,
+        status: 'recovered',
+        detail: 'fresh verified quota is now the exact account baseline',
+        snapshot: fresh,
+      );
+    });
+  } catch (_) {
+    return _baselineRecoveryFailure(
+      'storage_unavailable',
+      'the exact provider account baseline could not be updated safely',
+    );
+  }
+}
+
+void _writeRecoveredBaselineUnlocked(
+  ProviderQuota quota,
+  int observedMicros,
+) {
+  _atomicWrite(
+    _accountedFile(quota),
+    jsonEncode({
+      ..._persistedSnapshotJson(quota),
+      _cacheObservedAtMicrosKey: observedMicros,
+    }),
+  );
+  _clearProviderDriftObservation(
+    quota.provider,
+    quota.account,
+    observedMicros,
+  );
+}
+
 /// Linearizable evidence admission for one provider/account. The comparison,
 /// generation check, trusted-cache update, and drift-marker update share one
 /// interprocess lock so a stalled older collector cannot overwrite or clear a
@@ -335,6 +492,8 @@ ProviderQuota _lockUnavailableAdmissionResult(
     displayName: fresh.displayName,
     account: fresh.account,
     plan: fresh.plan,
+    planEvidenceSource: fresh.planEvidenceSource,
+    planEvidenceAsOf: fresh.planEvidenceAsOf,
     source: fresh.source,
     sourceClass: fresh.sourceClass,
     ok: false,
@@ -1270,7 +1429,8 @@ List<ProviderQuota> _loadHistoryFile(
       if (quota.provider == provider &&
           (exactAccount == null || quota.account == exactAccount) &&
           _isRegisteredCacheEvidence(quota) &&
-          isTrustedQuotaEvidenceAt(quota, observedAt)) {
+          quota.asOf <= observedAt + kQuotaEvidenceClockSkewSeconds &&
+          isTrustedQuotaEvidenceAtCapture(quota)) {
         results.add(quota);
       }
     }

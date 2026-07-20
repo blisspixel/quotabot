@@ -74,10 +74,11 @@ const kStatusOnlySourceClasses = {
 /// routing and cache boundary.
 Set<ProviderSourceClass>? builtInProviderSourceClasses(String provider) =>
     switch (provider.trim().toLowerCase()) {
-      claudeProviderId || grokProviderId => kAuthoritativeLiveSourceClasses,
+      claudeProviderId ||
       codexProviderId ||
-      antigravityProviderId =>
-        kLiveOrMachineFallbackSourceClasses,
+      grokProviderId =>
+        kAuthoritativeLiveSourceClasses,
+      antigravityProviderId => kLiveOrMachineFallbackSourceClasses,
       cursorProviderId ||
       windsurfProviderId ||
       kiroProviderId =>

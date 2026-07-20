@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
-import '../auth/tokens.dart';
 import '../auth/xai_auth.dart';
 import '../models.dart';
 import '../parsing.dart';
@@ -148,9 +147,7 @@ class GrokAdapter {
     // allowDefaultGrant already limits that to the sole account) or is stamped
     // for this account. Lending a default owned by a different account would
     // show that account's usage under this one.
-    final owner = TokenStore.defaultOwner(XaiAuth.provider);
-    if (owner != null && owner != account) return null;
-    return await xai.freshAccessToken();
+    return await xai.freshAccessToken(requiredDefaultOwner: account);
   }
 
   static List<_GrokAccount> _readAccounts(File authFile) {

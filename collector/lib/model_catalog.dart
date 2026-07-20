@@ -77,6 +77,10 @@ const Map<String, List<ModelInfo>> kModelCatalog = {
   ],
   'codex': [
     ModelInfo(
+      id: 'gpt-5.3-codex-spark',
+      displayName: 'GPT-5.3-Codex-Spark',
+    ),
+    ModelInfo(
       id: 'gpt-5.5',
       displayName: 'GPT-5.5',
       contextTokens: 1000000,

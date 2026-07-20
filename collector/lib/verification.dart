@@ -81,6 +81,12 @@ class ProviderVerification {
   final int? asOf;
   final int? stalenessSeconds;
   final bool stale;
+
+  /// Whether this invocation obtained fresh, accepted metadata from the
+  /// provider adapter. This is deliberately separate from [passed], which
+  /// means the snapshot is truthful and may therefore pass with a plain
+  /// signed-out or cached-fallback reason.
+  final bool liveReadSucceeded;
   final String? driftReason;
   final int? driftObservedAt;
   final List<Map<String, dynamic>> windows;
@@ -101,6 +107,7 @@ class ProviderVerification {
     this.asOf,
     this.stalenessSeconds,
     this.stale = false,
+    this.liveReadSucceeded = false,
     this.driftReason,
     this.driftObservedAt,
     this.windows = const [],
@@ -120,6 +127,7 @@ class ProviderVerification {
         if (asOf != null) 'as_of': asOf,
         if (stalenessSeconds != null) 'staleness_seconds': stalenessSeconds,
         'stale': stale,
+        'live_read_succeeded': liveReadSucceeded,
         if (driftReason != null) 'drift_reason': driftReason,
         if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         if (windows.isNotEmpty) 'windows': windows,
@@ -137,6 +145,7 @@ class VerificationReport {
   final List<ProviderVerification> providers;
   final List<VerifyCheck> fleetChecks;
   final RuntimeAccessReport? runtimeAccess;
+  final bool requireLive;
 
   const VerificationReport({
     required this.generatedAt,
@@ -144,11 +153,24 @@ class VerificationReport {
     required this.providers,
     required this.fleetChecks,
     this.runtimeAccess,
+    this.requireLive = false,
   });
 
-  bool get passed =>
+  bool get honestyPassed =>
       providers.every((p) => p.passed) &&
       fleetChecks.every((c) => c.status != VerifyStatus.fail);
+
+  Iterable<ProviderVerification> get _adapterReads => providers.where(
+        (provider) => provider.sourceClass != ProviderSourceClass.manual,
+      );
+
+  bool get allLiveReadsSucceeded =>
+      _adapterReads.every((provider) => provider.liveReadSucceeded);
+
+  bool get passed => honestyPassed && (!requireLive || allLiveReadsSucceeded);
+
+  int get liveReadFailureCount =>
+      _adapterReads.where((provider) => !provider.liveReadSucceeded).length;
 
   int get failCount =>
       providers.where((p) => !p.passed).length +
@@ -158,6 +180,9 @@ class VerificationReport {
         'schema': quotabotVerifyV1SchemaId,
         'generated_at': generatedAt,
         'os': os,
+        'require_live': requireLive,
+        'honesty_passed': honestyPassed,
+        'all_live_reads_succeeded': allLiveReadsSucceeded,
         'passed': passed,
         'providers': providers.map((p) => p.toJson()).toList(),
         if (runtimeAccess != null) 'runtime_access': runtimeAccess!.toJson(),
@@ -175,15 +200,22 @@ VerificationReport buildVerificationReport(
   int now, {
   required String os,
   bool filtered = false,
+  bool requireLive = false,
   List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
   RuntimeAccessReport? runtimeAccess,
 }) {
+  final observedProviderIds = runtimeAccess?.providers
+      .where((provider) => provider.observed)
+      .map((provider) => provider.provider)
+      .toSet();
   final providers = <ProviderVerification>[
     for (final q in results)
       _verifyProvider(
         q,
         now,
         registry.where((entry) => entry.id == q.provider).firstOrNull,
+        liveReadObserved: observedProviderIds == null ||
+            observedProviderIds.contains(q.provider),
       ),
   ];
   if (!filtered) {
@@ -200,6 +232,7 @@ VerificationReport buildVerificationReport(
     fleetChecks: _fleetChecks(results, now,
         filtered: filtered, runtimeAccess: runtimeAccess),
     runtimeAccess: runtimeAccess,
+    requireLive: requireLive,
   );
 }
 
@@ -234,8 +267,9 @@ ProviderVerification _undetected(ProviderAdapterRegistration entry) {
 ProviderVerification _verifyProvider(
   ProviderQuota q,
   int now,
-  ProviderAdapterRegistration? registration,
-) {
+  ProviderAdapterRegistration? registration, {
+  required bool liveReadObserved,
+}) {
   final checks = <VerifyCheck>[
     _identityCheck(q),
     _sourceClassCheck(q, registration),
@@ -246,6 +280,14 @@ ProviderVerification _verifyProvider(
     _staleHonestyCheck(q, now),
     ..._resetChecks(q, now),
   ];
+  final liveReadSucceeded = liveReadObserved &&
+      q.ok &&
+      !q.stale &&
+      q.driftReason == null &&
+      q.suspect == null &&
+      _errorIsCompatibleWithSuccessfulLiveRead(q, now) &&
+      !q.isManual &&
+      checks.every((check) => check.status != VerifyStatus.fail);
   return ProviderVerification(
     provider: q.provider,
     displayName: q.displayName,
@@ -257,6 +299,7 @@ ProviderVerification _verifyProvider(
     asOf: q.asOf,
     stalenessSeconds: q.asOf > 0 ? (q.asOf > now ? 0 : now - q.asOf) : null,
     stale: q.stale,
+    liveReadSucceeded: liveReadSucceeded,
     driftReason: q.driftReason,
     driftObservedAt: q.driftObservedAt,
     windows: [
@@ -272,6 +315,27 @@ ProviderVerification _verifyProvider(
     checks: checks,
     crossCheck: kProviderCrossChecks[q.provider],
   );
+}
+
+const _passiveSpentStatusProviders = {
+  cursorProviderId,
+  windsurfProviderId,
+  kiroProviderId,
+};
+
+/// Cursor, Windsurf, and Kiro historically carry their valid out-of-quota
+/// status in [ProviderQuota.error] alongside a complete passive-state window.
+/// Strict verification accepts only that exact status convention. Transport
+/// failures still have `ok: false`, and stale, malformed, differently sourced,
+/// or non-spent rows remain unsuccessful.
+bool _errorIsCompatibleWithSuccessfulLiveRead(ProviderQuota q, int now) {
+  final error = q.error?.trim();
+  if (error == null || error.isEmpty) return true;
+  return _passiveSpentStatusProviders.contains(q.provider) &&
+      q.sourceClass == ProviderSourceClass.passiveLocalEvidence &&
+      error.startsWith('out of quota (resets ') &&
+      error.endsWith(')') &&
+      verifyState(q, now) == 'out_of_quota';
 }
 
 VerifyCheck _sourceClassCheck(
@@ -335,7 +399,9 @@ String verifyState(ProviderQuota q, int now) {
   if (!q.ok) return 'error';
   if (q.windows.isEmpty) return 'no_data';
   if (q.stale) return 'cached';
-  final headroom = providerHeadroom(q, now) ?? 100;
+  if (!isTrustedQuotaEvidenceAt(q, now)) return 'error';
+  final headroom = providerHeadroom(q, now);
+  if (headroom == null) return 'error';
   return headroom <= kSpentHeadroomFloor ? 'out_of_quota' : 'live';
 }
 
@@ -445,16 +511,12 @@ List<VerifyCheck> _resetChecks(ProviderQuota q, int now) {
           '${w.label} resets ${(resetsAt - now) ~/ 86400}d out; implausible '
               'for a rolling window and likely provider drift'));
     } else if (resetsAt <= now) {
-      final trusted = isTrustedQuotaEvidenceAt(q, now);
       checks.add(VerifyCheck(
           'reset_sanity',
           VerifyStatus.info,
-          trusted
-              ? '${w.label} reset boundary has passed; trusted fresh evidence '
-                  'is treated as a reset-edge rollover until the next read'
-              : '${w.label} reset boundary has passed, but cached or untrusted '
-                  'evidence keeps its last observed usage and remains '
-                  'non-routable until a fresh read'));
+          '${w.label} reset boundary has passed; the last observed usage is '
+              'preserved and remains non-routable until a provider read supplies '
+              'a new quota window'));
     }
   }
   if (checks.isEmpty && q.windows.any((w) => w.resetsAt != null)) {
@@ -482,7 +544,7 @@ List<VerifyCheck> _fleetChecks(
   final contractErrors = validateQuotabotV1Snapshot(snapshot);
   checks.add(contractErrors.isEmpty
       ? const VerifyCheck('schema_contract', VerifyStatus.pass,
-          'live snapshot conforms to the frozen quotabot.v1 contract')
+          'emitted snapshot conforms to the frozen quotabot.v1 contract')
       : VerifyCheck('schema_contract', VerifyStatus.fail,
           'quotabot.v1 violations: ${contractErrors.join('; ')}'));
 
@@ -490,7 +552,11 @@ List<VerifyCheck> _fleetChecks(
   final duplicates = <String>{};
   for (final q in results) {
     final key = '${q.provider}/${q.account}';
-    if (!seen.add(key)) duplicates.add(key);
+    if (!seen.add(key)) {
+      duplicates.add(
+        '${q.provider}/${quotaAccountDisplayLabel(q.account)}',
+      );
+    }
   }
   checks.add(duplicates.isEmpty
       ? const VerifyCheck('unique_accounts', VerifyStatus.pass,

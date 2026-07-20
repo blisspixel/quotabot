@@ -38,7 +38,9 @@ def _normalized_entry(name: str) -> str:
     if not name or "\x00" in name:
         raise DesktopArchiveError("archive contains an empty or invalid path")
     if any(ord(character) < 32 or ord(character) == 127 for character in name):
-        raise DesktopArchiveError(f"archive path contains a control character: {name!r}")
+        raise DesktopArchiveError(
+            f"archive path contains a control character: {name!r}"
+        )
     portable = name.replace("\\", "/")
     if portable.startswith("/") or re.match(r"^[A-Za-z]:", portable):
         raise DesktopArchiveError(f"archive path is absolute: {name}")
@@ -71,15 +73,27 @@ def _validate_link(entry_name: str, target: str) -> None:
             stack.append(part)
 
 
-def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
+def _archive_entries(
+    path: Path,
+    extension: str,
+) -> tuple[tuple[str, ...], frozenset[str], frozenset[str]]:
+    nonempty_regular: set[str] = set()
+    executable_regular: set[str] = set()
     if extension == "zip":
         try:
             with zipfile.ZipFile(path) as archive:
                 infos = archive.infolist()
+                if len(infos) > MAX_ARCHIVE_ENTRIES:
+                    raise DesktopArchiveError(
+                        "desktop archive contains too many entries"
+                    )
                 if sum(entry.file_size for entry in infos) > MAX_UNCOMPRESSED_BYTES:
-                    raise DesktopArchiveError("desktop archive expands beyond the size limit")
+                    raise DesktopArchiveError(
+                        "desktop archive expands beyond the size limit"
+                    )
                 for entry in infos:
-                    if stat.S_ISLNK(entry.external_attr >> 16):
+                    mode = entry.external_attr >> 16
+                    if stat.S_ISLNK(mode):
                         if entry.file_size > 4096:
                             raise DesktopArchiveError(
                                 f"archive link target is oversized: {entry.filename}"
@@ -91,6 +105,21 @@ def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
                                 f"archive link target is not UTF-8: {entry.filename}"
                             ) from error
                         _validate_link(entry.filename, target)
+                        continue
+                    file_type = stat.S_IFMT(mode)
+                    if file_type not in {0, stat.S_IFREG, stat.S_IFDIR}:
+                        raise DesktopArchiveError(
+                            f"ZIP archive contains a special file: {entry.filename}"
+                        )
+                    if (
+                        file_type in {0, stat.S_IFREG}
+                        and not entry.is_dir()
+                        and entry.file_size > 0
+                    ):
+                        normalized = _normalized_entry(entry.filename)
+                        nonempty_regular.add(normalized)
+                        if mode & 0o111:
+                            executable_regular.add(normalized)
                 names = [entry.filename for entry in infos]
         except (OSError, zipfile.BadZipFile) as error:
             raise DesktopArchiveError(f"invalid ZIP archive: {error}") from error
@@ -98,8 +127,14 @@ def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
         try:
             with tarfile.open(path, mode="r:gz") as archive:
                 members = archive.getmembers()
+                if len(members) > MAX_ARCHIVE_ENTRIES:
+                    raise DesktopArchiveError(
+                        "desktop archive contains too many entries"
+                    )
                 if sum(entry.size for entry in members) > MAX_UNCOMPRESSED_BYTES:
-                    raise DesktopArchiveError("desktop archive expands beyond the size limit")
+                    raise DesktopArchiveError(
+                        "desktop archive expands beyond the size limit"
+                    )
                 for entry in members:
                     if not (
                         entry.isfile()
@@ -110,14 +145,21 @@ def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
                         raise DesktopArchiveError(
                             f"archive contains a special file: {entry.name}"
                         )
-                    if entry.issym() or entry.islnk():
+                    if entry.islnk():
+                        raise DesktopArchiveError(
+                            f"tar archive contains a hard link: {entry.name}"
+                        )
+                    if entry.issym():
                         _validate_link(entry.name, entry.linkname)
+                    elif entry.isfile() and entry.size > 0:
+                        normalized = _normalized_entry(entry.name)
+                        nonempty_regular.add(normalized)
+                        if entry.mode & 0o111:
+                            executable_regular.add(normalized)
                 names = [entry.name for entry in members]
         except (OSError, tarfile.TarError) as error:
             raise DesktopArchiveError(f"invalid tar archive: {error}") from error
 
-    if len(names) > MAX_ARCHIVE_ENTRIES:
-        raise DesktopArchiveError("desktop archive contains too many entries")
     normalized = tuple(
         entry for entry in (_normalized_entry(name) for name in names) if entry != "."
     )
@@ -125,7 +167,7 @@ def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
         raise DesktopArchiveError("desktop archive is empty")
     if len(normalized) != len(set(normalized)):
         raise DesktopArchiveError("desktop archive contains duplicate paths")
-    return normalized
+    return normalized, frozenset(nonempty_regular), frozenset(executable_regular)
 
 
 def _sha256(path: Path) -> str:
@@ -152,8 +194,12 @@ def _verify_sidecar(path: Path, actual_hash: str) -> None:
         raise DesktopArchiveError("desktop archive checksum mismatch")
 
 
-def _require_shape(operating_system: str, entries: tuple[str, ...]) -> None:
-    entry_set = set(entries)
+def _require_shape(
+    operating_system: str,
+    entries: tuple[str, ...],
+    nonempty_regular: frozenset[str],
+    executable_regular: frozenset[str],
+) -> None:
     if operating_system in {"windows", "darwin"} and len(
         {entry.casefold() for entry in entries}
     ) != len(entries):
@@ -171,15 +217,20 @@ def _require_shape(operating_system: str, entries: tuple[str, ...]) -> None:
         required = {"quotabot"}
         prefixes = ("data/flutter_assets/", "lib/")
 
-    missing = sorted(required.difference(entry_set))
+    missing = sorted(required.difference(nonempty_regular))
     if missing:
         raise DesktopArchiveError(
-            "desktop archive is missing required entries: " + ", ".join(missing)
+            "desktop archive is missing required nonempty regular files: "
+            + ", ".join(missing)
+        )
+    if operating_system == "linux" and "quotabot" not in executable_regular:
+        raise DesktopArchiveError(
+            "desktop archive executable is not a nonempty executable regular file"
         )
     for prefix in prefixes:
-        if not any(entry.startswith(prefix) for entry in entries):
+        if not any(entry.startswith(prefix) for entry in nonempty_regular):
             raise DesktopArchiveError(
-                f"desktop archive is missing required tree: {prefix}"
+                f"desktop archive is missing a nonempty regular file under: {prefix}"
             )
 
 
@@ -199,8 +250,16 @@ def verify_desktop_archive(path: Path) -> DesktopArchive:
 
     actual_hash = _sha256(resolved)
     _verify_sidecar(resolved, actual_hash)
-    entries = _archive_entries(resolved, extension)
-    _require_shape(operating_system, entries)
+    entries, nonempty_regular, executable_regular = _archive_entries(
+        resolved,
+        extension,
+    )
+    _require_shape(
+        operating_system,
+        entries,
+        nonempty_regular,
+        executable_regular,
+    )
     return DesktopArchive(
         path=resolved,
         operating_system=operating_system,

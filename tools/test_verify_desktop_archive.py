@@ -41,6 +41,27 @@ def _windows_archive(root: Path, *, extra: str | None = None) -> Path:
     return path
 
 
+def _linux_archive(
+    root: Path,
+    *,
+    executable_mode: int = 0o755,
+    executable_payload: bytes = b"binary",
+) -> Path:
+    path = root / "quotabot-linux-x64-desktop.tar.gz"
+    with tarfile.open(path, mode="w:gz") as bundle:
+        for name, payload, mode in (
+            ("quotabot", executable_payload, executable_mode),
+            ("data/flutter_assets/AssetManifest.bin", b"assets", 0o644),
+            ("lib/libapp.so", b"library", 0o644),
+        ):
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            info.mode = mode
+            bundle.addfile(info, io.BytesIO(payload))
+    _write_sidecar(path)
+    return path
+
+
 class DesktopArchiveTests(unittest.TestCase):
     def test_accepts_windows_bundle_with_matching_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -160,6 +181,79 @@ class DesktopArchiveTests(unittest.TestCase):
             _write_sidecar(archive)
 
             with self.assertRaisesRegex(DesktopArchiveError, "link target escapes"):
+                verify_desktop_archive(archive)
+
+    def test_rejects_zip_special_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "quotabot-windows-x64-desktop.zip"
+            with zipfile.ZipFile(archive, mode="w") as bundle:
+                bundle.writestr("quotabot.exe", b"binary")
+                bundle.writestr(
+                    "data/flutter_assets/AssetManifest.bin",
+                    b"assets",
+                )
+                special = zipfile.ZipInfo("named-pipe")
+                special.create_system = 3
+                special.external_attr = (stat.S_IFIFO | 0o600) << 16
+                bundle.writestr(special, b"")
+            _write_sidecar(archive)
+
+            with self.assertRaisesRegex(DesktopArchiveError, "special file"):
+                verify_desktop_archive(archive)
+
+    def test_rejects_required_zip_file_with_directory_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "quotabot-windows-x64-desktop.zip"
+            with zipfile.ZipFile(archive, mode="w") as bundle:
+                disguised = zipfile.ZipInfo("quotabot.exe")
+                disguised.create_system = 3
+                disguised.external_attr = (stat.S_IFDIR | 0o755) << 16
+                bundle.writestr(disguised, b"not a regular file")
+                bundle.writestr(
+                    "data/flutter_assets/AssetManifest.bin",
+                    b"assets",
+                )
+            _write_sidecar(archive)
+
+            with self.assertRaisesRegex(DesktopArchiveError, "nonempty regular"):
+                verify_desktop_archive(archive)
+
+    def test_rejects_tar_hard_link(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = _linux_archive(Path(directory))
+            replacement = Path(directory) / "replacement.tar.gz"
+            with (
+                tarfile.open(archive, mode="r:gz") as source,
+                tarfile.open(
+                    replacement,
+                    mode="w:gz",
+                ) as target,
+            ):
+                for member in source.getmembers():
+                    extracted = source.extractfile(member) if member.isfile() else None
+                    target.addfile(member, extracted)
+                link = tarfile.TarInfo("lib/alias")
+                link.type = tarfile.LNKTYPE
+                link.linkname = "lib/libapp.so"
+                target.addfile(link)
+            replacement.replace(archive)
+            _write_sidecar(archive)
+
+            with self.assertRaisesRegex(DesktopArchiveError, "hard link"):
+                verify_desktop_archive(archive)
+
+    def test_rejects_empty_required_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = _linux_archive(Path(directory), executable_payload=b"")
+
+            with self.assertRaisesRegex(DesktopArchiveError, "nonempty regular"):
+                verify_desktop_archive(archive)
+
+    def test_rejects_nonexecutable_linux_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = _linux_archive(Path(directory), executable_mode=0o644)
+
+            with self.assertRaisesRegex(DesktopArchiveError, "executable regular"):
                 verify_desktop_archive(archive)
 
     def test_rejects_wrong_platform_extension(self) -> None:

@@ -18,6 +18,13 @@ snapshot_ttl_seconds: 45
 # candidate (or a local fallback) is preferred.
 comfort_threshold: 15
 
+# Every managed remote route is atomically reserved before dispatch so parallel
+# proxy requests see reduced effective headroom. The callback releases the lease;
+# the TTL handles a request whose callback never runs. Values are clamped to
+# 15..3600 seconds and 1..50 percent.
+lease_seconds: 120
+lease_weight_percent: 15
+
 # No-surprise-billing default. Candidates marked `spend: paid_api` are skipped
 # unless this is set to true. Mark a cloud candidate `spend: quota_plan` only
 # when it is backed by a real included quota plan, and also set

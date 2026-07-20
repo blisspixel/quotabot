@@ -19,6 +19,7 @@ import 'insights.dart';
 import 'model_catalog.dart';
 import 'models.dart';
 import 'parsing.dart' show resetLabel;
+import 'plan_evidence.dart';
 import 'provider_ids.dart';
 import 'util.dart';
 
@@ -530,6 +531,13 @@ const kDefaultProviderRouteRequirements = ModelRequirements(
   budgetPolicy: ModelBudgetPolicy.quota,
 );
 
+/// Default spend envelope for choosing one concrete model. Listing remains
+/// unrestricted for inspection, but a recommendation must not opt a caller into
+/// credit-backed or paid API use without `budget=any` being explicit.
+const kDefaultModelSuggestionRequirements = ModelRequirements(
+  budgetPolicy: ModelBudgetPolicy.quota,
+);
+
 class ModelCapabilityGates {
   /// Provider/account keys with at least one catalog model that satisfies the
   /// capability floor, regardless of whether its quota gate currently has
@@ -544,10 +552,17 @@ class ModelCapabilityGates {
   /// model budget, mapped to the earliest known reset of a matching model gate.
   final Map<String, int> budgetResetByQuotaKey;
 
+  /// Conservative current headroom for an available capability gate, keyed by
+  /// provider/account. This is populated only for providers whose provider-wide
+  /// window is a synthetic summary over exhaustive independent model pools.
+  /// Callers may use it instead of that summary for a capability-scoped route.
+  final Map<String, double> headroomByQuotaKey;
+
   const ModelCapabilityGates({
     required this.knownQuotaKeys,
     required this.availableQuotaKeys,
     this.budgetResetByQuotaKey = const {},
+    this.headroomByQuotaKey = const {},
   });
 }
 
@@ -560,12 +575,26 @@ ModelCapabilityGates modelCapabilityGates(
   final known = <String>{};
   final available = <String>{};
   final budgetResets = <String, int>{};
+  final routeHeadroom = <String, double>{};
   for (final entry in buildModelRegistry(snapshot, now, catalog: catalog)) {
     if (entry.local || !meetsRequirements(entry, requirements)) continue;
     final key = quotaIdentityKey(entry.provider, entry.account);
     known.add(key);
     if (entry.available) {
       available.add(key);
+      // Antigravity's provider window is the tightest display summary across
+      // independent model pools. It must not gate an unrelated eligible model.
+      // Among eligible available pools, retain the lowest measured headroom so
+      // provider-level routing never advertises more budget than every viable
+      // model represented by this capability gate can support.
+      final headroom = entry.headroomPercent;
+      if (entry.provider == antigravityProviderId && headroom != null) {
+        routeHeadroom.update(
+          key,
+          (previous) => math.min(previous, headroom),
+          ifAbsent: () => headroom,
+        );
+      }
     } else {
       final reset = entry.resetsAt;
       if (reset != null) {
@@ -581,6 +610,7 @@ ModelCapabilityGates modelCapabilityGates(
     knownQuotaKeys: known,
     availableQuotaKeys: available,
     budgetResetByQuotaKey: budgetResets,
+    headroomByQuotaKey: routeHeadroom,
   );
 }
 
@@ -621,10 +651,11 @@ List<ModelEntry> buildModelRegistry(
         q.windows.isNotEmpty &&
         kQuotaPlanProviders.contains(q.provider);
     for (final m in models) {
-      final claudeScopedQuota =
-          q.provider == claudeProviderId ? _matchingModelQuota(q, m) : null;
-      final requiresLiveFableQuota =
-          q.provider == claudeProviderId && _claudeScopedFamily(m) == 'fable';
+      final sparseScopedQuota =
+          q.provider == claudeProviderId || q.provider == codexProviderId
+              ? _matchingModelQuota(q, m, now)
+              : null;
+      final requiresLiveScopedQuota = _requiresLiveScopedQuota(q.provider, m);
       final budget = q.isLocal
           ? null
           : _modelBudgetFor(
@@ -638,8 +669,9 @@ List<ModelEntry> buildModelRegistry(
             );
       final quotaBacked = providerQuotaBacked &&
           (m.quotaIncludedUntil == null || now < m.quotaIncludedUntil!) &&
-          (!requiresLiveFableQuota ||
-              (claudeScopedQuota != null && isTrustedQuotaEvidenceAt(q, now)));
+          _modelPlanIsIncludedQuota(q, m, now) &&
+          (!requiresLiveScopedQuota ||
+              (sparseScopedQuota != null && isTrustedQuotaEvidenceAt(q, now)));
       entries.add(ModelEntry(
         model: m,
         provider: q.provider,
@@ -655,7 +687,9 @@ List<ModelEntry> buildModelRegistry(
         resetsAt: budget?.resetsAt,
         gatingWindow: budget?.gatingWindow,
         available: q.isLocal
-            ? isLocalRuntimeAvailableAt(q, now)
+            ? m.cloudOffloaded
+                ? isLocalRuntimeReachableAt(q, now)
+                : isLocalRuntimeAvailableAt(q, now)
             : budget?.available ?? false,
         stale: q.stale,
         driftReason: q.driftReason,
@@ -708,8 +742,7 @@ List<ModelEntry> buildModelRegistry(
   required int now,
 }) {
   if (q.modelQuotas.isEmpty) {
-    if (q.provider == claudeProviderId &&
-        _claudeScopedFamily(model) == 'fable') {
+    if (_requiresLiveScopedQuota(q.provider, model)) {
       return (
         headroomPercent: null,
         resetsAt: null,
@@ -724,16 +757,17 @@ List<ModelEntry> buildModelRegistry(
       available: providerAvailable,
     );
   }
-  final quota = _matchingModelQuota(q, model);
-  if (q.provider == claudeProviderId) {
-    // Claude's model quotas are scoped overlays on the account-wide shared
-    // windows. They are not an exhaustive catalog of every Claude model, so an
-    // unmatched model still inherits the shared provider budget. A matching
-    // model must satisfy both gates and reports whichever one is tighter.
+  final quota = _matchingModelQuota(q, model, now);
+  if (q.provider == claudeProviderId || q.provider == codexProviderId) {
+    // Claude and Codex model quotas are sparse overlays on account-wide shared
+    // windows. They are not exhaustive catalogs, so an unmatched model still
+    // inherits the shared provider budget. A matching model must satisfy both
+    // gates and reports whichever one is tighter.
     if (quota == null) {
-      // Fable inclusion differs by plan. Without a live scoped Fable pool there
-      // is no evidence that this account can use it without paid credits.
-      if (_claudeScopedFamily(model) == 'fable') {
+      // Some scoped products differ by plan. Without their live named pool
+      // there is no evidence that this account can use them from included
+      // quota.
+      if (_requiresLiveScopedQuota(q.provider, model)) {
         return (
           headroomPercent: null,
           resetsAt: null,
@@ -748,7 +782,8 @@ List<ModelEntry> buildModelRegistry(
         available: providerAvailable,
       );
     }
-    final scopedHeadroom = _scopedModelHeadroom(q, quota, now);
+    final scopedHeadroom = quota.remainingPercent;
+    final scopedCurrent = isCurrentModelQuotaEvidenceAt(quota, now);
     if (providerHeadroom == null) {
       return (
         headroomPercent: null,
@@ -762,7 +797,8 @@ List<ModelEntry> buildModelRegistry(
       return (
         headroomPercent: null,
         resetsAt: reset,
-        gatingWindow: reset == null ? null : resetLabel(reset, q.asOf),
+        gatingWindow: _trustedModelQuotaWindowLabel(quota) ??
+            (reset == null ? null : resetLabel(reset, q.asOf)),
         available: false,
       );
     }
@@ -773,39 +809,56 @@ List<ModelEntry> buildModelRegistry(
       headroomPercent: headroom,
       resetsAt: reset,
       gatingWindow: scopedIsTighter
-          ? (reset == null ? null : resetLabel(reset, q.asOf))
+          ? (_trustedModelQuotaWindowLabel(quota) ??
+              (reset == null ? null : resetLabel(reset, q.asOf)))
           : bindingLabel,
-      available: providerAvailable && headroom > kSpentHeadroomFloor,
+      available:
+          scopedCurrent && providerAvailable && headroom > kSpentHeadroomFloor,
     );
   }
   final headroom = quota?.remainingPercent;
   final reset = quota?.resetsAt;
+  final modelQuotaCurrent =
+      quota != null && isCurrentModelQuotaEvidenceAt(quota, now);
+  // Antigravity's model_quotas are exhaustive independent pools. Its synthetic
+  // provider window intentionally shows the tightest pool for a truthful glance,
+  // but an exhausted sibling cannot make this matched pool unavailable. Provider
+  // integrity and freshness still gate every model, so stale or drifted evidence
+  // cannot be revived by a healthy-looking per-model value.
+  final providerGateAvailable = q.provider == antigravityProviderId
+      ? isTrustedQuotaEvidenceAt(q, now)
+      : providerAvailable;
   return (
     headroomPercent: headroom,
     resetsAt: reset,
-    gatingWindow: reset == null ? null : resetLabel(reset, q.asOf),
-    available:
-        providerAvailable && headroom != null && headroom > kSpentHeadroomFloor,
+    gatingWindow: _trustedModelQuotaWindowLabel(quota) ??
+        (reset == null ? null : resetLabel(reset, q.asOf)),
+    available: providerGateAvailable &&
+        modelQuotaCurrent &&
+        headroom != null &&
+        headroom > kSpentHeadroomFloor,
   );
 }
 
-double? _scopedModelHeadroom(
-  ProviderQuota providerQuota,
-  ModelQuota modelQuota,
-  int now,
-) {
-  final reset = modelQuota.resetsAt;
-  if (isTrustedQuotaEvidenceAt(providerQuota, now) &&
-      reset != null &&
-      reset <= now) {
-    return 100;
+String? _trustedModelQuotaWindowLabel(ModelQuota? quota) {
+  final label = quota?.windowLabel;
+  if (label == null ||
+      label.isEmpty ||
+      label.length > kMaxModelQuotaWindowLabelCharacters ||
+      label.trim() != label ||
+      stripTerminalControl(label) != label) {
+    return null;
   }
-  return modelQuota.remainingPercent;
+  return label;
 }
 
-ModelQuota? _matchingModelQuota(ProviderQuota quota, ModelInfo model) {
+ModelQuota? _matchingModelQuota(
+  ProviderQuota quota,
+  ModelInfo model,
+  int now,
+) {
   final modelKeys = _modelIdentityKeys(model.id, model.displayName);
-  ModelQuota? best;
+  final best = <ModelQuota>[];
   var bestScore = 0;
   for (final modelQuota in quota.modelQuotas) {
     final score = _modelQuotaMatchScore(
@@ -814,11 +867,63 @@ ModelQuota? _matchingModelQuota(ProviderQuota quota, ModelInfo model) {
       provider: quota.provider,
     );
     if (score > bestScore) {
-      best = modelQuota;
+      best
+        ..clear()
+        ..add(modelQuota);
       bestScore = score;
+    } else if (score > 0 && score == bestScore) {
+      best.add(modelQuota);
     }
   }
-  return best;
+  if (best.isEmpty) return null;
+  if (best.length == 1) return best.single;
+  return _conservativeModelQuota(best, now);
+}
+
+/// Combines equally specific quota matches without depending on provider row
+/// order. A base catalog model can match several effort or mode variants. Until
+/// the caller names a variant, the safe budget is the tightest known headroom;
+/// an unknown percent or an expired variant fails closed for that base entry.
+ModelQuota _conservativeModelQuota(List<ModelQuota> matches, int now) {
+  final ordered = List<ModelQuota>.of(matches)
+    ..sort((a, b) {
+      final byKey = _modelQuotaKey(a.model).compareTo(_modelQuotaKey(b.model));
+      return byKey != 0 ? byKey : a.model.compareTo(b.model);
+    });
+  final representative = ordered.first;
+
+  double? usedPercent;
+  if (ordered.every((quota) => quota.usedPercent != null)) {
+    usedPercent = ordered.map((quota) => quota.usedPercent!).reduce(math.max);
+  }
+
+  final expiredResets = ordered
+      .map((quota) => quota.resetsAt)
+      .whereType<int>()
+      .where((reset) => reset <= now)
+      .toList();
+  int? resetsAt;
+  if (expiredResets.isNotEmpty) {
+    // Any expired equal-best variant makes the unspecialized base entry
+    // non-current. Keep the latest expired reset for deterministic diagnostics.
+    resetsAt = expiredResets.reduce(math.max);
+  } else if (ordered.every((quota) => quota.resetsAt != null)) {
+    // With all resets known and current, the later constraint is conservative.
+    resetsAt = ordered.map((quota) => quota.resetsAt!).reduce(math.max);
+  }
+
+  return ModelQuota(
+    model: representative.model,
+    usedPercent: usedPercent,
+    resetsAt: resetsAt,
+    windowLabel: ordered.every(
+      (quota) => quota.windowLabel == representative.windowLabel,
+    )
+        ? representative.windowLabel
+        : null,
+    category: representative.category,
+    note: representative.note,
+  );
 }
 
 int _modelQuotaMatchScore(
@@ -856,6 +961,45 @@ String? _claudeScopedFamily(ModelInfo model) {
     if (keys.any((key) => key.contains(family))) return family;
   }
   return null;
+}
+
+bool _requiresLiveScopedQuota(String provider, ModelInfo model) {
+  if (provider == claudeProviderId) {
+    return _claudeScopedFamily(model) == 'fable';
+  }
+  if (provider == codexProviderId) {
+    final keys = _modelIdentityKeys(model.id, model.displayName);
+    return keys.any((key) => key.contains('codexspark'));
+  }
+  return false;
+}
+
+/// Whether provider plan metadata proves this model belongs to included quota.
+///
+/// Fable is unusual: Anthropic exposes a measured scoped balance to plans where
+/// use can be credit-backed as well as plans where it is included. A scoped row
+/// therefore proves availability and headroom, but not the spend class. Only an
+/// explicit Max or Team Premium entitlement returned by a current provider
+/// response at or after the announced policy boundary may enter the no-surprise
+/// `quota` budget. A plan label copied from
+/// this machine's host credential is diagnostic only because it can outlive an
+/// account downgrade. Pro, Team Standard, missing, and unproven labels remain
+/// visible under `any`.
+bool _modelPlanIsIncludedQuota(
+  ProviderQuota quota,
+  ModelInfo model,
+  int now,
+) {
+  if (quota.provider != claudeProviderId ||
+      _claudeScopedFamily(model) != 'fable') {
+    return true;
+  }
+  final evidence = claudeFableSpendEvidenceAt(
+    quota,
+    model.displayName ?? model.id,
+    now,
+  );
+  return evidence?.includedQuota ?? false;
 }
 
 Set<String> _modelIdentityKeys(String id, String? displayName) => {
@@ -933,8 +1077,11 @@ int _recommendCompare(
   }
   final tier = _tierRank(a.model.tier).compareTo(_tierRank(b.model.tier));
   if (tier != 0) return tier;
-  final ha = a.headroomPercent ?? 100.0;
-  final hb = b.headroomPercent ?? 100.0;
+  // Unknown budget is not full budget. Both entries are already ordered by
+  // availability above; among unavailable matches, keep measured headroom
+  // ahead of entries with no governing quota evidence.
+  final ha = a.headroomPercent ?? -1.0;
+  final hb = b.headroomPercent ?? -1.0;
   return hb.compareTo(ha);
 }
 
@@ -960,6 +1107,11 @@ String _recommendReason(
     return '${e.model.id} on ${e.provider} uses included quota projected to '
         'expire ${expiringQuota.wastedAtReset.round()}% unused at reset'
         '${h == null ? '' : ' ($h% free)'}.';
+  }
+  if (!e.quotaBacked) {
+    return '${e.model.id} on ${e.provider} is available under the unrestricted '
+        'budget, but included quota is not proven'
+        '${h == null ? '' : ' ($h% measured headroom)'}.';
   }
   return '${e.model.id} on ${e.provider} - lightest $tier tier with budget'
       '${h == null ? '' : ' ($h% free)'}.';
@@ -1065,7 +1217,7 @@ ModelSuggestion suggestModel(
   List<ProviderQuota> snapshot,
   int now, {
   Map<String, List<ModelInfo>> catalog = const {},
-  ModelRequirements requirements = const ModelRequirements(),
+  ModelRequirements requirements = kDefaultModelSuggestionRequirements,
   bool useExpiringQuota = false,
   Map<String, ExpiringQuotaSignal> expiringQuotaByProvider = const {},
   double expiringQuotaThresholdPercent = kDefaultExpiringQuotaWasteThreshold,

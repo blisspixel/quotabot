@@ -88,9 +88,7 @@ def render(src: Path, dst: Path, font, bold_font) -> None:
     d = ImageDraw.Draw(probe)
     box = d.textbbox((0, 0), "M", font=font)
     cw, ch = int(box[2] - box[0]), SIZE + 6
-    cols = max(
-        (sum(1 for _ in parse_line(line)) for line in lines), default=80
-    )
+    cols = max((sum(1 for _ in parse_line(line)) for line in lines), default=80)
     pad = 16
     img = Image.new("RGB", (cols * cw + 2 * pad, len(lines) * ch + 2 * pad), BG)
     draw = ImageDraw.Draw(img)
@@ -127,11 +125,7 @@ def main() -> None:
         for f in sorted(src.glob("*.ans")):
             render(f, out / f.with_suffix(".png").name, font, bold_font)
     else:
-        dst = (
-            Path(sys.argv[2])
-            if len(sys.argv) > 2
-            else src.with_suffix(".png")
-        )
+        dst = Path(sys.argv[2]) if len(sys.argv) > 2 else src.with_suffix(".png")
         render(src, dst, font, bold_font)
 
 

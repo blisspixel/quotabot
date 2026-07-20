@@ -134,16 +134,24 @@ void main() {
       expect(back.note, q.note);
     });
 
-    test('clamps a hostile percent and drops a non-finite reset on reload', () {
-      final back = ModelQuota.fromJson({
+    test('preserves invalid percents and drops non-finite reset on reload', () {
+      final high = ModelQuota.fromJson({
         'model': 'X',
         'used_percent': 250,
         'resets_at': double.infinity,
       });
-      expect(back.usedPercent, 100);
-      expect(back.resetsAt, isNull);
-      expect(back.remainingPercent, 0);
-      expect(back.exhausted, isTrue);
+      final negative = ModelQuota.fromJson({
+        'model': 'X',
+        'used_percent': -25,
+      });
+
+      expect(high.usedPercent, 250);
+      expect(high.resetsAt, isNull);
+      expect(high.remainingPercent, isNull);
+      expect(high.exhausted, isTrue);
+      expect(negative.usedPercent, -25);
+      expect(negative.remainingPercent, isNull);
+      expect(negative.exhausted, isTrue);
     });
 
     test('travels with ProviderQuota through JSON', () {

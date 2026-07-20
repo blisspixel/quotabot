@@ -1,4 +1,7 @@
+import 'dart:ui' show SemanticsAction, Tristate;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot_collector/collector.dart';
@@ -99,6 +102,64 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('custom chart labels honor composed text scaling', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(820, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final data = [
+      _q('codex', 'Codex', 20, asOf: now, resetsAt: now + 3600),
+      _q('claude', 'Claude', 45, asOf: now, resetsAt: now + 7200),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: FleetScreen(
+          data: data,
+          buckets: {'codex': _buckets(45), 'claude': _buckets(65)},
+          dark: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final liveSemantics = find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics &&
+          (widget.properties.label ?? '').startsWith('Live headroom.'),
+    );
+    final liveChart = find.descendant(
+      of: liveSemantics,
+      matching: find.byType(CustomPaint),
+    );
+    expect(liveChart, findsOneWidget);
+    expect(tester.getSize(liveChart).height, greaterThan(data.length * 30));
+
+    await tester.tap(find.text('90d'));
+    await tester.pump();
+    final heatmapSemantics = find.byWidgetPredicate(
+      (widget) =>
+          widget is Semantics &&
+          (widget.properties.label ?? '').startsWith('Best time heatmap.'),
+    );
+    final heatmapChart = find.descendant(
+      of: heatmapSemantics,
+      matching: find.byType(CustomPaint),
+    );
+    expect(heatmapChart, findsOneWidget);
+    expect(tester.getSize(heatmapChart).height, greaterThan(120));
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
   testWidgets('FleetScreen handles an empty fleet gracefully', (tester) async {
     await tester.binding.setSurfaceSize(const Size(400, 800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -112,6 +173,164 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('7d'));
     await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('analytics ranges expose selection and work from the keyboard', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      _wrap(const FleetScreen(data: [], buckets: {}, dark: false)),
+    );
+    await tester.pump();
+
+    final now = tester.getSemantics(
+      find.bySemanticsLabel('Now analytics range'),
+    );
+    final nowData = now.getSemanticsData();
+    expect(nowData.flagsCollection.isButton, isTrue);
+    expect(nowData.flagsCollection.isSelected, Tristate.isTrue);
+    expect(nowData.hasAction(SemanticsAction.tap), isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(find.text('OVER 7 DAYS'), findsOneWidget);
+    final week = tester.getSemantics(
+      find.bySemanticsLabel('7d analytics range'),
+    );
+    expect(week.getSemanticsData().flagsCollection.isSelected, Tristate.isTrue);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets(
+    'analytics disambiguates accounts when account names are enabled',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.binding.setSurfaceSize(const Size(820, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final work = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'work@example.com',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: '5h', usedPercent: 40, resetsAt: now + 3600),
+        ],
+      );
+      final personal = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'personal@example.com',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: '5h', usedPercent: 20, resetsAt: now + 3600),
+        ],
+      );
+      final data = [work, personal];
+      final buckets = {
+        'codex|work@example.com': _buckets(45),
+        'codex|personal@example.com': _buckets(70),
+      };
+
+      await tester.pumpWidget(
+        _wrap(
+          FleetScreen(
+            key: const ValueKey('live-accounts'),
+            data: data,
+            buckets: buckets,
+            dark: true,
+            showAccounts: true,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Codex (personal@example.com)'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(
+          RegExp(
+            r'Live headroom\. Codex \(work@example\.com\).+'
+            r'Codex \(personal@example\.com\)',
+          ),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          FleetScreen(
+            key: const ValueKey('history-accounts'),
+            data: data,
+            buckets: buckets,
+            dark: true,
+            showAccounts: true,
+            initialRange: FleetRange.quarter,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        find.bySemanticsLabel(
+          RegExp(
+            r'Free quota distribution\. Codex \(work@example\.com\).+'
+            r'Codex \(personal@example\.com\)',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    },
+  );
+
+  testWidgets('excluded evidence disambiguates visible account names', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(620, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final base = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'work@example.com',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final personal = ProviderQuota.fromJson({
+      ...base.toJson(),
+      'account': 'personal@example.com',
+    }).withProviderDrift('weekly usage moved unexpectedly', now);
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [base.asStale('cached'), personal],
+          buckets: const {},
+          dark: true,
+          showAccounts: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.textContaining('Claude (work@example.com) (cached'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Claude (personal@example.com) (provider drift'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -215,7 +434,9 @@ void main() {
       'antigravity',
       'Antigravity',
       10,
-      asOf: now + kQuotaEvidenceClockSkewSeconds + 1,
+      // Leave enough margin that crossing a wall-clock second while the widget
+      // pumps cannot move this fixture back inside the accepted skew window.
+      asOf: now + kQuotaEvidenceClockSkewSeconds + 60,
       resetsAt: now + 86400,
     );
 
@@ -333,6 +554,45 @@ void main() {
     await tester.pump();
 
     expect(find.text('BEST TIME TO RUN'), findsOneWidget);
+    expect(find.textContaining('next strong slot'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('untrusted reset never drives the best-slot recommendation', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final fresh = _q('codex', 'Codex', 20, asOf: now, resetsAt: now + 3 * 3600);
+    final drifted = fresh.withProviderDrift('reset moved unexpectedly', now);
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          key: const ValueKey('drifted-reset'),
+          data: [drifted],
+          buckets: {'codex': _scheduleBuckets()},
+          dark: true,
+          initialRange: FleetRange.week,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('next strong slot'), findsNothing);
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          key: const ValueKey('fresh-reset'),
+          data: [fresh],
+          buckets: {'codex': _scheduleBuckets()},
+          dark: true,
+          initialRange: FleetRange.week,
+        ),
+      ),
+    );
+    await tester.pump();
     expect(find.textContaining('next strong slot'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

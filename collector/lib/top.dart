@@ -12,10 +12,22 @@ import 'dart:convert';
 
 import 'analysis.dart';
 import 'ansi.dart';
+import 'drift.dart';
 import 'labels.dart';
 import 'models.dart';
 import 'palette.dart';
 import 'provenance.dart';
+
+/// Removes session-hidden provider/account rows before both routing and
+/// rendering. Keeping this projection explicit prevents a hidden provider from
+/// remaining the header or copied-route winner.
+List<ProviderQuota> filterHiddenProvidersForTop(
+  Iterable<ProviderQuota> providers,
+  Set<String> hiddenQuotaKeys,
+) =>
+    providers
+        .where((quota) => !hiddenQuotaKeys.contains(quotaIdentityKeyFor(quota)))
+        .toList(growable: false);
 
 /// Builds the OSC 52 terminal escape that asks the terminal to copy [text] to
 /// the system clipboard. This needs no external process or platform clipboard
@@ -92,7 +104,7 @@ List<ProviderQuota> sortProvidersForTop(
   // (value, rankable). Lower value sorts first; unrankable rows sink and hold
   // their original order. Signs are chosen so each mode's "most urgent" leads.
   (double, bool) keyFor(ProviderQuota q) {
-    if (q.stale) return (0, false);
+    if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) return (0, false);
     switch (sort) {
       case TopSort.headroom:
         final h = providerHeadroom(q, now);
@@ -274,10 +286,13 @@ String _accent(AnsiStyle s, Palette p, String t) {
 /// spent color, so the bar visibly "heats up" toward exhaustion); otherwise it
 /// falls back to a single headroom-colored fill. htop-style, btop-grade gradient.
 List<_Cell> _bar(
-    double usedPct, double remaining, int barW, AnsiStyle s, Palette p) {
+    double usedPct, double remaining, int barW, AnsiStyle s, Palette p,
+    {required bool trusted}) {
   final filled = ((usedPct.clamp(0, 100) / 100) * barW).round().clamp(0, barW);
   final cells = <_Cell>[_Cell('[', (s, t) => s.dim(t))];
-  if (s.truecolor) {
+  if (!trusted) {
+    cells.add(_Cell('█' * filled, (s, t) => s.dim(t)));
+  } else if (s.truecolor) {
     for (var i = 0; i < filled; i++) {
       final cellRemaining = 100.0 * (1 - (i + 1) / barW);
       cells.add(_Cell('█', (s, t) => _healthPaint(s, p, cellRemaining, t)));
@@ -308,22 +323,45 @@ String _topReadState(ProviderQuota q, int now) {
     return 'provider drift$age';
   }
   if (!q.ok) return 'error';
-  if (q.isLocal) return q.active ? 'in use' : 'available';
-  if (q.stale) {
-    final age = q.asOf > 0 && now > q.asOf
-        ? ' ${compactAge(now - q.asOf, floorNow: true)}'
-        : '';
-    return 'cached$age';
+  if (q.sourceClassViolation != null) return 'invalid evidence';
+  if (q.isLocal) {
+    if (q.stale) return _cachedTopState(q, now);
+    if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+      return 'unverified';
+    }
+    if (!isLocalRuntimeAvailableAt(q, now)) return 'unavailable';
+    return q.active ? 'in use' : 'available';
   }
+  if (q.stale) {
+    return _cachedTopState(q, now);
+  }
+  if (q.suspect != null) return 'review reading';
   if (q.windows.isEmpty && (q.status ?? '').isEmpty) return 'no live data';
   if (q.windows.isEmpty) return 'metadata';
+  if (!isTrustedQuotaEvidenceAt(q, now)) return 'unverified';
   return 'live';
+}
+
+String _cachedTopState(ProviderQuota q, int now) {
+  final age = q.asOf > 0 && now > q.asOf
+      ? ' ${compactAge(now - q.asOf, floorNow: true)}'
+      : '';
+  return 'cached$age';
+}
+
+String? _topEvidenceLabel(ProviderQuota q, int now) {
+  if (q.driftReason != null) return 'last trusted';
+  if (q.stale) return 'last known';
+  if (q.windows.isNotEmpty && !isTrustedQuotaEvidenceAt(q, now)) {
+    return 'unverified';
+  }
+  return null;
 }
 
 bool _isCollapsedSpent(ProviderQuota q, int now) {
   final binding = bindingWindow(q, now);
-  final headroom = providerHeadroom(q, now) ?? 100;
-  return binding != null && headroom <= kSpentHeadroomFloor;
+  final headroom = providerHeadroom(q, now);
+  return binding != null && headroom != null && headroom <= kSpentHeadroomFloor;
 }
 
 int _trailingTagBudget(
@@ -369,7 +407,7 @@ String _routeAccountTag(
   Map<String, int> providerCounts,
 ) =>
     (providerCounts[c.provider] ?? 0) > 1 && hasSpecificQuotaAccount(c.account)
-        ? ' @${c.account}'
+        ? ' @${quotaAccountDisplayLabel(c.account)}'
         : '';
 
 String _visibleRouteAccountTag({
@@ -450,12 +488,36 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   }
 
   final binding = bindingWindow(q, now);
-  final headroom = providerHeadroom(q, now) ?? 100;
+  final headroom = providerHeadroom(q, now);
+  final evidenceLabel = _topEvidenceLabel(q, now);
+  final trusted = evidenceLabel == null && isTrustedQuotaEvidenceAt(q, now);
+  if (headroom == null) {
+    const text = 'quota balance unavailable';
+    final visibleTags = _visibleInlineTags(
+      width: width,
+      text: text,
+      trustTag: trustTag,
+      accountTag: accountTag,
+    );
+    return [
+      _line([
+        ..._rowHead(q.displayName, '', selected: selected, palette: p),
+        _Cell(text, (s, t) => s.dim(t)),
+        _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
+        _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
+      ], width, s),
+      ..._detailRows(q, width, s),
+    ];
+  }
   if (binding != null && headroom <= kSpentHeadroomFloor) {
     final reset = !columns.reset || binding.resetsAt == null
         ? ''
-        : 'resets ${countdown(binding.resetsAt!, now)}';
-    final state = q.stale ? 'last spent' : 'spent';
+        : !trusted && binding.resetsAt! <= now
+            ? 'refresh to confirm'
+            : trusted
+                ? 'resets ${countdown(binding.resetsAt!, now)}'
+                : 'reset ${countdown(binding.resetsAt!, now)}';
+    final state = trusted ? 'spent' : 'was spent (${evidenceLabel!})';
     final text = '$state${reset.isEmpty ? '' : '   $reset'}';
     final visibleTags = _visibleInlineTags(
       width: width,
@@ -467,7 +529,7 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       _line([
         ..._rowHead(q.displayName, binding.label,
             selected: selected, palette: p),
-        _Cell(state, (s, t) => q.stale ? s.dim(t) : s.red(t)),
+        _Cell(state, (s, t) => trusted ? s.red(t) : s.dim(t)),
         if (reset.isNotEmpty) _Cell('   $reset', (s, t) => s.dim(t)),
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
@@ -482,12 +544,16 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
       final remaining = 100 - used;
       final secReset = secondary.resetsAt == null
           ? ''
-          : '   resets ${countdown(secondary.resetsAt!, now)}';
+          : trusted
+              ? '   resets ${countdown(secondary.resetsAt!, now)}'
+              : secondary.resetsAt! <= now
+                  ? '   refresh to confirm'
+                  : '   reset ${countdown(secondary.resetsAt!, now)}';
       rows.add(_line([
         ..._rowHead('', secondary.label, palette: p),
         _Cell(
             '${remaining.round().toString().padLeft(3)}% '
-            '${q.stale ? 'last' : 'free'}$secReset',
+            '${evidenceLabel ?? 'free'}$secReset',
             (s, t) => s.dim(t)),
       ], width, s));
     }
@@ -500,19 +566,26 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
   for (final w in q.windows) {
     final used = quotaWindowUsedPercent(q, w, now);
     final remaining = 100 - used;
-    final reset =
-        w.resetsAt == null ? '' : 'resets ${countdown(w.resetsAt!, now)}';
-    final showForecast =
-        columns.forecast && forecast != null && w.label == binding?.label;
+    final reset = w.resetsAt == null
+        ? ''
+        : trusted
+            ? 'resets ${countdown(w.resetsAt!, now)}'
+            : w.resetsAt! <= now
+                ? 'refresh to confirm'
+                : 'reset ${countdown(w.resetsAt!, now)}';
+    final showForecast = trusted &&
+        columns.forecast &&
+        forecast != null &&
+        w.label == binding?.label;
     final headroomText =
-        '${remaining.round().toString().padLeft(3)}% ${q.stale ? 'last' : 'free'}';
+        '${remaining.round().toString().padLeft(3)}% ${evidenceLabel ?? 'free'}';
     lines.add(_line([
       ..._rowHead(first ? q.displayName : '', w.label,
           selected: first && selected, palette: p),
-      ..._bar(used, remaining, barW, s, p),
+      ..._bar(used, remaining, barW, s, p, trusted: trusted),
       _Cell(' '),
       _Cell(headroomText,
-          (s, t) => q.stale ? s.dim(t) : _healthPaint(s, p, remaining, t)),
+          (s, t) => trusted ? _healthPaint(s, p, remaining, t) : s.dim(t)),
       // The reset column is padded to its reserved width so the forecast and
       // Trust/account tags line up vertically across every row.
       if (columns.reset) ...[
@@ -548,9 +621,10 @@ List<String> _localRows(
   Palette p, {
   bool selected = false,
 }) {
-  final status = q.ok
+  final available = isLocalRuntimeAvailableAt(q, now);
+  final status = available
       ? (q.status?.isNotEmpty == true ? q.status! : 'ready')
-      : (q.error?.isNotEmpty == true ? q.error! : 'read failed');
+      : (q.error?.isNotEmpty == true ? q.error! : 'local runtime unavailable');
   // The trust tag renders only when the whole row fits, so a long model list on
   // a narrow terminal keeps its status text intact instead of clipping the tag.
   const head = 2 + _nameW + _labelW;
@@ -559,8 +633,11 @@ List<String> _localRows(
   final lines = <String>[
     _line([
       ..._rowHead(q.displayName, 'local', selected: selected, palette: p),
-      _Cell(status,
-          (s, t) => !q.ok ? s.red(t) : (q.active ? s.cyan(t) : s.dim(t))),
+      _Cell(
+          status,
+          (s, t) => !q.ok || q.error != null
+              ? s.red(t)
+              : (available && q.active ? s.cyan(t) : s.dim(t))),
       if (showTrust) ...[
         const _Cell('  '),
         _Cell(trustTag, (s, t) => s.dim(t)),
@@ -588,6 +665,16 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
       _Cell(reset, (s, t) => s.green(t)),
+    ], width, s));
+  }
+  if (!q.isLocal &&
+      q.stale &&
+      q.driftReason == null &&
+      q.error?.isNotEmpty == true) {
+    rows.add(_line([
+      const _Cell('  '),
+      _Cell(' ' * (_nameW + _labelW)),
+      _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
     ], width, s));
   }
   for (final d in q.details) {
@@ -644,8 +731,7 @@ double? _poolHeadroom(List<ProviderQuota> providers, int now) {
   var sum = 0.0;
   var n = 0;
   for (final q in providers) {
-    if (q.isLocal) continue;
-    if (q.stale) continue;
+    if (q.isLocal || !isTrustedQuotaEvidenceAt(q, now)) continue;
     final h = providerHeadroom(q, now);
     if (h != null) {
       sum += h;
@@ -699,7 +785,7 @@ List<String> renderTopFrame({
   if (cloud.isEmpty && local.isEmpty) {
     lines.add(_line([
       const _Cell('  '),
-      _Cell('no providers detected - open app; login supports Grok/Antigravity',
+      _Cell('no providers detected - run quotabot doctor for setup guidance',
           (s, t) => s.dim(t)),
     ], w, s));
   }
@@ -729,12 +815,22 @@ List<String> renderTopFrame({
   String accountTagFor(ProviderQuota q) =>
       (providerCounts[q.provider] ?? 0) > 1 &&
               hasSpecificQuotaAccount(q.account)
-          ? ' @${q.account}'
+          ? ' @${quotaAccountDisplayLabel(q.account)}'
           : '';
   // Reserve room for the widest trailing annotation so tags never clip.
+  // Untrusted quota labels such as "last trusted" are wider than the normal
+  // "free" label included in _rowCore. Account for that difference before
+  // deciding whether a whole trust tag fits.
+  final evidenceWidthExtra = cloud.fold<int>(0, (widest, q) {
+    if (!q.ok || q.windows.isEmpty || _isCollapsedSpent(q, now)) return widest;
+    final label = _topEvidenceLabel(q, now);
+    if (label == null) return widest;
+    final extra = label.length - 5;
+    return extra > widest ? extra : widest;
+  });
   var tagWidth = 0;
   final trustTags = <ProviderQuota, ({String trustTag, String accountTag})>{};
-  final tagBudget = _trailingTagBudget(w, columns);
+  final tagBudget = _trailingTagBudget(w, columns) - evidenceWidthExtra;
   for (final q in cloud) {
     final rawTrustTag = _topTrustTag(q, now);
     final rawAccountTag = accountTagFor(q);
@@ -753,7 +849,11 @@ List<String> renderTopFrame({
       if (t > tagWidth) tagWidth = t;
     }
   }
-  final barW = _barWidth(w, columns: columns, tagWidth: tagWidth);
+  final barW = _barWidth(
+    w,
+    columns: columns,
+    tagWidth: tagWidth + evidenceWidthExtra,
+  );
   // A selection names a provider and, in multi-account fleets, the account,
   // so two rows of the same provider never both carry the cursor.
   bool isSelected(ProviderQuota q) =>
