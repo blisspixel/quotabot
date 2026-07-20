@@ -16,6 +16,8 @@ void main() {
         bool stale = false,
         int asOf = now,
         List<QuotaWindow> windows = const [],
+        List<ModelInfo> models = const [],
+        String? error,
       }) => ProviderQuota(
         provider: id,
         displayName: id,
@@ -26,13 +28,35 @@ void main() {
         stale: stale,
         asOf: asOf,
         windows: windows,
+        models: models,
+        error: error,
       );
 
       expect(
         hasSuccessfulRefreshEvidence([
-          provider(id: 'ollama', kind: ProviderQuotaKind.local),
+          provider(
+            id: 'ollama',
+            kind: ProviderQuotaKind.local,
+            models: const [ModelInfo(id: 'qwen:7b', local: true)],
+          ),
         ], now),
         isTrue,
+      );
+      expect(
+        hasSuccessfulRefreshEvidence([
+          provider(id: 'ollama', kind: ProviderQuotaKind.local),
+        ], now),
+        isFalse,
+      );
+      expect(
+        hasSuccessfulRefreshEvidence([
+          provider(
+            id: 'ollama',
+            kind: ProviderQuotaKind.local,
+            error: 'configured host is not loopback',
+          ),
+        ], now),
+        isFalse,
       );
       expect(
         hasSuccessfulRefreshEvidence([

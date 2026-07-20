@@ -3,6 +3,7 @@ library;
 
 import 'provider_source.dart';
 
+export 'credential_identity.dart';
 export 'provider_source.dart';
 
 /// Conservative defaults for use-it-or-lose-it quota signals. These defaults
@@ -68,7 +69,12 @@ class QuotaWindow {
   }
 
   /// True when the window is effectively exhausted.
-  bool get exhausted => (percent ?? 0) >= 100 - kSpentHeadroomFloor;
+  bool get exhausted {
+    final value = percent;
+    if (value == null) return false;
+    if (!value.isFinite || value < 0 || value > 100) return true;
+    return value >= 100 - kSpentHeadroomFloor;
+  }
 
   Map<String, dynamic> toJson() => {
         'label': label,
@@ -80,9 +86,11 @@ class QuotaWindow {
 
   factory QuotaWindow.fromJson(Map<String, dynamic> j) => QuotaWindow(
         label: j['label'] as String,
-        // Percents bound to 0..100; counts kept as-is but finite; a non-finite
-        // reset is dropped rather than thrown through `as int`.
-        usedPercent: finiteOrNull(j['used_percent'])?.clamp(0, 100).toDouble(),
+        // Keep finite out-of-range values intact so the quota trust boundary
+        // can reject a corrupt cache entry. Clamping a negative value to zero
+        // here would launder it into a trusted 100%-free balance. Non-finite
+        // numbers are still dropped because they cannot be JSON-encoded again.
+        usedPercent: finiteOrNull(j['used_percent']),
         used: finiteOrNull(j['used']),
         limit: finiteOrNull(j['limit']),
         resetsAt: finiteOrNull(j['resets_at'])?.toInt(),
@@ -94,6 +102,8 @@ class QuotaWindow {
 /// model family independently; Claude can report an additional cap for one
 /// model such as Fable. Consumers must preserve that provider-specific scope so
 /// an optional model cap never blocks unrelated models.
+const int kMaxModelQuotaWindowLabelCharacters = 96;
+
 class ModelQuota {
   /// Model name as the provider labels it, e.g. "Gemini 3.5 Flash". Effort or
   /// mode variants that share a pool are rolled up to this base name.
@@ -105,6 +115,13 @@ class ModelQuota {
   /// Unix epoch seconds when this model's pool resets. Null when unknown.
   final int? resetsAt;
 
+  /// Provider window identity for this scoped pool, for example `weekly`.
+  ///
+  /// This is distinct from [resetsAt]: a reset timestamp alone cannot identify
+  /// a rolling or re-rated provider window, and guessing from time remaining
+  /// can mislabel the same pool near its reset boundary.
+  final String? windowLabel;
+
   /// Provider speed/category label, e.g. "Fast". Null when not exposed.
   final String? category;
 
@@ -115,6 +132,7 @@ class ModelQuota {
     required this.model,
     this.usedPercent,
     this.resetsAt,
+    this.windowLabel,
     this.category,
     this.note,
   });
@@ -122,24 +140,34 @@ class ModelQuota {
   /// Remaining headroom percent (100 - used), 0..100. Null when unknown.
   double? get remainingPercent {
     final u = usedPercent;
-    return u == null ? null : (100 - u).clamp(0, 100).toDouble();
+    if (u == null || !u.isFinite || u < 0 || u > 100) return null;
+    return 100 - u;
   }
 
   /// True when this model's pool is effectively spent.
-  bool get exhausted => (usedPercent ?? 0) >= 100 - kSpentHeadroomFloor;
+  bool get exhausted {
+    final used = usedPercent;
+    if (used == null) return false;
+    if (!used.isFinite || used < 0 || used > 100) return true;
+    return used >= 100 - kSpentHeadroomFloor;
+  }
 
   Map<String, dynamic> toJson() => {
         'model': model,
         if (usedPercent != null) 'used_percent': usedPercent,
         if (resetsAt != null) 'resets_at': resetsAt,
+        if (windowLabel != null) 'window_label': windowLabel,
         if (category != null) 'category': category,
         if (note != null) 'note': note,
       };
 
   factory ModelQuota.fromJson(Map<String, dynamic> j) => ModelQuota(
         model: j['model'] as String,
-        usedPercent: finiteOrNull(j['used_percent'])?.clamp(0, 100).toDouble(),
+        // Preserve finite invalid values for drift/admission validation. In
+        // particular, a negative cached percent must not become 100% remaining.
+        usedPercent: finiteOrNull(j['used_percent']),
         resetsAt: finiteOrNull(j['resets_at'])?.toInt(),
+        windowLabel: j['window_label'] as String?,
         category: j['category'] as String?,
         note: j['note'] as String?,
       );
@@ -217,6 +245,28 @@ enum ProviderQuotaKind {
         providerQuotaLocalKind => ProviderQuotaKind.local,
         _ => throw FormatException('unknown provider quota kind: $value'),
       };
+}
+
+/// Where a provider plan label came from.
+///
+/// A host credential label is useful diagnostic context, but it is not current
+/// entitlement proof. Provider metadata is the only class that can prove an
+/// included-plan classification for a spend-sensitive routing decision.
+enum ProviderPlanEvidenceSource {
+  hostCredential('host_credential'),
+  providerMetadata('provider_metadata');
+
+  const ProviderPlanEvidenceSource(this.wireName);
+
+  final String wireName;
+
+  static ProviderPlanEvidenceSource? fromWire(Object? value) => switch (value) {
+        'host_credential' => ProviderPlanEvidenceSource.hostCredential,
+        'provider_metadata' => ProviderPlanEvidenceSource.providerMetadata,
+        _ => null,
+      };
+
+  static const wireValues = ['host_credential', 'provider_metadata'];
 }
 
 /// Passive memory capacity observed on the machine hosting a local runtime.
@@ -324,6 +374,14 @@ class ProviderQuota {
   /// Plan/tier string when known, e.g. "pro", "max".
   final String? plan;
 
+  /// Provenance for [plan]. A locally stored host-credential label is
+  /// deliberately distinct from a current provider-metadata entitlement.
+  final ProviderPlanEvidenceSource? planEvidenceSource;
+
+  /// Unix epoch seconds when [plan] was captured from [planEvidenceSource].
+  /// This is separate from [asOf], which is the quota observation time.
+  final int? planEvidenceAsOf;
+
   /// Data source hint. Null means a built-in adapter or local runtime produced
   /// the snapshot; [providerQuotaManualSource] means the user entered the quota
   /// themselves.
@@ -430,6 +488,8 @@ class ProviderQuota {
     required this.account,
     required this.asOf,
     this.plan,
+    this.planEvidenceSource,
+    this.planEvidenceAsOf,
     this.source,
     this.ok = true,
     this.error,
@@ -531,6 +591,8 @@ class ProviderQuota {
     int asOf, {
     String account = 'unknown',
     String? plan,
+    ProviderPlanEvidenceSource? planEvidenceSource,
+    int? planEvidenceAsOf,
     String? pipeHealth,
     int? httpStatus,
     int? retryAfterSeconds,
@@ -540,6 +602,8 @@ class ProviderQuota {
         displayName: displayName,
         account: account,
         plan: plan,
+        planEvidenceSource: planEvidenceSource,
+        planEvidenceAsOf: planEvidenceAsOf,
         asOf: asOf,
         ok: false,
         error: error,
@@ -553,6 +617,9 @@ class ProviderQuota {
         'display_name': displayName,
         'account': account,
         if (plan != null) 'plan': plan,
+        if (planEvidenceSource != null)
+          'plan_evidence_source': planEvidenceSource!.wireName,
+        if (planEvidenceAsOf != null) 'plan_evidence_as_of': planEvidenceAsOf,
         if (source != null) 'source': source,
         'source_class': sourceClass.wireName,
         'kind': kind.wireName,
@@ -584,6 +651,10 @@ class ProviderQuota {
         displayName: j['display_name'] as String,
         account: j['account'] as String,
         plan: j['plan'] as String?,
+        planEvidenceSource: _providerPlanEvidenceSourceFromJson(j),
+        planEvidenceAsOf: _providerPlanEvidenceSourceFromJson(j) == null
+            ? null
+            : boundedIntFromWire(j['plan_evidence_as_of'], min: 1),
         source: j['source'] as String?,
         sourceClass: _providerSourceClassFromJson(j),
         ok: j['ok'] as bool? ?? true,
@@ -629,6 +700,12 @@ class ProviderQuota {
         displayName: displayName,
         account: _staleMetadataAccount(metadataFrom, account),
         plan: metadataFrom?.plan ?? plan,
+        planEvidenceSource: metadataFrom?.plan != null
+            ? metadataFrom?.planEvidenceSource
+            : planEvidenceSource,
+        planEvidenceAsOf: metadataFrom?.plan != null
+            ? metadataFrom?.planEvidenceAsOf
+            : planEvidenceAsOf,
         source: metadataFrom?.source ?? source,
         sourceClass: sourceClass,
         ok: true,
@@ -669,6 +746,8 @@ class ProviderQuota {
         account: account,
         asOf: asOf,
         plan: plan,
+        planEvidenceSource: planEvidenceSource,
+        planEvidenceAsOf: planEvidenceAsOf,
         source: source,
         sourceClass: sourceClass,
         ok: ok,
@@ -701,6 +780,8 @@ class ProviderQuota {
         account: account,
         asOf: asOf,
         plan: plan,
+        planEvidenceSource: planEvidenceSource,
+        planEvidenceAsOf: planEvidenceAsOf,
         source: source,
         sourceClass: sourceClass,
         ok: true,
@@ -741,6 +822,12 @@ class ProviderQuota {
             ? metadataFrom.asOf
             : asOf,
         plan: metadataFrom?.plan ?? plan,
+        planEvidenceSource: metadataFrom?.plan != null
+            ? metadataFrom?.planEvidenceSource
+            : planEvidenceSource,
+        planEvidenceAsOf: metadataFrom?.plan != null
+            ? metadataFrom?.planEvidenceAsOf
+            : planEvidenceAsOf,
         source: metadataFrom?.source ?? source,
         sourceClass: sourceClass,
         ok: false,
@@ -770,6 +857,8 @@ class ProviderQuota {
         account: account,
         asOf: asOf,
         plan: plan,
+        planEvidenceSource: planEvidenceSource,
+        planEvidenceAsOf: planEvidenceAsOf,
         source: source,
         sourceClass: sourceClass,
         ok: ok,
@@ -819,6 +908,16 @@ ProviderSourceClass _providerSourceClassFromJson(Map<String, dynamic> json) {
   );
 }
 
+ProviderPlanEvidenceSource? _providerPlanEvidenceSourceFromJson(
+  Map<String, dynamic> json,
+) {
+  if (json['plan'] is! String ||
+      boundedIntFromWire(json['plan_evidence_as_of'], min: 1) == null) {
+    return null;
+  }
+  return ProviderPlanEvidenceSource.fromWire(json['plan_evidence_source']);
+}
+
 String _staleMetadataAccount(
     ProviderQuota? metadataFrom, String cachedAccount) {
   final fresh = metadataFrom?.account;
@@ -852,6 +951,8 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     displayName: t(q.displayName),
     account: t(q.account),
     plan: q.plan == null ? null : t(q.plan!),
+    planEvidenceSource: q.planEvidenceSource,
+    planEvidenceAsOf: q.planEvidenceAsOf,
     source: q.source == null ? null : t(q.source!),
     sourceClass: q.sourceClass,
     ok: q.ok,
@@ -902,6 +1003,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           model: t(m.model),
           usedPercent: m.usedPercent,
           resetsAt: m.resetsAt,
+          windowLabel: m.windowLabel == null ? null : t(m.windowLabel!),
           category: m.category == null ? null : t(m.category!),
           note: m.note == null ? null : t(m.note!),
         ),

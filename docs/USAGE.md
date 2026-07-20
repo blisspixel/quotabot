@@ -29,11 +29,12 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
 - **Trust line:** each provider card carries a compact line for live, cached, or
   provider-drift state, normalized source class, spend class, and capture age,
-  so the number is not separated from where it came from. The source labels are
-  `authoritative`, `this-machine fallback`, `passive local`, `local runtime`,
-  `status only`, and `manual`; they replace redundant scope tags. Drift
-  also adds a visible, screen-reader-announced warning and suppresses forecasts
-  from stale evidence.
+  so the number is not separated from where it came from. The desktop source
+  labels are `account-wide`, `this-machine fallback`, `passive local`,
+  `local runtime`, `status only`, and `manual`; `account-wide` is its
+  plain-language rendering of the `authoritative_live` wire class. Drift also
+  adds a visible, screen-reader-announced warning and suppresses forecasts from
+  stale evidence.
 - **Forecast at a glance:** when a provider is visibly burning, the card adds a
   plain-language line on the binding window ("about an hour of usage left", or
   "likely to run out before it resets" once that risk is material), the same
@@ -51,9 +52,10 @@ headroom palette as the terminal truecolor view.
 
 ## Quota Analytics
 
-Open it from the bar-chart button in the header. It takes over the window (a
-Back button returns you to the strip) and scrolls like a phone, switchable by
-time range:
+Open it from the bar-chart button in the header. The analytics body replaces the
+quota body under the same header and menu, without moving or resizing the
+window. It scrolls within the current size, the header's Back to quotas control
+restores the quota body, and the view is switchable by time range:
 
 - **Now:** pool-free and most-headroom chips, ranked headroom per provider with
   reset countdowns, a consumption-share donut, and LiteLLM routed-request totals
@@ -114,10 +116,10 @@ metadata. Add `--json` to any read command for machine output.
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, best windows, pace.   |
 | `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
-| `verify`               | Honesty checks over one live read (exit 65 on any failure). |
+| `verify`               | Honesty checks over one read; `--require-live` also gates adapter health. |
 | `explain`              | Dry-run manifest of local reads and network hosts.    |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
-| `login <provider>`     | Connect grok or antigravity so it stays live.         |
+| `login <provider>`     | Connect claude, codex, grok, or antigravity for refreshable reads. |
 | `logout <provider>`    | Disconnect a provider.                                |
 | `help`, `version`      | Usage and version.                                    |
 
@@ -153,15 +155,18 @@ does not read analytics buckets.
 ### Verification (`quotabot verify`)
 
 `quotabot verify` runs the honesty checks quotabot holds itself to over one
-live read: every window percentage finite and in bounds, every snapshot
+read: every window percentage finite and in bounds, every snapshot
 carrying a sane capture time, every failure carrying a plain reason, cached
 data labeled stale with a note, reset times plausible, provider/account pairs
 unique, every source class allowed by its adapter and consistent with the data
 shape, the emitted snapshot conforming to the frozen `quotabot.v1` contract,
 and the runtime access boundary staying free of prompts, source code, token
 spend, and generation endpoints. A provider that is out of quota, signed out,
-or not running still passes when it says so truthfully; the failure mode
-`verify` hunts is a lying or silent number, not an empty one.
+or not running still passes the default honesty check when it says so
+truthfully; the failure mode `verify` hunts is a lying or silent number, not an
+empty one. Each JSON provider row also has `live_read_succeeded`, and the
+envelope has `all_live_reads_succeeded`, so a truthful cached fallback cannot
+be mistaken for a healthy adapter read.
 
 The provider-level `source_class` check validates the six-value contract from
 [DATA_SOURCES.md](DATA_SOURCES.md#source-classes). It rejects an authoritative
@@ -185,20 +190,51 @@ labels either form `PROVIDER DRIFT` and identifies the `provider_drift` failure.
 The provider stays unavailable to routing, and no new measured analytics sample
 is recorded until recovery. Earlier trusted history remains intact.
 
+If a provider has intentionally changed its quota shape and clean reads cannot
+advance the quarantined baseline automatically, use the explicit targeted
+recovery mode. Obtain the exact `account` value from `quotabot verify --json`,
+then name both identity dimensions and confirm noninteractively:
+
+```bash
+quotabot verify --recover-drift=codex --account=EXACT_ACCOUNT --yes
+quotabot verify --recover-drift=codex --account=EXACT_ACCOUNT --yes --json
+```
+
+Recovery is not a general cache clear. Before contacting the provider, it
+requires an active drift or legacy quarantine for that exact identity. It
+invokes only the selected provider adapter, requires one exact account row to
+pass full live verification plus the stricter quota trust boundary, and refuses
+failed, stale, malformed, expired, future-dated, duplicate, or wrong-account
+evidence. `--profile`, `--exclude`, and simulation flags are rejected so they
+cannot make the target ambiguous. `--yes` is mandatory and no interactive
+prompt is used, which makes the confirmation safe for scripts. A successful
+transaction replaces only the exact snapshot baseline and its older matching
+drift diagnostic. It leaves history, analytics, profiles, preferences, leases,
+credentials, and every other account unchanged. A concurrent newer cache or
+drift observation wins and makes recovery fail instead of being overwritten.
+The JSON result is `quotabot.drift-recovery.v1`. Exit code is `0` only when the
+baseline was replaced, `64` for invalid or unconfirmed usage, and `65` when live
+verification or the safe transaction does not recover it.
+
 ```bash
 quotabot verify           # human summary, one line per provider
 quotabot verify --json    # quotabot.verify.v1 record for scripts and archives
+quotabot verify --require-live  # exit 65 unless every selected read is fresh and accepted
 ```
 
 Exit code is `0` when every snapshot is reading correctly or failing with a
-plain reason, and `65` when any check fails, so a script or CI job can branch
-on it. Each record also names the provider's own usage surface (for example
+plain reason, and `65` when any honesty check fails. With `--require-live`, 65
+also means at least one selected provider did not produce a fresh accepted
+adapter read. Each record also names the provider's own usage surface (for example
 `/usage` in Claude Code) so you can confirm the numbers by hand; the mechanical
 checks cannot know the provider's side of the conversation. Undetected local
 runtimes are reported as truthful absences, not failures. `--profile`,
 `--exclude`, and simulation flags narrow the read as usual; the
 claimed-provider coverage check then reports itself skipped instead of
-misreading the filter.
+misreading the filter. An unfiltered `--require-live` run selects the whole
+built-in adapter fleet, including local runtimes; use a profile or exclusions
+when the strict gate should cover only a subset. Manual entries are not adapter
+reads and do not satisfy or fail the strict live-read aggregate.
 
 `verify --json` includes `runtime_access`, a `quotabot.explain.v1` object for
 the collection. For real reads it is `mode: "runtime_access_observation"` and
@@ -361,6 +397,12 @@ re-arms only after the reset is gone. The same reset shows as a prominent green
 on the desktop card. These reset notifications are local only, never sent to the
 webhook.
 
+Native low-quota and reset notification bodies, including the Windows subtitle,
+follow the desktop "Show account names" preference. Even when enabled, an
+account appears only when duplicate accounts for that provider need
+disambiguation. Alert webhook JSON retains its exact account metadata contract
+and is not rewritten by this display preference.
+
 ## Exit codes
 
 The CLI uses stable exit codes so a shell or agent can branch without parsing
@@ -371,7 +413,8 @@ output:
 - `64` usage error: a bad argument or an unknown provider name.
 - `65` verification failure: a `verify` run found at least one snapshot failing
   its honesty checks (a lying number, provider drift, a silent failure, or
-  contract drift).
+  contract drift), or `--require-live` found a selected provider adapter that
+  did not return a fresh accepted read.
 - `69` unavailable: the named provider (`check`), or the whole fleet (piped
   `top`), has no usable quota at the moment. `check` uses this code for
   provider-drift evidence because last-trusted headroom is not current capacity.
@@ -420,9 +463,13 @@ explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 never sees the task; you supply the requirements, and it returns the models that
 meet them with budget. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
-Add `--budget=local` for a hard cap to models classified as local-runtime, or
-`--budget=quota` to allow local runtimes plus measured built-in quota plans while
-excluding self-reported manual quotas. `quota` is not permission to use
+`quotabot models` and MCP `list_models` default to `budget=any` for inspection.
+Concrete CLI suggestions and MCP `suggest_model` default to `budget=quota`, which
+allows on-device local runtimes plus measured built-in quota plans while
+excluding self-reported, credit-backed, and paid API candidates. Add
+`--budget=local` for a hard cap to models classified as local-runtime. Pass
+`--budget=any` explicitly on a concrete suggestion to admit unrestricted catalog
+entries; its reason states when included quota is not proven. `quota` is not permission to use
 request-metered paid APIs; those remain blocked by the LiteLLM guardrails unless
 explicitly enabled in that integration. Providers that expose availability but
 no measured quota windows, such as NVIDIA NIM trial access, stay visible in
@@ -430,6 +477,38 @@ status views but do not become `models` candidates. If a provider model is only
 temporarily included in a plan, quotabot marks it quota-backed only until the
 documented cutoff; after that point `--budget=quota` excludes it rather than
 drifting into credit-backed usage.
+Fable 5 has no temporary catalog cutoff. Beginning July 20, 2026, Anthropic says
+it is included for Max and Team Premium at 50% of limits; Pro and Team Standard
+retain access through usage credits and receive a one-time $100 credit. That
+dated policy does not reveal a current balance. quotabot admits Fable as
+quota-backed only when the provider response contains a current scoped Fable row
+and current provider metadata from `/api/oauth/usage` or the same-credential
+companion `/api/oauth/profile` read, captured on or after July 20, 2026 UTC,
+confirms a Max or Team Premium entitlement. The profile call is zero-token
+metadata, not a model request. Before that effective boundary, the row remains
+available for inspection but included quota is not proven.
+The Max or Team Premium label in a local Claude credential can outlive a plan
+change, so it is exposed as host-credential provenance but never proves included
+spend. Positive included-quota and credit-backed labels both require current
+provider plan metadata from one of those two provider reads. Valid profile
+account and optional organization IDs are irreversibly hashed for live
+subscription-pool deduplication; the raw IDs are not stored or output. When
+several credential reads succeed but any pool identity is unknown, only one
+success remains routable. A successful profile identity becomes the stable
+opaque account key used by cache, drift, leases, and routing. The credential
+fingerprint remains the fail-closed account-key fallback when profile identity
+is unavailable. Pro, Team Standard, host-label-only, and plan-unknown Fable
+rows stay visible under `--budget=any` but are excluded from `--budget=quota`. Doctor and
+the desktop scoped row say `included quota`, `credit-backed availability`, or
+`included quota not proven`. The effective budget uses the tighter of the
+scoped row and the shared Claude window, and Fable exhaustion never blocks
+unrelated Claude models. See Anthropic's
+[July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
+Codex `additional_rate_limits` are also sparse overlays. A named pool such as
+GPT-5.3-Codex-Spark is preserved as model quota evidence. When the matching model
+is represented in the catalog, it must have current scoped evidence and is gated
+by the tighter of that pool and the shared Codex window; ordinary unmatched
+Codex models keep using the shared account budget.
 Ollama can expose cloud-offloaded models through its local daemon (a `-cloud` tag
 suffix, e.g. `qwen3-coder:480b-cloud`) that execute on ollama.com, not on-device.
 quotabot flags these `cloud_offloaded` and excludes them from `--budget=local` and
@@ -462,6 +541,9 @@ reorders. The preference also persists per profile as `preference_order` in the
 profile JSON; an explicit `--prefer` overrides the active profile's saved order
 for that run. MCP `suggest_provider` and `decide_now` apply the same saved
 `preference_order` when you pass `profile`, so CLI and agent paths agree.
+The saved order also governs the recommendation shown by human `doctor`,
+`top`, `watch`, and `report` surfaces, so selecting a profile does not silently
+change meaning between interactive and automated views.
 For cost-sensitive dispatch, `quotabot suggest --local-first` keeps the normal
 provider ranking visible but recommends a local runtime before subscription quota
 when one is available. MCP `suggest_provider` and `decide_now` accept
@@ -494,10 +576,11 @@ request-metered paid API routes.
 |---|---|---|---|---|
 | Choose a provider | `suggest` | provider recommendation and ranked alternatives | measured subscription runway, then reachable local fallback | does not enable catalogued paid API routes |
 | Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
-| Inspect model candidates | `models` | matching entries represented by the current snapshot and catalog | most routable first; known unavailable entries remain explicit within represented providers | `any` shows the normal catalog policy |
-| Choose one model | `suggest --task=PROFILE` or capability flags | concrete model recommendation | available first; local-runtime, loaded, lighter provider tier, then headroom | `--use-expiring-quota` may let measured included quota beat local |
+| Inspect model candidates | `models` | matching entries represented by the current snapshot and catalog | most routable first; known unavailable entries remain explicit within represented providers | defaults to unrestricted `any` for inspection; `quota_backed` stays explicit |
+| Choose one model | `suggest --task=PROFILE` or capability flags | concrete model recommendation | available first; on-device local runtime, loaded, lighter provider tier, then headroom | defaults to safe `quota`; `--use-expiring-quota` may let measured included quota beat local |
 | Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud, manual, and cloud-offloaded Ollama (`-cloud`) entries |
-| Restrict to quota-plan and runtime classes | add `--budget=quota` to a model command | filtered list or concrete model | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Restrict a listing to quota-plan and runtime classes | add `--budget=quota` to `models` | filtered list | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Opt into unrestricted model selection | add `--budget=any` to a model suggestion | concrete model recommendation | normal model ranking across all represented spend classes | may include credit-backed or paid catalog entries; the reason warns when included quota is not proven |
 | Keep model requirements but return a provider | add `--provider-route` | `quotabot.suggest.v1` provider result | provider ranking after the caller-supplied capability gate | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
 
 MCP `suggest_provider`, `list_models`, and `suggest_model` expose the same
@@ -631,13 +714,16 @@ and exposes nine tools plus two resources:
   `local_first: true` to prefer a local runtime before subscription quota. Pass
   `cost_penalties` only when the caller already has an explicit cost policy.
 - `decide_now` - the same routing decision from the latest cached snapshot,
-  with explicit snapshot source, age, and staleness. It never forces a live
-  collect, and accepts the same `local_first` and explicit cost policies.
+  with explicit snapshot source, age, and whole-snapshot staleness scope after
+  any profile, account, and exclude filters. It never forces a live collect and
+  accepts the same `local_first` and explicit cost policies. Ranked candidates
+  carry their own provider-level stale flags.
 - `reserve_provider` - create a short local quota lease for a cloud provider
   before dispatching parallel work, reducing later effective headroom.
 - `release_provider` - idempotently release a local routing lease when the
   caller finishes or abandons the dispatch.
-- `check_provider_availability` - whether a named provider is usable now.
+- `check_provider_availability` - whether a named provider is usable now, plus
+  the plain live-read failure when it is showing stale last-known evidence.
 - `list_models` - matching models (cloud + local) for providers represented in
   the current registry, ordered by routability with explicit availability,
   gating budget, and capability hints.
@@ -717,10 +803,21 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 recommendation, `GET /suggest?exclude=codex,grok` ignores those providers for
 that recommendation, `GET /suggest?local_first=true` prefers local capacity, and
 `GET /suggest?cost_penalty=codex:2` applies an explicit caller cost penalty.
-The server binds to loopback and spends zero usage tokens, but it has no
-authentication and snapshots can include account identifiers such as email
-addresses. Treat the port as trusted local metadata: run it only on a machine
-whose local processes you trust, and stop it when it is not needed.
+The server also exposes authenticated `POST /leases/reserve` and
+`POST /leases/release` for the bundled LiteLLM router. Startup creates a stable
+owner-only bearer token under the local quotabot HTTP directory; the token is
+never printed or returned. Mutation bodies are bounded quota target metadata
+only and never contain prompts or code. Read endpoints remain unauthenticated.
+
+Browser requests must use a loopback `Origin`. When a browser omits `Origin`,
+Fetch Metadata rejects same-site and cross-site subresource requests before any
+provider collection. Normal non-browser clients that send no Fetch Metadata and
+explicit user-activated top-level navigations remain supported.
+
+The server binds to loopback and spends zero usage tokens. Snapshots can include
+bounded account identifiers, so treat the port as trusted local metadata: run it
+only on a machine whose local processes you trust, and stop it when it is not
+needed.
 
 ## Demo mode
 

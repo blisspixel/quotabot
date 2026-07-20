@@ -22,7 +22,10 @@ class LemonadeAdapter {
   static const name = lemonadeProviderName;
 
   final http.Client? _injectedClient;
-  LemonadeAdapter({http.Client? client}) : _injectedClient = client;
+  final Map<String, String> _environment;
+  LemonadeAdapter({http.Client? client, Map<String, String>? environment})
+      : _injectedClient = client,
+        _environment = environment ?? Platform.environment;
 
   static String baseUrl({Map<String, String>? environment}) {
     final env = environment ?? Platform.environment;
@@ -35,6 +38,9 @@ class LemonadeAdapter {
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
+    if (!isLoopbackRuntimeHost(_environment['LEMONADE_HOST'])) {
+      return _nonLoopback(asOf);
+    }
     // Own the client for this collect: close it in `finally` when we created it,
     // so a long-lived TUI's periodic refresh does not leak a client (and its
     // connection pool) every cycle. An injected client is the caller's to close.
@@ -63,7 +69,7 @@ class LemonadeAdapter {
   Future<List<LocalModel>?> _models(String path, http.Client client) async {
     try {
       final resp = await client
-          .get(Uri.parse('${baseUrl()}$path'))
+          .get(Uri.parse('${baseUrl(environment: _environment)}$path'))
           .timeout(const Duration(seconds: 2));
       if (resp.statusCode != 200) return null;
       final models = lmStudioCompatFromJson(jsonDecode(resp.body));
@@ -82,5 +88,17 @@ class LemonadeAdapter {
         asOf: asOf,
         ok: false,
         error: 'not running',
+      );
+
+  ProviderQuota _nonLoopback(int asOf) => ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: 'local',
+        plan: 'local',
+        kind: ProviderQuotaKind.local,
+        asOf: asOf,
+        ok: true,
+        status: 'configured host is not loopback',
+        error: 'non-loopback runtime host is not eligible as local capacity',
       );
 }

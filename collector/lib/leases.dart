@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'file_guard.dart';
 import 'provider_ids.dart';
 import 'storage_keys.dart';
 import 'util.dart';
@@ -13,6 +14,7 @@ const defaultLeaseWeightPercent = 15.0;
 const minLeaseWeightPercent = 1.0;
 const maxLeaseWeightPercent = 50.0;
 const maxActiveLeases = 256;
+const leaseStoreAcquisitionTimeout = Duration(seconds: 5);
 
 typedef LeaseIdFactory = String Function();
 
@@ -115,6 +117,29 @@ class RouteLease {
   }
 }
 
+/// The active lease set together with whether it is a trusted, complete read.
+///
+/// A read is [available] when the store could be read in full: either a
+/// disabled store (definitively no leases) or a healthy file read. It is
+/// unavailable only when a read was attempted and failed, so an empty
+/// [activeLeases] must not be mistaken for "no active leases". Routing surfaces
+/// publish [available] as `lease_store_available` so a caller can tell a
+/// complete empty read from a degraded one.
+class RouteLeaseState {
+  final List<RouteLease> activeLeases;
+  final bool available;
+  final String? reason;
+
+  RouteLeaseState.available(List<RouteLease> activeLeases)
+      : activeLeases = List.unmodifiable(activeLeases),
+        available = true,
+        reason = null;
+
+  const RouteLeaseState.unavailable(this.reason)
+      : activeLeases = const [],
+        available = false;
+}
+
 class LeaseTargetDiscount {
   final String provider;
   final String account;
@@ -198,14 +223,20 @@ class RouteLeaseRelease {
 }
 
 abstract class RouteLeaseStore {
+  /// The active leases, degrading to an empty list on any read failure. Advisory
+  /// read-only routing tools use this and must not break on a lock or IO error.
   List<RouteLease> active(int now);
+
+  /// The active leases plus whether that read was trusted and complete. Use this
+  /// when a caller must distinguish a genuinely empty store from a degraded read.
+  RouteLeaseState activeState(int now);
 
   /// Selects a target from the latest active leases and creates its lease as
   /// one store transaction. File-backed stores serialize independent processes.
-  /// Callers must route all file-store operations in a POSIX process through one
-  /// isolate because Dart advisory file locks are process-scoped. Synchronous
-  /// calls within that isolate cannot interleave. A matching idempotency key
-  /// that fails [reuseWhere] is a scope conflict and is never reassigned.
+  /// The file store combines an exclusive claim with its native lock so POSIX
+  /// isolates and independent processes observe the same transaction boundary.
+  /// A matching idempotency key that fails [reuseWhere] is a scope conflict and
+  /// is never reassigned.
   RouteLeaseReservation selectAndReserve({
     required RouteLeaseSelector select,
     required int now,
@@ -238,6 +269,11 @@ class NoopRouteLeaseStore implements RouteLeaseStore {
   @override
   List<RouteLease> active(int now) => const [];
 
+  // A disabled store has definitively no leases, so an empty read is complete
+  // and trusted; only a store that tried and failed to read is unavailable.
+  @override
+  RouteLeaseState activeState(int now) => RouteLeaseState.available(const []);
+
   @override
   RouteLeaseReservation selectAndReserve({
     required RouteLeaseSelector select,
@@ -258,12 +294,12 @@ class NoopRouteLeaseStore implements RouteLeaseStore {
         activeLeases: const [],
       );
     }
-    return const RouteLeaseReservation(
+    return RouteLeaseReservation(
       reserved: false,
       reused: false,
       reason: 'lease store unavailable',
       lease: null,
-      activeLeases: [],
+      activeLeases: const [],
     );
   }
 
@@ -277,21 +313,21 @@ class NoopRouteLeaseStore implements RouteLeaseStore {
     String? client,
     String? idempotencyKey,
   }) =>
-      const RouteLeaseReservation(
+      RouteLeaseReservation(
         reserved: false,
         reused: false,
         reason: 'lease store unavailable',
         lease: null,
-        activeLeases: [],
+        activeLeases: const [],
       );
 
   @override
   RouteLeaseRelease release({required String leaseId, required int now}) =>
-      const RouteLeaseRelease(
+      RouteLeaseRelease(
         released: false,
         reason: 'lease store unavailable',
         lease: null,
-        activeLeases: [],
+        activeLeases: const [],
       );
 }
 
@@ -307,6 +343,10 @@ class InMemoryRouteLeaseStore implements RouteLeaseStore {
     _leases = _activeOnly(_leases, now);
     return List.unmodifiable(_leases);
   }
+
+  @override
+  RouteLeaseState activeState(int now) =>
+      RouteLeaseState.available(active(now));
 
   @override
   RouteLeaseReservation selectAndReserve({
@@ -365,6 +405,15 @@ class InMemoryRouteLeaseStore implements RouteLeaseStore {
         activeLeases: List.unmodifiable(_leases),
       );
     }
+    if (_idempotencyKeyTargetsDifferentLease(_leases, request)) {
+      return RouteLeaseReservation(
+        reserved: false,
+        reused: false,
+        reason: 'idempotency key belongs to a different lease target',
+        lease: null,
+        activeLeases: List.unmodifiable(_leases),
+      );
+    }
     if (_leases.length >= maxActiveLeases) {
       return RouteLeaseReservation(
         reserved: false,
@@ -420,19 +469,32 @@ class FileRouteLeaseStore implements RouteLeaseStore {
 
   File _lockFile(Directory dir) => File('${dir.path}/route_leases.lock');
 
+  // Publishing uses a same-directory atomic replace, so a read never needs the
+  // transaction guard and its platform ACL helpers. It sees either the complete
+  // old ledger or the complete new ledger.
+  List<RouteLease> _readActive(int now) =>
+      _activeOnly(_readLeaseLedger(_dataFile(dirFactory())), now);
+
   @override
   List<RouteLease> active(int now) {
     // Leases are advisory; a lock or IO failure must never break the read-only
-    // routing tools that consult them (suggest_provider, decide_now). Degrade
-    // to no active leases, matching NoopRouteLeaseStore.
+    // routing tools that consult them. Degrade to no active leases.
     try {
-      return _withLock((dir) {
-        final active = _activeOnly(_readUnlocked(_dataFile(dir)), now);
-        _writeUnlocked(_dataFile(dir), active);
-        return List.unmodifiable(active);
-      });
+      return List.unmodifiable(_readActive(now));
     } catch (_) {
       return const [];
+    }
+  }
+
+  @override
+  RouteLeaseState activeState(int now) {
+    // Unlike active(), this distinguishes a genuinely empty ledger from a read
+    // that failed, so invalid or unreadable evidence is explicitly unavailable
+    // instead of being called an empty active set.
+    try {
+      return RouteLeaseState.available(_readActive(now));
+    } catch (_) {
+      return const RouteLeaseState.unavailable('lease store unavailable');
     }
   }
 
@@ -449,7 +511,7 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     try {
       return _withLock((dir) {
         final file = _dataFile(dir);
-        final active = _activeOnly(_readUnlocked(file), now);
+        final active = _activeOnly(_readLeaseLedger(file), now);
         final reservation = _selectAndReserve(
           active: active,
           select: select,
@@ -465,12 +527,12 @@ class FileRouteLeaseStore implements RouteLeaseStore {
         return reservation;
       });
     } catch (_) {
-      return const RouteLeaseReservation(
+      return RouteLeaseReservation(
         reserved: false,
         reused: false,
         reason: 'lease store unavailable',
         lease: null,
-        activeLeases: [],
+        activeLeases: const [],
       );
     }
   }
@@ -488,7 +550,7 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     try {
       return _withLock((dir) {
         final file = _dataFile(dir);
-        final active = _activeOnly(_readUnlocked(file), now);
+        final active = _activeOnly(_readLeaseLedger(file), now);
         final request = _leaseFromRequest(
           provider: provider,
           account: account,
@@ -507,6 +569,16 @@ class FileRouteLeaseStore implements RouteLeaseStore {
             reused: true,
             reason: 'existing lease reused',
             lease: existing,
+            activeLeases: List.unmodifiable(active),
+          );
+        }
+        if (_idempotencyKeyTargetsDifferentLease(active, request)) {
+          _writeUnlocked(file, active);
+          return RouteLeaseReservation(
+            reserved: false,
+            reused: false,
+            reason: 'idempotency key belongs to a different lease target',
+            lease: null,
             activeLeases: List.unmodifiable(active),
           );
         }
@@ -531,12 +603,12 @@ class FileRouteLeaseStore implements RouteLeaseStore {
         );
       });
     } catch (_) {
-      return const RouteLeaseReservation(
+      return RouteLeaseReservation(
         reserved: false,
         reused: false,
         reason: 'lease store unavailable',
         lease: null,
-        activeLeases: [],
+        activeLeases: const [],
       );
     }
   }
@@ -546,7 +618,7 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     try {
       return _withLock((dir) {
         final file = _dataFile(dir);
-        final active = _activeOnly(_readUnlocked(file), now);
+        final active = _activeOnly(_readLeaseLedger(file), now);
         final normalized = leaseId.trim();
         RouteLease? found;
         final kept = <RouteLease>[];
@@ -566,11 +638,11 @@ class FileRouteLeaseStore implements RouteLeaseStore {
         );
       });
     } catch (_) {
-      return const RouteLeaseRelease(
+      return RouteLeaseRelease(
         released: false,
         reason: 'lease store unavailable',
         lease: null,
-        activeLeases: [],
+        activeLeases: const [],
       );
     }
   }
@@ -579,50 +651,94 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     final dir = dirFactory();
     restrictOwnerOnlyDirectory(dir);
     final lockFile = _lockFile(dir);
-    if (!lockFile.existsSync()) lockFile.createSync(recursive: true);
+    if (!lockFile.existsSync()) {
+      try {
+        lockFile.createSync(recursive: true, exclusive: true);
+      } on FileSystemException {
+        if (!lockFile.existsSync()) rethrow;
+      }
+    }
+    if (FileSystemEntity.typeSync(lockFile.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      throw FileSystemException('invalid lease lock file', lockFile.path);
+    }
     restrictOwnerOnlyFile(lockFile);
-    final lock = lockFile.openSync(mode: FileMode.write);
+    final guard = acquireInterprocessFileGuardSync(
+      lockFile,
+      hardenClaim: restrictOwnerOnlyFile,
+      acquisitionTimeout: leaseStoreAcquisitionTimeout,
+    );
     try {
-      lock.lockSync(FileLock.blockingExclusive);
       return run(dir);
     } finally {
-      try {
-        lock.unlockSync();
-      } catch (_) {}
-      lock.closeSync();
+      guard.release();
     }
   }
 }
 
-List<RouteLease> _readUnlocked(File file) {
-  try {
-    if (!file.existsSync() || file.lengthSync() > 1024 * 1024) return [];
-    final decoded = jsonDecode(file.readAsStringSync());
-    if (decoded is! List<Object?>) return [];
-    return decoded
-        .whereType<Map<Object?, Object?>>()
-        .map((entry) {
-          try {
-            return RouteLease.fromJson(entry.cast<String, dynamic>());
-          } catch (_) {
-            return null;
-          }
-        })
-        .whereType<RouteLease>()
-        .toList();
-  } catch (_) {
-    return [];
+List<RouteLease> _readLeaseLedger(File file) {
+  if (!file.existsSync()) return [];
+  if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+      FileSystemEntityType.file) {
+    throw FileSystemException('invalid lease ledger', file.path);
   }
+  if (file.lengthSync() > 1024 * 1024) {
+    throw FileSystemException('oversized lease ledger', file.path);
+  }
+  Object? decoded;
+  try {
+    decoded = jsonDecode(file.readAsStringSync());
+  } on FormatException {
+    throw FileSystemException('invalid lease ledger', file.path);
+  }
+  if (decoded is! List<Object?>) {
+    throw FileSystemException('invalid lease ledger', file.path);
+  }
+  final leases = <RouteLease>[];
+  for (final entry in decoded) {
+    if (entry is! Map<Object?, Object?>) {
+      throw FileSystemException('invalid lease ledger', file.path);
+    }
+    try {
+      leases.add(RouteLease.fromJson(entry.cast<String, dynamic>()));
+    } catch (_) {
+      throw FileSystemException('invalid lease ledger', file.path);
+    }
+  }
+  return leases;
 }
 
 void _writeUnlocked(File file, List<RouteLease> leases) {
-  final tmp = File('${file.path}.$pid.tmp');
-  if (!tmp.existsSync()) tmp.createSync(recursive: true);
-  restrictOwnerOnlyFile(tmp);
-  tmp.writeAsStringSync(
-      jsonEncode(leases.map((lease) => lease.toJson()).toList()));
-  tmp.renameSync(file.path);
-  restrictOwnerOnlyFile(file);
+  final tmp = _createLeaseTemporaryFile(file);
+  try {
+    restrictOwnerOnlyFile(tmp);
+    tmp.writeAsStringSync(
+      jsonEncode(leases.map((lease) => lease.toJson()).toList()),
+      flush: true,
+    );
+    tmp.renameSync(file.path);
+    restrictOwnerOnlyFile(file);
+  } finally {
+    try {
+      if (tmp.existsSync()) tmp.deleteSync();
+    } catch (_) {}
+  }
+}
+
+File _createLeaseTemporaryFile(File target) {
+  for (var attempt = 0; attempt < 16; attempt++) {
+    final temporary = File('${target.path}.$pid.${randomLeaseId()}.tmp');
+    try {
+      temporary.createSync(exclusive: true);
+      return temporary;
+    } on FileSystemException {
+      if (!temporary.existsSync()) rethrow;
+    }
+  }
+  throw FileSystemException(
+    'could not create lease temporary file',
+    target.path,
+  );
 }
 
 List<RouteLease> _activeOnly(List<RouteLease> leases, int now) =>
@@ -745,6 +861,20 @@ RouteLease? _matchingIdempotencyLease(
     }
   }
   return null;
+}
+
+bool _idempotencyKeyTargetsDifferentLease(
+  List<RouteLease> active,
+  RouteLease request,
+) {
+  final key = request.idempotencyKey;
+  if (key == null) return false;
+  return active.any(
+    (lease) =>
+        lease.idempotencyKey == key &&
+        (lease.provider != request.provider ||
+            lease.account != request.account),
+  );
 }
 
 List<LeaseTargetDiscount> leaseDiscounts(Iterable<RouteLease> leases) {

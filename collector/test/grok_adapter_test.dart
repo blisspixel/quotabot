@@ -48,10 +48,10 @@ void main() {
     return Uint8List.fromList(out);
   }
 
-  Uint8List grpcFrame(Uint8List payload) {
+  Uint8List grpcFrame(Uint8List payload, {int flag = 0}) {
     final len = payload.length;
     return Uint8List.fromList([
-      0,
+      flag,
       (len >> 24) & 0xff,
       (len >> 16) & 0xff,
       (len >> 8) & 0xff,
@@ -183,9 +183,10 @@ void main() {
       TokenStore.clear(XaiAuth.provider);
       TokenStore.clearAccounts(XaiAuth.provider);
     });
-    TokenStore.save(
+    TokenStore.saveDefaultOwnedBy(
       XaiAuth.provider,
       Tokens(accessToken: 'default-token', expiresAt: nowEpoch() + 3600),
+      'a@example.com',
     );
     writeAuth({
       'a': {'email': 'a@example.com'},
@@ -342,6 +343,30 @@ void main() {
       q.map((p) => p.error).toSet(),
       {'token expired (open Grok to refresh) - account only'},
     );
+  });
+
+  test('a nonzero gRPC body trailer invalidates an apparent data frame',
+      () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    });
+    const now = 1782000000;
+    final data = grpcFrame(grokMessage(17.0, now + 3600));
+    final denied = grpcFrame(
+      Uint8List.fromList(utf8.encode('grpc-status: 16\r\n')),
+      flag: 0x80,
+    );
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient((_) async => http.Response.bytes(
+            Uint8List.fromList([...data, ...denied]),
+            200,
+          )),
+    ).collectAccounts();
+
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, contains('token expired'));
   });
 
   test('an account without any token stays visible with a plain note',

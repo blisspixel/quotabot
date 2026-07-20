@@ -30,7 +30,11 @@ if ($windowsBuildPrereqs) {
 Write-Host 'Building Windows release...'
 Push-Location $appDir
 try {
-  & $flutter build windows --release
+  & $flutter pub get --enforce-lockfile
+  if ($LASTEXITCODE -ne 0) {
+    throw "flutter pub get failed with exit code $LASTEXITCODE"
+  }
+  & $flutter build windows --release --no-pub
   if ($LASTEXITCODE -ne 0) {
     throw "flutter build failed with exit code $LASTEXITCODE"
   }

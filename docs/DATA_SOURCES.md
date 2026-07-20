@@ -13,8 +13,8 @@ are a stable additive contract:
 | Human label | `source_class` | Current assignment | Routing treatment | Verification method | Failure or drift treatment |
 |---|---|---|---|---|---|
 | Authoritative | `authoritative_live` | Claude; live Codex; live Grok; live Antigravity | Eligible while fresh and its binding quota is usable | The provider registry permits the class; `quotabot verify` checks its account-wide shape, time, bounds, resets, drift, and provider-owned cross-check target | Preserve the last trusted snapshot as stale evidence; reject implausible changes and never call stale cloud quota available |
-| This-machine fallback | `this_machine_fallback` | Codex session snapshot; Antigravity local state | Eligible only under normal freshness and binding rules; routing confidence is multiplied by `0.7`, and machine scope stays visible | The registry permits the fallback path; a successful measured window must carry `per_machine: true`, then passes the normal time, bounds, reset, and drift checks | State that another device can make the value incomplete |
-| Passive local | `passive_local_evidence` | Cursor; Windsurf/Devin; Kiro | A measured normalized window can participate with routing confidence multiplied by `0.7`; detection-only state cannot | The registry and sanitized parser fixture pin the source; a successful measured window must carry `per_machine: true`, and `verify` checks its shape and honesty | Show no live data or last-trusted reader-drift evidence instead of inventing quota |
+| This-machine fallback | `this_machine_fallback` | Antigravity local state | Eligible only under normal freshness and binding rules; routing confidence is multiplied by `0.7`, and machine scope stays visible | The registry permits the fallback path; a successful measured window must carry `per_machine: true`, then passes the normal time, bounds, reset, and drift checks | State that another device can make the value incomplete |
+| Passive local | `passive_local_evidence` | Cursor; Windsurf/Devin; Kiro | A measured normalized window can participate with routing confidence multiplied by `0.7` only while its source row carries a current provider-owned timestamp; detection-only, unproven-time, or stale state cannot | The registry and sanitized parser fixture pin the source; a successful measured window must carry `per_machine: true`, preserve row-owned capture time, and pass normal age and shape checks | Show unverified or stale local evidence instead of inventing freshness; ask the user to refresh the provider usage view |
 | Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Admits reachable runtime-classified entries; an Ollama `-cloud` model is flagged `cloud_offloaded` and excluded from local-only and free budgets | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; keep a cloud-offloaded local model out of any local-only or free budget promise |
 | Status only | `status_only` | NVIDIA NIM model-list access check | Visible for access diagnostics, never a model-budget route without measured quota | The registry requires a subscription observation with no quota windows; `verify` rejects quota or provider-drift claims on this class | Show access state with numeric quota unknown |
 | Manual | `manual` | User-defined entries | Visible with the existing `0.35` self-reported confidence factor; excluded by `budget=quota` | The entry must carry both `source_class: "manual"` and the legacy `source: "manual"` marker; it cannot claim local-runtime, machine-scoped, or drift evidence | Never refresh or reinterpret what the user entered |
@@ -23,8 +23,10 @@ are a stable additive contract:
 `source` field remains a narrow origin hint and currently uses `"manual"` only;
 it is not a substitute for `source_class`. Current snapshots, routing
 candidates, model candidates, reports, checks, and verification records carry
-the normalized class. Human surfaces use the concise labels in the first
-column, without stacking redundant `this machine`, `local`, or `manual` tags.
+the normalized class. CLI and report surfaces use the concise labels in the
+first column, without stacking redundant `this machine`, `local`, or `manual`
+tags. The desktop uses the plain-language scope label `account-wide` for
+`authoritative_live`; it is the same provenance class, not a seventh value.
 
 The frozen `quotabot.v1` schema keeps `source_class` optional so snapshots from
 earlier 0.5 releases remain valid. When reading one of those legacy documents,
@@ -45,6 +47,10 @@ Stale windows never roll forward speculatively. If a live read fails after a
 cached window's reset boundary passes, quotabot preserves the last observed
 percentage and original capture time. It does not infer 100% free capacity, and
 the stale provider remains non-routable until a fresh read succeeds.
+A fresh response that still names a quota reset at or before its own capture
+time is rejected rather than treated as a refilled pool. A model-scoped row
+whose reset passes after capture likewise keeps its last observed display value
+but cannot make that model available until current provider evidence arrives.
 
 The `0.7` machine-scoped factor is multiplicative, not a fabricated probability
 that the number is correct. It discounts the routing confidence produced from
@@ -74,6 +80,25 @@ the existing `error` state.
 A source-class transition starts a new drift baseline rather than comparing
 unlike evidence. This prevents an account-wide live read and a machine-scoped
 fallback from being treated as interchangeable history.
+
+When a provider legitimately changes a quota shape and ordinary admission
+cannot establish a new baseline, recovery is explicit and exact:
+
+```text
+quotabot verify --recover-drift=PROVIDER --account=EXACT_ACCOUNT --yes
+```
+
+The command first requires an active drift or legacy quarantine for that exact
+provider/account. It then performs one targeted provider metadata read and
+requires exactly one matching row to pass the registered source contract, the
+full live verification checks, and the stricter cache trust boundary. Failed,
+stale, malformed, expired, future-dated, duplicate, or wrong-account evidence
+cannot recover a baseline. The final replacement is serialized with the same
+provider/account evidence lock and is refused if a newer cache or drift
+observation appeared after the live read began. Only that snapshot baseline and
+its older matching drift diagnostic change. History, analytics buckets,
+profiles, preferences, leases, credentials, and every other account remain
+untouched. This is quota metadata traffic only and makes no model call.
 
 ### Provenance design basis
 
@@ -105,12 +130,29 @@ PROV-DM conformance.
   status view polls. Auth is tried in priority order: the OAuth access token
   Codex stores in `~/.codex/auth.json`, then quotabot's own refreshable grant
   from `quotabot login codex` when that token is expired (the idle-machine path).
-  The `chatgpt-account-id` header is read from `auth.json` either way - it is a
-  stable identifier that does not expire - and quotabot never writes that file.
-  The response's
-  `rate_limit.primary_window` is the 5 hour window and `secondary_window` the
-  weekly, each with `used_percent` and `reset_at`; `plan_type` and `email`
-  identify the account. This is a metadata read, so it costs no tokens.
+  The `chatgpt-account-id` header is read from `auth.json` only with that host
+  token. An independent grant may represent another account and never inherits
+  the host selector. quotabot never writes the host auth file.
+  Each non-null `rate_limit.primary_window` or `secondary_window` carries
+  `used_percent`, `reset_at`, and `limit_window_seconds`; the duration, not the
+  slot name, determines the normalized label. Current Pro responses can put one
+  weekly pool in `primary_window` and explicitly set `secondary_window` to null.
+  That null is an absent pool, not a malformed response. `plan_type` is display
+  metadata only. Response email is ignored for evidence identity. Host reads
+  use a full irreversible `credential:<sha256>` identity derived from the
+  stable ChatGPT account id, with refresh-token and access-token fallbacks for
+  older host files. A quotabot grant keeps one stamped opaque identity across
+  token rotation. Replacing an account or grant therefore cannot inherit the
+  prior credential's cache or drift evidence. Raw credentials and account ids
+  are never serialized. This is a metadata read, so it costs no tokens.
+- Model-scoped pools: `additional_rate_limits` is a sparse list of named limits,
+  currently including GPT-5.3-Codex-Spark on observed Pro accounts. Each named
+  row becomes a `model_quotas` overlay reduced to its tightest valid window and
+  keeps that window's duration-derived label. A matching model must satisfy both
+  shared and scoped gates; unrelated Codex models still inherit the shared
+  account window. The list is admitted atomically: if a present container or any
+  row, name, flag, duration, reset, or percentage is malformed, quotabot rejects
+  the fresh observation and serves trusted cache evidence when available.
 - Reset credits: the same response carries
   `rate_limit_reset_credits.available_count` - redeemable off-cycle resets that
   refresh the rate limit early. quotabot exposes this as the structured
@@ -119,25 +161,29 @@ PROV-DM conformance.
   on the desktop card, and a "Reset available" notification. It is a fresh-read
   signal (never asserted from stale or drifted evidence), and it is display only;
   quotabot never redeems one.
-- Window restructure: OpenAI has been observed collapsing the separate 5 hour and
-  weekly buckets into a single weekly window. A Codex window disappearing is
-  treated as a provider restructure rather than silent drift, so a fresh
-  single-window read is admitted instead of being held behind the
+- Window restructure: OpenAI has been observed collapsing the separate 5 hour
+  and weekly buckets into a single weekly window. Only that exact transition,
+  where `5h` disappears while `weekly` survives, bypasses the missing-window
+  drift check. Losing `weekly` remains drift regardless of reset timestamps, so
+  a parser regression cannot make a short pool look like the only binding cap.
+  The valid collapse is admitted instead of being held behind the
   pre-restructure snapshot (which would keep reporting a spent old window as
   current). A surviving window's own value still passes the reset-monotonicity
   and re-rating checks, so an implausible number is still caught.
-- Fallback (this machine only): the newest `rollout-*.jsonl` under
-  `~/.codex/sessions/<date>/`, where the CLI writes a `rate_limits` object with
-  `primary` (5 hour) and `secondary` (weekly) buckets on every turn. Used only
-  when the live read is signed out or offline. It reflects this machine's
-  sessions alone, so its snapshot is classified `this_machine_fallback`, marked
-  `per_machine`, and can undercount
-  when the account is used on another device; a reset time in the past means
-  that window has rolled over since the last session here.
+- No session fallback: Codex rollout files mix rate-limit events with prompts
+  and model responses. quotabot never opens them. If account-wide metadata
+  cannot be read, Codex is unavailable with a login repair step instead of a
+  this-machine estimate.
+- Profiles saved by an older release with a Codex plan, email, or other
+  response label in the account filter remain fail-closed and are flagged for
+  editing. quotabot never silently widens an exact account filter.
 
 ## Claude (Anthropic)
 
-- Source: `GET https://api.anthropic.com/api/oauth/usage`.
+- Source: `GET https://api.anthropic.com/api/oauth/usage`, with a companion
+  `GET https://api.anthropic.com/api/oauth/profile` metadata read using the same
+  credential when current account-pool or plan evidence is needed. Both are
+  zero-usage-token metadata reads, not model calls.
 - Auth, in priority order: the OAuth access token Claude Code stores in
   `~/.claude/.credentials.json` under `claudeAiOauth.accessToken` (used while its
   `claudeAiOauth.expiresAt` is still in the future), then quotabot's own
@@ -148,10 +194,67 @@ PROV-DM conformance.
 - Current responses provide a `limits` array with shared session and weekly rows
   plus model-scoped weekly rows, each carrying a percent and ISO `resets_at`.
   Older responses expose equivalent `five_hour`, `seven_day`, and per-model
-  blocks with `utilization`; those remain a compatibility fallback. Model-scoped
-  rows gate only the matching model and never become provider-wide binding
-  windows.
-- This is live, and is the same data the in-CLI `/usage` command shows.
+  blocks with `utilization`; those remain a compatibility fallback only when
+  the combined observation proves both shared binding pools. Admission is
+  atomic: every recognized canonical row and every present known legacy block
+  must be structurally complete, so a valid session or Fable row cannot survive
+  a malformed sibling. A null optional legacy Opus block means that scoped pool
+  is absent. Unknown additive fields remain compatible. Model-scoped rows gate
+  only the matching model and never become provider-wide binding windows.
+- The companion profile response can provide current Max, Pro, Team Premium, or
+  Team Standard entitlement when the usage response omits `subscription_type`.
+  It can also identify whether independently successful credentials point at
+  the same live subscription pool. Valid account and optional organization IDs
+  are combined and irreversibly hashed for that live deduplication check. Raw
+  provider account and organization IDs are not stored or emitted. If several
+  credentials succeed but any live pool identity is unavailable, quotabot
+  fails closed to one routable success and marks the other successes
+  unavailable rather than double-counting one plan. When profile identity
+  succeeds, that stable opaque pool hash becomes the snapshot account key used
+  consistently by cache, drift, leases, and routing. A credential fingerprint
+  is the fail-closed account-key fallback only when profile identity is
+  unavailable.
+- Fable 5 is admitted to the model registry as quota-backed only when the current
+  usage response contains a live scoped Fable row and current provider metadata
+  from that usage read or its same-credential companion profile read, captured
+  on or after July 20, 2026 UTC, carries an explicit Max or Team Premium
+  entitlement. Its effective
+  gate is the tighter of that scoped pool and the shared Claude binding window.
+  A missing or expired Fable row fails closed for Fable without making unrelated
+  Claude models unavailable. The local Claude credential's `subscriptionType`
+  is serialized
+  as `plan_evidence_source: "host_credential"` for diagnostics, but it can
+  outlive a downgrade and never satisfies `budget=quota`. Only current
+  `provider_metadata` evidence from one of those provider reads at or after the
+  policy boundary can prove included entitlement or a credit-backed plan
+  classification. Pro, Team
+  Standard, host-label-only, and plan-unknown rows remain visible under the
+  unrestricted budget; the catalog never invents a balance or spend class from
+  plan policy.
+- Beginning July 20, 2026, Anthropic says Fable 5 is included for Max and Team
+  Premium at 50% of limits. Pro and Team Standard retain access through usage
+  credits and receive a one-time $100 credit. This dated entitlement policy is
+  not a hardcoded quota value or expiry; runtime balance still comes only from
+  the live scoped row. See Anthropic's
+  [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
+- This live response supplies the current-window bars and reset times shown by
+  the in-CLI `/usage` command. `/usage` can also show a separate approximate
+  contribution breakdown based on local sessions; quotabot does not use that
+  this-machine section as account-wide quota or burn evidence.
+- The usage response alone does not expose a stable account id. When companion
+  profile identity is unavailable, Claude snapshots use a full, irreversible
+  `credential:<sha256>` identity derived locally from the credential generation,
+  with the provider name as a domain separator. A valid profile account plus
+  optional organization identity instead produces a stable opaque pool hash
+  used for the successful snapshot's account key. Raw provider IDs,
+  access tokens, and refresh tokens never enter quota output, cache, drift
+  records, or history. quotabot's own grant preserves its opaque credential
+  fallback across refresh-token rotation. A replacement credential cannot
+  inherit another credential's fallback evidence unless current profile
+  metadata independently proves that both belong to the same provider pool.
+  Profiles saved by an older version with a Claude plan such as `max` in the
+  account filter remain fail-closed and are flagged for editing; quotabot never
+  silently widens an exact account filter.
 - The host token only refreshes while Claude Code runs on this machine, so on an
   idle machine it eventually expires. quotabot then refreshes its own grant if
   connected; if neither token works it reports the token as expired (pointing at
@@ -211,6 +314,10 @@ State lives in the Antigravity globalStorage SQLite database at
   `:fetchAvailableModels`) for per-model `quotaInfo` with `remainingFraction`,
   `resetTime`, and `isExhausted`. These are quota metadata calls, not generation,
   so they cost no tokens. The per-model quotas are bucketed into windows by reset.
+  The model table is admitted as one exhaustive response: any missing or
+  malformed model row, quota object, fraction, or reset rejects the whole live
+  table so a hidden sibling cannot overstate account headroom. The adapter then
+  fails soft to its documented fallback instead of mixing partial live rows.
 - The local `userStatus` cache is this-machine state. It is used for account and
   plan discovery, and as an offline last-known fallback when live quota is
   unavailable. A successful live read is preferred and is not overridden by local
@@ -239,8 +346,9 @@ State lives in the Antigravity globalStorage SQLite database at
 ## Authentication
 
 Codex reuses the OAuth access token Codex stores locally for the ChatGPT usage
-endpoint and falls back to local session snapshots when unavailable. Claude
-reuses the token Claude Code stores. All four of Claude, Codex, Grok, and
+endpoint and fails closed with a login repair when no account-wide read
+succeeds. It never opens mixed-content session files. Claude reuses the token
+Claude Code stores. All four of Claude, Codex, Grok, and
 Antigravity can run two ways:
 
 - Opportunistic: reuse the token the CLI or IDE currently holds for the bounded
@@ -248,10 +356,12 @@ Antigravity can run two ways:
   remains usable.
 - Connected: after `login claude`, `login codex`, `login grok`, or
   `login antigravity`, quotabot holds its own OAuth grant and refreshes silently.
-  All work with no cloud setup. Grok uses the device-code flow; Antigravity and
-  Codex use a loopback plus PKCE authorization-code flow against the provider's
-  public client (Codex on a fixed loopback port); Claude uses a PKCE
-  authorization-code flow whose console callback shows a code to paste back.
+  All work without manual cloud project setup. Antigravity performs its
+  provider-required account onboarding request automatically. Grok uses the
+  device-code flow; Antigravity and Codex use a loopback plus PKCE
+  authorization-code flow against the provider's public client (Codex on a
+  fixed loopback port); Claude uses a PKCE authorization-code flow whose console
+  callback shows a code to paste back.
   Override the public client id with `QUOTABOT_ANTHROPIC_CLIENT_ID`,
   `QUOTABOT_OPENAI_CLIENT_ID`, or
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET`. Claude and Codex
@@ -281,6 +391,14 @@ account has been discovered.
 - Opportunistic read of local credits/usage. Passive "installed" report even
   after subscription cancel (e.g. Kiro CLI left behind).
 - Adapter falls back gracefully; no live API required for basic robustness.
+- Only the exact `kiro.resourceNotifications.usageState` child inside the
+  `kiro.kiroAgent` row is projected into quota evidence. Unrelated agent state,
+  including quota-like or content-shaped root fields, is never traversed for
+  usage or freshness.
+- Quota `as_of` is a safely parseable update time owned by the row that carries
+  quota. Without one, the value remains visible but unverified and cannot route;
+  unrelated writes to the shared database or WAL never establish freshness.
+  Timestamped evidence older than one hour is retained stale and cannot route.
 
 ## Cursor (agentic IDE)
 
@@ -293,9 +411,16 @@ account has been discovered.
   and opportunistic reads. The adapter scans usage/credit/plan/account rows in
   Cursor's `state.vscdb`, accepts JSON stored as either strings or blobs, and
   surfaces account and plan labels when the local state includes them.
+- Quota `as_of` follows the rows that supply the selected windows. Identical
+  copies use their newest safe timestamp, while the oldest selected window sets
+  provider age. A row without an embedded quota timestamp remains visible but
+  unverified; whole-database and WAL modification times are unrelated shared
+  state and never make it current. Timestamped evidence older than one hour
+  remains stale until Cursor refreshes its usage view.
 - Account shown automatically for duplicate-provider cards so two accounts are
-  never visually ambiguous. The global "Show account names" setting also shows
-  non-default account labels for single-account providers.
+  never visually ambiguous. The global "Show account names" setting controls
+  whether those duplicate-account labels are exposed; single-account labels
+  remain hidden.
 
 ## Windsurf / Devin (Codeium / Cognition)
 
@@ -311,6 +436,10 @@ account has been discovered.
   daily/weekly quota evidence from direct percent fields or nested quota maps,
   carries reset timestamps when present, and surfaces account/plan labels when
   local state includes them.
+- Quota `as_of` uses the same row-owned embedded timestamp rule as Cursor.
+  Missing-time evidence is visible but unverified, and timestamped evidence
+  older than one hour remains stale until Windsurf or Devin refreshes its usage
+  view.
 - CLI-only installs (devin CLI): passive detection via `config.json` /
   `credentials.toml` (no rich daily/weekly cache). Shows as "cli" or org
   snippet.
@@ -334,12 +463,14 @@ actually down). All three built-in runtime adapters emit
 
 When at least one reachable runtime exposes an on-device model, the collector
 also reads passive machine memory metadata. Linux uses `/proc/meminfo`; Windows
-uses `Win32_OperatingSystem` through the system Windows PowerShell executable;
-macOS uses `/usr/sbin/sysctl hw.memsize` and `/usr/bin/vm_stat`. On Windows and
-Linux, an installed NVIDIA driver can add its largest single GPU through a
-bounded `nvidia-smi` memory query. Separate GPU pools are never summed. The read
-is cached for 30 seconds, has bounded output and deadlines, and fails soft. It
-does not load a model, reserve memory, execute inference, or measure throughput.
+uses the local `Microsoft.VisualBasic.Devices.ComputerInfo` memory API with
+`Win32_OperatingSystem` as a compatibility fallback, both inside one bounded
+system Windows PowerShell process; macOS uses `/usr/sbin/sysctl hw.memsize` and
+`/usr/bin/vm_stat`. On Windows and Linux, an installed NVIDIA driver can add its
+largest single GPU through a bounded `nvidia-smi` memory query. Separate GPU
+pools are never summed. The read is cached for 30 seconds, has bounded output
+and deadlines, and fails soft. It does not load a model, reserve memory, execute
+inference, or measure throughput.
 
 For a cold model with an installed byte size, quotabot estimates required memory
 as the file size plus the larger of 25 percent or 512 MiB. Each observed memory
@@ -370,6 +501,10 @@ format overhead can differ from the estimate.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`). Honors `LEMONADE_HOST` and `LEMONADE_PORT`;
   the default is `http://127.0.0.1:13305`.
+
+All three host overrides must resolve syntactically to `localhost`, an IPv4
+loopback address, or `::1`. Credential-bearing, LAN, and public destinations
+are not contacted and are retained only as non-routable configuration errors.
 - Other runtimes: anything exposing an OpenAI-style `/v1/models` endpoint (Jan,
   llama.cpp / llamafile, GPT4All, text-generation-webui, KoboldCpp) can be added
   with the same shared `localRuntimeQuota` helper; only the discovery URL and

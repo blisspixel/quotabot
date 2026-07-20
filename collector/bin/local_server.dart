@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/local_http_auth.dart';
 import 'package:quotabot_collector/local_server.dart';
 
 /// Optional local HTTP endpoint serving the normalized quota JSON.
@@ -12,9 +13,10 @@ import 'package:quotabot_collector/local_server.dart';
 /// ?local_first=true), /health, `/providers/<name>`
 /// Complements MCP (stdio primary; Streamable HTTP for remote possible per
 /// 2026 research). Useful for external consumers (e.g. ESP32, dashboards).
-/// Zero token metadata reads only. Use Ctrl-C to stop. Not for production (no
-/// auth, local only). It never serves tokens, but the snapshot does include
-/// account identifiers (e.g. emails), so treat the loopback port as trusted.
+/// Zero token metadata reads only. Use Ctrl-C to stop. Read endpoints are local
+/// only. Lease mutations require a stable owner-only bearer token that is never
+/// printed or served. Snapshots include bounded account identifiers, so treat
+/// the loopback port as trusted.
 Future<void> main(List<String> args) async {
   final port = args.isNotEmpty ? int.tryParse(args.first) : 8721;
   if (port == null || port < 1 || port > 65535) {
@@ -23,10 +25,21 @@ Future<void> main(List<String> args) async {
     return;
   }
 
-  await startLocalQuotabotServer(
-    port: port,
-    snapshotProvider: collectAll,
-    log: stdout.writeln,
-  );
+  try {
+    final mutationToken = loadOrCreateLocalHttpMutationToken();
+    await startLocalQuotabotServer(
+      port: port,
+      snapshotProvider: collectAll,
+      leaseStore: const FileRouteLeaseStore(),
+      mutationToken: mutationToken,
+      log: stdout.writeln,
+    );
+  } on FileSystemException {
+    stderr.writeln(
+      'Could not secure the local HTTP mutation token. The server was not started.',
+    );
+    exitCode = 74;
+    return;
+  }
   await Completer<void>().future;
 }

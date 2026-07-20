@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
@@ -40,8 +41,29 @@ import 'theme_spec.dart';
 import 'typography.dart';
 import 'window_geometry.dart';
 
+String _joinedCredentialProviderNames(List<String> providers) {
+  final names = providers
+      .map(
+        (provider) => switch (provider) {
+          'claude' => 'Claude',
+          'codex' => 'Codex',
+          _ => provider,
+        },
+      )
+      .toList(growable: false);
+  if (names.length < 2) return names.single;
+  return '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
+}
+
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
+
+const Size _compactMinimumWindowSize = Size(120, 40);
+const Size _expandedMinimumWindowSize = Size(320, 120);
+
+@visibleForTesting
+Size desktopMinimumWindowSize({required bool compact}) =>
+    compact ? _compactMinimumWindowSize : _expandedMinimumWindowSize;
 
 const Color _quotaGreen = Color(0xFF3FB950);
 const String _windowsAppUserModelId = 'io.quotabot.app';
@@ -103,7 +125,7 @@ bool hasSuccessfulRefreshEvidence(Iterable<ProviderQuota> providers, int now) =>
       if (quota.windows.isNotEmpty) {
         return isTrustedQuotaEvidenceAt(quota, now);
       }
-      if (quota.isLocal) return true;
+      if (quota.isLocal) return isLocalRuntimeAvailableAt(quota, now);
       if (quota.sourceClass != ProviderSourceClass.statusOnly) return false;
       final status = quota.status?.trim().toLowerCase();
       return status != null &&
@@ -168,7 +190,7 @@ Future<void> main() async {
   const initialWindowSize = Size(340, 760);
   final options = WindowOptions(
     size: initialWindowSize,
-    minimumSize: Size(120, 40),
+    minimumSize: desktopMinimumWindowSize(compact: prefs.compact),
     center: false,
     backgroundColor: Colors.transparent,
     titleBarStyle: TitleBarStyle.hidden,
@@ -196,7 +218,9 @@ Future<void> main() async {
       await windowManager.setTitle('quotabot');
       await windowManager.show();
       await windowManager.focus();
-      await windowManager.setMinimumSize(const Size(120, 40));
+      await windowManager.setMinimumSize(
+        desktopMinimumWindowSize(compact: prefs.compact),
+      );
       // Gentle bring-to-front for launcher contexts (was aggressive loop causing issues)
       await windowManager.setAlwaysOnTop(true);
       await Future<void>.delayed(const Duration(milliseconds: 120));
@@ -244,12 +268,15 @@ class QuotaBotApp extends StatelessWidget {
           key: _shotBoundaryKey,
           child: ValueListenableBuilder<double>(
             valueListenable: textScale,
-            builder: (context, scale, _) => MediaQuery(
-              data: MediaQuery.of(
-                context,
-              ).copyWith(textScaler: TextScaler.linear(scale)),
-              child: child!,
-            ),
+            builder: (context, scale, _) {
+              final media = MediaQuery.of(context);
+              return MediaQuery(
+                data: media.copyWith(
+                  textScaler: _PreferenceTextScaler(media.textScaler, scale),
+                ),
+                child: child!,
+              );
+            },
           ),
         ),
         home:
@@ -284,6 +311,32 @@ class QuotaBotApp extends StatelessWidget {
       extensions: [chrome],
     );
   }
+}
+
+/// Composes the app's explicit text-size preference with the operating system
+/// accessibility scaler. Keeping the platform scaler intact also preserves any
+/// nonlinear large-text policy supplied by newer Flutter embedders.
+class _PreferenceTextScaler extends TextScaler {
+  final TextScaler platformScaler;
+  final double preferenceScale;
+
+  const _PreferenceTextScaler(this.platformScaler, this.preferenceScale);
+
+  @override
+  double scale(double fontSize) =>
+      platformScaler.scale(fontSize) * preferenceScale;
+
+  @override
+  double get textScaleFactor => scale(1);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _PreferenceTextScaler &&
+      other.platformScaler == platformScaler &&
+      other.preferenceScale == preferenceScale;
+
+  @override
+  int get hashCode => Object.hash(platformScaler, preferenceScale);
 }
 
 /// Returns [t] with tabular (fixed-width) figures applied to every text style, so
@@ -323,6 +376,8 @@ typedef ProviderConnector = Future<void> Function(String provider);
 
 typedef ProfileDeleter = void Function(String name);
 
+typedef ProfileSaver = void Function(QuotaProfile profile);
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   final String? startupStorageWarning;
@@ -340,6 +395,9 @@ class Dashboard extends StatefulWidget {
   final ProviderConnector? providerConnector;
   @visibleForTesting
   final ProfileDeleter? profileDeleter;
+  @visibleForTesting
+  final ProfileSaver? profileSaver;
+  final RouteLeaseStore leaseStore;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
     : _hostIntegration = true,
@@ -349,7 +407,9 @@ class Dashboard extends StatefulWidget {
       alertPoster = null,
       prefsSaver = null,
       providerConnector = null,
-      profileDeleter = null;
+      profileDeleter = null,
+      profileSaver = null,
+      leaseStore = const FileRouteLeaseStore();
 
   /// Builds a deterministic dashboard without desktop plugin or preference
   /// side effects. This exercises the production widget tree while keeping
@@ -365,6 +425,8 @@ class Dashboard extends StatefulWidget {
     this.prefsSaver,
     this.providerConnector,
     this.profileDeleter,
+    this.profileSaver,
+    this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
   }) : _hostIntegration = false,
        _demoModeOverride = demoMode,
@@ -388,6 +450,7 @@ class _DashboardState extends State<Dashboard>
   late bool _showInTaskbar = widget.prefs.showInTaskbar;
   late bool _enableNotifications = widget.prefs.enableNotifications;
   late bool _showAccounts = widget.prefs.showAccounts;
+  late bool _setupDone = widget.prefs.setupDone;
   late TextSize _textSize = widget.prefs.textSize;
   late String? _webhookUrl = widget.prefs.webhookUrl;
   late bool _webhookAllowExternal = widget.prefs.webhookAllowExternal;
@@ -403,6 +466,8 @@ class _DashboardState extends State<Dashboard>
   /// set and fires for newly-visible red ones, so clearing it here would
   /// re-fire a still-red provider that was already alerted.
   Set<String> _armed = {};
+  Completer<void>? _alertCheckFlight;
+  bool _alertCheckPending = false;
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
   int _failStreak = 0; // consecutive refreshes with no live data at all
@@ -418,7 +483,10 @@ class _DashboardState extends State<Dashboard>
   String? _lastWebhookDeliveryStatus;
   bool? _lastWebhookDeliveryFailed;
   bool _notificationDeliveryFailed = false;
-  late String? _preferenceStorageWarning = widget.startupStorageWarning;
+  late String? _settingsStorageWarning = widget.startupStorageWarning;
+  String? _profileStorageWarning;
+  String? get _preferenceStorageWarning =>
+      _profileStorageWarning ?? _settingsStorageWarning;
   final Set<String> _expanded = {}; // providers whose insights panel is open
   bool _overflowing = false; // content taller than the capped window (scrolls)
   // Analytics renders as a body inside this dashboard (same header, same
@@ -458,15 +526,23 @@ class _DashboardState extends State<Dashboard>
         break;
       case ProviderSort.mostAvailable:
         list.sort((a, b) {
-          final ha = providerHeadroom(a, now) ?? -1.0;
-          final hb = providerHeadroom(b, now) ?? -1.0;
+          final ha = isTrustedQuotaEvidenceAt(a, now)
+              ? providerHeadroom(a, now) ?? -1.0
+              : -1.0;
+          final hb = isTrustedQuotaEvidenceAt(b, now)
+              ? providerHeadroom(b, now) ?? -1.0
+              : -1.0;
           return hb.compareTo(ha); // highest headroom first
         });
         break;
       case ProviderSort.mostUsed:
         list.sort((a, b) {
-          final ha = providerHeadroom(a, now) ?? 101.0;
-          final hb = providerHeadroom(b, now) ?? 101.0;
+          final ha = isTrustedQuotaEvidenceAt(a, now)
+              ? providerHeadroom(a, now) ?? 101.0
+              : 101.0;
+          final hb = isTrustedQuotaEvidenceAt(b, now)
+              ? providerHeadroom(b, now) ?? 101.0
+              : 101.0;
           return ha.compareTo(hb); // lowest headroom (most used) first
         });
         break;
@@ -476,6 +552,21 @@ class _DashboardState extends State<Dashboard>
     // Local runtimes always sit below the cloud quota services, keeping their
     // relative order from the sort above. Local has no quota to rank against.
     return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
+  }
+
+  bool get _showFirstRunPrompt =>
+      !_setupDone && !(widget._demoModeOverride ?? _demoMode);
+
+  List<String> get _activeProfileLegacyCredentialFilterProviders {
+    final providers = <String>{};
+    for (final entry in _activeProfile.accounts.entries) {
+      if (entry.value.any(
+        (account) => isLegacyCredentialProfileAccountFilter(entry.key, account),
+      )) {
+        providers.add(entry.key.trim().toLowerCase());
+      }
+    }
+    return providers.toList()..sort();
   }
 
   Map<String, int> _providerCounts(Iterable<ProviderQuota> data) {
@@ -548,24 +639,35 @@ class _DashboardState extends State<Dashboard>
     _sort = sortFromProfile(profile);
   }
 
-  void _saveActiveProfileUiState() {
+  bool _saveActiveProfileUiState() {
     if (_activeProfile.name == defaultProfileName) {
       _defaultHidden = {..._hidden};
       _defaultSort = _sort;
-      return;
+      _setProfileStorageWarning(null);
+      return true;
     }
     final updated = profileWithUiPrefs(
       _activeProfile,
       hiddenProviders: _hidden,
       sort: _sort,
     );
-    if (widget._hostIntegration) {
-      try {
+    try {
+      final saver = widget.profileSaver;
+      if (saver != null) {
+        saver(updated);
+      } else if (widget._hostIntegration) {
         saveProfile(updated);
-      } catch (_) {}
+      }
+    } catch (_) {
+      _setProfileStorageWarning(
+        'Profile changes not saved (storage unavailable)',
+      );
+      return false;
     }
     _activeProfile = updated;
     _upsertProfile(updated);
+    _setProfileStorageWarning(null);
+    return true;
   }
 
   @override
@@ -586,7 +688,11 @@ class _DashboardState extends State<Dashboard>
       unawaited(_initTray());
       unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
       unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
-      unawaited(windowManager.setMinimumSize(const Size(120, 40)));
+      unawaited(
+        windowManager.setMinimumSize(
+          desktopMinimumWindowSize(compact: _compact),
+        ),
+      );
     }
     _refresh();
     if (_shotsMode) unawaited(_exportShots());
@@ -665,11 +771,16 @@ class _DashboardState extends State<Dashboard>
     final demo = cli_demo.demoProviders(now);
     return renderTopFrame(
       providers: demo,
-      suggestion: suggestRoute(
+      suggestion: decide(
         demo,
         now,
-        burnStatsByProvider: cli_demo.demoBurnStats(),
-      ),
+        context: providerRouteDecisionContext(
+          demo,
+          now,
+          burnStatsByProvider: cli_demo.demoBurnStats(),
+          catalog: kModelCatalog,
+        ),
+      ).route,
       now: now,
       // Wide enough that the meters stay generous with the forecast column held
       // back, matching a typical 80-120 column terminal.
@@ -842,10 +953,10 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<bool> _persistPrefs({bool saveProfileUiState = false}) async {
-    if (!widget._hostIntegration && widget.prefsSaver == null) return true;
-    if (saveProfileUiState && widget._hostIntegration) {
-      _saveActiveProfileUiState();
+    if (!widget._hostIntegration && widget.prefsSaver == null) {
+      return !saveProfileUiState || _saveActiveProfileUiState();
     }
+    final profileSaved = !saveProfileUiState || _saveActiveProfileUiState();
     final next = Prefs(
       hidden: _defaultHidden,
       compact: _compact,
@@ -859,14 +970,14 @@ class _DashboardState extends State<Dashboard>
       showAccounts: _showAccounts,
       webhookUrl: _webhookUrl,
       webhookAllowExternal: _webhookAllowExternal,
-      setupDone: widget.prefs.setupDone,
+      setupDone: _setupDone,
       windowX: _windowPos?.dx,
       windowY: _windowPos?.dy,
     );
     try {
       await (widget.prefsSaver?.call(next) ?? next.save());
       _setPreferenceStorageWarning(null);
-      return true;
+      return profileSaved;
     } catch (_) {
       _setPreferenceStorageWarning('Settings not saved (storage unavailable)');
       return false;
@@ -874,11 +985,23 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _setPreferenceStorageWarning(String? warning) {
-    if (!mounted || _preferenceStorageWarning == warning) return;
-    setState(() => _preferenceStorageWarning = warning);
+    if (!mounted || _settingsStorageWarning == warning) return;
+    setState(() => _settingsStorageWarning = warning);
     if (warning != null && widget._hostIntegration) {
       stderr.writeln(
         'quotabot: settings were not saved because secure storage is '
+        'unavailable',
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+  }
+
+  void _setProfileStorageWarning(String? warning) {
+    if (!mounted || _profileStorageWarning == warning) return;
+    setState(() => _profileStorageWarning = warning);
+    if (warning != null && widget._hostIntegration) {
+      stderr.writeln(
+        'quotabot: profile changes were not saved because secure storage is '
         'unavailable',
       );
     }
@@ -959,7 +1082,9 @@ class _DashboardState extends State<Dashboard>
         _buckets = {};
         _burnStats = burnStats;
         _routeSummary = routeSummary;
-        _lastRefreshError = null;
+        _lastRefreshError = anyLive
+            ? null
+            : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
         final tz = DateTime.now().timeZoneOffset;
         final rawInsights = <String, Insights>{};
         if (widget._hostIntegration) {
@@ -988,16 +1113,25 @@ class _DashboardState extends State<Dashboard>
       // .first on empty) surfaces as an Error, and the isolate-failure fallback
       // rethrows it on the main isolate. Catching only Exception let it escape
       // as an unhandled async error every poll while the UI showed no failure.
-      // A failed or timed-out refresh keeps the last data on screen; the next
-      // poll (scheduled in finally) retries.
+      // A failed or timed-out refresh keeps the last data on screen as
+      // explicitly stale evidence; the next poll (scheduled in finally)
+      // retries. This prevents a previously live account-wide value from
+      // remaining routable after the collector can no longer confirm it.
       _failStreak += 1;
       if (mounted) {
+        final message = refreshFailureMessage(
+          error,
+          hasPreviousData: _data.isNotEmpty,
+        );
         setState(() {
-          _loading = false;
-          _lastRefreshError = refreshFailureMessage(
-            error,
-            hasPreviousData: _data.isNotEmpty,
+          _data = retainSnapshotAfterRefreshFailure(_data, note: message);
+          _setupData = retainSnapshotAfterRefreshFailure(
+            _setupData,
+            note: message,
           );
+          _loading = false;
+          _updated = DateTime.now();
+          _lastRefreshError = message;
         });
       }
     } finally {
@@ -1098,12 +1232,25 @@ class _DashboardState extends State<Dashboard>
         // Estimates tuned to the real rendered heights so the frameless window
         // hugs the content (no translucent dead space below it). The body
         // scrolls, so a small undershoot is caught rather than clipped.
-        h = 62; // header row + outer paddings
+        h = _showFirstRunPrompt
+            ? 112
+            : 62; // header row, onboarding, and outer paddings
+        if (_displayed.isEmpty) {
+          h +=
+              _activeProfileLegacyCredentialFilterProviders.isNotEmpty ||
+                  _profiledData.isNotEmpty
+              ? 72
+              : 38;
+        }
         for (final q in _displayed) {
           final key = quotaDisplayKey(q);
           final rows = providerTileQuotaRowCount(q, now);
           var card =
               64.0 + rows * 14.0; // card chrome, trust line, and data rows
+          if (desktopScopedModelQuotas(q).isNotEmpty) {
+            card += 18; // model-specific section heading
+          }
+          if (q.suspect != null && q.driftReason == null) card += 20;
           if (q.isLocal) card += q.details.length * 14; // detail lines
           if ((_history[key] ?? const []).isNotEmpty) {
             card += 20; // "usually ~X% free" line
@@ -1167,6 +1314,13 @@ class _DashboardState extends State<Dashboard>
       // header's collapse button honest in both directions.
       if (_compact) _showingAnalytics = false;
     });
+    if (widget._hostIntegration) {
+      unawaited(
+        windowManager.setMinimumSize(
+          desktopMinimumWindowSize(compact: _compact),
+        ),
+      );
+    }
     _applySize();
     unawaited(_persistPrefs());
   }
@@ -1234,7 +1388,8 @@ class _DashboardState extends State<Dashboard>
           value: 'hide',
           child: Text(
             _shouldShowAccount(q, _providerCounts(_profiledData))
-                ? 'Hide ${q.displayName} (${q.account})'
+                ? 'Hide ${q.displayName} '
+                      '(${quotaAccountDisplayLabel(q.account)})'
                 : 'Hide ${q.displayName}',
           ),
         ),
@@ -1262,7 +1417,7 @@ class _DashboardState extends State<Dashboard>
             TextButton(
               onPressed: () {
                 Navigator.pop(ctx);
-                _connectAndValidate(q.provider);
+                _connectAndValidate(q.provider, account: q.account);
               },
               child: const Text('Connect now'),
             ),
@@ -1301,6 +1456,7 @@ class _DashboardState extends State<Dashboard>
                   data: _visible,
                   buckets: _buckets,
                   dark: Theme.of(context).brightness == Brightness.dark,
+                  showAccounts: _showAccounts,
                   routedRequests: _routeSummary,
                   initialRange: _analyticsRange,
                 ),
@@ -1358,7 +1514,9 @@ class _DashboardState extends State<Dashboard>
   Widget _expandedView(Color card) {
     final displayed = _displayed;
     final counts = _providerCounts(displayed);
-    final groups = _showAccounts
+    final groups = displayed.isEmpty
+        ? const <ProviderDisplayGroup>[]
+        : _showAccounts
         ? groupProvidersForDisplay(displayed)
         : [ProviderDisplayGroup(account: null, quotas: displayed)];
     final showGroupHeaders = groups.length > 1;
@@ -1367,6 +1525,7 @@ class _DashboardState extends State<Dashboard>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _header(),
+        if (_showFirstRunPrompt) _firstRunPrompt(),
         const SizedBox(height: 2),
         if (groups.isEmpty)
           _emptyProfileState()
@@ -1405,6 +1564,24 @@ class _DashboardState extends State<Dashboard>
 
   Widget _emptyProfileState() {
     final muted = AppChromeTheme.of(context).muted;
+    final repairProviders = _activeProfileLegacyCredentialFilterProviders;
+    final needsCredentialFilterRepair = repairProviders.isNotEmpty;
+    final allProfileProvidersHidden =
+        !needsCredentialFilterRepair && _profiledData.isNotEmpty;
+    final providerNames = needsCredentialFilterRepair
+        ? _joinedCredentialProviderNames(repairProviders)
+        : '';
+    final repairMessage = repairProviders.length > 1
+        ? 'This profile uses older $providerNames account filters. '
+              'Select the current credentials before routing.'
+        : 'This profile uses an older $providerNames account filter. '
+              'Select the current $providerNames credential before routing.';
+    final message = needsCredentialFilterRepair
+        ? repairMessage
+        : allProfileProvidersHidden
+        ? 'All providers in ${profileLabel(_activeProfile)} are hidden. '
+              'Use the Providers menu to show one.'
+        : 'No providers in ${profileLabel(_activeProfile)}';
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: widget._hostIntegration
@@ -1412,13 +1589,92 @@ class _DashboardState extends State<Dashboard>
           : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-        child: Text(
-          'No providers in ${profileLabel(_activeProfile)}',
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: AppType.caption, color: muted),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              label: message,
+              child: ExcludeSemantics(
+                child: Text(
+                  message,
+                  style: TextStyle(fontSize: AppType.caption, color: muted),
+                ),
+              ),
+            ),
+            if (needsCredentialFilterRepair)
+              TextButton(
+                onPressed: _showProfileEditor,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.only(top: 4),
+                  minimumSize: const Size(0, 30),
+                ),
+                child: const Text('Edit profile'),
+              ),
+          ],
         ),
       ),
     );
+  }
+
+  Widget _firstRunPrompt() {
+    final chrome = AppChromeTheme.of(context);
+    return Semantics(
+      container: true,
+      label:
+          'Start here. Review provider connections and quota evidence before '
+          'using recommendations.',
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+        padding: const EdgeInsets.fromLTRB(10, 6, 2, 6),
+        decoration: BoxDecoration(
+          color: chrome.tileBorder.withValues(alpha: 0.35),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: chrome.border),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.fact_check_outlined, size: 16, color: chrome.muted),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                'Start here: review provider connections',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: AppType.caption,
+                  fontWeight: FontWeight.w600,
+                  color: chrome.foreground,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => _finishFirstRunSetup(openProviders: true),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 7),
+                minimumSize: const Size(0, 30),
+              ),
+              child: const Text('Review'),
+            ),
+            IconButton(
+              tooltip: 'Dismiss getting started',
+              onPressed: _finishFirstRunSetup,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+              icon: Icon(Icons.close_rounded, size: 15, color: chrome.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _finishFirstRunSetup({bool openProviders = false}) {
+    if (_setupDone) return;
+    setState(() => _setupDone = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    unawaited(_persistPrefs());
+    if (openProviders) _showSetup();
   }
 
   Widget _providerTile(ProviderQuota q, Color card, Map<String, int> counts) {
@@ -1483,8 +1739,15 @@ class _DashboardState extends State<Dashboard>
                             padding: EdgeInsets.only(
                               right: i == displayed.length - 1 ? 0 : 10,
                             ),
-                            child: Tooltip(
-                              message: _compactTooltip(displayed[i], counts),
+                            child: _FocusableCompactProviderChip(
+                              key: ValueKey(
+                                'compact-provider-${quotaDisplayKey(displayed[i])}',
+                              ),
+                              message: _compactTooltip(
+                                displayed[i],
+                                counts,
+                                now,
+                              ),
                               child: _compactChip(displayed[i], now, fg),
                             ),
                           ),
@@ -1548,20 +1811,26 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  String _compactTooltip(ProviderQuota q, Map<String, int> counts) {
+  String _compactTooltip(ProviderQuota q, Map<String, int> counts, int now) {
     final base = _shouldShowAccount(q, counts)
-        ? '${q.displayName} (${q.account})'
+        ? '${q.displayName} (${quotaAccountDisplayLabel(q.account)})'
         : q.displayName;
-    if (q.driftReason != null) return '$base (provider drift)';
-    return q.stale ? '$base (cached)' : base;
+    return '$base - ${desktopProviderTrustLine(q, now)}';
   }
 
-  RouteSuggestion _routeSuggestion(int now) => suggestRoute(
+  RouteSuggestion _routeSuggestion(int now) => decide(
     _visible,
     now,
-    burnStatsByProvider: _burnStats,
-    pipePenaltyByProvider: _routeSummary.pipePenaltyByProvider(now: now),
-  );
+    context: providerRouteDecisionContext(
+      _visible,
+      now,
+      burnStatsByProvider: _burnStats,
+      activeLeases: widget.leaseStore.active(now),
+      pipePenaltyByProvider: _routeSummary.pipePenaltyByProvider(now: now),
+      catalog: kModelCatalog,
+      preferenceOrder: _activeProfile.preferenceOrder,
+    ),
+  ).route;
 
   /// Average remaining headroom across visible providers that report quota,
   /// as a percent (0..100), or null when nothing has data. This is the "pool"
@@ -1576,18 +1845,107 @@ class _DashboardState extends State<Dashboard>
     final muted = chrome.muted;
     const warning = Color(0xFFD29922);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final suggestion = _routeSuggestion(now);
     final routeLine = desktopRouteSignalLine(
-      _routeSuggestion(now),
+      suggestion,
       _visible,
       now,
       showAccounts: _showAccounts,
     );
     final routeDetail = desktopRouteDetailLine(
-      _routeSuggestion(now),
+      suggestion,
       _visible,
       now,
       showAccounts: _showAccounts,
     );
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final titleCluster = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        () {
+          final pool = _poolHeadroom();
+          final track = chrome.gaugeTrack;
+          return Semantics(
+            label: pool == null
+                ? 'Trusted quota headroom unavailable'
+                : 'Average trusted quota headroom ${pool.round()} percent',
+            excludeSemantics: true,
+            child: AppGauge(
+              size: 17,
+              value: (pool ?? 0) / 100.0,
+              fillColor: pool == null ? track : _availColor(pool),
+              trackColor: track,
+            ),
+          );
+        }(),
+        const SizedBox(width: 7),
+        Text(
+          _showingAnalytics ? 'Analytics' : 'Quota',
+          style: TextStyle(
+            fontSize: AppType.title,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+            color: chrome.foreground,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            checkedAtLabel(_updated),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: AppType.caption, color: muted),
+          ),
+        ),
+        if (_activeProfile.name != defaultProfileName) ...[
+          const SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              profileLabel(_activeProfile),
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppType.label,
+                fontWeight: FontWeight.w600,
+                color: muted,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+    final actions = <Widget>[
+      _iconButton(
+        _isRefreshing ? Icons.sync : Icons.refresh_rounded,
+        muted,
+        _isRefreshing ? null : _refresh,
+        tooltip: _isRefreshing ? 'Refreshing quotas' : 'Refresh now',
+      ),
+      _iconButton(
+        _showingAnalytics ? Icons.arrow_back_rounded : Icons.bar_chart_rounded,
+        muted,
+        _showingAnalytics ? _closeFleet : _showFleet,
+        tooltip: _showingAnalytics ? 'Back to quotas' : 'Quota analytics',
+      ),
+      _iconButton(
+        Icons.close_fullscreen_rounded,
+        muted,
+        _toggleCompact,
+        tooltip: 'Collapse',
+      ),
+      _menuButton(muted),
+      _iconButton(
+        Icons.help_outline_rounded,
+        muted,
+        _showHelp,
+        tooltip: 'Setup and help',
+      ),
+      _iconButton(
+        Icons.close_rounded,
+        muted,
+        widget._hostIntegration ? windowManager.close : null,
+        tooltip: 'Close',
+      ),
+    ];
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onPanStart: widget._hostIntegration
@@ -1598,100 +1956,19 @@ class _DashboardState extends State<Dashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      () {
-                        final pool = _poolHeadroom();
-                        final track = chrome.gaugeTrack;
-                        return AppGauge(
-                          size: 17,
-                          value: (pool ?? 0) / 100.0,
-                          fillColor: pool == null ? track : _availColor(pool),
-                          trackColor: track,
-                        );
-                      }(),
-                      const SizedBox(width: 7),
-                      Text(
-                        _showingAnalytics ? 'Analytics' : 'Quota',
-                        style: TextStyle(
-                          fontSize: AppType.title,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.2,
-                          color: chrome.foreground,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          asOfLabel(_updated),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.caption,
-                            color: muted,
-                          ),
-                        ),
-                      ),
-                      if (_activeProfile.name != defaultProfileName) ...[
-                        const SizedBox(width: 7),
-                        Flexible(
-                          child: Text(
-                            profileLabel(_activeProfile),
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppType.label,
-                              fontWeight: FontWeight.w600,
-                              color: muted,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                // Order: the two things you actively do (refresh, open analytics),
-                // then the view toggle, then settings and help, then close last.
-                _iconButton(
-                  _isRefreshing ? Icons.sync : Icons.refresh_rounded,
-                  muted,
-                  _refresh,
-                  tooltip: 'Refresh now',
-                ),
-                _iconButton(
-                  _showingAnalytics
-                      ? Icons.arrow_back_rounded
-                      : Icons.bar_chart_rounded,
-                  muted,
-                  _showingAnalytics ? _closeFleet : _showFleet,
-                  tooltip: _showingAnalytics
-                      ? 'Back to quotas'
-                      : 'Quota analytics',
-                ),
-                _iconButton(
-                  Icons.close_fullscreen_rounded,
-                  muted,
-                  _toggleCompact,
-                  tooltip: 'Collapse',
-                ),
-                _menuButton(muted),
-                _iconButton(
-                  Icons.help_outline_rounded,
-                  muted,
-                  _showHelp,
-                  tooltip: 'Setup and help',
-                ),
-                _iconButton(
-                  Icons.close_rounded,
-                  muted,
-                  widget._hostIntegration ? windowManager.close : null,
-                  tooltip: 'Close',
-                ),
-              ],
-            ),
+            if (largeText) ...[
+              titleCluster,
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(mainAxisSize: MainAxisSize.min, children: actions),
+              ),
+            ] else
+              Row(
+                children: [
+                  Expanded(child: titleCluster),
+                  ...actions,
+                ],
+              ),
             if (routeLine != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4, right: 4),
@@ -1807,10 +2084,12 @@ class _DashboardState extends State<Dashboard>
                   ? q.displayName
                   : (counts[q.provider] ?? 0) > 1
                   ? _shouldShowAccount(q, counts)
-                        ? '${q.displayName} (${q.account})'
+                        ? '${q.displayName} '
+                              '(${quotaAccountDisplayLabel(q.account)})'
                         : '${q.displayName} (${counts[q.provider]} accounts)'
                   : _shouldShowAccount(q, counts)
-                  ? '${q.displayName} (${q.account})'
+                  ? '${q.displayName} '
+                        '(${quotaAccountDisplayLabel(q.account)})'
                   : q.displayName,
               style: const TextStyle(fontSize: AppType.subtitle),
             ),
@@ -1987,7 +2266,12 @@ class _DashboardState extends State<Dashboard>
   void _setActiveProfile(String name) {
     final normalized = normalizeProfileName(name);
     if (normalized == null || normalized == _activeProfile.name) return;
-    _saveActiveProfileUiState();
+    if (!_saveActiveProfileUiState()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save profile changes.')),
+      );
+      return;
+    }
     if (widget._hostIntegration) _profiles = _loadProfiles();
     final next = _profileByName(normalized);
     setState(() {
@@ -1999,7 +2283,12 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<void> _showProfileEditor() async {
-    _saveActiveProfileUiState();
+    if (!_saveActiveProfileUiState()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save profile changes.')),
+      );
+      return;
+    }
     final result = await showDialog<ProfileEditorResult>(
       context: context,
       builder: (_) => ProfileEditorDialog(
@@ -2140,7 +2429,40 @@ class _DashboardState extends State<Dashboard>
     unawaited(_persistPrefs());
   }
 
-  Future<void> _checkAndNotify() async {
+  /// Coalesces alert checks behind one delivery flight. The flight marker is
+  /// installed synchronously before alert computation or any transport await,
+  /// so a refresh that finishes while a webhook is slow cannot start a second
+  /// notification or webhook batch against the same edge state.
+  Future<void> _checkAndNotify() {
+    final running = _alertCheckFlight;
+    if (running != null) {
+      _alertCheckPending = true;
+      return running.future;
+    }
+    final flight = Completer<void>();
+    _alertCheckFlight = flight;
+    _alertCheckPending = false;
+    unawaited(_drainAlertChecks(flight));
+    return flight.future;
+  }
+
+  Future<void> _drainAlertChecks(Completer<void> flight) async {
+    try {
+      do {
+        _alertCheckPending = false;
+        await _checkAndNotifyOnce();
+      } while (_alertCheckPending && mounted);
+    } catch (_) {
+      // Alert delivery is best effort and must never break the refresh loop.
+    } finally {
+      if (identical(_alertCheckFlight, flight)) {
+        _alertCheckFlight = null;
+      }
+      if (!flight.isCompleted) flight.complete();
+    }
+  }
+
+  Future<void> _checkAndNotifyOnce() async {
     final webhookUrl = _webhookUrl;
     // Local notifications and the alert webhook are independent transports; run
     // when either is active. Alerts are still computed and armed so the
@@ -2170,6 +2492,20 @@ class _DashboardState extends State<Dashboard>
         // suppress the webhook or skip the rest of the batch. Both keys carry
         // the account so two accounts of one provider do not collide.
         if (_enableNotifications) {
+          final notificationBody = desktopQuotaAlertNotificationMessage(
+            a,
+            snapshot,
+            showAccounts: _showAccounts,
+          );
+          final notificationQuota = snapshot.firstWhere(
+            (quota) =>
+                quota.provider == a.provider && quota.account == a.account,
+          );
+          final notificationLabel = desktopNotificationProviderLabel(
+            notificationQuota,
+            snapshot,
+            showAccounts: _showAccounts,
+          );
           final id = notificationId(
             '${quotaIdentityKey(a.provider, a.account)}:low',
           );
@@ -2178,8 +2514,8 @@ class _DashboardState extends State<Dashboard>
             await flutterLocalNotificationsPlugin.show(
               id: id,
               title: 'Low quota',
-              body: a.message,
-              notificationDetails: _buildDetails(a.displayName),
+              body: notificationBody,
+              notificationDetails: _buildDetails(notificationLabel),
             );
             _setNotificationDeliveryFailed(false);
           } catch (_) {
@@ -2206,7 +2542,7 @@ class _DashboardState extends State<Dashboard>
       // Scheduled "resets soon" reminders are local notifications only.
       if (_enableNotifications) {
         for (final q in snapshot) {
-          if (q.stale) continue;
+          if (!canScheduleQuotaResetAlert(q, nowSec)) continue;
           for (final w in q.windows) {
             if (w.resetsAt != null &&
                 w.resetsAt! > nowSec &&
@@ -2214,6 +2550,11 @@ class _DashboardState extends State<Dashboard>
                 w.percent! > 80) {
               final key = '${quotaIdentityKeyFor(q)}:${w.label}:reset';
               if (_shouldNotify(key, now)) {
+                final notificationLabel = desktopNotificationProviderLabel(
+                  q,
+                  snapshot,
+                  showAccounts: _showAccounts,
+                );
                 final resetDt = DateTime.fromMillisecondsSinceEpoch(
                   w.resetsAt! * 1000,
                 );
@@ -2224,9 +2565,9 @@ class _DashboardState extends State<Dashboard>
                   await flutterLocalNotificationsPlugin.zonedSchedule(
                     id: id,
                     title: 'Quota reset soon',
-                    body: '${q.displayName} ${w.label} resets soon',
+                    body: '$notificationLabel ${w.label} resets soon',
                     scheduledDate: tzReset,
-                    notificationDetails: _buildDetails(q.displayName),
+                    notificationDetails: _buildDetails(notificationLabel),
                     androidScheduleMode:
                         AndroidScheduleMode.exactAllowWhileIdle,
                   );
@@ -2246,13 +2587,25 @@ class _DashboardState extends State<Dashboard>
       // its flap-resistant re-arm rule live in the pure computeResetSignals.
       if (_enableNotifications) {
         final resets = computeResetSignals(
-          snapshot: snapshot,
+          snapshot: [
+            for (final quota in snapshot)
+              if (canScheduleQuotaResetAlert(quota, nowSec)) quota,
+          ],
           armed: _resetArmed,
         );
         _resetArmed
           ..clear()
           ..addAll(resets.armed);
         for (final r in resets.fired) {
+          final notificationQuota = snapshot.firstWhere(
+            (quota) =>
+                quota.provider == r.provider && quota.account == r.account,
+          );
+          final notificationLabel = desktopNotificationProviderLabel(
+            notificationQuota,
+            snapshot,
+            showAccounts: _showAccounts,
+          );
           final id = notificationId(
             '${quotaIdentityKey(r.provider, r.account)}:reset-available',
           );
@@ -2261,8 +2614,12 @@ class _DashboardState extends State<Dashboard>
             await flutterLocalNotificationsPlugin.show(
               id: id,
               title: 'Reset available',
-              body: r.message,
-              notificationDetails: _buildDetails(r.displayName),
+              body: desktopResetAvailableNotificationMessage(
+                r,
+                snapshot,
+                showAccounts: _showAccounts,
+              ),
+              notificationDetails: _buildDetails(notificationLabel),
             );
             _setNotificationDeliveryFailed(false);
           } catch (_) {
@@ -2331,8 +2688,8 @@ class _DashboardState extends State<Dashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
   }
 
-  /// Compact setup/help panel: a short intro, then every provider from the
-  /// latest snapshot with its live status and an inline Connect for
+  /// Compact setup/help panel: a short intro, then every provider account from
+  /// the latest snapshot with its live status and an inline Connect for
   /// Grok/Antigravity. Reachable from the help button; never pops up on its own.
   /// All path/state reads are portable, so it works the same on every OS.
   void _showSetup() {
@@ -2349,6 +2706,7 @@ class _DashboardState extends State<Dashboard>
           builder: (ctx, setDlg) {
             final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
             final setupRows = _currentSetupRows(now);
+            final setupCounts = _providerCounts(setupRows);
             return Dialog(
               insetPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
@@ -2367,15 +2725,18 @@ class _DashboardState extends State<Dashboard>
                     children: [
                       Row(
                         children: [
-                          Text(
-                            'Providers',
-                            style: TextStyle(
-                              fontSize: AppType.title,
-                              fontWeight: FontWeight.w700,
-                              color: fg,
+                          Expanded(
+                            child: Text(
+                              'Providers',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.title,
+                                fontWeight: FontWeight.w700,
+                                color: fg,
+                              ),
                             ),
                           ),
-                          const Spacer(),
                           IconButton(
                             tooltip: 'Close providers',
                             icon: Icon(
@@ -2392,23 +2753,24 @@ class _DashboardState extends State<Dashboard>
                           ),
                         ],
                       ),
-                      Text(
-                        'Connect Grok or Antigravity once to stay live. '
-                        'Key-based and local providers show their current setup '
-                        'state.',
-                        style: TextStyle(
-                          fontSize: AppType.bodySmall,
-                          height: 1.3,
-                          color: muted,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
                       Flexible(
                         child: SingleChildScrollView(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              Text(
+                                'Quota reads use metadata only and spend no '
+                                'model tokens. Cards distinguish account-wide, '
+                                'this-machine, cached, and unavailable '
+                                'evidence.',
+                                style: TextStyle(
+                                  fontSize: AppType.bodySmall,
+                                  height: 1.3,
+                                  color: muted,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
                               for (final q in setupRows)
                                 _setupRow(
                                   ctx,
@@ -2417,17 +2779,22 @@ class _DashboardState extends State<Dashboard>
                                   fg,
                                   connecting,
                                   setDlg,
+                                  showAccount: quotaShouldShowAccountLabel(
+                                    q,
+                                    setupCounts,
+                                  ),
                                 ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Tip: right-click any card to set it up or hide '
+                                'it.',
+                                style: TextStyle(
+                                  fontSize: AppType.caption,
+                                  color: muted,
+                                ),
+                              ),
                             ],
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Tip: right-click any card to set it up or hide it.',
-                        style: TextStyle(
-                          fontSize: AppType.caption,
-                          color: muted,
                         ),
                       ),
                     ],
@@ -2443,22 +2810,29 @@ class _DashboardState extends State<Dashboard>
 
   List<ProviderQuota> _currentSetupRows(int now) {
     final source = _setupData.isEmpty ? _data : _setupData;
-    final rowsByProvider = <String, ProviderQuota>{};
+    final rowsByAccount = <String, ProviderQuota>{};
     for (final quota in source) {
-      final current = rowsByProvider[quota.provider];
+      final key = quotaDisplayKey(quota);
+      final current = rowsByAccount[key];
       if (current == null ||
           _setupRowRank(quota, now) > _setupRowRank(current, now)) {
-        rowsByProvider[quota.provider] = quota;
+        rowsByAccount[key] = quota;
       }
     }
-    return rowsByProvider.values.toList();
+    return rowsByAccount.values.toList();
   }
 
   static int _setupRowRank(ProviderQuota quota, int now) {
-    if (isTrustedQuotaEvidenceAt(quota, now)) return 4;
+    if (isTrustedQuotaEvidenceAt(quota, now)) return 5;
+    if (isLocalRuntimeAvailableAt(quota, now)) return 4;
     if (quota.ok &&
         !quota.stale &&
+        quota.suspect == null &&
         quota.driftReason == null &&
+        quota.sourceClassViolation == null &&
+        quota.asOf > 0 &&
+        quota.asOf <= now + kQuotaEvidenceClockSkewSeconds &&
+        quota.sourceClass == ProviderSourceClass.statusOnly &&
         (quota.status ?? '').isNotEmpty) {
       return 3;
     }
@@ -2473,8 +2847,9 @@ class _DashboardState extends State<Dashboard>
     Color muted,
     Color fg,
     Set<String> connecting,
-    StateSetter setDlg,
-  ) {
+    StateSetter setDlg, {
+    required bool showAccount,
+  }) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final (label, color) = _stateChip(
       q,
@@ -2486,62 +2861,113 @@ class _DashboardState extends State<Dashboard>
         : widget._hostIntegration && _canConnectProvider(q.provider);
     final isLive = label == 'live' || label == 'in use';
     final busy = connecting.contains(q.provider);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          ProviderLogo(q.provider, size: 18, color: fg),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              q.displayName,
-              style: TextStyle(fontSize: AppType.subtitle, color: fg),
-            ),
-          ),
-          if (busy)
-            const SizedBox(
+    final displayLabel = showAccount
+        ? '${q.displayName} (${quotaAccountDisplayLabel(q.account)})'
+        : q.displayName;
+    final state = Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: label,
+        excludeSemantics: true,
+        child: Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: AppType.caption, color: color),
+        ),
+      ),
+    );
+    final Widget action = busy
+        ? Semantics(
+            label: 'Connecting $displayLabel',
+            liveRegion: true,
+            child: const SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else
-            Text(
-              label,
-              style: TextStyle(fontSize: AppType.caption, color: color),
             ),
-          const SizedBox(width: 8),
-          if (canConnect && !isLive && !busy)
-            TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: const Size(0, 30),
-              ),
-              onPressed: () async {
-                setDlg(() => connecting.add(q.provider));
-                await _connectAndValidate(q.provider);
-                if (ctx.mounted) setDlg(() => connecting.remove(q.provider));
-              },
-              child: const Text(
-                'Connect',
-                style: TextStyle(fontSize: AppType.bodySmall),
-              ),
-            )
-          else if (!busy)
-            IconButton(
-              tooltip: 'Set up ${q.displayName}',
-              icon: Icon(Icons.help_outline_rounded, size: 16, color: muted),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-              onPressed: () => _showProviderSetup(q),
+          )
+        : canConnect && !isLive
+        ? TextButton(
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 30),
             ),
-        ],
-      ),
+            onPressed: () async {
+              setDlg(() => connecting.add(q.provider));
+              await _connectAndValidate(q.provider, account: q.account);
+              if (ctx.mounted) setDlg(() => connecting.remove(q.provider));
+            },
+            child: const Text(
+              'Connect',
+              style: TextStyle(fontSize: AppType.bodySmall),
+            ),
+          )
+        : IconButton(
+            tooltip: 'Set up $displayLabel',
+            icon: Icon(Icons.help_outline_rounded, size: 16, color: muted),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            onPressed: () => _showProviderSetup(q),
+          );
+    final largeText = MediaQuery.textScalerOf(ctx).scale(10) > 14;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: largeText
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    ProviderLogo(q.provider, size: 18, color: fg),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        displayLabel,
+                        style: TextStyle(fontSize: AppType.subtitle, color: fg),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 27),
+                  child: Row(
+                    children: [
+                      Expanded(child: state),
+                      const SizedBox(width: 8),
+                      action,
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                ProviderLogo(q.provider, size: 18, color: fg),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    displayLabel,
+                    style: TextStyle(fontSize: AppType.subtitle, color: fg),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Flexible(child: state),
+                const SizedBox(width: 8),
+                action,
+              ],
+            ),
     );
   }
 
   /// Runs quotabot's own login for a provider, then re-collects so the setup
-  /// row reflects the new state. Returns whether the provider is now live.
-  Future<bool> _connectAndValidate(String provider) async {
+  /// row reflects the new state. When an account-specific row initiated the
+  /// flow, only that same account identity can satisfy validation.
+  Future<bool> _connectAndValidate(String provider, {String? account}) async {
     final messenger = ScaffoldMessenger.of(context);
     // The connect flow only handles these two, and their display names are
     // fixed, so the toast can use the same capitalized label as the dialog
@@ -2603,17 +3029,28 @@ class _DashboardState extends State<Dashboard>
       if (priorRefresh != null) await priorRefresh;
       await _refresh();
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final match = _data.where((x) => x.provider == provider);
-      final ok = match.any(
-        (quota) =>
-            isTrustedQuotaEvidenceAt(quota, now) &&
-            providerHeadroom(quota, now) != null,
-      );
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(ok ? '$label connected' : '$label not live yet'),
-        ),
-      );
+      final live = _data
+          .where(
+            (quota) =>
+                quota.provider == provider &&
+                isTrustedQuotaEvidenceAt(quota, now) &&
+                providerHeadroom(quota, now) != null,
+          )
+          .toList(growable: false);
+      final target = account?.trim();
+      final hasSpecificTarget =
+          target != null &&
+          target.isNotEmpty &&
+          !genericAccountLabels.contains(target.toLowerCase());
+      final ok = !hasSpecificTarget
+          ? live.isNotEmpty
+          : live.any((quota) => quota.account == target);
+      final message = ok
+          ? '$label connected'
+          : hasSpecificTarget && live.isNotEmpty
+          ? '$label connected, but the selected account is still unconfirmed'
+          : '$label not live yet';
+      messenger.showSnackBar(SnackBar(content: Text(message)));
       return ok;
     } catch (_) {
       messenger.showSnackBar(
@@ -2640,15 +3077,36 @@ class _DashboardState extends State<Dashboard>
         amber = Color(0xFFD29922),
         grey = Color(0xFF8A91A0),
         blue = Color(0xFF58A6FF);
-    if (q.isLocal) return q.active ? ('in use', green) : ('idle', blue);
+    if (q.sourceClassViolation != null) {
+      return ('invalid evidence', errorColor);
+    }
+    if (q.isLocal) {
+      if (!q.ok || q.error != null) {
+        return ('error', errorColor);
+      }
+      if (q.stale) return ('cached', amber);
+      if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+        return ('unverified', amber);
+      }
+      if (!isLocalRuntimeAvailableAt(q, now)) return ('unavailable', grey);
+      return q.active ? ('in use', green) : ('idle', blue);
+    }
     if (q.driftReason != null) return ('provider drift', errorColor);
     if (!q.ok) return ('no live data', grey);
+    if (q.stale) return ('cached', amber);
+    if (q.suspect != null) return ('review', amber);
+    if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+      return ('unverified', amber);
+    }
     if (q.windows.isEmpty && (q.status ?? '').isNotEmpty) {
-      return ('available', green);
+      return q.sourceClass == ProviderSourceClass.statusOnly
+          ? ('metadata', blue)
+          : ('no live data', grey);
     }
     if (q.windows.isEmpty) return ('no live data', grey);
-    if (q.stale) return ('cached', amber);
-    final h = providerHeadroom(q, now) ?? 100;
+    if (!isTrustedQuotaEvidenceAt(q, now)) return ('unverified', amber);
+    final h = providerHeadroom(q, now);
+    if (h == null) return ('unverified', amber);
     if (h <= kSpentHeadroomFloor) return ('spent', errorColor);
     return ('live', green);
   }
@@ -2798,7 +3256,9 @@ class _AccountGroupHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
-    final label = account ?? 'default and local';
+    final label = account == null
+        ? 'default and local'
+        : quotaAccountDisplayLabel(account!);
     return Row(
       children: [
         Icon(Icons.account_circle_outlined, size: 14, color: chrome.muted),
@@ -2827,6 +3287,94 @@ class _AccountGroupHeader extends StatelessWidget {
   }
 }
 
+/// Adds desktop keyboard activation and a visible focus ring to provider cards
+/// that can reveal analytics. The card keeps its mouse and context-menu gestures
+/// in [child]; this wrapper only handles focus, Enter, Space, and semantics.
+class _FocusableProviderCard extends StatefulWidget {
+  final bool enabled;
+  final String label;
+  final bool expanded;
+  final VoidCallback? onActivate;
+  final Widget child;
+
+  const _FocusableProviderCard({
+    required this.enabled,
+    required this.label,
+    required this.expanded,
+    required this.onActivate,
+    required this.child,
+  });
+
+  @override
+  State<_FocusableProviderCard> createState() => _FocusableProviderCardState();
+}
+
+class _FocusableProviderCardState extends State<_FocusableProviderCard> {
+  bool _showFocus = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled || widget.onActivate == null) return widget.child;
+    return Semantics(
+      container: true,
+      label: widget.label,
+      hint: 'Press Enter or Space to toggle analytics',
+      button: true,
+      expanded: widget.expanded,
+      onTap: widget.onActivate,
+      child: FocusableActionDetector(
+        enabled: true,
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+          SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        },
+        actions: <Type, Action<Intent>>{
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onActivate!();
+              return null;
+            },
+          ),
+        },
+        onShowFocusHighlight: (show) {
+          if (_showFocus != show) setState(() => _showFocus = show);
+        },
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(
+              color: _showFocus
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.transparent,
+              width: 2,
+            ),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+String _providerPlanTitle(String raw) {
+  final cleaned = raw.trim().replaceAll(RegExp(r'[_-]+'), ' ');
+  final normalized = cleaned.toLowerCase();
+  return switch (normalized) {
+    'team premium' => 'Team Premium',
+    'team standard' => 'Team Standard',
+    'ai pro' => 'AI Pro',
+    'chatgpt plus' => 'ChatGPT Plus',
+    _ when cleaned == normalized =>
+      cleaned
+          .split(RegExp(r'\s+'))
+          .where((word) => word.isNotEmpty)
+          .map((word) => '${word[0].toUpperCase()}${word.substring(1)}')
+          .join(' '),
+    _ => cleaned,
+  };
+}
+
 class ProviderTile extends StatelessWidget {
   final ProviderQuota quota;
   final Color cardColor;
@@ -2837,6 +3385,7 @@ class ProviderTile extends StatelessWidget {
   final VoidCallback? onToggle;
   final void Function(Offset globalPosition)? onContextMenu;
   final bool showAccounts;
+  final int? nowEpochSeconds;
   const ProviderTile({
     super.key,
     required this.quota,
@@ -2848,6 +3397,7 @@ class ProviderTile extends StatelessWidget {
     this.onToggle,
     this.onContextMenu,
     this.showAccounts = true,
+    this.nowEpochSeconds,
   });
 
   @override
@@ -2856,11 +3406,17 @@ class ProviderTile extends StatelessWidget {
     final chrome = AppChromeTheme.of(context);
     final muted = chrome.muted;
     final fg = chrome.foreground;
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final now =
+        nowEpochSeconds ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final views = quota.windows.map((w) => _view(quota, w, now)).toList();
-    final scopedModelViews = desktopScopedModelQuotas(
-      quota,
-    ).map((modelQuota) => _modelQuotaView(quota, modelQuota, now)).toList();
+    final scopedModelQuotas = desktopScopedModelQuotas(quota);
+    final completeWindowEvidence = quota.windows.every((window) {
+      final percent = window.percent;
+      return percent != null &&
+          percent.isFinite &&
+          percent >= 0 &&
+          percent <= 100;
+    });
 
     // Binding constraint from pure analysis. A spent longer window overrides
     // shorter ones so the display never shows healthy when the binding cap is spent.
@@ -2869,19 +3425,40 @@ class ProviderTile extends StatelessWidget {
     if (bindingWin != null) {
       binding = _view(quota, bindingWin, now);
     }
+    final trustedEvidence = isTrustedQuotaEvidenceAt(quota, now);
+    final localAvailable = isLocalRuntimeAvailableAt(quota, now);
     final blocked = binding != null && binding.exhausted;
     // When a spent short window blocks the card, a longer window that still has
     // room is the constraint the user faces after the short one resets - show it
     // instead of hiding it behind the "spent" line.
     final secondaryWin = blocked ? secondaryVisibleWindow(quota, now) : null;
     final driftColor = _providerDriftForeground(cardColor);
-    final statusColor = quota.driftReason != null
+    final statusColor = quota.isLocal
+        ? !localAvailable
+              ? muted
+              : quota.active
+              ? const Color(0xFF3FB950)
+              : const Color(0xFF58A6FF)
+        : quota.driftReason != null
         ? driftColor
+        : quota.suspect != null
+        ? const Color(0xFFD29922)
+        : !trustedEvidence
+        ? muted
         : binding == null
         ? muted
         : _availColor(binding.remaining);
     final hasInsights = insights != null && insights!.samples > 0;
+    final expandable = hasInsights && onToggle != null;
     final trustLine = desktopProviderTrustLine(quota, now);
+    final trustDetail = desktopProviderTrustDetail(quota, now);
+    final rawPlan = quota.plan?.trim();
+    final planLabel = rawPlan == null || rawPlan.isEmpty
+        ? null
+        : rawPlan.toLowerCase().replaceAll(RegExp(r'[_-]+'), ' ');
+    final planDetail = planLabel == null
+        ? null
+        : 'Plan: ${_providerPlanTitle(rawPlan!)}';
     // A redeemable off-cycle reset is the most actionable thing on a tight card,
     // so it renders as a prominent green banner, not a muted detail line.
     final resetMessage = resetAvailableMessage(quota);
@@ -2889,6 +3466,8 @@ class ProviderTile extends StatelessWidget {
         ? 'last trusted'
         : quota.stale
         ? 'last known'
+        : !trustedEvidence
+        ? 'unverified'
         : null;
 
     // A glance-layer forward-looking note on the binding window, in plain
@@ -2898,7 +3477,7 @@ class ProviderTile extends StatelessWidget {
     // appears once there is enough history; otherwise the runway estimate does.
     final forecast =
         (quota.isLocal ||
-            quota.stale ||
+            !trustedEvidence ||
             blocked ||
             binding == null ||
             !hasInsights)
@@ -2915,213 +3494,418 @@ class ProviderTile extends StatelessWidget {
             headroom: binding.remaining,
           );
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: hasInsights ? onToggle : null,
-      onSecondaryTapDown: onContextMenu == null
-          ? null
-          : (d) => onContextMenu!(d.globalPosition),
-      onLongPressStart: onContextMenu == null
-          ? null
-          : (d) => onContextMenu!(d.globalPosition),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(color: chrome.tileBorder),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                ProviderLogo(quota.provider, size: 20, color: fg),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: quota.displayName,
-                          style: TextStyle(
-                            fontSize: AppType.subtitle,
-                            fontWeight: FontWeight.w600,
-                            color: fg,
-                          ),
-                        ),
-                        if (showAccounts && quotaHasSpecificAccount(quota))
+    final cardLabel = showAccounts && quotaHasSpecificAccount(quota)
+        ? '${quota.displayName} '
+              '(${quotaAccountDisplayLabel(quota.account)}) quota card'
+        : '${quota.displayName} quota card';
+    return _FocusableProviderCard(
+      enabled: expandable,
+      label: cardLabel,
+      expanded: expanded,
+      onActivate: onToggle,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: expandable ? onToggle : null,
+        onSecondaryTapDown: onContextMenu == null
+            ? null
+            : (d) => onContextMenu!(d.globalPosition),
+        onLongPressStart: onContextMenu == null
+            ? null
+            : (d) => onContextMenu!(d.globalPosition),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: chrome.tileBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  ProviderLogo(quota.provider, size: 20, color: fg),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
                           TextSpan(
-                            text: ' (${quota.account})',
+                            text: quota.displayName,
+                            style: TextStyle(
+                              fontSize: AppType.subtitle,
+                              fontWeight: FontWeight.w600,
+                              color: fg,
+                            ),
+                          ),
+                          if (showAccounts && quotaHasSpecificAccount(quota))
+                            TextSpan(
+                              text:
+                                  ' (${quotaAccountDisplayLabel(quota.account)})',
+                              style: TextStyle(
+                                fontSize: AppType.caption,
+                                fontWeight: FontWeight.w500,
+                                color: muted,
+                              ),
+                            ),
+                        ],
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  if (quota.isLocal)
+                    _Dot(statusColor)
+                  else if (quota.windows.isNotEmpty)
+                    _Dot(statusColor),
+                  if (planLabel != null) ...[
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Semantics(
+                        label: planDetail,
+                        excludeSemantics: true,
+                        child: Tooltip(
+                          message: planDetail!,
+                          excludeFromSemantics: true,
+                          child: Text(
+                            planLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: AppType.caption,
                               fontWeight: FontWeight.w500,
                               color: muted,
                             ),
                           ),
-                      ],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (quota.isLocal)
-                  _Dot(
-                    quota.active
-                        ? const Color(0xFF3FB950) // a model is loaded / in use
-                        : const Color(0xFF58A6FF),
-                  ) // running but idle
-                else if (quota.windows.isNotEmpty)
-                  _Dot(statusColor),
-                if (quota.plan != null)
-                  Text(
-                    quota.plan!.toLowerCase(),
-                    style: TextStyle(
-                      fontSize: AppType.caption,
-                      fontWeight: FontWeight.w500,
-                      color: muted,
-                    ),
-                  ),
-                if (quota.suspect != null)
-                  Text(
-                    ' !',
-                    style: TextStyle(
-                      fontSize: AppType.caption,
-                      fontWeight: FontWeight.w500,
-                      color: const Color(0xFFE3B341),
-                    ),
-                  ),
-                if (hasInsights) ...[
-                  const SizedBox(width: 4),
-                  Icon(
-                    expanded
-                        ? Icons.expand_less_rounded
-                        : Icons.insights_rounded,
-                    size: 13,
-                    color: muted,
-                  ),
-                ],
-              ],
-            ),
-            Padding(
-              padding: const EdgeInsets.only(top: 3),
-              child: Text(
-                trustLine,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppType.small,
-                  fontWeight: FontWeight.w500,
-                  color: muted,
-                ),
-              ),
-            ),
-            if (resetMessage != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.refresh_rounded,
-                      size: 13,
-                      color: Color(0xFF3FB950),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        resetMessage,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: AppType.small,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF3FB950),
                         ),
                       ),
                     ),
                   ],
+                  if (hasInsights) ...[
+                    const SizedBox(width: 4),
+                    Icon(
+                      expanded
+                          ? Icons.expand_less_rounded
+                          : Icons.insights_rounded,
+                      size: 13,
+                      color: muted,
+                    ),
+                  ],
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Semantics(
+                  label: trustDetail,
+                  excludeSemantics: true,
+                  child: Tooltip(
+                    message: trustDetail,
+                    excludeFromSemantics: true,
+                    child: Text(
+                      trustLine,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppType.small,
+                        fontWeight: FontWeight.w500,
+                        color: muted,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            if (quota.driftReason != null)
-              _providerDriftRow(
-                quota.driftReason!,
-                driftColor,
-                hasTrustedWindows: quota.hasWindows,
-              ),
-            const SizedBox(height: 10),
-            if (quota.isLocal)
-              _localRow(quota, muted, fg)
-            else if (quota.windows.isEmpty)
-              ((quota.status ?? '').isNotEmpty
-                  ? _statusOnlyRow(quota, muted, fg)
-                  : _noData(quota.error, muted))
-            else if (blocked) ...[
-              _blockedRow(binding, now, muted, evidenceLabel: evidenceLabel),
-              if (secondaryWin != null)
+              if (quota.suspect != null && quota.driftReason == null)
+                _providerSuspectRow(quota.suspect!, const Color(0xFFD29922)),
+              if (resetMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.refresh_rounded,
+                        size: 13,
+                        color: Color(0xFF3FB950),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          resetMessage,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: AppType.small,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF3FB950),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (quota.driftReason != null)
+                _providerDriftRow(
+                  quota.driftReason!,
+                  driftColor,
+                  hasTrustedWindows: quota.hasWindows,
+                ),
+              if (!quota.isLocal &&
+                  quota.hasWindows &&
+                  quota.stale &&
+                  quota.driftReason == null &&
+                  quota.error?.isNotEmpty == true)
+                _providerStaleFailureRow(quota.error!, driftColor),
+              const SizedBox(height: 10),
+              if (quota.isLocal)
+                (localAvailable
+                    ? _localRow(quota, muted, fg)
+                    : _noData(
+                        quota.error ?? 'local runtime unavailable',
+                        muted,
+                      ))
+              else if (quota.windows.isEmpty)
+                ((quota.status ?? '').isNotEmpty
+                    ? _statusOnlyRow(quota, muted, fg)
+                    : _noData(quota.error, muted))
+              else if (!completeWindowEvidence)
+                _noData(
+                  'quota balance unavailable - not used for routing',
+                  muted,
+                )
+              else if (blocked) ...[
+                _blockedRow(
+                  binding,
+                  now,
+                  muted,
+                  evidenceLabel: evidenceLabel,
+                  largeText: MediaQuery.textScalerOf(context).scale(10) > 14,
+                ),
+                if (secondaryWin != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: WindowBar(
+                      view: _view(quota, secondaryWin, now),
+                      muted: muted,
+                      fg: fg,
+                      evidenceLabel: evidenceLabel,
+                    ),
+                  ),
+              ] else
+                ...views.map(
+                  (v) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: WindowBar(
+                      view: v,
+                      muted: muted,
+                      fg: fg,
+                      evidenceLabel: evidenceLabel,
+                    ),
+                  ),
+                ),
+              if (scopedModelQuotas.isNotEmpty) ...[
+                _scopedQuotaHeading(quota, muted),
+                ...scopedModelQuotas.map((modelQuota) {
+                  final spendEvidence = claudeFableSpendEvidenceAt(
+                    quota,
+                    modelQuota.model,
+                    now,
+                  );
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _scopedModelQuotaRow(
+                      modelQuota,
+                      muted: muted,
+                      fg: fg,
+                      spendEvidence: spendEvidence,
+                      evidenceLabel: desktopScopedModelEvidenceLabel(
+                        quota,
+                        modelQuota,
+                        now,
+                      ),
+                    ),
+                  );
+                }),
+              ],
+              if (forecast != null) _forecastRow(forecast, muted),
+              if (history.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
-                  child: WindowBar(
-                    view: _view(quota, secondaryWin, now),
-                    muted: muted,
-                    fg: fg,
-                    evidenceLabel: evidenceLabel,
-                  ),
+                  child: () {
+                    final avg = averageRecentHeadroom(history, now);
+                    return Text(
+                      avg == null
+                          ? '${history.length} recent checks'
+                          : 'usually ~${avg.toStringAsFixed(0)}% free (last ${history.length})',
+                      style: TextStyle(
+                        fontSize: AppType.caption,
+                        fontWeight: FontWeight.w500,
+                        color: muted,
+                      ),
+                    );
+                  }(),
                 ),
-            ] else
-              ...views.map(
-                (v) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: WindowBar(
-                    view: v,
-                    muted: muted,
-                    fg: fg,
-                    evidenceLabel: evidenceLabel,
+              if (expanded && hasInsights)
+                InsightsPanel(
+                  insights: insights!,
+                  history: history,
+                  heatmap: heatmap,
+                  bindingRemaining: binding?.remaining,
+                  bindingResetsAt: binding?.resetsAt,
+                  muted: muted,
+                  fg: fg,
+                  dark: dark,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _scopedQuotaHeading(ProviderQuota quota, Color muted) {
+    final detail =
+        'Model-specific quota. This allowance applies only to the named '
+        '${quota.displayName} model and does not replace ${quota.displayName}\'s '
+        'shared account limits. An expired allowance remains last observed '
+        'until a new provider read.';
+    return Padding(
+      padding: const EdgeInsets.only(top: 1, bottom: 5),
+      child: Semantics(
+        container: true,
+        label: detail,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: detail,
+          excludeFromSemantics: true,
+          child: Row(
+            children: [
+              Icon(Icons.filter_alt_outlined, size: 12, color: muted),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'Model-specific quota (separate)',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.small,
+                    fontWeight: FontWeight.w600,
+                    color: muted,
                   ),
                 ),
               ),
-            ...scopedModelViews.map(
-              (v) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: WindowBar(
-                  view: v,
-                  muted: muted,
-                  fg: fg,
-                  evidenceLabel: evidenceLabel,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _scopedModelQuotaRow(
+    ModelQuota modelQuota, {
+    required Color muted,
+    required Color fg,
+    required ScopedModelSpendEvidence? spendEvidence,
+    required String? evidenceLabel,
+  }) {
+    final model = modelQuota.model.trim();
+    final modelLabel = model.isEmpty ? 'Unnamed model' : model;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Semantics(
+                label: modelLabel,
+                excludeSemantics: true,
+                child: Tooltip(
+                  message: modelLabel,
+                  excludeFromSemantics: true,
+                  child: Text(
+                    modelLabel,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: AppType.small,
+                      fontWeight: FontWeight.w600,
+                      color: muted,
+                    ),
+                  ),
                 ),
               ),
             ),
-            if (forecast != null) _forecastRow(forecast, muted),
-            if (history.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: () {
-                  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-                  final avg = averageRecentHeadroom(history, now);
-                  return Text(
-                    avg == null
-                        ? '${history.length} recent checks'
-                        : 'usually ~${avg.toStringAsFixed(0)}% free (last ${history.length})',
-                    style: TextStyle(
-                      fontSize: AppType.caption,
-                      fontWeight: FontWeight.w500,
-                      color: muted,
+            if (spendEvidence != null) ...[
+              const SizedBox(width: 8),
+              Flexible(
+                child: Semantics(
+                  label: spendEvidence.detail,
+                  excludeSemantics: true,
+                  child: Tooltip(
+                    message: spendEvidence.detail,
+                    excludeFromSemantics: true,
+                    child: Text(
+                      spendEvidence.compactLabel,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: TextStyle(
+                        fontSize: AppType.caption,
+                        fontWeight: FontWeight.w600,
+                        color: muted,
+                      ),
                     ),
-                  );
-                }(),
+                  ),
+                ),
               ),
-            if (expanded && hasInsights)
-              InsightsPanel(
-                insights: insights!,
-                history: history,
-                heatmap: heatmap,
-                bindingRemaining: binding?.remaining,
-                bindingResetsAt: binding?.resetsAt,
-                muted: muted,
-                fg: fg,
-                dark: dark,
-              ),
+            ],
           ],
+        ),
+        const SizedBox(height: 3),
+        WindowBar(
+          view: _modelQuotaView(modelQuota),
+          muted: muted,
+          fg: fg,
+          evidenceLabel: evidenceLabel,
+        ),
+      ],
+    );
+  }
+
+  Widget _providerSuspectRow(String reason, Color color) {
+    final detail =
+        'Provider marked this reading for review. It is shown as unverified and '
+        'is not used for routing or forecasts. Reason: $reason';
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Semantics(
+        container: true,
+        liveRegion: true,
+        label: detail,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: detail,
+          excludeFromSemantics: true,
+          child: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, size: 13, color: color),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'reading needs review - not used for routing',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.caption,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3159,6 +3943,43 @@ class ProviderTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.caption,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _providerStaleFailureRow(String reason, Color color) {
+    final detail =
+        'The latest live quota read failed. Showing last-known quota; routing '
+        'is disabled until a clean read succeeds. Reason: $reason';
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Semantics(
+        container: true,
+        liveRegion: true,
+        label: detail,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: detail,
+          excludeFromSemantics: true,
+          child: Row(
+            children: [
+              Icon(Icons.cloud_off_rounded, size: 13, color: color),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  'live read failed - showing last known',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -3241,60 +4062,116 @@ class ProviderTile extends StatelessWidget {
   }
 
   /// Single collapsed line shown when the binding window is exhausted.
-  Widget _blockedRow(WinView v, int now, Color muted, {String? evidenceLabel}) {
+  Widget _blockedRow(
+    WinView v,
+    int now,
+    Color muted, {
+    String? evidenceLabel,
+    required bool largeText,
+  }) {
     const red = Color(0xFFF85149);
     final status = evidenceLabel == null
         ? '${v.label} spent'
-        : '${v.label} spent ($evidenceLabel)';
-    return Row(
+        : '${v.label} was spent ($evidenceLabel)';
+    final resetPassedWithoutCurrentEvidence =
+        evidenceLabel != null && v.resetsAt != null && v.resetsAt! <= now;
+    final availability = v.resetsAt == null
+        ? ''
+        : resetPassedWithoutCurrentEvidence
+        ? 'refresh to confirm'
+        : evidenceLabel == null
+        ? 'available ${backLabel(v.resetsAt, now)}'
+        : 'reset ${backLabel(v.resetsAt, now)}';
+    final stateColor = evidenceLabel == null ? red : muted;
+    final statusRow = Row(
       children: [
-        const _Dot(red),
+        _Dot(stateColor),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             status,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: AppType.body,
               fontWeight: FontWeight.w600,
-              color: red,
+              color: stateColor,
             ),
           ),
         ),
-        const SizedBox(width: 8),
-        Text(
-          v.resetsAt == null ? '' : 'available ${backLabel(v.resetsAt, now)}',
+      ],
+    );
+    final availabilityText = Semantics(
+      label: availability,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: availability,
+        excludeFromSemantics: true,
+        child: Text(
+          availability,
+          maxLines: largeText ? 3 : 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: AppType.caption,
             fontWeight: FontWeight.w600,
             color: muted,
           ),
         ),
+      ),
+    );
+    if (largeText) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          statusRow,
+          if (availability.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 3, left: 15),
+              child: availabilityText,
+            ),
+        ],
+      );
+    }
+    return Row(
+      children: [
+        Expanded(child: statusRow),
+        if (availability.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Flexible(child: availabilityText),
+        ],
       ],
     );
   }
 
   Widget _noData(String? err, Color muted) {
-    final msg = (err != null && err.length < 80) ? err : 'no live data';
-    return Row(
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: muted, width: 1.4),
-          ),
+    final trimmed = err?.trim();
+    final msg = trimmed == null || trimmed.isEmpty ? 'no live data' : trimmed;
+    return Tooltip(
+      message: msg,
+      excludeFromSemantics: true,
+      child: Semantics(
+        label: msg,
+        excludeSemantics: true,
+        child: Row(
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: muted, width: 1.4),
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                msg,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: AppType.caption, color: muted),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 7),
-        Expanded(
-          child: Text(
-            msg,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: AppType.caption, color: muted),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -3384,7 +4261,9 @@ class ProviderTile extends StatelessWidget {
 class WinView {
   final String label;
   final double remaining; // headroom %, 0..100
-  final bool rolledOver; // reset time already passed -> fresh window
+  /// Legacy presentation state retained for deterministic demo/test views. Live
+  /// quota reads never infer a fresh balance merely because a reset passed.
+  final bool rolledOver;
   final int? resetsAt;
   const WinView(this.label, this.remaining, this.rolledOver, this.resetsAt);
   bool get exhausted => !rolledOver && remaining <= kSpentHeadroomFloor;
@@ -3396,33 +4275,65 @@ WinView _view(ProviderQuota quota, QuotaWindow w, int now) {
   return WinView(w.label, rem, rolled, w.resetsAt);
 }
 
-WinView _modelQuotaView(ProviderQuota quota, ModelQuota modelQuota, int now) {
-  final reset = modelQuota.resetsAt;
-  final rolled =
-      isTrustedQuotaEvidenceAt(quota, now) && reset != null && reset <= now;
-  final remaining = rolled ? 100.0 : modelQuota.remainingPercent!;
-  return WinView(modelQuota.model, remaining, rolled, reset);
+WinView _modelQuotaView(ModelQuota modelQuota) {
+  final providerLabel = modelQuota.windowLabel?.trim();
+  return WinView(
+    providerLabel == null || providerLabel.isEmpty ? 'quota' : providerLabel,
+    modelQuota.remainingPercent!,
+    false,
+    modelQuota.resetsAt,
+  );
 }
 
-/// Claude's scoped family pools are compact enough to show below its shared
-/// account windows. Antigravity's model-quota list is exhaustive and can be
-/// large, so it remains available only through model-routing detail surfaces.
+/// Claude and Codex scoped pools are sparse and compact enough to show below
+/// their shared account windows. Antigravity's model-quota list is exhaustive
+/// and can be large, so it remains available only through model-routing detail
+/// surfaces.
 @visibleForTesting
 List<ModelQuota> desktopScopedModelQuotas(ProviderQuota quota) =>
-    quota.provider == claudeProviderId && quota.windows.isNotEmpty
+    (quota.provider == claudeProviderId || quota.provider == codexProviderId) &&
+        quota.windows.isNotEmpty
     ? quota.modelQuotas
           .where((modelQuota) => modelQuota.remainingPercent != null)
           .toList(growable: false)
     : const [];
 
+/// Evidence qualifier for a sparse Claude model-family allowance. A passed
+/// scoped reset does not prove a fresh 100% pool, but it also does not make the
+/// provider's shared account windows or unrelated models unavailable.
+@visibleForTesting
+String? desktopScopedModelEvidenceLabel(
+  ProviderQuota quota,
+  ModelQuota modelQuota,
+  int now,
+) {
+  if (quota.driftReason != null) return 'last trusted';
+  if (quota.stale) return 'last known';
+  final reset = modelQuota.resetsAt;
+  if (reset != null && reset <= now) return 'last observed';
+  if (!isTrustedQuotaEvidenceAt(quota, now)) return 'unverified';
+  return null;
+}
+
 /// Deterministic quota-row estimate used by the native window sizing fallback.
 @visibleForTesting
 int providerTileQuotaRowCount(ProviderQuota quota, int now) {
   final blocked = providerStatus(quota, now).blocked;
-  final providerRows = (quota.windows.isEmpty || blocked)
+  final hasCompleteWindowEvidence = quota.windows.every((window) {
+    final percent = window.percent;
+    return percent != null &&
+        percent.isFinite &&
+        percent >= 0 &&
+        percent <= 100;
+  });
+  final providerRows =
+      (quota.windows.isEmpty || !hasCompleteWindowEvidence || blocked)
       ? 1
       : quota.windows.length;
-  return providerRows + desktopScopedModelQuotas(quota).length;
+  // A sparse scoped pool renders as two visual lines: its model identity and
+  // its provider window meter. Count both so the native window-size fallback
+  // does not clip the new dedicated row before measured sizing takes over.
+  return providerRows + desktopScopedModelQuotas(quota).length * 2;
 }
 
 Color _availColor(num remaining) {
@@ -3446,13 +4357,9 @@ class WindowBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final remaining = view.remaining;
-    final color = _availColor(remaining);
+    final color = evidenceLabel == null ? _availColor(remaining) : muted;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final chrome = AppChromeTheme.of(context);
-    // Track the Text Size preference so the fixed label/value columns grow with
-    // the font instead of overflowing the meter. This is identity at the
-    // default (medium = 1.0), so it never changes the normal-scale layout.
-    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
     final value = evidenceLabel != null
         ? view.rolledOver
               ? 'reset passed ($evidenceLabel)'
@@ -3465,13 +4372,10 @@ class WindowBar extends StatelessWidget {
 
     return Row(
       children: [
-        SizedBox(
-          width: 42 * textScale,
-          child: Text(
-            view.label == 'baseline' ? 'baseline' : view.label,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.visible,
+        Expanded(
+          flex: 2,
+          child: _WindowBarText(
+            text: view.label,
             style: TextStyle(
               fontSize: AppType.label,
               fontWeight: FontWeight.w600,
@@ -3481,6 +4385,7 @@ class WindowBar extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Expanded(
+          flex: 7,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: LinearProgressIndicator(
@@ -3492,21 +4397,55 @@ class WindowBar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        SizedBox(
-          width: 104 * textScale,
-          child: Text(
-            value,
+        Expanded(
+          flex: 5,
+          child: _WindowBarText(
+            text: value,
             textAlign: TextAlign.end,
             style: TextStyle(
               fontSize: AppType.small,
               fontWeight: FontWeight.w600,
-              color: view.rolledOver ? const Color(0xFF3FB950) : fg,
+              color: evidenceLabel != null
+                  ? muted
+                  : view.rolledOver
+                  ? const Color(0xFF3FB950)
+                  : fg,
             ),
           ),
         ),
       ],
     );
   }
+}
+
+class _WindowBarText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final TextAlign textAlign;
+
+  const _WindowBarText({
+    required this.text,
+    required this.style,
+    this.textAlign = TextAlign.start,
+  });
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: text,
+    excludeSemantics: true,
+    child: Tooltip(
+      message: text,
+      excludeFromSemantics: true,
+      child: Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        textAlign: textAlign,
+        style: style,
+      ),
+    ),
+  );
 }
 
 /// Expandable per-provider analytics: a headroom sparkline from the recent raw
@@ -3587,14 +4526,19 @@ class InsightsPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (series.length >= 2)
-            SizedBox(
-              height: 26,
-              width: double.infinity,
-              child: CustomPaint(
-                painter: _SparklinePainter(
-                  series,
-                  lineColor,
-                  dark ? const Color(0xFF2A2E36) : const Color(0xFFE9EBEF),
+            Semantics(
+              container: true,
+              label: insightsSparklineSemantics(series),
+              excludeSemantics: true,
+              child: SizedBox(
+                height: 26,
+                width: double.infinity,
+                child: CustomPaint(
+                  painter: _SparklinePainter(
+                    series,
+                    lineColor,
+                    dark ? const Color(0xFF2A2E36) : const Color(0xFFE9EBEF),
+                  ),
                 ),
               ),
             ),
@@ -3644,10 +4588,15 @@ class InsightsPanel extends StatelessWidget {
               style: TextStyle(fontSize: AppType.micro, color: muted),
             ),
             const SizedBox(height: 3),
-            SizedBox(
-              height: 30,
-              width: double.infinity,
-              child: CustomPaint(painter: _HeatmapPainter(heatmap!, dark)),
+            Semantics(
+              container: true,
+              label: insightsHeatmapSemantics(heatmap!),
+              excludeSemantics: true,
+              child: SizedBox(
+                height: 30,
+                width: double.infinity,
+                child: CustomPaint(painter: _HeatmapPainter(heatmap!, dark)),
+              ),
             ),
           ],
           if (showPace)
@@ -3668,6 +4617,72 @@ class InsightsPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+@visibleForTesting
+String insightsSparklineSemantics(List<double> values) {
+  if (values.isEmpty) return 'Quota headroom history. No samples.';
+  var low = values.first;
+  var high = values.first;
+  for (final value in values.skip(1)) {
+    if (value < low) low = value;
+    if (value > high) high = value;
+  }
+  final sampleLabel = values.length == 1
+      ? '1 sample'
+      : '${values.length} samples';
+  return 'Quota headroom history, oldest to newest. $sampleLabel. '
+      'Latest ${values.last.round()} percent free; range ${low.round()} to '
+      '${high.round()} percent.';
+}
+
+String _insightsHourSemantics(int hour) {
+  final normalized = hour % 24;
+  if (normalized == 0) return 'midnight';
+  if (normalized == 12) return 'noon';
+  return normalized < 12 ? '$normalized AM' : '${normalized - 12} PM';
+}
+
+@visibleForTesting
+String insightsHeatmapSemantics(List<List<double?>> grid) {
+  const days = [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+  var count = 0;
+  double? low;
+  double? high;
+  double? best;
+  var bestDay = 0;
+  var bestHour = 0;
+  for (var day = 0; day < grid.length; day++) {
+    for (var hour = 0; hour < grid[day].length; hour++) {
+      final value = grid[day][hour];
+      if (value == null || !value.isFinite) continue;
+      count++;
+      if (low == null || value < low) low = value;
+      if (high == null || value > high) high = value;
+      if (best == null || value > best) {
+        best = value;
+        bestDay = day;
+        bestHour = hour;
+      }
+    }
+  }
+  if (count == 0) {
+    return 'Quota headroom heatmap by weekday and hour. No sampled slots.';
+  }
+  final dayLabel = bestDay < days.length ? days[bestDay] : 'day ${bestDay + 1}';
+  final slotLabel = count == 1 ? '1 sampled slot' : '$count sampled slots';
+  return 'Quota headroom heatmap by weekday and hour. $slotLabel, ranging '
+      'from ${low!.round()} to ${high!.round()} percent free. Best sampled '
+      'slot $dayLabel at ${_insightsHourSemantics(bestHour)}, '
+      '${best!.round()} percent free.';
 }
 
 /// Number of populated cells in a 7x24 heatmap.
@@ -3753,6 +4768,84 @@ class _SparklinePainter extends CustomPainter {
       old.values != values || old.color != color;
 }
 
+/// A compact provider status is informative rather than actionable, but it
+/// still participates in keyboard traversal so its full trust tooltip is
+/// reachable. Focusing an off-screen chip scrolls it into view.
+class _FocusableCompactProviderChip extends StatefulWidget {
+  final String message;
+  final Widget child;
+
+  const _FocusableCompactProviderChip({
+    super.key,
+    required this.message,
+    required this.child,
+  });
+
+  @override
+  State<_FocusableCompactProviderChip> createState() =>
+      _FocusableCompactProviderChipState();
+}
+
+class _FocusableCompactProviderChipState
+    extends State<_FocusableCompactProviderChip> {
+  bool _focused = false;
+
+  void _handleFocusChange(bool focused) {
+    if (_focused != focused) setState(() => _focused = focused);
+    if (!focused) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final reduceMotion =
+          MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+      unawaited(
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.5,
+          duration: reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+        ),
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chrome = AppChromeTheme.of(context);
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    return Focus(
+      onFocusChange: _handleFocusChange,
+      child: Semantics(
+        label: widget.message,
+        focusable: true,
+        focused: _focused,
+        excludeSemantics: true,
+        child: Tooltip(
+          message: widget.message,
+          child: AnimatedContainer(
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 100),
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: _focused
+                  ? chrome.accent.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: _focused ? chrome.accent : Colors.transparent,
+              ),
+            ),
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Dot extends StatelessWidget {
   final Color color;
   final double size;
@@ -3777,13 +4870,18 @@ PStatus providerStatus(ProviderQuota q, int now) {
   // A running local runtime is available, so it reads green like a healthy
   // provider. The in-use vs idle nuance is shown in the card body, not the dot.
   if (q.isLocal) {
-    return const PStatus(Color(0xFF3FB950), true, false);
+    return isLocalRuntimeAvailableAt(q, now)
+        ? const PStatus(Color(0xFF3FB950), true, false)
+        : const PStatus(Color(0xFF8A91A0), false, false);
   }
   final h = providerHeadroom(q, now);
   if (h == null) {
     return const PStatus(Color(0xFF8A91A0), false, false);
   }
-  if (q.stale) {
+  if (!isTrustedQuotaEvidenceAt(q, now)) {
+    if (q.suspect != null && q.driftReason == null) {
+      return const PStatus(Color(0xFFD29922), true, false);
+    }
     return const PStatus(Color(0xFF8A91A0), true, false);
   }
   return PStatus(_availColor(h), true, h <= kSpentHeadroomFloor);

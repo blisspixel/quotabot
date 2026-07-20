@@ -61,10 +61,10 @@ void main() {
       expect(
           classes(claudeProviderId), {ProviderSourceClass.authoritativeLive});
       expect(classes(grokProviderId), {ProviderSourceClass.authoritativeLive});
-      expect(classes(codexProviderId), {
-        ProviderSourceClass.authoritativeLive,
-        ProviderSourceClass.thisMachineFallback,
-      });
+      expect(
+        classes(codexProviderId),
+        {ProviderSourceClass.authoritativeLive},
+      );
       expect(classes(antigravityProviderId), {
         ProviderSourceClass.authoritativeLive,
         ProviderSourceClass.thisMachineFallback,
@@ -184,7 +184,12 @@ void main() {
         kProviderAdapterRegistry
             .where((entry) => entry.accountScopedCache)
             .map((entry) => entry.id),
-        [grokProviderId, antigravityProviderId],
+        [
+          claudeProviderId,
+          codexProviderId,
+          grokProviderId,
+          antigravityProviderId,
+        ],
       );
       expect(
         kProviderAdapterRegistry
@@ -202,6 +207,14 @@ void main() {
             .where((entry) => entry.multiAccount)
             .every((entry) => entry.currentAccounts != null),
         isTrue,
+      );
+      expect(
+        providerAdapterById(claudeProviderId)!.collect,
+        collectClaudeProviderAccounts,
+      );
+      expect(
+        providerAdapterById(codexProviderId)!.collect,
+        collectCodexProviderAccounts,
       );
     });
   });

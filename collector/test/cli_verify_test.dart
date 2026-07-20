@@ -35,6 +35,10 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.verify.v1');
     expect(json['passed'], isTrue);
+    expect(json['honesty_passed'], isTrue);
+    expect(json['require_live'], isFalse);
+    expect(json['all_live_reads_succeeded'], isFalse,
+        reason: 'simulation must never claim that a live adapter ran');
     expect(json['os'], Platform.operatingSystem);
     final providers = json['providers'] as List;
     expect(providers, hasLength(1));
@@ -43,6 +47,7 @@ void main() {
     expect(claude['source_class'], 'authoritative_live');
     expect(claude['state'], 'live');
     expect(claude['passed'], isTrue);
+    expect(claude['live_read_succeeded'], isFalse);
     final providerChecks =
         (claude['checks'] as List).cast<Map<String, dynamic>>();
     expect(
@@ -89,6 +94,7 @@ void main() {
     expect(grok['source_class'], 'authoritative_live');
     expect(grok['state'], 'error');
     expect(grok['passed'], isTrue);
+    expect(grok['live_read_succeeded'], isFalse);
     final checks = (grok['checks'] as List).cast<Map<String, dynamic>>();
     final readOrReason = checks.firstWhere((c) => c['id'] == 'read_or_reason');
     expect(readOrReason['status'], 'pass');
@@ -118,6 +124,100 @@ void main() {
     expect(drift['detail'], contains('not routable'));
   });
 
+  test('drift recovery requires an explicit noninteractive confirmation',
+      () async {
+    const unsafeAccount = 'work@example.com;Write-Output injected';
+    final result = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--account=$unsafeAccount',
+      '--json',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('changes one local quota baseline'));
+    expect(result.stderr, contains('rerunning the same command with --yes'));
+    expect(result.stderr, isNot(contains(unsafeAccount)));
+    expect(result.stderr, isNot(contains('--recover-drift=codex')));
+  });
+
+  test('drift recovery rejects filters and simulation before any live read',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--recover-drift=claude',
+      '--account=credential:test-account',
+      '--yes',
+      '--mock-provider=claude',
+      '--state=provider-drift',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('cannot be combined'));
+    expect(result.stderr, contains('--mock-provider'));
+    expect(result.stderr, contains('--state'));
+  });
+
+  test('drift recovery reports an exact missing baseline without collecting',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--account=credential:missing-account',
+      '--yes',
+      '--json',
+    ]);
+
+    expectExitCode(result, 65);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.drift-recovery.v1');
+    expect(json['provider'], 'codex');
+    expect(json['account'], 'credential:missing-account');
+    expect(json['recovered'], isFalse);
+    expect(json['status'], 'baseline_not_found');
+    expect(json, isNot(contains('runtime_access')));
+  });
+
+  test('drift recovery rejects incomplete and unsupported targets', () async {
+    final missingAccount = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--yes',
+    ]);
+    final unsupported = await runCli([
+      'verify',
+      '--recover-drift=not-a-provider',
+      '--account=exact',
+      '--yes',
+      '--json',
+    ]);
+
+    expectExitCode(missingAccount, 64);
+    expect(missingAccount.stderr, contains('--account=EXACT_ACCOUNT'));
+    expectExitCode(unsupported, 64);
+    final json =
+        jsonDecode(unsupported.stdout as String) as Map<String, dynamic>;
+    expect(json['status'], 'unsupported_target');
+    expect(json['recovered'], isFalse);
+  });
+
+  test('drift recovery rejects conflicting repeated exact targets', () async {
+    final result = await runCli([
+      'verify',
+      '--recover-drift=codex',
+      '--recover-drift=claude',
+      '--account=first',
+      '--account=second',
+      '--yes',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('one exact provider and account'));
+  });
+
   test('verify prints a human summary with cross-check pointers', () async {
     final result = await runCli([
       'verify',
@@ -128,7 +228,9 @@ void main() {
     expectExitCode(result, 0);
     final out = result.stdout as String;
     expect(out, contains('quotabot verify'));
-    expect(out, contains('PASS'));
+    expect(out, contains('honesty checks over one snapshot'));
+    expect(out, isNot(contains('honesty checks over one live read')));
+    expect(out, contains('HONEST'));
     expect(out, contains('/usage'));
     expect(out, contains('runtime access manifest only'));
     expect(out, contains('quotabot verify --json'));
@@ -160,6 +262,7 @@ void main() {
     expect(out, contains('[error, authoritative, quota plan, captured'));
     expect(out, contains('read_or_reason'));
     expect(out, contains('simulated signed-out state'));
+    expect(out, contains('HONEST'));
   });
 
   test('verify human output explains cached snapshots', () async {
@@ -178,6 +281,25 @@ void main() {
     );
     expect(out, contains('stale_honesty'));
     expect(out, contains('simulated stale cache'));
+    expect(out, contains('HONEST'));
+  });
+
+  test('verify --require-live turns an honest simulation into a strict failure',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--json',
+      '--require-live',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 65);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['require_live'], isTrue);
+    expect(json['honesty_passed'], isTrue);
+    expect(json['all_live_reads_succeeded'], isFalse);
+    expect(json['passed'], isFalse);
   });
 
   test('verify human output names provider drift and trusted provenance',

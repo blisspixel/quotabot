@@ -48,6 +48,83 @@ void main() {
     expect(providers.map((p) => p['provider']), isNot(contains('claude')));
   });
 
+  test('saved preference applies to every human recommendation surface',
+      () async {
+    saveProfile(
+      const QuotaProfile(
+        name: 'prefer-codex',
+        preferenceOrder: ['codex', 'antigravity'],
+      ),
+      dir: Directory('${temp.path}/quotabot/profiles'),
+    );
+
+    final doctor = await runCli([
+      'doctor',
+      '--no-color',
+      '--profile=prefer-codex',
+    ]);
+    final top = await runCli([
+      'top',
+      '--no-color',
+      '--profile=prefer-codex',
+    ]);
+    final report = await runCli([
+      'report',
+      '--json',
+      '--profile=prefer-codex',
+    ]);
+
+    expectExitCode(doctor, 0);
+    expect(doctor.stdout as String, contains('Suggested: Use codex'));
+    expect(doctor.stdout as String, contains('first by your preference'));
+
+    expectExitCode(top, 0);
+    expect(top.stdout as String, contains('route -> codex'));
+    expect(top.stdout as String, contains('first by your preference'));
+
+    expectExitCode(report, 0);
+    final reportJson =
+        jsonDecode(report.stdout as String) as Map<String, dynamic>;
+    expect(reportJson['recommended_provider'], 'codex');
+    expect(
+      reportJson['recommendation_reason'],
+      contains('first by your preference'),
+    );
+  });
+
+  test('human output warns when a Codex profile uses a legacy account label',
+      () async {
+    saveProfile(
+      const QuotaProfile(
+        name: 'legacy-codex',
+        accounts: {
+          'codex': {'plus'},
+        },
+      ),
+      dir: Directory('${temp.path}/quotabot/profiles'),
+    );
+
+    final human = await runCli([
+      'doctor',
+      '--no-color',
+      '--profile=legacy-codex',
+    ]);
+    final machine = await runCli(['--json', '--profile=legacy-codex']);
+
+    expectExitCode(human, 0);
+    expect(
+      human.stderr as String,
+      contains('uses an older Codex account filter'),
+    );
+    expect(human.stderr as String,
+        contains('select the current Codex credential'));
+    expectExitCode(machine, 0);
+    expect(
+      machine.stderr as String,
+      isNot(contains('older Codex account filter')),
+    );
+  });
+
   test('missing profile is a usage error', () async {
     final result = await runCli(['--json', '--profile=missing']);
 

@@ -164,6 +164,37 @@ void main() {
     expect((json['recommended'] as Map<String, dynamic>)['local'], isTrue);
   });
 
+  test('model listing is unrestricted but model suggestion defaults quota',
+      () async {
+    final models = await runCli(['models', '--json']);
+    final safeSuggestion = await runCli(['suggest', '--json', '--task=hard']);
+    final unrestricted = await runCli([
+      'suggest',
+      '--json',
+      '--task=hard',
+      '--budget=any',
+    ]);
+
+    expectExitCode(models, 0);
+    expectExitCode(safeSuggestion, 0);
+    expectExitCode(unrestricted, 0);
+    expect(
+      (jsonDecode(models.stdout as String)
+          as Map<String, dynamic>)['budget_policy'],
+      'any',
+    );
+    expect(
+      (jsonDecode(safeSuggestion.stdout as String)
+          as Map<String, dynamic>)['budget_policy'],
+      'quota',
+    );
+    expect(
+      (jsonDecode(unrestricted.stdout as String)
+          as Map<String, dynamic>)['budget_policy'],
+      'any',
+    );
+  });
+
   test('suggest can opt into expiring-quota model routing', () async {
     final result = await runCli(['suggest', '--json', '--use-expiring-quota']);
 
@@ -214,5 +245,13 @@ void main() {
 
     expectExitCode(result, 64);
     expect(result.stderr as String, contains('unknown --budget value'));
+  });
+
+  test('models rejects an explicitly empty budget policy', () async {
+    final result = await runCli(['models', '--json', '--budget=']);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('unknown --budget value'));
+    expect(result.stdout as String, isEmpty);
   });
 }

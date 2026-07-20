@@ -48,7 +48,7 @@ QuotaProfile profileWithUiPrefs(
   providers: profile.providers,
   accounts: profile.accounts,
   hiddenProviders: hiddenProviders,
-  routingPolicy: profile.routingPolicy,
+  routingPolicy: profile.routingPolicy.canonical,
   // Routing preference is not a UI pref; it survives a UI-pref update.
   preferenceOrder: profile.preferenceOrder,
   theme: profile.theme,
@@ -59,7 +59,7 @@ QuotaProfile profileWithoutUiPrefs(QuotaProfile profile) => QuotaProfile(
   name: profile.name,
   providers: profile.providers,
   accounts: profile.accounts,
-  routingPolicy: profile.routingPolicy,
+  routingPolicy: profile.routingPolicy.canonical,
   // Stripping UI prefs (theme, sort) must not drop a routing preference.
   preferenceOrder: profile.preferenceOrder,
   theme: profile.theme,
@@ -86,7 +86,11 @@ List<ProfileProviderOption> profileProviderOptions(
   final accounts = <String, Set<String>>{};
   for (final q in quotas) {
     labels.putIfAbsent(q.provider, () => q.displayName);
-    if (quotaHasSpecificAccount(q)) {
+    // Claude and Codex moved from human plan/response labels to opaque,
+    // credential-derived identities. Never offer an obsolete profile label as
+    // though it were a currently detected credential.
+    if (quotaHasSpecificAccount(q) &&
+        !isLegacyCredentialProfileAccountFilter(q.provider, q.account)) {
       accounts.putIfAbsent(q.provider, () => <String>{}).add(q.account);
     }
   }
@@ -96,7 +100,14 @@ List<ProfileProviderOption> profileProviderOptions(
     }
     for (final entry in profile.accounts.entries) {
       labels.putIfAbsent(entry.key, () => entry.key);
-      accounts.putIfAbsent(entry.key, () => <String>{}).addAll(entry.value);
+      accounts
+          .putIfAbsent(entry.key, () => <String>{})
+          .addAll(
+            entry.value.where(
+              (account) =>
+                  !isLegacyCredentialProfileAccountFilter(entry.key, account),
+            ),
+          );
     }
   }
   final ids = labels.keys.toList()
@@ -143,7 +154,7 @@ QuotaProfile profileFromSelection({
     providers: providers,
     accounts: accounts,
     hiddenProviders: hiddenProviders,
-    routingPolicy: routingPolicy,
+    routingPolicy: routingPolicy.canonical,
     preferenceOrder: preferenceOrder,
     theme: theme == null ? null : storedAppTheme(theme),
     sort: sort.name,

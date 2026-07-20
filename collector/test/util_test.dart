@@ -202,6 +202,79 @@ void main() {
       expect(() => restrictOwnerOnlyFile(missing), returnsNormally);
     });
 
+    test('best-effort Windows hardening uses atomic descriptor writes', () {
+      if (!Platform.isWindows) return;
+      final temp = Directory.systemTemp.createTempSync(
+        'quotabot_best_effort_acl_test_',
+      );
+      final file = File('${temp.path}/metadata')..createSync();
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync(recursive: true);
+      });
+      final calls = <({String executable, List<String> arguments})>[];
+      ProcessResult run(String executable, List<String> arguments) {
+        calls.add((executable: executable, arguments: arguments));
+        return ProcessResult(1, 0, '', '');
+      }
+
+      restrictOwnerOnlyFile(
+        file,
+        run: run,
+        identityLookup: () => ProcessResult(
+          2,
+          0,
+          '"User Name","SID"\n"alice","S-1-5-21-1-2-3-4"\n',
+          '',
+        ),
+      );
+      restrictOwnerOnlyDirectory(
+        temp,
+        run: run,
+        identityLookup: () => ProcessResult(
+          3,
+          0,
+          '"User Name","SID"\n"alice","S-1-5-21-1-2-3-4"\n',
+          '',
+        ),
+      );
+
+      expect(calls, hasLength(2));
+      for (final call in calls) {
+        expect(call.executable, 'powershell.exe');
+        expect(call.arguments, contains('-NoProfile'));
+        expect(call.arguments.last, contains('GetAccessControl'));
+        expect(call.arguments.last, contains('SetAccessControl'));
+        expect(call.arguments.last, contains('SetAccessRuleProtection'));
+        expect(call.arguments.last, isNot(contains('icacls')));
+      }
+      expect(calls.first.arguments.last, contains('FileSecurity'));
+      expect(calls.last.arguments.last, contains('DirectorySecurity'));
+    });
+
+    test('best-effort Windows descriptor failures remain suppressed', () {
+      if (!Platform.isWindows) return;
+      final temp = File(
+        '${Directory.systemTemp.path}/quotabot_best_effort_failure_${pid}_test',
+      )..createSync();
+      addTearDown(() {
+        if (temp.existsSync()) temp.deleteSync();
+      });
+
+      expect(
+        () => restrictOwnerOnlyFile(
+          temp,
+          run: (_, __) => ProcessResult(1, 9, '', 'sensitive output'),
+          identityLookup: () => ProcessResult(
+            2,
+            0,
+            '"User Name","SID"\n"alice","S-1-5-21-1-2-3-4"\n',
+            '',
+          ),
+        ),
+        returnsNormally,
+      );
+    });
+
     test('Windows hardening removes an explicit non-owner grant', () {
       if (!Platform.isWindows) return;
       final temp = Directory.systemTemp.createTempSync('quotabot_acl_test_');

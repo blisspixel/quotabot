@@ -250,6 +250,10 @@ void main() {
       expect(localBaseUrl('https://remote', 11434), 'https://remote');
     });
 
+    test('supports a bare IPv6 loopback literal', () {
+      expect(localBaseUrl('::1', 11434), 'http://[::1]:11434');
+    });
+
     test('applies a valid separate port override', () {
       expect(
         localBaseUrl('https://remote:443', 13305, rawPort: '14000'),
@@ -259,6 +263,43 @@ void main() {
         localBaseUrl('remote', 13305, rawPort: '70000'),
         'http://remote:13305',
       );
+    });
+  });
+
+  group('isLoopbackRuntimeHost', () {
+    test('accepts defaults and exact loopback destinations', () {
+      for (final host in <String?>[
+        null,
+        '',
+        'localhost',
+        'LOCALHOST:11434',
+        'localhost.',
+        '127.0.0.1',
+        '127.255.10.2:1234',
+        'http://127.1.2.3:13305/ignored',
+        '::1',
+        'http://[::1]:11434',
+      ]) {
+        expect(isLoopbackRuntimeHost(host), isTrue, reason: '$host');
+      }
+    });
+
+    test('refuses remote, malformed, and credential-bearing lookalikes', () {
+      for (final host in <String?>[
+        '192.168.1.20',
+        '10.0.0.5:11434',
+        '8.8.8.8',
+        'ollama.example.com',
+        'localhost.evil.example',
+        '127.0.0.1.evil.example',
+        '127.0.0.999',
+        '2130706433',
+        'http://user:secret@localhost:11434',
+        'http://user@127.0.0.1:11434',
+        'http://[::ffff:127.0.0.1]:11434',
+      ]) {
+        expect(isLoopbackRuntimeHost(host), isFalse, reason: '$host');
+      }
     });
   });
 }

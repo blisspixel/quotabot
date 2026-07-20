@@ -1,3 +1,4 @@
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:test/test.dart';
 
@@ -87,6 +88,22 @@ void main() {
         ),
         'out_of_quota',
       );
+      expect(
+        verifyState(
+          ProviderQuota(
+            provider: 'claude',
+            displayName: 'Claude',
+            account: 'default',
+            asOf: now,
+            windows: [
+              QuotaWindow(label: 'weekly', usedPercent: double.nan),
+            ],
+          ),
+          now,
+        ),
+        'error',
+        reason: 'invalid headroom must not default to a live 100 percent',
+      );
     });
   });
 
@@ -107,6 +124,86 @@ void main() {
       expect(checkById(p, 'source_class').status, VerifyStatus.pass);
       expect(p.sourceClass, ProviderSourceClass.authoritativeLive);
       expect(report.passed, isTrue);
+    });
+
+    test('fresh passive spent metadata satisfies strict live verification', () {
+      final providers = <(String, String)>[
+        (cursorProviderId, cursorProviderName),
+        (windsurfProviderId, windsurfProviderName),
+        (kiroProviderId, kiroProviderName),
+      ];
+      final report = buildVerificationReport(
+        [
+          for (final (provider, displayName) in providers)
+            ProviderQuota(
+              provider: provider,
+              displayName: displayName,
+              account: 'default',
+              asOf: now - 5,
+              perMachine: true,
+              error: 'out of quota (resets in 2h)',
+              windows: [
+                QuotaWindow(
+                  label: 'monthly',
+                  usedPercent: 100,
+                  resetsAt: now + 2 * 3600,
+                ),
+              ],
+            ),
+        ],
+        now,
+        os: 'windows',
+        filtered: true,
+        requireLive: true,
+      );
+
+      expect(report.providers, hasLength(3));
+      for (final provider in report.providers) {
+        expect(provider.state, 'out_of_quota', reason: provider.provider);
+        expect(provider.liveReadSucceeded, isTrue, reason: provider.provider);
+      }
+      expect(report.allLiveReadsSucceeded, isTrue);
+      expect(report.passed, isTrue);
+    });
+
+    test('genuine and non-status adapter failures remain strict failures', () {
+      final failures = <ProviderQuota>[
+        ProviderQuota.error(
+          cursorProviderId,
+          cursorProviderName,
+          'unable to read Cursor state',
+          now,
+        ),
+        ProviderQuota(
+          provider: cursorProviderId,
+          displayName: cursorProviderName,
+          account: 'default',
+          asOf: now,
+          perMachine: true,
+          error: 'unable to read Cursor state',
+          windows: [
+            QuotaWindow(
+              label: 'monthly',
+              usedPercent: 100,
+              resetsAt: now + 2 * 3600,
+            ),
+          ],
+        ),
+      ];
+
+      for (final failure in failures) {
+        final report = buildVerificationReport(
+          [failure],
+          now,
+          os: 'windows',
+          filtered: true,
+          requireLive: true,
+        );
+
+        expect(report.providers.single.liveReadSucceeded, isFalse);
+        expect(report.allLiveReadsSucceeded, isFalse);
+        expect(report.passed, isFalse);
+      }
     });
 
     test('stale passed resets retain their last observed usage', () {
@@ -140,8 +237,8 @@ void main() {
       );
       final reset = checkById(report.providers.single, 'reset_sanity');
       expect(reset.status, VerifyStatus.info);
-      expect(reset.detail, contains('keeps its last observed usage'));
-      expect(reset.detail, contains('non-routable until a fresh read'));
+      expect(reset.detail, contains('last observed usage is preserved'));
+      expect(reset.detail, contains('provider read supplies a new quota'));
     });
 
     test('source-class contradictions fail verification', () {
@@ -345,6 +442,8 @@ void main() {
       expect(check.status, VerifyStatus.fail);
       expect(check.detail, contains('no usable percent'));
       expect(report.passed, isFalse);
+      expect(report.providers.single.liveReadSucceeded, isFalse,
+          reason: 'rejected evidence is not a successful accepted live read');
     });
 
     test('an ok subscription with no windows and no reason fails', () {
@@ -508,7 +607,7 @@ void main() {
       final resets = p.checks.where((c) => c.id == 'reset_sanity').toList();
       expect(resets.map((c) => c.status),
           containsAll([VerifyStatus.info, VerifyStatus.fail]));
-      expect(resets.first.detail, contains('trusted fresh evidence'));
+      expect(resets.first.detail, contains('new quota window'));
       expect(p.passed, isFalse);
     });
   });
@@ -544,14 +643,17 @@ void main() {
       expect(fleet(report, 'claimed_coverage').status, VerifyStatus.info);
     });
 
-    test('the live snapshot is validated against quotabot.v1', () {
+    test('the emitted snapshot is validated against quotabot.v1', () {
       final report = buildVerificationReport(
         [healthy()],
         now,
         os: 'windows',
         filtered: true,
       );
-      expect(fleet(report, 'schema_contract').status, VerifyStatus.pass);
+      final check = fleet(report, 'schema_contract');
+      expect(check.status, VerifyStatus.pass);
+      expect(check.detail, contains('emitted snapshot'));
+      expect(check.detail, isNot(contains('live snapshot')));
     });
 
     test('duplicate provider/account pairs fail unique_accounts', () {
@@ -565,6 +667,20 @@ void main() {
       expect(check.status, VerifyStatus.fail);
       expect(check.detail, contains('claude/work@example.com'));
       expect(report.passed, isFalse);
+    });
+
+    test('duplicate credential error copy abbreviates the raw identity', () {
+      final identity = opaqueCredentialIdentity('claude', 'verify-grant');
+      final report = buildVerificationReport(
+        [healthy(account: identity), healthy(account: identity)],
+        now,
+        os: 'windows',
+        filtered: true,
+      );
+      final detail = fleet(report, 'unique_accounts').detail;
+
+      expect(detail, contains('claude/${quotaAccountDisplayLabel(identity)}'));
+      expect(detail, isNot(contains(identity)));
     });
 
     test('manual entries are noted as self-reported, never failed', () {
@@ -584,8 +700,11 @@ void main() {
         now,
         os: 'windows',
         filtered: true,
+        requireLive: true,
       );
       expect(fleet(report, 'manual_entries').status, VerifyStatus.info);
+      expect(report.allLiveReadsSucceeded, isTrue,
+          reason: 'manual rows are not provider adapter reads');
       expect(report.passed, isTrue);
     });
   });
@@ -603,10 +722,14 @@ void main() {
       expect(json['generated_at'], now);
       expect(json['os'], 'linux');
       expect(json['passed'], isTrue);
+      expect(json['honesty_passed'], isTrue);
+      expect(json['require_live'], isFalse);
+      expect(json['all_live_reads_succeeded'], isTrue);
       final provider = (json['providers'] as List).single as Map;
       expect(provider['provider'], 'claude');
       expect(provider['source_class'], 'authoritative_live');
       expect(provider['state'], 'live');
+      expect(provider['live_read_succeeded'], isTrue);
       expect(provider['passed'], isTrue);
       expect(provider['cross_check'], isNotEmpty);
       final windows = provider['windows'] as List;

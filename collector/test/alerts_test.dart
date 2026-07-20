@@ -194,6 +194,24 @@ void main() {
       expect(alert.message, isNot(contains('(pro)')));
     });
 
+    test('abbreviates opaque credential identities in alert copy', () {
+      final identity = 'credential:${List.filled(64, 'a').join()}';
+      final alert = QuotaAlert(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: identity,
+        sourceClass: ProviderSourceClass.authoritativeLive,
+        window: 'weekly',
+        severity: AlertSeverity.red,
+        freePercent: 4,
+        asOf: _now,
+      );
+
+      expect(alert.message, contains('Claude (account aaaaaaaa)'));
+      expect(alert.message, isNot(contains(identity)));
+      expect(alert.toJson()['account'], identity);
+    });
+
     test('route provenance is enforced outside debug assertions', () {
       QuotaAlert invalid({
         String? routeTo,

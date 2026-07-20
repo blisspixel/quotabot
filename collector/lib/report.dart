@@ -123,7 +123,8 @@ class QuotaHealthReport {
       '| Provider | Account | State | Trust | Headroom | Reset | 7d p50 free | 7d reliability | Streak | Pace |',
       '| --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- |',
       for (final provider in providers)
-        '| ${_cell(provider.displayName)} | ${_cell(provider.account)} | '
+        '| ${_cell(provider.displayName)} | '
+            '${_cell(quotaAccountDisplayLabel(provider.account))} | '
             '${_cell(provider.state)} | '
             '${_cell(_trustContext(provider, generatedAt))} | '
             '${_percent(provider.headroomPercent)} | '
@@ -159,7 +160,8 @@ class QuotaHealthReport {
         );
       for (final provider in calendars) {
         lines.add(
-          '- ${_cell(provider.displayName)} (${_cell(provider.account)}): '
+          '- ${_cell(provider.displayName)} '
+          '(${_cell(quotaAccountDisplayLabel(provider.account))}): '
           '`${contributionCalendarMarkers(
             provider.contributionCalendar,
             maxDays: 7,
@@ -180,7 +182,8 @@ class QuotaHealthReport {
         );
       for (final provider in bestTimes) {
         lines.add(
-          '- ${_cell(provider.displayName)} (${_cell(provider.account)}): '
+          '- ${_cell(provider.displayName)} '
+          '(${_cell(quotaAccountDisplayLabel(provider.account))}): '
           '${_cell(_bestWindows(provider.bestTimeWindows))}',
         );
       }
@@ -197,7 +200,8 @@ class QuotaHealthReport {
         );
       for (final provider in scheduleHints) {
         lines.add(
-          '- ${_cell(provider.displayName)} (${_cell(provider.account)}): '
+          '- ${_cell(provider.displayName)} '
+          '(${_cell(quotaAccountDisplayLabel(provider.account))}): '
           '${_cell(provider.scheduleHint!.summary)}',
         );
       }

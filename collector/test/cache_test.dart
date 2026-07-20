@@ -2,17 +2,36 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/provider_ids.dart';
+import 'package:quotabot_collector/storage_keys.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
+ProviderQuota? _plainSnapshot(String provider) => loadSnapshot(provider);
+
+ProviderQuota? _plainSnapshotForAdmission(String provider) =>
+    loadSnapshotForAdmission(provider);
+
 void main() {
-  const id = claudeProviderId;
+  const id = codexProviderId;
   late Directory tempConfig;
+
+  ProviderQuota? loadSnapshot(String provider) => provider == id
+      ? loadAccountSnapshot(provider, 'acct')
+      : _plainSnapshot(provider);
+  ProviderQuota? loadSnapshotForAdmission(String provider) => provider == id
+      ? loadAccountSnapshotForAdmission(provider, 'acct')
+      : _plainSnapshotForAdmission(provider);
+  File accountCacheFile([String account = 'acct']) => File(
+        '${cacheDir().path}/${id}_${accountStorageStem(account)}.json',
+      );
+  String accountLockPath([String account = 'acct']) =>
+      '${cacheDir().path}/evidence_${id}_${accountStorageStem(account)}.lock';
 
   setUp(() {
     tempConfig = Directory.systemTemp.createTempSync('quotabot_cache_test_');
@@ -25,13 +44,23 @@ void main() {
   });
 
   test('saveSnapshot then loadSnapshot round-trips', () {
+    final now = nowEpoch();
+    final reset = now + 3600;
     final q = ProviderQuota(
       provider: id,
       displayName: 'Test',
       account: 'acct',
       plan: 'pro',
-      asOf: 1782000000,
-      windows: [QuotaWindow(label: '5h', usedPercent: 33, resetsAt: 999)],
+      asOf: now,
+      windows: [QuotaWindow(label: '5h', usedPercent: 33, resetsAt: reset)],
+      modelQuotas: [
+        ModelQuota(
+          model: 'GPT-5.3-Codex-Spark',
+          usedPercent: 20,
+          resetsAt: reset,
+          windowLabel: 'weekly',
+        ),
+      ],
     );
     saveSnapshot(q);
 
@@ -39,7 +68,8 @@ void main() {
     expect(back, isNotNull);
     expect(back!.provider, id);
     expect(back.windows.single.usedPercent, 33);
-    expect(back.windows.single.resetsAt, 999);
+    expect(back.windows.single.resetsAt, reset);
+    expect(back.modelQuotas.single.windowLabel, 'weekly');
   });
 
   test('reset credits are fresh-read only and never return from cache', () {
@@ -76,6 +106,301 @@ void main() {
     expect(back.windows.single.usedPercent, 40);
     expect(back.stale, isFalse);
     expect(back.suspect, isNull);
+  });
+
+  test('Claude credential generations isolate cache and drift evidence', () {
+    final now = nowEpoch();
+    final accountA = opaqueCredentialIdentity('claude', 'grant-a');
+    final accountB = opaqueCredentialIdentity('claude', 'grant-b');
+    ProviderQuota quota(String account, double used) => ProviderQuota(
+          provider: claudeProviderId,
+          displayName: claudeProviderName,
+          account: account,
+          plan: 'max',
+          asOf: now,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: used,
+              resetsAt: now + 3600,
+            ),
+          ],
+        );
+    final first = quota(accountA, 20);
+    final replacement = quota(accountB, 70);
+
+    saveSnapshot(first);
+    saveSnapshot(replacement);
+    saveProviderDriftObservation(
+      first,
+      'simulated first-generation drift',
+      now,
+    );
+
+    expect(loadSnapshot(claudeProviderId), isNull);
+    expect(
+      loadAccountSnapshot(claudeProviderId, accountA)
+          ?.windows
+          .single
+          .usedPercent,
+      20,
+    );
+    expect(
+      loadAccountSnapshot(claudeProviderId, accountB)
+          ?.windows
+          .single
+          .usedPercent,
+      70,
+    );
+    expect(
+      attachProviderDriftObservation(first, now: now).driftReason,
+      contains('first-generation'),
+    );
+    expect(
+      attachProviderDriftObservation(replacement, now: now).driftReason,
+      isNull,
+    );
+
+    final fallbacks = currentAccountFallbacks(
+      liveResults: const [],
+      cachedSnapshots: [first, replacement],
+      currentAccounts: {accountB},
+    );
+    expect(fallbacks.map((quota) => quota.account), [accountB]);
+    expect(fallbacks.single.windows.single.usedPercent, 70);
+  });
+
+  test('cached invalid percents are rejected instead of normalized', () {
+    final file = accountCacheFile();
+    final now = nowEpoch();
+    for (final invalid in const [-25, 125]) {
+      final json = ProviderQuota(
+        provider: id,
+        displayName: 'Claude',
+        account: 'acct',
+        plan: 'max',
+        asOf: now,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: invalid.toDouble(),
+            resetsAt: now + 3600,
+          ),
+        ],
+      ).toJson();
+      file.writeAsStringSync(jsonEncode(json));
+
+      expect(loadSnapshot(id), isNull, reason: 'invalid percent $invalid');
+      expect(
+        loadCachedSnapshots(now: now).where((quota) => quota.provider == id),
+        isEmpty,
+      );
+    }
+  });
+
+  test('cached invalid Fable percent cannot become full model headroom', () {
+    final file = accountCacheFile();
+    final now = nowEpoch();
+    final json = ProviderQuota(
+      provider: id,
+      displayName: 'Claude',
+      account: 'acct',
+      plan: 'max',
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 30,
+          resetsAt: now + 3600,
+        ),
+      ],
+      modelQuotas: [
+        ModelQuota(
+          model: 'Fable',
+          usedPercent: -25,
+          resetsAt: now + 3600,
+        ),
+      ],
+    ).toJson();
+    file.writeAsStringSync(jsonEncode(json));
+
+    expect(loadSnapshot(id), isNull);
+    expect(loadCachedSnapshots(now: now), isEmpty);
+  });
+
+  test('cached invalid model window labels cannot reach routing', () {
+    final file = accountCacheFile();
+    final now = nowEpoch();
+    final labels = [
+      '',
+      ' weekly',
+      'week\u001b[31mly',
+      List.filled(kMaxModelQuotaWindowLabelCharacters + 1, 'w').join(),
+    ];
+
+    for (final label in labels) {
+      final json = ProviderQuota(
+        provider: id,
+        displayName: 'Codex',
+        account: 'acct',
+        plan: 'pro',
+        asOf: now,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 30,
+            resetsAt: now + 3600,
+          ),
+        ],
+        modelQuotas: [
+          ModelQuota(
+            model: 'GPT-5.3-Codex-Spark',
+            usedPercent: 20,
+            resetsAt: now + 3600,
+            windowLabel: label,
+          ),
+        ],
+      ).toJson();
+      file.writeAsStringSync(jsonEncode(json));
+
+      expect(loadSnapshot(id), isNull, reason: label);
+    }
+  });
+
+  test('live passed reset is quarantined until the provider advances it', () {
+    final observedAt = nowEpoch();
+    final rejected = admitAndCacheQuotaEvidence(
+      ProviderQuota(
+        provider: id,
+        displayName: 'Claude',
+        account: 'acct',
+        plan: 'max',
+        asOf: observedAt,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 100,
+            resetsAt: observedAt - 1,
+          ),
+        ],
+      ),
+      observedAt: observedAt,
+      observedAtMicros: DateTime.now().microsecondsSinceEpoch,
+    );
+
+    expect(rejected.ok, isFalse);
+    expect(rejected.stale, isTrue);
+    expect(rejected.windows, isEmpty);
+    expect(rejected.driftReason, contains('new quota window'));
+    expect(providerAvailability(rejected, observedAt).available, isFalse);
+    expect(loadSnapshot(id), isNull);
+  });
+
+  test('passed reset preserves an expired trusted baseline as last observed',
+      () {
+    final capturedAt = nowEpoch();
+    final reset = capturedAt + 60;
+    final baseline = ProviderQuota(
+      provider: id,
+      displayName: 'Claude',
+      account: 'acct',
+      plan: 'max',
+      asOf: capturedAt,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 72,
+          resetsAt: reset,
+        ),
+      ],
+    );
+    saveSnapshot(baseline);
+
+    final observedAt = reset + 1;
+    final rejected = admitAndCacheQuotaEvidence(
+      ProviderQuota(
+        provider: id,
+        displayName: 'Claude',
+        account: 'acct',
+        plan: 'max',
+        asOf: observedAt,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 0,
+            resetsAt: reset,
+          ),
+        ],
+      ),
+      observedAt: observedAt,
+      observedAtMicros: DateTime.now().microsecondsSinceEpoch + 1,
+    );
+
+    expect(rejected.ok, isTrue);
+    expect(rejected.stale, isTrue);
+    expect(rejected.windows.single.usedPercent, 72);
+    expect(rejected.windows.single.resetsAt, reset);
+    expect(rejected.driftReason, contains('new quota window'));
+    expect(providerHeadroom(rejected, observedAt), 28);
+    expect(providerAvailability(rejected, observedAt).available, isFalse);
+    expect(loadSnapshot(id)!.windows.single.usedPercent, 72);
+  });
+
+  test('implausibly distant shared reset is quarantined', () {
+    final observedAt = nowEpoch();
+    final rejected = admitAndCacheQuotaEvidence(
+      ProviderQuota(
+        provider: id,
+        displayName: 'Claude',
+        account: 'acct',
+        plan: 'max',
+        asOf: observedAt,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 30,
+            resetsAt: observedAt + 401 * 86400,
+          ),
+        ],
+      ),
+      observedAt: observedAt,
+      observedAtMicros: DateTime.now().microsecondsSinceEpoch,
+    );
+
+    expect(rejected.ok, isFalse);
+    expect(rejected.stale, isTrue);
+    expect(rejected.windows, isEmpty);
+    expect(rejected.driftReason, contains('implausibly far'));
+    expect(providerAvailability(rejected, observedAt).available, isFalse);
+    expect(loadSnapshot(id), isNull);
+  });
+
+  test('new provider observation with a future reset remains routable', () {
+    final observedAt = nowEpoch();
+    final admitted = admitAndCacheQuotaEvidence(
+      ProviderQuota(
+        provider: id,
+        displayName: 'Claude',
+        account: 'acct',
+        plan: 'max',
+        asOf: observedAt,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 30,
+            resetsAt: observedAt + 3600,
+          ),
+        ],
+      ),
+      observedAt: observedAt,
+      observedAtMicros: DateTime.now().microsecondsSinceEpoch,
+    );
+
+    expect(admitted.ok, isTrue);
+    expect(admitted.stale, isFalse);
+    expect(providerAvailability(admitted, observedAt).available, isTrue);
+    expect(providerHeadroom(admitted, observedAt), 70);
+    expect(loadSnapshot(id), isNotNull);
   });
 
   test('drift diagnostics persist separately and clear on recovery', () {
@@ -161,6 +486,240 @@ void main() {
     expect(afterRecovery.stale, isFalse);
     expect(afterRecovery.driftReason, isNull);
     expect(afterRecovery.asOf, 1782000300);
+  });
+
+  test('explicit recovery replaces only one baseline and preserves history',
+      () {
+    final now = nowEpoch();
+    final generation = DateTime.now().microsecondsSinceEpoch;
+    ProviderQuota quota(String account, double used, int asOf) => ProviderQuota(
+          provider: id,
+          displayName: 'Codex',
+          account: account,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: used,
+              resetsAt: now + 86400,
+            ),
+          ],
+        );
+
+    final first = quota('acct', 70, now - 20);
+    final other = quota('other-account', 55, now - 20);
+    saveSnapshot(first, observedAtMicros: generation - 4000);
+    saveSnapshot(other, observedAtMicros: generation - 4000);
+    saveProviderDriftObservation(
+      first,
+      'weekly usage fell without a reset',
+      now - 10,
+      observedAtMicros: generation - 3000,
+    );
+    saveProviderDriftObservation(
+      other,
+      'other account drift',
+      now - 10,
+      observedAtMicros: generation - 3000,
+    );
+    final historyBefore = loadHistory(id, account: 'acct');
+
+    final fresh = quota('acct', 25, now);
+    final result = recoverProviderDriftBaseline(
+      fresh,
+      observedAt: now,
+      observedAtMicros: generation,
+    );
+
+    expect(result.recovered, isTrue);
+    expect(result.status, 'recovered');
+    expect(loadAccountSnapshot(id, 'acct')?.windows.single.usedPercent, 25);
+    expect(
+      attachProviderDriftObservation(
+        loadAccountSnapshot(id, 'acct')!,
+        now: now,
+      ).driftReason,
+      isNull,
+    );
+    expect(
+      attachProviderDriftObservation(
+        loadAccountSnapshot(id, 'other-account')!,
+        now: now,
+      ).driftReason,
+      'other account drift',
+    );
+    expect(loadHistory(id, account: 'acct'), hasLength(historyBefore.length));
+    expect(
+      loadHistory(id, account: 'acct').single.windows.single.usedPercent,
+      historyBefore.single.windows.single.usedPercent,
+    );
+  });
+
+  test('explicit recovery rejects untrusted fresh evidence without mutation',
+      () {
+    final now = nowEpoch();
+    final generation = DateTime.now().microsecondsSinceEpoch;
+    final baseline = ProviderQuota(
+      provider: id,
+      displayName: 'Codex',
+      account: 'acct',
+      asOf: now - 20,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 70,
+          resetsAt: now + 86400,
+        ),
+      ],
+    );
+    saveSnapshot(baseline, observedAtMicros: generation - 3000);
+    saveProviderDriftObservation(
+      baseline,
+      'active drift',
+      now - 10,
+      observedAtMicros: generation - 2000,
+    );
+
+    final candidates = <ProviderQuota>[
+      baseline.asStale('cached fallback'),
+      ProviderQuota(
+        provider: id,
+        displayName: 'Codex',
+        account: 'acct',
+        asOf: now,
+        ok: false,
+        error: 'live read failed',
+      ),
+      ProviderQuota(
+        provider: id,
+        displayName: 'Codex',
+        account: 'acct',
+        asOf: now,
+        windows: [QuotaWindow(label: 'weekly')],
+      ),
+      ProviderQuota(
+        provider: id,
+        displayName: 'Codex',
+        account: 'acct',
+        asOf: now + kQuotaEvidenceClockSkewSeconds + 1,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: 20,
+            resetsAt: now + 86400,
+          ),
+        ],
+      ),
+    ];
+
+    for (final candidate in candidates) {
+      final result = recoverProviderDriftBaseline(
+        candidate,
+        observedAt: now,
+        observedAtMicros: generation,
+      );
+      expect(result.recovered, isFalse, reason: candidate.toJson().toString());
+      expect(result.status, 'invalid_live_evidence');
+      expect(loadAccountSnapshot(id, 'acct')?.windows.single.usedPercent, 70);
+      expect(
+        attachProviderDriftObservation(
+          loadAccountSnapshot(id, 'acct')!,
+          now: now,
+        ).driftReason,
+        'active drift',
+      );
+    }
+  });
+
+  test('explicit recovery requires active drift and rejects newer generations',
+      () {
+    final now = nowEpoch();
+    final generation = DateTime.now().microsecondsSinceEpoch;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: id,
+          displayName: 'Codex',
+          account: 'acct',
+          asOf: asOf,
+          windows: [
+            QuotaWindow(
+              label: 'weekly',
+              usedPercent: used,
+              resetsAt: now + 86400,
+            ),
+          ],
+        );
+    final baseline = quota(70, now - 20);
+    saveSnapshot(baseline, observedAtMicros: generation - 3000);
+
+    final clean = recoverProviderDriftBaseline(
+      quota(25, now),
+      observedAt: now,
+      observedAtMicros: generation,
+    );
+    expect(clean.recovered, isFalse);
+    expect(clean.status, 'no_active_drift');
+
+    saveProviderDriftObservation(
+      baseline,
+      'newer concurrent drift',
+      now,
+      observedAtMicros: generation + 1000,
+    );
+    final superseded = recoverProviderDriftBaseline(
+      quota(25, now),
+      observedAt: now,
+      observedAtMicros: generation,
+    );
+    expect(superseded.recovered, isFalse);
+    expect(superseded.status, 'superseded');
+    expect(loadAccountSnapshot(id, 'acct')?.windows.single.usedPercent, 70);
+  });
+
+  test('explicit recovery can replace an exact legacy suspect quarantine', () {
+    final now = nowEpoch();
+    final generation = DateTime.now().microsecondsSinceEpoch;
+    final legacy = ProviderQuota(
+      provider: id,
+      displayName: 'Codex',
+      account: 'acct',
+      asOf: now - 20,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 70,
+          resetsAt: now + 86400,
+        ),
+      ],
+    ).withSuspect('legacy drift concern');
+    accountCacheFile().writeAsStringSync(jsonEncode({
+      ...legacy.toJson(),
+      'cache_observed_at_micros': generation - 2000,
+    }));
+    final fresh = ProviderQuota(
+      provider: id,
+      displayName: 'Codex',
+      account: 'acct',
+      asOf: now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 25,
+          resetsAt: now + 86400,
+        ),
+      ],
+    );
+
+    final result = recoverProviderDriftBaseline(
+      fresh,
+      observedAt: now,
+      observedAtMicros: generation,
+    );
+
+    expect(result.recovered, isTrue);
+    expect(loadAccountSnapshot(id, 'acct')?.suspect, isNull);
+    expect(loadAccountSnapshot(id, 'acct')?.windows.single.usedPercent, 25);
+    expect(loadHistory(id, account: 'acct'), isEmpty);
   });
 
   test('same-second drift is ordered by local observation generation', () {
@@ -260,7 +819,7 @@ void main() {
   });
 
   test('live admission rejects noncanonical cache baselines', () {
-    final file = File('${cacheDir().path}/$id.json');
+    final file = accountCacheFile();
     ProviderQuota quota({
       String provider = id,
       String account = 'acct',
@@ -416,6 +975,56 @@ void main() {
     expect(loadGrokSnapshot('test-account')?.account, 'test-account');
   });
 
+  test('Codex replacement account cannot reuse or drift-compare prior cache',
+      () {
+    final now = nowEpoch();
+    final accountA = opaqueCredentialIdentity(id, 'account-a');
+    final accountB = opaqueCredentialIdentity(id, 'account-b');
+    ProviderQuota quota(String account, double used, int asOf) => ProviderQuota(
+          provider: id,
+          displayName: 'Codex',
+          account: account,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [
+            QuotaWindow(
+              label: '5h',
+              usedPercent: used,
+              resetsAt: now + 3600,
+            ),
+          ],
+        );
+
+    final first = admitAndCacheQuotaEvidence(
+      quota(accountA, 80, now - 10),
+      observedAt: now - 10,
+      observedAtMicros: (now - 10) * Duration.microsecondsPerSecond,
+    );
+    final replacement = admitAndCacheQuotaEvidence(
+      quota(accountB, 5, now),
+      observedAt: now,
+      observedAtMicros: now * Duration.microsecondsPerSecond,
+    );
+
+    expect(first.driftReason, isNull);
+    expect(replacement.driftReason, isNull);
+    expect(replacement.stale, isFalse);
+    expect(loadAccountSnapshot(id, accountA)?.account, accountA);
+    expect(loadAccountSnapshot(id, accountB)?.account, accountB);
+    expect(loadAccountSnapshots(id).map((quota) => quota.account).toSet(), {
+      accountA,
+      accountB,
+    });
+    expect(
+      currentAccountFallbacks(
+        liveResults: [replacement],
+        cachedSnapshots: loadAccountSnapshots(id),
+        currentAccounts: {accountB},
+      ),
+      isEmpty,
+    );
+  });
+
   test('lock failure never exposes fresh quota as routable evidence', () {
     ProviderQuota quota(double used) => ProviderQuota(
           provider: id,
@@ -424,7 +1033,7 @@ void main() {
           asOf: 1782000000 + used.round(),
           windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
         );
-    final lockPath = '${cacheDir().path}/evidence_${id}_provider.lock';
+    final lockPath = accountLockPath();
     final lockFile = File(lockPath);
     final lockDirectory = Directory(lockPath);
     void forceLockFailure() {
@@ -451,7 +1060,7 @@ void main() {
     expect(isTrustedQuotaEvidence(fallback), isFalse);
 
     lockDirectory.deleteSync();
-    File('${cacheDir().path}/$id.json').deleteSync();
+    accountCacheFile().deleteSync();
     forceLockFailure();
     final unavailable = admitAndCacheQuotaEvidence(
       quota(70),
@@ -472,9 +1081,8 @@ void main() {
       asOf: 1782000000,
       windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
     ).withSuspect('legacy drift concern');
-    File('${cacheDir().path}/$id.json')
-        .writeAsStringSync(jsonEncode(legacy.toJson()));
-    final lockPath = '${cacheDir().path}/evidence_${id}_provider.lock';
+    accountCacheFile().writeAsStringSync(jsonEncode(legacy.toJson()));
+    final lockPath = accountLockPath();
     final lockFile = File(lockPath);
     if (lockFile.existsSync()) lockFile.deleteSync();
     final lockDirectory = Directory(lockPath)..createSync();
@@ -655,7 +1263,7 @@ void main() {
       asOf: 1782000000,
       windows: [QuotaWindow(label: '5h', usedPercent: 5)],
     );
-    final file = File('${cacheDir().path}/$id.json');
+    final file = accountCacheFile();
     file.writeAsStringSync(jsonEncode(trustedShape.asStale('legacy').toJson()));
     expect(loadSnapshot(id), isNull);
     expect(
@@ -700,6 +1308,35 @@ void main() {
     saveSnapshot(q2); // triggers history
     final hist = loadHistory(id, account: 'acct');
     expect(hist.length, greaterThanOrEqualTo(1));
+  });
+
+  test('history retains a sample that was valid before its reset', () {
+    final now = nowEpoch();
+    final sample = ProviderQuota(
+      provider: id,
+      displayName: 'Claude',
+      account: 'acct',
+      plan: 'max',
+      asOf: now - 7200,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 65,
+          resetsAt: now - 3600,
+        ),
+      ],
+    );
+    File('${cacheDir().path}/history_$id.jsonl')
+        .writeAsStringSync('${jsonEncode(sample.toJson())}\n');
+
+    final history = loadHistory(id);
+
+    expect(history, hasLength(1));
+    expect(history.single.windows.single.usedPercent, 65);
+    expect(isTrustedQuotaEvidenceAtCapture(history.single), isTrue);
+    expect(isTrustedQuotaEvidenceAt(history.single, now), isFalse);
+    expect(providerHeadroom(history.single, now), 35);
+    expect(providerAvailability(history.single, now).available, isFalse);
   });
 
   test('loadSnapshot returns null for an unknown provider', () {
@@ -763,8 +1400,7 @@ void main() {
       asOf: 1782003601,
       windows: [QuotaWindow(label: '5h', usedPercent: 1)],
     );
-    File('${cacheDir().path}/$id.json')
-        .writeAsStringSync(jsonEncode(future.toJson()));
+    accountCacheFile().writeAsStringSync(jsonEncode(future.toJson()));
 
     final cached = loadCachedSnapshots(now: 1782000000);
     expect(
@@ -774,7 +1410,7 @@ void main() {
     );
     expect(cached.any((provider) => provider.provider == id), isFalse);
 
-    File('${cacheDir().path}/$id.json').writeAsStringSync(
+    accountCacheFile().writeAsStringSync(
       jsonEncode(
         ProviderQuota(
           provider: id,

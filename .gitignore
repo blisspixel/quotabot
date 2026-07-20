@@ -11,6 +11,7 @@
 # Test coverage (regenerated locally; embeds absolute paths)
 coverage/
 **/coverage/
+**/coverage_*/
 
 # Dev artifacts, logs, atomic-write temp files
 tools/shot*.png

@@ -94,7 +94,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     );
     _selection = profile.name;
     _name.text = profile.name;
-    _policy = profile.routingPolicy;
+    _policy = profile.routingPolicy.canonical;
     _theme = normalizeAppTheme(profile.theme);
     _sort = profile.name == widget.activeProfile
         ? widget.currentSort
@@ -152,12 +152,18 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       _creating &&
       widget.profiles.any((profile) => profile.name == _normalizedName);
 
+  bool _missingCredentialSelection(ProfileProviderOption option) =>
+      _providers.contains(option.provider) &&
+      option.accounts.isNotEmpty &&
+      (_accounts[option.provider]?.isEmpty ?? true);
+
   bool get _canSave {
     if (!_creating && _selection == defaultProfileName) return false;
     final normalized = _normalizedName;
     if (normalized == null || normalized == defaultProfileName) return false;
     if (_nameCollides) return false;
     if (_options.isNotEmpty && _providers.isEmpty) return false;
+    if (_options.any(_missingCredentialSelection)) return false;
     return true;
   }
 
@@ -240,6 +246,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               DropdownButtonFormField<ProfileRoutingPolicy>(
                 key: ValueKey('routing:$_selection'),
                 initialValue: _policy,
+                isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Routing policy',
                   isDense: true,
@@ -247,11 +254,10 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 items: const [
                   DropdownMenuItem(
                     value: ProfileRoutingPolicy.balanced,
-                    child: Text('Balanced'),
-                  ),
-                  DropdownMenuItem(
-                    value: ProfileRoutingPolicy.subscriptionsFirst,
-                    child: Text('Subscriptions first'),
+                    child: Text(
+                      'Cloud first, local fallback',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   DropdownMenuItem(
                     value: ProfileRoutingPolicy.localOnly,
@@ -372,6 +378,21 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               : (value) => _setProvider(option, value ?? false),
         ),
         if (selected)
+          if (_missingCredentialSelection(option))
+            Padding(
+              padding: const EdgeInsets.only(left: 36, right: 8, bottom: 4),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  'Select at least one current ${option.displayName} credential',
+                  style: TextStyle(
+                    fontSize: AppType.caption,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+            ),
+        if (selected)
           for (final account in option.accounts)
             Padding(
               padding: const EdgeInsets.only(left: 24),
@@ -381,7 +402,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 contentPadding: EdgeInsets.zero,
                 controlAffinity: ListTileControlAffinity.leading,
                 title: Text(
-                  account,
+                  quotaAccountDisplayLabel(account),
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: AppType.caption),
                 ),

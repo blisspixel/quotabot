@@ -273,11 +273,16 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       network: [
         _https('GET', 'api.anthropic.com', '/api/oauth/usage',
             'Claude usage metadata'),
+        _https('GET', 'api.anthropic.com', '/api/oauth/profile',
+            'Claude account and plan metadata',
+            dataClass: 'account_metadata'),
         _https('POST', 'console.anthropic.com', '/v1/oauth/token',
             'Claude OAuth token refresh',
             dataClass: 'credential_exchange'),
       ],
-      notes: const ['Response bodies are parsed only for quota windows.'],
+      notes: const [
+        'Response bodies are parsed only for quota windows, opaque account-pool identity, and current plan metadata.',
+      ],
     ),
     ProviderRuntimeAccess(
       provider: codexProviderId,
@@ -287,8 +292,6 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _file(_joinPath(h, '.codex/auth.json'),
             'Codex ChatGPT OAuth access token',
             dataClass: 'credential'),
-        _file(_joinPath(h, '.codex/sessions/**/rollout-*.jsonl'),
-            'Codex local rate-limit fallback snapshots'),
         _file(_joinPath(config, 'quotabot/auth/codex*.json'),
             'quotabot stored Codex OAuth grant',
             dataClass: 'credential'),
@@ -499,7 +502,7 @@ List<RuntimeAccessRecord> _localHardwareAccess(
         ],
       'windows' => [
           _process(
-            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe Get-CimInstance Win32_OperatingSystem',
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe ComputerInfo or Get-CimInstance Win32_OperatingSystem',
             'passive system memory capacity',
           ),
           _process(

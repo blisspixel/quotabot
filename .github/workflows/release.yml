@@ -30,11 +30,17 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
-      - name: Verify the tagged commit belongs to main
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Verify the tagged commit is the current main tip
         run: |
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
-            echo 'Release tags must point to a commit on main.' >&2
+          tagged_commit="$(git rev-parse 'HEAD^{commit}')"
+          main_commit="$(git rev-parse 'refs/remotes/origin/main^{commit}')"
+          if [ "$tagged_commit" != "$main_commit" ]; then
+            echo 'Release tags must point to the current protected main tip.' >&2
             exit 1
           fi
       - name: Verify tag matches the source release version
@@ -78,21 +84,75 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          resolve_remote_tag_commit() {
+            local object_type object_sha
+            read -r object_type object_sha < <(gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+              --jq '[.object.type, .object.sha] | @tsv')
+            for _ in 1 2 3 4 5 6 7 8; do
+              case "$object_type" in
+                commit)
+                  printf '%s\n' "$object_sha"
+                  return 0
+                  ;;
+                tag)
+                  read -r object_type object_sha < <(gh api \
+                    "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
+                    --jq '[.object.type, .object.sha] | @tsv')
+                  ;;
+                *)
+                  echo "Release tag resolves to unsupported object type: $object_type" >&2
+                  return 1
+                  ;;
+              esac
+            done
+            echo 'Release tag indirection is unexpectedly deep.' >&2
+            return 1
+          }
+
+          expected_prerelease=false
+          prerelease_args=()
+          case "$GITHUB_REF_NAME" in
+            *-*) expected_prerelease=true; prerelease_args+=(--prerelease --latest=false) ;;
+          esac
+          main_commit="$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/main" \
+            --jq '.sha')"
+          if [ "$GITHUB_SHA" != "$main_commit" ]; then
+            echo 'Releases must target the current protected main tip.' >&2
+            exit 1
+          fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$GITHUB_REF_NAME" \
+            read -r is_draft is_prerelease < <(gh release view "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
-              --json isDraft \
-              --jq '.isDraft')"
+              --json isDraft,isPrerelease \
+              --jq '[.isDraft, .isPrerelease] | @tsv')
             if [ "$is_draft" != true ]; then
               echo "Refusing to replace assets on published release $GITHUB_REF_NAME." >&2
               exit 1
             fi
+            if [ "$is_prerelease" != "$expected_prerelease" ]; then
+              echo "Draft prerelease classification does not match $GITHUB_REF_NAME." >&2
+              exit 1
+            fi
+            remote_tag_commit="$(resolve_remote_tag_commit)"
+            if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
+              echo 'Remote release tag no longer points to the workflow commit.' >&2
+              exit 1
+            fi
             echo "Resuming draft release $GITHUB_REF_NAME."
           else
+            remote_tag_commit="$(resolve_remote_tag_commit)"
+            if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
+              echo 'Remote release tag no longer points to the workflow commit.' >&2
+              exit 1
+            fi
             gh release create "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
               --title "$GITHUB_REF_NAME" \
               --draft \
+              --verify-tag \
+              "${prerelease_args[@]}" \
               --generate-notes
           fi
           release_id="$(gh release view "$GITHUB_REF_NAME" \
@@ -114,10 +174,18 @@ jobs:
         # source (install.sh says so). Re-add an Intel leg only if a hosted Intel
         # runner returns or we add a Rosetta x64 cross-build.
         include:
-          - { os: ubuntu-latest,    script: bash tools/package-cli.sh }
-          - { os: ubuntu-24.04-arm, script: bash tools/package-cli.sh }
-          - { os: macos-latest,     script: bash tools/package-cli.sh }
-          - { os: windows-latest,   script: pwsh tools/package-cli.ps1 }
+          - os: ubuntu-latest
+            script: bash tools/package-cli.sh
+            archive: release/quotabot-linux-x64.tar.gz
+          - os: ubuntu-24.04-arm
+            script: bash tools/package-cli.sh
+            archive: release/quotabot-linux-arm64.tar.gz
+          - os: macos-latest
+            script: bash tools/package-cli.sh
+            archive: release/quotabot-darwin-arm64.tar.gz
+          - os: windows-latest
+            script: pwsh tools/package-cli.ps1
+            archive: release/quotabot-windows-x64.zip
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -126,24 +194,147 @@ jobs:
       attestations: write # record the attestation
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+        with:
+          sdk: '3.12.2'
       - name: Resolve collector dependencies
         working-directory: collector
-        run: dart pub get
+        run: dart pub get --enforce-lockfile
       - name: Build and package the CLI asset
         run: ${{ matrix.script }}
+      - name: Verify CLI archive shape and checksum
+        run: python tools/verify_cli_archive.py "${{ matrix.archive }}"
       - name: Attest build provenance for the archive
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          # One archive exists per leg; the non-matching glob is ignored.
-          subject-path: |
-            release/quotabot-*.tar.gz
-            release/quotabot-*.zip
+          subject-path: ${{ matrix.archive }}
       - name: Upload the asset to the release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" release/quotabot-* --repo "$GITHUB_REPOSITORY" --clobber
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            "${{ matrix.archive }}" \
+            "${{ matrix.archive }}.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+  verify-cli-release:
+    needs: [create-release, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            archive: quotabot-windows-x64.zip
+          - os: macos-latest
+            archive: quotabot-darwin-arm64.tar.gz
+          - os: ubuntu-latest
+            archive: quotabot-linux-x64.tar.gz
+          - os: ubuntu-24.04-arm
+            archive: quotabot-linux-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      QUOTABOT_DEMO: '1'
+    permissions:
+      # GitHub exposes draft releases only to push-capable identities. This job
+      # performs reads only, but contents: write is required to see the draft.
+      contents: write
+      attestations: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the draft CLI asset and checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          case "$RELEASE_ID" in
+            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
+          esac
+          destination="$RUNNER_TEMP/quotabot-cli-release"
+          mkdir -p "$destination"
+          for name in "${{ matrix.archive }}" "${{ matrix.archive }}.sha256"; do
+            asset_id="$(gh api \
+              "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" \
+              --paginate \
+              --jq ".[] | select(.name == \"$name\") | .id")"
+            case "$asset_id" in
+              ''|*[!0-9]*) echo "Draft asset id is invalid for $name." >&2; exit 1 ;;
+            esac
+            gh api \
+              -H 'Accept: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              > "$destination/$name"
+          done
+      - name: Reverify downloaded CLI archive and provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          archive="$RUNNER_TEMP/quotabot-cli-release/${{ matrix.archive }}"
+          python tools/verify_cli_archive.py "$archive"
+          source_digest="$(git rev-parse 'HEAD^{commit}')"
+          gh attestation verify "$archive" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$GITHUB_REF_NAME" \
+            --source-digest "$source_digest" \
+            --deny-self-hosted-runners
+      - name: Exercise the downloaded Windows CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'quotabot-cli-release\${{ matrix.archive }}'
+          $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-cli-expanded'
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'quotabot-cli-state'
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+          $executable = Join-Path $expanded 'bin\quotabot.exe'
+          $expectedVersion = 'quotabot ' + $env:GITHUB_REF_NAME.TrimStart('v')
+          $actualVersion = & $executable --version
+          if ($LASTEXITCODE -ne 0 -or $actualVersion -ne $expectedVersion) {
+            throw "Expected $expectedVersion, got $actualVersion"
+          }
+          $doctor = & $executable doctor --json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $doctor.schema -ne 'quotabot.v1') {
+            throw 'Downloaded CLI doctor check failed.'
+          }
+      - name: Exercise the downloaded macOS or Linux CLI
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
+        run: |
+          archive="$RUNNER_TEMP/quotabot-cli-release/${{ matrix.archive }}"
+          expanded="$RUNNER_TEMP/quotabot-cli-expanded"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/quotabot-cli-state"
+          mkdir -p "$expanded" "$XDG_CONFIG_HOME"
+          tar -xzf "$archive" -C "$expanded"
+          executable="$expanded/bin/quotabot"
+          test -x "$executable"
+          expected_version="quotabot ${GITHUB_REF_NAME#v}"
+          actual_version="$("$executable" --version)"
+          [[ "$actual_version" == "$expected_version" ]] || {
+            echo "Expected $expected_version, got $actual_version" >&2
+            exit 1
+          }
+          "$executable" doctor --json \
+            | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
 
   build-desktop:
     needs: create-release
@@ -168,10 +359,17 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
-          channel: stable
-          cache: true
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
       - name: Install Linux desktop build prerequisites
         if: runner.os == 'Linux'
         run: |
@@ -179,7 +377,7 @@ jobs:
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev dbus-x11 xvfb
       - name: Resolve desktop dependencies
         working-directory: app
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
       - name: Build and package the desktop asset
         run: ${{ matrix.script }}
       - name: Verify archive shape and checksum
@@ -220,6 +418,11 @@ jobs:
       attestations: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - name: Install Linux desktop runtime prerequisites
         if: runner.os == 'Linux'
         run: |
@@ -264,11 +467,75 @@ jobs:
             --source-ref "refs/tags/$GITHUB_REF_NAME" \
             --source-digest "$source_digest" \
             --deny-self-hosted-runners
+      - name: Download and verify the previous stable desktop asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          resolve_tag_commit() {
+            local tag="$1"
+            local object_type object_sha
+            read -r object_type object_sha < <(gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" \
+              --jq '[.object.type, .object.sha] | @tsv')
+            for _ in 1 2 3 4 5 6 7 8; do
+              case "$object_type" in
+                commit)
+                  [[ "$object_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+                  printf '%s\n' "$object_sha"
+                  return 0
+                  ;;
+                tag)
+                  read -r object_type object_sha < <(gh api \
+                    "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
+                    --jq '[.object.type, .object.sha] | @tsv')
+                  ;;
+                *) return 1 ;;
+              esac
+            done
+            return 1
+          }
+
+          previous_tag="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '.tag_name')"
+          if [[ ! "$previous_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Previous stable release tag is invalid.' >&2
+            exit 1
+          fi
+          if [ "$previous_tag" = "$GITHUB_REF_NAME" ]; then
+            echo 'Previous stable release must differ from the candidate.' >&2
+            exit 1
+          fi
+          previous_digest="$(resolve_tag_commit "$previous_tag")" || {
+            echo 'Previous stable release tag does not resolve to one commit.' >&2
+            exit 1
+          }
+          destination="$RUNNER_TEMP/quotabot-previous-release"
+          mkdir -p "$destination"
+          gh release download "$previous_tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "${{ matrix.archive }}" \
+            --pattern "${{ matrix.archive }}.sha256" \
+            --dir "$destination"
+          printf '%s' "$previous_tag" > "$destination/tag"
+          python tools/verify_desktop_archive.py \
+            "$destination/${{ matrix.archive }}"
+          gh attestation verify "$destination/${{ matrix.archive }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$previous_tag" \
+            --source-digest "$previous_digest" \
+            --deny-self-hosted-runners
       - name: Exercise the Windows portable lifecycle
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-release\${{ matrix.archive }}'
+          $previousArchive = Join-Path $env:RUNNER_TEMP 'quotabot-previous-release\${{ matrix.archive }}'
           $current = Join-Path $env:RUNNER_TEMP 'quotabot-desktop-current'
           $previous = Join-Path $env:RUNNER_TEMP 'quotabot-desktop-previous'
           $config = Join-Path $env:RUNNER_TEMP 'quotabot-config'
@@ -277,7 +544,7 @@ jobs:
           New-Item -ItemType File -Force -Path $sentinel | Out-Null
           $env:LOCALAPPDATA = $config
 
-          Expand-Archive -LiteralPath $archive -DestinationPath $previous
+          Expand-Archive -LiteralPath $previousArchive -DestinationPath $previous
           Expand-Archive -LiteralPath $archive -DestinationPath $current
           python tools/desktop_readiness_smoke.py --executable (Join-Path $current 'quotabot.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Current desktop archive did not start.' }
@@ -291,8 +558,12 @@ jobs:
           }
       - name: Exercise the Linux portable lifecycle
         if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
         run: |
           archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
+          previous_archive="$RUNNER_TEMP/quotabot-previous-release/${{ matrix.archive }}"
           current="$RUNNER_TEMP/quotabot-desktop-current"
           previous="$RUNNER_TEMP/quotabot-desktop-previous"
           export XDG_CONFIG_HOME="$RUNNER_TEMP/quotabot-config"
@@ -300,7 +571,7 @@ jobs:
           mkdir -p "$(dirname "$sentinel")" "$current" "$previous"
           : > "$sentinel"
 
-          tar -xzf "$archive" -C "$previous"
+          tar -xzf "$previous_archive" -C "$previous"
           tar -xzf "$archive" -C "$current"
           python tools/desktop_readiness_smoke.py --executable "$current/quotabot"
           python tools/desktop_readiness_smoke.py --executable "$previous/quotabot"
@@ -309,8 +580,12 @@ jobs:
           test -f "$sentinel"
       - name: Exercise the macOS portable lifecycle
         if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ''
+          GITHUB_TOKEN: ''
         run: |
           archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
+          previous_archive="$RUNNER_TEMP/quotabot-previous-release/${{ matrix.archive }}"
           current="$RUNNER_TEMP/quotabot-desktop-current"
           previous="$RUNNER_TEMP/quotabot-desktop-previous"
           export XDG_CONFIG_HOME="$RUNNER_TEMP/quotabot-config"
@@ -318,7 +593,7 @@ jobs:
           mkdir -p "$(dirname "$sentinel")" "$current" "$previous"
           : > "$sentinel"
 
-          ditto -x -k "$archive" "$previous"
+          ditto -x -k "$previous_archive" "$previous"
           ditto -x -k "$archive" "$current"
           for bundle in "$current/quotabot.app" "$previous/quotabot.app"; do
             test -x "$bundle/Contents/MacOS/quotabot"
@@ -329,16 +604,24 @@ jobs:
           test -f "$sentinel"
 
   audit-release-assets:
-    needs: [create-release, build, verify-desktop-release]
+    needs: [create-release, verify-cli-release, verify-desktop-release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       # Draft asset listings require a push-capable token.
       contents: write
       attestations: read
+    outputs:
+      asset_manifest_sha256: ${{ steps.asset_manifest.outputs.asset_manifest_sha256 }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
       - name: Require the exact complete release asset set
+        id: asset_manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
@@ -378,6 +661,11 @@ jobs:
             echo "Draft release has assets that are not uploaded: $invalid" >&2
             exit 1
           fi
+          manifest="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq 'sort_by(.name) | .[] | [.id, .name, .size, .state, .updated_at] | @tsv')"
+          manifest_sha256="$(printf '%s\n' "$manifest" | sha256sum | awk '{print $1}')"
+          echo "asset_manifest_sha256=$manifest_sha256" >> "$GITHUB_OUTPUT"
       - name: Reverify every final archive, checksum, and attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -404,6 +692,14 @@ jobs:
           done <<< "$names"
 
           (cd "$destination" && sha256sum --check ./*.sha256)
+          python tools/verify_cli_archive.py \
+            "$destination/quotabot-windows-x64.zip"
+          python tools/verify_cli_archive.py \
+            "$destination/quotabot-darwin-arm64.tar.gz"
+          python tools/verify_cli_archive.py \
+            "$destination/quotabot-linux-x64.tar.gz"
+          python tools/verify_cli_archive.py \
+            "$destination/quotabot-linux-arm64.tar.gz"
           python tools/verify_desktop_archive.py \
             "$destination/quotabot-windows-x64-desktop.zip"
           python tools/verify_desktop_archive.py \
@@ -422,9 +718,10 @@ jobs:
           done
 
   publish-release:
-    # Runs only if every build leg succeeded, so the release is published (and
-    # `latest` flips) exactly once all platform assets are present.
+    # Runs only if every build leg succeeded, so the release is published only
+    # after all platform assets are present. Prereleases do not replace latest.
     needs:
+      - create-release
       - audit-release-assets
       - quality-gate
       - codeql-gate
@@ -437,7 +734,77 @@ jobs:
       - name: Publish the drafted release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          AUDITED_ASSET_MANIFEST_SHA256: ${{ needs.audit-release-assets.outputs.asset_manifest_sha256 }}
         run: |
-          gh release edit "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false
+          resolve_remote_tag_commit() {
+            local object_type object_sha
+            read -r object_type object_sha < <(gh api \
+              "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+              --jq '[.object.type, .object.sha] | @tsv')
+            for _ in 1 2 3 4 5 6 7 8; do
+              case "$object_type" in
+                commit)
+                  printf '%s\n' "$object_sha"
+                  return 0
+                  ;;
+                tag)
+                  read -r object_type object_sha < <(gh api \
+                    "repos/$GITHUB_REPOSITORY/git/tags/$object_sha" \
+                    --jq '[.object.type, .object.sha] | @tsv')
+                  ;;
+                *)
+                  echo "Release tag resolves to unsupported object type: $object_type" >&2
+                  return 1
+                  ;;
+              esac
+            done
+            echo 'Release tag indirection is unexpectedly deep.' >&2
+            return 1
+          }
+
+          remote_tag_commit="$(resolve_remote_tag_commit)"
+          if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
+            echo 'Remote release tag no longer points to the workflow commit.' >&2
+            exit 1
+          fi
+          main_commit="$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/main" \
+            --jq '.sha')"
+          if [ "$GITHUB_SHA" != "$main_commit" ]; then
+            echo 'The protected main tip changed before release publication.' >&2
+            exit 1
+          fi
+          case "$RELEASE_ID" in
+            ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
+          esac
+          if [[ ! "$AUDITED_ASSET_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo 'Audited asset manifest digest is invalid.' >&2
+            exit 1
+          fi
+          expected_prerelease=false
+          case "$GITHUB_REF_NAME" in
+            *-*) expected_prerelease=true ;;
+          esac
+          read -r release_tag is_draft is_prerelease < <(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            --jq '[.tag_name, .draft, .prerelease] | @tsv')
+          if [ "$release_tag" != "$GITHUB_REF_NAME" ] || [ "$is_draft" != true ]; then
+            echo 'The audited release object is missing, replaced, or no longer a draft.' >&2
+            exit 1
+          fi
+          if [ "$is_prerelease" != "$expected_prerelease" ]; then
+            echo 'The draft prerelease classification changed after creation.' >&2
+            exit 1
+          fi
+          manifest="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq 'sort_by(.name) | .[] | [.id, .name, .size, .state, .updated_at] | @tsv')"
+          manifest_sha256="$(printf '%s\n' "$manifest" | sha256sum | awk '{print $1}')"
+          if [ "$manifest_sha256" != "$AUDITED_ASSET_MANIFEST_SHA256" ]; then
+            echo 'The draft release asset set changed after final audit.' >&2
+            exit 1
+          fi
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            -F draft=false >/dev/null

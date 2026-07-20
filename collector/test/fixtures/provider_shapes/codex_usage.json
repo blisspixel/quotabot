@@ -1,0 +1,18 @@
+{
+  "email": "fixture@example.com",
+  "plan_type": "pro",
+  "rate_limit": {
+    "allowed": true,
+    "limit_reached": false,
+    "primary_window": {
+      "used_percent": 28,
+      "limit_window_seconds": 18000,
+      "reset_at": 1782018000
+    },
+    "secondary_window": {
+      "used_percent": 73,
+      "limit_window_seconds": 604800,
+      "reset_at": 1782604800
+    }
+  }
+}

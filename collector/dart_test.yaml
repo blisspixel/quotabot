@@ -1,0 +1,6 @@
+on_os:
+  windows:
+    # This suite contains process, isolate, ACL, and file-lock integration
+    # tests. High-core Windows hosts otherwise start enough suites at once to
+    # make bounded operating-system checks contend with the test runner itself.
+    concurrency: 2

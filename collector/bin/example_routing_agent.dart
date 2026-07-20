@@ -33,7 +33,10 @@ Future<void> main() async {
   final a = providerAvailability(best, now);
 
   print('routing decision:');
-  print('  provider: ${best.displayName} (${best.account})');
+  print(
+    '  provider: ${best.displayName} '
+    '(${quotaAccountDisplayLabel(best.account)})',
+  );
   print('  headroom: ${h.toStringAsFixed(1)}%');
   if (a.resetsAt != null) {
     final resetsIn = a.resetsAt! - now;

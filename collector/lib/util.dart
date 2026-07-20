@@ -202,13 +202,21 @@ Future<void> enforceOwnerOnlyFileAsync(
 /// Failures are intentionally ignored so cache and history writes stay
 /// fail-soft on locked-down enterprise machines. Credential stores must call
 /// [enforceOwnerOnlyFile] instead.
-void restrictOwnerOnlyFile(File file) {
+void restrictOwnerOnlyFile(
+  File file, {
+  PermissionCommandRunner? run,
+  WindowsIdentityLookup? identityLookup,
+}) {
   try {
     if (Platform.isWindows) {
-      final user = windowsAclPrincipal();
+      final user = windowsAclPrincipal(lookup: identityLookup);
       if (user == null) return;
-      Process.runSync('icacls', [file.path, '/inheritance:r']);
-      Process.runSync('icacls', [file.path, '/grant:r', '$user:F']);
+      _enforceWindowsOwnerOnly(
+        run ?? _runPermissionCommand,
+        file.path,
+        user,
+        isDirectory: false,
+      );
     } else {
       Process.runSync('chmod', ['600', file.path]);
       if (Platform.isMacOS) Process.runSync('chmod', ['-N', file.path]);
@@ -300,14 +308,22 @@ Future<void> enforceOwnerOnlyDirectoryAsync(
 }
 
 /// Best-effort owner-only permissions for non-secret metadata directories.
-void restrictOwnerOnlyDirectory(Directory dir) {
+void restrictOwnerOnlyDirectory(
+  Directory dir, {
+  PermissionCommandRunner? run,
+  WindowsIdentityLookup? identityLookup,
+}) {
   try {
     if (!dir.existsSync()) dir.createSync(recursive: true);
     if (Platform.isWindows) {
-      final user = windowsAclPrincipal();
+      final user = windowsAclPrincipal(lookup: identityLookup);
       if (user == null) return;
-      Process.runSync('icacls', [dir.path, '/inheritance:r']);
-      Process.runSync('icacls', [dir.path, '/grant:r', '$user:(OI)(CI)F']);
+      _enforceWindowsOwnerOnly(
+        run ?? _runPermissionCommand,
+        dir.path,
+        user,
+        isDirectory: true,
+      );
     } else {
       Process.runSync('chmod', ['700', dir.path]);
       if (Platform.isMacOS) Process.runSync('chmod', ['-N', dir.path]);

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
@@ -9,6 +8,7 @@ import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
 import '../util.dart';
+import '../vscode_state.dart';
 
 /// Kiro (agentic CLI + IDE) adapter.
 /// Kiro is a VS Code fork with credit-based usage (interactions/credits).
@@ -42,54 +42,79 @@ class KiroAdapter {
         );
       }
 
-      final usageState = _readUsageState(dbPath);
-      final windows = kiroWindows(usageState, asOf);
+      final state = _readState(dbPath);
+      final windows = kiroWindows(state.usage, asOf);
+      final observations = [
+        if (state.usage != null && windows.isNotEmpty)
+          PassiveStateQuotaObservation(
+            // Kiro's producer stores both the quota breakdowns and their
+            // timestamp in this exact child. Do not traverse unrelated agent
+            // state solely to establish quota provenance.
+            payload: state.usage!,
+            windows: windows,
+          ),
+      ];
+      final evidenceAsOf = windows.isEmpty
+          ? asOf
+          : passiveStateEvidenceAsOf(
+              checkedAt: asOf,
+              observations: observations,
+              selectedWindows: windows,
+            );
 
       String? err;
       if (windows.isEmpty) {
         err = 'no quota data found in local state';
       } else {
         final main = windows.first;
-        if (windowHeadroom(main, asOf) <= kSpentHeadroomFloor) {
+        // Once this passive window's reset has passed, the stored percentage is
+        // last-known evidence rather than proof that the new pool is spent. The
+        // collector marks it stale; do not also claim current out-of-quota.
+        if (!windowHasRolledOver(main, asOf) &&
+            windowHeadroom(main, asOf) <= kSpentHeadroomFloor) {
           err =
               'out of quota (resets ${resetCountdownLabel(main.resetsAt, asOf)})';
         }
       }
 
-      return ProviderQuota(
+      final quota = ProviderQuota(
         provider: id,
         displayName: name,
         account: 'default',
         plan: null,
-        asOf: asOf,
+        // Preserve unknown capture provenance. A read performed now does not
+        // prove when the embedded quota value was captured.
+        asOf: evidenceAsOf,
         windows: windows,
         error: err,
         perMachine: true,
       );
+      return windows.isNotEmpty &&
+              passiveStateEvidenceIsStale(evidenceAsOf, asOf)
+          ? quota.asStale(
+              passiveStateStaleMessage(name, evidenceAsOf, asOf),
+            )
+          : quota;
     } catch (_) {
       return ProviderQuota.error(id, name, 'unable to read Kiro state', asOf);
     }
   }
 
-  Map<String, dynamic>? _readUsageState(String dbPath) {
+  _KiroState _readState(String dbPath) {
     final db = sqlite3.open(dbPath, mode: OpenMode.readOnly);
     try {
       final rows = db.select(
         "SELECT value FROM ItemTable WHERE key = 'kiro.kiroAgent';",
       );
-      if (rows.isEmpty) return null;
-      final raw = rows.first['value'];
-      String jsonStr;
-      if (raw is List<int>) {
-        jsonStr = utf8.decode(raw, allowMalformed: true);
-      } else {
-        jsonStr = raw.toString();
-      }
-      final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
-      return parsed['kiro.resourceNotifications.usageState']
-          as Map<String, dynamic>?;
+      if (rows.isEmpty) return const _KiroState();
+      final parsed = decodeStateJsonObject(rows.first['value']);
+      if (parsed == null) return const _KiroState();
+      final rawUsage = parsed['kiro.resourceNotifications.usageState'];
+      final usage =
+          rawUsage is Map ? Map<String, dynamic>.from(rawUsage) : null;
+      return _KiroState(usage: usage);
     } catch (_) {
-      return null;
+      return const _KiroState();
     } finally {
       db.close();
     }
@@ -108,4 +133,10 @@ class KiroAdapter {
       return '$dataHome/Kiro/User/globalStorage/state.vscdb';
     }
   }
+}
+
+class _KiroState {
+  final Map<String, dynamic>? usage;
+
+  const _KiroState({this.usage});
 }

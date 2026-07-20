@@ -35,7 +35,7 @@ enum ProviderAdapterClass {
 }
 
 enum ProviderFixtureKind {
-  codexRateLimits,
+  codexUsage,
   claudeUsage,
   antigravityQuota,
   grokGrpcBytes,
@@ -87,7 +87,9 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     displayName: claudeProviderName,
     adapterClass: ProviderAdapterClass.subscription,
     sourceClasses: kAuthoritativeLiveSourceClasses,
-    collect: _collectClaude,
+    collect: collectClaudeProviderAccounts,
+    multiAccount: true,
+    currentAccounts: _claudeCurrentAccounts,
     fixtureKind: ProviderFixtureKind.claudeUsage,
     fixtureFile: 'claude_usage.json',
   ),
@@ -95,10 +97,12 @@ const kProviderAdapterRegistry = <ProviderAdapterRegistration>[
     id: codexProviderId,
     displayName: codexProviderName,
     adapterClass: ProviderAdapterClass.subscription,
-    sourceClasses: kLiveOrMachineFallbackSourceClasses,
-    collect: _collectCodex,
-    fixtureKind: ProviderFixtureKind.codexRateLimits,
-    fixtureFile: 'codex_rate_limits.json',
+    sourceClasses: kAuthoritativeLiveSourceClasses,
+    collect: collectCodexProviderAccounts,
+    multiAccount: true,
+    currentAccounts: _codexCurrentAccounts,
+    fixtureKind: ProviderFixtureKind.codexUsage,
+    fixtureFile: 'codex_usage.json',
   ),
   ProviderAdapterRegistration(
     id: cursorProviderId,
@@ -231,11 +235,18 @@ String? registeredSourceClassViolation(
   return null;
 }
 
-Future<List<ProviderQuota>> _collectClaude() async =>
-    [await ClaudeAdapter().collect()];
+/// Production Claude registration path. The optional adapter keeps the exact
+/// registered path testable without replacing global credentials or network.
+Future<List<ProviderQuota>> collectClaudeProviderAccounts([
+  ClaudeAdapter? adapter,
+]) =>
+    (adapter ?? ClaudeAdapter()).collectAccounts();
 
-Future<List<ProviderQuota>> _collectCodex() async =>
-    [await CodexAdapter().collect()];
+/// Production Codex registration path. See [collectClaudeProviderAccounts].
+Future<List<ProviderQuota>> collectCodexProviderAccounts([
+  CodexAdapter? adapter,
+]) =>
+    (adapter ?? CodexAdapter()).collectAccounts();
 
 Future<List<ProviderQuota>> _collectCursor() async =>
     [await CursorAdapter().collect()];
@@ -264,5 +275,9 @@ Future<List<ProviderQuota>> _collectAntigravity() =>
     AntigravityAdapter().collectAccounts();
 
 Set<String> _grokCurrentAccounts() => GrokAdapter.currentAccounts;
+
+Set<String> _claudeCurrentAccounts() => ClaudeAdapter.currentAccounts;
+
+Set<String> _codexCurrentAccounts() => CodexAdapter.currentAccounts;
 
 Set<String> _antigravityCurrentAccounts() => AntigravityAdapter.currentAccounts;

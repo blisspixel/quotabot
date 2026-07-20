@@ -20,7 +20,16 @@ Provider snapshots keep these stable fields:
 
 - `provider`, `display_name`, `account`, `kind`, `ok`, `as_of`, `stale`, and
   `windows`.
-- Optional `plan`, `source`, `source_class`, `status`, `active`, `details`,
+- `account` is the exact local evidence identity. It is normally a provider
+  account label. Claude and Codex use `credential:` plus a full irreversible
+  SHA-256 fingerprint. Codex hashes its stable ChatGPT account id when known;
+  Claude hashes the current profile account and organization ids when available.
+  A credential-generation fingerprint is the fail-closed fallback. Consumers
+  must treat the value as an opaque exact-match key, not as a user-facing name
+  or a token. Raw credentials and provider account ids are never serialized in
+  this field.
+- Optional `plan`, `plan_evidence_source`, `plan_evidence_as_of`, `source`,
+  `source_class`, `status`, `active`, `details`,
   `error`, `models`, `local_hardware`, `model_quotas`, `suspect`, `drift_reason`,
   `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`,
   `retry_after_seconds`, and `reset_credits_available`.
@@ -30,6 +39,13 @@ Provider snapshots keep these stable fields:
   the value is positive and no more than 60 seconds ahead of local admission
   time. Missing, zero, negative, or materially future live provenance fails
   closed before persistence or routing.
+- `plan_evidence_source` is `host_credential` or `provider_metadata`, and appears
+  with `plan_evidence_as_of`. A host-credential label is local diagnostic
+  context, not current entitlement proof. Spend-sensitive included-plan routing
+  requires current provider usage or profile metadata read with the same
+  credential at or after any dated policy boundary.
+  Positive included-quota and credit-backed Fable labels both require this
+  current provider metadata; a host-credential plan label stays diagnostic.
 - `source_class` is the normalized provenance class. Current producers always
   emit one of `authoritative_live`, `this_machine_fallback`,
   `passive_local_evidence`, `local_runtime`, `status_only`, or `manual`.
@@ -60,10 +76,10 @@ Provider snapshots keep these stable fields:
   the rejection or quarantine was observed. It is separate from `as_of`, which
   remains the capture time of the underlying evidence.
 - `per_machine`, when true, means the read reflects only this machine's local
-  usage (Cursor, Windsurf, Kiro, or the Codex session fallback) rather than the
+  usage (Antigravity local fallback, Cursor, Windsurf, or Kiro) rather than the
   account across every device, so it can undercount when the account is used
-  elsewhere. Authoritative server-side reads (Claude, Grok, Antigravity, Codex
-  live) omit it. Successful measured `this_machine_fallback` and
+  elsewhere. Authoritative server-side reads (Claude, Grok, Antigravity live,
+  and Codex live) omit it. Successful measured `this_machine_fallback` and
   `passive_local_evidence` observations require it; it remains a scope detail,
   not a replacement for `source_class`.
 - `pipe_health` is an optional native adapter diagnostic for metadata endpoint
@@ -95,14 +111,28 @@ Window objects keep:
 
 `model_quotas` is present when a provider exposes a model-specific pool or cap.
 For Antigravity the list is exhaustive and each model family has an independent
-pool. For Claude the list is a sparse overlay on the shared `windows`, so an
-unmatched Claude model still uses the provider binding window and a spent scoped
-cap blocks only its matching model. Each entry keeps:
+pool. Claude and Codex lists are sparse overlays on the shared `windows`, so an
+unmatched ordinary model still uses the provider binding window and a spent
+scoped cap blocks only its matching model. Fable is a fail-closed scoped family:
+its catalog entry becomes quota-backed only with a current matching row and an
+explicit Max or Team Premium entitlement from current provider metadata captured
+on or after July 20, 2026 UTC, then
+uses the tighter of that row and the shared provider window. A Max or Team
+Premium host-credential label does not qualify. Pro, Team Standard,
+host-label-only, and plan-unknown rows can remain visible with
+`quota_backed: false`. Claude admits shared and scoped rows as one
+atomic provider observation, so malformed recognized siblings produce no fresh
+windows or model rows. A represented
+GPT-5.3-Codex-Spark entry follows the same fail-closed rule. Each entry keeps:
 
 - `model`, the provider's model name (pool-sharing effort/mode variants are
   rolled up to this base name).
 - Optional `used_percent` in the range `0..100`.
 - Optional `resets_at` Unix epoch seconds.
+- Optional `window_label`, the provider's normalized identity for that scoped
+  pool, such as `weekly`. Consumers should prefer it over inferring a window
+  from time remaining. When present it is trimmed, control-free, non-empty, and
+  at most 96 characters.
 - Optional `category` (a provider speed label) and `note` (a provider badge).
 
 The contract is additive. Unknown fields are allowed at the root, provider,
@@ -126,7 +156,8 @@ emit `quotabot.suggest.v1` with:
   `using_local_fallback`, `fallback`, and `ranked`.
 - `receipt`: a nested `quotabot.receipt.v1` decision receipt. Its deterministic
   `decision_id` is stable for identical decision inputs and policy. `snapshot`
-  records source, age, and staleness; `policy` records routing order, comfort
+  records source, age, staleness, and `stale_scope: "snapshot"`; `policy`
+  records routing order, comfort
   threshold, planning horizon, and risk setting; `winner` records binding pool,
   source and spend classes, raw and effective headroom, confidence reasons, and
   every applied adjustment; `alternatives` assigns each rejected candidate a
@@ -174,10 +205,32 @@ emit `quotabot.suggest.v1` with:
 
 MCP `decide_now` emits `quotabot.decision.v1`, a cache-only decision with the
 same routing fields (including `active_leases`) plus `source`,
-`snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`, and
-`max_age_seconds`. Its nested receipt carries those cache snapshot coordinates,
-so the receipt and the envelope cannot disagree about provenance. It never
-forces a live provider collect.
+`snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`,
+`snapshot_stale_scope`, and `max_age_seconds`. The scope is always `snapshot`:
+the flag can be set by missing, future, or old envelope evidence, or by any
+unsafe provider row in the filtered snapshot. The selected candidate and every
+alternative carry their own provider-level `stale` flag. Its nested receipt carries those cache
+snapshot coordinates plus the matching `stale_scope`, so the receipt and the
+envelope cannot disagree about provenance. It never forces a live provider
+collect.
+
+MCP `reserve_provider` and the authenticated loopback HTTP
+`POST /leases/reserve` emit `quotabot.reserve.v1`. Both include `as_of`,
+`reserved`, `reused`, `reason`, a nullable `lease`, and `active_leases`. A lease
+contains its bounded id, provider/account target, creation and expiry epochs,
+weight, and optional client/idempotency labels. The HTTP form also returns the
+exact `selected` routing candidate and its content-blind `decision_id`, allowing
+an execution hook to verify the target it is about to dispatch. HTTP selection
+evaluates the caller's complete provider/account target set and writes the lease
+under one ledger lock.
+
+MCP `release_provider` and authenticated loopback HTTP
+`POST /leases/release` emit `quotabot.release.v1`: `as_of`, `released`, `reason`,
+`lease_id`, the nullable released `lease`, and the remaining `active_leases`.
+Release is idempotent, so an unknown or already released id returns
+`released: false` without changing another reservation. Both operations carry
+quota metadata and bounded identifiers only, never task text, prompts, source
+code, responses, credentials, or exception messages.
 
 ## Single-provider answers
 
@@ -185,7 +238,8 @@ forces a live provider collect.
 `quotabot.check.v1`: `schema`, `as_of`, `provider`, then either `found: false`
 (CLI, unknown name), an `error` note (MCP, unknown provider/account), or
 `account`, `source_class`, `available`, `headroom_percent`, `resets_at`, and
-`stale`, with optional `drift_reason` and `drift_observed_at`. This is
+`stale`, with an optional plain `error` when a failed live read is showing
+last-known evidence, plus optional `drift_reason` and `drift_observed_at`. This is
 deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
 no `providers` array. `available` means usable from current evidence and above
 the practical spent floor; stale cached cloud quota has `available: false` even
@@ -216,10 +270,21 @@ carries `drift_reason`
 and `drift_observed_at` and is unavailable. When a provider exposes per-model
 or provider-family quotas, those
 matched values gate the entry instead of account-wide provider headroom; an
-unmatched model-specific quota is not treated as available by inference.
+unmatched exhaustive provider-family quota is not treated as available by
+inference. Claude is intentionally sparse: non-Fable models without a scoped row
+inherit the shared provider window, while Fable requires a current matching row
+plus explicit Max or Team Premium plan evidence captured on or after July 20,
+2026 UTC for `quota_backed: true`, and
+otherwise fails closed for the quota budget. Codex follows the same sparse rule: ordinary
+unmatched models inherit the shared window, while any represented
+GPT-5.3-Codex-Spark entry requires its current named `additional_rate_limits`
+row.
 Stale remote entries keep last-known quota fields, and remote entries at or
 below the spent floor keep their measured quota fields, but both set
-`available: false`. Entries gated by a self-reported manual quota carry
+`available: false`. A remote provider or model quota whose named reset has
+already passed also keeps its last observed fields but sets `available: false`;
+the timestamp does not prove the replacement pool is unused. Entries gated by
+a self-reported manual quota carry
 `source_class: "manual"` and the legacy `source: "manual"` hint. Status-only
 cloud providers with no measured quota windows stay visible in `quotabot.v1`
 snapshots but do not contribute `models` entries.
@@ -243,10 +308,15 @@ runtime executes in its cloud rather than on-device (an Ollama `-cloud` model)
 carries `cloud_offloaded: true` and is excluded from `--budget=local` and free
 budgets, though it stays listed under `--budget=any`; it remains `local: true`
 because it is reached through the local daemon.
+Model registry listing defaults to `any` for inspection. Concrete CLI and MCP
+model suggestions default to `quota`; `any` must be explicit before a suggestion
+can select credit-backed or paid catalog entries.
 
 `quotabot suggest --json` with a model profile and MCP `suggest_model` emit
 `quotabot.suggest_model.v1` with `schema`, `generated_at`, `budget_policy`,
 optional `recommended`, `reason`, and ranked model candidates. When the caller
+uses the unrestricted `any` policy and included quota is not proven, the reason
+states that fact. When the caller
 opts into expiring-quota routing, the response adds `use_expiring_quota`,
 `expiring_quota_threshold_percent`, `expiring_quota_max_hours`, and, when the
 pick used that signal, `expiring_quota` with provider, account, projected waste
@@ -316,14 +386,19 @@ own, outside the `quotabot` CLI's documented exit-code contract.
 `quotabot verify --json` emits the record of one honesty-check run:
 
 - `schema`: always `quotabot.verify.v1`.
-- `generated_at`, `os`, and the run-level `passed` verdict.
+- `generated_at`, `os`, `require_live`, the honesty-only `honesty_passed`,
+  `all_live_reads_succeeded`, and the run-level `passed` verdict. By default,
+  `passed` has the same value as `honesty_passed`. With CLI `--require-live`, it
+  is false unless every selected provider adapter produced a fresh accepted
+  read.
 - `providers`: one record per provider account, with `provider`,
   `display_name`, `account`, `state` (`live`, `cached`, `out_of_quota`,
   `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`, and
   `source_class`, plus `as_of`, `staleness_seconds`, `stale`, `drift_reason`, and
   `drift_observed_at`, a window summary (label, used percent, effective used
-  percent, reset time, and seconds to reset), a `passed` verdict, `checks`, and
-  an optional `cross_check` naming the provider's own usage surface to confirm
+  percent, reset time, and seconds to reset), `live_read_succeeded`, an
+  honesty-only `passed` verdict, `checks`, and an optional `cross_check` naming
+  the provider's own usage surface to confirm
   the numbers against. Provider drift with last-trusted windows keeps `state:
   "cached"` for compatibility; a migrated legacy quarantine with no trusted
   windows uses the existing `error` state. The additive drift fields and failed
@@ -345,14 +420,16 @@ own, outside the `quotabot` CLI's documented exit-code contract.
   single provider-level check as well. Check ids are additive: consumers should
   match the ids they understand and ignore unknown future ids rather than
   treating this list as a closed enum.
-- `fleet_checks`: run-level checks, including validation of the live snapshot
+- `fleet_checks`: run-level checks, including validation of the emitted snapshot
   against the frozen `quotabot.v1` contract above.
 
 The record is quota metadata only and follows the same additive rule as every
 other contract here. A truthful absence (a signed-out account or a local
-runtime that is not running) passes; the failing states are lying numbers,
-silent failures, provider drift, and contract drift. The CLI exits 65 when any
-check fails.
+runtime that is not running) passes the honesty contract but has
+`live_read_succeeded: false`; the failing states are lying numbers, silent
+failures, provider drift, and contract drift. The CLI exits 65 when any check
+fails, and also exits 65 when `--require-live` is set and a selected adapter did
+not return a fresh accepted read.
 
 ## `quotabot.explain.v1`
 

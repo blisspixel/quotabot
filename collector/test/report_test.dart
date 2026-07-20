@@ -1,4 +1,5 @@
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/report.dart';
@@ -143,6 +144,35 @@ void main() {
     final schedule = claude['weekly_schedule_hint'] as Map<String, dynamic>;
     expect(schedule['summary'], contains('before reset'));
     expect(schedule['window'], isA<Map<String, dynamic>>());
+  });
+
+  test('report keeps raw credential identity in JSON and abbreviates markdown',
+      () {
+    final identity = opaqueCredentialIdentity('claude', 'report-grant');
+    final provider = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: identity,
+      asOf: _now,
+      windows: [
+        QuotaWindow(
+          label: 'weekly',
+          usedPercent: 20,
+          resetsAt: _now + 3600,
+        ),
+      ],
+    );
+    final report = buildQuotaHealthReport(
+      [provider],
+      _now,
+      suggestRoute([provider], _now),
+    );
+
+    final jsonProvider =
+        (report.toJson()['providers'] as List).single as Map<String, dynamic>;
+    expect(jsonProvider['account'], identity);
+    expect(report.toMarkdown(), contains(quotaAccountDisplayLabel(identity)));
+    expect(report.toMarkdown(), isNot(contains(identity)));
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {

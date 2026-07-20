@@ -13,23 +13,15 @@ import 'util.dart';
 List<QuotaWindow> codexWindows(Map<String, dynamic> rateLimits) =>
     codexBindingWindows([rateLimits], 0);
 
-/// Builds the binding windows across several Codex `rate_limits` snapshots.
-///
-/// Codex meters different models against separate limit buckets (for example a
-/// standard limit and a newer model's own allocation), and each session's
-/// rollout only records the bucket that session used. Reading just the newest
-/// session therefore hides usage accrued on another bucket. This takes the
-/// latest snapshot of each bucket and, per window slot (5h, weekly), keeps the
-/// most-constrained one so the glance reflects real remaining headroom.
-///
-/// A window whose reset time has passed counts as fresh (0 used) when choosing
-/// the binding bucket, so a bucket that has already rolled over does not keep
-/// reading as spent. [now] is unix epoch seconds; pass 0 to disable rollover
-/// handling (used by the single-snapshot path where it does not apply).
+/// Parses several legacy sanitized `rate_limits` fixture snapshots. Runtime
+/// collection uses [codexUsageWindows] on account-wide metadata and never reads
+/// mixed session files. Reset timestamps do not synthesize a fresh balance.
+/// [now] remains in the signature for fixture compatibility only.
 List<QuotaWindow> codexBindingWindows(
   Iterable<Map<String, dynamic>> snapshots,
   int now,
 ) {
+  final trustedSnapshots = snapshots.where(_codexPercentShapeIsValid).toList();
   final windows = <QuotaWindow>[];
   for (final entry in const [
     ['primary', '5h'],
@@ -37,21 +29,23 @@ List<QuotaWindow> codexBindingWindows(
   ]) {
     QuotaWindow? binding;
     double bindingUsed = -1;
-    for (final rl in snapshots) {
+    for (final rl in trustedSnapshots) {
       final w = rl[entry[0]];
       if (w is! Map) continue;
       final used = _boundedPercent(w['used_percent']);
       if (used == null) continue;
       final resetsAt = parseReset(w['resets_at']);
-      final rolledOver = now > 0 && resetsAt != null && resetsAt < now;
-      final effectiveUsed = rolledOver ? 0.0 : used;
-      if (effectiveUsed > bindingUsed) {
-        bindingUsed = effectiveUsed;
-        binding = QuotaWindow(
-          label: codexLabel(w['window_minutes'], entry[1]),
-          usedPercent: used,
-          resetsAt: resetsAt,
-        );
+      final candidate = QuotaWindow(
+        label: codexLabel(w['window_minutes'], entry[1]),
+        usedPercent: used,
+        resetsAt: resetsAt,
+      );
+      if (used > bindingUsed ||
+          (used == bindingUsed &&
+              binding != null &&
+              _saferEqualUseWindow(candidate, binding))) {
+        bindingUsed = used;
+        binding = candidate;
       }
     }
     if (binding != null) windows.add(binding);
@@ -59,42 +53,274 @@ List<QuotaWindow> codexBindingWindows(
   return windows;
 }
 
-String codexLabel(dynamic minutes, String fallback) {
-  if (minutes is num) {
-    if (minutes == 300) return '5h';
-    if (minutes == 10080) return 'weekly';
-    if (minutes % 1440 == 0) return '${minutes ~/ 1440}d';
-    if (minutes % 60 == 0) return '${minutes ~/ 60}h';
-    return '${minutes}m';
+bool _codexPercentShapeIsValid(Map<String, dynamic> rateLimits) {
+  for (final key in const ['primary', 'secondary']) {
+    if (!rateLimits.containsKey(key)) continue;
+    final window = rateLimits[key];
+    if (window is! Map || _boundedPercent(window['used_percent']) == null) {
+      return false;
+    }
   }
-  return fallback;
+  return true;
+}
+
+String codexLabel(dynamic minutes, String fallback) {
+  final bounded = boundedIntFromWire(
+    minutes,
+    min: 1,
+    max: 366 * 24 * 60,
+  );
+  if (bounded == null) return fallback;
+  if (bounded == 300) return '5h';
+  if (bounded == 10080) return 'weekly';
+  if (bounded % 1440 == 0) return '${bounded ~/ 1440}d';
+  if (bounded % 60 == 0) return '${bounded ~/ 60}h';
+  return '${bounded}m';
 }
 
 /// Windows from the live Codex `/backend-api/wham/usage` response, which is
 /// authoritative and cross-device unlike the per-machine session snapshots.
-/// `rate_limit.primary_window` is the 5-hour window and `secondary_window` the
-/// weekly, each with `used_percent`, `reset_at`, and `limit_window_seconds`.
-List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) {
-  final rl = resp?['rate_limit'];
-  if (rl is! Map) return const [];
+/// `rate_limit.primary_window` and `secondary_window` each carry
+/// `used_percent`, `reset_at`, and `limit_window_seconds`. The duration is the
+/// source of truth for the label because some plans now expose one weekly
+/// primary window and an explicit null secondary window.
+typedef CodexLiveUsage = ({
+  List<QuotaWindow> windows,
+  List<ModelQuota> modelQuotas,
+});
+
+/// Parses one live response atomically. Shared and model-scoped rate limits are
+/// one provider observation: accepting the shared pool while silently dropping
+/// a malformed named sibling could overstate a model's usable budget.
+CodexLiveUsage? codexLiveUsage(Map<String, dynamic>? resp) {
+  if (resp == null) return null;
+  final shared = _codexLiveRateLimitWindows(resp['rate_limit']);
+  if (!shared.valid) return null;
+  final scoped = _codexAdditionalRateLimits(resp);
+  if (!scoped.valid) return null;
+  return (windows: shared.windows, modelQuotas: scoped.modelQuotas);
+}
+
+List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
+    codexLiveUsage(resp)?.windows ?? const [];
+
+({bool valid, List<QuotaWindow> windows}) _codexLiveRateLimitWindows(
+  dynamic raw,
+) {
+  if (raw is! Map) return (valid: false, windows: const []);
+  if (_codexHasUnknownQuotaWindow(raw)) {
+    return (valid: false, windows: const []);
+  }
   final out = <QuotaWindow>[];
-  for (final entry in const [
-    ['primary_window', '5h'],
-    ['secondary_window', 'weekly'],
-  ]) {
-    final w = rl[entry[0]];
-    if (w is! Map) continue;
-    final pct = _boundedPercent(w['used_percent']);
-    final reset = parseReset(w['reset_at']);
-    final secs = w['limit_window_seconds'];
-    // Integer minutes: `secs / 60` is a double, so a non-standard window
-    // rendered as "90.0m" rather than "90m".
-    final label = secs is num ? codexLabel(secs ~/ 60, entry[1]) : entry[1];
-    if (pct != null || reset != null) {
-      out.add(QuotaWindow(label: label, usedPercent: pct, resetsAt: reset));
+  for (final key in const ['primary_window', 'secondary_window']) {
+    if (!raw.containsKey(key)) continue;
+    final window = raw[key];
+    // The live endpoint uses an explicit null for a pool that this plan does
+    // not have. That is absence, not a malformed observation. A non-null row
+    // still has to be structurally complete and bounded.
+    if (window == null) continue;
+    if (window is! Map) {
+      return (valid: false, windows: const []);
+    }
+    final pct = _codexLivePercent(window['used_percent']);
+    final reset = parseReset(window['reset_at']);
+    final seconds = _codexLiveWindowSeconds(window['limit_window_seconds']);
+    if (pct == null || reset == null || reset <= 0 || seconds == null) {
+      return (valid: false, windows: const []);
+    }
+    out.add(
+      QuotaWindow(
+        label: codexLabel(seconds ~/ 60, '${seconds ~/ 60}m'),
+        usedPercent: pct,
+        resetsAt: reset,
+      ),
+    );
+  }
+  if (out.isEmpty || !_codexLiveFlagsAreConsistent(raw, out)) {
+    return (valid: false, windows: const []);
+  }
+  return (valid: true, windows: out);
+}
+
+const _codexKnownRateLimitKeys = {
+  'allowed',
+  'limit_reached',
+  'primary_window',
+  'secondary_window',
+};
+
+const _codexQuotaWindowMarkers = {
+  'used_percent',
+  'reset_at',
+  'limit_window_seconds',
+};
+
+/// A newly added binding pool must not be mistaken for harmless metadata. Its
+/// schema is unknown, so the only safe result is to reject the atomic provider
+/// observation until the pool can be parsed and included in routing.
+bool _codexHasUnknownQuotaWindow(Map<dynamic, dynamic> rateLimit) {
+  for (final entry in rateLimit.entries) {
+    final key = entry.key;
+    if (key is String && _codexKnownRateLimitKeys.contains(key)) continue;
+
+    final normalizedKey = key is String ? key.toLowerCase() : '';
+    if (normalizedKey.endsWith('_window')) return true;
+
+    final value = entry.value;
+    if (value is Map &&
+        value.keys.any(
+          (candidate) =>
+              candidate is String &&
+              _codexQuotaWindowMarkers.contains(candidate.toLowerCase()),
+        )) {
+      return true;
     }
   }
-  return out;
+  return false;
+}
+
+double? _codexLivePercent(dynamic raw) =>
+    raw is num ? _boundedPercent(raw) : null;
+
+int? _codexLiveWindowSeconds(dynamic raw) {
+  if (raw is! num || !raw.toDouble().isFinite) return null;
+  if (raw.truncateToDouble() != raw.toDouble()) return null;
+  final seconds = raw.toInt();
+  if (seconds < 60 || seconds > 366 * 86400 || seconds % 60 != 0) {
+    return null;
+  }
+  return seconds;
+}
+
+bool _codexLiveFlagsAreConsistent(
+  Map<dynamic, dynamic> raw,
+  List<QuotaWindow> windows,
+) {
+  bool? allowed;
+  bool? limitReached;
+  if (raw.containsKey('allowed')) {
+    final value = raw['allowed'];
+    if (value is! bool) return false;
+    allowed = value;
+  }
+  if (raw.containsKey('limit_reached')) {
+    final value = raw['limit_reached'];
+    if (value is! bool) return false;
+    limitReached = value;
+  }
+  if (allowed != null && limitReached != null && allowed == limitReached) {
+    return false;
+  }
+  // Provider status flags describe the provider's hard limit, not quotabot's
+  // earlier routing comfort floor. A valid 99% observation can be unavailable
+  // for new routing while the provider still truthfully reports that its hard
+  // limit has not been reached.
+  final observedLimitReached = windows.any((window) {
+    final percent = window.percent;
+    return percent != null && percent >= 100;
+  });
+  if (allowed != null && allowed == observedLimitReached) {
+    return false;
+  }
+  if (limitReached != null && limitReached != observedLimitReached) {
+    return false;
+  }
+  return true;
+}
+
+/// Model-scoped Codex pools from `additional_rate_limits`. These are sparse
+/// overlays on the shared account limit, not an exhaustive model catalog. A
+/// valid row is reduced to its tightest reported window. The field is optional,
+/// but when present every row is required to be complete. A malformed sibling
+/// rejects the entire live provider observation rather than being silently
+/// omitted.
+List<ModelQuota> codexModelQuotas(Map<String, dynamic>? resp) {
+  if (resp == null) return const [];
+  final parsed = _codexAdditionalRateLimits(resp);
+  return parsed.valid ? parsed.modelQuotas : const [];
+}
+
+({bool valid, List<ModelQuota> modelQuotas}) _codexAdditionalRateLimits(
+  Map<String, dynamic> resp,
+) {
+  if (!resp.containsKey('additional_rate_limits') ||
+      resp['additional_rate_limits'] == null) {
+    return (valid: true, modelQuotas: const []);
+  }
+  final rawRows = resp['additional_rate_limits'];
+  if (rawRows is! List) return (valid: false, modelQuotas: const []);
+
+  final byModel = <String, ModelQuota>{};
+  for (final row in rawRows) {
+    if (row is! Map) return (valid: false, modelQuotas: const []);
+    final model = _codexScopedModelName(row['limit_name']);
+    if (model == null) return (valid: false, modelQuotas: const []);
+
+    final parsed = _codexLiveRateLimitWindows(row['rate_limit']);
+    if (!parsed.valid) return (valid: false, modelQuotas: const []);
+    final candidate = _codexBindingModelQuota(model, parsed.windows);
+    final key = model.toLowerCase();
+    final current = byModel[key];
+    byModel[key] = current == null
+        ? candidate
+        : _conservativeCodexModelQuota(current, candidate);
+  }
+  return (
+    valid: true,
+    modelQuotas: byModel.values.toList(growable: false),
+  );
+}
+
+String? _codexScopedModelName(dynamic raw) {
+  if (raw is! String) return null;
+  final value = raw.trim();
+  if (value.isEmpty || value.length > 160) return null;
+  if (value.codeUnits.any((code) => code < 32 || code == 127)) return null;
+  return value;
+}
+
+ModelQuota _codexBindingModelQuota(
+  String model,
+  List<QuotaWindow> windows,
+) {
+  var binding = windows.first;
+  for (final candidate in windows.skip(1)) {
+    final candidateUsed = candidate.usedPercent!;
+    final bindingUsed = binding.usedPercent!;
+    if (candidateUsed > bindingUsed ||
+        (candidateUsed == bindingUsed &&
+            _saferEqualUseWindow(candidate, binding))) {
+      binding = candidate;
+    }
+  }
+  return ModelQuota(
+    model: model,
+    usedPercent: binding.usedPercent,
+    resetsAt: binding.resetsAt,
+    windowLabel: binding.label,
+  );
+}
+
+ModelQuota _conservativeCodexModelQuota(
+  ModelQuota current,
+  ModelQuota candidate,
+) {
+  final currentUsed = current.usedPercent;
+  final candidateUsed = candidate.usedPercent;
+  if (currentUsed == null || candidateUsed == null) {
+    return ModelQuota(
+      model: current.model,
+      windowLabel: current.windowLabel == candidate.windowLabel
+          ? current.windowLabel
+          : null,
+      note: 'provider returned conflicting scoped quota rows',
+    );
+  }
+  if (candidateUsed > currentUsed) return candidate;
+  if (candidateUsed < currentUsed) return current;
+  return (candidate.resetsAt ?? -1) > (current.resetsAt ?? -1)
+      ? candidate
+      : current;
 }
 
 /// The number of rate-limit reset credits Codex reports as available to redeem,
@@ -114,51 +340,212 @@ int? codexResetCredits(Map<String, dynamic>? resp) {
 
 // --- Claude -----------------------------------------------------------------
 
-/// Builds windows from the Anthropic OAuth usage response.
-List<QuotaWindow> claudeWindows(Map<String, dynamic> data) {
-  final legacy = _legacyClaudeWindows(data);
-  final limits = data['limits'];
-  if (limits is List) {
-    final canonical = _claudeLimitWindows(limits);
-    if (canonical.isNotEmpty) {
-      return _mergeClaudeWindows(canonical, legacy);
-    }
+/// One admitted Anthropic OAuth usage response. Shared and model-scoped limits
+/// are one observation and must cross the trust boundary together.
+typedef ClaudeLiveUsage = ({
+  List<QuotaWindow> windows,
+  List<ModelQuota> modelQuotas,
+});
+
+/// Parses one Anthropic OAuth usage response atomically.
+///
+/// The shared session and weekly rows are both binding pools. Dropping either
+/// one can overstate immediate availability, so an admitted response must prove
+/// both. Every recognized canonical row and every present known legacy block
+/// must also be structurally valid. Unknown additive root fields and
+/// advisory-only canonical kinds remain compatible. An unknown row or root
+/// block carrying quota markers rejects the atomic observation because it may
+/// be a newly introduced binding pool.
+ClaudeLiveUsage? claudeLiveUsage(
+  Map<String, dynamic>? data, {
+  int? observedAt,
+}) {
+  if (data == null) return null;
+  if (_claudeHasUnknownRootQuotaBlock(data)) return null;
+  final observation = observedAt ?? nowEpoch();
+
+  var canonical = (
+    valid: true,
+    windows: const <QuotaWindow>[],
+    modelQuotas: const <ModelQuota>[],
+  );
+  if (data.containsKey('limits')) {
+    final limits = data['limits'];
+    if (limits is! List) return null;
+    canonical = _claudeCanonicalLimits(limits, observation);
+    if (!canonical.valid) return null;
   }
 
-  return legacy;
+  final legacy = _legacyClaudeUsage(data);
+  if (!legacy.valid) return null;
+
+  final windows = _mergeClaudeWindows(canonical.windows, legacy.windows);
+  final labels = windows.map((window) => window.label).toSet();
+  if (!labels.contains('5h') || !labels.contains('weekly')) return null;
+
+  return (
+    windows: windows,
+    modelQuotas: _mergeClaudeModelQuotas(
+      canonical.modelQuotas,
+      legacy.modelQuotas,
+    ),
+  );
 }
 
-/// Parses Anthropic's current `limits` array. Rows need a known kind/group
-/// pairing, but `is_active` is advisory: Claude reports enforced weekly rows as
-/// inactive while still displaying them in `/usage`. If this produces at least
-/// one window, it wins over a same-label legacy field. Missing primary windows
-/// can still be filled from legacy fields in a transitional response.
-List<QuotaWindow> _claudeLimitWindows(List<dynamic> limits) {
-  final out = <QuotaWindow>[];
-  final seenLabels = <String>{};
+/// Compatibility projection for callers that need only shared windows. Runtime
+/// collection uses [claudeLiveUsage] once so windows and scoped limits cannot be
+/// admitted from different parser outcomes.
+List<QuotaWindow> claudeWindows(
+  Map<String, dynamic> data, {
+  int? observedAt,
+}) =>
+    claudeLiveUsage(data, observedAt: observedAt)?.windows ?? const [];
+
+/// Compatibility projection for callers that need only model-scoped limits.
+List<ModelQuota> claudeModelQuotas(
+  Map<String, dynamic> data, {
+  int? observedAt,
+}) =>
+    claudeLiveUsage(data, observedAt: observedAt)?.modelQuotas ?? const [];
+
+/// Parses Anthropic's current `limits` array. Recognized rows need a complete
+/// kind/group/scope pairing, bounded numeric percent, and positive ISO reset.
+/// `is_active` is advisory: Claude reports enforced weekly rows as inactive
+/// while still displaying them in `/usage`. Unknown kinds remain additive only
+/// when they do not carry any canonical quota marker.
+({
+  bool valid,
+  List<QuotaWindow> windows,
+  List<ModelQuota> modelQuotas,
+}) _claudeCanonicalLimits(List<dynamic> limits, int observedAt) {
+  final byLabel = <String, QuotaWindow>{};
+  final byModel = <String, ModelQuota>{};
   for (final row in limits) {
-    if (row is! Map) continue;
-    final label = _claudeLimitLabel(row);
-    final percent = _strictBoundedPercent(row['percent']);
-    if (label == null || percent == null || seenLabels.contains(label)) {
-      continue;
+    if (row is! Map) {
+      return (
+        valid: false,
+        windows: const [],
+        modelQuotas: const [],
+      );
+    }
+    final kind = row['kind'];
+    if (kind is! String) {
+      return (
+        valid: false,
+        windows: const [],
+        modelQuotas: const [],
+      );
     }
 
-    final resetValue = row['resets_at'];
-    final reset = parseIsoToEpoch(resetValue);
-    if (resetValue != null && reset == null) continue;
-
-    seenLabels.add(label);
-    out.add(
-      QuotaWindow(
+    if (kind == 'session' || kind == 'weekly_all') {
+      final label = _claudeLimitLabel(row);
+      final percent = _claudeCanonicalPercent(row);
+      final reset = _claudeCanonicalReset(row);
+      if (label == null || percent == null || reset == null) {
+        return (
+          valid: false,
+          windows: const [],
+          modelQuotas: const [],
+        );
+      }
+      final candidate = QuotaWindow(
         label: label,
         usedPercent: percent,
         resetsAt: reset,
-      ),
-    );
+      );
+      final current = byLabel[label];
+      if (current == null ||
+          _preferClaudeWindow(candidate, current, observedAt)) {
+        byLabel[label] = candidate;
+      }
+      continue;
+    }
+
+    if (kind == 'weekly_scoped') {
+      final model =
+          row['group'] == 'weekly' ? _claudeScopedModelName(row) : null;
+      final percent = _claudeCanonicalPercent(row);
+      final reset = _claudeCanonicalReset(row);
+      if (model == null || percent == null || reset == null) {
+        return (
+          valid: false,
+          windows: const [],
+          modelQuotas: const [],
+        );
+      }
+      final candidate = ModelQuota(
+        model: model,
+        usedPercent: percent,
+        resetsAt: reset,
+        windowLabel: 'weekly',
+      );
+      final key = model.toLowerCase();
+      final current = byModel[key];
+      if (current == null ||
+          _preferClaudeModelQuota(candidate, current, observedAt)) {
+        byModel[key] = candidate;
+      }
+      continue;
+    }
+
+    if (_claudeUnknownLimitIsQuotaShaped(row)) {
+      return (
+        valid: false,
+        windows: const [],
+        modelQuotas: const [],
+      );
+    }
   }
-  return out;
+  return (
+    valid: true,
+    windows: byLabel.values.toList(growable: false),
+    modelQuotas: byModel.values.toList(growable: false),
+  );
 }
+
+const _claudeCanonicalQuotaMarkers = {
+  'percent',
+  'utilization',
+  'resets_at',
+  'group',
+  'scope',
+  'is_active',
+};
+
+const _claudeKnownRootQuotaKeys = {
+  'limits',
+  'five_hour',
+  'seven_day',
+  'seven_day_opus',
+};
+
+const _claudeRootQuotaMarkers = {
+  ..._claudeCanonicalQuotaMarkers,
+  'used_percent',
+  'reset_at',
+};
+
+bool _claudeUnknownLimitIsQuotaShaped(Map<dynamic, dynamic> row) =>
+    _hasDirectQuotaMarker(row, _claudeCanonicalQuotaMarkers);
+
+bool _claudeHasUnknownRootQuotaBlock(Map<String, dynamic> data) {
+  for (final entry in data.entries) {
+    if (_claudeKnownRootQuotaKeys.contains(entry.key)) continue;
+    final value = entry.value;
+    if (value is Map && _hasDirectQuotaMarker(value, _claudeRootQuotaMarkers)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _hasDirectQuotaMarker(
+  Map<dynamic, dynamic> value,
+  Set<String> markers,
+) =>
+    value.keys.any(
+      (key) => key is String && markers.contains(key.toLowerCase()),
+    );
 
 /// Combines transitional response shapes without duplicate pools. Canonical
 /// rows win by label, while legacy fields can fill a missing primary. The
@@ -192,54 +579,68 @@ List<QuotaWindow> _mergeClaudeWindows(
   return out;
 }
 
-/// Builds per-model weekly caps without making them provider-wide binding
-/// windows. Spending a scoped Fable or Opus cap still leaves Claude usable with
-/// other models, so these belong in [ProviderQuota.modelQuotas].
-List<ModelQuota> claudeModelQuotas(Map<String, dynamic> data) {
-  final out = <ModelQuota>[];
-  final seenModels = <String>{};
-  final limits = data['limits'];
-  if (limits is List) {
-    for (final row in limits) {
-      if (row is! Map ||
-          row['kind'] != 'weekly_scoped' ||
-          row['group'] != 'weekly') {
-        continue;
-      }
-      final model = _claudeScopedModelName(row);
-      final percent = _strictBoundedPercent(row['percent']);
-      if (model == null || percent == null) continue;
-
-      final resetValue = row['resets_at'];
-      final reset = parseIsoToEpoch(resetValue);
-      if (resetValue != null && reset == null) continue;
-
-      if (!seenModels.add(model.toLowerCase())) continue;
-      out.add(
-        ModelQuota(
-          model: model,
-          usedPercent: percent,
-          resetsAt: reset,
-        ),
-      );
-    }
+List<ModelQuota> _mergeClaudeModelQuotas(
+  List<ModelQuota> canonical,
+  List<ModelQuota> legacy,
+) {
+  final byModel = <String, ModelQuota>{};
+  for (final quota in legacy) {
+    byModel[quota.model.toLowerCase()] = quota;
   }
-
-  final legacyOpus = data['seven_day_opus'];
-  if (legacyOpus is Map && seenModels.add('opus')) {
-    final percent = _strictBoundedPercent(legacyOpus['utilization']);
-    if (percent != null) {
-      out.add(
-        ModelQuota(
-          model: 'Opus',
-          usedPercent: percent,
-          resetsAt: parseIsoToEpoch(legacyOpus['resets_at']),
-        ),
-      );
-    }
+  for (final quota in canonical) {
+    byModel[quota.model.toLowerCase()] = quota;
   }
-  return out;
+  return byModel.values.toList(growable: false);
 }
+
+bool _tighterWindow(QuotaWindow candidate, QuotaWindow current) {
+  final candidateUsed = candidate.usedPercent;
+  final currentUsed = current.usedPercent;
+  if (candidateUsed == null) return false;
+  if (currentUsed == null || candidateUsed > currentUsed) return true;
+  if (candidateUsed < currentUsed) return false;
+  return (candidate.resetsAt ?? -1) > (current.resetsAt ?? -1);
+}
+
+/// Resolves an equal-use tie without depending on provider row order. A later
+/// reset is the conservative choice because the same amount of spent quota
+/// remains binding for longer. A known reset also wins over an unknown one.
+bool _saferEqualUseWindow(QuotaWindow candidate, QuotaWindow current) =>
+    (candidate.resetsAt ?? -1) > (current.resetsAt ?? -1);
+
+bool _preferClaudeWindow(
+  QuotaWindow candidate,
+  QuotaWindow current,
+  int observedAt,
+) {
+  final candidateExpired = _resetExpired(candidate.resetsAt, observedAt);
+  final currentExpired = _resetExpired(current.resetsAt, observedAt);
+  if (candidateExpired != currentExpired) return !candidateExpired;
+  return _tighterWindow(candidate, current);
+}
+
+bool _tighterModelQuota(ModelQuota candidate, ModelQuota current) {
+  final candidateUsed = candidate.usedPercent;
+  final currentUsed = current.usedPercent;
+  if (candidateUsed == null) return false;
+  if (currentUsed == null || candidateUsed > currentUsed) return true;
+  if (candidateUsed < currentUsed) return false;
+  return (candidate.resetsAt ?? -1) > (current.resetsAt ?? -1);
+}
+
+bool _preferClaudeModelQuota(
+  ModelQuota candidate,
+  ModelQuota current,
+  int observedAt,
+) {
+  final candidateExpired = _resetExpired(candidate.resetsAt, observedAt);
+  final currentExpired = _resetExpired(current.resetsAt, observedAt);
+  if (candidateExpired != currentExpired) return !candidateExpired;
+  return _tighterModelQuota(candidate, current);
+}
+
+bool _resetExpired(int? reset, int observedAt) =>
+    reset != null && reset <= observedAt;
 
 String? _claudeLimitLabel(Map<dynamic, dynamic> row) {
   final kind = row['kind'];
@@ -252,6 +653,15 @@ String? _claudeLimitLabel(Map<dynamic, dynamic> row) {
   return null;
 }
 
+double? _claudeCanonicalPercent(Map<dynamic, dynamic> row) {
+  if (row.containsKey('is_active') && row['is_active'] is! bool) return null;
+  return _strictBoundedPercent(row['percent']);
+}
+
+int? _claudeCanonicalReset(Map<dynamic, dynamic> row) {
+  return _strictClaudeIsoEpoch(row['resets_at']);
+}
+
 String? _claudeScopedModelName(Map<dynamic, dynamic> row) {
   final scope = row['scope'];
   if (scope is! Map) return null;
@@ -259,7 +669,10 @@ String? _claudeScopedModelName(Map<dynamic, dynamic> row) {
   if (model is! Map) return null;
   final displayName = model['display_name'];
   if (displayName is! String) return null;
-  final label = _claudeScopedLabel(displayName);
+  final trimmed = displayName.trim();
+  if (trimmed.isEmpty || trimmed.length > 160) return null;
+  if (trimmed.codeUnits.any((code) => code < 32 || code == 127)) return null;
+  final label = _claudeScopedLabel(trimmed);
   if (label == null) return null;
   return label
       .split('-')
@@ -294,25 +707,79 @@ double? _strictBoundedPercent(dynamic value) {
   return parsed;
 }
 
-List<QuotaWindow> _legacyClaudeWindows(Map<String, dynamic> data) {
+({
+  bool valid,
+  List<QuotaWindow> windows,
+  List<ModelQuota> modelQuotas,
+}) _legacyClaudeUsage(Map<String, dynamic> data) {
   final out = <QuotaWindow>[];
   for (final spec in const [
     ['five_hour', '5h'],
     ['seven_day', 'weekly'],
   ]) {
+    if (!data.containsKey(spec[0])) continue;
     final block = data[spec[0]];
-    if (block is! Map) continue;
+    if (block is! Map) {
+      return (valid: false, windows: const [], modelQuotas: const []);
+    }
     final util = _strictBoundedPercent(block['utilization']);
-    if (util == null) continue;
+    final reset = _legacyClaudeReset(block);
+    if (util == null || !reset.valid) {
+      return (valid: false, windows: const [], modelQuotas: const []);
+    }
     out.add(
       QuotaWindow(
         label: spec[1],
         usedPercent: util,
-        resetsAt: parseIsoToEpoch(block['resets_at']),
+        resetsAt: reset.value,
       ),
     );
   }
-  return out;
+
+  final modelQuotas = <ModelQuota>[];
+  if (data.containsKey('seven_day_opus') && data['seven_day_opus'] != null) {
+    final block = data['seven_day_opus'];
+    if (block is! Map) {
+      return (valid: false, windows: const [], modelQuotas: const []);
+    }
+    final util = _strictBoundedPercent(block['utilization']);
+    final reset = _legacyClaudeReset(block);
+    if (util == null || !reset.valid) {
+      return (valid: false, windows: const [], modelQuotas: const []);
+    }
+    modelQuotas.add(
+      ModelQuota(
+        model: 'Opus',
+        usedPercent: util,
+        resetsAt: reset.value,
+        windowLabel: 'weekly',
+      ),
+    );
+  }
+
+  return (
+    valid: true,
+    windows: out,
+    modelQuotas: modelQuotas,
+  );
+}
+
+({bool valid, int? value}) _legacyClaudeReset(Map<dynamic, dynamic> block) {
+  if (!block.containsKey('resets_at') || block['resets_at'] == null) {
+    return (valid: true, value: null);
+  }
+  final parsed = _strictClaudeIsoEpoch(block['resets_at']);
+  return parsed != null && parsed > 0
+      ? (valid: true, value: parsed)
+      : (valid: false, value: null);
+}
+
+int? _strictClaudeIsoEpoch(dynamic raw) {
+  if (raw is! String) return null;
+  final parsed = DateTime.tryParse(raw);
+  if (parsed == null || !parsed.isUtc) return null;
+  final epoch = parsed.millisecondsSinceEpoch ~/ 1000;
+  return epoch > 0 ? epoch : null;
 }
 
 int? parseIsoToEpoch(dynamic v) {
@@ -349,25 +816,19 @@ const _antigravityMaxWindowHorizon = 8 * 86400;
 /// [_antigravityMaxWindowHorizon] is treated as an indeterminate balance and not
 /// asserted as a window.
 List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
-  final models = resp?['models'];
-  if (models is! Map) return const [];
+  final models = _antigravityLiveQuotaRows(resp);
+  if (models == null || models.isEmpty) return const [];
 
   double? bindingUsed;
   int? bindingReset;
-  models.forEach((_, m) {
-    if (m is! Map) return;
-    final qi = m['quotaInfo'];
-    if (qi is! Map) return;
-    final frac = _fraction(qi['remainingFraction']);
-    final reset = parseReset(qi['resetTime']);
-    if (frac == null || reset == null) return;
-    if (reset - now > _antigravityMaxWindowHorizon) return;
-    final used = ((1 - frac) * 100).clamp(0, 100).toDouble();
-    if (bindingUsed == null || used > bindingUsed!) {
+  for (final model in models) {
+    if (model.resetsAt - now > _antigravityMaxWindowHorizon) continue;
+    final used = ((1 - model.remainingFraction) * 100).clamp(0, 100).toDouble();
+    if (bindingUsed == null || used > bindingUsed) {
       bindingUsed = used;
-      bindingReset = reset;
+      bindingReset = model.resetsAt;
     }
-  });
+  }
 
   if (bindingUsed == null) return const [];
   return [
@@ -385,23 +846,52 @@ List<QuotaWindow> antigravityWindows(Map<String, dynamic>? resp, int now) {
 /// preferred whenever the live read succeeds. Each entry is keyed by the model
 /// id and carries `{quotaInfo: {remainingFraction, resetTime}}`.
 List<ModelQuota> antigravityModelQuotasFromLive(Map<String, dynamic>? resp) {
+  final models = _antigravityLiveQuotaRows(resp);
+  if (models == null) return const [];
+  return models
+      .map(
+        (model) => ModelQuota(
+          model: model.model,
+          usedPercent:
+              ((1 - model.remainingFraction) * 100).clamp(0, 100).toDouble(),
+          resetsAt: model.resetsAt,
+        ),
+      )
+      .toList();
+}
+
+typedef _AntigravityLiveQuotaRow = ({
+  String model,
+  double remainingFraction,
+  int resetsAt,
+});
+
+/// Parses the live model table as one exhaustive quota snapshot. Every model
+/// advertised by the provider must carry a complete quota row. Publishing only
+/// the well-shaped siblings could hide the binding effort variant and overstate
+/// headroom, so any incomplete row rejects the whole live table.
+List<_AntigravityLiveQuotaRow>? _antigravityLiveQuotaRows(
+  Map<String, dynamic>? resp,
+) {
   final models = resp?['models'];
-  if (models is! Map) return const [];
-  final out = <ModelQuota>[];
-  models.forEach((key, m) {
-    if (m is! Map) return;
-    final qi = m['quotaInfo'];
-    if (qi is! Map) return;
-    final frac = _fraction(qi['remainingFraction']);
-    if (frac == null) return;
-    out.add(
-      ModelQuota(
-        model: key.toString(),
-        usedPercent: ((1 - frac) * 100).clamp(0, 100).toDouble(),
-        resetsAt: parseReset(qi['resetTime']),
-      ),
-    );
-  });
+  if (models is! Map) return null;
+  final out = <_AntigravityLiveQuotaRow>[];
+  for (final entry in models.entries) {
+    final model = entry.value;
+    if (model is! Map) return null;
+    final quotaInfo = model['quotaInfo'];
+    if (quotaInfo is! Map) return null;
+    final remainingFraction = _fraction(quotaInfo['remainingFraction']);
+    final resetsAt = parseReset(quotaInfo['resetTime']);
+    if (remainingFraction == null || resetsAt == null || resetsAt <= 0) {
+      return null;
+    }
+    out.add((
+      model: entry.key.toString(),
+      remainingFraction: remainingFraction,
+      resetsAt: resetsAt,
+    ));
+  }
   return out;
 }
 
@@ -495,7 +985,7 @@ List<ModelQuota> antigravityModelQuotas(List<int> bytes) {
     }
   });
   final r = remaining;
-  if (!ok || r == null || r < -0.0001 || r > 1.0001) return null;
+  if (!ok || r == null || r < 0 || r > 1) return null;
   final used = ((1 - r) * 100).clamp(0, 100).toDouble();
   return (_percent2(used), reset);
 }
@@ -596,10 +1086,7 @@ List<QuotaWindow> cursorWindows(dynamic usageData, int now) {
       // threw on one and dropped every window in the breakdown.
       final resetsAt = parseReset(block['resetDate']);
       final label = (block['displayName'] ?? 'usage').toString().toLowerCase();
-      final usedP = pct ??
-          (used != null && limit != null && limit > 0
-              ? (used / limit * 100).clamp(0, 100)
-              : null);
+      final usedP = pct ?? _ratioPercent(used, limit);
       if (usedP != null || resetsAt != null) {
         windows.add(
           QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
@@ -634,6 +1121,7 @@ QuotaWindow? _cursorMonthlyPool(Map<String, dynamic> usageData) {
       if (_jsonObject(usageData[key]) case final nested?) nested,
   ];
 
+  QuotaWindow? binding;
   for (final c in candidates) {
     final used = _firstNum(c, const [
       'usedCents',
@@ -660,14 +1148,18 @@ QuotaWindow? _cursorMonthlyPool(Map<String, dynamic> usageData) {
       'usageLimit',
       'hardLimit',
     ]);
-    if (used == null || limit == null || limit <= 0) continue;
-    return QuotaWindow(
+    final percent = _ratioPercent(used, limit);
+    if (percent == null) continue;
+    final candidate = QuotaWindow(
       label: 'monthly',
-      usedPercent: (used / limit * 100).clamp(0.0, 100.0),
+      usedPercent: percent,
       resetsAt: _cursorReset(c) ?? _cursorReset(usageData),
     );
+    if (binding == null || _tighterWindow(candidate, binding)) {
+      binding = candidate;
+    }
   }
-  return null;
+  return binding;
 }
 
 double? _firstNum(Map<String, dynamic> data, List<String> keys) {
@@ -692,8 +1184,10 @@ double? _boundedPercent(dynamic value) {
     String() => double.tryParse(value.replaceAll(',', '').trim()),
     _ => null,
   };
-  if (parsed == null || !parsed.isFinite) return null;
-  return parsed.clamp(0.0, 100.0);
+  if (parsed == null || !parsed.isFinite || parsed < 0 || parsed > 100) {
+    return null;
+  }
+  return parsed;
 }
 
 double? _fraction(dynamic value) {
@@ -702,8 +1196,15 @@ double? _fraction(dynamic value) {
     String() => double.tryParse(value.replaceAll(',', '').trim()),
     _ => null,
   };
-  if (parsed == null || !parsed.isFinite) return null;
-  return parsed.clamp(0.0, 1.0);
+  if (parsed == null || !parsed.isFinite || parsed < 0 || parsed > 1) {
+    return null;
+  }
+  return parsed;
+}
+
+double? _ratioPercent(double? used, double? limit) {
+  if (used == null || limit == null || used < 0 || limit <= 0) return null;
+  return (used / limit * 100).clamp(0.0, 100.0).toDouble();
 }
 
 int? _cursorReset(Map<String, dynamic> data) {
@@ -730,14 +1231,14 @@ int? _cursorReset(Map<String, dynamic> data) {
 List<QuotaWindow> windsurfWindows(dynamic usageData, int now) {
   final usage = _jsonObject(usageData);
   if (usage == null) return const [];
-  final windows = <QuotaWindow>[];
-
-  final seenLabels = <String>{};
+  final byLabel = <String, QuotaWindow>{};
 
   void addWindow(QuotaWindow? window) {
     if (window == null) return;
-    if (!seenLabels.add(window.label)) return;
-    windows.add(window);
+    final current = byLabel[window.label];
+    if (current == null || _tighterWindow(window, current)) {
+      byLabel[window.label] = window;
+    }
   }
 
   addWindow(_windsurfDirectQuotaWindow('daily', usage));
@@ -755,28 +1256,30 @@ List<QuotaWindow> windsurfWindows(dynamic usageData, int now) {
   // usage counters (newer cache shapes per research; usedMessages/messages etc)
   final usedMsgs = _firstNum(usage, const ['usedMessages']);
   final totMsgs = _firstNum(usage, const ['messages', 'messageLimit']);
-  if (usedMsgs != null && totMsgs != null && totMsgs > 0) {
-    windows.add(
+  final messagePercent = _ratioPercent(usedMsgs, totMsgs);
+  if (messagePercent != null) {
+    addWindow(
       QuotaWindow(
         label: 'messages',
-        usedPercent: (usedMsgs / totMsgs * 100).clamp(0.0, 100.0),
+        usedPercent: messagePercent,
       ),
     );
   }
 
   final usedFlows = _firstNum(usage, const ['usedFlowActions']);
   final totFlows = _firstNum(usage, const ['flowActions', 'flowActionLimit']);
-  if (usedFlows != null && totFlows != null && totFlows > 0) {
-    windows.add(
+  final flowPercent = _ratioPercent(usedFlows, totFlows);
+  if (flowPercent != null) {
+    addWindow(
       QuotaWindow(
         label: 'flow',
-        usedPercent: (usedFlows / totFlows * 100).clamp(0.0, 100.0),
+        usedPercent: flowPercent,
       ),
     );
   }
 
   // Try similar to Kiro/Cursor breakdowns as last resort
-  if (windows.isEmpty) {
+  if (byLabel.isEmpty) {
     final breakdowns = usage['usageBreakdowns'] ?? usage['credits'];
     if (breakdowns is List) {
       for (final b in breakdowns) {
@@ -787,18 +1290,15 @@ List<QuotaWindow> windsurfWindows(dynamic usageData, int now) {
         final pct = _boundedPercent(block['percentageUsed']);
         final label =
             (block['displayName'] ?? 'prompts').toString().toLowerCase();
-        final usedP = pct ??
-            (used != null && limit != null && limit > 0
-                ? (used / limit * 100).clamp(0.0, 100.0)
-                : null);
+        final usedP = pct ?? _ratioPercent(used, limit);
         if (usedP != null) {
-          windows.add(QuotaWindow(label: label, usedPercent: usedP));
+          addWindow(QuotaWindow(label: label, usedPercent: usedP));
         }
       }
     }
   }
 
-  return windows;
+  return byLabel.values.toList();
 }
 
 QuotaWindow? _windsurfDirectQuotaWindow(
@@ -810,10 +1310,11 @@ QuotaWindow? _windsurfDirectQuotaWindow(
     '${label}_remaining_percent',
     '${label}RemainingPercent',
   ]);
-  if (remaining != null) {
+  final boundedRemaining = _boundedPercent(remaining);
+  if (boundedRemaining != null) {
     return QuotaWindow(
       label: label,
-      usedPercent: (100 - remaining).clamp(0.0, 100.0),
+      usedPercent: 100 - boundedRemaining,
       resetsAt: _windsurfReset(label, data, data),
     );
   }
@@ -824,10 +1325,11 @@ QuotaWindow? _windsurfDirectQuotaWindow(
     '${label}_used_percent',
     '${label}UsedPercent',
   ]);
-  if (usedPercent != null) {
+  final boundedUsed = _boundedPercent(usedPercent);
+  if (boundedUsed != null) {
     return QuotaWindow(
       label: label,
-      usedPercent: usedPercent.clamp(0.0, 100.0),
+      usedPercent: boundedUsed,
       resetsAt: _windsurfReset(label, data, data),
     );
   }
@@ -848,10 +1350,11 @@ QuotaWindow? _windsurfDirectQuotaWindow(
     '${label}_quota_limit',
     '${label}QuotaLimit',
   ]);
-  if (used == null || limit == null || limit <= 0) return null;
+  final ratio = _ratioPercent(used, limit);
+  if (ratio == null) return null;
   return QuotaWindow(
     label: label,
-    usedPercent: (used / limit * 100).clamp(0.0, 100.0),
+    usedPercent: ratio,
     resetsAt: _windsurfReset(label, data, data),
   );
 }
@@ -911,10 +1414,11 @@ QuotaWindow? _windsurfQuotaWindowFromMap(
     'freePercent',
     'free_percent',
   ]);
-  if (remaining != null) {
+  final boundedRemaining = _boundedPercent(remaining);
+  if (boundedRemaining != null) {
     return QuotaWindow(
       label: label,
-      usedPercent: (100 - remaining).clamp(0.0, 100.0),
+      usedPercent: 100 - boundedRemaining,
       resetsAt: _windsurfReset(label, data, root),
     );
   }
@@ -929,10 +1433,11 @@ QuotaWindow? _windsurfQuotaWindowFromMap(
     'quotaUsedPercent',
     'quota_used_percent',
   ]);
-  if (usedPercent != null) {
+  final boundedUsed = _boundedPercent(usedPercent);
+  if (boundedUsed != null) {
     return QuotaWindow(
       label: label,
-      usedPercent: usedPercent.clamp(0.0, 100.0),
+      usedPercent: boundedUsed,
       resetsAt: _windsurfReset(label, data, root),
     );
   }
@@ -952,10 +1457,11 @@ QuotaWindow? _windsurfQuotaWindowFromMap(
     'allowance',
     'total',
   ]);
-  if (used == null || limit == null || limit <= 0) return null;
+  final ratio = _ratioPercent(used, limit);
+  if (ratio == null) return null;
   return QuotaWindow(
     label: label,
-    usedPercent: (used / limit * 100).clamp(0.0, 100.0),
+    usedPercent: ratio,
     resetsAt: _windsurfReset(label, data, root),
   );
 }
@@ -1009,10 +1515,7 @@ List<QuotaWindow> kiroWindows(dynamic usageState, int now) {
     // whole loop, discarding every otherwise-parseable window.
     final resetsAt = parseReset(block['resetDate']);
     final label = (block['displayName'] ?? 'Credits').toString().toLowerCase();
-    final usedP = pct ??
-        (used != null && limit != null && limit > 0
-            ? (used / limit * 100).clamp(0, 100)
-            : null);
+    final usedP = pct ?? _ratioPercent(used, limit);
     if (usedP != null || resetsAt != null) {
       windows.add(
         QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
@@ -1022,24 +1525,33 @@ List<QuotaWindow> kiroWindows(dynamic usageState, int now) {
   return windows;
 }
 
-/// A numeric reset above this many "seconds" is really epoch milliseconds. No
-/// genuine epoch-seconds reset is this large (it is year ~33658), while any
-/// present-day millisecond timestamp (~1.7e12) exceeds it, so dividing by 1000
-/// above the threshold rescues an accidentally-millis value without ever
-/// corrupting a real seconds value.
-const int _resetMillisThreshold = 1000000000000;
+/// Magnitude boundaries for present-day unix timestamps in milliseconds,
+/// microseconds, and nanoseconds. Provider and IDE state has used all four
+/// units over time, so normalize them before trust admission rather than
+/// interpreting a microsecond value as a reset tens of thousands of years out.
+const int _resetMillisThreshold = 100000000000;
+const int _resetMicrosThreshold = 100000000000000;
+const int _resetNanosThreshold = 100000000000000000;
+
+int _normalizeEpochSeconds(int value) {
+  final magnitude = value.abs();
+  if (magnitude >= _resetNanosThreshold) return value ~/ 1000000000;
+  if (magnitude >= _resetMicrosThreshold) return value ~/ 1000000;
+  if (magnitude >= _resetMillisThreshold) return value ~/ 1000;
+  return value;
+}
 
 int? parseReset(dynamic v) {
   if (v == null) return null;
   if (v is num) {
     if (!v.toDouble().isFinite) return null;
-    final seconds = v.abs() > _resetMillisThreshold ? v ~/ 1000 : v.toInt();
-    return seconds;
+    if (v.truncateToDouble() != v.toDouble()) return null;
+    return _normalizeEpochSeconds(v.toInt());
   }
   final s = v.toString();
   final asInt = int.tryParse(s);
   if (asInt != null) {
-    return asInt.abs() > _resetMillisThreshold ? asInt ~/ 1000 : asInt;
+    return _normalizeEpochSeconds(asInt);
   }
   final dt = DateTime.tryParse(s);
   return dt == null ? null : dt.millisecondsSinceEpoch ~/ 1000;
@@ -1250,13 +1762,45 @@ int _modelScore(String model) {
 
 // --- Grok -------------------------------------------------------------------
 
-/// Extracts the first gRPC-web DATA frame payload (flag 0x00) from a response.
+/// Extracts the unary gRPC-web DATA frame payload from a valid response.
+///
+/// gRPC-web commonly carries `grpc-status` in a body trailer rather than an
+/// HTTP header. A nonzero or malformed trailer invalidates the data frame so an
+/// authentication failure cannot be mistaken for successful quota evidence.
 List<int> grpcMessage(Uint8List resp) {
-  if (resp.length < 5) return const [];
-  if ((resp[0] & 0x80) != 0) return const []; // first frame is a trailer
-  final len = (resp[1] << 24) | (resp[2] << 16) | (resp[3] << 8) | resp[4];
-  if (5 + len > resp.length) return const [];
-  return resp.sublist(5, 5 + len);
+  List<int>? message;
+  var offset = 0;
+  while (offset < resp.length) {
+    if (resp.length - offset < 5) return const [];
+    final flag = resp[offset];
+    final len = (resp[offset + 1] << 24) |
+        (resp[offset + 2] << 16) |
+        (resp[offset + 3] << 8) |
+        resp[offset + 4];
+    offset += 5;
+    if (len < 0 || len > resp.length - offset) return const [];
+    final payload = resp.sublist(offset, offset + len);
+    offset += len;
+
+    if ((flag & 0x80) != 0) {
+      if (flag != 0x80 || message == null || offset != resp.length) {
+        return const [];
+      }
+      final trailer = ascii.decode(payload, allowInvalid: true);
+      final status = RegExp(
+        r'(?:^|\r?\n)grpc-status:\s*([0-9]+)\s*(?:\r?\n|$)',
+        caseSensitive: false,
+      ).firstMatch(trailer);
+      if (status == null || status.group(1) != '0') return const [];
+      continue;
+    }
+
+    // Grok's billing RPC is unary and uncompressed. Multiple data frames or a
+    // compression flag are response-shape drift, not quota evidence.
+    if (flag != 0 || message != null) return const [];
+    message = payload;
+  }
+  return message ?? const [];
 }
 
 /// Parses the Grok billing protobuf into a single shared weekly usage window.
@@ -1272,11 +1816,16 @@ List<int> grpcMessage(Uint8List resp) {
 /// reset), so Grok usage is not monotonic between resets.
 QuotaWindow? grokWindow(List<int> message, int now) {
   if (message.isEmpty) return null;
-  return _grokConfigWindow(message, now) ?? _grokScanWindow(message, now);
+  final anchored = _grokConfigWindow(message, now);
+  if (anchored.recognized) return anchored.window;
+  return _grokScanWindow(message, now);
 }
 
 /// Schema-anchored read of the Grok credits config message.
-QuotaWindow? _grokConfigWindow(List<int> message, int now) {
+({bool recognized, QuotaWindow? window}) _grokConfigWindow(
+  List<int> message,
+  int now,
+) {
   List<int>? config;
   // The top-level walk's verdict is deliberately ignored: trailing garbage
   // after a well-delimited config must not force the less precise scan
@@ -1285,16 +1834,21 @@ QuotaWindow? _grokConfigWindow(List<int> message, int now) {
     if (field == 1 && wireType == 2) config ??= bytes;
   });
   final body = config;
-  if (body == null) return null;
+  if (body == null) return (recognized: false, window: null);
   double? used;
   int? windowEnd;
+  var invalidPoolPercent = false;
   final ok = _forEachProtoField(body, (field, wireType, varint, bytes) {
     if (field == 1 && wireType == 5) {
       final f = _float32(bytes);
-      // This field is the pool total by schema, so a finite value outside
-      // 0..100 is clamped rather than discarded; discarding would hand the
-      // read back to the scan, which can pick a breakdown percent.
-      if (f.isFinite) used ??= _percent2(f.clamp(0.0, 100.0));
+      // This field is the pool total by schema. An impossible total invalidates
+      // the anchored response and must not hand parsing to the schema-less scan,
+      // which could mistake a valid-looking product breakdown for the total.
+      if (!f.isFinite || f < 0 || f > 100) {
+        invalidPoolPercent = true;
+      } else {
+        used ??= _percent2(f);
+      }
     } else if (field == 5 && wireType == 2) {
       _forEachProtoField(bytes, (subField, subWire, subVarint, _) {
         if (subField == 1 &&
@@ -1306,12 +1860,17 @@ QuotaWindow? _grokConfigWindow(List<int> message, int now) {
       });
     }
   });
-  if (!ok || used == null) return null;
-  return QuotaWindow(
-    label: 'weekly',
-    usedPercent: used,
-    resetsAt:
-        windowEnd ?? (ProtoScan()..walk(message)).nearestFutureTimestamp(now),
+  if (invalidPoolPercent) return (recognized: true, window: null);
+  if (!ok) return (recognized: false, window: null);
+  if (used == null) return (recognized: false, window: null);
+  return (
+    recognized: true,
+    window: QuotaWindow(
+      label: 'weekly',
+      usedPercent: used,
+      resetsAt:
+          windowEnd ?? (ProtoScan()..walk(message)).nearestFutureTimestamp(now),
+    ),
   );
 }
 
@@ -1327,9 +1886,10 @@ QuotaWindow? _grokScanWindow(List<int> message, int now) {
   );
 }
 
-/// Plausibility bounds for a unix-seconds varint (2020..2033), so field ids,
-/// enums, and nano counts are never mistaken for timestamps.
-bool _plausibleEpochSeconds(int v) => v > 1600000000 && v < 2000000000;
+/// Plausibility bounds for a unix-seconds varint (2020..2100), so field ids,
+/// enums, and sub-second counts are never mistaken for timestamps without
+/// imposing a 2033 parser expiry on valid long-lived code.
+bool _plausibleEpochSeconds(int v) => v > 1600000000 && v < 4102444800;
 
 double _percent2(double f) => double.parse(f.toStringAsFixed(2));
 

@@ -34,6 +34,10 @@ $sidecar = "$out.sha256"
 
 Push-Location $collectorDir
 try {
+  & $dart pub get --enforce-lockfile
+  if ($LASTEXITCODE -ne 0) {
+    throw "dart pub get failed with exit code $LASTEXITCODE"
+  }
   if (Test-Path -LiteralPath $buildDir) {
     Remove-Item -LiteralPath $buildDir -Recurse -Force
   }

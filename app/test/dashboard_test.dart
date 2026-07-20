@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot/main.dart';
@@ -70,6 +72,27 @@ List<ProviderQuota> _multiAccountClaude(int now) => [
   ),
 ];
 
+ProviderQuota _routeQuota(
+  String provider,
+  String displayName,
+  int now, {
+  double usedPercent = 20,
+  List<ModelQuota> modelQuotas = const [],
+}) => ProviderQuota(
+  provider: provider,
+  displayName: displayName,
+  account: 'default',
+  asOf: now,
+  windows: [
+    QuotaWindow(
+      label: 'weekly',
+      usedPercent: usedPercent,
+      resetsAt: now + 86400,
+    ),
+  ],
+  modelQuotas: modelQuotas,
+);
+
 List<String> _providerMenuValues(WidgetTester tester) => tester
     .widgetList<CheckedPopupMenuItem<String>>(
       find.byType(CheckedPopupMenuItem<String>),
@@ -95,6 +118,11 @@ void main() {
   tearDown(() {
     appThemeSpec.value = appThemeSystem;
     textScale.value = 1;
+  });
+
+  test('expanded mode keeps a viable desktop minimum width', () {
+    expect(desktopMinimumWindowSize(compact: true), const Size(120, 40));
+    expect(desktopMinimumWindowSize(compact: false), const Size(320, 120));
   });
 
   test('webhook delivery status never exposes raw transport errors', () {
@@ -172,6 +200,197 @@ void main() {
     );
   });
 
+  testWidgets('desktop routing honors the active profile preference', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final snapshot = [
+      _routeQuota('claude', 'Claude', now, usedPercent: 30),
+      _routeQuota('codex', 'Codex', now, usedPercent: 40),
+    ];
+    const preferred = QuotaProfile(
+      name: 'preferred',
+      preferenceOrder: ['codex'],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            activeProfile: 'preferred',
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => snapshot,
+          testProfiles: const [
+            QuotaProfile(name: defaultProfileName),
+            preferred,
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Next: Codex'), findsOneWidget);
+  });
+
+  testWidgets('empty profile explains a legacy Codex credential filter', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    const legacy = QuotaProfile(
+      name: 'legacy-codex',
+      accounts: {
+        'codex': {'plus'},
+      },
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            activeProfile: 'legacy-codex',
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'codex',
+              displayName: 'Codex',
+              account: 'account 01234567',
+              asOf: now,
+              windows: [
+                QuotaWindow(
+                  label: 'weekly',
+                  usedPercent: 20,
+                  resetsAt: now + 86400,
+                ),
+              ],
+            ),
+          ],
+          testProfiles: const [
+            QuotaProfile(name: defaultProfileName),
+            legacy,
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('older Codex account filter'), findsOneWidget);
+    expect(find.textContaining('current Codex credential'), findsOneWidget);
+    expect(find.text('Edit profile'), findsOneWidget);
+  });
+
+  testWidgets('all-hidden fleet explains how to restore a provider', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            hidden: {'claude'},
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            _routeQuota('claude', 'Claude', now, usedPercent: 20),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    const message =
+        'All providers in Default are hidden. Use the Providers menu to show one.';
+    expect(find.text(message), findsOneWidget);
+    expect(find.bySemanticsLabel(message), findsOneWidget);
+    expect(find.textContaining('No providers in'), findsNothing);
+  });
+
+  testWidgets('desktop routing applies model capability budget gates', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final snapshot = [
+      _routeQuota(
+        'antigravity',
+        'Antigravity',
+        now,
+        usedPercent: 10,
+        modelQuotas: [
+          ModelQuota(
+            model: 'Gemini 3.1 Pro',
+            usedPercent: 100,
+            resetsAt: now + 3600,
+          ),
+          ModelQuota(
+            model: 'Gemini 3 Flash',
+            usedPercent: 10,
+            resetsAt: now + 3600,
+          ),
+        ],
+      ),
+      _routeQuota('codex', 'Codex', now, usedPercent: 45),
+    ];
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () async => snapshot,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Next: Codex'), findsOneWidget);
+    expect(find.textContaining('Next: Antigravity'), findsNothing);
+  });
+
+  testWidgets('desktop routing honors active cross-process leases', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final leases = InMemoryRouteLeaseStore(idFactory: () => 'lease-1');
+    leases.reserve(
+      provider: 'claude',
+      account: 'default',
+      now: now,
+      leaseSeconds: 120,
+      weightPercent: 30,
+    );
+    final snapshot = [
+      _routeQuota('claude', 'Claude', now, usedPercent: 20),
+      _routeQuota('codex', 'Codex', now, usedPercent: 35),
+    ];
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () async => snapshot,
+          leaseStore: leases,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Next: Codex'), findsOneWidget);
+  });
+
   testWidgets('dashboard exposes a bounded webhook delivery failure', (
     tester,
   ) async {
@@ -233,6 +452,87 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets(
+    'slow webhook overlap stays single-flight and preserves alert arming',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      ProviderQuota quota(double used) => ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'test',
+        asOf: now,
+        windows: [QuotaWindow(label: '5h', usedPercent: used)],
+      );
+      final red = quota(100);
+      final recovered = quota(20);
+      var current = red;
+      var posts = 0;
+      final firstPostStarted = Completer<void>();
+      final releaseFirstPost = Completer<void>();
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(
+              enableNotifications: false,
+              webhookUrl: 'http://127.0.0.1:9000/quota',
+              setupDone: true,
+            ),
+            demoMode: false,
+            collector: () async => [current],
+            alertPoster: (url, payload, {required allowExternal}) async {
+              posts++;
+              if (posts == 1) {
+                firstPostStarted.complete();
+                await releaseFirstPost.future;
+              }
+              return const WebhookResult(ok: true, statusCode: 204);
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(firstPostStarted.isCompleted, isTrue);
+      expect(posts, 1);
+
+      // A completed refresh while the first transport awaits is coalesced into
+      // the same flight. It must not start a duplicate webhook batch.
+      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.pump();
+      await tester.pump();
+      expect(posts, 1);
+
+      releaseFirstPost.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(posts, 1);
+
+      // The coalesced red check remains armed, so another steady-red refresh is
+      // silent. Recovery clears the edge, and a later red crossing fires once.
+      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.pump();
+      await tester.pump();
+      expect(posts, 1);
+
+      current = recovered;
+      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.pump();
+      await tester.pump();
+      expect(posts, 1);
+
+      current = red;
+      await tester.tap(find.byTooltip('Refresh now'));
+      await tester.pump();
+      await tester.pump();
+      expect(posts, 2);
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final brightness in Brightness.values) {
     testWidgets(
       'setup labels legacy provider drift accessibly in ${brightness.name}',
@@ -293,7 +593,7 @@ void main() {
     );
   }
 
-  testWidgets('provider setup refreshes live state from any matching account', (
+  testWidgets('provider setup refresh keeps every matching account visible', (
     tester,
   ) async {
     await _useDesktopSurface(tester);
@@ -357,10 +657,22 @@ void main() {
 
     expect(connections, 1);
     expect(collections, 2);
-    expect(find.text('Grok connected'), findsOneWidget);
+    expect(
+      find.text(
+        'Grok connected, but the selected account is still unconfirmed',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Grok connected'), findsNothing);
     expect(find.byType(Dialog), findsOneWidget);
     expect(
       find.descendant(of: dialog, matching: find.text('live')),
+      findsOneWidget,
+    );
+    expect(find.text('Grok (old@example.com)'), findsOneWidget);
+    expect(find.text('Grok (fresh@example.com)'), findsOneWidget);
+    expect(
+      find.descendant(of: dialog, matching: find.text('cached')),
       findsOneWidget,
     );
     expect(
@@ -368,11 +680,126 @@ void main() {
         of: dialog,
         matching: find.widgetWithText(TextButton, 'Connect'),
       ),
-      findsNothing,
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'provider setup keeps a failed grant beside a live host account',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final hostAccount = 'credential:${List.filled(64, 'a').join()}';
+      final grantAccount = 'credential:${List.filled(64, 'b').join()}';
+      final liveHost = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: hostAccount,
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+        ],
+      );
+      final failedGrant = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: grantAccount,
+        asOf: now,
+        ok: false,
+        error: 'refresh grant unavailable',
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(enableNotifications: false, setupDone: true),
+            demoMode: false,
+            collector: () async => [liveHost, failedGrant],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Setup and help'));
+      await tester.pumpAndSettle();
+
+      final dialog = find.byType(Dialog);
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.text('Claude (account aaaaaaaa)'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: dialog,
+          matching: find.text('Claude (account bbbbbbbb)'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('live')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('no live data')),
+        findsOneWidget,
+      );
+      expect(
+        find.byTooltip('Set up Claude (account bbbbbbbb)'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('provider setup stays bounded at narrow width and 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 900);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final invalid = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'work@example.com',
+      asOf: now,
+      perMachine: true,
+      sourceClass: ProviderSourceClass.passiveLocalEvidence,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    expect(invalid.sourceClassViolation, isNotNull);
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          demoMode: false,
+          collector: () async => [invalid],
+          providerConnector: (_) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('invalid evidence'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Connect'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('provider connect recollects after an active refresh', (
@@ -518,6 +945,75 @@ void main() {
     expect(find.bySemanticsLabel(warning), findsOneWidget);
   });
 
+  testWidgets(
+    'compact provider chips focus and reveal overflow from keyboard',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(210, 600);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final providers = List<ProviderQuota>.generate(
+        10,
+        (index) => ProviderQuota(
+          provider: 'provider$index',
+          displayName: 'Provider $index',
+          account: 'default',
+          asOf: now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: index * 5)],
+        ),
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(
+              compact: true,
+              enableNotifications: false,
+              setupDone: true,
+            ),
+            demoMode: false,
+            collector: () async => providers,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final horizontalScroll = find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.horizontal,
+      );
+      final lastChip = find.byKey(const ValueKey('compact-provider-provider9'));
+      expect(horizontalScroll, findsOneWidget);
+      expect(lastChip, findsOneWidget);
+      expect(
+        tester.getRect(lastChip).left,
+        greaterThan(tester.getRect(horizontalScroll).right),
+      );
+
+      for (var i = 0; i < providers.length; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pumpAndSettle();
+      }
+
+      final focused = tester.getSemantics(lastChip).getSemanticsData();
+      expect(focused.flagsCollection.isFocused, Tristate.isTrue);
+      expect(
+        tester.getRect(lastChip).left,
+        lessThan(tester.getRect(horizontalScroll).right),
+      );
+      expect(
+        tester.getRect(lastChip).right,
+        greaterThan(tester.getRect(horizontalScroll).left),
+      );
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    },
+  );
+
   testWidgets('profile delete failure is bounded and keeps the profile', (
     tester,
   ) async {
@@ -600,6 +1096,8 @@ void main() {
     tester,
   ) async {
     late BuildContext appContext;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     textScale.value = TextSize.large.scale;
     appThemeSpec.value = appThemeLight;
 
@@ -617,7 +1115,7 @@ void main() {
     await tester.pump();
 
     expect(Theme.of(appContext).brightness, Brightness.light);
-    expect(MediaQuery.textScalerOf(appContext).scale(10), 11.5);
+    expect(MediaQuery.textScalerOf(appContext).scale(10), 23);
     expect(Theme.of(appContext).textTheme.bodyMedium?.fontFeatures, isNotEmpty);
 
     appThemeSpec.value = appThemeHacker;
@@ -806,6 +1304,8 @@ void main() {
     expect(find.text('Quota'), findsOneWidget);
     expect(find.textContaining('timed out'), findsOneWidget);
     expect(find.textContaining('retrying automatically'), findsOneWidget);
+    expect(find.textContaining('checked '), findsOneWidget);
+    expect(find.textContaining('as of '), findsNothing);
     expect(find.textContaining('private-token-value'), findsNothing);
     expect(find.byType(ProviderTile), findsNothing);
     expect(
@@ -814,6 +1314,204 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('failed refresh makes retained quota last known and unroutable', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    var collections = 0;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () async {
+            collections++;
+            if (collections == 1) return [quota];
+            throw StateError('private-token-value');
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('Next: Claude'), findsOneWidget);
+    expect(find.textContaining('80% free'), findsWidgets);
+
+    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Refresh failed; showing previous data'), findsOneWidget);
+    expect(find.text('80% last known'), findsOneWidget);
+    expect(find.textContaining('80% free'), findsNothing);
+    expect(find.textContaining('Next: Claude'), findsNothing);
+    expect(find.textContaining('cached | account-wide'), findsOneWidget);
+    expect(find.text('live read failed - showing last known'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('Trusted quota headroom unavailable'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('private-token-value'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('first run offers provider review and persists completion', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    Prefs? saved;
+    final quota = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          demoMode: false,
+          collector: () async => [quota],
+          prefsSaver: (prefs) async => saved = prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.text('Start here: review provider connections'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Review'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Providers'), findsOneWidget);
+    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(saved?.setupDone, isTrue);
+
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('completed degraded refresh never looks current', (tester) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final stale = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now - 3600,
+      stale: true,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 60, resetsAt: now + 86400),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () async => [stale],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.text(
+        'No current quota data; showing cached or unavailable providers',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('checked '), findsOneWidget);
+    expect(find.textContaining('as of '), findsNothing);
+    expect(find.textContaining('cached | account-wide'), findsOneWidget);
+    expect(find.text('40% last known'), findsOneWidget);
+    expect(find.textContaining('40% free'), findsNothing);
+    expect(
+      find.bySemanticsLabel('Trusted quota headroom unavailable'),
+      findsOneWidget,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('manual refresh announces and disables its in-flight state', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 20, resetsAt: now + 86400),
+      ],
+    );
+    final pending = Completer<List<ProviderQuota>>();
+    var collections = 0;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () {
+            collections++;
+            return collections == 1 ? Future.value([quota]) : pending.future;
+          },
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byTooltip('Refresh now'), findsOneWidget);
+    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.pump();
+
+    expect(find.byTooltip('Refreshing quotas'), findsOneWidget);
+    final disabled = tester.widget<InkWell>(
+      find.descendant(
+        of: find.byTooltip('Refreshing quotas'),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(disabled.onTap, isNull);
+
+    pending.complete([quota]);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byTooltip('Refresh now'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -923,6 +1621,7 @@ void main() {
   testWidgets('insights panel renders reliability, trend, pace, and heatmap', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     await _useDesktopSurface(tester);
     final history = [_historyPoint(20), _historyPoint(45), _historyPoint(70)];
     final heatmap = List<List<double?>>.generate(
@@ -969,7 +1668,23 @@ void main() {
       expect(find.textContaining('usually 20-90% free'), findsOneWidget);
       expect(find.textContaining('before reset'), findsOneWidget);
       expect(find.textContaining('free by hour'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(
+          'Quota headroom history, oldest to newest. 3 samples. Latest 30 '
+          'percent free; range 30 to 80 percent.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel(
+          'Quota headroom heatmap by weekday and hour. 14 sampled slots, '
+          'ranging from 0 to 61 percent free. Best sampled slot Sunday at 1 '
+          'AM, 61 percent free.',
+        ),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     }
+    semantics.dispose();
   });
 }
