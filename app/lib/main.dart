@@ -1244,15 +1244,27 @@ class _DashboardState extends State<Dashboard>
         }
         for (final q in _displayed) {
           final key = quotaDisplayKey(q);
-          final rows = providerTileQuotaRowCount(q, now);
-          var card =
-              64.0 + rows * 14.0; // card chrome, trust line, and data rows
-          if (desktopScopedModelQuotas(q).isNotEmpty) {
+          final isExpanded = _expanded.contains(key);
+          // The tight default hides the provenance line, model-specific quota,
+          // and the "usually" line; they only add height once the card expands.
+          final scopedRows = desktopScopedModelQuotas(q).length * 2;
+          final rows =
+              providerTileQuotaRowCount(q, now) - (isExpanded ? 0 : scopedRows);
+          var card = 64.0 + rows * 14.0; // card chrome and data rows
+          if (isExpanded && desktopScopedModelQuotas(q).isNotEmpty) {
             card += 18; // model-specific section heading
           }
           if (q.suspect != null && q.driftReason == null) card += 20;
+          // The inline Connect button shows on a failed read for a provider that
+          // supports quotabot's own login; budget its row so the first frame
+          // before measured sizing does not clip it.
+          if (_canConnectProvider(q.provider) &&
+              !q.isLocal &&
+              (q.stale || !isTrustedQuotaEvidenceAt(q, now))) {
+            card += 28;
+          }
           if (q.isLocal) card += q.details.length * 14; // detail lines
-          if ((_history[key] ?? const []).isNotEmpty) {
+          if (isExpanded && (_history[key] ?? const []).isNotEmpty) {
             card += 20; // "usually ~X% free" line
           }
           // An expanded insights panel adds a sparkline, a couple of lines, and
@@ -1692,6 +1704,9 @@ class _DashboardState extends State<Dashboard>
         WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
       }),
       onContextMenu: (pos) => _showCardMenu(q, pos),
+      onConnect: widget._hostIntegration && _canConnectProvider(q.provider)
+          ? () => unawaited(_connectAndValidate(q.provider, account: q.account))
+          : null,
       showAccounts: _shouldShowAccount(q, counts),
     );
   }
@@ -3384,6 +3399,11 @@ class ProviderTile extends StatelessWidget {
   final bool expanded;
   final VoidCallback? onToggle;
   final void Function(Offset globalPosition)? onContextMenu;
+
+  /// Starts an in-app login for providers that support quotabot's own grant
+  /// (Grok, Antigravity). Null when the provider cannot be connected from the
+  /// GUI, which hides the inline Reconnect affordance.
+  final VoidCallback? onConnect;
   final bool showAccounts;
   final int? nowEpochSeconds;
   const ProviderTile({
@@ -3396,6 +3416,7 @@ class ProviderTile extends StatelessWidget {
     this.expanded = false,
     this.onToggle,
     this.onContextMenu,
+    this.onConnect,
     this.showAccounts = true,
     this.nowEpochSeconds,
   });
@@ -3449,7 +3470,14 @@ class ProviderTile extends StatelessWidget {
         ? muted
         : _availColor(binding.remaining);
     final hasInsights = insights != null && insights!.samples > 0;
-    final expandable = hasInsights && onToggle != null;
+    // The tight default shows only the binding windows. Any card can expand to
+    // reveal its provenance line, model-specific quota, and analytics, so the
+    // affordance is offered whenever a toggle is wired, not just for insights.
+    final expandable = onToggle != null;
+    // Detail is hidden only when there is a working toggle to bring it back. A
+    // non-interactive tile (no toggle wired) shows everything so nothing becomes
+    // permanently unreachable behind an affordance that is not there.
+    final showDetail = expanded || !expandable;
     final trustLine = desktopProviderTrustLine(quota, now);
     final trustDetail = desktopProviderTrustDetail(quota, now);
     final rawPlan = quota.plan?.trim();
@@ -3582,39 +3610,40 @@ class ProviderTile extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (hasInsights) ...[
+                  if (expandable) ...[
                     const SizedBox(width: 4),
                     Icon(
                       expanded
                           ? Icons.expand_less_rounded
-                          : Icons.insights_rounded,
+                          : Icons.expand_more_rounded,
                       size: 13,
                       color: muted,
                     ),
                   ],
                 ],
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Semantics(
-                  label: trustDetail,
-                  excludeSemantics: true,
-                  child: Tooltip(
-                    message: trustDetail,
-                    excludeFromSemantics: true,
-                    child: Text(
-                      trustLine,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: AppType.small,
-                        fontWeight: FontWeight.w500,
-                        color: muted,
+              if (showDetail)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Semantics(
+                    label: trustDetail,
+                    excludeSemantics: true,
+                    child: Tooltip(
+                      message: trustDetail,
+                      excludeFromSemantics: true,
+                      child: Text(
+                        trustLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppType.small,
+                          fontWeight: FontWeight.w500,
+                          color: muted,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
               if (quota.suspect != null && quota.driftReason == null)
                 _providerSuspectRow(quota.suspect!, const Color(0xFFD29922)),
               if (resetMessage != null)
@@ -3655,6 +3684,37 @@ class ProviderTile extends StatelessWidget {
                   quota.driftReason == null &&
                   quota.error?.isNotEmpty == true)
                 _providerStaleFailureRow(quota.error!, driftColor),
+              // Surface the in-app login right where the failure shows, so a
+              // provider that supports quotabot's own grant (Grok, Antigravity)
+              // can be reconnected without a terminal. Kept out of the tight/
+              // expanded gate because a failed login is always actionable.
+              if (onConnect != null &&
+                  !quota.isLocal &&
+                  (quota.stale || !trustedEvidence))
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: onConnect,
+                      icon: const Icon(Icons.login_rounded, size: 14),
+                      label: const Text('Connect'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF58A6FF),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        textStyle: const TextStyle(
+                          fontSize: AppType.small,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               const SizedBox(height: 10),
               if (quota.isLocal)
                 (localAvailable
@@ -3702,7 +3762,7 @@ class ProviderTile extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (scopedModelQuotas.isNotEmpty) ...[
+              if (showDetail && scopedModelQuotas.isNotEmpty) ...[
                 _scopedQuotaHeading(quota, muted),
                 ...scopedModelQuotas.map((modelQuota) {
                   final spendEvidence = claudeFableSpendEvidenceAt(
@@ -3726,8 +3786,8 @@ class ProviderTile extends StatelessWidget {
                   );
                 }),
               ],
-              if (forecast != null) _forecastRow(forecast, muted),
-              if (history.isNotEmpty)
+              if (showDetail && forecast != null) _forecastRow(forecast, muted),
+              if (showDetail && history.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: () {
@@ -3744,7 +3804,7 @@ class ProviderTile extends StatelessWidget {
                     );
                   }(),
                 ),
-              if (expanded && hasInsights)
+              if (showDetail && hasInsights)
                 InsightsPanel(
                   insights: insights!,
                   history: history,

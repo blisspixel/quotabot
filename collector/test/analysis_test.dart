@@ -1587,22 +1587,59 @@ void main() {
       );
     });
 
-    test('watches closely near a cap', () {
+    test('watches closely near a cap when the reset is near', () {
+      final near = _now + 3 * 3600;
+      expect(
+        nextRefreshSeconds([
+          _q('codex',
+              [QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: near)])
+        ], _now),
+        300, // 5% free, resets soon
+      );
+      expect(
+        nextRefreshSeconds([
+          _q('codex',
+              [QuotaWindow(label: 'weekly', usedPercent: 70, resetsAt: near)])
+        ], _now),
+        900, // 30% free, resets soon
+      );
+    });
+
+    test('a window spent for days backs off instead of fast polling', () {
+      // Nearly or fully spent with a far-off reset has nothing to watch until it
+      // resets, so it must not pin the fleet to a fast poll and hammer the
+      // provider. It relaxes to the far-reset cadence like a healthy provider.
       final far = _now + 5 * 86400;
       expect(
         nextRefreshSeconds([
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: far)])
         ], _now),
-        300, // 5% free
+        12 * 3600, // 5% free but resets in 5 days
       );
       expect(
         nextRefreshSeconds([
           _q('codex',
-              [QuotaWindow(label: 'weekly', usedPercent: 70, resetsAt: far)])
+              [QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: far)])
         ], _now),
-        900, // 30% free
+        12 * 3600, // fully spent, resets in 5 days
       );
+    });
+
+    test('a spent far-reset provider does not speed up a healthy fleet', () {
+      // A live but spent Codex (reset days away) alongside a healthy Claude must
+      // not drag the whole fleet to a fast poll; the binding reset is far.
+      final far = _now + 5 * 86400;
+      final spent = _q('codex',
+          [QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: far)]);
+      final healthy = _q('claude', [
+        QuotaWindow(
+            label: 'weekly', usedPercent: 50, resetsAt: _now + 3 * 86400),
+        QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 4 * 3600),
+      ]);
+      // Soonest reset is Claude's 5h window (~4h), so it relaxes to 15 min, not
+      // the 5 min the spent Codex would otherwise force.
+      expect(nextRefreshSeconds([spent, healthy], _now), 900);
     });
 
     test('relaxes when healthy and resets are far off', () {

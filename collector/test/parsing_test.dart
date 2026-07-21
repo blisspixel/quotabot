@@ -676,6 +676,62 @@ void main() {
   });
 
   group('claude', () {
+    test('additive root blocks alongside a limits array do not reject the read',
+        () {
+      // The live /usage response ships many non-account root blocks next to the
+      // authoritative `limits` array: usage-credit `spend`, `extra_usage`, and
+      // per-model or rotating codenamed weekly windows. These carry quota-shaped
+      // markers but are not account windows, so they must not fail the whole
+      // read and drop the real 5h and weekly windows. Shape captured live.
+      final data = <String, dynamic>{
+        'five_hour': {'utilization': 4.0},
+        'seven_day': {'utilization': 56.0},
+        'seven_day_opus': null,
+        'seven_day_sonnet': {'utilization': 12.0},
+        'tangelo': {'is_active': true},
+        'nimbus_quill': {'group': 'weekly'},
+        'extra_usage': {'utilization': null, 'is_enabled': false},
+        'spend': {'percent': 0, 'severity': 'normal', 'enabled': false},
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': 4,
+            'resets_at': '2026-07-21T18:20:00Z',
+            'scope': null,
+            'is_active': false,
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': 56,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': null,
+            'is_active': false,
+          },
+          {
+            'kind': 'weekly_scoped',
+            'group': 'weekly',
+            'percent': 83,
+            'resets_at': '2026-07-24T09:00:00Z',
+            'scope': {
+              'model': {'id': null, 'display_name': 'Fable'},
+              'surface': null,
+            },
+            'is_active': true,
+          },
+        ],
+      };
+
+      final w = claudeWindows(data);
+      final models = claudeModelQuotas(data);
+      expect(w.map((e) => e.label), ['5h', 'weekly']);
+      expect(w.firstWhere((e) => e.label == '5h').usedPercent, 4);
+      expect(w.firstWhere((e) => e.label == 'weekly').usedPercent, 56);
+      expect(models.map((m) => m.model), contains('Fable'));
+      expect(models.firstWhere((m) => m.model == 'Fable').usedPercent, 83);
+    });
+
     test('prefers canonical limits and normalizes scoped families', () {
       final data = <String, dynamic>{
         'limits': [
@@ -1433,58 +1489,122 @@ void main() {
       expect(antigravityWindows(null, now), isEmpty);
     });
 
-    test('rejects every partial live model table atomically', () {
+    test('a broken metered row still rejects the whole live table', () {
       final reset = now + 3600;
-      final invalidSiblings = <Object?>[
+      // A structurally broken row, or a metered row (one that carries a real
+      // reset window) whose remaining fraction is unparseable, means the table
+      // cannot be trusted: dropping a possibly-binding variant could overstate
+      // headroom, so the whole live read is rejected.
+      final fatalSiblings = <Object?>[
         'wrong-shaped model row',
-        <String, Object?>{},
-        {'quotaInfo': 'wrong-shaped quota info'},
         {
-          'quotaInfo': {'remainingFraction': 0.1},
-        },
-        {
-          'quotaInfo': {
-            'remainingFraction': 0.1,
-            'resetTime': 'not-a-reset',
-          },
-        },
-        {
-          'quotaInfo': {
-            'remainingFraction': 0.1,
-            'resetTime': 0,
-          },
-        },
-        {
-          'quotaInfo': {
-            'remainingFraction': 1.01,
-            'resetTime': reset,
-          },
+          'quotaInfo': {'remainingFraction': 1.01, 'resetTime': reset},
         },
       ];
 
-      for (final invalidSibling in invalidSiblings) {
+      for (final fatalSibling in fatalSiblings) {
         final response = {
           'models': {
             'Gemini 3.5 Flash (Medium)': {
-              'quotaInfo': {
-                'remainingFraction': 0.9,
-                'resetTime': reset,
-              },
+              'quotaInfo': {'remainingFraction': 0.9, 'resetTime': reset},
             },
-            'Gemini 3.5 Flash (High)': invalidSibling,
+            'Gemini 3.5 Flash (High)': fatalSibling,
           },
         };
 
         expect(
           antigravityWindows(response, now),
           isEmpty,
-          reason: 'an omitted sibling could be the account binding pool',
+          reason: 'a broken metered sibling could be the binding pool',
         );
+        expect(antigravityModelQuotasFromLive(response), isEmpty);
+      }
+    });
+
+    test('non-metered helper rows are skipped, not fatal', () {
+      final reset = now + 3600;
+      // The endpoint lists tab-completion and chat helpers alongside metered
+      // models. They carry no rolling window (no valid reset time), so they must
+      // be ignored, never reject the real windows sitting next to them.
+      // Real helpers carry a quota block with a full remaining fraction and no
+      // usable reset. A fully absent or non-map quota block is missing data, not
+      // a helper, and fails closed instead (see the incomplete-row test below).
+      final helperSiblings = <Object?>[
+        {
+          'quotaInfo': {'remainingFraction': 1}, // no reset -> unmetered
+        },
+        {
+          'quotaInfo': {'remainingFraction': 1, 'resetTime': 'not-a-reset'},
+        },
+        {
+          'quotaInfo': {'remainingFraction': 1, 'resetTime': 0},
+        },
+      ];
+
+      for (final helper in helperSiblings) {
+        final response = {
+          'models': {
+            'tab_helper': helper,
+            'gemini-real': {
+              'quotaInfo': {'remainingFraction': 0.5, 'resetTime': reset},
+            },
+          },
+        };
+
+        final windows = antigravityWindows(response, now);
         expect(
-          antigravityModelQuotasFromLive(response),
-          isEmpty,
-          reason: 'a partial table must not be treated as exhaustive',
+          windows,
+          hasLength(1),
+          reason: 'the metered model still yields its window',
         );
+        expect(windows.single.usedPercent, closeTo(50, 0.01));
+        expect(
+          antigravityModelQuotasFromLive(response).map((m) => m.model),
+          ['gemini-real'],
+          reason: 'only the metered model contributes a quota row',
+        );
+      }
+    });
+
+    test('an incomplete or consumed row without a reset fails closed', () {
+      final reset = now + 3600;
+      // A fully absent or non-map quota block is missing data, and a row that
+      // shows real consumption (fraction below full) but carries no rolling
+      // window is an incomplete metered pool. Neither is a helper; skipping
+      // either would drop a possibly-binding window and overstate headroom, so
+      // the whole table must fail closed.
+      final failClosed = <Object?>[
+        <String, Object?>{}, // no quotaInfo block at all
+        {'quotaInfo': 'wrong-shaped quota info'}, // quotaInfo not a map
+        {
+          'quotaInfo': {'remainingFraction': 0.0}, // fully spent, no reset
+        },
+        {
+          'quotaInfo': {'remainingFraction': 0.1}, // nearly spent, no reset
+        },
+        {
+          'quotaInfo': {'remainingFraction': 0.5, 'resetTime': 'not-a-reset'},
+        },
+        {
+          'quotaInfo': {'remainingFraction': 0.5, 'resetTime': 0},
+        },
+      ];
+
+      for (final row in failClosed) {
+        final response = {
+          'models': {
+            'spent-no-reset': row,
+            'gemini-real': {
+              'quotaInfo': {'remainingFraction': 0.9, 'resetTime': reset},
+            },
+          },
+        };
+        expect(
+          antigravityWindows(response, now),
+          isEmpty,
+          reason: 'a consumed pool with no reset must not be silently dropped',
+        );
+        expect(antigravityModelQuotasFromLive(response), isEmpty);
       }
     });
 

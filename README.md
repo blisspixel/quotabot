@@ -66,11 +66,16 @@ Highlights:
 
 ## What it shows
 
-Each provider is a card with one bar per rolling window (for example a 5 hour and
-a weekly window): green when healthy, amber as it tightens, red when spent, with a
-reset countdown. A longer window overrides a shorter one, so a spent weekly cap
-collapses the card to a single "weekly spent - resets in 2d" line rather than
-showing a green 5 hour bar you cannot use. Local runtimes have no quota, so their
+Each provider is a card that defaults to a tight view: one bar per rolling window
+(for example a 5 hour and a weekly window), green when healthy, amber as it
+tightens, red when spent, with a reset countdown. A longer window overrides a
+shorter one, so a spent weekly cap collapses the card to a single "weekly spent -
+resets in 2d" line rather than showing a green 5 hour bar you cannot use. Click a
+card to expand it for the full provenance line, model-specific rows, and
+analytics; a failed live read, drift, and last-known signals stay on the tight
+card because they are always actionable, and a provider that supports quotabot's
+own login (Grok, Antigravity) shows an inline Connect button when its read fails.
+Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
 Cold on-device models are ranked with a conservative metadata-only hardware-fit
 signal from current RAM and largest-GPU capacity. It never loads a model or runs

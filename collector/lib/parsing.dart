@@ -351,17 +351,20 @@ typedef ClaudeLiveUsage = ({
 ///
 /// The shared session and weekly rows are both binding pools. Dropping either
 /// one can overstate immediate availability, so an admitted response must prove
-/// both. Every recognized canonical row and every present known legacy block
-/// must also be structurally valid. Unknown additive root fields and
-/// advisory-only canonical kinds remain compatible. An unknown row or root
-/// block carrying quota markers rejects the atomic observation because it may
-/// be a newly introduced binding pool.
+/// both. Every recognized canonical `limits` row and every present known legacy
+/// block must also be structurally valid, and an unknown quota-shaped row inside
+/// the `limits` array still rejects the observation because a new binding pool
+/// arrives there. When the authoritative `limits` array is present, additive
+/// non-account root blocks alongside it (usage-credit `spend`, `extra_usage`, and
+/// per-model or rotating codenamed weekly windows) are tolerated rather than
+/// failing the whole read. The strict unknown-root-block guard applies only to
+/// the older response shape that has no `limits` array, where an unknown root
+/// block carrying quota markers may be a newly introduced binding pool.
 ClaudeLiveUsage? claudeLiveUsage(
   Map<String, dynamic>? data, {
   int? observedAt,
 }) {
   if (data == null) return null;
-  if (_claudeHasUnknownRootQuotaBlock(data)) return null;
   final observation = observedAt ?? nowEpoch();
 
   var canonical = (
@@ -369,12 +372,21 @@ ClaudeLiveUsage? claudeLiveUsage(
     windows: const <QuotaWindow>[],
     modelQuotas: const <ModelQuota>[],
   );
+  final hasCanonicalLimits = data['limits'] is List;
   if (data.containsKey('limits')) {
     final limits = data['limits'];
     if (limits is! List) return null;
     canonical = _claudeCanonicalLimits(limits, observation);
     if (!canonical.valid) return null;
   }
+
+  // The `limits` array is the authoritative account-window source. Anthropic
+  // ships many additive non-account root blocks alongside it (usage credits,
+  // spend, per-model and rotating codenamed windows), so the strict
+  // unknown-root-block guard only applies to the older response shape that has
+  // no `limits` array; failing the whole read on those additive blocks would
+  // drop the account's real 5h and weekly windows entirely.
+  if (!hasCanonicalLimits && _claudeHasUnknownRootQuotaBlock(data)) return null;
 
   final legacy = _legacyClaudeUsage(data);
   if (!legacy.valid) return null;
@@ -866,10 +878,16 @@ typedef _AntigravityLiveQuotaRow = ({
   int resetsAt,
 });
 
-/// Parses the live model table as one exhaustive quota snapshot. Every model
-/// advertised by the provider must carry a complete quota row. Publishing only
-/// the well-shaped siblings could hide the binding effort variant and overstate
-/// headroom, so any incomplete row rejects the whole live table.
+/// Parses the live model table into one quota snapshot. The endpoint lists two
+/// kinds of models side by side: metered ones that carry a rolling window
+/// (`quotaInfo` with a `resetTime`) and non-metered helpers (tab-completion and
+/// chat models) that have no reset time and a full remaining fraction. A row
+/// with no reset window is skipped only when it also shows no consumption (a full
+/// or absent fraction), rather than rejecting the whole table - otherwise a
+/// single helper hides every real window. A metered row whose remaining fraction
+/// is unparseable, and a consumed row (fraction below full) that carries no
+/// reset, both stay fatal: dropping a possibly-binding variant there could
+/// overstate headroom.
 List<_AntigravityLiveQuotaRow>? _antigravityLiveQuotaRows(
   Map<String, dynamic>? resp,
 ) {
@@ -880,12 +898,23 @@ List<_AntigravityLiveQuotaRow>? _antigravityLiveQuotaRows(
     final model = entry.value;
     if (model is! Map) return null;
     final quotaInfo = model['quotaInfo'];
+    // A model with no quota block at all is missing data, not a recognizable
+    // helper: the non-metered helpers the endpoint lists (tab-completion, chat)
+    // still carry a quota block with a full remaining fraction and no reset. A
+    // fully absent block could hide a constrained variant, so fail closed.
     if (quotaInfo is! Map) return null;
     final remainingFraction = _fraction(quotaInfo['remainingFraction']);
     final resetsAt = parseReset(quotaInfo['resetTime']);
-    if (remainingFraction == null || resetsAt == null || resetsAt <= 0) {
+    if (resetsAt == null || resetsAt <= 0) {
+      // No rolling window. That is a non-metered helper only when it also shows
+      // no consumption (a full or absent fraction, like the tab-completion and
+      // chat rows). A row that shows real consumption but carries no reset is an
+      // incomplete metered pool; skipping it would drop a possibly-binding window
+      // and overstate headroom, so fail the whole table closed instead.
+      if (remainingFraction == null || remainingFraction >= 1) continue;
       return null;
     }
+    if (remainingFraction == null) return null;
     out.add((
       model: entry.key.toString(),
       remainingFraction: remainingFraction,

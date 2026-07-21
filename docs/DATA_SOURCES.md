@@ -196,11 +196,16 @@ PROV-DM conformance.
   Older responses expose equivalent `five_hour`, `seven_day`, and per-model
   blocks with `utilization`; those remain a compatibility fallback only when
   the combined observation proves both shared binding pools. Admission is
-  atomic: every recognized canonical row and every present known legacy block
-  must be structurally complete, so a valid session or Fable row cannot survive
-  a malformed sibling. A null optional legacy Opus block means that scoped pool
-  is absent. Unknown additive fields remain compatible. Model-scoped rows gate
-  only the matching model and never become provider-wide binding windows.
+  atomic for the canonical rows: every recognized `limits` row and every present
+  known legacy block must be structurally complete, so a valid session or Fable
+  row cannot survive a malformed sibling. A null optional legacy Opus block means
+  that scoped pool is absent. When the authoritative `limits` array is present,
+  additive non-account root blocks that ship alongside it - usage-credit `spend`,
+  `extra_usage`, and per-model or rotating codenamed weekly windows - are
+  tolerated rather than failing the whole `/usage` response; the strict
+  unknown-root-block guard applies only to the older response shape that has no
+  `limits` array. Model-scoped rows gate only the matching model and never become
+  provider-wide binding windows.
 - The companion profile response can provide current Max, Pro, Team Premium, or
   Team Standard entitlement when the usage response omits `subscription_type`.
   It can also identify whether independently successful credentials point at
@@ -314,10 +319,12 @@ State lives in the Antigravity globalStorage SQLite database at
   `:fetchAvailableModels`) for per-model `quotaInfo` with `remainingFraction`,
   `resetTime`, and `isExhausted`. These are quota metadata calls, not generation,
   so they cost no tokens. The per-model quotas are bucketed into windows by reset.
-  The model table is admitted as one exhaustive response: any missing or
-  malformed model row, quota object, fraction, or reset rejects the whole live
-  table so a hidden sibling cannot overstate account headroom. The adapter then
-  fails soft to its documented fallback instead of mixing partial live rows.
+  Non-metered helper models the endpoint lists alongside real ones - tab-completion
+  and chat models that carry no reset window - are skipped rather than rejecting
+  the whole table. A metered row (one that carries a reset window) whose fraction
+  is unparseable still rejects the live table so a hidden sibling cannot overstate
+  account headroom, and the adapter then fails soft to its documented fallback
+  instead of mixing partial live rows.
 - The local `userStatus` cache is this-machine state. It is used for account and
   plan discovery, and as an offline last-known fallback when live quota is
   unavailable. A successful live read is preferred and is not overridden by local

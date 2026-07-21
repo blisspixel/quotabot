@@ -120,8 +120,10 @@ protobuf-like byte streams, gRPC-web frames, embedded-token blobs, and passive
 SQLite rows, plus sanitized provider-shape fixtures loaded from
 `collector/test/fixtures/` so the pure parsers are checked against stable
 recorded shapes without touching live credentials or provider APIs.
-Antigravity admits its live model table atomically, rejecting the full response
-if any advertised sibling lacks a complete quota row. Kiro projects only the
+Antigravity skips non-metered helper models in its live model table - the
+tab-completion and chat models it lists that carry no reset window - and keeps
+the real metered windows, so a helper cannot reject the whole table; only a
+metered row with an unparseable fraction still fails closed. Kiro projects only the
 exact `kiro.resourceNotifications.usageState` child, so unrelated agent state
 cannot become quota or freshness evidence. `provider_adapters.dart` is the
 compile-time registry for all built-in adapters and their required sanitized
@@ -151,11 +153,13 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
 - Claude's current usage response separates shared session and weekly windows
   from optional model-scoped weekly limits. Shared windows govern provider
   routing; a scoped row is a sparse model-budget overlay, so spending it cannot
-  block unrelated Claude models. The parser admits the whole response or none
-  of it: both shared binding rows and every recognized scoped row must be valid.
-  Present known legacy blocks follow the same rule, preventing a malformed
-  weekly or model sibling from being silently discarded while healthier rows
-  continue to route.
+  block unrelated Claude models. The parser requires both shared binding rows and
+  every recognized scoped row in the authoritative `limits` array to be valid,
+  and present known legacy blocks follow the same rule, so a malformed weekly or
+  model sibling is never silently discarded while healthier rows continue to
+  route. Additive non-account root blocks that ship alongside the `limits` array -
+  usage credits, per-model, and rotating codenamed weekly windows - are tolerated
+  rather than failing the whole response.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
   Cursor's current included-usage pool is normalized as a monthly quota window
@@ -485,14 +489,18 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   providers display without an overflow. Small minimum size supports compact
   mode. Dragging works on the full header bar and content/cards area (buttons
   excluded).
-- `ProviderTile` computes the binding window (the one with the least headroom).
-  If that window is exhausted, the card collapses to a single line; otherwise it
-  renders one `WindowBar` per window. Windows with `resetsAt` (e.g. Claude weekly)
-  show countdowns (e.g. "80%  3d12h"). When a provider is visibly burning it adds
-  a glance-layer forecast line on the binding window, worded plainly from the
-  shared `classifyForecast` (the same forecast `top` shows): a runway estimate or,
-  once a strand is material, a plain warning. It is shown only with a real burn
-  signal, never invented.
+- `ProviderTile` computes the binding window (the one with the least headroom)
+  and defaults to a tight view: the window bars with their reset countdowns
+  (e.g. "80%  3d12h"), plus the always-actionable failure, drift, and last-known
+  signals. If the binding window is exhausted, the card collapses to a single
+  line; otherwise it renders one `WindowBar` per window. Clicking a card expands
+  it to reveal the full provenance line, the model-specific rows, the recent
+  "usually ~X% free" line, and the burn forecast. That forecast is worded plainly
+  from the shared `classifyForecast` (the same one `top` shows): a runway estimate
+  or, once a strand is material, a plain warning, shown only with a real burn
+  signal, never invented. A provider whose live read failed and that supports
+  quotabot's own login (Grok, Antigravity) also shows an inline Connect action on
+  its card, so it can be reconnected from the app without a terminal.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
   a route, moving, or resizing the window; the body scrolls within the current
@@ -509,10 +517,12 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   grey is still used when no data is available. The OS application icon
   (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style mark
   (light/dark friendly) for the desktop icon.
-- Compact and expanded views, plus hide/show per provider. The expanded view
-  groups distinct account identities when work and personal accounts coexist,
-  and expansion state is keyed by provider/account so opening one account's
-  details does not open its sibling. Duplicate-provider cards always show their
+- A whole-widget compact strip (logo plus status dot per provider) and the full
+  card view, plus hide/show per provider. In the card view, per-card expansion
+  toggles the card's own detail - the provenance line, model-specific rows, and
+  analytics - on top of the tight default, and it also groups distinct account
+  identities when work and personal accounts coexist. Expansion state is keyed by
+  provider/account so opening one account's details does not open its sibling. Duplicate-provider cards always show their
   account when the "Show account names" preference is enabled; single-account
   labels remain hidden. `prefs.dart` persists hidden providers, compact state,
   cadence, always on top, taskbar visibility, enable notifications,
@@ -533,8 +543,9 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   non-default profile hidden-provider, sort, and theme preferences back into the
   profile file. The `default` profile keeps the legacy app prefs file.
 - A thirty second timer repaints so the last-check label ("checked HH:MM AM")
-  and reset countdowns stay current. Provider cards carry their own evidence
-  capture age; actual data refresh is on a separate adaptive timer.
+  and reset countdowns stay current. Each card carries its own evidence capture
+  age in its expanded provenance line; actual data refresh is on a separate
+  adaptive timer.
 - History snapshots (last few per provider) load from jsonl and show a
   "usually ~X% free (last N)" line in expanded tiles when an average is present
   ("N recent checks" otherwise).
@@ -547,11 +558,15 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
 ## Adaptive refresh
 
 `_nextInterval()` picks the next refresh delay from the current data: about
-thirty seconds when a reset is imminent, five minutes near a cap, fifteen
-minutes when partially used, and one hour to twelve hours when everything is
-healthy and resets are far off. A cycle that returns nothing live backs off to
-one hour, then six. A fixed cadence (15 minutes or 1 hour) can be chosen from
-the menu instead of the smart schedule.
+thirty seconds when a reset is imminent, and five to fifteen minutes when a
+provider is near a cap and its binding window's own reset is near enough to be
+worth watching. A provider that is spent (or nearly so) but whose reset is far
+away is not watched closely - it just sits there until it resets - so it relaxes
+to the one hour to twelve hour cadence like a healthy provider rather than
+pinning the whole fleet to a fast poll and hammering the provider. A cycle that
+returns nothing live backs off to one hour, then six. A fixed cadence (15 minutes
+or 1 hour) can be chosen from the menu instead of the smart schedule. `top` and
+`watch` share the same `nextRefreshSeconds`, so all three poll alike.
 
 ## Packaging
 

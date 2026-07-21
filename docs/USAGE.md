@@ -20,27 +20,35 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   provider has more than one account on screen.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
-  configured.
-- **Smart schedule:** refreshes more often as a reset nears or a cap fills, and
-  relaxes to as little as twice a day when everything is healthy.
+  configured. A provider whose live read failed and that supports quotabot's own
+  login (Grok, Antigravity) also shows an inline Connect button on its card, so
+  it can be reconnected from the app without a terminal.
+- **Smart schedule:** refreshes more often only when a reset is near, or after a
+  failed read, and relaxes to as little as twice a day when everything is healthy
+  or a provider is spent with a far-off reset. A long-spent provider never pulls
+  the fleet into fast polling.
 - **Route signal:** the expanded header shows the next recommended route, its
   current free headroom, any material burn discount, and confidence. Account
   names still appear only when needed to distinguish multiple accounts.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
-- **Trust line:** each provider card carries a compact line for live, cached, or
-  provider-drift state, normalized source class, spend class, and capture age,
-  so the number is not separated from where it came from. The desktop source
-  labels are `account-wide`, `this-machine fallback`, `passive local`,
-  `local runtime`, `status only`, and `manual`; `account-wide` is its
-  plain-language rendering of the `authoritative_live` wire class. Drift also
-  adds a visible, screen-reader-announced warning and suppresses forecasts from
-  stale evidence.
-- **Forecast at a glance:** when a provider is visibly burning, the card adds a
-  plain-language line on the binding window ("about an hour of usage left", or
+- **Trust line:** the tight card keeps the always-actionable signals - a failed
+  live read, provider drift, and the last-known label on the bar. Expanding a
+  card reveals the full provenance line: live, cached, or provider-drift state,
+  normalized source class, spend class, and capture age, so the number is not
+  separated from where it came from. The desktop source labels are `account-wide`,
+  `this-machine fallback`, `passive local`, `local runtime`, `status only`, and
+  `manual`; `account-wide` is its plain-language rendering of the
+  `authoritative_live` wire class. Drift adds a visible, screen-reader-announced
+  warning and suppresses forecasts from stale evidence.
+- **Forecast:** expanding a card shows a plain-language line on the binding
+  window when a provider is visibly burning ("about an hour of usage left", or
   "likely to run out before it resets" once that risk is material), the same
   forecast `quotabot top` shows. It appears only with a real burn signal.
-- **Insights panel:** tap a card to expand a headroom sparkline, the p10/p50/p90
-  distribution, how often it is usable, any trend, and the tightest hour of day.
+- **Tight by default, tap to expand:** each card defaults to its window bars and
+  reset countdowns. Tapping a card expands it to reveal the provenance line, the
+  model-specific rows, the recent "usually ~X% free" line, and the insights panel
+  - a headroom sparkline, the p10/p50/p90 distribution, how often it is usable,
+  any trend, and the tightest hour of day.
 - Your hidden providers, compact/expanded state, cadence, always-on-top, taskbar,
   notifications, account-names, active profile, and window position persist
   across restarts. Non-default profiles keep their own hidden-provider, sort,
@@ -307,8 +315,9 @@ quotabot top --sort=headroom  # order providers by a routing metric
 ```
 
 By default the collection cadence adapts to the same logic the desktop app uses:
-it polls fast (down to 30s) when a window is near its cap or a reset is imminent,
-and relaxes to hours when the whole fleet is healthy and resets are far off, so
+it polls fast (down to 30s) when a reset is imminent, or when a window is near its
+cap and that window's own reset is near enough to be worth watching, and relaxes
+to hours when the fleet is healthy or a provider is spent with a far-off reset, so
 it is responsive when it matters without hammering provider APIs. The footer
 shows when the data was last collected. `--interval` pins a fixed rate.
 

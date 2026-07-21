@@ -2,6 +2,34 @@
 
 Notable changes to quotabot. Newest first.
 
+## Unreleased
+
+### Fixed
+- Claude live `/usage` reads no longer fail as an invalid response when Anthropic
+  ships additive non-account blocks alongside the authoritative `limits` array
+  (usage-credit `spend`, `extra_usage`, per-model and rotating codenamed weekly
+  windows). The account 5 hour and weekly windows and the scoped Fable row parse
+  as before; the strict unknown-root-block guard now applies only to the older
+  response shape that has no `limits` array.
+- Antigravity live quota windows are no longer discarded when the Cloud Code
+  model table includes non-metered helper models (tab-completion and chat models
+  that carry no reset window). Those rows are skipped instead of rejecting the
+  whole table, while a genuinely malformed metered row still fails closed.
+- Adaptive refresh no longer polls a provider every few minutes when it is spent
+  but its reset is days away. A near-empty window is watched closely only while
+  its binding window's own reset is near; otherwise it relaxes to the slow
+  cadence, so a long-spent provider cannot pull the whole fleet into fast polling
+  or trip provider rate limits.
+
+### Changed
+- The desktop provider card defaults to a tight view (the binding windows and
+  reset time). Clicking a card expands it to reveal the full provenance line,
+  model-specific quota, and analytics. The failure, drift, and last-known signals
+  stay visible in the tight view because they are always actionable.
+- A provider whose live read failed and that supports quotabot's own login
+  (Grok, Antigravity) shows an inline Connect action on its card, so the account
+  can be reconnected from the app without a terminal.
+
 ## 0.9.3 - 2026-07-19
 
 ### Security
