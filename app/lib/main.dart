@@ -3326,10 +3326,19 @@ class _FocusableProviderCard extends StatefulWidget {
 
 class _FocusableProviderCardState extends State<_FocusableProviderCard> {
   bool _showFocus = false;
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled || widget.onActivate == null) return widget.child;
+    final primary = Theme.of(context).colorScheme.primary;
+    // Focus wins with a full ring; a plain hover gets a quieter accent edge so
+    // the card reads as interactive without competing with the keyboard focus.
+    final borderColor = _showFocus
+        ? primary
+        : _hover
+        ? primary.withValues(alpha: 0.45)
+        : Colors.transparent;
     return Semantics(
       container: true,
       label: widget.label,
@@ -3339,6 +3348,7 @@ class _FocusableProviderCardState extends State<_FocusableProviderCard> {
       onTap: widget.onActivate,
       child: FocusableActionDetector(
         enabled: true,
+        mouseCursor: SystemMouseCursors.click,
         shortcuts: const <ShortcutActivator, Intent>{
           SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
           SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
@@ -3354,16 +3364,15 @@ class _FocusableProviderCardState extends State<_FocusableProviderCard> {
         onShowFocusHighlight: (show) {
           if (_showFocus != show) setState(() => _showFocus = show);
         },
-        child: DecoratedBox(
-          position: DecorationPosition.foreground,
-          decoration: BoxDecoration(
+        onShowHoverHighlight: (hover) {
+          if (_hover != hover) setState(() => _hover = hover);
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 130),
+          curve: Curves.easeOut,
+          foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(11),
-            border: Border.all(
-              color: _showFocus
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.transparent,
-              width: 2,
-            ),
+            border: Border.all(color: borderColor, width: _showFocus ? 2 : 1.5),
           ),
           child: widget.child,
         ),
@@ -3612,12 +3621,17 @@ class ProviderTile extends StatelessWidget {
                   ],
                   if (expandable) ...[
                     const SizedBox(width: 4),
-                    Icon(
-                      expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 13,
-                      color: muted,
+                    AnimatedRotation(
+                      // One chevron that rotates, so expand and collapse read as
+                      // the same control moving rather than two different icons.
+                      turns: expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 160),
+                      curve: Curves.easeOut,
+                      child: Icon(
+                        Icons.expand_more_rounded,
+                        size: 14,
+                        color: muted,
+                      ),
                     ),
                   ],
                 ],
@@ -4472,12 +4486,19 @@ class WindowBar extends StatelessWidget {
         Expanded(
           flex: 7,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: remaining / 100.0,
-              minHeight: 7,
-              backgroundColor: chrome.gaugeTrack,
-              valueColor: AlwaysStoppedAnimation(color),
+            borderRadius: BorderRadius.circular(4.5),
+            child: TweenAnimationBuilder<double>(
+              // Ease the fill to its new level on refresh so a jump reads as
+              // motion, not a flicker.
+              tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) => LinearProgressIndicator(
+                value: v,
+                minHeight: 8,
+                backgroundColor: chrome.gaugeTrack,
+                valueColor: AlwaysStoppedAnimation(color),
+              ),
             ),
           ),
         ),
