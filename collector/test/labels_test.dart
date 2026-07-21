@@ -30,6 +30,19 @@ void main() {
     });
   });
 
+  group('capturedAgeLabel', () {
+    test('uses natural copy only for an exact current capture', () {
+      expect(capturedAgeLabel(1000, 1000), 'captured just now');
+      expect(capturedAgeLabel(999, 1000), 'captured 1s ago');
+      expect(capturedAgeLabel(940, 1000), 'captured 60s ago');
+    });
+
+    test('keeps missing and future captures explicit', () {
+      expect(capturedAgeLabel(0, 1000), isEmpty);
+      expect(capturedAgeLabel(1001, 1000), 'captured in the future');
+    });
+  });
+
   group('countdown', () {
     test('reached, day+hour, and hour+minute forms', () {
       expect(countdown(1000, 1000), 'now');

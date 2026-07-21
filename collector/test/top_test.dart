@@ -1174,7 +1174,7 @@ void main() {
       expect(_plain(claude).startsWith('> '), isFalse);
     });
 
-    test('the footer surfaces the hidden count and a copy confirmation', () {
+    test('the footer surfaces the hidden count and a copy request', () {
       final providers = [
         _q('claude', [QuotaWindow(label: 'weekly', usedPercent: 20)]),
       ];
@@ -1189,7 +1189,8 @@ void main() {
         copied: 'grok',
       ).last;
       expect(_plain(footer), contains('show(2)'));
-      expect(_plain(footer), contains('copied grok'));
+      expect(_plain(footer), contains('copy requested grok'));
+      expect(_plain(footer), isNot(contains('copied grok')));
       expect(_plain(footer), contains('x'));
     });
   });

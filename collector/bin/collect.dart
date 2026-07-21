@@ -1781,7 +1781,8 @@ void _printHelp() {
   stdout.writeln('');
   stdout.writeln(head('OPTIONS'));
   stdout.writeln(
-    '  --json              machine-readable output (status/check/suggest/stats/json)',
+    '  --json              machine-readable output where supported '
+    '(including suggest, models, report, verify)',
   );
   stdout.writeln(
     '  --profile=NAME      use a local named profile view',
@@ -3400,12 +3401,10 @@ bool _routeHasAccountIdentity(RouteCandidate c) =>
     hasSpecificQuotaAccount(c.account) &&
     (c.account.contains('@') || isOpaqueCredentialIdentity(c.account));
 
-const routeFutureCaptureLabel = 'captured in the future';
+const routeFutureCaptureLabel = capturedInFutureLabel;
 
 String routeCaptureAgeLabel(int capturedAt, int decisionAsOf) {
-  if (capturedAt <= 0) return '';
-  if (capturedAt > decisionAsOf) return routeFutureCaptureLabel;
-  return 'captured ${compactAge(decisionAsOf - capturedAt, suffix: ' ago')}';
+  return capturedAgeLabel(capturedAt, decisionAsOf);
 }
 
 /// Pace for a provider from its live binding window plus the recent burn rate.

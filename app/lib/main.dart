@@ -133,7 +133,9 @@ bool hasSuccessfulRefreshEvidence(Iterable<ProviderQuota> providers, int now) =>
           !status.startsWith('not configured');
     });
 
-final SingleInstanceGuard _singleInstance = SingleInstanceGuard();
+final SingleInstanceGuard _singleInstance = _shotsMode
+    ? SingleInstanceGuard.ephemeral()
+    : SingleInstanceGuard();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

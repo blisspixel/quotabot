@@ -275,11 +275,13 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
     }
   }
   if (quota.asOf > 0) {
-    detail.add(
-      quota.asOf > now
-          ? 'Capture time is ahead of this machine clock.'
-          : 'Captured ${ageLabel(quota.asOf, now)} ago.',
-    );
+    if (quota.asOf > now) {
+      detail.add('Capture time is ahead of this machine clock.');
+    } else if (quota.asOf == now) {
+      detail.add('Captured just now.');
+    } else {
+      detail.add('Captured ${ageLabel(quota.asOf, now)} ago.');
+    }
   } else {
     detail.add('Capture time is unavailable.');
   }
@@ -298,6 +300,7 @@ String? _desktopProviderSpendClass(ProviderQuota quota) {
 String _desktopCaptureAgeLabel(int asOf, int now) {
   if (asOf <= 0) return 'capture time unknown';
   if (asOf > now) return 'captured in the future';
+  if (asOf == now) return 'captured just now';
   return 'captured ${ageLabel(asOf, now)} ago';
 }
 

@@ -11,6 +11,16 @@ Future<int> _unusedLoopbackPort() async {
 }
 
 void main() {
+  test('ephemeral guards do not contend with a running app', () async {
+    final first = SingleInstanceGuard.ephemeral();
+    final second = SingleInstanceGuard.ephemeral();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+
+    expect(await first.tryBecomePrimary(onShowRequested: () async {}), isTrue);
+    expect(await second.tryBecomePrimary(onShowRequested: () async {}), isTrue);
+  });
+
   test(
     'a second instance detects the first and is told to step aside',
     () async {

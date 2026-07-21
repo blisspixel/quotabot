@@ -38,6 +38,32 @@ login.
 
 <p align="center"><sub>Demo mode: the desktop widget, compact strip, 90-day analytics view, and <code>quotabot top</code>.</sub></p>
 
+## Quick start
+
+Install the latest verified CLI release:
+
+**macOS / Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
+```
+
+Restart the terminal, then get one truthful status and one recommendation:
+
+```bash
+quotabot doctor
+quotabot suggest
+```
+
+If a provider is not current, `doctor` shows its evidence state and repair hint.
+Use `quotabot verify --require-live` when automation must fail unless selected
+provider reads are live. See [Setup](docs/SETUP.md) for inspect-before-run,
+idle-machine login, update, and uninstall paths.
+
 Highlights:
 
 - **Cross-platform.** One codebase on Windows, macOS, and Linux.

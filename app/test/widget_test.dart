@@ -903,7 +903,7 @@ void main() {
         now,
       );
 
-      expect(line, 'live | account-wide | quota plan | captured 0s ago');
+      expect(line, 'live | account-wide | quota plan | captured just now');
     });
 
     test('labels cached manual quota without plan identity noise', () {
@@ -937,7 +937,7 @@ void main() {
 
       expect(
         line,
-        'provider drift | account-wide | quota plan | captured 0s ago',
+        'provider drift | account-wide | quota plan | captured just now',
       );
     });
 
@@ -957,7 +957,7 @@ void main() {
         now,
       );
 
-      expect(line, 'in use | local runtime | captured 0s ago');
+      expect(line, 'in use | local runtime | captured just now');
     });
 
     test('labels an idle local runtime without claiming it is active', () {
@@ -975,7 +975,7 @@ void main() {
         now,
       );
 
-      expect(line, 'available | local runtime | captured 0s ago');
+      expect(line, 'available | local runtime | captured just now');
     });
 
     test('labels a rejected local configuration as an error', () {
@@ -994,7 +994,7 @@ void main() {
         now,
       );
 
-      expect(line, 'error | local runtime | captured 0s ago');
+      expect(line, 'error | local runtime | captured just now');
     });
 
     test('labels status-only metadata without claiming live quota', () {
@@ -1010,7 +1010,7 @@ void main() {
         now,
       );
 
-      expect(line, 'metadata | status only | captured 0s ago');
+      expect(line, 'metadata | status only | captured just now');
     });
 
     test('labels this-machine fallback without repeated scope', () {
@@ -1027,7 +1027,7 @@ void main() {
         now,
       );
 
-      expect(line, 'metadata | this-machine fallback | captured 0s ago');
+      expect(line, 'metadata | this-machine fallback | captured just now');
     });
 
     test('labels passive local evidence without repeating machine scope', () {
@@ -1044,7 +1044,7 @@ void main() {
         now,
       );
 
-      expect(line, 'live | passive local | metered plan | captured 0s ago');
+      expect(line, 'live | passive local | metered plan | captured just now');
     });
 
     test('states when passive evidence has no capture provenance', () {

@@ -5,6 +5,14 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- The README now puts the verified install, `doctor`, and `suggest` path before
+  provider internals, and its screenshots and animation are regenerated from the
+  current card, analytics, compact-strip, and terminal surfaces.
+- Fresh provenance now reads "captured just now" instead of "captured 0s ago"
+  across CLI, desktop, and reports. The interactive terminal says "copy
+  requested" after sending OSC 52 because terminals do not acknowledge whether
+  they accepted the clipboard request, and global CLI help now describes the
+  current machine-readable output surface accurately.
 - A slow or rate-limited live read (a request timeout, or an HTTP 429) now reads
   as "throttled - retrying" in amber rather than a red "live read failed", in the
   desktop card, `quotabot top`, and the machine-readable trust detail, because it
@@ -21,6 +29,11 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- README demo capture now uses an isolated single-instance guard, resolves the
+  discovered Flutter executable before changing build directories, builds from
+  the existing locked package resolution, and carries normalized loaded models
+  in its synthetic local-runtime data. Maintainers can regenerate truthful demo
+  media while the installed tray app remains open.
 - Live reads no longer time out spuriously during a fleet poll. Each provider read
   used the top-level `http` helpers, which open and discard a fresh connection per
   call, so a concurrent poll opened many cold DNS/TLS connections at once and the

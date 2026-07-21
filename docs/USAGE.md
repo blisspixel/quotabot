@@ -336,7 +336,8 @@ Navigate and act with the keyboard: `j`/`k` (or the up/down arrows) move the
 cursor, `x` (or `h`) hides the selected provider for the session and `u` brings
 them all back, and `c` copies the recommended route (the provider to send the
 next request to) to your clipboard via the terminal, so you can paste it straight
-into a tool. The footer shows the hidden count and a brief "copied" confirmation.
+into a tool. The footer shows the hidden count and a brief "copy requested"
+status because OSC 52 does not report whether the terminal accepted it.
 
 A spent longer window collapses its
 provider to one line, the same binding-window rule the widget uses. Piped or on a dumb terminal it prints a single plain frame and

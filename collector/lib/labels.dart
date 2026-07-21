@@ -34,6 +34,20 @@ String compactAge(int seconds, {String suffix = '', bool floorNow = false}) {
   return '${(seconds / 86400).round()}d$suffix';
 }
 
+const capturedInFutureLabel = 'captured in the future';
+
+/// A complete capture-age phrase for provenance and trust labels.
+///
+/// Exact current evidence reads naturally as `captured just now`; older
+/// evidence keeps the compact elapsed unit, and clock skew stays explicit.
+String capturedAgeLabel(int capturedAt, int now) {
+  if (capturedAt <= 0) return '';
+  if (capturedAt > now) return capturedInFutureLabel;
+  final elapsed = now - capturedAt;
+  if (elapsed == 0) return 'captured just now';
+  return 'captured ${compactAge(elapsed, suffix: ' ago')}';
+}
+
 /// A compact two-unit countdown to [resetsAt]: `now` when reached, `2d3h` when a
 /// day or more away, otherwise `3h20m`. Used wherever a precise time-to-reset is
 /// shown (the `top` view and the CLI).

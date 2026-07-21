@@ -48,7 +48,9 @@ def _tool(name: str) -> str:
     path = shutil.which(name) or shutil.which(f"{name}.bat")
     if path is None:
         raise SystemExit(f"{name} not found on PATH")
-    return path
+    # The build runs from app/, so keep a current-directory lookup such as
+    # `.\\flutter.BAT` from becoming invalid when subprocess changes cwd.
+    return str(Path(path).resolve())
 
 
 def _flutter_target() -> tuple[str, Path]:
@@ -70,7 +72,7 @@ def _flutter_target() -> tuple[str, Path]:
 
 def _capture(frame_dir: Path) -> None:
     target, executable = _flutter_target()
-    _run([_tool("flutter"), "build", target, "--debug"], APP_DIR)
+    _run([_tool("flutter"), "build", target, "--debug", "--no-pub"], APP_DIR)
     if not executable.exists():
         raise SystemExit(f"Flutter build did not produce {executable}")
     env = os.environ.copy()

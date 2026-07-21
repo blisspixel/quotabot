@@ -30,6 +30,11 @@ class SingleInstanceGuard {
   factory SingleInstanceGuard({int port = _defaultPort}) =>
       SingleInstanceGuard._(port);
 
+  /// An isolated guard for explicit developer automation such as screenshot
+  /// capture. Port zero asks the OS for a fresh loopback port, so the operation
+  /// cannot ring or displace the installed app's production instance.
+  factory SingleInstanceGuard.ephemeral() => SingleInstanceGuard._(0);
+
   SingleInstanceGuard._(this._port);
 
   /// Attempts to become the primary instance. Returns true when this process is

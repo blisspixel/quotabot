@@ -944,7 +944,7 @@ List<String> renderTopFrame({
       ], 5),
       if (copied.isNotEmpty)
         _Seg([
-          _Cell('copied $copied  ', (s, t) => _accent(s, p, t)),
+          _Cell('copy requested $copied  ', (s, t) => _accent(s, p, t)),
         ], 3),
       if (updated.isNotEmpty)
         _Seg([

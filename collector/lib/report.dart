@@ -332,9 +332,7 @@ String _trustReadState(QuotaHealthProviderLine provider) {
 }
 
 String _captureAgeLabel(int asOf, int generatedAt) {
-  if (asOf <= 0) return '';
-  if (asOf > generatedAt) return 'captured in the future';
-  return 'captured ${compactAge(generatedAt - asOf, suffix: ' ago')}';
+  return capturedAgeLabel(asOf, generatedAt);
 }
 
 String _iso(int epochSeconds) => DateTime.fromMillisecondsSinceEpoch(

@@ -547,6 +547,20 @@ void main() {
     expect(
       help.stdout as String,
       contains(
+        'machine-readable output where supported (including suggest, models, report, verify)',
+      ),
+    );
+    expect(
+      help.stdout as String,
+      isNot(
+        contains(
+          'machine-readable output (status/check/suggest/stats/json)',
+        ),
+      ),
+    );
+    expect(
+      help.stdout as String,
+      contains(
         'Quota and routing reads use metadata only and cost no usage tokens.',
       ),
     );
@@ -651,7 +665,8 @@ void main() {
 
   test('future capture label does not present clock skew as fresh', () {
     expect(cli.routeCaptureAgeLabel(1050, 1000), cli.routeFutureCaptureLabel);
-    expect(cli.routeCaptureAgeLabel(1000, 1000), 'captured 0s ago');
+    expect(cli.routeCaptureAgeLabel(1000, 1000), 'captured just now');
+    expect(cli.routeCaptureAgeLabel(999, 1000), 'captured 1s ago');
   });
 
   test('invalid simulation state is a usage error', () async {
