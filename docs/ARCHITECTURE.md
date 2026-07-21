@@ -557,19 +557,22 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
 
 ## Adaptive refresh
 
-`_nextInterval()` picks the next refresh delay from the current data: about
-thirty seconds when a reset is imminent, and five to fifteen minutes when a
+`_nextInterval()` picks the next refresh delay from the current data. Quota moves
+slowly and a cloud read can be rate-limited, so the default leans gentle: about
+thirty seconds only when a reset is imminent, ten to twenty minutes when a
 provider is near a cap and its binding window's own reset is near enough to be
-worth watching. A provider that is spent (or nearly so) but whose reset is far
-away is not watched closely - it just sits there until it resets - so it relaxes
-to the one hour to twelve hour cadence like a healthy provider rather than
-pinning the whole fleet to a fast poll and hammering the provider. A cycle that
-returns nothing live backs off to one hour, then six. When a provider is
-throttling (a request timeout or an HTTP 429), the cadence holds a floor and
-honors an explicit retry-after so quotabot does not pile onto a rate-limited
-endpoint; an imminent reset is still caught promptly. A fixed cadence (15 minutes
-or 1 hour) can be chosen from the menu instead of the smart schedule. `top` and
-`watch` share the same `nextRefreshSeconds`, so all three poll alike.
+worth watching, twenty minutes at the healthy baseline, and one to twelve hours
+as the nearest reset recedes. A provider that is spent (or nearly so) but whose
+reset is far away is not watched closely - it just sits there until it resets -
+so it relaxes like a healthy provider rather than pinning the whole fleet to a
+fast poll. A cycle that returns nothing live backs off to one hour, then six.
+When a provider keeps throttling (a request timeout or an HTTP 429), the back-off
+escalates each consecutive throttled cycle - twenty minutes, then forty, then
+ninety - and honors an explicit retry-after, so quotabot stops checking a
+provider that keeps pushing back; an imminent reset is still caught promptly. A
+fixed cadence (15 minutes or 1 hour) can be chosen from the menu instead of the
+smart schedule. `top` and `watch` share the same `nextRefreshSeconds`, so all
+three poll alike.
 
 ## Packaging
 

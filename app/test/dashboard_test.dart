@@ -1623,7 +1623,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(find.byType(QuotaMeter), findsOneWidget);
       expect(tester.takeException(), isNull);
     }
     expect(find.text('82% free'), findsOneWidget);

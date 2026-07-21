@@ -471,6 +471,7 @@ class _DashboardState extends State<Dashboard>
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
   int _failStreak = 0; // consecutive refreshes with no live data at all
+  int _throttleStreak = 0; // consecutive refreshes with a throttled provider
   late Set<String> _hidden;
   late ProviderSort _sort;
   Map<String, List<ProviderQuota>> _history = {};
@@ -1069,6 +1070,16 @@ class _DashboardState extends State<Dashboard>
       // Track systemic failure...
       final anyLive = hasSuccessfulRefreshEvidence(active, nowSec);
       _failStreak = anyLive ? 0 : _failStreak + 1;
+      // Track throttling separately from a full failure: a provider can push
+      // back (a timeout or a 429) while others read fine, so the refresh cadence
+      // can escalate its back-off from that provider without waiting for the
+      // whole fleet to go dark.
+      final anyThrottled = active.any(
+        (q) =>
+            q.pipeHealth == providerPipeHealthThrottled ||
+            q.pipeHealth == providerPipeHealthDegraded,
+      );
+      _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
       setState(() {
         _profiles = profiles;
         _activeProfile = _profileByName(selectedProfile);
@@ -1200,7 +1211,12 @@ class _DashboardState extends State<Dashboard>
     // The adaptive cadence is shared with the CLI's `top` so both poll alike.
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return Duration(
-      seconds: nextRefreshSeconds(_data, now, failStreak: _failStreak),
+      seconds: nextRefreshSeconds(
+        _data,
+        now,
+        failStreak: _failStreak,
+        throttleStreak: _throttleStreak,
+      ),
     );
   }
 
@@ -3597,7 +3613,7 @@ class ProviderTile extends StatelessWidget {
                   else if (quota.windows.isNotEmpty)
                     _Dot(statusColor),
                   if (planLabel != null) ...[
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                     Flexible(
                       child: Semantics(
                         label: planDetail,
@@ -3605,14 +3621,25 @@ class ProviderTile extends StatelessWidget {
                         child: Tooltip(
                           message: planDetail!,
                           excludeFromSemantics: true,
-                          child: Text(
-                            planLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppType.caption,
-                              fontWeight: FontWeight.w500,
-                              color: muted,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: muted.withValues(alpha: 0.13),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              planLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.small,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.3,
+                                color: muted,
+                              ),
                             ),
                           ),
                         ),
@@ -4440,6 +4467,49 @@ Color _availColor(num remaining) {
 }
 
 /// One rolling window rendered as: [label] [availability bar] [reset / %].
+/// A rounded quota meter. The fill carries a subtle top-to-bottom lift so it
+/// reads as a lit level rather than a flat block, and the whole bar is a pill.
+class QuotaMeter extends StatelessWidget {
+  final double value;
+  final Color color;
+  final Color track;
+  const QuotaMeter({
+    super.key,
+    required this.value,
+    required this.color,
+    required this.track,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const height = 8.0;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(height / 2),
+      child: LayoutBuilder(
+        builder: (context, c) => SizedBox(
+          width: c.maxWidth,
+          height: height,
+          child: Stack(
+            children: [
+              Positioned.fill(child: ColoredBox(color: track)),
+              Container(
+                width: c.maxWidth * value.clamp(0.0, 1.0),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color.lerp(color, Colors.white, 0.22)!, color],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class WindowBar extends StatelessWidget {
   final WinView view;
   final Color muted;
@@ -4485,21 +4555,14 @@ class WindowBar extends StatelessWidget {
         const SizedBox(width: 6),
         Expanded(
           flex: 7,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4.5),
-            child: TweenAnimationBuilder<double>(
-              // Ease the fill to its new level on refresh so a jump reads as
-              // motion, not a flicker.
-              tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
-              duration: const Duration(milliseconds: 320),
-              curve: Curves.easeOutCubic,
-              builder: (context, v, _) => LinearProgressIndicator(
-                value: v,
-                minHeight: 8,
-                backgroundColor: chrome.gaugeTrack,
-                valueColor: AlwaysStoppedAnimation(color),
-              ),
-            ),
+          child: TweenAnimationBuilder<double>(
+            // Ease the fill to its new level on refresh so a jump reads as
+            // motion, not a flicker.
+            tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+            builder: (context, v, _) =>
+                QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
           ),
         ),
         const SizedBox(width: 8),
