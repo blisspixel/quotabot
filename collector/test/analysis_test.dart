@@ -1570,14 +1570,15 @@ void main() {
       expect(nextRefreshSeconds(const [], _now, failStreak: 2), 6 * 3600);
     });
 
-    test('a throttled provider holds the fleet to the throttle floor', () {
-      // A near-cap provider with a near reset would poll fast (300s), but a
-      // throttled sibling backs the whole fleet off to at least the slow floor
-      // so quotabot does not pile onto a rate-limited endpoint.
+    test('a throttled provider backs the fleet off, escalating each cycle', () {
+      // A near-cap provider with a near reset would poll fast, but a throttled
+      // sibling backs the whole fleet off so quotabot does not pile onto a
+      // rate-limited endpoint, and the back-off escalates while it keeps
+      // throttling: twenty minutes, then forty, then ninety.
       final nearCap = _q('claude', [
         QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: _now + 3 * 3600)
       ]);
-      expect(nextRefreshSeconds([nearCap], _now), 300);
+      expect(nextRefreshSeconds([nearCap], _now), 600);
 
       final throttled = ProviderQuota.error(
         'codex',
@@ -1586,7 +1587,12 @@ void main() {
         _now,
         pipeHealth: providerPipeHealthThrottled,
       );
-      expect(nextRefreshSeconds([nearCap, throttled], _now), 900);
+      expect(nextRefreshSeconds([nearCap, throttled], _now, throttleStreak: 1),
+          1200);
+      expect(nextRefreshSeconds([nearCap, throttled], _now, throttleStreak: 2),
+          2400);
+      expect(nextRefreshSeconds([nearCap, throttled], _now, throttleStreak: 5),
+          5400);
     });
 
     test('an explicit retry-after is honored above the throttle floor', () {
@@ -1601,7 +1607,8 @@ void main() {
         pipeHealth: providerPipeHealthThrottled,
         retryAfterSeconds: 1800,
       );
-      expect(nextRefreshSeconds([nearCap, throttled], _now), 1800);
+      expect(nextRefreshSeconds([nearCap, throttled], _now, throttleStreak: 1),
+          1800);
     });
 
     test('a throttled provider still yields to an imminent reset', () {
@@ -1643,14 +1650,14 @@ void main() {
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: near)])
         ], _now),
-        300, // 5% free, resets soon
+        600, // 5% free, resets soon
       );
       expect(
         nextRefreshSeconds([
           _q('codex',
               [QuotaWindow(label: 'weekly', usedPercent: 70, resetsAt: near)])
         ], _now),
-        900, // 30% free, resets soon
+        1200, // 30% free, resets soon
       );
     });
 
@@ -1686,9 +1693,9 @@ void main() {
             label: 'weekly', usedPercent: 50, resetsAt: _now + 3 * 86400),
         QuotaWindow(label: '5h', usedPercent: 20, resetsAt: _now + 4 * 3600),
       ]);
-      // Soonest reset is Claude's 5h window (~4h), so it relaxes to 15 min, not
-      // the 5 min the spent Codex would otherwise force.
-      expect(nextRefreshSeconds([spent, healthy], _now), 900);
+      // Soonest reset is Claude's 5h window (~4h), so it relaxes to the gentle
+      // baseline, not the fast poll the spent Codex would otherwise force.
+      expect(nextRefreshSeconds([spent, healthy], _now), 1200);
     });
 
     test('relaxes when healthy and resets are far off', () {
@@ -1725,7 +1732,7 @@ void main() {
       ]);
 
       expect(nextRefreshSeconds([stale, healthy], _now), 12 * 3600);
-      expect(nextRefreshSeconds([stale], _now), 900);
+      expect(nextRefreshSeconds([stale], _now), 1200);
       expect(nextRefreshSeconds([stale], _now, failStreak: 1), 3600);
     });
 

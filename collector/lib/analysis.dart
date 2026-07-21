@@ -1815,25 +1815,25 @@ double? _projectedWastePercent(
 /// not force the whole fleet into a fast polling loop. Pure, so the desktop app
 /// and `quotabot top` poll on identical logic rather than two drifting copies.
 int nextRefreshSeconds(List<ProviderQuota> data, int now,
-    {int failStreak = 0}) {
+    {int failStreak = 0, int throttleStreak = 0}) {
   if (failStreak >= 2) return 6 * 3600;
   if (failStreak >= 1) return 3600;
 
   int? soonestReset;
   int? nearCapInterval;
-  var throttleFloor = 0;
+  var throttled = false;
+  var retryAfterFloor = 0;
   for (final q in data) {
-    // Back off from a provider that is throttling or slow to answer so quotabot
-    // does not pile onto a rate-limited endpoint. Honor an explicit retry-after,
-    // and otherwise hold a floor. This is checked before the trusted filter
-    // because a throttled read is stale by definition.
+    // A throttled or slow read means the provider is pushing back. Note it (and
+    // any explicit retry-after) before the trusted filter, because a throttled
+    // read is stale by definition, so the escalating back-off below applies.
     if (q.pipeHealth == providerPipeHealthThrottled ||
         q.pipeHealth == providerPipeHealthDegraded) {
-      throttleFloor = math.max(throttleFloor, 900);
+      throttled = true;
     }
     final retryAfter = q.retryAfterSeconds;
-    if (retryAfter != null && retryAfter > throttleFloor) {
-      throttleFloor = retryAfter;
+    if (retryAfter != null && retryAfter > retryAfterFloor) {
+      retryAfterFloor = retryAfter;
     }
     if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
       continue;
@@ -1856,7 +1856,7 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
         bindingReset != null &&
         bindingReset > now &&
         bindingReset - now < 6 * 3600) {
-      final demand = rem <= 10 ? 300 : (rem <= 40 ? 900 : null);
+      final demand = rem <= 10 ? 600 : (rem <= 40 ? 1200 : null);
       if (demand != null) {
         nearCapInterval = nearCapInterval == null
             ? demand
@@ -1869,16 +1869,23 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
   if (soonestReset != null && soonestReset < 600) {
     return soonestReset < 120 ? 30 : 60;
   }
-  // Near a cap with a reset close enough to matter: watch closely so a warning
-  // stays timely. Otherwise relax with how far the nearest reset is.
+  // Escalating back-off while a provider keeps throttling us: stop checking so
+  // much precisely when it keeps pushing back - twenty minutes, then forty, then
+  // ninety per consecutive throttled cycle - and honor an explicit retry-after.
+  if (throttled || throttleStreak > 0) {
+    const steps = [1200, 2400, 5400];
+    final idx = (throttleStreak - 1).clamp(0, steps.length - 1);
+    return math.max(steps[idx], retryAfterFloor);
+  }
+  // Healthy or moderate: a gentle default so a slow-moving quota is not polled
+  // hard enough to trip a rate limit; relax further as the nearest reset recedes.
   final base = nearCapInterval ??
       (soonestReset == null || soonestReset < 6 * 3600
-          ? 900
+          ? 1200
           : soonestReset < 24 * 3600
               ? 3600
               : 12 * 3600);
-  // Never poll faster than the throttle floor while a provider is backing us off.
-  return math.max(base, throttleFloor);
+  return math.max(base, retryAfterFloor);
 }
 
 /// Computes simple average headroom from recent history snapshots.
