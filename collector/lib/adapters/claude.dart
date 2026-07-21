@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../auth/anthropic_auth.dart';
 import '../auth/tokens.dart';
+import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -360,7 +361,7 @@ class ClaudeAdapter {
     final profileFuture = _readProfile(credential, asOf);
     http.Response resp;
     try {
-      final get = _http?.get ?? http.get;
+      final get = _http?.get ?? sharedHttpClient.get;
       resp = await get(
         Uri.parse(_endpoint),
         headers: {
@@ -478,7 +479,7 @@ class ClaudeAdapter {
     int asOf,
   ) async {
     try {
-      final get = _http?.get ?? http.get;
+      final get = _http?.get ?? sharedHttpClient.get;
       final response = await get(
         Uri.parse(_profileEndpoint),
         headers: {

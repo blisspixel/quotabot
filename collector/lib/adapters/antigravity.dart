@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:sqlite3/sqlite3.dart';
 
 import '../auth/google_auth.dart';
+import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -721,7 +722,7 @@ class AntigravityAdapter {
     String method,
     Map<String, dynamic> body,
   ) async {
-    final post = _http?.post ?? http.post;
+    final post = _http?.post ?? sharedHttpClient.post;
     final resp = await post(
       Uri.parse('$_api:$method'),
       headers: {
@@ -891,7 +892,7 @@ class AntigravityAdapter {
       }
       if (refresh == null || refresh.isEmpty) return stored;
 
-      final resp = await http.post(
+      final resp = await sharedHttpClient.post(
         Uri.parse('https://oauth2.googleapis.com/token'),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: {

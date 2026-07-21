@@ -131,6 +131,14 @@ fixtures; tests fail when a new adapter lacks a registry row or fixture.
 
 ## Adapters
 
+Cloud adapters share one pooled, keep-alive HTTP client (`sharedHttpClient`)
+instead of the top-level `http` helpers, which open and discard a fresh
+connection per call. A fleet poll runs every adapter concurrently, so without
+pooling it would open many cold DNS/TLS connections at once and the heavier
+front ends could miss their deadline; a shared client reuses warm connections
+and lets a multi-call adapter reuse one. Adapters still accept an injected client
+for tests.
+
 Each adapter has a single `collect()` method returning a `ProviderQuota`:
 
 - Codex calls the ChatGPT usage metadata endpoint with the OAuth access token

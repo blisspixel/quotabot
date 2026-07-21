@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../http_client.dart';
+
 import '../models.dart';
 import '../provider_ids.dart';
 import '../util.dart';
@@ -44,7 +46,7 @@ class NvidiaAdapter {
       return _noKey(asOf);
     }
     try {
-      final get = _http?.get ?? http.get;
+      final get = _http?.get ?? sharedHttpClient.get;
       final resp = await get(
         Uri.parse('$_base/models'),
         headers: {'Authorization': 'Bearer $key'},
