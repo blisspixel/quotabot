@@ -671,10 +671,14 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       q.stale &&
       q.driftReason == null &&
       q.error?.isNotEmpty == true) {
+    final throttled = q.pipeHealth == providerPipeHealthThrottled ||
+        q.pipeHealth == providerPipeHealthDegraded;
     rows.add(_line([
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
-      _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
+      throttled
+          ? _Cell('throttled - retrying: ${q.error}', (s, t) => s.yellow(t))
+          : _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
     ], width, s));
   }
   for (final d in q.details) {

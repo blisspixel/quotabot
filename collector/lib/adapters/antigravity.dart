@@ -592,7 +592,8 @@ class AntigravityAdapter {
         windows: windows,
         modelQuotas: liveModelQuotas,
       );
-    } catch (_) {
+    } catch (e) {
+      final health = providerPipeHealthForReadError(e);
       return ProviderQuota(
         provider: id,
         displayName: name,
@@ -600,7 +601,10 @@ class AntigravityAdapter {
         plan: plan,
         asOf: asOf,
         ok: false,
-        error: 'unable to read Antigravity state',
+        error: health == providerPipeHealthThrottled
+            ? 'Antigravity read timed out'
+            : 'unable to read Antigravity state',
+        pipeHealth: health,
       );
     }
   }

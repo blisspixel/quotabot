@@ -4,6 +4,15 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- A slow or rate-limited live read (a request timeout, or an HTTP 429) now reads
+  as "throttled - retrying" in amber rather than a red "live read failed", in the
+  desktop card, `quotabot top`, and the machine-readable trust detail, because it
+  is temporary and self-recovering rather than a broken login or a bad response.
+- The adaptive refresh cadence backs off from a throttled provider: it honors an
+  explicit retry-after and otherwise holds a slow floor, so quotabot does not pile
+  onto a rate-limited endpoint. An imminent reset is still caught promptly.
+
 ### Fixed
 - Claude live `/usage` reads no longer fail as an invalid response when Anthropic
   ships additive non-account blocks alongside the authoritative `limits` array

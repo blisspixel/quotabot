@@ -1570,6 +1570,55 @@ void main() {
       expect(nextRefreshSeconds(const [], _now, failStreak: 2), 6 * 3600);
     });
 
+    test('a throttled provider holds the fleet to the throttle floor', () {
+      // A near-cap provider with a near reset would poll fast (300s), but a
+      // throttled sibling backs the whole fleet off to at least the slow floor
+      // so quotabot does not pile onto a rate-limited endpoint.
+      final nearCap = _q('claude', [
+        QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: _now + 3 * 3600)
+      ]);
+      expect(nextRefreshSeconds([nearCap], _now), 300);
+
+      final throttled = ProviderQuota.error(
+        'codex',
+        'Codex',
+        'Codex usage read timed out',
+        _now,
+        pipeHealth: providerPipeHealthThrottled,
+      );
+      expect(nextRefreshSeconds([nearCap, throttled], _now), 900);
+    });
+
+    test('an explicit retry-after is honored above the throttle floor', () {
+      final nearCap = _q('claude', [
+        QuotaWindow(label: 'weekly', usedPercent: 95, resetsAt: _now + 3 * 3600)
+      ]);
+      final throttled = ProviderQuota.error(
+        'codex',
+        'Codex',
+        'HTTP 429',
+        _now,
+        pipeHealth: providerPipeHealthThrottled,
+        retryAfterSeconds: 1800,
+      );
+      expect(nextRefreshSeconds([nearCap, throttled], _now), 1800);
+    });
+
+    test('a throttled provider still yields to an imminent reset', () {
+      // The reset flip is a brief, one-time event, so catch it promptly even
+      // while another provider is throttling.
+      final imminent = _q('claude',
+          [QuotaWindow(label: '5h', usedPercent: 50, resetsAt: _now + 60)]);
+      final throttled = ProviderQuota.error(
+        'codex',
+        'Codex',
+        'timed out',
+        _now,
+        pipeHealth: providerPipeHealthThrottled,
+      );
+      expect(nextRefreshSeconds([imminent, throttled], _now), 30);
+    });
+
     test('polls fast when a reset is imminent', () {
       expect(
         nextRefreshSeconds([
