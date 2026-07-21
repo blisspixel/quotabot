@@ -21,6 +21,14 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Live reads no longer time out spuriously during a fleet poll. Each provider read
+  used the top-level `http` helpers, which open and discard a fresh connection per
+  call, so a concurrent poll opened many cold DNS/TLS connections at once and the
+  heavier endpoints (Codex behind Cloudflare, Antigravity's load-then-fetch
+  sequence) missed their deadline even though the same call is fast in isolation.
+  Reads now share one pooled, keep-alive client so connections are reused, and the
+  ChatGPT usage endpoint gets more timeout headroom for its slower cold connect.
+  Antigravity and Codex read live again.
 - Claude live `/usage` reads no longer fail as an invalid response when Anthropic
   ships additive non-account blocks alongside the authoritative `limits` array
   (usage-credit `spend`, `extra_usage`, per-model and rotating codenamed weekly

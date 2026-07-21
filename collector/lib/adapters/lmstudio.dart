@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../http_client.dart';
+
 import '../local_runtime_config.dart';
 import '../models.dart';
 import '../provider_ids.dart';
@@ -37,7 +39,8 @@ class LmStudioAdapter {
     return localBaseUrl(env['LMSTUDIO_HOST'], lmStudioDefaultPort);
   }
 
-  Future<http.Response> _get(String path) => (_http?.get ?? http.get)(
+  Future<http.Response> _get(String path) =>
+      (_http?.get ?? sharedHttpClient.get)(
         Uri.parse('${baseUrl(environment: _environment)}$path'),
       ).timeout(const Duration(seconds: 2));
 
