@@ -1821,7 +1821,20 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
 
   int? soonestReset;
   int? nearCapInterval;
+  var throttleFloor = 0;
   for (final q in data) {
+    // Back off from a provider that is throttling or slow to answer so quotabot
+    // does not pile onto a rate-limited endpoint. Honor an explicit retry-after,
+    // and otherwise hold a floor. This is checked before the trusted filter
+    // because a throttled read is stale by definition.
+    if (q.pipeHealth == providerPipeHealthThrottled ||
+        q.pipeHealth == providerPipeHealthDegraded) {
+      throttleFloor = math.max(throttleFloor, 900);
+    }
+    final retryAfter = q.retryAfterSeconds;
+    if (retryAfter != null && retryAfter > throttleFloor) {
+      throttleFloor = retryAfter;
+    }
     if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
       continue;
     }
@@ -1851,17 +1864,21 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
       }
     }
   }
-  // A reset about to flip the display: catch it promptly.
+  // A reset about to flip the display: catch it promptly, even under throttle -
+  // the flip is a brief, one-time event worth catching.
   if (soonestReset != null && soonestReset < 600) {
     return soonestReset < 120 ? 30 : 60;
   }
-  // Near a cap with a reset that is close enough to matter: watch closely so a
-  // warning stays timely.
-  if (nearCapInterval != null) return nearCapInterval;
-  // Healthy, or low with a far reset: relax with how far the nearest reset is.
-  if (soonestReset == null || soonestReset < 6 * 3600) return 900;
-  if (soonestReset < 24 * 3600) return 3600;
-  return 12 * 3600;
+  // Near a cap with a reset close enough to matter: watch closely so a warning
+  // stays timely. Otherwise relax with how far the nearest reset is.
+  final base = nearCapInterval ??
+      (soonestReset == null || soonestReset < 6 * 3600
+          ? 900
+          : soonestReset < 24 * 3600
+              ? 3600
+              : 12 * 3600);
+  // Never poll faster than the throttle floor while a provider is backing us off.
+  return math.max(base, throttleFloor);
 }
 
 /// Computes simple average headroom from recent history snapshots.

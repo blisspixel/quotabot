@@ -26,7 +26,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 - **Smart schedule:** refreshes more often only when a reset is near, or after a
   failed read, and relaxes to as little as twice a day when everything is healthy
   or a provider is spent with a far-off reset. A long-spent provider never pulls
-  the fleet into fast polling.
+  the fleet into fast polling, and a provider that is throttling (a timeout or an
+  HTTP 429) backs the schedule off - honoring any retry-after - so quotabot never
+  piles onto a rate-limited endpoint. Such a provider reads as "throttled -
+  retrying", not "live read failed".
 - **Route signal:** the expanded header shows the next recommended route, its
   current free headroom, any material burn discount, and confidence. Account
   names still appear only when needed to distinguish multiple accounts.

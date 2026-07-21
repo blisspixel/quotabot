@@ -3683,7 +3683,13 @@ class ProviderTile extends StatelessWidget {
                   quota.stale &&
                   quota.driftReason == null &&
                   quota.error?.isNotEmpty == true)
-                _providerStaleFailureRow(quota.error!, driftColor),
+                _providerStaleFailureRow(
+                  quota.error!,
+                  driftColor,
+                  throttled:
+                      quota.pipeHealth == providerPipeHealthThrottled ||
+                      quota.pipeHealth == providerPipeHealthDegraded,
+                ),
               // Surface the in-app login right where the failure shows, so a
               // provider that supports quotabot's own grant (Grok, Antigravity)
               // can be reconnected without a terminal. Kept out of the tight/
@@ -4019,10 +4025,21 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _providerStaleFailureRow(String reason, Color color) {
-    final detail =
-        'The latest live quota read failed. Showing last-known quota; routing '
-        'is disabled until a clean read succeeds. Reason: $reason';
+  Widget _providerStaleFailureRow(
+    String reason,
+    Color color, {
+    bool throttled = false,
+  }) {
+    // A throttled or slow pipe is temporary and self-recovering, so it reads as
+    // "throttled - retrying" in amber rather than a red "live read failed" that
+    // implies a broken login or a bad response.
+    const throttleColor = Color(0xFFD29922);
+    final rowColor = throttled ? throttleColor : color;
+    final detail = throttled
+        ? 'The provider is responding slowly (throttled). Showing last-known '
+              'quota and backing off; it retries automatically. Reason: $reason'
+        : 'The latest live quota read failed. Showing last-known quota; routing '
+              'is disabled until a clean read succeeds. Reason: $reason';
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Semantics(
@@ -4035,17 +4052,25 @@ class ProviderTile extends StatelessWidget {
           excludeFromSemantics: true,
           child: Row(
             children: [
-              Icon(Icons.cloud_off_rounded, size: 13, color: color),
+              Icon(
+                throttled
+                    ? Icons.hourglass_top_rounded
+                    : Icons.cloud_off_rounded,
+                size: 13,
+                color: rowColor,
+              ),
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
-                  'live read failed - showing last known',
+                  throttled
+                      ? 'throttled - retrying, showing last known'
+                      : 'live read failed - showing last known',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: AppType.caption,
                     fontWeight: FontWeight.w600,
-                    color: color,
+                    color: rowColor,
                   ),
                 ),
               ),

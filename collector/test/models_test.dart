@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
@@ -530,6 +532,21 @@ void main() {
       expect(providerPipeHealthForHttpStatus(529), providerPipeHealthDegraded);
       expect(providerPipeHealthForHttpStatus(401), isNull);
       expect(providerPipeHealthForHttpStatus(404), isNull);
+    });
+
+    test('classifies a read timeout as throttled, other errors as unknown', () {
+      expect(
+        providerPipeHealthForReadError(
+          TimeoutException('read', const Duration(seconds: 10)),
+        ),
+        providerPipeHealthThrottled,
+      );
+      expect(
+        providerPipeHealthForReadError(const SocketException('refused')),
+        isNull,
+      );
+      expect(
+          providerPipeHealthForReadError(const FormatException('bad')), isNull);
     });
 
     test('drops malformed cached native pipe-health diagnostics', () {
