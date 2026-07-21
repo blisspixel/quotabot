@@ -1361,13 +1361,17 @@ void main() {
     expect(find.text('80% last known'), findsOneWidget);
     expect(find.textContaining('80% free'), findsNothing);
     expect(find.textContaining('Next: Claude'), findsNothing);
-    expect(find.textContaining('cached | account-wide'), findsOneWidget);
     expect(find.text('live read failed - showing last known'), findsOneWidget);
     expect(
       find.bySemanticsLabel('Trusted quota headroom unavailable'),
       findsOneWidget,
     );
     expect(find.textContaining('private-token-value'), findsNothing);
+    // Full provenance stays one tap away in the expanded card.
+    await tester.tap(find.byType(ProviderTile));
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('cached | account-wide'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -1452,13 +1456,20 @@ void main() {
     );
     expect(find.textContaining('checked '), findsOneWidget);
     expect(find.textContaining('as of '), findsNothing);
-    expect(find.textContaining('cached | account-wide'), findsOneWidget);
     expect(find.text('40% last known'), findsOneWidget);
     expect(find.textContaining('40% free'), findsNothing);
     expect(
       find.bySemanticsLabel('Trusted quota headroom unavailable'),
       findsOneWidget,
     );
+    // The tight default proves staleness above without the full provenance
+    // line, which is one tap away in the expanded card and still never reads as
+    // current.
+    expect(find.textContaining('cached | account-wide'), findsNothing);
+    await tester.tap(find.byType(ProviderTile));
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('cached | account-wide'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });
