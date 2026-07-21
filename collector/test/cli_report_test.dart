@@ -37,6 +37,9 @@ void main() {
     final output = result.stdout as String;
     expect(output, startsWith('# quotabot weekly quota health'));
     expect(output, contains('Recommendation:'));
+    expect(output, contains('Decision: qb-'));
+    expect(output, contains('Accounts: anonymized'));
+    expect(output, isNot(contains('you@example.com')));
     expect(output, contains('| Provider | Account | State | Trust |'));
     expect(output, contains('captured'));
     expect(output, contains('| Streak | Pace |'));
@@ -48,8 +51,19 @@ void main() {
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.report.v1');
+    expect(json['decision_code'], isA<String>());
+    expect(json['decision_id'], startsWith('qb-'));
+    expect((json['receipt'] as Map)['schema'], 'quotabot.receipt.v1');
+    expect(json.containsKey('recommended_account'), isTrue);
     expect(json['providers'], isNotEmpty);
     final providers = json['providers'] as List;
+    for (final provider in providers.cast<Map<String, dynamic>>()) {
+      expect(provider['ok'], isA<bool>());
+      expect(provider['as_of'], isA<int>());
+      expect(provider['staleness_seconds'], isA<int>());
+      expect(provider['stale'], isA<bool>());
+      expect(provider['per_machine'], isA<bool>());
+    }
     expect(
       providers.any(
         (provider) => (provider as Map<String, dynamic>)
@@ -70,6 +84,35 @@ void main() {
             .containsKey('weekly_best_time_windows'),
       ),
       isTrue,
+    );
+  });
+
+  test('report includes exact account labels only by explicit request',
+      () async {
+    final redacted = await runCli(['report']);
+    final included = await runCli(['report', '--include-accounts']);
+
+    expectExitCode(redacted, 0);
+    expectExitCode(included, 0);
+    expect(redacted.stdout as String, isNot(contains('you@example.com')));
+    expect(included.stdout as String, contains('you@example.com'));
+    expect(
+      included.stdout as String,
+      contains('Accounts: included by explicit request'),
+    );
+  });
+
+  test('report rejects account inclusion on exact JSON output', () async {
+    final result = await runCli([
+      'report',
+      '--json',
+      '--include-accounts',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(
+      result.stderr as String,
+      contains('--include-accounts applies to Markdown output only'),
     );
   });
 

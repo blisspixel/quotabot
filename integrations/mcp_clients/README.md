@@ -4,13 +4,17 @@ Runnable adoption snippets for using quotabot as a routing MCP server from
 Python or TypeScript. They call quota metadata tools only. They do not send
 prompts, code, or model requests.
 
-## SDK guidance checked June 29, 2026
+## SDK guidance checked July 21, 2026
 
 - Python: use the stable MCP Python SDK v1 line for production clients and pin
   `mcp>=1.28,<2`. PyPI latest was `1.28.1` when checked.
 - TypeScript: use `@modelcontextprotocol/sdk` and the high-level `Client` with
   `StreamableHTTPClientTransport` or `StdioClientTransport`. npm latest was
   `1.29.0` when checked.
+- TypeScript snippets require Node.js 20 or later. The lock overrides the MCP
+  SDK's transitive Hono Node adapter to patched version 2.0.11 because versions
+  below 2.0.5 are affected by the Windows path traversal in
+  [GHSA-frvp-7c67-39w9](https://github.com/advisories/GHSA-frvp-7c67-39w9).
 - Prefer stdio when the MCP client can spawn quotabot directly. Use Streamable
   HTTP when a host requires HTTP, keeping the endpoint on loopback and enabling
   bearer auth for long-lived processes.
@@ -21,8 +25,8 @@ prompts, code, or model requests.
   `notifications/resources/updated` to receive `quotabot.alerts.v1`.
 
 Sources checked: MCP Python SDK v1.x README and client docs, MCP Python SDK v1.x
-`streamable_http.py`, MCP TypeScript SDK v1.x README, client source, and
-Streamable HTTP transport source.
+`streamable_http.py`, MCP TypeScript SDK v1.x README, client source, Streamable
+HTTP transport source, and the Hono Node adapter advisory and v2 release notes.
 
 ## Start quotabot
 

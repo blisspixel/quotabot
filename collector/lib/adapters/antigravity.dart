@@ -73,6 +73,7 @@ class AntigravityAdapter {
   final AntigravityOnboardUser? _onboardUserFn;
   final AntigravityFetchModels? _fetchModelsFn;
   final http.Client? _http;
+  final Duration _requestTimeout;
   final List<String> Function()? _dbPathSource;
   final String? Function()? _activeAccountSource;
   final bool Function()? _hasGeminiCredsSource;
@@ -85,6 +86,7 @@ class AntigravityAdapter {
     AntigravityOnboardUser? onboardUser,
     AntigravityFetchModels? fetchModels,
     http.Client? client,
+    Duration requestTimeout = const Duration(seconds: 15),
     List<String> Function()? dbPathSource,
     String? Function()? activeAccountSource,
     bool Function()? hasGeminiCreds,
@@ -95,6 +97,7 @@ class AntigravityAdapter {
         _onboardUserFn = onboardUser,
         _fetchModelsFn = fetchModels,
         _http = client,
+        _requestTimeout = requestTimeout,
         _dbPathSource = dbPathSource,
         _activeAccountSource = activeAccountSource,
         _hasGeminiCredsSource = hasGeminiCreds;
@@ -541,20 +544,27 @@ class AntigravityAdapter {
       }
 
       var project = _extractProjectId(findKey(load, 'cloudaicompanionProject'));
-      final onboarded = _projectCache[account];
-      if (onboarded != null) {
-        project = onboarded;
-      } else {
-        final tier = _pickOnboardTier(
-          load['allowedTiers'],
-          (load['currentTier'] is Map)
-              ? (load['currentTier'] as Map)['id']?.toString()
-              : null,
-        );
-        final p = await (_onboardUserFn ?? _onboardUser)(access, tier);
-        if (p != null) {
-          project = p;
-          _projectCache[account] = p;
+      // A project returned by loadCodeAssist means this account is already
+      // onboarded. Repeating onboardUser on every short-lived CLI process adds
+      // a needless mutation and another timeout/rate-limit boundary. This
+      // matches the official Gemini CLI setup flow: onboard only when the load
+      // response has no usable project.
+      if (project == null) {
+        final onboarded = _projectCache[account];
+        if (onboarded != null) {
+          project = onboarded;
+        } else {
+          final tier = _pickOnboardTier(
+            load['allowedTiers'],
+            (load['currentTier'] is Map)
+                ? (load['currentTier'] as Map)['id']?.toString()
+                : null,
+          );
+          final p = await (_onboardUserFn ?? _onboardUser)(access, tier);
+          if (p != null) {
+            project = p;
+            _projectCache[account] = p;
+          }
         }
       }
 
@@ -731,7 +741,7 @@ class AntigravityAdapter {
         'User-Agent': 'antigravity',
       },
       body: jsonEncode(body),
-    ).timeout(const Duration(seconds: 10));
+    ).timeout(_requestTimeout);
     if (resp.statusCode != 200) return null;
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }

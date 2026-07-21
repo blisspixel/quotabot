@@ -37,6 +37,7 @@ const int _exitUnavailable = 69;
 
 late AnsiStyle style;
 List<ProviderQuota>? _simulatedSnapshot;
+bool _simulationNoticePending = false;
 
 bool get _usingSimulation => _simulatedSnapshot != null;
 
@@ -104,6 +105,7 @@ Future<List<ProviderQuota>> _collectProfiled(
   QuotaProfile? profile, {
   Set<String> excludedProviders = const {},
 }) async {
+  _printSimulationNoticeIfNeeded();
   final results = _simulatedSnapshot ?? await collectAll();
   final profiled =
       profile == null ? List.of(results) : applyProfile(results, profile);
@@ -114,6 +116,7 @@ Future<_VerifiedRead> _collectProfiledForVerify(
   QuotaProfile? profile, {
   Set<String> excludedProviders = const {},
 }) async {
+  _printSimulationNoticeIfNeeded();
   if (_simulatedSnapshot != null) {
     final profiled = profile == null
         ? List.of(_simulatedSnapshot!)
@@ -145,9 +148,22 @@ Map<String, dynamic> _snapshot(
     {
       'schema': quotabotV1SchemaId,
       if (profile != null) 'profile': profile.name,
+      'snapshot_source': _usingSimulation ? 'simulation' : 'live',
       'generated_at': nowEpoch(),
       'providers': results.map((r) => r.toJson()).toList(),
     };
+
+void _printSimulationNotice() {
+  stdout.writeln(
+    '${style.yellow('SIMULATION')} - synthetic provider evidence\n',
+  );
+}
+
+void _printSimulationNoticeIfNeeded() {
+  if (!_simulationNoticePending) return;
+  _simulationNoticePending = false;
+  _printSimulationNotice();
+}
 
 Future<void> main(List<String> rawArgs) async {
   final args = _normalizeArgs(rawArgs);
@@ -239,6 +255,7 @@ Future<void> main(List<String> rawArgs) async {
     }
     excludedProviders = exclusionSelection.providers;
   }
+  _simulationNoticePending = _usingSimulation && !wantsJson;
 
   switch (cmd) {
     case 'login':
@@ -360,9 +377,29 @@ Future<void> main(List<String> rawArgs) async {
       );
       return;
     case 'report':
-      await _runReport(wantsJson, profile, excludedProviders);
+      final includeAccounts = flags.contains('--include-accounts');
+      if (wantsJson && includeAccounts) {
+        stderr.writeln(
+          'quotabot: --include-accounts applies to Markdown output only',
+        );
+        exitCode = _exitUsage;
+        return;
+      }
+      await _runReport(
+        wantsJson,
+        profile,
+        excludedProviders,
+        includeAccounts: includeAccounts,
+      );
       return;
     case 'top':
+      if (_simulationNoticePending) {
+        if (stdout.hasTerminal) {
+          _simulationNoticePending = false;
+        } else {
+          _printSimulationNoticeIfNeeded();
+        }
+      }
       await _runTop(flags, profile, excludedProviders);
       return;
     case 'watch':
@@ -522,9 +559,10 @@ RouteSuggestion _suggestFor(
   List<String> preferenceOrder = const [],
 }) =>
     () {
-      final activeLeases = Platform.environment['QUOTABOT_DEMO'] == '1'
-          ? const <RouteLease>[]
-          : const FileRouteLeaseStore().active(now);
+      final activeLeases =
+          Platform.environment['QUOTABOT_DEMO'] == '1' || _usingSimulation
+              ? const <RouteLease>[]
+              : const FileRouteLeaseStore().active(now);
       return decide(
         results,
         now,
@@ -1045,6 +1083,7 @@ const _switchOptions = {
   '--allow-external',
   '--color',
   '--help',
+  '--include-accounts',
   '--json',
   '--local-first',
   '--network',
@@ -1164,6 +1203,8 @@ String? _commandOptionError(String command, Set<String> flags) {
         'tier-plan',
         'tier-risk',
       });
+    case 'report':
+      allowed.add('include-accounts');
     case 'top':
       allowed.addAll(const {'interval', 'sort', 'theme', 'truecolor'});
     case 'watch':
@@ -1495,6 +1536,7 @@ Future<void> _runTop(
       color: false,
       clock: _clock(),
       palette: palette,
+      updated: _usingSimulation ? 'SIMULATION' : '',
       sort: sort == TopSort.defaultOrder ? '' : sort.label,
     );
     stdout.writeln(lines.join('\n'));
@@ -1551,9 +1593,11 @@ Future<void> _runTop(
         clock: _clock(),
         depth: depth,
         palette: palette,
-        updated: refreshFailure.isEmpty
-            ? _agoLabel(lastCollect, now)
-            : refreshFailure,
+        updated: _usingSimulation
+            ? 'SIMULATION'
+            : refreshFailure.isEmpty
+                ? _agoLabel(lastCollect, now)
+                : refreshFailure,
         sort: sort.label,
         selected: (selected >= 0 && selected < visible.length)
             ? visible[selected].provider
@@ -1746,7 +1790,7 @@ void _printHelp() {
     '  stats [provider]    90-day analytics: distribution, best windows, pace',
   );
   stdout.writeln(
-    '  report              weekly quota health markdown export',
+    '  report              weekly quota health export; Markdown anonymizes accounts',
   );
   stdout.writeln(
     '  verify              honesty checks over one read; add --require-live for adapter health',
@@ -1767,7 +1811,7 @@ void _printHelp() {
   stdout.writeln(head('CONNECT'));
   stdout.writeln(
     '  login <provider>    connect grok, antigravity, claude, or codex '
-    '(adds a refreshable path; confirm with doctor)',
+    '(adds a refreshable path; inspect with doctor)',
   );
   stdout.writeln('  logout <provider>   disconnect a provider');
   stdout.writeln(
@@ -1783,6 +1827,9 @@ void _printHelp() {
   stdout.writeln(
     '  --json              machine-readable output where supported '
     '(including suggest, models, report, verify)',
+  );
+  stdout.writeln(
+    '  --include-accounts  report: include account labels in Markdown',
   );
   stdout.writeln(
     '  --profile=NAME      use a local named profile view',
@@ -2091,8 +2138,9 @@ Future<void> _runStats(
 Future<void> _runReport(
   bool wantsJson,
   QuotaProfile? profile,
-  Set<String> excludedProviders,
-) async {
+  Set<String> excludedProviders, {
+  bool includeAccounts = false,
+}) async {
   final now = nowEpoch();
   final results = await _read(profile, excludedProviders);
   final tz = DateTime.now().timeZoneOffset;
@@ -2122,7 +2170,7 @@ Future<void> _runReport(
   );
   wantsJson
       ? print(_jsonPretty(report.toJson()))
-      : stdout.write(report.toMarkdown());
+      : stdout.write(report.toMarkdown(includeAccounts: includeAccounts));
 }
 
 /// `check <provider>`: is this one usable right now, and when does it reset.
@@ -2247,7 +2295,7 @@ Future<void> _login(String provider) async {
           },
         );
         stderr.writeln(
-            'Grok connected. Run "quotabot doctor" to verify live data.');
+            'Grok connected. Run "quotabot doctor" to inspect its status.');
       } catch (e) {
         // Match the other providers: a failed device login (network error,
         // timeout, declined code) reports cleanly and exits with the usage code,
@@ -2272,7 +2320,7 @@ Future<void> _login(String provider) async {
           },
         );
         stderr.writeln(
-          'Antigravity connected. You can now run "quotabot doctor" to verify live data.',
+          'Antigravity connected. Run "quotabot doctor" to inspect its status.',
         );
       } catch (e) {
         stderr.writeln('Antigravity login failed: $e');
@@ -2297,7 +2345,7 @@ Future<void> _login(String provider) async {
           promptCode: () async => stdin.readLineSync() ?? '',
         );
         stderr.writeln(
-          'Claude connected. You can now run "quotabot doctor" to verify live data.',
+          'Claude connected. Run "quotabot doctor" to inspect its status.',
         );
       } catch (e) {
         stderr.writeln('Claude login failed: $e');
@@ -2318,7 +2366,7 @@ Future<void> _login(String provider) async {
           },
         );
         stderr.writeln(
-          'Codex connected. You can now run "quotabot doctor" to verify live data.',
+          'Codex connected. Run "quotabot doctor" to inspect its status.',
         );
       } catch (e) {
         stderr.writeln('Codex login failed: $e');
@@ -2732,7 +2780,8 @@ void _printDoctor(
 
   // Passive detection for robustness: report installed popular agentic tools
   // even if no active subscription or full quota data (e.g. cancelled Kiro CLI).
-  final detected = detectInstalledAgenticTools();
+  final detected =
+      _usingSimulation ? const <String>[] : detectInstalledAgenticTools();
   if (detected.isNotEmpty) {
     print('\nDetected installed agentic dev coding tools (passive check):');
     for (final t in detected) {

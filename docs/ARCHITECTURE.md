@@ -112,8 +112,11 @@ network or disk access, so it is unit tested directly against fixtures. Adapters
 are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate parsing.
 This is why the core has high test coverage even though the adapters do I/O.
 `simulation.dart` follows the same rule: it produces deterministic
-`ProviderQuota` snapshots for CLI tests without adapter calls, history reads, or
-burn-history influence. It is intentionally separate from `demo.dart`, which is a
+`ProviderQuota` snapshots for CLI tests without adapter calls, history reads,
+analytics buckets, active route leases, or passive host-tool detection. Human
+surfaces retain an explicit simulation marker, while snapshot JSON and decision
+receipts retain the simulation source. It is intentionally separate from
+`demo.dart`, which is a
 believable multi-provider screenshot fleet rather than an exact assertion tool.
 The parser test layer includes seeded property/fuzz tests over malformed JSON,
 protobuf-like byte streams, gRPC-web frames, embedded-token blobs, and passive

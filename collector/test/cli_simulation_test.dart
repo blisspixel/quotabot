@@ -152,6 +152,7 @@ void main() {
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.v1');
+    expect(json['snapshot_source'], 'simulation');
     final providers = json['providers'] as List;
     expect(providers, hasLength(1));
     final claude = providers.single as Map<String, dynamic>;
@@ -360,8 +361,7 @@ void main() {
     expect((json['ranked'] as List), hasLength(1));
   });
 
-  test('suggest applies active cross-process leases to simulated quota',
-      () async {
+  test('suggest ignores active cross-process leases in simulation', () async {
     final leaseStore = FileRouteLeaseStore(
       dirFactory: () => Directory('${temp.path}/quotabot/leases'),
       idFactory: () => 'cli-lease',
@@ -386,11 +386,13 @@ void main() {
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final claude = (json['ranked'] as List).single as Map<String, dynamic>;
-    expect(claude['lease_discount_percent'], 50.0);
+    expect(claude.containsKey('lease_discount_percent'), isFalse);
     expect(
       (claude['effective_headroom_percent'] as num).toDouble(),
-      lessThan((claude['headroom_percent'] as num).toDouble()),
+      (claude['headroom_percent'] as num).toDouble(),
     );
+    final receipt = json['receipt'] as Map<String, dynamic>;
+    expect((receipt['snapshot'] as Map)['source'], 'simulation');
   });
 
   test('suggest human output names trust provenance', () async {
@@ -403,6 +405,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
+    expect(out, contains('SIMULATION - synthetic provider evidence'));
     expect(out, contains('quota plan'));
     expect(out, contains('live'));
     expect(out, contains('captured'));
@@ -525,8 +528,13 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
+    expect(out, contains('SIMULATION - synthetic provider evidence'));
     expect(out, contains('[live, authoritative, quota plan, captured'));
     expect(out, isNot(contains('Claude (simulated)')));
+    expect(
+      out,
+      isNot(contains('Detected installed agentic dev coding tools')),
+    );
   });
 
   test('doctor shows cached failure before generic login guidance', () async {
@@ -543,7 +551,7 @@ void main() {
     expect(doctor.stdout as String, contains('simulated stale cache'));
     expect(doctor.stdout as String, isNot(contains('quotabot login claude')));
     expect(help.stdout as String, contains('adds a refreshable path'));
-    expect(help.stdout as String, contains('confirm with doctor'));
+    expect(help.stdout as String, contains('inspect with doctor'));
     expect(
       help.stdout as String,
       contains(
@@ -632,6 +640,20 @@ void main() {
     expect(out, isNot(contains('note: this machine only')));
     expect(out, isNot(contains('local fallback; other devices may differ')));
     expect(out, isNot(contains('local runtime, loaded, this machine')));
+  });
+
+  test('top snapshot keeps simulation provenance visible', () async {
+    final result = await runCli([
+      'top',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    expect(
+      result.stdout as String,
+      contains('SIMULATION - synthetic provider evidence'),
+    );
   });
 
   test('doctor provenance does not call plan strings account identities', () {
@@ -723,6 +745,19 @@ void main() {
     }
   });
 
+  test('invalid simulated command does not emit normal output', () async {
+    final result = await runCli([
+      'suggest',
+      '--mock-provider=claude',
+      '--state=healthy',
+      '--risk=bogus',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('--risk'));
+    expect(result.stdout as String, isEmpty);
+  });
+
   test('unknown command fails before producing a snapshot', () async {
     final result = await runCollectCli(
       ['definitely-not-a-command', '--json'],
@@ -771,10 +806,11 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
+    expect(out, contains('SIMULATION - synthetic provider evidence'));
     expect(out, contains('[red] Claude 5h at 0% free'));
     expect(out, contains('fallback: wait for claude'));
     expect(out, contains('[live, authoritative, quota plan, captured'));
-    expect(out, isNot(contains('simulated')));
+    expect(out, isNot(contains('claude (simulated)')));
   });
 
   test('watch provenance names cached route evidence without duplicate emails',

@@ -10,6 +10,8 @@ The root object contains:
 
 - `schema`: always `quotabot.v1`.
 - `generated_at`: Unix epoch seconds.
+- `snapshot_source`: collection mode for CLI snapshots, currently `live` or
+  `simulation`.
 - `profile`: optional local profile name when a filtered view produced the
   snapshot.
 - `account_filter`: optional exact account label when a router narrowed a view.
@@ -336,8 +338,12 @@ prices or caps for this object. Calendar entries use the same sampled-day shape
 described below.
 
 `quotabot report --json` emits `quotabot.report.v1` with `schema`,
-`generated_at`, `recommended_provider`, `recommendation_reason`,
-`fallback_kind`, and `providers`. Provider rows include `source_class`, state,
+`generated_at`, `recommended_provider`, exact `recommended_account`,
+`recommendation_reason`, `fallback_kind`, `decision_code`, `decision_id`, the
+complete content-blind `receipt`, and `providers`. Provider rows include
+`source_class`, state, `ok`, `as_of`, `staleness_seconds`, `stale`, explicit
+`per_machine`, and optional `error`, `drift_reason`, `drift_observed_at`,
+`pipe_health`, `http_status`, and `retry_after_seconds` diagnostics,
 optional `spend_class` (the same spend label the markdown Trust column shows:
 `quota plan`, `metered plan`, `loaded`, `cold`, or a manual budget label),
 headroom/reset metadata, weekly p50 free percent, weekly reliability, weekly

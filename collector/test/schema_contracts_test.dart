@@ -11,6 +11,9 @@ void main() {
       expect(quotabotV1JsonSchema['additionalProperties'], isTrue);
       expect(quotabotV1JsonSchema['required'],
           containsAll(['schema', 'generated_at', 'providers']));
+      final rootProperties =
+          quotabotV1JsonSchema['properties'] as Map<String, Object?>;
+      expect(rootProperties, contains('snapshot_source'));
       final defs = quotabotV1JsonSchema[r'$defs'] as Map<String, Object?>;
       final provider = defs['providerQuota'] as Map<String, Object?>;
       final properties = provider['properties'] as Map<String, Object?>;
@@ -36,6 +39,7 @@ void main() {
     test('accepts additive fields while enforcing stable required fields', () {
       final snapshot = {
         'schema': quotabotV1SchemaId,
+        'snapshot_source': 'simulation',
         'generated_at': 1782000000,
         'future_root': true,
         'providers': [
@@ -126,6 +130,18 @@ void main() {
       };
 
       expect(validateQuotabotV1Snapshot(snapshot), isEmpty);
+    });
+
+    test('rejects an unknown snapshot source when present', () {
+      expect(
+        validateQuotabotV1Snapshot({
+          'schema': quotabotV1SchemaId,
+          'snapshot_source': 'mystery',
+          'generated_at': 1782000000,
+          'providers': const <Object?>[],
+        }),
+        contains(r'$.snapshot_source must be one of live, simulation'),
+      );
     });
 
     test('rejects a present but blank provider drift reason', () {

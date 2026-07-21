@@ -201,15 +201,11 @@ void main() {
       'c@example.com:false',
     ]);
     expect(loadTokens, ['default-token', 'grant-b', 'ide-c']);
-    expect(onboardCalls, [
-      'default-token:PRO',
-      'grant-b:PRO',
-      'ide-c:PRO',
-    ]);
+    expect(onboardCalls, isEmpty);
     expect(fetchCalls, [
-      'default-token:onboard-default-token',
-      'grant-b:onboard-grant-b',
-      'ide-c:onboard-ide-c',
+      'default-token:load-default-token',
+      'grant-b:load-grant-b',
+      'ide-c:load-ide-c',
     ]);
   });
 
@@ -509,6 +505,23 @@ void main() {
     expect(methods, ['loadCodeAssist', 'onboardUser', 'fetchAvailableModels']);
     expect(projects, ['project-api']);
     expect(q.single.windows.single.usedPercent, 60);
+  });
+
+  test('Cloud Code request timeout stays bounded and visible', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('slow@example.com')],
+      tokenResolver: (_, __) async => 'slow-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient((_) async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        return http.Response(jsonEncode(load(project: 'project')), 200);
+      }),
+      requestTimeout: const Duration(milliseconds: 1),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'Antigravity read timed out');
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
   });
 
   test('onboarding picks the first tier when none is marked default', () async {

@@ -42,6 +42,10 @@ const quotabotV1JsonSchema = <String, Object?>{
   'required': _rootRequired,
   'properties': {
     'schema': {'const': quotabotV1SchemaId},
+    'snapshot_source': {
+      'type': 'string',
+      'enum': ['live', 'simulation'],
+    },
     'profile': {'type': 'string', 'minLength': 1},
     'account_filter': {'type': 'string', 'minLength': 1},
     'error': {'type': 'string'},
@@ -199,6 +203,14 @@ List<String> validateQuotabotV1Snapshot(Map<String, dynamic> snapshot) {
   _checkOptionalString(snapshot, 'profile', r'$', errors);
   _checkOptionalString(snapshot, 'account_filter', r'$', errors);
   _checkOptionalString(snapshot, 'error', r'$', errors);
+  _checkStringEnum(
+    snapshot,
+    'snapshot_source',
+    r'$',
+    {'live', 'simulation'},
+    errors,
+    required: false,
+  );
   _checkNonNegativeInt(snapshot, 'generated_at', r'$', errors);
 
   final providers = snapshot['providers'];

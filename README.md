@@ -61,8 +61,10 @@ quotabot suggest
 
 If a provider is not current, `doctor` shows its evidence state and repair hint.
 Use `quotabot verify --require-live` when automation must fail unless selected
-provider reads are live. See [Setup](docs/SETUP.md) for inspect-before-run,
-idle-machine login, update, and uninstall paths.
+provider reads are live. An unfiltered strict run checks the whole built-in
+fleet; use `--profile=NAME` or `--exclude=PROVIDER,...` to select its scope. See
+[Setup](docs/SETUP.md) for inspect-before-run, idle-machine login, update, and
+uninstall paths.
 
 Highlights:
 
@@ -185,10 +187,11 @@ session files for quota evidence. Because host tokens may expire on an idle
 machine, a one-time local `quotabot login claude` or `quotabot login codex` adds
 a separate refreshable grant designed to keep the account-wide read live there.
 Grants are local and are not synchronized, so run the login once on each idle
-machine that needs an independent live read, then use `quotabot doctor` to
-confirm that machine's current result. Refresh and expired-host fall-through
-have deterministic test coverage; dated real-account validation after an idle
-interval remains a tracked 1.0 evidence gate.
+machine that needs an independent live read, then inspect that machine with
+`quotabot doctor`. Use scoped `quotabot verify --require-live` when automation
+must enforce a fresh read. Refresh and expired-host fall-through have
+deterministic test coverage; dated real-account validation after an idle interval
+remains a tracked 1.0 evidence gate.
 Anthropic's usage response does not include a stable account id, so quotabot
 also reads the zero-cost OAuth profile metadata with the same credential. Its
 account and organization ids are hashed locally into the stable account-pool key
@@ -327,16 +330,18 @@ quotabot login claude        # opens a browser; paste the code it shows back
 quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow
 quotabot login antigravity   # opens a browser; sign in with the account you want
-quotabot doctor              # confirm it reads live
+quotabot doctor              # inspect status and repair guidance
 ```
 
 Claude and Codex read the same zero-cost account-wide usage endpoints either way;
 the grant only changes how the token can be refreshed. quotabot stores its own
 refresh token under your per-user config directory, independent of the app's
 credentials, and never writes the host app's credential files. A new or rotated
-grant is not written unless owner-only permission hardening succeeds. Confirm a
-live result with `quotabot doctor`; real-account evidence after an idle interval
-is still tracked as a 1.0 acceptance item. Details in
+grant is not written unless owner-only permission hardening succeeds. Inspect
+the result with `quotabot doctor`. For an automated fresh-read gate, use
+`quotabot verify --require-live` with a profile or exclusions that name the
+intended provider scope. Real-account evidence after an idle interval is still
+tracked as a 1.0 acceptance item. Details in
 [docs/SETUP.md](docs/SETUP.md#4-keep-a-provider-live-on-an-idle-machine-or-pin-an-account-optional).
 
 ## Routing for tools and agents

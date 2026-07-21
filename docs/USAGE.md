@@ -162,8 +162,13 @@ spent, so the provider is unavailable. `provider-drift` exposes stale
 last-trusted windows plus a rejected-observation diagnostic; `metadata` exposes
 a truthful status-only provider with no quota window.
 Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
-state for assertions, skips live adapter calls, ignores real burn history, and
-does not read analytics buckets.
+state for assertions, skips live adapter calls, and ignores real burn history,
+analytics buckets, active route leases, and passive installed-tool detection.
+Human output begins with `SIMULATION - synthetic provider evidence`; terminal
+`top` keeps `SIMULATION` in its frame. Snapshot JSON adds
+`snapshot_source: "simulation"`, and routing receipts use the same source.
+A healthy mock is synthetic and therefore does not satisfy
+`verify --require-live`, which requires an accepted adapter read.
 
 ### Verification (`quotabot verify`)
 
@@ -627,8 +632,9 @@ recorded history and reports how often they come true, as a calibration
 percentage, a Brier score, and a reliability diagram. It fills in over time, once
 predictions' horizons have elapsed, and says plainly when there is not enough yet.
 
-`quotabot report` prints a shareable weekly quota-health markdown report with the
-current recommendation, provider headroom, reset times, seven-day history
+`quotabot report` prints a privacy-safe weekly quota-health Markdown report with
+the current recommendation, decision id, evidence source, provider headroom,
+reset times, seven-day history
 metrics, current sampled-day usable/spent streaks, and a compact sampled-day
 calendar where enough local history exists. Calendar markers are ASCII: `#`
 heavy use, `*` moderate-high, `+` moderate, `.` light, `!` mixed, and `x`
@@ -640,7 +646,13 @@ outrank a supported quiet pattern. Best-time window JSON also includes
 `usable_rate`, shrunk `shrunk_usable_rate`, and a reliability-weighted
 `scheduling_score`, so sparse quiet cells with spent samples are ranked below
 consistently usable windows. Add `--json` for the structured `quotabot.report.v1`
-shape. It is still local metadata only.
+shape. Markdown anonymizes account labels by default while keeping multiple
+accounts distinguishable. Add `--include-accounts` only when the local Markdown
+must show provider-visible account labels. JSON always keeps exact account
+identities for matching and adds the winning account, decision code, decision
+id, complete content-blind receipt, capture time and age, machine scope, stale
+state, and bounded failure or drift evidence. Review JSON before sharing it. It
+is still local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from
 `~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped

@@ -5,6 +5,18 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Deterministic simulation now ignores ambient route leases and passive
+  installed-tool detection, marks every human quota surface as synthetic, and
+  records `snapshot_source: "simulation"` on CLI snapshots. A mock run now
+  produces the same route on machines with different local lease state.
+- Weekly Markdown reports now anonymize account labels by default, distinguish
+  multiple accounts with local report labels, and require
+  `--include-accounts` before provider-visible labels are included. The report
+  also names its decision id and evidence source.
+- `doctor` is now described consistently as the truthful inspection and repair
+  view. Setup guidance points strict automation to scoped
+  `verify --require-live` instead of implying that a successful `doctor` exit
+  proves every adapter read is fresh.
 - The README now puts the verified install, `doctor`, and `suggest` path before
   provider internals, and its screenshots and animation are regenerated from the
   current card, analytics, compact-strip, and terminal surfaces.
@@ -29,6 +41,19 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Antigravity reads now use an existing Cloud Code project returned by
+  `loadCodeAssist` instead of repeating account onboarding in every new process.
+  Already-onboarded accounts avoid an unnecessary mutation and its extra
+  timeout or provider-throttle boundary. Cloud Code requests now use a
+  15-second deadline under the existing 30-second whole-adapter ceiling, which
+  avoids reporting ordinary 10-second response variance as throttling.
+- The TypeScript MCP client sample now pins the transitive Hono Node adapter to
+  a patched 2.0 release, closing the Windows static-file path traversal reported
+  in GHSA-frvp-7c67-39w9 without changing the sample's MCP SDK version.
+- `quotabot.report.v1` now retains the selected account, decision code, complete
+  content-blind receipt, capture time and age, stale and machine scope, plus
+  bounded error, drift, pipe-health, HTTP, and retry evidence. Stored reports
+  can now be correlated with the same routing decision on other surfaces.
 - README demo capture now uses an isolated single-instance guard, resolves the
   discovered Flutter executable before changing build directories, builds from
   the existing locked package resolution, and carries normalized loaded models

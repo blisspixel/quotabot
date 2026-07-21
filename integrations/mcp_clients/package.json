@@ -3,12 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "python -m unittest test_mcp_client_snippets.py"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.0.11"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
