@@ -257,12 +257,22 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
   if (quota.stale &&
       quota.driftReason == null &&
       quota.error?.isNotEmpty == true) {
-    detail.add(
-      quota.hasWindows
-          ? 'Latest live read failed: ${quota.error}. Showing last-known quota; '
-                'routing is disabled until recovery.'
-          : 'Latest live read failed: ${quota.error}. No current quota is available.',
-    );
+    final throttled =
+        quota.pipeHealth == providerPipeHealthThrottled ||
+        quota.pipeHealth == providerPipeHealthDegraded;
+    if (throttled) {
+      detail.add(
+        'Provider is responding slowly (throttled): ${quota.error}. Showing '
+        'last-known quota and backing off; it retries automatically.',
+      );
+    } else {
+      detail.add(
+        quota.hasWindows
+            ? 'Latest live read failed: ${quota.error}. Showing last-known quota; '
+                  'routing is disabled until recovery.'
+            : 'Latest live read failed: ${quota.error}. No current quota is available.',
+      );
+    }
   }
   if (quota.asOf > 0) {
     detail.add(

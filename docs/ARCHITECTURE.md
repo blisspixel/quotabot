@@ -564,7 +564,10 @@ worth watching. A provider that is spent (or nearly so) but whose reset is far
 away is not watched closely - it just sits there until it resets - so it relaxes
 to the one hour to twelve hour cadence like a healthy provider rather than
 pinning the whole fleet to a fast poll and hammering the provider. A cycle that
-returns nothing live backs off to one hour, then six. A fixed cadence (15 minutes
+returns nothing live backs off to one hour, then six. When a provider is
+throttling (a request timeout or an HTTP 429), the cadence holds a floor and
+honors an explicit retry-after so quotabot does not pile onto a rate-limited
+endpoint; an imminent reset is still caught promptly. A fixed cadence (15 minutes
 or 1 hour) can be chosen from the menu instead of the smart schedule. `top` and
 `watch` share the same `nextRefreshSeconds`, so all three poll alike.
 

@@ -250,14 +250,18 @@ class CodexAdapter {
             'chatgpt-account-id': accountId,
         },
       ).timeout(timeout);
-    } catch (_) {
+    } catch (e) {
+      final health = providerPipeHealthForReadError(e);
       return _ReadOutcome.error(
         ProviderQuota.error(
           id,
           name,
-          'unable to read Codex usage',
+          health == providerPipeHealthThrottled
+              ? 'Codex usage read timed out'
+              : 'unable to read Codex usage',
           asOf,
           account: credential.identity,
+          pipeHealth: health,
         ),
       );
     }

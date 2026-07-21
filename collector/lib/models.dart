@@ -1,6 +1,8 @@
 /// Normalized quota model shared by every provider adapter and the UI.
 library;
 
+import 'dart:async';
+
 import 'provider_source.dart';
 
 export 'credential_identity.dart';
@@ -199,6 +201,13 @@ String? providerPipeHealthForHttpStatus(int statusCode) {
   if (statusCode >= 500 && statusCode <= 599) return providerPipeHealthDegraded;
   return null;
 }
+
+/// Classifies a thrown live-read error. A timeout means the provider's metadata
+/// endpoint did not answer in time, which is a slow or rate-limited pipe, not a
+/// broken login or a bad response, so it is reported as throttled and the
+/// retry-and-back-off path applies. Everything else stays unclassified.
+String? providerPipeHealthForReadError(Object error) =>
+    error is TimeoutException ? providerPipeHealthThrottled : null;
 
 double providerPipeRetryAfterPenaltyPercent(int? retryAfterSeconds) =>
     retryAfterSeconds == null

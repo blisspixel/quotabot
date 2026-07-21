@@ -369,17 +369,21 @@ class ClaudeAdapter {
           'anthropic-version': '2023-06-01',
         },
       ).timeout(timeout);
-    } catch (_) {
+    } catch (e) {
+      final health = providerPipeHealthForReadError(e);
       return _ReadOutcome.error(
         ProviderQuota.error(
           id,
           name,
-          'unable to read Claude usage',
+          health == providerPipeHealthThrottled
+              ? 'Claude usage read timed out'
+              : 'unable to read Claude usage',
           asOf,
           account: knownAccount,
           plan: fallbackPlanEvidence?.plan,
           planEvidenceSource: fallbackPlanEvidence?.source,
           planEvidenceAsOf: fallbackPlanEvidence?.asOf,
+          pipeHealth: health,
         ),
       );
     }

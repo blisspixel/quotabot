@@ -762,6 +762,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a throttled read reads as throttled, not failed', (
+    tester,
+  ) async {
+    // A slow or rate-limited read retains last-known quota and reads as a
+    // temporary, self-recovering "throttled - retrying", not a red failure.
+    final throttled = ProviderQuota.fromJson({
+      ..._q(60).toJson(),
+      'stale': true,
+      'ok': false,
+      'error': 'Claude usage read timed out',
+      'pipe_health': 'throttled',
+    });
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: throttled, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('40% last known'), findsOneWidget);
+    expect(
+      find.text('throttled - retrying, showing last known'),
+      findsOneWidget,
+    );
+    expect(find.text('live read failed - showing last known'), findsNothing);
+    expect(
+      find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
+      findsWidgets,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('offers an inline Connect action on a stale connectable tile', (
     tester,
   ) async {
