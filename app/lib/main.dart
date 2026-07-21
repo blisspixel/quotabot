@@ -471,6 +471,7 @@ class _DashboardState extends State<Dashboard>
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
   int _failStreak = 0; // consecutive refreshes with no live data at all
+  int _throttleStreak = 0; // consecutive refreshes with a throttled provider
   late Set<String> _hidden;
   late ProviderSort _sort;
   Map<String, List<ProviderQuota>> _history = {};
@@ -1069,6 +1070,16 @@ class _DashboardState extends State<Dashboard>
       // Track systemic failure...
       final anyLive = hasSuccessfulRefreshEvidence(active, nowSec);
       _failStreak = anyLive ? 0 : _failStreak + 1;
+      // Track throttling separately from a full failure: a provider can push
+      // back (a timeout or a 429) while others read fine, so the refresh cadence
+      // can escalate its back-off from that provider without waiting for the
+      // whole fleet to go dark.
+      final anyThrottled = active.any(
+        (q) =>
+            q.pipeHealth == providerPipeHealthThrottled ||
+            q.pipeHealth == providerPipeHealthDegraded,
+      );
+      _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
       setState(() {
         _profiles = profiles;
         _activeProfile = _profileByName(selectedProfile);
@@ -1200,7 +1211,12 @@ class _DashboardState extends State<Dashboard>
     // The adaptive cadence is shared with the CLI's `top` so both poll alike.
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return Duration(
-      seconds: nextRefreshSeconds(_data, now, failStreak: _failStreak),
+      seconds: nextRefreshSeconds(
+        _data,
+        now,
+        failStreak: _failStreak,
+        throttleStreak: _throttleStreak,
+      ),
     );
   }
 

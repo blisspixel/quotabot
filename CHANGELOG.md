@@ -9,9 +9,16 @@ Notable changes to quotabot. Newest first.
   as "throttled - retrying" in amber rather than a red "live read failed", in the
   desktop card, `quotabot top`, and the machine-readable trust detail, because it
   is temporary and self-recovering rather than a broken login or a bad response.
-- The adaptive refresh cadence backs off from a throttled provider: it honors an
-  explicit retry-after and otherwise holds a slow floor, so quotabot does not pile
-  onto a rate-limited endpoint. An imminent reset is still caught promptly.
+- The adaptive refresh cadence now leans gentle by default (fast only when a reset
+  is imminent, about twenty minutes at the healthy baseline, up to twice a day as
+  resets recede) because quota moves slowly and a cloud read can be rate-limited.
+  When a provider keeps throttling, the back-off escalates each consecutive
+  throttled cycle - twenty minutes, then forty, then ninety - and honors an
+  explicit retry-after, so quotabot stops checking a provider that keeps pushing
+  back instead of re-hitting it. An imminent reset is still caught promptly.
+- Desktop card interactions were polished: a hover accent edge and click cursor on
+  expandable cards, a rotating expand chevron, an eased pill quota meter with a lit
+  gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
 - Claude live `/usage` reads no longer fail as an invalid response when Anthropic
