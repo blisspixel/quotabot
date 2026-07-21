@@ -1820,17 +1820,34 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
   if (failStreak >= 1) return 3600;
 
   int? soonestReset;
-  double minRem = 100;
+  int? nearCapInterval;
   for (final q in data) {
     if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
       continue;
     }
-    final h = providerHeadroom(q, now);
-    if (h != null && h < minRem) minRem = h;
     for (final w in q.windows) {
       if (w.resetsAt != null && w.resetsAt! > now) {
         final dt = w.resetsAt! - now;
         soonestReset = soonestReset == null ? dt : math.min(soonestReset, dt);
+      }
+    }
+    // Watching a low provider closely only pays off while its binding window's
+    // own reset is near enough that the picture can still change soon. A window
+    // that is spent (or nearly so) with a far-off reset just sits there until it
+    // resets, so it must not pin the whole fleet to a fast poll and hammer the
+    // provider for days.
+    final binding = bindingWindow(q, now);
+    final bindingReset = binding?.resetsAt;
+    final rem = providerHeadroom(q, now);
+    if (rem != null &&
+        bindingReset != null &&
+        bindingReset > now &&
+        bindingReset - now < 6 * 3600) {
+      final demand = rem <= 10 ? 300 : (rem <= 40 ? 900 : null);
+      if (demand != null) {
+        nearCapInterval = nearCapInterval == null
+            ? demand
+            : math.min(nearCapInterval, demand);
       }
     }
   }
@@ -1838,10 +1855,10 @@ int nextRefreshSeconds(List<ProviderQuota> data, int now,
   if (soonestReset != null && soonestReset < 600) {
     return soonestReset < 120 ? 30 : 60;
   }
-  // Near a cap: watch closely so a warning is timely.
-  if (minRem <= 10) return 300;
-  if (minRem <= 40) return 900;
-  // Healthy: relax with how far the nearest reset is.
+  // Near a cap with a reset that is close enough to matter: watch closely so a
+  // warning stays timely.
+  if (nearCapInterval != null) return nearCapInterval;
+  // Healthy, or low with a far reset: relax with how far the nearest reset is.
   if (soonestReset == null || soonestReset < 6 * 3600) return 900;
   if (soonestReset < 24 * 3600) return 3600;
   return 12 * 3600;

@@ -566,19 +566,20 @@ void main() {
     expect(q.single.perMachine, isTrue);
   });
 
-  test('an incomplete live model table falls back to local evidence', () async {
+  test('a non-metered helper row does not hide the live window', () async {
+    // The endpoint always lists non-metered helpers (tab-completion, chat) that
+    // carry no quota block. They must be skipped, not treated as a broken table
+    // that discards every real metered window next to them.
     final reset =
         DateTime.now().add(const Duration(hours: 2)).toUtc().toIso8601String();
-    const localQuota = ModelQuota(
-      model: 'Gemini 3.5 Flash',
-      usedPercent: 60,
-    );
     final q = await AntigravityAdapter(
       accountSource: () => [
         candidate(
           'partial@example.com',
           localModel: 'Gemini 3.5 Flash',
-          modelQuotas: const [localQuota],
+          modelQuotas: const [
+            ModelQuota(model: 'Gemini 3.5 Flash', usedPercent: 60)
+          ],
         ),
       ],
       tokenResolver: (_, __) async => 'token',
@@ -593,15 +594,19 @@ void main() {
               'resetTime': reset,
             },
           },
-          'Gemini 3.5 Flash (High)': <String, Object?>{},
+          // A real non-metered helper: a quota block with a full remaining
+          // fraction and no reset window (the tab-completion and chat rows).
+          'tab_flash_lite_preview': {
+            'quotaInfo': {'remainingFraction': 1},
+          },
         },
       },
     ).collectAccounts();
 
-    expect(q.single.windows, isEmpty);
-    expect(q.single.modelQuotas, const [localQuota]);
-    expect(q.single.perMachine, isTrue);
-    expect(q.single.error, contains('live quota windows are not exposed'));
+    // The helper is skipped; the metered Medium row (10% used) still yields the
+    // live weekly window, which is authoritative over the local machine cache.
+    expect(q.single.windows.single.usedPercent, closeTo(10, 0.001));
+    expect(q.single.error, isNot(contains('not exposed')));
   });
 
   test('collect returns the first account snapshot', () async {

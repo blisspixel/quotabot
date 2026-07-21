@@ -762,6 +762,44 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('offers an inline Connect action on a stale connectable tile', (
+    tester,
+  ) async {
+    var connects = 0;
+    final stale = _q(60).asStale('token expired');
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: stale,
+          cardColor: Colors.white,
+          onConnect: () => connects++,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.widgetWithText(TextButton, 'Connect'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Connect'));
+    await tester.pump();
+    expect(connects, 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hides the Connect action when the tile reads live', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(quota: _q(20), cardColor: Colors.white, onConnect: () {}),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.widgetWithText(TextButton, 'Connect'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('keeps stale headroom last known after the reset passes', (
     tester,
   ) async {
