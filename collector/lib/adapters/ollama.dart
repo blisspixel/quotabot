@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+import '../http_client.dart';
+
 import '../local_runtime_config.dart';
 import '../models.dart';
 import '../parsing.dart';
@@ -78,7 +80,7 @@ class OllamaAdapter {
   /// is unreachable.
   Future<List<LocalModel>?> _models(String path) async {
     try {
-      final resp = await (_http?.get ?? http.get)(
+      final resp = await (_http?.get ?? sharedHttpClient.get)(
         Uri.parse('${baseUrl(environment: _environment)}$path'),
       ).timeout(const Duration(seconds: 2));
       if (resp.statusCode != 200) return null;

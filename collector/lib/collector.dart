@@ -54,7 +54,7 @@ bool _sweptTemp = false;
 /// HTTP timeouts. A hung provider (accepted TCP, no bytes; stacked retries)
 /// degrades to a truthful timeout error for that provider instead of wedging
 /// the whole fleet, the desktop refresh loop, and MCP snapshot calls.
-const Duration kAdapterDeadline = Duration(seconds: 20);
+const Duration kAdapterDeadline = Duration(seconds: 30);
 
 class CollectedQuotaSnapshot {
   final List<ProviderQuota> providers;

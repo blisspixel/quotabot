@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../auth/xai_auth.dart';
+import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -168,7 +169,7 @@ class GrokAdapter {
   Future<QuotaWindow?> _fetchUsage(String token, int asOf) async {
     // gRPC-web data frame: flag(0) + length(0) = empty request message.
     final body = Uint8List.fromList([0, 0, 0, 0, 0]);
-    final post = _http?.post ?? http.post;
+    final post = _http?.post ?? sharedHttpClient.post;
     final resp = await post(
       Uri.parse(_endpoint),
       headers: {

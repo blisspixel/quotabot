@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../auth/openai_auth.dart';
 import '../auth/tokens.dart';
+import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
 import '../provider_ids.dart';
@@ -237,11 +238,15 @@ class CodexAdapter {
     OpenAiCredential credential,
     String? accountId,
     int asOf, {
-    Duration timeout = const Duration(seconds: 10),
+    // The ChatGPT usage endpoint sits behind a heavier front end whose cold TLS
+    // connect can run past ten seconds while the fleet opens other connections
+    // at once. Give it more headroom so a slow-but-successful read is not cut
+    // off and reported as a timeout.
+    Duration timeout = const Duration(seconds: 20),
   }) async {
     http.Response response;
     try {
-      final get = _http?.get ?? http.get;
+      final get = _http?.get ?? sharedHttpClient.get;
       response = await get(
         Uri.parse(_usageEndpoint),
         headers: {
