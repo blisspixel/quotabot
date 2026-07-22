@@ -7,6 +7,7 @@ import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/palette.dart';
 
 import 'headroom_colors.dart';
 import 'profile_ui.dart' show quotaDisplayKey, quotaShouldShowAccountLabel;
@@ -15,6 +16,12 @@ import 'typography.dart';
 
 /// Health color on the shared green-to-red scale (input is remaining free %).
 Color fleetColor(num freePct) => headroomColor(freePct);
+
+/// Health color for text on the current Analytics card surface.
+Color fleetTextColor(num freePct, {required bool dark}) => headroomColor(
+  freePct,
+  palette: dark ? kDefaultPalette : paletteFromSpec('light'),
+);
 
 /// The time window the dashboard is showing.
 enum FleetRange {
@@ -75,6 +82,14 @@ class _FleetScreenState extends State<FleetScreen> {
   final ScrollController _scrollController = ScrollController();
 
   bool get dark => widget.dark;
+  Color get _blueText =>
+      dark ? const Color(0xFF58A6FF) : const Color(0xFF285AC8);
+  Color get _greenText =>
+      dark ? const Color(0xFF3FB950) : const Color(0xFF238636);
+  Color get _amberText =>
+      dark ? const Color(0xFFD29922) : const Color(0xFF9A6700);
+  Color get _orangeText =>
+      dark ? const Color(0xFFDB6D28) : const Color(0xFFB45014);
 
   @override
   void dispose() {
@@ -232,7 +247,7 @@ class _FleetScreenState extends State<FleetScreen> {
               child: _chip(
                 '${pool.round()}%',
                 'pool free',
-                fleetColor(pool),
+                fleetTextColor(pool, dark: dark),
                 c,
               ),
             ),
@@ -241,7 +256,7 @@ class _FleetScreenState extends State<FleetScreen> {
               child: _chip(
                 freest.label,
                 'most headroom (${freest.free.round()}%)',
-                fleetColor(freest.free),
+                fleetTextColor(freest.free, dark: dark),
                 c,
               ),
             ),
@@ -345,7 +360,7 @@ class _FleetScreenState extends State<FleetScreen> {
     final pipe = _pipeLine(summary);
     final pipeColor = summary.pipeHealth == litellmPipeHealthHealthy
         ? c.muted
-        : const Color(0xFFD29922);
+        : _amberText;
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: _card(
@@ -361,7 +376,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   child: _routeMetric(
                     '${summary.totalRequests}',
                     '${summary.routedRequests} routed',
-                    const Color(0xFF58A6FF),
+                    _blueText,
                     c,
                   ),
                 ),
@@ -370,7 +385,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   child: _routeMetric(
                     _compactInt(summary.totalTokens),
                     'tokens',
-                    const Color(0xFF3FB950),
+                    _greenText,
                     c,
                   ),
                 ),
@@ -379,7 +394,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   child: _routeMetric(
                     _money(summary.cost),
                     'tracked cost',
-                    const Color(0xFFD29922),
+                    _amberText,
                     c,
                   ),
                 ),
@@ -393,9 +408,7 @@ class _FleetScreenState extends State<FleetScreen> {
               style: TextStyle(
                 fontSize: AppType.caption,
                 height: 1.3,
-                color: summary.paidApiRequests > 0
-                    ? const Color(0xFFD29922)
-                    : c.muted,
+                color: summary.paidApiRequests > 0 ? _amberText : c.muted,
               ),
             ),
             const SizedBox(height: 4),
@@ -886,7 +899,7 @@ class _FleetScreenState extends State<FleetScreen> {
       trendStr =
           '${up ? '▲' : '▼'} ${trend.abs().toStringAsFixed(1)}%/d'
           '${r2 == null ? '' : ' r2 ${r2.toStringAsFixed(2)}'}';
-      trendCol = up ? const Color(0xFF3FB950) : const Color(0xFFDB6D28);
+      trendCol = up ? _greenText : _orangeText;
     }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1353,7 +1366,7 @@ class _BarsPainter extends CustomPainter {
               text: '  $reset',
               style: TextStyle(
                 fontSize: AppType.label,
-                color: dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280),
+                color: dark ? const Color(0xFF8A91A0) : const Color(0xFF69707E),
               ),
             ),
         ],

@@ -81,7 +81,9 @@ Highlights:
   cannot fit, and collapses to a compact strip that keeps the next route or
   no-safe-route state visible. Compact sizing also reserves room for a selected
   account when duplicate providers are shown, honors reduced motion, and keeps
-  window controls usable at large text sizes.
+  window controls usable at large text sizes. Widget tests enforce labeled
+  controls, Windows desktop target sizes, and text contrast across expanded,
+  compact, and Analytics surfaces in light, dark, and Hacker themes.
 - **Explainable and fail-soft.** The expanded desktop always shows either the
   next route or an explicit no-safe-route fallback. Its visible details control
   opens the shared reason, evidence freshness and scope, spend class, fallback,
@@ -380,10 +382,11 @@ native window and tray results, isolated-config state, and cleanup. It hashes th
 bundle before launch and after cleanup, so changed Dart code, plugins, or assets
 cannot hide behind an unchanged native runner. Failure reports retain no raw
 errors, logs, or filesystem paths and are preserved by CI and release workflows.
-Archive checksum and provenance,
-application signing, and native accessibility remain separate release gates;
-Narrator, keyboard-only focus order, visible focus, and critical-flow semantics
-still require interactive evidence.
+Archive checksum and provenance, application signing, and native accessibility
+remain separate release gates. Automated widget checks cover labels, minimum
+desktop target sizes, and contrast across the shipped themes and primary
+surfaces; Narrator, keyboard-only focus order, visible focus, and critical-flow
+semantics still require interactive evidence.
 
 To build and install everything from source in one command, run
 `pwsh tools/setup.ps1` on Windows or `bash tools/setup.sh` on macOS/Linux (add

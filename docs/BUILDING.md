@@ -144,9 +144,11 @@ host details.
 
 This bundle identity proves which extracted product payload passed readiness. It
 does not replace the archive checksum and provenance checks, application
-signing, or native accessibility evidence. A release candidate still requires
-keyboard-only focus-order and visible-focus review plus a basic Narrator
-workflow on a native interactive Windows session.
+signing, or native accessibility evidence. The Flutter widget suite enforces
+labeled controls, 28 by 28 desktop targets, and text contrast across expanded,
+compact, and Analytics surfaces in light, dark, and Hacker themes. A release
+candidate still requires keyboard-only focus-order and visible-focus review plus
+a basic Narrator workflow on a native interactive Windows session.
 
 GitHub-hosted macOS runners build the app, but direct and LaunchServices bundle
 launches did not publish an app-authored window or status-item readiness

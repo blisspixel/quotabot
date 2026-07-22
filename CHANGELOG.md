@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Desktop widget tests now enforce labeled controls, 28 by 28 desktop targets,
+  and text contrast across expanded, compact, and Analytics surfaces in light,
+  dark, and Hacker themes. Native keyboard and screen-reader evidence remains a
+  separate release gate.
 - Packaged desktop readiness now writes a bounded v3 report for both passing and
   failing runs. Failure evidence names the completed stage without retaining raw
   errors, logs, or filesystem paths, and CI and release workflows preserve the
@@ -30,6 +34,9 @@ Notable changes to quotabot. Newest first.
   provenance, signing, and accessibility evidence stay separate release claims.
 
 ### Fixed
+- Light theme muted copy and Analytics status, routing, token, cost, and trend
+  text now use contrast-safe display colors instead of low-contrast dark-theme
+  accents on white cards. Chart fills retain their existing visual palette.
 - Desktop startup now reapplies rendered-content sizing after native window
   setup finishes, preventing the initial fixed height from cutting off the quota
   list on cold starts, including at large text sizes.
