@@ -60,6 +60,9 @@ quotabot suggest
 ```
 
 If a provider is not current, `doctor` shows its evidence state and repair hint.
+Credential-related failures for Claude, Codex, Grok, and Antigravity name the
+exact `quotabot login PROVIDER` recovery command; temporary timeouts, rate
+limits, and service failures keep their automatic retry guidance instead.
 Use `quotabot verify --require-live` when automation must fail unless selected
 provider reads are live. An unfiltered strict run checks the whole built-in
 fleet; use `--profile=NAME` or `--exclude=PROVIDER,...` to constrain both the
@@ -75,6 +78,10 @@ Highlights:
   mode, pins always-on-top or to the taskbar, measures the rendered provider
   cards so no row is clipped, stays inside the active display, scrolls only when
   the full list cannot fit, and collapses to a tiny status strip.
+- **Explainable and fail-soft.** The expanded desktop always shows either the
+  next route or an explicit no-safe-route fallback. Its visible details control
+  opens the shared reason, evidence freshness and scope, spend class, fallback,
+  and selectable decision id without requiring a hover.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, smoothed and reset-aware best times to
   run). Outputs contain quota and routing metadata, never prompts, code, model
@@ -112,6 +119,11 @@ card reports installed and loaded models instead, and acts as a routing fallback
 Cold on-device models are ranked with a conservative metadata-only hardware-fit
 signal from current RAM and largest-GPU capacity. It never loads a model or runs
 a throughput probe, and it remains advisory because runtimes can split memory.
+
+The expanded header keeps the routing answer visible even when no provider is
+safe. Select its details control to inspect why the decision was made, how fresh
+and authoritative the evidence is, whether it can create metered spend, what to
+do if the route fails, and the decision id used across other quotabot surfaces.
 
 When a provider offers a redeemable off-cycle reset (Codex's reset credits),
 quotabot flags it prominently in green on the card, in `doctor`, and in `top`,

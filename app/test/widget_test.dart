@@ -778,7 +778,7 @@ void main() {
           leaseDiscountFor: (_, _) => lease,
           pipePenaltyByProvider: pipe > 0 ? {'claude': pipe} : const {},
         );
-        return desktopRouteDetailLine(suggestion, [claude], now)!;
+        return desktopRouteDetailLine(suggestion, [claude], now);
       }
 
       final burnOnly = detail(burn: 20);
@@ -892,6 +892,68 @@ void main() {
       final detail = desktopRouteDetailLine(suggestion, [ollama], now);
       expect(detail, startsWith('Next: Ollama | local runtime | fallback'));
       expect(detail, isNot(contains('local runtime | local fallback')));
+    });
+
+    test('keeps the soonest-reset fallback visible without a safe route', () {
+      const now = 1782046566;
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: now + 3600),
+        ],
+      );
+      final codex = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: now + 7200),
+        ],
+      );
+
+      final suggestion = suggestRoute([codex, claude], now);
+
+      expect(suggestion.recommended, isNull);
+      expect(
+        desktopRouteSignalLine(suggestion, [codex, claude], now),
+        'No safe route - wait for Claude',
+      );
+      final detail = desktopRouteDetailLine(suggestion, [codex, claude], now);
+      expect(detail, startsWith('No safe route | Receipt: qb-$now-'));
+      expect(detail, contains('Everything is spent.'));
+      expect(
+        detail,
+        contains('Fallback: claude resets soonest - wait for it.'),
+      );
+    });
+
+    test('keeps the passthrough fallback visible without quota evidence', () {
+      const now = 1782046566;
+      final grok = ProviderQuota(
+        provider: 'grok',
+        displayName: 'Grok',
+        account: 'default',
+        asOf: now,
+      );
+
+      final suggestion = suggestRoute([grok], now);
+
+      expect(suggestion.recommended, isNull);
+      expect(
+        desktopRouteSignalLine(suggestion, [grok], now),
+        'No safe route - use requested model',
+      );
+      expect(
+        desktopRouteDetailLine(suggestion, [grok], now),
+        allOf(
+          contains('No live quota data.'),
+          contains('Fallback: No quota signal - use the model you requested.'),
+        ),
+      );
     });
   });
 

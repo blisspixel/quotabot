@@ -4,6 +4,7 @@ import 'dart:ui' show Tristate;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:quotabot/chrome_controls.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
@@ -345,6 +346,32 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Next: Codex'), findsOneWidget);
+    final details = find.byTooltip('Explain recommendation');
+    expect(details, findsOneWidget);
+
+    final detailsButton = tester
+        .widgetList<AppChromeIconButton>(find.byType(AppChromeIconButton))
+        .singleWhere((button) => button.tooltip == 'Explain recommendation');
+    expect(detailsButton.focusNode, isNotNull);
+    detailsButton.focusNode!.requestFocus();
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(detailsButton.focusNode));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Why this recommendation?'), findsOneWidget);
+    expect(find.textContaining('Use codex'), findsOneWidget);
+    expect(find.textContaining('Evidence: live authoritative'), findsOneWidget);
+    expect(
+      find.textContaining('Spend: measured quota-plan budget.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Fallback:'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    expect(find.textContaining('qb-'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Close'));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('empty profile explains a legacy Codex credential filter', (
@@ -1537,6 +1564,8 @@ void main() {
     expect(find.text('80% last known'), findsOneWidget);
     expect(find.textContaining('80% free'), findsNothing);
     expect(find.textContaining('Next: Claude'), findsNothing);
+    expect(find.text('No safe route - use requested model'), findsOneWidget);
+    expect(find.byTooltip('Explain why no route is safe'), findsOneWidget);
     expect(find.text('live read failed - showing last known'), findsOneWidget);
     expect(
       find.bySemanticsLabel('Trusted quota headroom unavailable'),
@@ -1548,6 +1577,16 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.textContaining('cached | account-wide'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Explain why no route is safe'));
+    await tester.pumpAndSettle();
+    expect(find.text('Why no route is safe'), findsOneWidget);
+    expect(
+      find.textContaining('Only cached quota evidence is present'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Fallback:'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -1590,11 +1629,49 @@ void main() {
     await tester.pump();
 
     expect(find.text('Providers'), findsOneWidget);
-    expect(find.text('Start here: review provider connections'), findsNothing);
-    expect(saved?.setupDone, isTrue);
+    expect(
+      find.text('Start here: review provider connections'),
+      findsOneWidget,
+    );
+    expect(saved, isNull);
 
     tester.state<NavigatorState>(find.byType(Navigator).first).pop();
     await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(saved?.setupDone, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('first run Dismiss persists completion immediately', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    Prefs? saved;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          demoMode: false,
+          collector: () async => [_routeQuota('claude', 'Claude', now)],
+          prefsSaver: (prefs) async => saved = prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Dismiss getting started'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(saved?.setupDone, isTrue);
+
     await tester.pumpWidget(const SizedBox());
   });
 

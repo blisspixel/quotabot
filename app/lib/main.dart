@@ -538,6 +538,10 @@ class _DashboardState extends State<Dashboard>
   bool _alertCheckPending = false;
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
+  bool _firstRunReviewOpen = false;
+  final FocusNode _routeExplanationFocusNode = FocusNode(
+    debugLabel: 'Route explanation',
+  );
   int _failStreak = 0; // consecutive refreshes with no live data at all
   int _throttleStreak = 0; // consecutive refreshes with a throttled provider
   late Set<String> _hidden;
@@ -915,6 +919,7 @@ class _DashboardState extends State<Dashboard>
     _tick?.cancel();
     _windowMovePersistTimer?.cancel();
     _scroll.dispose();
+    _routeExplanationFocusNode.dispose();
     super.dispose();
   }
 
@@ -1869,7 +1874,7 @@ class _DashboardState extends State<Dashboard>
               ),
             ),
             TextButton(
-              onPressed: () => _finishFirstRunSetup(openProviders: true),
+              onPressed: () => unawaited(_reviewFirstRunSetup()),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 7),
                 minimumSize: const Size(0, 30),
@@ -1889,12 +1894,22 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  void _finishFirstRunSetup({bool openProviders = false}) {
+  Future<void> _reviewFirstRunSetup() async {
+    if (_setupDone || _firstRunReviewOpen) return;
+    _firstRunReviewOpen = true;
+    try {
+      await _showSetup();
+      if (mounted && !_setupDone) _finishFirstRunSetup();
+    } finally {
+      _firstRunReviewOpen = false;
+    }
+  }
+
+  void _finishFirstRunSetup() {
     if (_setupDone) return;
     setState(() => _setupDone = true);
     WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
     unawaited(_persistPrefs());
-    if (openProviders) _showSetup();
   }
 
   Widget _providerTile(ProviderQuota q, Color card, Map<String, int> counts) {
@@ -2195,31 +2210,39 @@ class _DashboardState extends State<Dashboard>
                   ...actions,
                 ],
               ),
-            if (routeLine != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, right: 4),
-                child: Row(
-                  children: [
-                    Icon(Icons.alt_route_rounded, size: 12, color: muted),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Tooltip(
-                        message: routeDetail ?? routeLine,
-                        child: Text(
-                          routeLine,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.caption,
-                            fontWeight: FontWeight.w500,
-                            color: muted,
-                          ),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.alt_route_rounded, size: 12, color: muted),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Tooltip(
+                      message: routeDetail,
+                      child: Text(
+                        routeLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppType.caption,
+                          fontWeight: FontWeight.w500,
+                          color: muted,
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  _iconButton(
+                    Icons.info_outline_rounded,
+                    muted,
+                    () => _showRouteExplanation(suggestion, routeLine),
+                    tooltip: suggestion.recommended == null
+                        ? 'Explain why no route is safe'
+                        : 'Explain recommendation',
+                    focusNode: _routeExplanationFocusNode,
+                  ),
+                ],
               ),
+            ),
             if (_preferenceStorageWarning != null)
               _warningLine(_preferenceStorageWarning!, warning),
             if (_lastRefreshError != null)
@@ -2257,6 +2280,50 @@ class _DashboardState extends State<Dashboard>
       ],
     ),
   );
+
+  void _showRouteExplanation(RouteSuggestion suggestion, String routeLine) {
+    final noRoute = suggestion.recommended == null;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            noRoute ? 'Why no route is safe' : 'Why this recommendation?',
+          ),
+          content: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    routeLine,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(suggestion.explanation),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Decision id',
+                    style: Theme.of(ctx).textTheme.labelMedium,
+                  ),
+                  const SizedBox(height: 3),
+                  SelectableText(suggestion.receipt.decisionId),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _menuButton(Color muted) {
     final counts = _providerCounts(_profiledData);
@@ -2897,7 +2964,7 @@ class _DashboardState extends State<Dashboard>
     unawaited(_persistPrefs());
   }
 
-  void _showHelp() => _showSetup();
+  void _showHelp() => unawaited(_showSetup());
 
   /// Shows the analytics body in this window, under the same header and menu.
   /// Short content-hugged quota windows grow to a useful display-bounded
@@ -2919,11 +2986,11 @@ class _DashboardState extends State<Dashboard>
   /// the latest snapshot with its live status and an inline Connect for
   /// Grok/Antigravity. Reachable from the help button; never pops up on its own.
   /// All path/state reads are portable, so it works the same on every OS.
-  void _showSetup() {
+  Future<void> _showSetup() async {
     // Mid-connect providers; declared outside the builder so it survives the
     // StatefulBuilder rebuilds.
     final connecting = <String>{};
-    showDialog<void>(
+    await showDialog<void>(
       context: context,
       builder: (ctx) {
         final dark = Theme.of(ctx).brightness == Brightness.dark;
@@ -3343,11 +3410,13 @@ class _DashboardState extends State<Dashboard>
     Color color,
     VoidCallback? onTap, {
     required String tooltip,
+    FocusNode? focusNode,
   }) => AppChromeIconButton(
     icon: icon,
     color: color,
     onTap: onTap,
     tooltip: tooltip,
+    focusNode: focusNode,
   );
 }
 

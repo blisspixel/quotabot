@@ -37,9 +37,16 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   slow - retrying", HTTP 429 reads as "rate limited - retrying", and HTTP 5xx
   reads as "provider error - retrying". Temporary provider pushback does not
   offer a reconnect action; HTTP 401 and 403 keep that repair path.
-- **Route signal:** the expanded header shows the next recommended route, its
-  current free headroom, any material burn discount, and confidence. Account
-  names still appear only when needed to distinguish multiple accounts.
+- **First run:** Review opens the provider-status dialog and records completion
+  only after that dialog closes. Dismiss remains an immediate, explicit way to
+  hide the prompt.
+- **Route signal:** the expanded header always shows the next recommended route
+  or an explicit no-safe-route fallback. The adjacent details button works with
+  pointer or keyboard and opens the shared reason, evidence freshness and
+  scope, spend class, fallback, and selectable decision id. Material burn
+  adjustments and confidence remain in this detail instead of crowding the
+  glance line. Account names appear only when needed to distinguish multiple
+  accounts.
 - **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
 - **Trust line:** the tight card keeps the always-actionable signals - a failed
   live read, provider drift, and the last-known label on the bar. Expanding a

@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- The expanded desktop recommendation now has a visible, keyboard-accessible
+  details control for the shared reason, evidence freshness and scope, spend
+  class, fallback, and selectable decision id. First-run provider review now
+  records completion after the Providers dialog closes; explicit Dismiss still
+  completes immediately.
 - Packaged Windows readiness is now isolated from the user's installed tray
   instance, and every packaged readiness run uses isolated local quotabot
   configuration. The v2 harness report retains a UTC timestamp, launch PID, and
@@ -78,6 +83,13 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- The expanded desktop no longer drops its routing answer when no provider is
+  safe. It shows an explicit fail-soft fallback and keeps the full no-route
+  reason inspectable, while stale evidence remains unroutable. Signed-out
+  Claude, Codex, Grok, and Antigravity `doctor` rows now name their exact login
+  command, and shared no-data copy delegates provider-specific recovery to
+  `doctor` instead of listing only two providers. Throttled and degraded reads
+  remain automatic retry states.
 - The expanded desktop quota window now sizes from the rendered provider cards
   instead of trusting a hand estimate, so wrapped status and recovery rows no
   longer leave the final provider partially hidden. Growth is reconciled with

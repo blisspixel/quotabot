@@ -23,9 +23,7 @@ Future<void> main() async {
   final best = providerWithMostHeadroom(results, now);
   if (best == null) {
     print('no live quota data available');
-    print(
-      'suggestions: run logins for Grok/Antigravity or open tools to refresh',
-    );
+    print('suggestion: run quotabot doctor for provider-specific recovery');
     return;
   }
 

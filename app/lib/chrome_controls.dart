@@ -6,6 +6,7 @@ class AppChromeIconButton extends StatelessWidget {
   final Color color;
   final VoidCallback? onTap;
   final String tooltip;
+  final FocusNode? focusNode;
 
   const AppChromeIconButton({
     super.key,
@@ -13,12 +14,14 @@ class AppChromeIconButton extends StatelessWidget {
     required this.color,
     required this.onTap,
     required this.tooltip,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     final button = InkWell(
       onTap: onTap,
+      focusNode: focusNode,
       borderRadius: BorderRadius.circular(6),
       child: Padding(
         padding: const EdgeInsets.all(4),

@@ -3030,7 +3030,7 @@ void _printDoctor(
         '${style.yellow('! suspect: ${q.suspect}')}',
       );
     }
-    final hint = _doctorHint(q, state);
+    final hint = doctorRecoveryHint(q, state);
     if (hint != null) print('  $indent ${_stateColumn('')} -> $hint');
     final storageWarning =
         analyticsStorageWarningForQuota(q, storageNoticesByIdentity);
@@ -4168,7 +4168,7 @@ String _hourLabel(int hour24) {
 /// A next-step suggestion for a provider row, or null when none applies.
 /// Turns the status table into a guided setup: cached providers that support a
 /// login are pointed at it; providers with no data are pointed at their app.
-String? _doctorHint(ProviderQuota q, String state) {
+String? doctorRecoveryHint(ProviderQuota q, String state) {
   const canLogin = {'grok', 'antigravity', 'claude', 'codex'};
   if (state == 'PROVIDER DRIFT') {
     return 'run: quotabot verify  (${_providerDriftEvidenceSummary(q)})';
@@ -4179,6 +4179,19 @@ String? _doctorHint(ProviderQuota q, String state) {
   if (state == 'unavailable' && q.isLocal) {
     return q.error ??
         'start the local runtime and expose an on-device model, then re-run';
+  }
+  if (state == 'ERROR' &&
+      !q.isLocal &&
+      !q.ok &&
+      q.pipeHealth != providerPipeHealthThrottled &&
+      q.pipeHealth != providerPipeHealthDegraded) {
+    final error = q.error ?? '';
+    if (canLogin.contains(q.provider) &&
+        _looksLikeCredentialFailure(error) &&
+        !error.toLowerCase().contains('quotabot login')) {
+      return 'run: quotabot login ${q.provider} '
+          '(adds a refreshable path; re-run doctor)';
+    }
   }
   if (state == 'cached' && q.error?.isNotEmpty == true) {
     final error = q.error!;
@@ -4218,6 +4231,8 @@ bool _looksLikeCredentialFailure(String message) {
     'login',
     'sign in',
     'signed out',
+    'signed-out',
+    'signed_out',
     'token',
     'unauthorized',
     '401',

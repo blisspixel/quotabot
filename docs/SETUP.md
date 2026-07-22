@@ -25,6 +25,9 @@ command here costs zero usage tokens.
 `doctor` is both the first quota view and the setup diagnostic. You do not need
 to configure every provider before running it: working providers show their
 current state, and missing or signed-out providers show a reason and next step.
+Credential-related failures for Claude, Codex, Grok, and Antigravity name the
+exact `quotabot login PROVIDER` command. Temporary provider timeouts, rate
+limits, and service failures remain retry states and do not recommend login.
 Its exit code confirms that the status rendered truthfully, not that every row
 is a fresh live adapter read. Automation that requires fresh evidence should use
 `quotabot verify --require-live`; an unfiltered strict run covers the whole

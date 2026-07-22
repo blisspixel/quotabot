@@ -26,6 +26,29 @@ void main() {
     return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
 
+  test('doctor does not call temporary transport failures a login problem', () {
+    const cases = [
+      ('Claude usage read timed out', providerPipeHealthThrottled, null),
+      ('HTTP 429', providerPipeHealthThrottled, 429),
+      ('HTTP 503', providerPipeHealthDegraded, 503),
+    ];
+
+    for (final (error, pipeHealth, httpStatus) in cases) {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: 1782046566,
+        ok: false,
+        error: error,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+      );
+
+      expect(cli.doctorRecoveryHint(quota, 'ERROR'), isNull, reason: error);
+    }
+  });
+
   test('analytics storage diagnostics stay scoped and identity safe', () {
     final affected = ProviderQuota(
       provider: codexProviderId,
@@ -765,19 +788,23 @@ void main() {
     expect(help.stdout as String, isNot(contains('keeps it live')));
   });
 
-  test('doctor human output labels failed quota-plan provenance', () async {
-    final result = await runCli([
-      'doctor',
-      '--no-color',
-      '--mock-provider=grok',
-      '--state=signed-out',
-    ]);
+  for (final provider in ['claude', 'codex', 'grok', 'antigravity']) {
+    test('doctor gives $provider an exact signed-out recovery command',
+        () async {
+      final result = await runCli([
+        'doctor',
+        '--no-color',
+        '--mock-provider=$provider',
+        '--state=signed-out',
+      ]);
 
-    expectExitCode(result, 0);
-    final out = result.stdout as String;
-    expect(out, contains('[error, authoritative, quota plan, captured'));
-    expect(out, contains('simulated signed-out state'));
-  });
+      expectExitCode(result, 0);
+      final out = result.stdout as String;
+      expect(out, contains('[error, authoritative, quota plan, captured'));
+      expect(out, contains('simulated signed-out state'));
+      expect(out, contains('-> run: quotabot login $provider'));
+    });
+  }
 
   test('doctor human output explains provider drift and recovery', () async {
     final result = await runCli([
