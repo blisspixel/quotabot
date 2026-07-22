@@ -14,13 +14,18 @@ from tools.desktop_readiness_smoke import (
     REPORT_SCHEMA,
     SCHEMA,
     _read_json_if_ready,
+    assert_bundle_unchanged,
     await_readiness,
     build_readiness_report,
+    desktop_bundle_identity,
+    desktop_bundle_root,
+    executable_sha256,
     isolated_config_environment,
     launch_command,
     macos_app_process_ids,
     stop_process,
     valid_windows_tray_rect,
+    validate_report_destination,
     validate_payload,
     write_report,
 )
@@ -64,19 +69,138 @@ class DesktopReadinessTests(unittest.TestCase):
         )
         self.assertNotIn("HOME", isolated_config_environment("macos", root))
 
+    def test_selects_the_complete_platform_bundle_root(self) -> None:
+        windows = Path("C:/build/Release/quotabot.exe")
+        macos = Path("/tmp/quotabot.app/Contents/MacOS/quotabot")
+
+        self.assertEqual(desktop_bundle_root(windows, "windows"), windows.parent)
+        self.assertEqual(desktop_bundle_root(macos, "macos"), Path("/tmp/quotabot.app"))
+        with self.assertRaisesRegex(RuntimeError, "not inside an app bundle"):
+            desktop_bundle_root(Path("/tmp/quotabot"), "macos")
+
+    def test_bundle_identity_is_order_independent_and_tracks_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temporary = Path(raw_temp)
+            first = temporary / "first"
+            second = temporary / "second"
+            (first / "data").mkdir(parents=True)
+            (first / "quotabot.exe").write_bytes(b"stable runner")
+            (first / "data" / "app.so").write_bytes(b"version one")
+            (second / "data").mkdir(parents=True)
+            (second / "data" / "app.so").write_bytes(b"version one")
+            (second / "quotabot.exe").write_bytes(b"stable runner")
+
+            first_executable = first / "quotabot.exe"
+            second_executable = second / "quotabot.exe"
+            first_identity = desktop_bundle_identity(first_executable, "windows")
+            second_identity = desktop_bundle_identity(second_executable, "windows")
+
+            self.assertEqual(first_identity, second_identity)
+            self.assertEqual(first_identity["bundle_entry_count"], 2)
+            self.assertEqual(
+                first_identity["bundle_bytes"], len(b"stable runnerversion one")
+            )
+
+            (second / "data" / "app.so").write_bytes(b"version two")
+            changed_identity = desktop_bundle_identity(second_executable, "windows")
+
+            self.assertEqual(
+                executable_sha256(first_executable),
+                executable_sha256(second_executable),
+            )
+            self.assertNotEqual(
+                first_identity["bundle_sha256"],
+                changed_identity["bundle_sha256"],
+            )
+
+    def test_bundle_identity_enforces_entry_and_byte_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temporary = Path(raw_temp)
+            executable = temporary / "quotabot"
+            executable.write_bytes(b"candidate")
+            (temporary / "data").mkdir()
+            (temporary / "data" / "app.so").write_bytes(b"payload")
+
+            with self.assertRaisesRegex(RuntimeError, "entry limit"):
+                desktop_bundle_identity(
+                    executable,
+                    "linux",
+                    max_entries=1,
+                )
+            with self.assertRaisesRegex(RuntimeError, "byte limit"):
+                desktop_bundle_identity(
+                    executable,
+                    "linux",
+                    max_bytes=1,
+                )
+
+    @unittest.skipIf(os.name == "nt", "ordinary Windows users cannot create links")
+    def test_bundle_identity_hashes_link_metadata_without_following_it(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temporary = Path(raw_temp)
+            bundle = temporary / "bundle"
+            bundle.mkdir()
+            executable = bundle / "quotabot"
+            executable.write_bytes(b"candidate")
+            outside = temporary / "outside"
+            outside.write_bytes(b"first external payload")
+            (bundle / "external").symlink_to(outside)
+
+            first = desktop_bundle_identity(executable, "linux")
+            outside.write_bytes(b"changed external payload")
+            second = desktop_bundle_identity(executable, "linux")
+
+            self.assertEqual(first, second)
+            self.assertEqual(first["bundle_bytes"], len(b"candidate"))
+
+    def test_rejects_a_bundle_changed_during_readiness(self) -> None:
+        identity = {
+            "bundle_sha256": "a" * 64,
+            "bundle_entry_count": 2,
+            "bundle_bytes": 20,
+        }
+
+        assert_bundle_unchanged(identity, dict(identity))
+        with self.assertRaisesRegex(RuntimeError, "changed during readiness"):
+            assert_bundle_unchanged(
+                identity,
+                {**identity, "bundle_sha256": "b" * 64},
+            )
+
+    def test_requires_the_report_to_stay_outside_the_candidate_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temporary = Path(raw_temp)
+            bundle = temporary / "bundle"
+            bundle.mkdir()
+
+            validate_report_destination(temporary / "report.json", bundle)
+            with self.assertRaisesRegex(RuntimeError, "outside the bundle"):
+                validate_report_destination(bundle / "report.json", bundle)
+
     def test_builds_and_writes_bounded_readiness_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as raw_temp:
             temporary = Path(raw_temp)
             executable = temporary / "quotabot.exe"
             executable.write_bytes(b"candidate")
-            report = build_readiness_report("windows", 31415, executable)
-            report["launch_process_stopped"] = True
+            identity = desktop_bundle_identity(executable, "windows")
+            report = build_readiness_report(
+                "windows",
+                31415,
+                executable,
+                identity,
+            )
             destination = temporary / "readiness-report.json"
 
             write_report(destination, report)
 
+            written = json.loads(destination.read_text(encoding="utf-8"))
+            generated_at = written.pop("generated_at")
+            self.assertRegex(
+                generated_at,
+                r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00$",
+            )
             self.assertEqual(
-                json.loads(destination.read_text(encoding="utf-8")),
+                written,
                 {
                     "schema": REPORT_SCHEMA,
                     "platform": "windows",
@@ -86,6 +210,11 @@ class DesktopReadinessTests(unittest.TestCase):
                     "executable_sha256": (
                         "dda18a0e21ae47c53b4309434cbc02ae8bf764fa83a6defbb719431242722aa7"
                     ),
+                    "bundle_sha256": identity["bundle_sha256"],
+                    "bundle_schema": identity["bundle_schema"],
+                    "bundle_entry_count": 1,
+                    "bundle_bytes": len(b"candidate"),
+                    "bundle_unchanged": True,
                     "isolated_config": True,
                     "window_ready": True,
                     "tray_ready": True,

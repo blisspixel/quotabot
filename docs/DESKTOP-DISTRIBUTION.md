@@ -14,8 +14,9 @@ expected Flutter bundle shape, checksum-verified, and given a GitHub build
 provenance attestation before the draft release can be published. The release
 stays a draft if any CLI or desktop build, clean-host lifecycle check, readiness
 check, attestation, or upload fails. The Windows candidate check also isolates
-configuration and singleton state, binds a structured report to the launched
-process and executable digest, and leaves an installed tray instance untouched.
+configuration and singleton state, binds a structured v2 report to the launched
+process, runner digest, and deterministic complete-bundle digest, verifies the
+bundle is unchanged after cleanup, and leaves an installed tray instance untouched.
 The lifecycle check installs two versioned
 copies, launches the Windows and Linux copies, exercises rollback, removes both
 application directories, and proves a persistent-state sentinel remains. A final
@@ -191,9 +192,11 @@ python tools/verify_desktop_archive.py release/quotabot-<os>-<arch>-desktop.<ext
 Clean native release jobs download the draft assets by release asset id,
 reverify checksum and provenance, and exercise side-by-side update, rollback,
 and data-preserving uninstall mechanics. Windows and Linux also require the
-native window and tray readiness contract to pass. The bounded report records
-the launch PID, exact executable digest, isolated-config state, readiness, and
-cleanup. It is not accessibility evidence. macOS hosted runners build, extract,
-and validate the app archive, but the final
+native window and tray readiness contract to pass. The bounded v2 report records
+a UTC timestamp, launch PID, narrow runner digest, complete-bundle digest and
+aggregate counts, prelaunch/post-cleanup stability, isolated-config state, readiness, and
+cleanup. Archive checksum and provenance remain separately verified, and the
+report is not signing or accessibility evidence. macOS hosted runners build,
+extract, and validate the app archive, but the final
 interactive launch, status item, signing, notarization, and accessibility
 evidence must come from a native interactive release host.

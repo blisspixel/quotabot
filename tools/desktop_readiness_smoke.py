@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,8 +20,13 @@ from typing import Any
 
 
 SCHEMA = "quotabot.desktop-readiness.v1"
-REPORT_SCHEMA = "quotabot.desktop-readiness-report.v1"
+REPORT_SCHEMA = "quotabot.desktop-readiness-report.v2"
+BUNDLE_SCHEMA = "quotabot.desktop-bundle.v1"
 READINESS_ENV = "QUOTABOT_DESKTOP_READINESS_FILE"
+MAX_BUNDLE_ENTRIES = 4096
+MAX_BUNDLE_BYTES = 512 * 1024 * 1024
+MAX_LINK_TARGET_BYTES = 4096
+HASH_CHUNK_BYTES = 1024 * 1024
 
 
 def host_platform() -> str:
@@ -76,23 +83,195 @@ def isolated_config_environment(platform: str, config_root: Path) -> dict[str, s
 def executable_sha256(executable: Path) -> str:
     digest = hashlib.sha256()
     with executable.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def desktop_bundle_root(executable: Path, platform: str) -> Path:
+    if platform == "macos":
+        app_bundle = executable.parent.parent.parent
+        if app_bundle.suffix != ".app":
+            raise RuntimeError(
+                f"macOS desktop executable is not inside an app bundle: {executable}"
+            )
+        return app_bundle
+    if platform in {"windows", "linux"}:
+        return executable.parent
+    raise RuntimeError(f"Unsupported desktop bundle platform: {platform}")
+
+
+def _bundle_entries(
+    root: Path,
+    *,
+    max_entries: int,
+) -> list[tuple[str, str, Path]]:
+    if max_entries <= 0:
+        raise RuntimeError("Desktop bundle entry limit must be positive")
+    pending = [root]
+    entries: list[tuple[str, str, Path]] = []
+    observed_entries = 0
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as iterator:
+                for child in iterator:
+                    observed_entries += 1
+                    if observed_entries > max_entries:
+                        raise RuntimeError(
+                            f"Desktop bundle exceeds the {max_entries} entry limit"
+                        )
+                    path = Path(child.path)
+                    relative = path.relative_to(root).as_posix()
+                    if child.is_symlink():
+                        entries.append(("link", relative, path))
+                    elif child.is_dir(follow_symlinks=False):
+                        pending.append(path)
+                    elif child.is_file(follow_symlinks=False):
+                        entries.append(("file", relative, path))
+                    else:
+                        raise RuntimeError(
+                            f"Desktop bundle contains an unsupported entry: {relative}"
+                        )
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle directory cannot be read: {directory.name}"
+            ) from error
+    return sorted(entries, key=lambda entry: os.fsencode(entry[1]))
+
+
+def _hash_framed_bytes(digest: Any, value: bytes, *, width: int) -> None:
+    digest.update(len(value).to_bytes(width, "big"))
+    digest.update(value)
+
+
+def _same_regular_file(first: os.stat_result, second: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(first.st_mode)
+        and stat.S_ISREG(second.st_mode)
+        and first.st_dev == second.st_dev
+        and first.st_ino == second.st_ino
+        and first.st_size == second.st_size
+        and first.st_mtime_ns == second.st_mtime_ns
+    )
+
+
+def desktop_bundle_identity(
+    executable: Path,
+    platform: str,
+    *,
+    max_entries: int = MAX_BUNDLE_ENTRIES,
+    max_bytes: int = MAX_BUNDLE_BYTES,
+) -> dict[str, Any]:
+    if max_bytes <= 0:
+        raise RuntimeError("Desktop bundle byte limit must be positive")
+    root = desktop_bundle_root(executable, platform)
+    if not root.is_dir():
+        raise RuntimeError(f"Desktop bundle root not found: {root}")
+
+    digest = hashlib.sha256()
+    digest.update(BUNDLE_SCHEMA.encode("ascii") + b"\0")
+    total_bytes = 0
+    entries = _bundle_entries(root, max_entries=max_entries)
+    for kind, relative, path in entries:
+        relative_bytes = os.fsencode(relative)
+        if kind == "link":
+            try:
+                target = os.fsencode(os.readlink(path))
+            except OSError as error:
+                raise RuntimeError(
+                    f"Desktop bundle link cannot be read: {relative}"
+                ) from error
+            if len(target) > MAX_LINK_TARGET_BYTES:
+                raise RuntimeError(
+                    f"Desktop bundle link target is too long: {relative}"
+                )
+            digest.update(b"L")
+            _hash_framed_bytes(digest, relative_bytes, width=4)
+            _hash_framed_bytes(digest, target, width=4)
+            continue
+
+        try:
+            before = path.stat(follow_symlinks=False)
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle file cannot be inspected: {relative}"
+            ) from error
+        if not stat.S_ISREG(before.st_mode):
+            raise RuntimeError(f"Desktop bundle file changed type: {relative}")
+        total_bytes += before.st_size
+        if total_bytes > max_bytes:
+            raise RuntimeError(f"Desktop bundle exceeds the {max_bytes} byte limit")
+
+        digest.update(b"F")
+        _hash_framed_bytes(digest, relative_bytes, width=4)
+        digest.update(before.st_size.to_bytes(8, "big"))
+        try:
+            with path.open("rb") as source:
+                opened = os.fstat(source.fileno())
+                if not _same_regular_file(before, opened):
+                    raise RuntimeError(
+                        f"Desktop bundle file changed while hashing: {relative}"
+                    )
+                bytes_read = 0
+                for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
+                    bytes_read += len(chunk)
+                    digest.update(chunk)
+                closed = os.fstat(source.fileno())
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle file cannot be read: {relative}"
+            ) from error
+        if bytes_read != before.st_size or not _same_regular_file(before, closed):
+            raise RuntimeError(f"Desktop bundle file changed while hashing: {relative}")
+        try:
+            after = path.stat(follow_symlinks=False)
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle file cannot be rechecked: {relative}"
+            ) from error
+        if not _same_regular_file(before, after):
+            raise RuntimeError(f"Desktop bundle file changed while hashing: {relative}")
+
+    return {
+        "bundle_schema": BUNDLE_SCHEMA,
+        "bundle_sha256": digest.hexdigest(),
+        "bundle_entry_count": len(entries),
+        "bundle_bytes": total_bytes,
+    }
+
+
+def assert_bundle_unchanged(
+    expected: dict[str, Any],
+    observed: dict[str, Any],
+) -> None:
+    if observed != expected:
+        raise RuntimeError("Desktop bundle changed during readiness")
+
+
+def validate_report_destination(path: Path, bundle_root: Path) -> None:
+    destination = path.resolve()
+    root = bundle_root.resolve()
+    if destination == root or root in destination.parents:
+        raise RuntimeError("Desktop readiness report must be outside the bundle")
 
 
 def build_readiness_report(
     platform: str,
     launch_pid: int,
     executable: Path,
+    bundle_identity: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema": REPORT_SCHEMA,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "platform": platform,
         "launch_pid": launch_pid,
-        "launch_process_stopped": False,
+        "launch_process_stopped": True,
         "executable_name": executable.name,
         "executable_sha256": executable_sha256(executable),
+        **bundle_identity,
+        "bundle_unchanged": True,
         "isolated_config": True,
         "window_ready": True,
         "tray_ready": True,
@@ -376,7 +555,11 @@ def main() -> int:
         raise RuntimeError("Desktop readiness timeout must be positive")
 
     platform = host_platform()
-    report: dict[str, Any] | None = None
+    bundle_root = desktop_bundle_root(executable, platform)
+    if args.report is not None:
+        validate_report_destination(args.report, bundle_root)
+    bundle_before = desktop_bundle_identity(executable, platform)
+    launch_pid: int | None = None
     with tempfile.TemporaryDirectory(prefix="quotabot-desktop-readiness-") as raw_temp:
         temporary_directory = Path(raw_temp)
         readiness_file = temporary_directory / "readiness.json"
@@ -407,7 +590,7 @@ def main() -> int:
                 )
                 if platform == "windows":
                     await_windows_tray(process)
-                report = build_readiness_report(platform, process.pid, executable)
+                launch_pid = process.pid
             except RuntimeError as error:
                 output.flush()
                 log_tail = log_file.read_text(encoding="utf-8", errors="replace")[
@@ -425,11 +608,18 @@ def main() -> int:
                 finally:
                     stop_process(process)
 
-        if report is None:
+        if launch_pid is None:
             raise RuntimeError("Desktop readiness evidence was not produced")
-        report["launch_process_stopped"] = process.poll() is not None
-        if not report["launch_process_stopped"]:
+        if process.poll() is None:
             raise RuntimeError("Desktop launch process did not stop after readiness")
+        bundle_after = desktop_bundle_identity(executable, platform)
+        assert_bundle_unchanged(bundle_before, bundle_after)
+        report = build_readiness_report(
+            platform,
+            launch_pid,
+            executable,
+            bundle_before,
+        )
 
     if args.report is not None:
         write_report(args.report, report)

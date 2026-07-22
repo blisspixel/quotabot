@@ -7,10 +7,13 @@ Notable changes to quotabot. Newest first.
 ### Changed
 - Packaged Windows readiness is now isolated from the user's installed tray
   instance, and every packaged readiness run uses isolated local quotabot
-  configuration. The harness emits a bounded report with its launch PID, exact
-  executable SHA-256, native window and tray results, isolated-config state,
-  and confirmed process cleanup. A running installed Windows app can remain
-  untouched while the release candidate is verified.
+  configuration. The v2 harness report retains a UTC timestamp, launch PID, and
+  narrow runner executable SHA-256 plus a bounded deterministic digest, entry count, and byte
+  count for the complete Flutter bundle. The bundle is hashed before launch and
+  after cleanup, so the gate fails if product code, plugins, or assets change
+  during readiness. Native window and tray results and confirmed process cleanup
+  remain part of the report, while archive checksum, provenance, signing, and
+  accessibility evidence stay separate release claims.
 - Default quota snapshots now include a bounded
   `quotabot.analytics-incident-inventory.v1` object. Mixed-version analytics
   incidents remain visible when an account is no longer in the current

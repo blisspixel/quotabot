@@ -124,11 +124,20 @@ python tools/desktop_readiness_smoke.py `
   --report .agent/windows-readiness.json
 ```
 
-The report includes the launch PID, exact executable SHA-256, isolated-config
-state, app-authored window and tray readiness, and confirmed launch-process
-cleanup. On Windows, the tray result is independently backed by the native
-Shell rectangle check. This report does not prove keyboard focus, accessibility
-semantics, or screen-reader experience. A release candidate still requires
+The v2 report includes a UTC timestamp, launch PID, narrow runner executable
+SHA-256, isolated-config state, app-authored window and tray readiness, and confirmed
+launch-process cleanup. It also records a domain-separated SHA-256, entry count,
+and regular-file byte count for the complete platform bundle. Relative paths,
+regular-file contents, and link targets are hashed in deterministic order;
+links are never followed, traversal is bounded, and the before-launch identity
+must match the after-cleanup identity. These fields use the
+`quotabot.desktop-bundle.v1` identity schema. Write the report outside the
+candidate bundle. On Windows, the tray result is independently backed by the
+native Shell rectangle check.
+
+This bundle identity proves which extracted product payload passed readiness. It
+does not replace the archive checksum and provenance checks, application
+signing, or native accessibility evidence. A release candidate still requires
 keyboard-only focus-order and visible-focus review plus a basic Narrator
 workflow on a native interactive Windows session.
 

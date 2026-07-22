@@ -350,10 +350,14 @@ to ignore.
 The packaged Windows release gate starts each candidate with isolated local
 configuration and a candidate-only single-instance guard, so validation can run
 beside an installed tray instance without surfacing or replacing it. Its bounded
-report records the launch process, exact executable digest, native window and
-tray result, isolated-config state, and cleanup result. Native accessibility is
-still a separate release gate: Narrator, keyboard-only focus order, visible
-focus, and critical-flow semantics require interactive evidence.
+v2 report records a UTC timestamp, the launch process, the runner executable
+digest, a deterministic digest plus aggregate counts for the complete Flutter bundle,
+native window and tray results, isolated-config state, and cleanup. It hashes the
+bundle before launch and after cleanup, so changed Dart code, plugins, or assets
+cannot hide behind an unchanged native runner. Archive checksum and provenance,
+application signing, and native accessibility remain separate release gates;
+Narrator, keyboard-only focus order, visible focus, and critical-flow semantics
+still require interactive evidence.
 
 To build and install everything from source in one command, run
 `pwsh tools/setup.ps1` on Windows or `bash tools/setup.sh` on macOS/Linux (add
