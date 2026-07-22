@@ -59,7 +59,8 @@ void main() {
     expect(cli.statsStorageNoticeFields(healthy, notices), isEmpty);
     expect(
       cli.analyticsStorageWarningForQuota(affected, notices),
-      contains('remains unavailable until repaired or reset'),
+      allOf(
+          contains('Exact merge is unavailable'), contains('quotabot doctor')),
     );
     expect(cli.analyticsStorageWarningForQuota(healthy, notices), isNull);
     expect(
@@ -684,6 +685,14 @@ void main() {
     expect(doctor.stdout as String, isNot(contains('quotabot login claude')));
     expect(help.stdout as String, contains('adds a refreshable path'));
     expect(help.stdout as String, contains('inspect with doctor'));
+    expect(
+      help.stdout as String,
+      contains('--recover-analytics=P --account=A --tier=history|buckets'),
+    );
+    expect(
+      help.stdout as String,
+      contains('verify recovery: exact account from quotabot --json'),
+    );
     expect(
       help.stdout as String,
       contains(

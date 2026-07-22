@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/storage_keys.dart';
+import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
 import '../bin/collect.dart' as cli;
@@ -16,11 +19,45 @@ void main() {
   });
 
   tearDown(() {
+    setQuotabotDirOverrideForTesting(null);
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 
   Future<ProcessResult> runCli(List<String> args) {
     return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
+  }
+
+  void seedAnalyticsHistoryConflict() {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    setQuotabotDirOverrideForTesting(temp);
+    try {
+      saveSnapshot(quota);
+      File('${cacheDir().path}/history_${provider}_$account.jsonl')
+          .writeAsStringSync(
+        '${jsonEncode(ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: now + 60,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 35)],
+        ).toJson())}\n',
+      );
+      expect(
+        analyticsStorageNotice(provider, account: account)?.tiers,
+        ['history'],
+      );
+    } finally {
+      setQuotabotDirOverrideForTesting(null);
+    }
   }
 
   test('verify --json passes a healthy simulated snapshot', () async {
@@ -216,6 +253,177 @@ void main() {
     expectExitCode(result, 64);
     expect(result.stdout, isEmpty);
     expect(result.stderr, contains('one exact provider and account'));
+  });
+
+  test('analytics recovery inspection is read-only and machine-readable',
+      () async {
+    seedAnalyticsHistoryConflict();
+    final cache = Directory('${temp.path}/quotabot/cache');
+    final before = {
+      for (final file in cache.listSync().whereType<File>())
+        file.uri.pathSegments.last: file.readAsBytesSync(),
+    };
+    final recoveryRoot = Directory('${temp.path}/quotabot/analytics-recovery');
+    expect(recoveryRoot.existsSync(), isFalse);
+
+    final result = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--json',
+    ]);
+
+    expectExitCode(result, 0);
+    expect(result.stderr, isEmpty);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.analytics-recovery.v1');
+    expect(json['mode'], 'inspect');
+    expect(json['ready'], isTrue);
+    expect(json['recovered'], isFalse);
+    expect(json['status'], 'ready');
+    expect(json['active_tiers'], ['history']);
+    expect(json, isNot(contains('runtime_access')));
+    final impact = json['impact'] as Map<String, dynamic>;
+    expect(impact['selected_tier'], 'would be archived, then restarted empty');
+    expect(impact['exact_merge_performed'], isFalse);
+    expect(recoveryRoot.existsSync(), isFalse);
+    final human = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--no-color',
+    ]);
+    expectExitCode(human, 0);
+    expect(human.stdout, contains('READY'));
+    expect(human.stdout, contains('Rerun this exact command with --yes'));
+    expect(human.stdout, contains('Exact merge is unavailable'));
+    expect(human.stdout, contains('unselected analytics remain unchanged'));
+    expect(
+      {
+        for (final file in cache.listSync().whereType<File>())
+          file.uri.pathSegments.last: file.readAsBytesSync(),
+      },
+      before,
+    );
+  });
+
+  test('analytics recovery confirmation archives only the selected tier',
+      () async {
+    seedAnalyticsHistoryConflict();
+
+    final result = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--yes',
+      '--json',
+    ]);
+
+    expectExitCode(result, 0);
+    expect(result.stderr, isEmpty);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['schema'], 'quotabot.analytics-recovery.v1');
+    expect(json['mode'], 'recover');
+    expect(json['recovered'], isTrue);
+    expect(json['status'], 'recovered');
+    expect(json['active_tiers'], isEmpty);
+    expect(json['archived_roles'], contains('legacy-history'));
+    final impact = json['impact'] as Map<String, dynamic>;
+    expect(impact['exact_merge_performed'], isFalse);
+    expect(impact['selected_tier'], 'archived, then restarted empty');
+    final bundle = Directory(json['evidence_bundle'] as String);
+    expect(bundle.existsSync(), isTrue);
+    expect(File('${bundle.path}/manifest.json').existsSync(), isTrue);
+    expect(
+      File('${temp.path}/quotabot/cache/codex_account_${accountIdentityDigest('acct')}.json')
+          .existsSync(),
+      isTrue,
+    );
+    final retry = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--yes',
+      '--json',
+    ]);
+    expectExitCode(retry, 0);
+    final retryJson =
+        jsonDecode(retry.stdout as String) as Map<String, dynamic>;
+    expect(retryJson['status'], 'already_recovered');
+    expect(retryJson['recovered'], isTrue);
+    expect(retryJson['evidence_bundle'], json['evidence_bundle']);
+  });
+
+  test('analytics recovery rejects mixed recovery modes before storage access',
+      () async {
+    final result = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--recover-drift=codex',
+      '--account=acct',
+      '--tier=history',
+      '--yes',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stdout, isEmpty);
+    expect(result.stderr, contains('cannot be combined'));
+    expect(result.stderr, contains('--recover-drift'));
+    expect(
+      Directory('${temp.path}/quotabot/analytics-recovery').existsSync(),
+      isFalse,
+    );
+  });
+
+  test('analytics recovery maps target and storage failures to stable exits',
+      () async {
+    final unsupported = await runCli([
+      'verify',
+      '--recover-analytics=not-a-provider',
+      '--account=acct',
+      '--tier=history',
+      '--json',
+    ]);
+    final healthy = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--json',
+    ]);
+    seedAnalyticsHistoryConflict();
+    File('${temp.path}/quotabot/analytics-recovery')
+        .writeAsStringSync('not a directory');
+    final archiveFailure = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--yes',
+      '--json',
+    ]);
+
+    expectExitCode(unsupported, 64);
+    expect(
+      (jsonDecode(unsupported.stdout as String)
+          as Map<String, dynamic>)['status'],
+      'unsupported_target',
+    );
+    expectExitCode(healthy, 65);
+    expect(
+      (jsonDecode(healthy.stdout as String) as Map<String, dynamic>)['status'],
+      'no_active_conflict',
+    );
+    expectExitCode(archiveFailure, 65);
+    expect(
+      (jsonDecode(archiveFailure.stdout as String)
+          as Map<String, dynamic>)['status'],
+      'archive_failed',
+    );
   });
 
   test('verify prints a human summary with cross-check pointers', () async {

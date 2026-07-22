@@ -126,9 +126,45 @@ view's warming copy. `doctor` prints every affected tier, and `stats --json`
 adds `storage_notice` when the row's hourly bucket tier is affected.
 The **Now** view and current quota evidence are unchanged. Close all older
 quotabot processes immediately to prevent further divergence. Closing them does
-not restore quarantined history; that tier remains unavailable until exact
-repair or a local-data reset. Backup, rollback, and reset tradeoffs are
-documented in [SETUP.md](SETUP.md#roll-back).
+not restore quarantined history. `doctor` prints an inspection template for
+each affected tier. Obtain the exact account value from `quotabot --json`, then
+run the template without `--yes` for a read-only plan:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=buckets --json
+```
+
+The inspection makes no provider or model call and creates no recovery lock or
+bundle. It reports the active tiers, whether the target is ready, the planned
+impact, and that exact merge is unavailable. After every older process is
+stopped, add `--yes` to archive and reset only the selected tier:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history --yes
+```
+
+Confirmed recovery holds both the exact provider/account evidence lock and the
+lossy legacy lock domain, accepts only bounded regular files, and caps archived
+evidence at 16 MiB. It moves selected canonical and legacy data into a unique
+owner-only bundle, copies the migration marker, verifies each SHA-256 digest,
+then records an immutable empty checkpoint. A legacy history file must contain
+only rows for the requested identity, and a legacy bucket file must have exact
+ownership evidence. Shared colliding legacy evidence is refused. The JSON
+receipt is `quotabot.analytics-recovery.v1`; its evidence manifest is
+`quotabot.analytics-recovery-evidence.v1` and contains fixed file roles and the
+opaque account digest, never the raw account or source path. Current quota,
+credentials, profiles, preferences, manual entries, leases, alerts, every other
+identity, provider-only compatibility analytics, and the unselected tier remain
+unchanged. If the other tier is also conflicted it remains quarantined until it
+is recovered separately. A failure before checkpoint admission retains
+quarantine. If manifest finalization fails after admission, the command returns
+`recovered_receipt_incomplete`, the retained bundle, and exit 65. Retrying a
+complete recovery returns `already_recovered` with its original bundle receipt.
+A late legacy writer immediately re-triggers quarantine. Recovery restarts the
+selected tier empty and does not merge ambiguous generations. Portable desktop
+bundles cannot perform this repair; install the CLI if needed. Backup and
+rollback tradeoffs are documented in [SETUP.md](SETUP.md#roll-back).
 
 For an explicit tier-fit check, pass candidate plan caps as percentages of your
 current plan. Prices are optional and caller-supplied:

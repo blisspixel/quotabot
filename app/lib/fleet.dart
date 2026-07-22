@@ -480,11 +480,14 @@ class _FleetScreenState extends State<FleetScreen> {
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
     final message = notices.length == 1
-        ? notices.single.summary
+        ? '${notices.single.summary} The desktop cannot perform this recovery. '
+              'Install the CLI from Setup first if needed.'
         : 'History incomplete - local analytics changed unexpectedly for '
               '${notices.length} provider accounts. Affected analytics are '
-              'quarantined. Close every older quotabot process now; this history '
-              'remains unavailable until repaired or reset.';
+              'quarantined. Close every older quotabot process now. Exact merge '
+              'is unavailable. Run quotabot doctor for the scoped '
+              'archive-and-reset path. The desktop cannot perform this '
+              'recovery. Install the CLI from Setup first if needed.';
     const amber = Color(0xFFD29922);
     return Semantics(
       container: true,

@@ -294,6 +294,32 @@ cannot penalize their route position. Quarantine therefore cannot make the
 affected provider rank more optimistically as evidence ages. No automatic merge or
 deletion occurs when the delta cannot be proven, because choosing one generation
 can lose samples and combining both can double-count their shared baseline.
+The explicit recovery boundary is `verify --recover-analytics`. Its default
+mode only inspects one exact provider/account/tier. With `--yes`, it repeats the
+checks while holding both the identity's canonical evidence lock and its lossy
+legacy lock domain, even when a legacy file was absent at inspection time. It
+rejects links and other non-regular sources, enforces a 16 MiB total evidence
+cap, and creates a unique owner-only bundle outside the cache directory.
+Owner-only permissions on the recovery root, bundle, manifest, and archived
+files are checked and fail closed. Canonical and legacy files for only the
+selected tier are atomically moved into fixed-role archive names; the migration
+marker and legacy bucket-owner record, when applicable, are copied. A legacy
+history file must contain only rows for the requested identity, and a legacy
+bucket file must carry exact ownership evidence, so colliding account stems are
+never adopted or moved. A manifest records byte counts and SHA-256 digests with
+an opaque account digest and no raw source paths. An explicit recovery guard is
+installed before originals move. Only after every archive digest verifies and
+every selected path, including paths absent at inspection, remains absent does
+the migration marker admit an immutable empty selected-tier checkpoint. A
+still-conflicted other tier retains its conflict flag and trusted checkpoint.
+Failures before checkpoint admission retain quarantine and partial archives
+retain their manifest. If manifest finalization fails after admission, retry
+returns the retained receipt as `recovered_receipt_incomplete`. A late legacy
+write differs from the empty baseline and reactivates quarantine.
+The transaction never contacts a provider and never touches quota snapshots,
+credentials, profiles, preferences, leases, alerts, other identities, or
+provider-only compatibility analytics. It deliberately does not attempt an
+exact merge.
 Drift diagnostics use separate per-provider/account records in the cache
 directory. They remain attached to cache-only and failed-read fallbacks so a
 process restart or transient provider failure cannot silently clear the warning.

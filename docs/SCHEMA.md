@@ -448,6 +448,58 @@ failures, provider drift, and contract drift. The CLI exits 65 when any check
 fails, and also exits 65 when `--require-live` is set and no adapter was selected
 or a selected adapter did not return a fresh accepted read.
 
+## `quotabot.analytics-recovery.v1`
+
+`quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
+--tier=history|buckets --json` emits a local analytics recovery receipt. Without
+`--yes`, the command is a read-only inspection and creates no recovery lock or
+bundle. With `--yes`, it archives and resets only the selected exact tier. It
+makes no provider or model call in either mode.
+
+- `schema`: always `quotabot.analytics-recovery.v1`.
+- `mode`: `inspect` or `recover`.
+- `provider`, `account`, and `tier`: the exact requested target. The account is
+  present because the caller supplied it and needs to match the receipt to the
+  request.
+- `active_tiers`: quarantined tiers still active when the result was produced.
+- `ready`: true only when an inspection proves the target can enter the
+  confirmed transaction.
+- `recovered`: true only when the selected tier reached an empty admitted
+  checkpoint. A rare `recovered_receipt_incomplete` status keeps this true but
+  exits 65 because the on-disk manifest could not be finalized.
+- `status` and `detail`: a bounded machine verdict and plain-language result.
+  Stable operational statuses include `ready`, `recovered`,
+  `already_recovered`, `recovered_receipt_incomplete`,
+  `no_active_conflict`, `tier_not_conflicted`, `unsupported_target`,
+  `invalid_target`, `unsafe_evidence`, `shared_legacy_evidence`,
+  `evidence_too_large`,
+  `evidence_changed`, `archive_failed`, `marker_write_failed`, `rediverged`,
+  and `recovery_unavailable`.
+- `impact`: the selected-tier action, `exact_merge_performed: false`, and the
+  local surfaces preserved by the transaction. The action is destructive only
+  for a `ready` inspection or a confirmed transaction; a failed inspection
+  reports the selected tier as unchanged.
+- `evidence_bundle` and `archived_roles`: present after an archive starts. The
+  bundle path is returned only to the local caller; role names are fixed and do
+  not contain account or source-path text.
+
+Exit code is 0 for a ready inspection or a fully recovered tier, 64 for invalid
+or unsupported targeting, and 65 when a valid target is not ready or not safely
+recovered. `already_recovered` is a successful idempotent replay of the retained
+receipt. `recovered_receipt_incomplete` reports that checkpoint admission
+succeeded but manifest finalization did not, so it exits 65 with the evidence
+bundle still identified. Filters, simulation, strict live verification, and
+provider-drift recovery cannot be combined with this command.
+
+Each created bundle contains `manifest.json` with schema
+`quotabot.analytics-recovery-evidence.v1`. The manifest records `state`,
+provider, opaque `account_digest`, tier, observation time, selected action,
+`exact_merge_performed: false`, and fixed-role file entries with byte counts,
+SHA-256 digests, archive state, and whether the original was moved. It never
+contains the raw account, original source path, quota samples, prompts, code, or
+credentials. The selected tier restarts empty; the bundle is retained for audit
+or a future exact reconciliation.
+
 ## `quotabot.explain.v1`
 
 `quotabot explain --reads --network --json` emits a dry-run runtime access

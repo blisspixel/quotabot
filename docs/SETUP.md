@@ -404,9 +404,29 @@ warning, while `stats` reports bucket-tier
 conflicts on the rows that consume those buckets. Closing the older process stops
 further divergence but does not restore quarantined history. Current quota
 snapshots, provider credentials, and the **Now** view remain available. quotabot
-does not guess at or delete an ambiguous analytics delta; keep the files for a
-future exact repair, or use the documented full local-data reset below only if
-losing local history is acceptable.
+does not guess at an ambiguous analytics delta. To recover without deleting
+unrelated local state, obtain the exact account value from `quotabot --json`,
+then inspect each affected tier named by `doctor`:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=buckets
+```
+
+Inspection is read-only and makes no provider call. After stopping every older
+process and reviewing the reported impact, rerun the selected command with
+`--yes`. quotabot moves only that exact tier's canonical and legacy files into
+an owner-only evidence bundle under the local `analytics-recovery` directory,
+verifies SHA-256 digests, and restarts the tier empty. It preserves current
+quota, credentials, profiles, preferences, manual entries, leases, alerts,
+other provider accounts, provider-only compatibility analytics, and the
+unselected tier. If both tiers are quarantined, recover them separately. This
+does not perform an exact merge. It refuses a legacy file shared by colliding
+account identities, and a retry after success returns the retained bundle
+receipt. Retain that bundle for a future proven reconciliation. Portable
+desktop bundles do not perform this recovery; install the CLI first if only the
+desktop is present. Use the full local-data reset below only when deleting all
+local state is actually intended.
 
 macOS or Linux:
 

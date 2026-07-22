@@ -5,6 +5,17 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Mixed-version analytics warnings now lead to a scoped local recovery path.
+  `verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
+  --tier=history|buckets` performs a no-write inspection; adding `--yes`
+  archives only that exact tier into an owner-only, digest-verified evidence
+  bundle and restarts it empty. The command makes no provider call, preserves
+  unrelated quota and local state, keeps any unselected tier quarantined, and
+  explicitly states that no exact merge was performed. Recovery holds both
+  legacy and canonical evidence locks, refuses legacy files shared by colliding
+  account identities, and returns the retained evidence receipt on retry. The
+  desktop warning now states that recovery requires the separately installed
+  CLI instead of implying that the desktop can perform it.
 - `check <provider>` now invokes only that built-in adapter instead of refreshing
   the full fleet. Filtered `verify --require-live` runs only the adapters allowed
   by its profile, exclusions, and local-only policy, and its observed runtime

@@ -479,11 +479,16 @@ Future<void> main(List<String> rawArgs) async {
       _runExplain(flags, wantsJson, profile, excludedProviders);
       return;
     case 'verify':
-      final recoveryRequested =
+      final analyticsRecoveryRequested =
+          _stringOption(flags, 'recover-analytics', null) != null ||
+              _stringOption(flags, 'tier', null) != null;
+      final driftRecoveryRequested =
           _stringOption(flags, 'recover-drift', null) != null ||
               _stringOption(flags, 'account', null) != null ||
               flags.contains('--yes');
-      if (recoveryRequested) {
+      if (analyticsRecoveryRequested) {
+        await _runAnalyticsStorageRecovery(flags, wantsJson);
+      } else if (driftRecoveryRequested) {
         await _runDriftRecovery(flags, wantsJson);
       } else {
         await _runVerify(
@@ -733,8 +738,9 @@ String analyticsStorageSummary(List<AnalyticsStorageNotice> notices) =>
         ? notices.single.summary
         : 'History incomplete - local analytics changed unexpectedly for '
             '${notices.length} provider accounts. Affected analytics are '
-            'quarantined. Close every older quotabot process now; this history '
-            'remains unavailable until repaired or reset.';
+            'quarantined. Close every older quotabot process now. Exact merge '
+            'is unavailable. Run quotabot doctor for the scoped '
+            'archive-and-reset path.';
 
 /// Builds the analytics series shown by `quotabot stats`.
 ///
@@ -1146,12 +1152,14 @@ const _valueOptions = {
   'plan',
   'prefer',
   'profile',
+  'recover-analytics',
   'recover-drift',
   'risk',
   'sort',
   'state',
   'task',
   'theme',
+  'tier',
   'tier-ceiling',
   'tier-floor',
   'tier-plan',
@@ -1306,8 +1314,10 @@ String? _commandOptionError(String command, Set<String> flags) {
     case 'verify':
       allowed.addAll(const {
         'account',
+        'recover-analytics',
         'recover-drift',
         'require-live',
+        'tier',
         'yes',
       });
   }
@@ -1882,7 +1892,10 @@ void _printHelp() {
     '  verify              honesty checks over one read; add --require-live for adapter health',
   );
   stdout.writeln(
-    '                      recover one quarantined baseline with --recover-drift, --account, and --yes',
+    '                      recover one provider-drift baseline with --recover-drift, --account, and --yes',
+  );
+  stdout.writeln(
+    '                      inspect or archive one quarantined analytics tier with --recover-analytics, --account, and --tier',
   );
   stdout.writeln(
     '  explain             show local reads and network hosts in the runtime trust boundary',
@@ -1918,7 +1931,7 @@ void _printHelp() {
     '  --include-accounts  report: include account labels in Markdown',
   );
   stdout.writeln(
-    '  --account=VALUE     check: exact returned account; verify: exact drift-recovery account',
+    '  --account=VALUE     check: exact returned account; verify recovery: exact account from quotabot --json',
   );
   stdout.writeln(
     '  --profile=NAME      use a local named profile view',
@@ -1988,6 +2001,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
+  );
+  stdout.writeln(
+    '  --recover-analytics=P --account=A --tier=history|buckets  inspect one exact analytics quarantine; add --yes to archive and restart that tier empty',
   );
   stdout.writeln(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
@@ -2971,6 +2987,18 @@ void _printDoctor(
         '  $indent ${_stateColumn('')} '
         '${style.yellow('! $storageWarning')} ',
       );
+      final notice = storageNoticesByIdentity[quotaIdentityKeyFor(q)]!;
+      print(
+        '  $indent ${_stateColumn('')} ${style.dim('-> exact account: copy '
+            'this provider row\'s account field from quotabot --json')}',
+      );
+      for (final tier in notice.tiers) {
+        print(
+          '  $indent ${_stateColumn('')} ${style.dim('-> inspect scoped reset: '
+              'quotabot verify --recover-analytics=${q.provider} '
+              '--account=EXACT_ACCOUNT --tier=$tier')}',
+        );
+      }
     }
   }
 
@@ -3133,6 +3161,139 @@ Future<void> _runVerify(
     _printVerify(report, results, requireLive: requireLive);
   }
   if (!report.passed) exitCode = _exitVerifyFailed;
+}
+
+Future<void> _runAnalyticsStorageRecovery(
+  Set<String> flags,
+  bool wantsJson,
+) async {
+  final providerOptions =
+      flags.where((flag) => flag.startsWith('--recover-analytics=')).toList();
+  final accountOptions =
+      flags.where((flag) => flag.startsWith('--account=')).toList();
+  final tierOptions =
+      flags.where((flag) => flag.startsWith('--tier=')).toList();
+  if (providerOptions.length > 1 ||
+      accountOptions.length > 1 ||
+      tierOptions.length > 1) {
+    stderr.writeln(
+      'quotabot: analytics recovery requires one exact provider, account, and tier',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  final provider = _stringOption(flags, 'recover-analytics', null);
+  final account = _stringOption(flags, 'account', null);
+  final tier = _stringOption(flags, 'tier', null);
+  if (provider == null || provider.trim().isEmpty) {
+    stderr.writeln(
+      'quotabot: analytics recovery requires --recover-analytics=PROVIDER',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (account == null || account.trim().isEmpty) {
+    stderr.writeln(
+      'quotabot: analytics recovery requires --account=EXACT_ACCOUNT',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (tier == null || tier.trim().isEmpty) {
+    stderr.writeln(
+      'quotabot: analytics recovery requires --tier=history or --tier=buckets',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  if (provider.length > 64 ||
+      tier.length > 16 ||
+      stripTerminalControl(provider) != provider ||
+      account.length > 512 ||
+      stripTerminalControl(account) != account ||
+      stripTerminalControl(tier) != tier) {
+    stderr.writeln('quotabot: analytics recovery target is malformed');
+    exitCode = _exitUsage;
+    return;
+  }
+  final conflicts = <String>[
+    if (flags.any((flag) => flag.startsWith('--recover-drift=')))
+      '--recover-drift',
+    if (flags.any((flag) => flag.startsWith('--profile='))) '--profile',
+    if (flags.any((flag) => flag.startsWith('--exclude='))) '--exclude',
+    if (flags.any((flag) => flag.startsWith('--mock-provider=')))
+      '--mock-provider',
+    if (flags.any((flag) => flag.startsWith('--state='))) '--state',
+    if (flags.contains('--require-live')) '--require-live',
+  ];
+  if (conflicts.isNotEmpty) {
+    stderr.writeln(
+      'quotabot: analytics recovery cannot be combined with '
+      '${conflicts.join(', ')}',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+
+  final confirmed = flags.contains('--yes');
+  final result = confirmed
+      ? recoverAnalyticsStorage(provider, account, tier)
+      : inspectAnalyticsStorageRecovery(provider, account, tier);
+  if (wantsJson) {
+    print(_jsonPretty(result.toJson()));
+  } else {
+    _printAnalyticsStorageRecovery(result);
+  }
+  if (result.status == 'unsupported_target' ||
+      result.status == 'invalid_target') {
+    exitCode = _exitUsage;
+  } else if ((!result.ready && !result.recovered) ||
+      result.status == 'recovered_receipt_incomplete') {
+    exitCode = _exitVerifyFailed;
+  }
+}
+
+void _printAnalyticsStorageRecovery(AnalyticsStorageRecoveryResult result) {
+  final displayName =
+      _providerAdapterForName(result.provider)?.displayName ?? result.provider;
+  final account = quotaAccountDisplayLabel(result.account);
+  final action = result.mode == 'inspect' ? 'inspection' : 'recovery';
+  print(
+    '${style.bold('quotabot verify analytics $action')}  '
+    '${style.dim('local files only, 0 provider calls, 0 usage tokens')}',
+  );
+  print('  ${style.dim('TARGET')} $displayName ($account), ${result.tier}');
+  if (result.recovered) {
+    final label = switch (result.status) {
+      'recovered' => style.green('RECOVERED'),
+      'already_recovered' => style.green('ALREADY RECOVERED'),
+      _ => style.red('RECOVERED WITH WARNING'),
+    };
+    print('  $label ${result.detail}');
+  } else if (result.ready) {
+    print('  ${style.green('READY')} ${result.detail}');
+    print(
+      style.dim(
+        '  Rerun this exact command with --yes to perform the scoped archive-and-reset.',
+      ),
+    );
+  } else {
+    print('  ${style.red('NOT READY')} ${result.status}: ${result.detail}');
+  }
+  if (result.evidenceBundle != null) {
+    print('  ${style.dim('Evidence bundle:')} ${result.evidenceBundle}');
+  }
+  if (result.activeTiers.isNotEmpty) {
+    print(
+      '  ${style.dim('Quarantined tiers:')} ${result.activeTiers.join(', ')}',
+    );
+  }
+  print(
+    style.dim(
+      '  Exact merge is unavailable. Current quota, credentials, preferences, '
+      'other identities, and unselected analytics remain unchanged.',
+    ),
+  );
 }
 
 Future<void> _runDriftRecovery(

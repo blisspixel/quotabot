@@ -264,7 +264,21 @@ provider, before a forecast is built on top of it.
   `doctor` surface affected tiers, while `stats --json` annotates bucket-tier
   conflicts on the rows that consume them, without exposing raw account or path
   data.
-- **Remaining:** exact reconciliation of a detected mixed-version delta. Raw
+- **Done:** a local-only `verify --recover-analytics` handoff now inspects one
+  exact provider/account/tier without writing, then requires `--yes` before it
+  moves only that tier's canonical and legacy files into a bounded owner-only
+  evidence bundle and admits an empty checkpoint. The receipt records fixed
+  roles, byte counts, and SHA-256 digests without raw account or source paths.
+  Recovery holds the canonical and lossy legacy lock domains together, refuses
+  colliding legacy evidence that is not exclusively owned by the requested
+  account, and returns the completed receipt on retry.
+  Other identities, the unselected tier, provider-only compatibility analytics,
+  quota evidence, credentials, preferences, profiles, leases, and alerts remain
+  unchanged. Failures before checkpoint admission retain quarantine. A failure
+  to finalize the manifest after admission returns
+  `recovered_receipt_incomplete` with the retained evidence bundle and a nonzero
+  exit. A late legacy writer re-triggers quarantine.
+- **Remaining:** exact merge reconciliation of a detected mixed-version delta. Raw
   history can use the ordered checkpoint, while aggregate buckets need a proven
   additive subtraction before any merge. Until that repair is implemented,
   quotabot will not guess between losing newer samples and double-counting the

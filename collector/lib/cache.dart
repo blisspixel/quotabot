@@ -41,8 +41,21 @@ const _cacheObservedAtMicrosKey = 'cache_observed_at_micros';
 const _driftObservedAtMicrosKey = 'observed_at_micros';
 const _legacyBucketOwnerSchema = 'quotabot.legacy-bucket-owner.v1';
 const _analyticsMigrationSchema = 'quotabot.analytics-migration.v1';
+const _analyticsLegacyBucketOwnerDigestKey = 'legacy_bucket_owner_digest';
+const _analyticsRecoverySchema = 'quotabot.analytics-recovery.v1';
+const _analyticsRecoveryEvidenceSchema =
+    'quotabot.analytics-recovery-evidence.v1';
 const _maxAnalyticsMigrationBytes = 1024 * 1024;
 const _maxAnalyticsCheckpointBuckets = kRetentionDays * 24 + 2;
+const _maxAnalyticsRecoveryEvidenceBytes = 16 * 1024 * 1024;
+const _analyticsRecoveryTiers = {'history', 'buckets'};
+const _analyticsRecoveryPreserved = [
+  'current quota and credentials',
+  'profiles, preferences, manual entries, leases, and alerts',
+  'every other provider account',
+  'the unselected analytics tier',
+  'provider-only compatibility analytics',
+];
 
 /// Bounded, identity-safe evidence that a legacy analytics path changed after
 /// the current canonical path was established, or that its checkpoint is no
@@ -69,7 +82,8 @@ class AnalyticsStorageNotice {
         : 'recent history and hourly analytics';
     return 'History incomplete - local $tierLabel changed unexpectedly. '
         'Affected analytics are quarantined. Close every older quotabot process '
-        'now; this history remains unavailable until repaired or reset.';
+        'now. Exact merge is unavailable. Run quotabot doctor for the scoped '
+        'archive-and-reset path.';
   }
 
   Map<String, dynamic> toJson() => {
@@ -78,6 +92,84 @@ class AnalyticsStorageNotice {
         'observed_at': observedAt,
         'detail': summary,
       };
+}
+
+/// Inspect or archive-and-reset outcome for one exact analytics conflict tier.
+///
+/// The result is intentionally bounded. The explicitly supplied account is
+/// returned to the caller. The manifest and opaque bundle id omit raw account
+/// and source-path text; archived source files retain their original quota
+/// metadata by design and are protected by checked owner-only permissions.
+class AnalyticsStorageRecoveryResult {
+  final String mode;
+  final String provider;
+  final String account;
+  final String tier;
+  final List<String> activeTiers;
+  final bool ready;
+  final bool recovered;
+  final String status;
+  final String detail;
+  final String? evidenceBundle;
+  final List<String> archivedRoles;
+
+  const AnalyticsStorageRecoveryResult({
+    required this.mode,
+    required this.provider,
+    required this.account,
+    required this.tier,
+    required this.activeTiers,
+    required this.ready,
+    required this.recovered,
+    required this.status,
+    required this.detail,
+    this.evidenceBundle,
+    this.archivedRoles = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'schema': _analyticsRecoverySchema,
+        'mode': mode,
+        'provider': provider,
+        'account': account,
+        'tier': tier,
+        'active_tiers': activeTiers,
+        'ready': ready,
+        'recovered': recovered,
+        'status': status,
+        'detail': detail,
+        'impact': {
+          'selected_tier': recovered
+              ? 'archived, then restarted empty'
+              : evidenceBundle != null
+                  ? 'archive attempted; quarantine retained'
+                  : mode == 'inspect' && ready
+                      ? 'would be archived, then restarted empty'
+                      : 'unchanged',
+          'exact_merge_performed': false,
+          'preserved': _analyticsRecoveryPreserved,
+        },
+        if (evidenceBundle != null) 'evidence_bundle': evidenceBundle,
+        if (archivedRoles.isNotEmpty) 'archived_roles': archivedRoles,
+      };
+}
+
+class _AnalyticsRecoveryEvidence {
+  final String role;
+  final File source;
+  final String extension;
+  final List<int> precheckBytes;
+  final String precheckDigest;
+  final bool moveOriginal;
+
+  const _AnalyticsRecoveryEvidence({
+    required this.role,
+    required this.source,
+    required this.extension,
+    required this.precheckBytes,
+    required this.precheckDigest,
+    required this.moveOriginal,
+  });
 }
 
 String _accountStem(String account) => accountStorageStem(account);
@@ -94,7 +186,11 @@ List<File> _driftFiles(String provider, String account) {
   return canonical.path == legacy.path ? [canonical] : [canonical, legacy];
 }
 
-List<File> _evidenceLockFiles(String provider, String account) {
+List<File> _evidenceLockFiles(
+  String provider,
+  String account, {
+  bool includeLegacy = false,
+}) {
   final accountScoped =
       _accountScopedProviders.contains(provider) && _hasAccount(account);
   final scope = accountScoped ? _accountStem(account) : 'provider';
@@ -102,7 +198,9 @@ List<File> _evidenceLockFiles(String provider, String account) {
   final canonical = File(
     '$dir/evidence_${_safeProviderStem(provider)}_$scope.lock',
   );
-  if (!accountScoped || !_legacyAccountArtifactsExist(provider, account, dir)) {
+  if (!accountScoped ||
+      (!includeLegacy &&
+          !_legacyAccountArtifactsExist(provider, account, dir))) {
     return [canonical];
   }
   final legacy = File(
@@ -130,9 +228,14 @@ bool _legacyAccountArtifactsExist(
 T _withEvidenceLock<T>(
   String provider,
   String account,
-  T Function() run,
-) {
-  final files = _evidenceLockFiles(provider, account);
+  T Function() run, {
+  bool includeLegacy = false,
+}) {
+  final files = _evidenceLockFiles(
+    provider,
+    account,
+    includeLegacy: includeLegacy,
+  );
   T lockAt(int index) {
     if (index == files.length) return run();
     final file = files[index];
@@ -163,6 +266,16 @@ void _atomicWrite(File f, String contents) {
   if (!tmp.existsSync()) tmp.createSync(recursive: true);
   restrictOwnerOnlyFile(tmp);
   tmp.writeAsStringSync(contents);
+  tmp.renameSync(f.path);
+  restrictOwnerOnlyFile(f);
+}
+
+void _atomicWriteBytes(File f, List<int> contents) {
+  restrictOwnerOnlyDirectory(f.parent);
+  final tmp = File('${f.path}.$pid.tmp');
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictOwnerOnlyFile(tmp);
+  tmp.writeAsBytesSync(contents, flush: true);
   tmp.renameSync(f.path);
   restrictOwnerOnlyFile(f);
 }
@@ -1201,6 +1314,27 @@ File _analyticsMigrationFile(String provider, String account) => File(
       '${cacheDir().path}/analytics_migration_${_safeProviderStem(provider)}_${_accountStem(account)}.json',
     );
 
+List<File> _analyticsRecoveryTierFiles(
+  String provider,
+  String account,
+  String tier,
+) {
+  final candidates = tier == 'history'
+      ? [
+          _historyFile(provider, account: account),
+          _legacyHistoryFile(provider, account: account),
+        ]
+      : [
+          _bucketsFile(provider, account: account),
+          _legacyBucketsFile(provider, account: account),
+        ];
+  final seen = <String>{};
+  return [
+    for (final file in candidates)
+      if (seen.add(file.path)) file
+  ];
+}
+
 String _contentDigest(String value) =>
     sha256.convert(utf8.encode(value)).toString();
 
@@ -1215,6 +1349,18 @@ Map<String, dynamic> _historyCheckpoint(String provider, String account) {
     'row_digests': rowDigests,
   };
 }
+
+Map<String, dynamic> _emptyHistoryCheckpoint() => {
+      'digest': _contentDigest(''),
+      'count': 0,
+      'row_digests': const <String>[],
+    };
+
+Map<String, dynamic> _emptyBucketCheckpoint() => {
+      'digest': _contentDigest('[]'),
+      'count': 0,
+      'buckets': const <Map<String, dynamic>>[],
+    };
 
 ({bool valid, List<HeadroomBucket> buckets}) _readBucketFile(File file) {
   if (!file.existsSync()) return (valid: true, buckets: const []);
@@ -1626,6 +1772,981 @@ AnalyticsStorageNotice? analyticsStorageNotice(
   );
 }
 
+AnalyticsStorageRecoveryResult _analyticsRecoveryResult({
+  required String mode,
+  required String provider,
+  required String account,
+  required String tier,
+  required List<String> activeTiers,
+  required bool ready,
+  required bool recovered,
+  required String status,
+  required String detail,
+  String? evidenceBundle,
+  List<String> archivedRoles = const [],
+}) =>
+    AnalyticsStorageRecoveryResult(
+      mode: mode,
+      provider: provider,
+      account: account,
+      tier: tier,
+      activeTiers: List.unmodifiable(activeTiers),
+      ready: ready,
+      recovered: recovered,
+      status: status,
+      detail: detail,
+      evidenceBundle: evidenceBundle,
+      archivedRoles: List.unmodifiable(archivedRoles),
+    );
+
+String? _legacyHistoryRecoveryFailure(
+  List<int> bytes,
+  String provider,
+  String account,
+) {
+  try {
+    for (final line in const LineSplitter().convert(utf8.decode(bytes))) {
+      if (line.trim().isEmpty) continue;
+      final decoded = jsonDecode(line);
+      if (decoded is! Map ||
+          decoded['provider'] is! String ||
+          decoded['account'] is! String) {
+        return 'unsafe_evidence';
+      }
+      if (decoded['provider'] != provider || decoded['account'] != account) {
+        return 'shared_legacy_evidence';
+      }
+    }
+  } catch (_) {
+    return 'unsafe_evidence';
+  }
+  return null;
+}
+
+({List<_AnalyticsRecoveryEvidence> evidence, String? failure})
+    _analyticsRecoveryEvidence(
+  String provider,
+  String account,
+  String tier,
+) {
+  final candidates =
+      <({String role, File source, String extension, bool moveOriginal})>[];
+  if (tier == 'history') {
+    candidates.addAll([
+      (
+        role: 'canonical-history',
+        source: _historyFile(provider, account: account),
+        extension: '.jsonl',
+        moveOriginal: true,
+      ),
+      (
+        role: 'legacy-history',
+        source: _legacyHistoryFile(provider, account: account),
+        extension: '.jsonl',
+        moveOriginal: true,
+      ),
+    ]);
+  } else {
+    candidates.addAll([
+      (
+        role: 'canonical-buckets',
+        source: _bucketsFile(provider, account: account),
+        extension: '.json',
+        moveOriginal: true,
+      ),
+      (
+        role: 'legacy-buckets',
+        source: _legacyBucketsFile(provider, account: account),
+        extension: '.json',
+        moveOriginal: true,
+      ),
+      (
+        role: 'legacy-bucket-owner',
+        source: _legacyBucketOwnerFile(provider, account),
+        extension: '.json',
+        moveOriginal: false,
+      ),
+    ]);
+  }
+  candidates.add((
+    role: 'migration-marker',
+    source: _analyticsMigrationFile(provider, account),
+    extension: '.json',
+    moveOriginal: false,
+  ));
+
+  final evidence = <_AnalyticsRecoveryEvidence>[];
+  final seenPaths = <String>{};
+  var totalBytes = 0;
+  for (final candidate in candidates) {
+    if (!seenPaths.add(candidate.source.path)) continue;
+    final type = FileSystemEntity.typeSync(
+      candidate.source.path,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) continue;
+    if (type != FileSystemEntityType.file) {
+      return (evidence: const [], failure: 'unsafe_evidence');
+    }
+    try {
+      final length = candidate.source.lengthSync();
+      if (length < 0 ||
+          length > _maxAnalyticsRecoveryEvidenceBytes ||
+          totalBytes + length > _maxAnalyticsRecoveryEvidenceBytes) {
+        return (evidence: const [], failure: 'evidence_too_large');
+      }
+      final bytes = candidate.source.readAsBytesSync();
+      if (bytes.length != length ||
+          totalBytes + bytes.length > _maxAnalyticsRecoveryEvidenceBytes) {
+        return (evidence: const [], failure: 'evidence_changed');
+      }
+      if (candidate.role == 'legacy-history') {
+        final failure = _legacyHistoryRecoveryFailure(
+          bytes,
+          provider,
+          account,
+        );
+        if (failure != null) return (evidence: const [], failure: failure);
+      }
+      if (candidate.role == 'legacy-buckets' &&
+          !_legacyBucketRecoveryOwned(provider, account)) {
+        return (evidence: const [], failure: 'shared_legacy_evidence');
+      }
+      totalBytes += bytes.length;
+      evidence.add(
+        _AnalyticsRecoveryEvidence(
+          role: candidate.role,
+          source: candidate.source,
+          extension: candidate.extension,
+          precheckBytes: bytes,
+          precheckDigest: sha256.convert(bytes).toString(),
+          moveOriginal: candidate.moveOriginal,
+        ),
+      );
+    } catch (_) {
+      return (evidence: const [], failure: 'unsafe_evidence');
+    }
+  }
+  return (evidence: evidence, failure: null);
+}
+
+/// Read-only readiness check for one exact quarantined analytics tier.
+///
+/// This never creates a recovery bundle or lock file and never contacts a
+/// provider. A confirmed recovery must repeat every check while holding the
+/// exact provider/account evidence lock.
+AnalyticsStorageRecoveryResult inspectAnalyticsStorageRecovery(
+  String provider,
+  String account,
+  String tier,
+) {
+  final canonicalProvider =
+      canonicalizeProviderId(provider.trim().toLowerCase());
+  final selectedTier = tier.trim().toLowerCase();
+  if (providerAdapterById(canonicalProvider) == null) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'unsupported_target',
+      detail: 'The provider is not registered with this quotabot build.',
+    );
+  }
+  if (!_hasAccount(account)) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'invalid_target',
+      detail: 'Recovery requires one exact non-placeholder account identity.',
+    );
+  }
+  if (!_analyticsRecoveryTiers.contains(selectedTier)) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'invalid_target',
+      detail: 'Tier must be history or buckets.',
+    );
+  }
+
+  final notice = analyticsStorageNotice(
+    canonicalProvider,
+    account: account,
+  );
+  final activeTiers = notice?.tiers ?? const <String>[];
+  if (notice == null) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: false,
+      status: 'no_active_conflict',
+      detail: 'No analytics storage conflict is active for this identity.',
+    );
+  }
+  if (!activeTiers.contains(selectedTier)) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: false,
+      status: 'tier_not_conflicted',
+      detail: 'The selected tier is not quarantined for this identity.',
+    );
+  }
+
+  final evidence = _analyticsRecoveryEvidence(
+    canonicalProvider,
+    account,
+    selectedTier,
+  );
+  if (evidence.failure != null) {
+    final tooLarge = evidence.failure == 'evidence_too_large';
+    final shared = evidence.failure == 'shared_legacy_evidence';
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: false,
+      status: evidence.failure!,
+      detail: tooLarge
+          ? 'Selected recovery evidence exceeds the 16 MiB safety limit.'
+          : shared
+              ? 'The legacy analytics file is not exclusive to this exact '
+                  'account. No scoped recovery files can be changed safely.'
+              : 'Selected recovery evidence is not a stable regular-file set.',
+    );
+  }
+  return _analyticsRecoveryResult(
+    mode: 'inspect',
+    provider: canonicalProvider,
+    account: account,
+    tier: selectedTier,
+    activeTiers: activeTiers,
+    ready: true,
+    recovered: false,
+    status: 'ready',
+    detail: 'Ready to archive this exact tier and restart it empty. '
+        'Exact merge is unavailable; every listed preserved surface remains '
+        'unchanged.',
+  );
+}
+
+Directory _createAnalyticsRecoveryBundle(
+  String provider,
+  String account,
+  String tier,
+) {
+  final root = quotabotDir('analytics-recovery');
+  if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+      FileSystemEntityType.directory) {
+    throw const FileSystemException('unsafe recovery root');
+  }
+  enforceOwnerOnlyDirectory(root);
+  final digest = accountIdentityDigest(account).substring(0, 16);
+  final micros = DateTime.now().toUtc().microsecondsSinceEpoch;
+  for (var attempt = 0; attempt < 100; attempt++) {
+    final suffix = attempt == 0 ? '' : '_$attempt';
+    final bundle = Directory(
+      '${root.path}/${_safeProviderStem(provider)}_${digest}_${tier}_${micros}_$pid$suffix',
+    );
+    if (bundle.existsSync()) continue;
+    bundle.createSync();
+    enforceOwnerOnlyDirectory(bundle);
+    return bundle;
+  }
+  throw const FileSystemException('could not allocate recovery bundle');
+}
+
+void _writeAnalyticsRecoveryManifest(
+  Directory bundle, {
+  required String provider,
+  required String account,
+  required String tier,
+  required String state,
+  required List<_AnalyticsRecoveryEvidence> evidence,
+  required Set<String> archivedRoles,
+  String? failure,
+}) {
+  final manifest = File('${bundle.path}/manifest.json');
+  _atomicWrite(
+    manifest,
+    jsonEncode({
+      'schema': _analyticsRecoveryEvidenceSchema,
+      'state': state,
+      'provider': provider,
+      'account_digest': accountIdentityDigest(account),
+      'tier': tier,
+      'observed_at': nowEpoch(),
+      'exact_merge_performed': false,
+      'selected_tier_action': 'archived_then_restarted_empty',
+      'files': [
+        for (final item in evidence)
+          {
+            'role': item.role,
+            'bytes': item.precheckBytes.length,
+            'sha256': item.precheckDigest,
+            'archived': archivedRoles.contains(item.role),
+            'moved_original':
+                item.moveOriginal && archivedRoles.contains(item.role),
+          },
+      ],
+      if (failure != null) 'failure': failure,
+    }),
+  );
+  enforceOwnerOnlyFile(manifest);
+}
+
+String _analyticsRecoveryReceiptKey(String tier) => '${tier}_recovery';
+
+void _copyAnalyticsRecoveryReceipts(
+  Map<String, dynamic> target,
+  Map<String, dynamic>? source,
+) {
+  for (final tier in _analyticsRecoveryTiers) {
+    final receipt = source?[_analyticsRecoveryReceiptKey(tier)];
+    if (receipt is! Map ||
+        receipt['bundle_id'] is! String ||
+        receipt['observed_at'] is! int) {
+      continue;
+    }
+    final bundleId = receipt['bundle_id'] as String;
+    if (!RegExp(r'^[a-zA-Z0-9._-]{1,220}$').hasMatch(bundleId)) continue;
+    target[_analyticsRecoveryReceiptKey(tier)] = {
+      'bundle_id': bundleId,
+      'observed_at': receipt['observed_at'],
+    };
+  }
+}
+
+Map<String, dynamic> _analyticsMigrationRecordAfterRecovery(
+  String provider,
+  String account,
+  String selectedTier,
+  Set<String> unresolvedTiers,
+  Map<String, dynamic>? previous,
+) {
+  final record = _newAnalyticsMigrationRecord(provider, account);
+  _copyAnalyticsRecoveryReceipts(record, previous);
+  final ownerDigest = previous?[_analyticsLegacyBucketOwnerDigestKey];
+  if (ownerDigest == accountIdentityDigest(account)) {
+    record[_analyticsLegacyBucketOwnerDigestKey] = ownerDigest;
+  }
+  for (final tier in _analyticsRecoveryTiers) {
+    if (tier == selectedTier) {
+      record[tier] = tier == 'history'
+          ? _emptyHistoryCheckpoint()
+          : _emptyBucketCheckpoint();
+      continue;
+    }
+    if (unresolvedTiers.contains(tier)) {
+      final previousCheckpoint = previous?[tier];
+      if (previousCheckpoint is Map) {
+        record[tier] = Map<String, dynamic>.from(previousCheckpoint);
+      }
+      record['${tier}_conflict'] = true;
+      final previousReason = previous?['${tier}_reason'];
+      record['${tier}_reason'] = previousReason is String
+          ? previousReason
+          : 'unresolved during scoped analytics recovery';
+      continue;
+    }
+
+    if (tier == 'history') {
+      record[tier] = _historyCheckpoint(provider, account);
+      continue;
+    }
+    final legacy = _legacyBucketsFile(provider, account: account);
+    final owned = !legacy.existsSync() ||
+        _legacyBucketOwnerAllows(provider, account, claim: false);
+    if (!owned) continue;
+    final checkpoint = _bucketCheckpoint(legacy);
+    if (checkpoint != null) {
+      record[tier] = checkpoint;
+    } else {
+      record['${tier}_conflict'] = true;
+      record['${tier}_reason'] = tier == selectedTier
+          ? 'selected tier did not restart from an empty baseline'
+          : 'hourly analytics checkpoint remains invalid';
+    }
+  }
+  return record;
+}
+
+Map<String, dynamic> _analyticsMigrationRecoveryGuard(
+  String provider,
+  String account,
+  String selectedTier,
+  Set<String> activeTiers,
+  Map<String, dynamic>? previous,
+) {
+  final record = _newAnalyticsMigrationRecord(provider, account);
+  _copyAnalyticsRecoveryReceipts(record, previous);
+  final accountDigest = accountIdentityDigest(account);
+  final previousOwner = previous?[_analyticsLegacyBucketOwnerDigestKey];
+  final legacyBuckets = _legacyBucketsFile(provider, account: account);
+  if (previousOwner == accountDigest ||
+      (legacyBuckets.existsSync() &&
+          _legacyBucketOwnerAllows(provider, account, claim: false))) {
+    record[_analyticsLegacyBucketOwnerDigestKey] = accountDigest;
+  }
+  for (final tier in _analyticsRecoveryTiers) {
+    final previousCheckpoint = previous?[tier];
+    if (previousCheckpoint is Map) {
+      record[tier] = Map<String, dynamic>.from(previousCheckpoint);
+    } else if (!activeTiers.contains(tier)) {
+      if (tier == 'history') {
+        record[tier] = _historyCheckpoint(provider, account);
+      } else {
+        final legacy = _legacyBucketsFile(provider, account: account);
+        final owned = !legacy.existsSync() ||
+            _legacyBucketOwnerAllows(provider, account, claim: false);
+        final checkpoint = owned ? _bucketCheckpoint(legacy) : null;
+        if (checkpoint != null) record[tier] = checkpoint;
+      }
+    }
+    if (!activeTiers.contains(tier)) continue;
+    record['${tier}_conflict'] = true;
+    final previousReason = previous?['${tier}_reason'];
+    record['${tier}_reason'] = previousReason is String
+        ? previousReason
+        : tier == selectedTier
+            ? 'scoped analytics recovery in progress'
+            : 'unresolved during scoped analytics recovery';
+  }
+  return record;
+}
+
+AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
+  String provider,
+  String account,
+  String tier, {
+  List<String> activeTiers = const [],
+}) {
+  try {
+    final record = _readAnalyticsMigrationRecord(provider, account);
+    final receipt = record?[_analyticsRecoveryReceiptKey(tier)];
+    if (receipt is! Map || receipt['bundle_id'] is! String) return null;
+    final bundleId = receipt['bundle_id'] as String;
+    if (!RegExp(r'^[a-zA-Z0-9._-]{1,220}$').hasMatch(bundleId)) return null;
+    final root = Directory('${cacheDir().parent.path}/analytics-recovery');
+    if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      return null;
+    }
+    final bundle = Directory('${root.path}/$bundleId');
+    if (FileSystemEntity.typeSync(bundle.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      return null;
+    }
+    final manifest = File('${bundle.path}/manifest.json');
+    if (FileSystemEntity.typeSync(manifest.path, followLinks: false) !=
+            FileSystemEntityType.file ||
+        manifest.lengthSync() > _maxDriftBytes) {
+      return null;
+    }
+    final decoded = jsonDecode(manifest.readAsStringSync());
+    if (decoded is! Map ||
+        decoded['schema'] != _analyticsRecoveryEvidenceSchema ||
+        (decoded['state'] != 'complete' &&
+            decoded['state'] != 'checkpoint_pending' &&
+            decoded['state'] != 'archiving') ||
+        decoded['provider'] != provider ||
+        decoded['account_digest'] != accountIdentityDigest(account) ||
+        decoded['tier'] != tier ||
+        decoded['files'] is! List) {
+      return null;
+    }
+    final roles = <String>[];
+    for (final entry in decoded['files'] as List) {
+      if (entry is Map &&
+          entry['archived'] == true &&
+          entry['role'] is String) {
+        roles.add(entry['role'] as String);
+      }
+    }
+    final complete = decoded['state'] == 'complete';
+    return _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: provider,
+      account: account,
+      tier: tier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: true,
+      status: complete ? 'already_recovered' : 'recovered_receipt_incomplete',
+      detail: complete
+          ? 'A prior completed scoped recovery already archived this tier.'
+          : 'The selected tier restarted empty, but its evidence manifest '
+              'was interrupted before finalization.',
+      evidenceBundle: bundle.path,
+      archivedRoles: roles,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+AnalyticsStorageRecoveryResult _recoveryFailureFromInspection(
+  AnalyticsStorageRecoveryResult inspection,
+) =>
+    _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: inspection.provider,
+      account: inspection.account,
+      tier: inspection.tier,
+      activeTiers: inspection.activeTiers,
+      ready: false,
+      recovered: false,
+      status: inspection.status,
+      detail: inspection.detail,
+    );
+
+/// Archives and clears one exact quarantined analytics tier.
+///
+/// This is intentionally not a merge. Every selected canonical and legacy
+/// regular file is moved into an owner-only evidence bundle before an empty
+/// checkpoint is admitted. An explicit recovery guard replaces the old marker
+/// before selected files move, so interruption fails closed.
+AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
+  String provider,
+  String account,
+  String tier,
+) {
+  final canonicalProvider =
+      canonicalizeProviderId(provider.trim().toLowerCase());
+  final selectedTier = tier.trim().toLowerCase();
+  try {
+    final preliminary = inspectAnalyticsStorageRecovery(
+      canonicalProvider,
+      account,
+      selectedTier,
+    );
+    if (!preliminary.ready) {
+      if (preliminary.status == 'no_active_conflict' ||
+          preliminary.status == 'tier_not_conflicted') {
+        final completed = _completedAnalyticsStorageRecovery(
+          canonicalProvider,
+          account,
+          selectedTier,
+          activeTiers: preliminary.activeTiers,
+        );
+        if (completed != null) return completed;
+      }
+      return _recoveryFailureFromInspection(preliminary);
+    }
+  } catch (_) {
+    return _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'recovery_unavailable',
+      detail: 'The exact analytics recovery target could not be inspected.',
+    );
+  }
+  try {
+    return _withEvidenceLock(canonicalProvider, account, () {
+      final inspection = inspectAnalyticsStorageRecovery(
+        canonicalProvider,
+        account,
+        selectedTier,
+      );
+      if (!inspection.ready) return _recoveryFailureFromInspection(inspection);
+
+      final scanned = _analyticsRecoveryEvidence(
+        canonicalProvider,
+        account,
+        selectedTier,
+      );
+      if (scanned.failure != null) {
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: inspection.activeTiers,
+          ready: false,
+          recovered: false,
+          status: scanned.failure!,
+          detail: scanned.failure == 'evidence_too_large'
+              ? 'Selected recovery evidence exceeds the 16 MiB safety limit.'
+              : scanned.failure == 'shared_legacy_evidence'
+                  ? 'The legacy analytics file is not exclusive to this exact '
+                      'account. No scoped recovery files were changed.'
+                  : 'Recovery evidence changed after confirmation. Stop every '
+                      'older quotabot process and inspect again.',
+        );
+      }
+      final evidence = scanned.evidence;
+      final previous = _readAnalyticsMigrationRecord(
+        canonicalProvider,
+        account,
+      );
+      final unresolvedTiers = inspection.activeTiers.toSet()
+        ..remove(selectedTier);
+      Directory bundle;
+      try {
+        bundle = _createAnalyticsRecoveryBundle(
+          canonicalProvider,
+          account,
+          selectedTier,
+        );
+      } catch (_) {
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: inspection.activeTiers,
+          ready: false,
+          recovered: false,
+          status: 'archive_failed',
+          detail: 'The evidence bundle could not be created. No recovery '
+              'files were changed.',
+        );
+      }
+
+      final archivedRoles = <String>{};
+      void finishManifest(String state, [String? failure]) {
+        _writeAnalyticsRecoveryManifest(
+          bundle,
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          state: state,
+          evidence: evidence,
+          archivedRoles: archivedRoles,
+          failure: failure,
+        );
+      }
+
+      try {
+        finishManifest('archiving');
+        for (final item in evidence) {
+          if (FileSystemEntity.typeSync(
+                item.source.path,
+                followLinks: false,
+              ) !=
+              FileSystemEntityType.file) {
+            finishManifest('failed', 'evidence_changed');
+            return _analyticsRecoveryResult(
+              mode: 'recover',
+              provider: canonicalProvider,
+              account: account,
+              tier: selectedTier,
+              activeTiers: inspection.activeTiers,
+              ready: false,
+              recovered: false,
+              status: 'evidence_changed',
+              detail: 'Recovery evidence changed after inspection. Stop every '
+                  'older quotabot process and inspect again.',
+              evidenceBundle: bundle.path,
+              archivedRoles: archivedRoles.toList(),
+            );
+          }
+          final currentBytes = item.source.readAsBytesSync();
+          if (sha256.convert(currentBytes).toString() != item.precheckDigest) {
+            finishManifest('failed', 'evidence_changed');
+            return _analyticsRecoveryResult(
+              mode: 'recover',
+              provider: canonicalProvider,
+              account: account,
+              tier: selectedTier,
+              activeTiers: inspection.activeTiers,
+              ready: false,
+              recovered: false,
+              status: 'evidence_changed',
+              detail: 'Recovery evidence changed after inspection. Stop every '
+                  'older quotabot process and inspect again.',
+              evidenceBundle: bundle.path,
+              archivedRoles: archivedRoles.toList(),
+            );
+          }
+        }
+
+        bool archiveEvidence(_AnalyticsRecoveryEvidence item) {
+          final archived = File(
+            '${bundle.path}/${item.role}${item.extension}',
+          );
+          if (item.moveOriginal) {
+            item.source.renameSync(archived.path);
+          } else {
+            _atomicWriteBytes(archived, item.precheckBytes);
+          }
+          archivedRoles.add(item.role);
+          enforceOwnerOnlyFile(archived);
+          return sha256.convert(archived.readAsBytesSync()).toString() ==
+              item.precheckDigest;
+        }
+
+        for (final item in evidence.where((item) => !item.moveOriginal)) {
+          if (archiveEvidence(item)) continue;
+          finishManifest('failed', 'archive_verification_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'archive_failed',
+            detail: 'Archived evidence failed its integrity check. No '
+                'selected analytics files were moved.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        final guard = _analyticsMigrationRecoveryGuard(
+          canonicalProvider,
+          account,
+          selectedTier,
+          inspection.activeTiers.toSet(),
+          previous,
+        );
+        if (!_writeAnalyticsMigrationRecord(
+          canonicalProvider,
+          account,
+          guard,
+        )) {
+          finishManifest('failed', 'recovery_guard_write_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'marker_write_failed',
+            detail: 'The fail-closed recovery guard could not be stored. No '
+                'selected analytics files were moved.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+        final marker = _analyticsMigrationFile(canonicalProvider, account);
+        final guardDigest = sha256.convert(marker.readAsBytesSync()).toString();
+
+        for (final item in evidence.where((item) => item.moveOriginal)) {
+          if (archiveEvidence(item)) continue;
+          finishManifest('failed', 'archive_verification_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'archive_failed',
+            detail: 'Archived evidence failed its integrity check. The '
+                'recovery guard keeps the quarantine active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        final selectedSources = _analyticsRecoveryTierFiles(
+          canonicalProvider,
+          account,
+          selectedTier,
+        );
+        if (selectedSources.any(
+          (file) =>
+              FileSystemEntity.typeSync(file.path, followLinks: false) !=
+              FileSystemEntityType.notFound,
+        )) {
+          finishManifest('failed', 'evidence_recreated');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'evidence_changed',
+            detail: 'An older process recreated selected analytics during '
+                'recovery. The recovery guard keeps the quarantine active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+        final guardUnchanged = marker.existsSync() &&
+            sha256.convert(marker.readAsBytesSync()).toString() == guardDigest;
+        if (!guardUnchanged) {
+          finishManifest('failed', 'recovery_guard_changed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'evidence_changed',
+            detail: 'The fail-closed recovery guard changed during archive. '
+                'Stop every older quotabot process before retrying.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        finishManifest('checkpoint_pending');
+
+        final replacement = _analyticsMigrationRecordAfterRecovery(
+          canonicalProvider,
+          account,
+          selectedTier,
+          unresolvedTiers,
+          guard,
+        );
+        replacement[_analyticsRecoveryReceiptKey(selectedTier)] = {
+          'bundle_id': bundle.uri.pathSegments
+              .where((segment) => segment.isNotEmpty)
+              .last,
+          'observed_at': nowEpoch(),
+        };
+        if (!_writeAnalyticsMigrationRecord(
+          canonicalProvider,
+          account,
+          replacement,
+        )) {
+          finishManifest('failed', 'migration_marker_write_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'marker_write_failed',
+            detail: 'The empty analytics checkpoint could not be stored. The '
+                'quarantine remains active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        final remaining = analyticsStorageNotice(
+          canonicalProvider,
+          account: account,
+        );
+        if (remaining?.tiers.contains(selectedTier) == true) {
+          finishManifest('failed', 'selected_tier_rediverged');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: remaining?.tiers ?? const [],
+            ready: false,
+            recovered: false,
+            status: 'rediverged',
+            detail: 'The selected tier changed again before verification. '
+                'Its quarantine remains active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        try {
+          finishManifest('complete');
+        } catch (_) {
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: remaining?.tiers ?? const [],
+            ready: false,
+            recovered: true,
+            status: 'recovered_receipt_incomplete',
+            detail: 'The selected tier restarted empty, but its evidence '
+                'manifest could not be finalized.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: remaining?.tiers ?? const [],
+          ready: false,
+          recovered: true,
+          status: 'recovered',
+          detail: 'Selected analytics were archived and restarted empty. '
+              'Exact merge was not performed.',
+          evidenceBundle: bundle.path,
+          archivedRoles: archivedRoles.toList(),
+        );
+      } catch (_) {
+        try {
+          finishManifest('failed', 'archive_failed');
+        } catch (_) {}
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: inspection.activeTiers,
+          ready: false,
+          recovered: false,
+          status: 'archive_failed',
+          detail: 'Recovery stopped before an empty checkpoint was admitted. '
+              'The quarantine remains active.',
+          evidenceBundle: bundle.path,
+          archivedRoles: archivedRoles.toList(),
+        );
+      }
+    }, includeLegacy: true);
+  } catch (_) {
+    return _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'recovery_unavailable',
+      detail: 'The exact analytics recovery lock could not be acquired.',
+    );
+  }
+}
+
 List<AnalyticsStorageNotice> analyticsStorageNoticesForQuotas(
   Iterable<ProviderQuota> quotas,
 ) {
@@ -1721,6 +2842,13 @@ bool _legacyBucketOwnerAllows(
     );
   }
   return true;
+}
+
+bool _legacyBucketRecoveryOwned(String provider, String account) {
+  if (_legacyBucketOwnerAllows(provider, account, claim: false)) return true;
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  return record?[_analyticsLegacyBucketOwnerDigestKey] ==
+      accountIdentityDigest(account);
 }
 
 /// Folds one headroom reading into the provider/account current hour bucket,

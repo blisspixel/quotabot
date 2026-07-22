@@ -142,6 +142,24 @@ provider/account baseline. It refuses stale, malformed, failed, duplicate,
 wrong-account, or concurrently superseded evidence. History and all other local
 metadata remain unchanged.
 
+If `doctor` or desktop Analytics reports a mixed-version analytics quarantine,
+first stop every older quotabot process. Copy the provider row's exact `account`
+field from `quotabot --json`, then inspect one affected tier without writing
+recovery data or contacting a provider:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
+```
+
+After reviewing the impact, add `--yes` to archive that tier's canonical and
+legacy files into an owner-only local evidence bundle and restart only that tier
+empty. Current quota, credentials, preferences, other accounts, provider-level
+compatibility analytics, and the unselected tier remain in place. This is a
+bounded recovery path, not an exact merge of ambiguous generations. Recovery
+refuses a lossy legacy file when it cannot prove that the file belongs only to
+the requested account. Retrying a completed command returns its prior evidence
+bundle receipt instead of treating the target as a new failure.
+
 An ordinary live-read failure follows the same evidence rule. Cached quota keeps
 its original capture time and last observed percentage. A reset time passing does
 not prove the new window is unused, so stale evidence never becomes 100% free and

@@ -208,9 +208,16 @@ void main() {
     await tester.tap(find.text('7d'));
     await tester.pump();
     expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.textContaining('quotabot doctor'), findsOneWidget);
+    expect(find.textContaining('desktop cannot perform'), findsOneWidget);
     expect(find.text('affected history is unavailable'), findsOneWidget);
     expect(find.text('history is still warming up'), findsNothing);
-    expect(find.bySemanticsLabel(notice.summary), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('History incomplete.*desktop cannot perform'),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Now'));
     await tester.pump();

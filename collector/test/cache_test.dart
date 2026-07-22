@@ -1892,6 +1892,423 @@ void main() {
     );
   });
 
+  test('analytics recovery inspection is read-only and recovery is scoped', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const otherAccount = 'other-account';
+    const now = 1782000000;
+    ProviderQuota quota(String targetAccount, double used, int asOf) =>
+        ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: targetAccount,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+
+    saveSnapshot(quota(account, 20, now));
+    saveSnapshot(quota(otherAccount, 30, now));
+    recordHeadroomSample(provider, 90, now - 3600, account: account);
+    recordHeadroomSample(provider, 80, now, account: account);
+    recordHeadroomSample(provider, 70, now, account: otherAccount);
+    recordHeadroomSample(provider, 60, now);
+
+    final accountStem = accountStorageStem(account);
+    File('${cacheDir().path}/history_${provider}_$account.jsonl')
+        .writeAsStringSync(
+      '${jsonEncode(quota(account, 35, now + 60).toJson())}\n',
+    );
+    final canonicalBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$accountStem.json',
+    );
+    final providerBuckets = File('${cacheDir().path}/buckets_$provider.json');
+    final otherHistory = File(
+      '${cacheDir().path}/history_${provider}_${accountStorageStem(otherAccount)}.jsonl',
+    );
+    final snapshotBefore = accountCacheFile().readAsBytesSync();
+    final bucketsBefore = canonicalBuckets.readAsBytesSync();
+    final providerBucketsBefore = providerBuckets.readAsBytesSync();
+    final otherHistoryBefore = otherHistory.readAsBytesSync();
+    final cacheBefore = {
+      for (final file in cacheDir().listSync().whereType<File>())
+        file.uri.pathSegments.last: file.readAsBytesSync(),
+    };
+    final recoveryRoot = Directory(
+      '${tempConfig.path}/quotabot/analytics-recovery',
+    );
+    expect(recoveryRoot.existsSync(), isFalse);
+
+    final inspection = inspectAnalyticsStorageRecovery(
+      provider,
+      account,
+      'history',
+    );
+
+    expect(inspection.ready, isTrue);
+    expect(inspection.status, 'ready');
+    expect(inspection.activeTiers, ['history']);
+    expect(inspection.toJson()['schema'], 'quotabot.analytics-recovery.v1');
+    expect(recoveryRoot.existsSync(), isFalse);
+    expect(
+      {
+        for (final file in cacheDir().listSync().whereType<File>())
+          file.uri.pathSegments.last: file.readAsBytesSync(),
+      },
+      cacheBefore,
+      reason: 'inspection must not create a lock, receipt, or storage write',
+    );
+
+    final recovered = recoverAnalyticsStorage(provider, account, 'history');
+
+    expect(recovered.recovered, isTrue);
+    expect(recovered.status, 'recovered');
+    expect(recovered.activeTiers, isEmpty);
+    expect(recovered.archivedRoles, contains('canonical-history'));
+    expect(recovered.archivedRoles, contains('legacy-history'));
+    expect(recovered.archivedRoles, contains('migration-marker'));
+    expect(analyticsStorageNotice(provider, account: account), isNull);
+    expect(loadHistory(provider, account: account), isEmpty);
+    expect(accountCacheFile().readAsBytesSync(), snapshotBefore);
+    expect(canonicalBuckets.readAsBytesSync(), bucketsBefore);
+    expect(providerBuckets.readAsBytesSync(), providerBucketsBefore);
+    expect(otherHistory.readAsBytesSync(), otherHistoryBefore);
+
+    final bundle = Directory(recovered.evidenceBundle!);
+    final manifest = File('${bundle.path}/manifest.json');
+    final manifestText = manifest.readAsStringSync();
+    final manifestJson = jsonDecode(manifestText) as Map<String, dynamic>;
+    expect(bundle.existsSync(), isTrue);
+    expect(manifestJson['schema'], 'quotabot.analytics-recovery-evidence.v1');
+    expect(manifestJson['state'], 'complete');
+    expect(manifestJson['account_digest'], accountIdentityDigest(account));
+    expect(manifestJson['exact_merge_performed'], isFalse);
+    expect(manifestText, isNot(contains(account)));
+    expect(manifestText, isNot(contains(cacheDir().path)));
+    expect(
+      File('${bundle.path}/legacy-history.jsonl').readAsBytesSync(),
+      isNotEmpty,
+    );
+
+    final bundleCount = recoveryRoot.listSync().whereType<Directory>().length;
+    final second = recoverAnalyticsStorage(provider, account, 'history');
+    expect(second.recovered, isTrue);
+    expect(second.status, 'already_recovered');
+    expect(second.evidenceBundle, recovered.evidenceBundle);
+    expect(recoveryRoot.listSync().whereType<Directory>().length, bundleCount);
+    final interruptedManifest = jsonDecode(manifest.readAsStringSync())
+        as Map<String, dynamic>
+      ..['state'] = 'checkpoint_pending';
+    manifest.writeAsStringSync(jsonEncode(interruptedManifest));
+    final interruptedRetry =
+        recoverAnalyticsStorage(provider, account, 'history');
+    expect(interruptedRetry.recovered, isTrue);
+    expect(interruptedRetry.status, 'recovered_receipt_incomplete');
+    expect(interruptedRetry.evidenceBundle, recovered.evidenceBundle);
+    interruptedManifest['state'] = 'complete';
+    manifest.writeAsStringSync(jsonEncode(interruptedManifest));
+
+    saveSnapshot(quota(account, 45, now + 120));
+    expect(loadHistory(provider, account: account), hasLength(1));
+  });
+
+  test('analytics recovery clears only the selected conflicted tier', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+
+    saveSnapshot(quota(20, now));
+    recordHeadroomSample(provider, 90, now - 3600, account: account);
+    recordHeadroomSample(provider, 80, now, account: account);
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync(
+        '${jsonEncode(quota(35, now + 60).toJson())}\n',
+      );
+    final legacyBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync(
+        jsonEncode([
+          (HeadroomBucket(start: bucketStart(now))..add(65)).toJson(),
+        ]),
+      );
+    final canonicalBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_${accountStorageStem(account)}.json',
+    );
+    final canonicalBucketsBefore = canonicalBuckets.readAsBytesSync();
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['history', 'buckets'],
+    );
+
+    final historyRecovery =
+        recoverAnalyticsStorage(provider, account, 'history');
+
+    expect(historyRecovery.recovered, isTrue);
+    expect(historyRecovery.activeTiers, ['buckets']);
+    expect(legacyHistory.existsSync(), isFalse);
+    expect(legacyBuckets.existsSync(), isTrue);
+    expect(canonicalBuckets.readAsBytesSync(), canonicalBucketsBefore);
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['buckets'],
+    );
+    expect(loadHistory(provider, account: account), isEmpty);
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      isEmpty,
+    );
+
+    final bucketsRecovery =
+        recoverAnalyticsStorage(provider, account, 'buckets');
+
+    expect(bucketsRecovery.recovered, isTrue);
+    expect(bucketsRecovery.activeTiers, isEmpty);
+    expect(analyticsStorageNotice(provider, account: account), isNull);
+    expect(legacyBuckets.existsSync(), isFalse);
+    expect(canonicalBuckets.existsSync(), isFalse);
+  });
+
+  test('malformed analytics marker can be archived one tier at a time', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    saveSnapshot(quota);
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    marker.writeAsStringSync('{not-json');
+
+    final result = recoverAnalyticsStorage(provider, account, 'history');
+
+    expect(result.recovered, isTrue);
+    expect(result.activeTiers, ['buckets']);
+    expect(
+      File('${result.evidenceBundle}/migration-marker.json').readAsStringSync(),
+      '{not-json',
+    );
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['buckets'],
+    );
+    final lockNames = cacheDir()
+        .listSync()
+        .whereType<File>()
+        .map((file) => file.uri.pathSegments.last)
+        .where((name) => name.startsWith('evidence_${provider}_'))
+        .toSet();
+    expect(lockNames, contains('evidence_${provider}_$account.lock'));
+    expect(
+      lockNames,
+      contains(
+        'evidence_${provider}_${accountStorageStem(account)}.lock',
+      ),
+    );
+    File('${cacheDir().path}/history_${provider}_$account.jsonl')
+        .writeAsStringSync('${jsonEncode(quota.toJson())}\n');
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['history', 'buckets'],
+      reason: 'a late old writer must differ from the immutable empty baseline',
+    );
+  });
+
+  test('invalid confirmed analytics recovery creates no storage artifacts', () {
+    final result = recoverAnalyticsStorage(
+      'not-a-provider',
+      'acct',
+      'history',
+    );
+
+    expect(result.recovered, isFalse);
+    expect(result.status, 'unsupported_target');
+    expect(Directory('${tempConfig.path}/quotabot').existsSync(), isFalse);
+  });
+
+  test('unsafe analytics evidence is rejected without a recovery write', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    saveSnapshot(quota);
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    final record = jsonDecode(marker.readAsStringSync()) as Map<String, dynamic>
+      ..['history_conflict'] = true;
+    marker.writeAsStringSync(jsonEncode(record));
+    Directory('${cacheDir().path}/history_${provider}_$account.jsonl')
+        .createSync();
+
+    final inspection = inspectAnalyticsStorageRecovery(
+      provider,
+      account,
+      'history',
+    );
+
+    expect(inspection.ready, isFalse);
+    expect(inspection.status, 'unsafe_evidence');
+    expect(
+      Directory('${tempConfig.path}/quotabot/analytics-recovery').existsSync(),
+      isFalse,
+    );
+  });
+
+  test(
+      'analytics recovery refuses a legacy history shared by colliding accounts',
+      () {
+    const provider = grokProviderId;
+    const target = 'nick+work@example.com';
+    const other = 'nick_work@example.com';
+    const legacyStem = 'nick_work_example.com';
+    const now = 1782000000;
+    ProviderQuota quota(String account, double used) => ProviderQuota(
+          provider: provider,
+          displayName: 'Grok',
+          account: account,
+          asOf: now,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: used)],
+        );
+    saveSnapshot(quota(target, 20));
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$legacyStem.jsonl',
+    )..writeAsStringSync(
+        '${jsonEncode(quota(target, 30).toJson())}\n'
+        '${jsonEncode(quota(other, 70).toJson())}\n',
+      );
+    final before = legacyHistory.readAsBytesSync();
+
+    final inspection = inspectAnalyticsStorageRecovery(
+      provider,
+      target,
+      'history',
+    );
+    final recovery = recoverAnalyticsStorage(provider, target, 'history');
+
+    expect(inspection.ready, isFalse);
+    expect(inspection.status, 'shared_legacy_evidence');
+    expect(inspection.toJson()['impact'],
+        containsPair('selected_tier', 'unchanged'));
+    expect(recovery.recovered, isFalse);
+    expect(recovery.status, 'shared_legacy_evidence');
+    expect(legacyHistory.readAsBytesSync(), before);
+    expect(loadHistory(provider, account: other).single.account, other);
+    expect(
+      Directory('${tempConfig.path}/quotabot/analytics-recovery').existsSync(),
+      isFalse,
+    );
+  });
+
+  test('analytics recovery refuses a legacy bucket owned by another account',
+      () {
+    const provider = grokProviderId;
+    const target = 'nick+work@example.com';
+    const other = 'nick_work@example.com';
+    const legacyStem = 'nick_work_example.com';
+    const now = 1782000000;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Grok',
+      account: target,
+      asOf: now,
+      windows: [QuotaWindow(label: 'monthly', usedPercent: 20)],
+    );
+    saveSnapshot(quota);
+    recordHeadroomSample(provider, 80, now, account: target);
+    final legacyBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$legacyStem.json',
+    )..writeAsStringSync(
+        jsonEncode([
+          (HeadroomBucket(start: bucketStart(now))..add(65)).toJson(),
+        ]),
+      );
+    File(
+      '${cacheDir().path}/legacy_bucket_owner_${provider}_${accountStorageStem(legacyStem)}.json',
+    ).writeAsStringSync(
+      jsonEncode({
+        'schema': 'quotabot.legacy-bucket-owner.v1',
+        'provider': provider,
+        'account_digest': accountIdentityDigest(other),
+      }),
+    );
+    final before = legacyBuckets.readAsBytesSync();
+
+    final inspection = inspectAnalyticsStorageRecovery(
+      provider,
+      target,
+      'buckets',
+    );
+    final recovery = recoverAnalyticsStorage(provider, target, 'buckets');
+
+    expect(inspection.ready, isFalse);
+    expect(inspection.status, 'shared_legacy_evidence');
+    expect(recovery.recovered, isFalse);
+    expect(recovery.status, 'shared_legacy_evidence');
+    expect(legacyBuckets.readAsBytesSync(), before);
+    expect(
+      Directory('${tempConfig.path}/quotabot/analytics-recovery').existsSync(),
+      isFalse,
+    );
+  });
+
+  test('unsafe analytics archive root leaves selected evidence quarantined',
+      () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    saveSnapshot(quota);
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync(
+        '${jsonEncode(ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: now + 60,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 35)],
+        ).toJson())}\n',
+      );
+    final recoveryRoot = File('${tempConfig.path}/quotabot/analytics-recovery')
+      ..writeAsStringSync('not a directory');
+
+    final result = recoverAnalyticsStorage(provider, account, 'history');
+
+    expect(result.recovered, isFalse);
+    expect(result.status, 'archive_failed');
+    expect(result.evidenceBundle, isNull);
+    expect(recoveryRoot.readAsStringSync(), 'not a directory');
+    expect(legacyHistory.existsSync(), isTrue);
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['history'],
+    );
+  });
+
   test('malformed analytics migration marker quarantines canonical history',
       () {
     const provider = codexProviderId;
