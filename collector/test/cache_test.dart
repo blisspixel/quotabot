@@ -1,3 +1,10 @@
+// Cache tests exercise real owner-only ACL and cross-process lock boundaries.
+// Windows permission helpers launch native subprocesses, so the default
+// 30-second budget is not sufficient for the larger lifecycle scenarios on a
+// loaded CI host. Functional latency assertions remain independently bounded.
+@Timeout(Duration(minutes: 2))
+library;
+
 import 'dart:convert';
 import 'dart:io';
 

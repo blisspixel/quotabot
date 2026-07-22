@@ -3048,6 +3048,18 @@ T? _tryWithAnalyticsDigestLock<T>(
     final lockFile = File(
       '${cacheDir().path}/evidence_${_safeProviderStem(provider)}_account_$accountDigest.lock',
     );
+    if (Directory(lockFile.path).existsSync() ||
+        Link(lockFile.path).existsSync()) {
+      return null;
+    }
+    final existingType = FileSystemEntity.typeSync(
+      lockFile.path,
+      followLinks: false,
+    );
+    if (existingType != FileSystemEntityType.notFound &&
+        existingType != FileSystemEntityType.file) {
+      return null;
+    }
     restrictOwnerOnlyDirectory(lockFile.parent);
     if (!lockFile.existsSync()) lockFile.createSync(recursive: true);
     restrictOwnerOnlyFile(lockFile);

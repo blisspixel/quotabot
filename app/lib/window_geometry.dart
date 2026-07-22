@@ -11,6 +11,78 @@ const Size _preferredAnalyticsWindowSize = Size(340, 760);
 const double _expandedFallbackHeight = 120;
 
 typedef AnalyticsWindowGeometry = ({Size size, Offset? position});
+typedef QuotaWindowGeometry = ({Size size, Offset? position, bool overflowing});
+
+/// Hugs the rendered quota content while keeping the whole window inside the
+/// current display work area.
+///
+/// The rendered height wins over the estimator because provider status and
+/// recovery copy can wrap or add rows that estimates cannot predict. The
+/// estimator remains the first-frame fallback. Content above the display cap
+/// gets a bounded viewport with an explicit scroll affordance.
+QuotaWindowGeometry quotaWindowGeometry({
+  required double width,
+  required double estimatedContentHeight,
+  required double? renderedContentHeight,
+  required Size currentSize,
+  required Offset? currentPosition,
+  required List<Rect> workAreas,
+  double fallbackMaximumHeight = 900,
+}) {
+  final renderedHeightIsUsable =
+      renderedContentHeight != null &&
+      renderedContentHeight.isFinite &&
+      renderedContentHeight > 80;
+  final estimatedHeightIsUsable =
+      estimatedContentHeight.isFinite && estimatedContentHeight > 0;
+  final contentHeight = renderedHeightIsUsable
+      ? renderedContentHeight
+      : estimatedHeightIsUsable
+      ? estimatedContentHeight
+      : _expandedFallbackHeight;
+  final usable = workAreas.where(_usableWorkArea).toList();
+  final fallbackCap =
+      fallbackMaximumHeight.isFinite && fallbackMaximumHeight > 0
+      ? math.max(fallbackMaximumHeight, _expandedFallbackHeight)
+      : _preferredAnalyticsWindowSize.height;
+
+  Rect? target;
+  var maximumHeight = fallbackCap;
+  if (usable.isNotEmpty) {
+    target = _workAreaForWindow(
+      currentPosition: currentPosition,
+      currentSize: currentSize,
+      workAreas: usable,
+    );
+    maximumHeight = target.height;
+  }
+
+  final safeWidth = width.isFinite && width > 0
+      ? target == null
+            ? width
+            : math.min(width, target.width)
+      : _preferredAnalyticsWindowSize.width;
+  final minimumHeight = math.min(_expandedFallbackHeight, maximumHeight);
+  final size = Size(
+    safeWidth,
+    contentHeight.clamp(minimumHeight, maximumHeight).toDouble(),
+  );
+  final position = target != null && _validPosition(currentPosition)
+      ? Offset(
+          _fitAxis(currentPosition!.dx, target.left, target.right, size.width),
+          _fitAxis(currentPosition.dy, target.top, target.bottom, size.height),
+        )
+      : restoredWindowPosition(
+          savedPosition: currentPosition,
+          windowSize: size,
+          workAreas: usable,
+        );
+  return (
+    size: size,
+    position: position,
+    overflowing: contentHeight > maximumHeight + 1,
+  );
+}
 
 /// Grows a content-hugged quota window into a useful Analytics viewport and
 /// keeps the resulting bounds inside the current display's work area.

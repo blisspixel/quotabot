@@ -6,6 +6,93 @@ import 'package:quotabot/window_geometry.dart';
 void main() {
   const windowSize = Size(340, 760);
 
+  test('quota window trusts rendered content over an undersized estimate', () {
+    expect(
+      quotaWindowGeometry(
+        width: 340,
+        estimatedContentHeight: 390,
+        renderedContentHeight: 448,
+        currentSize: const Size(340, 390),
+        currentPosition: const Offset(1500, 800),
+        workAreas: const [Rect.fromLTWH(0, 0, 1920, 1040)],
+      ),
+      (
+        size: const Size(340, 448),
+        position: const Offset(1500, 592),
+        overflowing: false,
+      ),
+    );
+  });
+
+  test('quota window caps oversized content and exposes scrolling', () {
+    expect(
+      quotaWindowGeometry(
+        width: 340,
+        estimatedContentHeight: 700,
+        renderedContentHeight: 1400,
+        currentSize: const Size(340, 700),
+        currentPosition: const Offset(300, 250),
+        workAreas: const [Rect.fromLTWH(0, 0, 1280, 720)],
+      ),
+      (
+        size: const Size(340, 720),
+        position: const Offset(300, 0),
+        overflowing: true,
+      ),
+    );
+  });
+
+  test('quota window tolerates a work area below its fallback height', () {
+    expect(
+      quotaWindowGeometry(
+        width: 340,
+        estimatedContentHeight: 430,
+        renderedContentHeight: 448,
+        currentSize: const Size(340, 430),
+        currentPosition: const Offset(5, 10),
+        workAreas: const [Rect.fromLTWH(0, 0, 320, 100)],
+      ),
+      (size: const Size(320, 100), position: Offset.zero, overflowing: true),
+    );
+  });
+
+  test('quota window falls back to its estimate without rendered evidence', () {
+    expect(
+      quotaWindowGeometry(
+        width: 340,
+        estimatedContentHeight: 430,
+        renderedContentHeight: double.nan,
+        currentSize: const Size(340, 760),
+        currentPosition: const Offset(50, 60),
+        workAreas: const [],
+        fallbackMaximumHeight: 500,
+      ),
+      (
+        size: const Size(340, 430),
+        position: const Offset(50, 60),
+        overflowing: false,
+      ),
+    );
+  });
+
+  test('returning from Analytics restores rendered quota height', () {
+    expect(
+      quotaWindowGeometry(
+        width: 340,
+        estimatedContentHeight: 420,
+        renderedContentHeight: 448,
+        currentSize: const Size(340, 760),
+        currentPosition: const Offset(100, 200),
+        workAreas: const [Rect.fromLTWH(0, 0, 1920, 1040)],
+      ),
+      (
+        size: const Size(340, 448),
+        position: const Offset(100, 200),
+        overflowing: false,
+      ),
+    );
+  });
+
   test('analytics grows a short window without shrinking useful space', () {
     expect(
       analyticsWindowGeometry(

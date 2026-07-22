@@ -546,7 +546,10 @@ jobs:
 
           Expand-Archive -LiteralPath $previousArchive -DestinationPath $previous
           Expand-Archive -LiteralPath $archive -DestinationPath $current
-          python tools/desktop_readiness_smoke.py --executable (Join-Path $current 'quotabot.exe')
+          $readinessReport = Join-Path $env:RUNNER_TEMP 'quotabot-windows-readiness.json'
+          python tools/desktop_readiness_smoke.py `
+            --executable (Join-Path $current 'quotabot.exe') `
+            --report $readinessReport
           if ($LASTEXITCODE -ne 0) { throw 'Current desktop archive did not start.' }
           python tools/desktop_readiness_smoke.py --executable (Join-Path $previous 'quotabot.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Desktop rollback archive did not start.' }

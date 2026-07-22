@@ -2,6 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+/// Whether an explicit desktop automation launch must avoid the production
+/// single-instance port. Demo mode alone is intentionally not automation: a
+/// normal demo launch should keep the same single-instance behavior as the app.
+bool isolateSingleInstanceForAutomation({
+  required bool screenshotCapture,
+  required bool readinessProbe,
+}) => screenshotCapture || readinessProbe;
+
 /// Cross-platform single-instance guard.
 ///
 /// The desktop app closes to the tray instead of quitting, so launching it a
@@ -31,8 +39,9 @@ class SingleInstanceGuard {
       SingleInstanceGuard._(port);
 
   /// An isolated guard for explicit developer automation such as screenshot
-  /// capture. Port zero asks the OS for a fresh loopback port, so the operation
-  /// cannot ring or displace the installed app's production instance.
+  /// capture or native readiness validation. Port zero asks the OS for a fresh
+  /// loopback port, so the operation cannot ring or displace the installed
+  /// app's production instance.
   factory SingleInstanceGuard.ephemeral() => SingleInstanceGuard._(0);
 
   SingleInstanceGuard._(this._port);

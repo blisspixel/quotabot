@@ -191,7 +191,11 @@ bool hasSuccessfulRefreshEvidence(Iterable<ProviderQuota> providers, int now) =>
           !status.startsWith('not configured');
     });
 
-final SingleInstanceGuard _singleInstance = _shotsMode
+final SingleInstanceGuard _singleInstance =
+    isolateSingleInstanceForAutomation(
+      screenshotCapture: _shotsMode,
+      readinessProbe: _desktopReadiness.enabled,
+    )
     ? SingleInstanceGuard.ephemeral()
     : SingleInstanceGuard();
 
@@ -1336,13 +1340,11 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  /// Resize the window to hug the content. Live measurement of the rendered
-  /// content proved unreliable here (the content is clamped to the window when
-  /// it overflows, and window_manager's pixel units don't match Flutter's
-  /// logical pixels under display scaling), so the height is derived
-  /// deterministically from the provider and window counts instead. It is
-  /// slightly generous so nothing is clipped, and the body is scrollable as a
-  /// safety net. Capped at the screen height (see [_maxWindowHeight]).
+  /// Resize the window to hug the rendered content. A deterministic provider
+  /// estimate covers the first frame; after layout, the scroll child's real
+  /// height wins so wrapped diagnostics and recovery rows cannot be clipped.
+  /// Content beyond the current display work area receives a bounded scrolling
+  /// viewport instead.
   void _applySize() {
     if (!widget._hostIntegration) return;
     final revision = ++_windowGeometryRevision;
@@ -1445,18 +1447,40 @@ class _DashboardState extends State<Dashboard>
           h += card;
         }
         h += (_displayed.length - 1).clamp(0, 20) * 8; // inter-card gaps
-        // Prefer the real measured content height when available: the content
-        // box lives inside a scroll view so its render box reports the full
-        // intrinsic height, which the estimate above cannot do for wrapped
-        // text (long "no live data" notes). The estimate is the fallback.
-        final measured = _measuredContentHeight();
-        final content = (measured != null && measured > 80) ? measured : h;
-        h = content.clamp(120.0, maxH).toDouble();
-        // Content taller than the capped window: it scrolls, so show the bar.
-        final overflow = content > maxH + 1;
-        if (mounted && overflow != _overflowing) {
-          setState(() => _overflowing = overflow);
+        final renderedHeight = _measuredContentHeight();
+        Rect? currentBounds;
+        try {
+          currentBounds = await windowManager.getBounds();
+        } catch (_) {}
+        if (!mounted || revision != _windowGeometryRevision) return;
+        final workAreas = await desktopWorkAreas();
+        if (!mounted || revision != _windowGeometryRevision) return;
+        final geometry = quotaWindowGeometry(
+          width: w,
+          estimatedContentHeight: h,
+          renderedContentHeight: renderedHeight,
+          currentSize: currentBounds?.size ?? _expandedMinimumWindowSize,
+          currentPosition: currentBounds?.topLeft ?? _windowPos,
+          workAreas: workAreas,
+          fallbackMaximumHeight: maxH,
+        );
+        if (geometry.overflowing != _overflowing) {
+          setState(() => _overflowing = geometry.overflowing);
         }
+        try {
+          final position = geometry.position;
+          if (position == null) {
+            await windowManager.setSize(geometry.size);
+          } else {
+            await windowManager.setBounds(position & geometry.size);
+          }
+          if (!mounted || revision != _windowGeometryRevision) return;
+          if (position != null && position != _windowPos) {
+            _windowPos = position;
+            unawaited(_persistPrefs());
+          }
+        } catch (_) {}
+        return;
       }
       try {
         await windowManager.setSize(Size(w, h));
@@ -1464,10 +1488,16 @@ class _DashboardState extends State<Dashboard>
     });
   }
 
-  /// True total content height (viewport + overflow), when the scroll position
-  /// proves content exceeds the viewport. A non-overflowing viewport is not a
-  /// content measurement because Analytics may have enlarged the host window.
+  /// True content height in Flutter logical pixels. The child of the vertical
+  /// scroll view receives unbounded height, so its render box includes every
+  /// provider even when the native window is shorter. Scroll metrics remain a
+  /// fallback while the keyed render box is attaching.
   double? _measuredContentHeight() {
+    final renderObject = _contentKey.currentContext?.findRenderObject();
+    if (renderObject is RenderBox && renderObject.hasSize) {
+      final height = renderObject.size.height;
+      if (height.isFinite && height > 0) return height;
+    }
     if (!_scroll.hasClients) return null;
     final pos = _scroll.position;
     if (!pos.hasViewportDimension) return null;

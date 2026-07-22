@@ -92,7 +92,7 @@ void main() {
       reportJson['recommendation_reason'],
       contains('first by your preference'),
     );
-  });
+  }, timeout: const Timeout(Duration(minutes: 1)));
 
   test('human output warns when a Codex profile uses a legacy account label',
       () async {

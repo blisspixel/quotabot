@@ -170,9 +170,12 @@ jobs:
           ./tools/package-windows.ps1
           python tools/verify_desktop_archive.py release/quotabot-windows-x64-desktop.zip
 
-      - name: Verify Windows desktop window and tray readiness
+      - name: Verify Windows desktop candidate readiness
         if: runner.os == 'Windows'
-        run: python tools/desktop_readiness_smoke.py --executable app/build/windows/x64/runner/Release/quotabot.exe
+        run: >-
+          python tools/desktop_readiness_smoke.py
+          --executable app/build/windows/x64/runner/Release/quotabot.exe
+          --report "${{ runner.temp }}\quotabot-windows-readiness.json"
 
       - name: Linux desktop build prerequisites
         if: runner.os == 'Linux'

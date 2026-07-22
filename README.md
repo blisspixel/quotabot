@@ -72,8 +72,9 @@ Highlights:
 - **Cross-platform.** One codebase on Windows, macOS, and Linux.
 - **Easy and good-looking.** A small frameless widget that follows the system
   light/dark theme, supports per-profile themes including a high-contrast Hacker
-  mode, pins always-on-top or to the taskbar, and collapses to a tiny status
-  strip.
+  mode, pins always-on-top or to the taskbar, measures the rendered provider
+  cards so no row is clipped, stays inside the active display, scrolls only when
+  the full list cannot fit, and collapses to a tiny status strip.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, smoothed and reset-aware best times to
   run). Outputs contain quota and routing metadata, never prompts, code, model
@@ -345,6 +346,14 @@ names, verification, launch, update, rollback, and uninstall instructions. The
 current Windows and macOS bundles are not yet application-signed; the guide
 keeps that limitation explicit rather than suggesting that an OS warning is safe
 to ignore.
+
+The packaged Windows release gate starts each candidate with isolated local
+configuration and a candidate-only single-instance guard, so validation can run
+beside an installed tray instance without surfacing or replacing it. Its bounded
+report records the launch process, exact executable digest, native window and
+tray result, isolated-config state, and cleanup result. Native accessibility is
+still a separate release gate: Narrator, keyboard-only focus order, visible
+focus, and critical-flow semantics require interactive evidence.
 
 To build and install everything from source in one command, run
 `pwsh tools/setup.ps1` on Windows or `bash tools/setup.sh` on macOS/Linux (add

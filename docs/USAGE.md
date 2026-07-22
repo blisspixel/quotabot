@@ -9,7 +9,9 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   (bar-chart icon), collapse, the providers/settings menu, setup and help, and
   close. Hover for a tooltip on each.
 - **Move it:** drag the header bar or the cards area (the control buttons on the
-  right are excluded). The body scrolls and the window hugs its content.
+  right are excluded). The expanded window measures its rendered cards and
+  grows without clipping them while staying inside the active display. The body
+  shows a scrollbar only when the complete list cannot fit in that work area.
 - **Collapse:** shrink to a compact strip of provider logos with one status dot
   each; expand to restore the full view.
 - **Menu:** hide or show individual providers, set the refresh cadence (smart,

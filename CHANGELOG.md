@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Packaged Windows readiness is now isolated from the user's installed tray
+  instance, and every packaged readiness run uses isolated local quotabot
+  configuration. The harness emits a bounded report with its launch PID, exact
+  executable SHA-256, native window and tray results, isolated-config state,
+  and confirmed process cleanup. A running installed Windows app can remain
+  untouched while the release candidate is verified.
 - Default quota snapshots now include a bounded
   `quotabot.analytics-incident-inventory.v1` object. Mixed-version analytics
   incidents remain visible when an account is no longer in the current
@@ -69,6 +75,16 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- The expanded desktop quota window now sizes from the rendered provider cards
+  instead of trusting a hand estimate, so wrapped status and recovery rows no
+  longer leave the final provider partially hidden. Growth is reconciled with
+  the active display work area, and an explicit scrollbar appears only when the
+  complete list cannot fit on screen. Returning from Analytics resumes the same
+  content-hugged, display-bounded quota layout.
+- Analytics incident inventory now rejects a directory, link, or other
+  non-regular evidence-lock path before invoking permission helpers. Corrupt or
+  hostile local lock state therefore fails soft without an avoidable Windows ACL
+  delay.
 - Analytics quarantine no longer disappears or falls back to ordinary warming
   copy solely because the affected account is unavailable. Existing valid
   markers are upgraded under the identity evidence lock with explicit conflict

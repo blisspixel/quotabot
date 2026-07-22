@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ from typing import Any
 
 
 SCHEMA = "quotabot.desktop-readiness.v1"
+REPORT_SCHEMA = "quotabot.desktop-readiness-report.v1"
 READINESS_ENV = "QUOTABOT_DESKTOP_READINESS_FILE"
 
 
@@ -56,9 +58,67 @@ def launch_command(
             f"{READINESS_ENV}={readiness_file}",
             "--env",
             "QUOTABOT_DEMO=1",
+            "--env",
+            f"XDG_CONFIG_HOME={readiness_file.parent / 'config'}",
             str(app_bundle),
         ]
     return [str(executable)]
+
+
+def isolated_config_environment(platform: str, config_root: Path) -> dict[str, str]:
+    root = str(config_root)
+    environment = {"XDG_CONFIG_HOME": root}
+    if platform == "windows":
+        environment.update({"LOCALAPPDATA": root, "APPDATA": root})
+    return environment
+
+
+def executable_sha256(executable: Path) -> str:
+    digest = hashlib.sha256()
+    with executable.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_readiness_report(
+    platform: str,
+    launch_pid: int,
+    executable: Path,
+) -> dict[str, Any]:
+    return {
+        "schema": REPORT_SCHEMA,
+        "platform": platform,
+        "launch_pid": launch_pid,
+        "launch_process_stopped": False,
+        "executable_name": executable.name,
+        "executable_sha256": executable_sha256(executable),
+        "isolated_config": True,
+        "window_ready": True,
+        "tray_ready": True,
+    }
+
+
+def write_report(path: Path, payload: dict[str, Any]) -> None:
+    parent = path.resolve().parent
+    if not parent.is_dir():
+        raise RuntimeError(f"Desktop readiness report directory not found: {parent}")
+    temporary = parent / f".{path.name}.{os.getpid()}.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def validate_payload(payload: Any, expected_platform: str) -> bool:
@@ -299,6 +359,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="write a machine-readable readiness evidence report",
+    )
     return parser.parse_args()
 
 
@@ -311,6 +376,7 @@ def main() -> int:
         raise RuntimeError("Desktop readiness timeout must be positive")
 
     platform = host_platform()
+    report: dict[str, Any] | None = None
     with tempfile.TemporaryDirectory(prefix="quotabot-desktop-readiness-") as raw_temp:
         temporary_directory = Path(raw_temp)
         readiness_file = temporary_directory / "readiness.json"
@@ -319,6 +385,9 @@ def main() -> int:
         environment = os.environ.copy()
         environment[READINESS_ENV] = str(readiness_file)
         environment["QUOTABOT_DEMO"] = "1"
+        environment.update(
+            isolated_config_environment(platform, temporary_directory / "config")
+        )
 
         with log_file.open("wb") as output:
             process = subprocess.Popen(
@@ -338,6 +407,7 @@ def main() -> int:
                 )
                 if platform == "windows":
                     await_windows_tray(process)
+                report = build_readiness_report(platform, process.pid, executable)
             except RuntimeError as error:
                 output.flush()
                 log_tail = log_file.read_text(encoding="utf-8", errors="replace")[
@@ -355,7 +425,17 @@ def main() -> int:
                 finally:
                     stop_process(process)
 
+        if report is None:
+            raise RuntimeError("Desktop readiness evidence was not produced")
+        report["launch_process_stopped"] = process.poll() is not None
+        if not report["launch_process_stopped"]:
+            raise RuntimeError("Desktop launch process did not stop after readiness")
+
+    if args.report is not None:
+        write_report(args.report, report)
+
     print(f"Desktop window and tray readiness passed on {platform}.")
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 

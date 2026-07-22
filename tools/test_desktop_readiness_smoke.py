@@ -11,14 +11,18 @@ import unittest
 import unittest.mock
 
 from tools.desktop_readiness_smoke import (
+    REPORT_SCHEMA,
     SCHEMA,
     _read_json_if_ready,
     await_readiness,
+    build_readiness_report,
+    isolated_config_environment,
     launch_command,
     macos_app_process_ids,
     stop_process,
     valid_windows_tray_rect,
     validate_payload,
+    write_report,
 )
 
 
@@ -37,9 +41,57 @@ class DesktopReadinessTests(unittest.TestCase):
                 "QUOTABOT_DESKTOP_READINESS_FILE=/tmp/readiness.json",
                 "--env",
                 "QUOTABOT_DEMO=1",
+                "--env",
+                "XDG_CONFIG_HOME=/tmp/config",
                 "/tmp/quotabot.app",
             ],
         )
+
+    def test_isolates_candidate_config_without_replacing_home(self) -> None:
+        root = Path("C:/isolated/config")
+
+        self.assertEqual(
+            isolated_config_environment("windows", root),
+            {
+                "XDG_CONFIG_HOME": str(root),
+                "LOCALAPPDATA": str(root),
+                "APPDATA": str(root),
+            },
+        )
+        self.assertEqual(
+            isolated_config_environment("linux", root),
+            {"XDG_CONFIG_HOME": str(root)},
+        )
+        self.assertNotIn("HOME", isolated_config_environment("macos", root))
+
+    def test_builds_and_writes_bounded_readiness_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temporary = Path(raw_temp)
+            executable = temporary / "quotabot.exe"
+            executable.write_bytes(b"candidate")
+            report = build_readiness_report("windows", 31415, executable)
+            report["launch_process_stopped"] = True
+            destination = temporary / "readiness-report.json"
+
+            write_report(destination, report)
+
+            self.assertEqual(
+                json.loads(destination.read_text(encoding="utf-8")),
+                {
+                    "schema": REPORT_SCHEMA,
+                    "platform": "windows",
+                    "launch_pid": 31415,
+                    "launch_process_stopped": True,
+                    "executable_name": "quotabot.exe",
+                    "executable_sha256": (
+                        "dda18a0e21ae47c53b4309434cbc02ae8bf764fa83a6defbb719431242722aa7"
+                    ),
+                    "isolated_config": True,
+                    "window_ready": True,
+                    "tray_ready": True,
+                },
+            )
+            self.assertEqual(list(temporary.glob(".*.tmp")), [])
 
     def test_selects_only_the_exact_macos_bundle_executable(self) -> None:
         executable = PurePosixPath(

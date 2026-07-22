@@ -13,7 +13,10 @@ Each archive is built on its native GitHub-hosted runner, checked for the
 expected Flutter bundle shape, checksum-verified, and given a GitHub build
 provenance attestation before the draft release can be published. The release
 stays a draft if any CLI or desktop build, clean-host lifecycle check, readiness
-check, attestation, or upload fails. The lifecycle check installs two versioned
+check, attestation, or upload fails. The Windows candidate check also isolates
+configuration and singleton state, binds a structured report to the launched
+process and executable digest, and leaves an installed tray instance untouched.
+The lifecycle check installs two versioned
 copies, launches the Windows and Linux copies, exercises rollback, removes both
 application directories, and proves a persistent-state sentinel remains. A final
 asset audit rejects a draft with any missing, duplicate, or unexpected file,
@@ -188,7 +191,9 @@ python tools/verify_desktop_archive.py release/quotabot-<os>-<arch>-desktop.<ext
 Clean native release jobs download the draft assets by release asset id,
 reverify checksum and provenance, and exercise side-by-side update, rollback,
 and data-preserving uninstall mechanics. Windows and Linux also require the
-native window and tray readiness contract to pass. macOS hosted runners build,
-extract, and validate the app archive, but the final interactive launch, status
-item, signing, notarization, and accessibility evidence must come from a native
-interactive release host.
+native window and tray readiness contract to pass. The bounded report records
+the launch PID, exact executable digest, isolated-config state, readiness, and
+cleanup. It is not accessibility evidence. macOS hosted runners build, extract,
+and validate the app archive, but the final
+interactive launch, status item, signing, notarization, and accessibility
+evidence must come from a native interactive release host.
