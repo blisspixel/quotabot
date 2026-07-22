@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
@@ -48,6 +49,7 @@ class FleetScreen extends StatefulWidget {
   final bool dark;
   final bool showAccounts;
   final FleetRange initialRange;
+  final List<AnalyticsStorageNotice> analyticsNotices;
 
   const FleetScreen({
     super.key,
@@ -57,6 +59,7 @@ class FleetScreen extends StatefulWidget {
     this.routedRequests,
     this.showAccounts = false,
     this.initialRange = FleetRange.now,
+    this.analyticsNotices = const [],
   });
 
   @override
@@ -83,6 +86,17 @@ class _FleetScreenState extends State<FleetScreen> {
       widget.buckets[q.provider] ??
       const <HeadroomBucket>[];
 
+  List<AnalyticsStorageNotice> get _relevantAnalyticsNotices {
+    final identities = widget.data.map(quotaIdentityKeyFor).toSet();
+    return [
+      for (final notice in widget.analyticsNotices)
+        if (identities.contains(
+          quotaIdentityKey(notice.provider, notice.account),
+        ))
+          notice,
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
@@ -94,6 +108,10 @@ class _FleetScreenState extends State<FleetScreen> {
     );
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final analyticsNotices = _relevantAnalyticsNotices;
+    final hasBucketStorageConflict = analyticsNotices.any(
+      (notice) => notice.tiers.contains('buckets'),
+    );
     final providerCounts = _providerCounts();
     final nodes = <_Node>[];
     for (final q in widget.data) {
@@ -122,7 +140,20 @@ class _FleetScreenState extends State<FleetScreen> {
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
               child: _range == FleetRange.now
                   ? _liveView(nodes, now, c)
-                  : _historyView(now, c),
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (analyticsNotices.isNotEmpty) ...[
+                          _analyticsStorageWarning(analyticsNotices, c),
+                          const SizedBox(height: 10),
+                        ],
+                        _historyView(
+                          now,
+                          c,
+                          hasStorageConflict: hasBucketStorageConflict,
+                        ),
+                      ],
+                    ),
             ),
           ),
         ),
@@ -444,10 +475,49 @@ class _FleetScreenState extends State<FleetScreen> {
 
   // ---- history (7d / 90d) ---------------------------------------------
 
-  Widget _historyView(
-    int now,
+  Widget _analyticsStorageWarning(
+    List<AnalyticsStorageNotice> notices,
     ({Color panel, Color fg, Color muted, Color line}) c,
   ) {
+    final message = notices.length == 1
+        ? notices.single.summary
+        : 'History incomplete - local analytics changed unexpectedly for '
+              '${notices.length} provider accounts. Affected analytics are '
+              'quarantined. Close every older quotabot process now; this history '
+              'remains unavailable until repaired or reset.';
+    const amber = Color(0xFFD29922);
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: message,
+      child: ExcludeSemantics(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: amber.withValues(alpha: dark ? 0.12 : 0.08),
+            border: Border.all(color: amber.withValues(alpha: 0.72)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            message,
+            style: TextStyle(
+              color: c.fg,
+              fontSize: 12,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _historyView(
+    int now,
+    ({Color panel, Color fg, Color muted, Color line}) c, {
+    required bool hasStorageConflict,
+  }) {
     final textScaler = MediaQuery.textScalerOf(context);
     final tz = DateTime.now().timeZoneOffset;
     final days = _range.days!;
@@ -495,7 +565,12 @@ class _FleetScreenState extends State<FleetScreen> {
         c,
         'OVER $days DAYS',
         'history',
-        _empty('history is still warming up', c.muted),
+        _empty(
+          hasStorageConflict
+              ? 'affected history is unavailable'
+              : 'history is still warming up',
+          c.muted,
+        ),
       );
     }
 

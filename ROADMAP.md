@@ -249,14 +249,27 @@ provider, before a forecast is built on top of it.
   account keys. During a one-way upgrade, exact-account legacy evidence remains
   readable, snapshot scans deduplicate canonical and legacy copies, and an
   ambiguous legacy bucket file can be claimed by only one verified identity.
-- **Remaining:** mixed-version concurrent writes and downgrades are not a
-  synchronization protocol. Once canonical history or bucket files exist, an
-  older binary can still append to a legacy path that canonical readers do not
-  merge. Safe aggregate reconciliation needs versioned baseline or generation
-  metadata; without it, merging can double-count the shared legacy samples while
-  choosing either file can discard newer samples. Stop
-  older quotabot processes before upgrading, and do not run an older build
-  against migrated state.
+- **Done:** account-scoped analytics now create a best-effort owner-only,
+  versioned legacy baseline checkpoint before the first canonical history or
+  bucket write. A
+  later mixed-version legacy write is detected per identity and tier; both
+  generations are preserved, affected display reads and writes fail closed,
+  and routing retains only the last trusted account baseline or the pre-existing
+  provider compatibility series for an unambiguous single-account snapshot.
+  Conflict evaluation retains the post-pooling conservative envelope from both
+  possible hourly cutoff sets for the affected identity while healthy identities
+  keep the actual current-offset result, so evidence cannot age into a more
+  optimistic relative route.
+  Desktop Analytics and
+  `doctor` surface affected tiers, while `stats --json` annotates bucket-tier
+  conflicts on the rows that consume them, without exposing raw account or path
+  data.
+- **Remaining:** exact reconciliation of a detected mixed-version delta. Raw
+  history can use the ordered checkpoint, while aggregate buckets need a proven
+  additive subtraction before any merge. Until that repair is implemented,
+  quotabot will not guess between losing newer samples and double-counting the
+  shared baseline. Stop older processes before upgrading, and do not run an
+  older build against migrated state.
 - Pin every remaining supported response shape with sanitized fixtures.
 - **Done:** Antigravity weekly-window semantics resolved from live evidence. The
   Cloud Code endpoint reports each model's single binding limit with no window

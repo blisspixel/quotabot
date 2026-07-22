@@ -50,6 +50,22 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Mixed-version writes can no longer silently split account-scoped analytics
+  between canonical and legacy filenames. Versioned, permission-hardened
+  checkpoints
+  detect divergence, preserve both generations, and exclude only the affected
+  history tiers from displayed analytics. Divergent legacy data cannot affect
+  routing; a frozen last-trusted account baseline, or the already eligible
+  compatibility series for one unambiguous account, remains available with an
+  hourly-boundary conservative burn estimate enforced after cross-provider
+  pooling. Healthy competitors retain the current-offset pooled result, so
+  quarantine cannot improve relative route rank as evidence ages or when
+  collection occurs between hour boundaries.
+- Quota Analytics now distinguishes quarantined local history from a new
+  installation that is still warming up. Historical ranges show one accessible
+  warning, `doctor` prints every affected tier, and bucket-affected `stats
+  --json` rows carry a bounded `storage_notice`; the current quota and **Now**
+  views remain available.
 - The TypeScript MCP client lockfile now resolves `fast-uri` 3.1.4, closing the
   host-confusion issue in GHSA-v2hh-gcrm-f6hx without changing the direct MCP
   SDK dependency.

@@ -271,6 +271,29 @@ metadata. Cache-only routing reads only canonical snapshot filenames that match
 the parsed provider/account identity and rejects snapshots dated materially in
 the future, so a stray JSON file in the cache directory cannot become a fresh
 routing recommendation.
+Account-scoped recent history and hourly buckets also use canonical opaque
+filenames. Their first canonical write stores a best-effort owner-only
+`quotabot.analytics-migration.v1` checkpoint for the exact-account legacy path:
+ordered raw-history row digests plus a bounded hourly aggregate baseline. The
+checkpoint contains a provider id and account digest, never a raw account, path,
+prompt, code, or credential. Reads compare the live legacy generation with that
+baseline. A changed or untrusted checkpoint quarantines only the affected
+history tier, preserves both generations, stops further writes to that tier, and
+surfaces a bounded diagnostic through desktop Analytics and human `doctor`;
+bucket-tier conflicts also annotate the affected `stats --json` row because
+that command reads hourly buckets. Ambiguous legacy data cannot influence
+routing. Burn-aware routing continues using frozen canonical account buckets or
+the validated pre-divergence checkpoint. If neither exists and the current
+snapshot has exactly one measured account, the same provider-only compatibility
+series that was eligible before conflict remains eligible. Conflict evaluation
+evaluates both possible hourly cutoff sets, applies cross-provider shrinkage to
+each complete candidate map, then retains the higher burn, higher uncertainty,
+and lower sample count for the conflicted identity. Healthy identities keep the
+pooled result matching the actual current hour offset, so conflict uncertainty
+cannot penalize their route position. Quarantine therefore cannot make the
+affected provider rank more optimistically as evidence ages. No automatic merge or
+deletion occurs when the delta cannot be proven, because choosing one generation
+can lose samples and combining both can double-count their shared baseline.
 Drift diagnostics use separate per-provider/account records in the cache
 directory. They remain attached to cache-only and failed-read fallbacks so a
 process restart or transient provider failure cannot silently clear the warning.
@@ -418,8 +441,12 @@ bounded horizon, and projected unused quota above the threshold. Burn history is
 keyed by provider/account when the provider exposes a specific account, so
 multi-account providers can use the signal only from matching account history.
 Legacy provider-only buckets are still a fallback for unambiguous single-account
-snapshots. When present it lets included quota that would otherwise expire
-unused outrank local capacity, but the hard `budget=local` filter still wins.
+snapshots. A quarantined account prefers its frozen canonical buckets or
+validated pre-divergence checkpoint; when both are absent, the same
+single-account provider compatibility fallback remains eligible and uses the
+same conservative post-pooling, two-boundary burn estimate. When present it lets
+included quota that would otherwise expire unused outrank local capacity, but
+the hard `budget=local` filter still wins.
 `catalog_audit.dart` keeps the
 committed cloud catalog honest without adding runtime network calls: the standalone
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for

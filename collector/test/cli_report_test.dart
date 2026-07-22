@@ -227,12 +227,12 @@ void main() {
     File('${cache.path}/buckets_codex.json').writeAsStringSync(jsonEncode([
       _bucketSamples(nextHour - Duration.secondsPerDay * 7, 92, 2),
     ]));
-
     final result = await runCli(['stats', '--json']);
 
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final codex = json['codex'] as Map<String, dynamic>;
+    expect(codex, isNot(contains('storage_notice')));
     final hint = codex['schedule_hint'] as Map<String, dynamic>;
     expect(hint['summary'], contains('before reset'));
     expect(hint['window'], isA<Map<String, dynamic>>());

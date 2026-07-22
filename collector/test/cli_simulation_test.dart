@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/ansi.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/storage_keys.dart';
 import 'package:test/test.dart';
 
 import '../bin/collect.dart' as cli;
@@ -23,6 +25,52 @@ void main() {
   Future<ProcessResult> runCli(List<String> args) {
     return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
+
+  test('analytics storage diagnostics stay scoped and identity safe', () {
+    final affected = ProviderQuota(
+      provider: codexProviderId,
+      displayName: 'Codex',
+      account: 'secret@example.com',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final healthy = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'healthy@example.com',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 30)],
+    );
+    const notice = AnalyticsStorageNotice(
+      provider: codexProviderId,
+      account: 'secret@example.com',
+      tiers: ['history', 'buckets'],
+      observedAt: 1782000100,
+    );
+    final notices = {quotaIdentityKeyFor(affected): notice};
+
+    final fields = cli.statsStorageNoticeFields(affected, notices);
+    final encoded = jsonEncode(fields);
+    expect(fields['storage_notice'], isA<Map<String, dynamic>>());
+    expect(encoded, contains('"state":"diverged"'));
+    expect(encoded, contains('"tiers":["history","buckets"]'));
+    expect(encoded, isNot(contains('secret@example.com')));
+    expect(encoded, isNot(contains(r'C:\Users')));
+    expect(cli.statsStorageNoticeFields(healthy, notices), isEmpty);
+    expect(
+      cli.analyticsStorageWarningForQuota(affected, notices),
+      contains('remains unavailable until repaired or reset'),
+    );
+    expect(cli.analyticsStorageWarningForQuota(healthy, notices), isNull);
+    expect(
+      cli.statsHistoryAvailabilityLabel(affected, notices),
+      'affected history unavailable',
+    );
+    expect(
+      cli.statsHistoryAvailabilityLabel(healthy, notices),
+      'no history yet',
+    );
+  });
 
   test('doctor keeps sparse model quota separate from shared limits', () {
     const now = 1782046566;
@@ -405,6 +453,44 @@ void main() {
     expect(json['schema'], 'quotabot.suggest.v1');
     expect((json['recommended'] as Map)['provider'], 'claude');
     expect((json['ranked'] as List), hasLength(1));
+  });
+
+  test('stats and doctor suppress ambient simulated-account storage', () async {
+    final cache = Directory('${temp.path}/quotabot/cache')
+      ..createSync(recursive: true);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final prior = HeadroomBucket(start: bucketStart(now) - 3600)..add(90);
+    final current = HeadroomBucket(start: bucketStart(now))..add(40);
+    File('${cache.path}/buckets_claude.json').writeAsStringSync(
+      jsonEncode([prior.toJson(), current.toJson()]),
+    );
+    File(
+      '${cache.path}/analytics_migration_claude_'
+      '${accountStorageStem('simulated')}.json',
+    ).writeAsStringSync('{invalid marker');
+
+    final stats = await runCli([
+      'stats',
+      '--json',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(stats, 0);
+    final report = jsonDecode(stats.stdout as String) as Map<String, dynamic>;
+    final claude = report['claude'] as Map<String, dynamic>;
+    expect(claude['samples'], 0);
+    expect(claude, isNot(contains('storage_notice')));
+
+    final doctor = await runCli([
+      'doctor',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(doctor, 0);
+    final output = doctor.stdout as String;
+    expect(output, isNot(contains('History incomplete')));
+    expect(output, isNot(contains('storage_notice')));
   });
 
   test('suggest ignores active cross-process leases in simulation', () async {

@@ -1755,6 +1755,554 @@ void main() {
     expect(ownerMarker.readAsStringSync(), isNot(contains(plus)));
   });
 
+  test('mixed-version analytics writes fail closed without losing evidence',
+      () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+
+    final initial = quota(20, now);
+    saveSnapshot(initial);
+    recordHeadroomSample(provider, 90, now - 3600, account: account);
+    recordHeadroomSample(provider, 80, now, account: account);
+    recordHeadroomSample(provider, 90, now - 3600);
+    recordHeadroomSample(provider, 40, now);
+    final competitor = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'other',
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 25)],
+    );
+    final burnBefore = recentBurnStatsByQuota([initial], now);
+    final accountKey = quotaIdentityKey(provider, account);
+    expect(burnBefore[accountKey]?.perHour, closeTo(10, 0.001));
+    expect(
+      suggestRoute(
+        [initial, competitor],
+        now,
+        burnStatsByProvider: burnBefore,
+      ).recommended?.provider,
+      claudeProviderId,
+    );
+
+    final stem = accountStorageStem(account);
+    final canonicalHistory = File(
+      '${cacheDir().path}/history_${provider}_$stem.jsonl',
+    );
+    final canonicalBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$stem.json',
+    );
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    );
+    final legacyBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    );
+    final migration = cacheDir().listSync().whereType<File>().singleWhere(
+        (file) => file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+
+    expect(analyticsStorageNotice(provider, account: account), isNull);
+    expect(loadHistory(provider, account: account), hasLength(1));
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      hasLength(2),
+    );
+    final canonicalHistoryBefore = canonicalHistory.readAsBytesSync();
+    final canonicalBucketsBefore = canonicalBuckets.readAsBytesSync();
+
+    final oldWriterQuota = quota(35, now + 60);
+    legacyHistory.writeAsStringSync(
+      '${jsonEncode(oldWriterQuota.toJson())}\n',
+    );
+    final oldWriterBucket = HeadroomBucket(start: bucketStart(now))..add(65);
+    legacyBuckets.writeAsStringSync(
+      jsonEncode([oldWriterBucket.toJson()]),
+    );
+
+    final notice = analyticsStorageNotice(provider, account: account);
+    expect(notice, isNotNull);
+    expect(notice!.tiers, ['history', 'buckets']);
+    expect(notice.summary, contains('Close every older quotabot process'));
+    expect(loadHistory(provider, account: account), isEmpty);
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      isEmpty,
+    );
+    final burnAfter = recentBurnStatsByQuota([initial], now);
+    expect(burnAfter[accountKey]?.perHour, burnBefore[accountKey]?.perHour);
+    expect(
+      suggestRoute(
+        [initial, competitor],
+        now,
+        burnStatsByProvider: burnAfter,
+      ).recommended?.provider,
+      claudeProviderId,
+      reason: 'a storage conflict must not improve the provider route position',
+    );
+    final later = now + 24 * 3600;
+    final laterQuota = quota(20, later);
+    final laterCompetitor = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'other',
+      plan: 'pro',
+      asOf: later,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 25)],
+    );
+    final burnLater = recentBurnStatsByQuota([laterQuota], later);
+    expect(burnLater[accountKey]?.perHour, burnBefore[accountKey]?.perHour);
+    expect(
+      suggestRoute(
+        [laterQuota, laterCompetitor],
+        later,
+        burnStatsByProvider: burnLater,
+      ).recommended?.provider,
+      claudeProviderId,
+      reason: 'frozen trusted burn must not age into an optimistic route',
+    );
+
+    saveSnapshot(quota(45, now + 120));
+    recordHeadroomSample(provider, 55, now + 120, account: account);
+    expect(canonicalHistory.readAsBytesSync(), canonicalHistoryBefore);
+    expect(canonicalBuckets.readAsBytesSync(), canonicalBucketsBefore);
+    expect(legacyHistory.existsSync(), isTrue);
+    expect(legacyBuckets.existsSync(), isTrue);
+
+    final markerText = migration.readAsStringSync();
+    final marker = jsonDecode(markerText) as Map<String, dynamic>;
+    expect(marker['schema'], 'quotabot.analytics-migration.v1');
+    expect(marker['provider'], provider);
+    expect(marker['account_digest'], accountIdentityDigest(account));
+    expect(markerText, isNot(contains(account)));
+    expect(markerText, isNot(contains(cacheDir().path)));
+    expect(
+      analyticsStorageNoticesForQuotas([initial]).single.toJson(),
+      containsPair('state', 'diverged'),
+    );
+  });
+
+  test('malformed analytics migration marker quarantines canonical history',
+      () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    saveSnapshot(quota);
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    marker.writeAsStringSync('{not-json');
+
+    expect(loadHistory(provider, account: account), isEmpty);
+    final notice = analyticsStorageNotice(provider, account: account);
+    expect(notice, isNotNull);
+    expect(notice!.tiers, ['history', 'buckets']);
+  });
+
+  test('conflict retains an unambiguous provider burn fallback', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        );
+    recordHeadroomSample(provider, 90, now - 3600);
+    recordHeadroomSample(provider, 80, now);
+    saveSnapshot(quota(now));
+    final key = quotaIdentityKey(provider, account);
+    final burnBefore = recentBurnStatsByQuota([quota(now)], now);
+    expect(burnBefore[key]?.perHour, closeTo(10, 0.001));
+
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    marker.writeAsStringSync('{not-json');
+    final later = now + 24 * 3600;
+    final laterQuota = quota(later);
+    final competitor = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'other',
+      plan: 'pro',
+      asOf: later,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 25)],
+    );
+    final burnAfter = recentBurnStatsByQuota([laterQuota], later);
+    expect(burnAfter[key]?.perHour, burnBefore[key]?.perHour);
+    expect(
+      suggestRoute(
+        [laterQuota, competitor],
+        later,
+        burnStatsByProvider: burnAfter,
+      ).recommended?.provider,
+      claudeProviderId,
+    );
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      isEmpty,
+    );
+  });
+
+  test('conflict cannot improve a mid-hour burn window', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const latestStart = 1782000000;
+    const now = latestStart + 1800;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    const headroom = [90.0, 100.0, 90.0, 80.0, 70.0, 60.0, 50.0];
+    saveSnapshot(quota);
+    for (var index = 0; index < headroom.length; index++) {
+      recordHeadroomSample(
+        provider,
+        headroom[index],
+        latestStart - (headroom.length - index - 1) * 3600,
+        account: account,
+      );
+    }
+
+    final key = quotaIdentityKey(provider, account);
+    final healthy = recentBurnStatsByQuota([quota], now)[key]!;
+    expect(healthy.perHour, closeTo(10, 0.001));
+    expect(healthy.samples, 6);
+    final aligned = burnRateWithError(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      latestStart,
+    );
+    expect(
+      aligned.perHour,
+      lessThan(healthy.perHour!),
+      reason: 'the fixture must expose the former exact-hour optimism',
+    );
+    final competitor = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'other',
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 28)],
+    );
+    expect(
+      suggestRoute(
+        [quota, competitor],
+        now,
+        burnStatsByProvider: {key: healthy},
+      ).recommended?.provider,
+      claudeProviderId,
+    );
+
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    marker.writeAsStringSync('{not-json');
+
+    final conflicted = recentBurnStatsByQuota([quota], now)[key]!;
+    expect(conflicted.perHour, greaterThanOrEqualTo(healthy.perHour!));
+    expect(conflicted.sePerHour, greaterThanOrEqualTo(healthy.sePerHour!));
+    expect(conflicted.samples, lessThanOrEqualTo(healthy.samples));
+    expect(
+      suggestRoute(
+        [quota, competitor],
+        now,
+        burnStatsByProvider: {key: conflicted},
+      ).recommended?.provider,
+      claudeProviderId,
+      reason: 'quarantine must not improve the affected provider route',
+    );
+  });
+
+  test('conflict remains conservative after three-provider burn pooling', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final competitor = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'other',
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 26.25)],
+    );
+    final third = ProviderQuota(
+      provider: grokProviderId,
+      displayName: 'Grok',
+      account: 'third',
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 60)],
+    );
+    const headroom = [100.0, 90.0, 80.0, 70.0, 60.0, 50.0, 40.0];
+    saveSnapshot(quota);
+    for (var index = 0; index < headroom.length; index++) {
+      final sampledAt = now - (headroom.length - index - 1) * 3600;
+      recordHeadroomSample(
+        provider,
+        headroom[index],
+        sampledAt,
+        account: account,
+      );
+      recordHeadroomSample(claudeProviderId, 70, sampledAt);
+      recordHeadroomSample(grokProviderId, 60, sampledAt);
+    }
+    final quotas = [quota, competitor, third];
+    final key = quotaIdentityKey(provider, account);
+    final healthy = recentBurnStatsByQuota(quotas, now);
+    expect(healthy[key]!.samples, 7);
+    expect(
+      suggestRoute(
+        quotas,
+        now,
+        burnStatsByProvider: healthy,
+      ).recommended?.provider,
+      claudeProviderId,
+    );
+
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    marker.writeAsStringSync('{not-json');
+
+    final conflicted = recentBurnStatsByQuota(quotas, now);
+    expect(
+        conflicted[key]!.perHour, greaterThanOrEqualTo(healthy[key]!.perHour!));
+    expect(
+      suggestRoute(
+        quotas,
+        now,
+        burnStatsByProvider: conflicted,
+      ).recommended?.provider,
+      claudeProviderId,
+      reason: 'post-pooling quarantine must not improve the affected route',
+    );
+  });
+
+  test('conflict pooling does not penalize healthy route competitors', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 30)],
+    );
+    final competitor = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'other',
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 17.5)],
+    );
+    final third = ProviderQuota(
+      provider: grokProviderId,
+      displayName: 'Grok',
+      account: 'third',
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 60)],
+    );
+    const recovering = [12.0, 50.0, 51.0, 52.0, 53.0, 54.0, 55.0];
+    const burning = [67.0, 65.0, 63.0, 61.0, 59.0, 57.0, 55.0];
+    saveSnapshot(quota);
+    for (var index = 0; index < recovering.length; index++) {
+      final sampledAt = now - (recovering.length - index - 1) * 3600;
+      recordHeadroomSample(
+        provider,
+        recovering[index],
+        sampledAt,
+        account: account,
+      );
+      recordHeadroomSample(claudeProviderId, burning[index], sampledAt);
+      recordHeadroomSample(grokProviderId, burning[index], sampledAt);
+    }
+    final quotas = [quota, competitor, third];
+    final key = quotaIdentityKey(provider, account);
+    final competitorKey = quotaIdentityKeyFor(competitor);
+    final healthy = recentBurnStatsByQuota(quotas, now);
+    expect(healthy[key]!.perHour, isNegative);
+    final healthySuggestion = suggestRoute(
+      quotas,
+      now,
+      burnStatsByProvider: healthy,
+    );
+    expect(
+      healthySuggestion.recommended?.provider,
+      claudeProviderId,
+      reason: 'the fixture must favor the healthy competitor before conflict',
+    );
+
+    final marker = cacheDir().listSync().whereType<File>().singleWhere((file) =>
+        file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    marker.writeAsStringSync('{not-json');
+
+    final conflicted = recentBurnStatsByQuota(quotas, now);
+    expect(
+        conflicted[key]!.perHour, greaterThanOrEqualTo(healthy[key]!.perHour!));
+    expect(
+      conflicted[competitorKey]!.perHour,
+      closeTo(healthy[competitorKey]!.perHour!, 0.000001),
+      reason: 'conflict uncertainty must not penalize a healthy competitor',
+    );
+    expect(
+      suggestRoute(
+        quotas,
+        now,
+        burnStatsByProvider: conflicted,
+      ).recommended?.provider,
+      claudeProviderId,
+      reason: 'a recovering conflict must not improve its relative route rank',
+    );
+  });
+
+  test('changed checkpoints stay visible without canonical tier files', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync('${jsonEncode(quota(20, now).toJson())}\n');
+    final legacyBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync(
+        jsonEncode([
+          (HeadroomBucket(start: bucketStart(now) - 3600)..add(90)).toJson(),
+          (HeadroomBucket(start: bucketStart(now))..add(80)).toJson(),
+        ]),
+      );
+
+    saveSnapshot(quota(20, now));
+    recordHeadroomSample(provider, 80, now, account: account);
+    final stem = accountStorageStem(account);
+    final canonicalHistory = File(
+      '${cacheDir().path}/history_${provider}_$stem.jsonl',
+    )..deleteSync();
+    final canonicalBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$stem.json',
+    )..deleteSync();
+
+    legacyHistory.writeAsStringSync(
+      '${jsonEncode(quota(35, now + 60).toJson())}\n',
+    );
+    legacyBuckets.writeAsStringSync(
+      jsonEncode([
+        (HeadroomBucket(start: bucketStart(now))..add(65)).toJson(),
+      ]),
+    );
+
+    final notice = analyticsStorageNotice(provider, account: account);
+    expect(notice, isNotNull);
+    expect(notice!.tiers, ['history', 'buckets']);
+    expect(loadHistory(provider, account: account), isEmpty);
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      isEmpty,
+    );
+    expect(
+      recentBurnStatsByQuota(
+        [quota(20, now)],
+        now,
+      )[quotaIdentityKey(provider, account)]
+          ?.perHour,
+      closeTo(10, 0.001),
+    );
+
+    saveSnapshot(quota(40, now + 120));
+    recordHeadroomSample(provider, 60, now + 120, account: account);
+    expect(canonicalHistory.existsSync(), isFalse);
+    expect(canonicalBuckets.existsSync(), isFalse);
+  });
+
+  test('full retention analytics baseline fits the bounded checkpoint', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    final now = nowEpoch();
+    ProviderQuota quota(int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        );
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    );
+    legacyHistory.writeAsStringSync(
+      '${[
+        for (var index = 199; index >= 0; index--)
+          jsonEncode(quota(now - index * 60).toJson()),
+      ].join('\n')}\n',
+    );
+    final alignedNow = bucketStart(now);
+    final legacyBuckets = [
+      for (var index = 90 * 24 - 1; index >= 0; index--)
+        HeadroomBucket(start: alignedNow - index * 3600)..add(70),
+    ];
+    File('${cacheDir().path}/buckets_${provider}_$account.json')
+        .writeAsStringSync(
+      jsonEncode(legacyBuckets.map((bucket) => bucket.toJson()).toList()),
+    );
+
+    saveSnapshot(quota(now));
+    recordHeadroomSample(provider, 65, now, account: account);
+
+    final migration = cacheDir().listSync().whereType<File>().singleWhere(
+        (file) => file.uri.pathSegments.last
+            .startsWith('analytics_migration_${provider}_'));
+    expect(migration.lengthSync(), lessThan(1024 * 1024));
+    expect(analyticsStorageNotice(provider, account: account), isNull);
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      hasLength(90 * 24),
+    );
+  });
+
   test('canonical and legacy snapshots coexist as one newest identity', () {
     const provider = grokProviderId;
     const account = 'nick+work@example.com';

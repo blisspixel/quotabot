@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+
 import 'drift.dart';
 import 'insights.dart';
 import 'models.dart';
@@ -38,6 +40,45 @@ const _driftSchema = 'quotabot.provider-drift.v1';
 const _cacheObservedAtMicrosKey = 'cache_observed_at_micros';
 const _driftObservedAtMicrosKey = 'observed_at_micros';
 const _legacyBucketOwnerSchema = 'quotabot.legacy-bucket-owner.v1';
+const _analyticsMigrationSchema = 'quotabot.analytics-migration.v1';
+const _maxAnalyticsMigrationBytes = 1024 * 1024;
+const _maxAnalyticsCheckpointBuckets = kRetentionDays * 24 + 2;
+
+/// Bounded, identity-safe evidence that a legacy analytics path changed after
+/// the current canonical path was established, or that its checkpoint is no
+/// longer trustworthy. Affected tiers fail closed until reconciliation can
+/// prove a delta.
+class AnalyticsStorageNotice {
+  final String provider;
+  final String account;
+  final List<String> tiers;
+  final int observedAt;
+
+  const AnalyticsStorageNotice({
+    required this.provider,
+    required this.account,
+    required this.tiers,
+    required this.observedAt,
+  });
+
+  String get summary {
+    final tierLabel = tiers.length == 1
+        ? tiers.single == 'history'
+            ? 'recent history'
+            : 'hourly analytics'
+        : 'recent history and hourly analytics';
+    return 'History incomplete - local $tierLabel changed unexpectedly. '
+        'Affected analytics are quarantined. Close every older quotabot process '
+        'now; this history remains unavailable until repaired or reset.';
+  }
+
+  Map<String, dynamic> toJson() => {
+        'state': 'diverged',
+        'tiers': tiers,
+        'observed_at': observedAt,
+        'detail': summary,
+      };
+}
 
 String _accountStem(String account) => accountStorageStem(account);
 
@@ -521,6 +562,14 @@ void saveHistory(ProviderQuota q) {
   if (!isTrustedQuotaEvidenceAt(q, nowEpoch())) return;
   try {
     final f = _historyFile(q.provider, account: q.account);
+    if (_hasAccount(q.account) &&
+        !_ensureHistoryMigrationBaseline(
+          q.provider,
+          q.account,
+          canonicalExisted: f.existsSync(),
+        )) {
+      return;
+    }
     final line = jsonEncode(_persistedSnapshotJson(q));
     final lines = f.existsSync() && f.lengthSync() <= _maxHistoryBytes
         ? f.readAsLinesSync().where((l) => l.trim().isNotEmpty).toList()
@@ -772,6 +821,7 @@ List<ProviderQuota> loadCachedSnapshots({int? now}) {
       if (!name.endsWith('.json') ||
           name.startsWith('buckets_') ||
           name.startsWith('drift_') ||
+          name.startsWith('analytics_migration_') ||
           name.startsWith('legacy_bucket_owner_')) {
         continue;
       }
@@ -1147,6 +1197,452 @@ File _legacyBucketsFile(String provider, {String? account}) {
   );
 }
 
+File _analyticsMigrationFile(String provider, String account) => File(
+      '${cacheDir().path}/analytics_migration_${_safeProviderStem(provider)}_${_accountStem(account)}.json',
+    );
+
+String _contentDigest(String value) =>
+    sha256.convert(utf8.encode(value)).toString();
+
+String _lineDigest(String line) => _contentDigest(line.trim());
+
+Map<String, dynamic> _historyCheckpoint(String provider, String account) {
+  final lines = _legacyHistoryLinesForIdentity(provider, account);
+  final rowDigests = lines.map(_lineDigest).toList(growable: false);
+  return {
+    'digest': _contentDigest(rowDigests.join('\n')),
+    'count': rowDigests.length,
+    'row_digests': rowDigests,
+  };
+}
+
+({bool valid, List<HeadroomBucket> buckets}) _readBucketFile(File file) {
+  if (!file.existsSync()) return (valid: true, buckets: const []);
+  if (file.lengthSync() > _maxJsonBytes) {
+    return (valid: false, buckets: const []);
+  }
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! List) return (valid: false, buckets: const []);
+    final buckets = <HeadroomBucket>[];
+    for (final entry in decoded) {
+      if (entry is! Map) continue;
+      try {
+        buckets.add(
+          HeadroomBucket.fromJson(entry.cast<String, dynamic>()),
+        );
+      } catch (_) {}
+    }
+    buckets.sort((a, b) => a.start.compareTo(b.start));
+    return (valid: true, buckets: buckets);
+  } catch (_) {
+    return (valid: false, buckets: const []);
+  }
+}
+
+Map<String, dynamic>? _bucketCheckpoint(File file) {
+  final read = _readBucketFile(file);
+  if (!read.valid || read.buckets.length > _maxAnalyticsCheckpointBuckets) {
+    return null;
+  }
+  final baseline = read.buckets.map((bucket) => bucket.toJson()).toList();
+  return {
+    'digest': _contentDigest(jsonEncode(baseline)),
+    'count': baseline.length,
+    'buckets': baseline,
+  };
+}
+
+Map<String, dynamic>? _readAnalyticsMigrationRecord(
+  String provider,
+  String account,
+) {
+  final file = _analyticsMigrationFile(provider, account);
+  if (!file.existsSync() || file.lengthSync() > _maxAnalyticsMigrationBytes) {
+    return null;
+  }
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return null;
+    final record = decoded.cast<String, dynamic>();
+    if (record['schema'] != _analyticsMigrationSchema ||
+        record['provider'] != provider ||
+        record['account_digest'] != accountIdentityDigest(account)) {
+      return null;
+    }
+    return record;
+  } catch (_) {
+    return null;
+  }
+}
+
+Map<String, dynamic> _newAnalyticsMigrationRecord(
+  String provider,
+  String account,
+) =>
+    {
+      'schema': _analyticsMigrationSchema,
+      'provider': provider,
+      'account_digest': accountIdentityDigest(account),
+      'observed_at': nowEpoch(),
+    };
+
+bool _writeAnalyticsMigrationRecord(
+  String provider,
+  String account,
+  Map<String, dynamic> record,
+) {
+  try {
+    record['observed_at'] = nowEpoch();
+    final encoded = jsonEncode(record);
+    if (utf8.encode(encoded).length > _maxAnalyticsMigrationBytes) return false;
+    _atomicWrite(_analyticsMigrationFile(provider, account), encoded);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+bool _checkpointMatches(Object? baseline, Map<String, dynamic> current) {
+  if (baseline is! Map) return false;
+  return baseline['digest'] == current['digest'] &&
+      baseline['count'] == current['count'];
+}
+
+List<({int asOf, String digest})> _historyCheckpointRows(
+  Iterable<String> lines,
+) {
+  final rows = <({int asOf, String digest})>[];
+  for (final line in lines) {
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is! Map) continue;
+      final quota = ProviderQuota.fromJson(decoded.cast<String, dynamic>());
+      rows.add((asOf: quota.asOf, digest: _lineDigest(line)));
+    } catch (_) {}
+  }
+  return rows;
+}
+
+bool _canonicalHistoryCoversLegacy(
+  String provider,
+  String account,
+) {
+  final legacyLines = _legacyHistoryLinesForIdentity(provider, account);
+  if (legacyLines.isEmpty) return true;
+  final canonicalLines = _historyLinesForIdentity(
+    _historyFile(provider, account: account),
+    provider,
+    account,
+  );
+  final canonical = _historyCheckpointRows(canonicalLines);
+  if (canonical.isEmpty) return false;
+  final oldestCanonical = canonical
+      .map((row) => row.asOf)
+      .reduce((left, right) => left < right ? left : right);
+  final canonicalDigests = canonical.map((row) => row.digest).toSet();
+  for (final row in _historyCheckpointRows(legacyLines)) {
+    if (row.asOf >= oldestCanonical && !canonicalDigests.contains(row.digest)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _bucketCovers(HeadroomBucket canonical, HeadroomBucket legacy) {
+  const epsilon = 0.000001;
+  if (canonical.count < legacy.count ||
+      canonical.sum + epsilon < legacy.sum ||
+      canonical.sumSq + epsilon < legacy.sumSq ||
+      canonical.exhausted < legacy.exhausted) {
+    return false;
+  }
+  if (legacy.count > 0 &&
+      (canonical.min > legacy.min + epsilon ||
+          canonical.max + epsilon < legacy.max)) {
+    return false;
+  }
+  for (var index = 0; index < kHistBins; index++) {
+    if (canonical.hist[index] < legacy.hist[index]) return false;
+  }
+  return true;
+}
+
+bool _canonicalBucketsCoverLegacy(File canonicalFile, File legacyFile) {
+  final canonicalRead = _readBucketFile(canonicalFile);
+  final legacyRead = _readBucketFile(legacyFile);
+  if (!canonicalRead.valid || !legacyRead.valid) return false;
+  if (legacyRead.buckets.isEmpty) return true;
+  if (canonicalRead.buckets.isEmpty) return false;
+  if (!legacyFile.lastModifiedSync().isBefore(
+        canonicalFile.lastModifiedSync(),
+      )) {
+    return false;
+  }
+  final byStart = {
+    for (final bucket in canonicalRead.buckets) bucket.start: bucket,
+  };
+  final oldestCanonical = canonicalRead.buckets.first.start;
+  for (final legacy in legacyRead.buckets) {
+    if (legacy.start < oldestCanonical) continue;
+    final canonical = byStart[legacy.start];
+    if (canonical == null || !_bucketCovers(canonical, legacy)) return false;
+  }
+  return true;
+}
+
+bool _ensureHistoryMigrationBaseline(
+  String provider,
+  String account, {
+  required bool canonicalExisted,
+}) {
+  final canonical = _historyFile(provider, account: account);
+  final legacy = _legacyHistoryFile(provider, account: account);
+  if (canonical.path == legacy.path) return true;
+  final marker = _analyticsMigrationFile(provider, account);
+  final existing = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && existing == null) return false;
+  final record = existing ?? _newAnalyticsMigrationRecord(provider, account);
+  if (record['history_conflict'] == true) return false;
+  final current = _historyCheckpoint(provider, account);
+  if (record.containsKey('history')) {
+    return _checkpointMatches(record['history'], current);
+  }
+  if (canonicalExisted && !_canonicalHistoryCoversLegacy(provider, account)) {
+    record['history_conflict'] = true;
+    record['history_reason'] = 'legacy history changed before checkpoint';
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  record['history'] = current;
+  if (_writeAnalyticsMigrationRecord(provider, account, record)) return true;
+  record.remove('history');
+  record['history_conflict'] = true;
+  record['history_reason'] = 'legacy history checkpoint could not be stored';
+  _writeAnalyticsMigrationRecord(provider, account, record);
+  return false;
+}
+
+bool _ensureBucketMigrationBaseline(
+  String provider,
+  String account, {
+  required bool canonicalExisted,
+}) {
+  final canonical = _bucketsFile(provider, account: account);
+  final legacy = _legacyBucketsFile(provider, account: account);
+  if (canonical.path == legacy.path) return true;
+  final marker = _analyticsMigrationFile(provider, account);
+  final existing = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && existing == null) return false;
+  final record = existing ?? _newAnalyticsMigrationRecord(provider, account);
+  if (record['buckets_conflict'] == true) return false;
+  final legacyOwned = !legacy.existsSync() ||
+      _legacyBucketOwnerAllows(provider, account, claim: true);
+  if (!legacyOwned) return true;
+  final current = _bucketCheckpoint(legacy);
+  if (current == null) {
+    record['buckets_conflict'] = true;
+    record['buckets_reason'] = 'legacy hourly analytics are invalid';
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  if (record.containsKey('buckets')) {
+    return _checkpointMatches(record['buckets'], current);
+  }
+  if (canonicalExisted &&
+      legacy.existsSync() &&
+      !_canonicalBucketsCoverLegacy(canonical, legacy)) {
+    record['buckets_conflict'] = true;
+    record['buckets_reason'] =
+        'legacy hourly analytics changed before checkpoint';
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  record['buckets'] = current;
+  if (_writeAnalyticsMigrationRecord(provider, account, record)) return true;
+  record.remove('buckets');
+  record['buckets_conflict'] = true;
+  record['buckets_reason'] =
+      'legacy hourly analytics checkpoint could not be stored';
+  _writeAnalyticsMigrationRecord(provider, account, record);
+  return false;
+}
+
+int _fileObservedAt(File file) {
+  try {
+    return file.lastModifiedSync().millisecondsSinceEpoch ~/ 1000;
+  } catch (_) {
+    return nowEpoch();
+  }
+}
+
+bool _historyMigrationConflict(String provider, String account) {
+  final canonical = _historyFile(provider, account: account);
+  final legacy = _legacyHistoryFile(provider, account: account);
+  if (canonical.path == legacy.path) return false;
+  final marker = _analyticsMigrationFile(provider, account);
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && record == null) return true;
+  if (record?['history_conflict'] == true) return true;
+  final current = _historyCheckpoint(provider, account);
+  if (record?.containsKey('history') == true) {
+    return !_checkpointMatches(record?['history'], current);
+  }
+  if (!canonical.existsSync()) return false;
+  if ((current['count'] as int) == 0 && record == null) return false;
+  return true;
+}
+
+bool _bucketMigrationConflict(String provider, String account) {
+  final canonical = _bucketsFile(provider, account: account);
+  final legacy = _legacyBucketsFile(provider, account: account);
+  if (canonical.path == legacy.path) return false;
+  final marker = _analyticsMigrationFile(provider, account);
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && record == null) return true;
+  if (record?['buckets_conflict'] == true) return true;
+  final legacyOwned = !legacy.existsSync() ||
+      _legacyBucketOwnerAllows(provider, account, claim: false);
+  if (record?.containsKey('buckets') == true) {
+    if (!legacyOwned) return true;
+    final current = _bucketCheckpoint(legacy);
+    return current == null || !_checkpointMatches(record?['buckets'], current);
+  }
+  if (!canonical.existsSync()) return false;
+  if (!legacyOwned) return false;
+  if (!legacy.existsSync()) return false;
+  final current = _bucketCheckpoint(legacy);
+  return current == null || record != null || (current['count'] as int) > 0;
+}
+
+List<HeadroomBucket>? _bucketsFromCheckpoint(Object? checkpoint) {
+  if (checkpoint is! Map) return null;
+  final rawBuckets = checkpoint['buckets'];
+  final count = checkpoint['count'];
+  final digest = checkpoint['digest'];
+  if (rawBuckets is! List ||
+      count is! int ||
+      digest is! String ||
+      count != rawBuckets.length ||
+      count > _maxAnalyticsCheckpointBuckets ||
+      _contentDigest(jsonEncode(rawBuckets)) != digest) {
+    return null;
+  }
+  final buckets = <HeadroomBucket>[];
+  try {
+    for (final entry in rawBuckets) {
+      if (entry is! Map) return null;
+      buckets.add(HeadroomBucket.fromJson(entry.cast<String, dynamic>()));
+    }
+  } catch (_) {
+    return null;
+  }
+  buckets.sort((left, right) => left.start.compareTo(right.start));
+  return buckets;
+}
+
+List<HeadroomBucket> _trustedBucketsDuringConflict(
+  String provider,
+  String account,
+) {
+  final canonical = _bucketsFile(provider, account: account);
+  if (canonical.existsSync()) {
+    final read = _readBucketFile(canonical);
+    if (read.valid) return List<HeadroomBucket>.of(read.buckets);
+  }
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  return List<HeadroomBucket>.of(
+    _bucketsFromCheckpoint(record?['buckets']) ?? const [],
+  );
+}
+
+double? _conservativeMaximum(double? left, double? right) {
+  final finiteLeft = left != null && left.isFinite ? left : null;
+  final finiteRight = right != null && right.isFinite ? right : null;
+  if (finiteLeft == null) return finiteRight;
+  if (finiteRight == null) return finiteLeft;
+  return finiteLeft >= finiteRight ? finiteLeft : finiteRight;
+}
+
+BurnStat _conservativeBurnStat(BurnStat left, BurnStat right) => BurnStat(
+      perHour: _conservativeMaximum(left.perHour, right.perHour),
+      sePerHour: _conservativeMaximum(left.sePerHour, right.sePerHour),
+      samples: left.samples <= right.samples ? left.samples : right.samples,
+    );
+
+({BurnStat onBoundary, BurnStat afterBoundary}) _conflictBurnCandidates(
+  List<HeadroomBucket> buckets, {
+  int? lookbackHours,
+}) {
+  if (buckets.isEmpty) {
+    return (
+      onBoundary: const BurnStat(),
+      afterBoundary: const BurnStat(),
+    );
+  }
+
+  BurnStat evaluate(int evaluationTime) => lookbackHours == null
+      ? burnRateWithError(buckets, evaluationTime)
+      : burnRateWithError(
+          buckets,
+          evaluationTime,
+          lookbackHours: lookbackHours,
+        );
+
+  // The trusted snapshot records hourly bucket starts, not the sub-hour offset
+  // of the last healthy evaluation. An exact-hour cutoff includes one boundary
+  // bucket that every later offset excludes. Evaluate both possible sets and
+  // retain both candidates so the conservative envelope can be enforced after
+  // cross-provider shrinkage as well as before it.
+  final onBoundary = evaluate(buckets.last.start);
+  final afterBoundary = evaluate(buckets.last.start + 1);
+  return (onBoundary: onBoundary, afterBoundary: afterBoundary);
+}
+
+/// Returns a bounded mixed-version analytics warning for one identity. No path,
+/// raw account, sample, or file content leaves the storage boundary.
+AnalyticsStorageNotice? analyticsStorageNotice(
+  String provider, {
+  String? account,
+}) {
+  final exactAccount = account != null && _hasAccount(account) ? account : null;
+  if (exactAccount == null) return null;
+  final tiers = <String>[];
+  if (_historyMigrationConflict(provider, exactAccount)) tiers.add('history');
+  if (_bucketMigrationConflict(provider, exactAccount)) tiers.add('buckets');
+  if (tiers.isEmpty) return null;
+  final legacyHistory = _legacyHistoryFile(provider, account: exactAccount);
+  final legacyBuckets = _legacyBucketsFile(provider, account: exactAccount);
+  final marker = _analyticsMigrationFile(provider, exactAccount);
+  final observedAt = [legacyHistory, legacyBuckets, marker]
+      .where((file) => file.existsSync())
+      .map(_fileObservedAt)
+      .fold(0, (latest, value) => value > latest ? value : latest);
+  return AnalyticsStorageNotice(
+    provider: provider,
+    account: exactAccount,
+    tiers: List.unmodifiable(tiers),
+    observedAt: observedAt == 0 ? nowEpoch() : observedAt,
+  );
+}
+
+List<AnalyticsStorageNotice> analyticsStorageNoticesForQuotas(
+  Iterable<ProviderQuota> quotas,
+) {
+  final notices = <AnalyticsStorageNotice>[];
+  final seen = <String>{};
+  for (final quota in quotas) {
+    final key = quotaIdentityKeyFor(quota);
+    if (!seen.add(key)) continue;
+    final notice = analyticsStorageNotice(
+      quota.provider,
+      account: quota.account,
+    );
+    if (notice != null) notices.add(notice);
+  }
+  return notices;
+}
+
 File _legacyBucketOwnerFile(String provider, String account) => File(
     '${cacheDir().path}/legacy_bucket_owner_${_safeProviderStem(provider)}_${accountStorageStem(_safeProviderStem(account))}.json');
 
@@ -1243,6 +1739,16 @@ void recordHeadroomSample(
     // first's sample (or a concurrent prune would drop a re-added bucket) - a
     // lost update on the most expensive local data to lose.
     _withEvidenceLock(provider, account ?? '', () {
+      final target = _bucketsFile(provider, account: account);
+      if (account != null &&
+          _hasAccount(account) &&
+          !_ensureBucketMigrationBaseline(
+            provider,
+            account,
+            canonicalExisted: target.existsSync(),
+          )) {
+        return;
+      }
       final buckets = _loadBuckets(
         provider,
         account: account,
@@ -1309,20 +1815,72 @@ Map<String, BurnStat> recentBurnStatsByQuota(
     measuredCounts[q.provider] = (measuredCounts[q.provider] ?? 0) + 1;
   }
   final out = <String, BurnStat>{};
+  final conflictCandidates =
+      <String, ({BurnStat onBoundary, BurnStat afterBoundary})>{};
   for (final q in list) {
     if (q.isManual || !q.hasWindows) continue;
     final key = quotaIdentityKeyFor(q);
-    var buckets = hasSpecificQuotaAccount(q.account)
-        ? loadBuckets(q.provider, account: q.account, fallbackToProvider: false)
-        : loadBuckets(q.provider);
+    final accountScoped = hasSpecificQuotaAccount(q.account);
+    final accountBucketsConflicted =
+        accountScoped && _bucketMigrationConflict(q.provider, q.account);
+    var buckets = accountBucketsConflicted
+        ? _trustedBucketsDuringConflict(q.provider, q.account)
+        : accountScoped
+            ? loadBuckets(
+                q.provider,
+                account: q.account,
+                fallbackToProvider: false,
+              )
+            : loadBuckets(q.provider);
     if (buckets.isEmpty && (measuredCounts[q.provider] ?? 0) == 1) {
       buckets = loadBuckets(q.provider);
     }
-    out[key] = lookbackHours == null
-        ? burnRateWithError(buckets, now)
-        : burnRateWithError(buckets, now, lookbackHours: lookbackHours);
+    if (accountBucketsConflicted) {
+      final candidates = _conflictBurnCandidates(
+        buckets,
+        lookbackHours: lookbackHours,
+      );
+      conflictCandidates[key] = candidates;
+      out[key] = _conservativeBurnStat(
+        candidates.onBoundary,
+        candidates.afterBoundary,
+      );
+    } else {
+      out[key] = lookbackHours == null
+          ? burnRateWithError(buckets, now)
+          : burnRateWithError(
+              buckets,
+              now,
+              lookbackHours: lookbackHours,
+            );
+    }
   }
-  return shrinkBurnStats(out);
+  if (conflictCandidates.isEmpty) return shrinkBurnStats(out);
+
+  // All hourly buckets share the same clock boundaries, so the unknown healthy
+  // sub-hour offset has exactly two global cases: on the boundary or after it.
+  // Shrink both complete maps. Healthy identities use the result matching the
+  // actual current offset, while conflicted identities take the envelope. This
+  // prevents conflict uncertainty from weakening its burn or penalizing a
+  // healthy route competitor through the shared pool.
+  final onBoundary = Map<String, BurnStat>.of(out);
+  final afterBoundary = Map<String, BurnStat>.of(out);
+  for (final entry in conflictCandidates.entries) {
+    onBoundary[entry.key] = entry.value.onBoundary;
+    afterBoundary[entry.key] = entry.value.afterBoundary;
+  }
+  final shrunkOnBoundary = shrinkBurnStats(onBoundary);
+  final shrunkAfterBoundary = shrinkBurnStats(afterBoundary);
+  final result = Map<String, BurnStat>.of(
+    bucketStart(now) == now ? shrunkOnBoundary : shrunkAfterBoundary,
+  );
+  for (final key in conflictCandidates.keys) {
+    result[key] = _conservativeBurnStat(
+      shrunkOnBoundary[key]!,
+      shrunkAfterBoundary[key]!,
+    );
+  }
+  return result;
 }
 
 /// Loads a provider/account hourly bucket series, oldest first. Empty when
@@ -1349,6 +1907,10 @@ List<HeadroomBucket> _loadBuckets(
   try {
     final exactAccount =
         account != null && _hasAccount(account) ? account : null;
+    if (exactAccount != null &&
+        _bucketMigrationConflict(provider, exactAccount)) {
+      return [];
+    }
     var f = _bucketsFile(provider, account: exactAccount);
     if (!f.existsSync() && exactAccount != null) {
       final legacy = _legacyBucketsFile(provider, account: exactAccount);
@@ -1363,32 +1925,18 @@ List<HeadroomBucket> _loadBuckets(
         f = _bucketsFile(provider);
       }
     }
-    if (!f.existsSync()) return [];
-    if (f.lengthSync() > _maxJsonBytes) return [];
-    final list = jsonDecode(f.readAsStringSync()) as List;
-    // Drop only a malformed element, not the whole history: up to 90 days of
-    // buckets is the most expensive local data to lose, and the lease and
-    // manual stores are already per-entry resilient the same way.
-    final buckets = <HeadroomBucket>[];
-    for (final e in list) {
-      if (e is! Map) continue;
-      try {
-        buckets.add(HeadroomBucket.fromJson(e.cast<String, dynamic>()));
-      } catch (_) {}
-    }
-    buckets.sort((a, b) => a.start.compareTo(b.start));
-    return buckets;
+    return List<HeadroomBucket>.of(_readBucketFile(f).buckets);
   } catch (_) {
     return [];
   }
 }
 
-List<String> _legacyHistoryLinesForIdentity(
+List<String> _historyLinesForIdentity(
+  File file,
   String provider,
   String account,
 ) {
   if (!_hasAccount(account)) return [];
-  final file = _legacyHistoryFile(provider, account: account);
   if (!file.existsSync() || file.lengthSync() > _maxHistoryBytes) return [];
   final lines = <String>[];
   try {
@@ -1408,6 +1956,16 @@ List<String> _legacyHistoryLinesForIdentity(
   } catch (_) {}
   return lines;
 }
+
+List<String> _legacyHistoryLinesForIdentity(
+  String provider,
+  String account,
+) =>
+    _historyLinesForIdentity(
+      _legacyHistoryFile(provider, account: account),
+      provider,
+      account,
+    );
 
 List<ProviderQuota> _loadHistoryFile(
   File file,
@@ -1440,6 +1998,10 @@ List<ProviderQuota> _loadHistoryFile(
 
 List<ProviderQuota> loadHistory(String provider, {String? account}) {
   final exactAccount = account != null && _hasAccount(account) ? account : null;
+  if (exactAccount != null &&
+      _historyMigrationConflict(provider, exactAccount)) {
+    return [];
+  }
   final canonical = _historyFile(provider, account: exactAccount);
   if (canonical.existsSync()) {
     return _loadHistoryFile(

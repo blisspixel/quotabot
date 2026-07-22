@@ -380,7 +380,33 @@ Remove-Item -LiteralPath $shortcut -Force -ErrorAction SilentlyContinue
 Stop running quotabot processes, then run the current installer with the exact
 previous release tag. The installer downloads that version, verifies its
 `.sha256` sidecar, and uses the same staged replacement and failure rollback as
-an update. Keep the local metadata directory.
+an update. For a compatible rollback, keep the local metadata directory. If the
+target release may predate an analytics-storage migration, first stop every
+quotabot process and make a restorable copy of that directory.
+
+Do not let a release from before the opaque account-key migration collect
+against the only copy of current metadata, even if the two releases never run
+at the same time. It can write recent history and hourly analytics to legacy
+filenames while the current release uses canonical filenames. Before returning
+to the current release, stop every older `top`, desktop, MCP, and server process,
+then either restore the backup made before rollback or accept that the current
+release will quarantine any affected history. Its migration checkpoint fails
+closed when legacy and canonical generations diverge: both are preserved, but
+the affected tier is excluded from displayed analytics, and ambiguous legacy
+data cannot influence burn-aware routing. A frozen canonical account baseline
+or validated pre-divergence checkpoint remains eligible for burn estimation. If
+neither exists, the existing provider-only compatibility series remains eligible
+only for an unambiguous single-account snapshot. Conflict evaluation uses the
+more conservative post-pooling result from both possible hourly cutoff sets.
+Healthy providers keep the pooled result matching the current hour offset, so
+the conflict cannot penalize a route competitor. Analytics and `doctor` show a
+warning, while `stats` reports bucket-tier
+conflicts on the rows that consume those buckets. Closing the older process stops
+further divergence but does not restore quarantined history. Current quota
+snapshots, provider credentials, and the **Now** view remain available. quotabot
+does not guess at or delete an ambiguous analytics delta; keep the files for a
+future exact repair, or use the documented full local-data reset below only if
+losing local history is acceptable.
 
 macOS or Linux:
 

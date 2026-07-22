@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 
@@ -174,6 +175,92 @@ void main() {
     await tester.tap(find.text('7d'));
     await tester.pump();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('analytics storage conflicts are clear only on history ranges', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = _q('codex', 'Codex', 30, asOf: now);
+    final notice = AnalyticsStorageNotice(
+      provider: 'codex',
+      account: 'codex@example.com',
+      tiers: const ['buckets'],
+      observedAt: now,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [quota],
+          buckets: const {},
+          dark: true,
+          analyticsNotices: [notice],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('History incomplete'), findsNothing);
+    await tester.tap(find.text('7d'));
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.text('affected history is unavailable'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsNothing);
+    expect(find.bySemanticsLabel(notice.summary), findsOneWidget);
+
+    await tester.tap(find.text('Now'));
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsNothing);
+
+    final historyOnly = AnalyticsStorageNotice(
+      provider: 'codex',
+      account: 'codex@example.com',
+      tiers: const ['history'],
+      observedAt: now,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          key: const ValueKey('history-only-conflict'),
+          data: [quota],
+          buckets: const {},
+          dark: true,
+          analyticsNotices: [historyOnly],
+          initialRange: FleetRange.week,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsOneWidget);
+
+    final combined = AnalyticsStorageNotice(
+      provider: 'codex',
+      account: 'codex@example.com',
+      tiers: const ['history', 'buckets'],
+      observedAt: now,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          key: const ValueKey('combined-conflict'),
+          data: [quota],
+          buckets: const {},
+          dark: true,
+          analyticsNotices: [combined],
+          initialRange: FleetRange.quarter,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.text('affected history is unavailable'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('constrained analytics keeps a visible scroll affordance', (

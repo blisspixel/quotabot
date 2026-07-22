@@ -11,6 +11,7 @@ import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
 import 'package:quotabot_collector/drift.dart';
@@ -486,6 +487,7 @@ class _DashboardState extends State<Dashboard>
   Map<String, List<List<double?>>> _heatmaps = {};
   Map<String, List<HeadroomBucket>> _buckets = {};
   Map<String, BurnStat> _burnStats = {};
+  List<AnalyticsStorageNotice> _analyticsStorageNotices = const [];
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   String? _lastRefreshError;
   String? _lastWebhookDeliveryStatus;
@@ -1073,6 +1075,9 @@ class _DashboardState extends State<Dashboard>
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final analyticsStorageNotices = widget._hostIntegration
+          ? analyticsStorageNoticesForQuotas(active)
+          : const <AnalyticsStorageNotice>[];
       final burnStats = widget._hostIntegration
           ? recentBurnStatsByQuota(active, nowSec)
           : <String, BurnStat>{};
@@ -1101,6 +1106,7 @@ class _DashboardState extends State<Dashboard>
         _heatmaps = {};
         _buckets = {};
         _burnStats = burnStats;
+        _analyticsStorageNotices = analyticsStorageNotices;
         _routeSummary = routeSummary;
         _lastRefreshError = anyLive
             ? null
@@ -1185,6 +1191,7 @@ class _DashboardState extends State<Dashboard>
       _heatmaps = {};
       _buckets = {};
       _burnStats = cli_demo.demoBurnStats();
+      _analyticsStorageNotices = const [];
       _routeSummary = demoRoutedRequestSummary();
       final rawInsights = <String, Insights>{};
       for (final q in demo) {
@@ -1537,6 +1544,7 @@ class _DashboardState extends State<Dashboard>
                   dark: Theme.of(context).brightness == Brightness.dark,
                   showAccounts: _showAccounts,
                   routedRequests: _routeSummary,
+                  analyticsNotices: _analyticsStorageNotices,
                   initialRange: _analyticsRange,
                 ),
               ),

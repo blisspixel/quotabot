@@ -10,6 +10,7 @@ import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/openai_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/drift.dart';
@@ -697,6 +698,43 @@ typedef StatsSeries = ({
   ProviderQuota quota,
   List<HeadroomBucket> buckets,
 });
+
+/// Bounded additive JSON fields for one stats row's storage diagnostic.
+/// The notice serializer intentionally omits raw account and path data.
+Map<String, dynamic> statsStorageNoticeFields(
+  ProviderQuota quota,
+  Map<String, AnalyticsStorageNotice> noticesByIdentity,
+) {
+  final notice = noticesByIdentity[quotaIdentityKeyFor(quota)];
+  return notice == null
+      ? const <String, dynamic>{}
+      : <String, dynamic>{'storage_notice': notice.toJson()};
+}
+
+/// Human operator diagnostic for one quota row, or null for healthy storage.
+String? analyticsStorageWarningForQuota(
+  ProviderQuota quota,
+  Map<String, AnalyticsStorageNotice> noticesByIdentity,
+) =>
+    noticesByIdentity[quotaIdentityKeyFor(quota)]?.summary;
+
+/// Truthful empty-history label for one stats row.
+String statsHistoryAvailabilityLabel(
+  ProviderQuota quota,
+  Map<String, AnalyticsStorageNotice> noticesByIdentity,
+) =>
+    noticesByIdentity.containsKey(quotaIdentityKeyFor(quota))
+        ? 'affected history unavailable'
+        : 'no history yet';
+
+/// One bounded summary when several provider accounts share the same conflict.
+String analyticsStorageSummary(List<AnalyticsStorageNotice> notices) =>
+    notices.length == 1
+        ? notices.single.summary
+        : 'History incomplete - local analytics changed unexpectedly for '
+            '${notices.length} provider accounts. Affected analytics are '
+            'quarantined. Close every older quotabot process now; this history '
+            'remains unavailable until repaired or reset.';
 
 /// Builds the analytics series shown by `quotabot stats`.
 ///
@@ -2152,6 +2190,20 @@ Future<void> _runStats(
   final only = rest.isEmpty ? null : rest.first.toLowerCase();
   final now = nowEpoch();
   final results = await _read(profile, excludedProviders);
+  final statsQuotas = [
+    for (final quota in results)
+      if (!quota.isLocal && (only == null || quota.provider == only)) quota,
+  ];
+  final storageNotices = _usingSimulation
+      ? const <AnalyticsStorageNotice>[]
+      : [
+          for (final notice in analyticsStorageNoticesForQuotas(statsQuotas))
+            if (notice.tiers.contains('buckets')) notice,
+        ];
+  final storageNoticesByIdentity = {
+    for (final notice in storageNotices)
+      quotaIdentityKey(notice.provider, notice.account): notice,
+  };
   final series = buildStatsSeries(results, only, _historyBuckets);
   final tz = DateTime.now().timeZoneOffset;
   final insights = shrinkInsightsReliability({
@@ -2172,6 +2224,7 @@ Future<void> _runStats(
         if (pace != null) 'pace': pace.toJson(),
         if (schedule != null) 'schedule_hint': schedule.toJson(),
         if (tierFit != null) 'tier_fit': tierFit.toJson(),
+        ...statsStorageNoticeFields(row.quota, storageNoticesByIdentity),
       };
     }
     print(_jsonPretty(report));
@@ -2182,6 +2235,7 @@ Future<void> _runStats(
       tz,
       insights,
       tierFitPolicy,
+      storageNotices,
     );
   }
 }
@@ -2828,6 +2882,12 @@ void _printDoctor(
   List<String> preferenceOrder = const [],
 }) {
   final now = nowEpoch();
+  final storageNoticesByIdentity = _usingSimulation
+      ? const <String, AnalyticsStorageNotice>{}
+      : {
+          for (final notice in analyticsStorageNoticesForQuotas(results))
+            quotaIdentityKey(notice.provider, notice.account): notice,
+        };
   print(
     '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
   );
@@ -2904,6 +2964,14 @@ void _printDoctor(
     }
     final hint = _doctorHint(q, state);
     if (hint != null) print('  $indent ${_stateColumn('')} -> $hint');
+    final storageWarning =
+        analyticsStorageWarningForQuota(q, storageNoticesByIdentity);
+    if (storageWarning != null) {
+      print(
+        '  $indent ${_stateColumn('')} '
+        '${style.yellow('! $storageWarning')} ',
+      );
+    }
   }
 
   // Close the loop: tell the user where to route work next.
@@ -3663,6 +3731,7 @@ void _printStats(
   Duration tz,
   Map<String, Insights> insights,
   _TierFitPolicy tierFitPolicy,
+  List<AnalyticsStorageNotice> storageNotices,
 ) {
   print(
     'quotabot stats  (90-day analytics from local history, 0 usage tokens)\n',
@@ -3671,6 +3740,16 @@ void _printStats(
     print('  no history yet; leave quotabot running to build it');
     return;
   }
+
+  if (storageNotices.isNotEmpty) {
+    final message = analyticsStorageSummary(storageNotices);
+    print('  ${style.yellow('! $message')}\n');
+  }
+
+  final storageNoticesByIdentity = {
+    for (final notice in storageNotices)
+      quotaIdentityKey(notice.provider, notice.account): notice,
+  };
 
   // Portfolio view: where you actually spend, and what you barely use.
   final port = portfolioInsight({
@@ -3703,7 +3782,10 @@ void _printStats(
     final ins = insights[row.key] ?? Insights.from(buckets, now, tzOffset: tz);
     final label = row.label;
     if (ins.samples == 0) {
-      print('  ${label.padRight(12)} no history yet');
+      print(
+        '  ${label.padRight(12)} '
+        '${statsHistoryAvailabilityLabel(row.quota, storageNoticesByIdentity)}',
+      );
       continue;
     }
     final mean = ins.mean!.round();

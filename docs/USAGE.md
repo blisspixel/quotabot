@@ -107,6 +107,29 @@ kept long term. Those history files store quota metadata only, never prompts or
 code; other bounded local stores such as grants, profiles, and leases are
 documented below.
 
+Account-scoped analytics use collision-resistant canonical filenames. At the
+first canonical write, quotabot records a best-effort owner-only, versioned
+checkpoint of
+any exact-account legacy history and bucket baseline. If an older process later
+writes a separate legacy generation, quotabot preserves both generations and
+fails closed for only the affected history tier. It does not merge an ambiguous
+delta or let divergent legacy data influence routing. Burn estimation retains
+the frozen canonical account baseline or its validated pre-divergence
+checkpoint. If neither exists, an already eligible provider-only series remains
+usable only for an unambiguous single-account snapshot. Its conflict burn uses
+the more conservative post-pooling result from both possible hourly cutoff sets,
+while healthy providers keep the result for the actual current hour offset.
+This prevents quarantine from improving that provider's relative rank as time passes. The
+desktop 7d/90d ranges show an accessible amber notice for any affected tier;
+only a bucket conflict replaces the bucket
+view's warming copy. `doctor` prints every affected tier, and `stats --json`
+adds `storage_notice` when the row's hourly bucket tier is affected.
+The **Now** view and current quota evidence are unchanged. Close all older
+quotabot processes immediately to prevent further divergence. Closing them does
+not restore quarantined history; that tier remains unavailable until exact
+repair or a local-data reset. Backup, rollback, and reset tradeoffs are
+documented in [SETUP.md](SETUP.md#roll-back).
+
 For an explicit tier-fit check, pass candidate plan caps as percentages of your
 current plan. Prices are optional and caller-supplied:
 
