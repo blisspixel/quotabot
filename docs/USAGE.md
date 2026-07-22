@@ -66,9 +66,14 @@ headroom palette as the terminal truecolor view.
 ## Quota Analytics
 
 Open it from the bar-chart button in the header. The analytics body replaces the
-quota body under the same header and menu, without moving or resizing the
-window. It scrolls within the current size, the header's Back to quotas control
-restores the quota body, and the view is switchable by time range:
+quota body under the same header and menu. A short content-hugged quota window
+grows to a useful size bounded by the current display, while dimensions you
+already enlarged are preserved when they fit. If needed, the window shifts only
+far enough to keep the resized view inside the display's work area. The body
+keeps a visible scrollbar when more content remains, card headings stack at
+large text sizes, and the header's Back to quotas control resumes content-hugged
+quota sizing, or compact-strip sizing if Analytics was opened from compact mode.
+The view is switchable by time range:
 
 - **Now:** pool-free and most-headroom chips, ranked headroom per provider with
   reset countdowns, a consumption-share donut, and LiteLLM routed-request totals

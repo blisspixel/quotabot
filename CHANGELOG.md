@@ -50,6 +50,12 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Quota Analytics now grows a short content-hugged quota window into a useful
+  display-bounded viewport on entry, keeps a visible scrollbar when its cards
+  exceed the available height, stacks card headings at large text sizes, and
+  returns to quota or compact-strip sizing on Back.
+- Provider-card disclosure chevrons now align with the trailing card padding
+  instead of drifting inward beside short plan badges such as `AI Pro` or `Pro`.
 - Strict `verify --require-live` now fails closed when filters select no provider
   adapters. The JSON record includes `selected_adapter_count` and
   `live_read_scope_valid`, and human output names the empty scope instead of

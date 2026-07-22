@@ -65,8 +65,15 @@ class FleetScreen extends StatefulWidget {
 
 class _FleetScreenState extends State<FleetScreen> {
   late FleetRange _range = widget.initialRange;
+  final ScrollController _scrollController = ScrollController();
 
   bool get dark => widget.dark;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   /// The history buckets for [q], keyed the way the dashboard stores them
   /// (provider|account when the account is specific), with a plain provider-id
@@ -107,11 +114,16 @@ class _FleetScreenState extends State<FleetScreen> {
       children: [
         _tabs(c),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-            child: _range == FleetRange.now
-                ? _liveView(nodes, now, c)
-                : _historyView(now, c),
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+              child: _range == FleetRange.now
+                  ? _liveView(nodes, now, c)
+                  : _historyView(now, c),
+            ),
           ),
         ),
       ],
@@ -933,6 +945,21 @@ class _FleetScreenState extends State<FleetScreen> {
     String subtitle,
     Widget child,
   ) {
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final titleText = Text(
+      title,
+      style: TextStyle(
+        fontSize: AppType.bodySmall,
+        fontWeight: FontWeight.w800,
+        color: c.fg,
+      ),
+    );
+    final subtitleText = Text(
+      subtitle,
+      maxLines: largeText ? 2 : 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: AppType.caption, color: c.muted),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: BoxDecoration(
@@ -943,29 +970,21 @@ class _FleetScreenState extends State<FleetScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: AppType.bodySmall,
-                  fontWeight: FontWeight.w800,
-                  color: c.fg,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: AppType.caption, color: c.muted),
-                ),
-              ),
-            ],
-          ),
+          if (largeText)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [titleText, const SizedBox(height: 2), subtitleText],
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                titleText,
+                const SizedBox(width: 8),
+                Expanded(child: subtitleText),
+              ],
+            ),
           const SizedBox(height: 10),
           child,
         ],

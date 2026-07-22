@@ -386,6 +386,8 @@ class Dashboard extends StatefulWidget {
   final bool _hostIntegration;
   final bool? _demoModeOverride;
   @visibleForTesting
+  final bool initialAnalytics;
+  @visibleForTesting
   final Future<List<ProviderQuota>> Function()? collector;
   @visibleForTesting
   final List<QuotaProfile>? testProfiles;
@@ -404,6 +406,7 @@ class Dashboard extends StatefulWidget {
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
     : _hostIntegration = true,
       _demoModeOverride = null,
+      initialAnalytics = false,
       collector = null,
       testProfiles = null,
       alertPoster = null,
@@ -421,6 +424,7 @@ class Dashboard extends StatefulWidget {
     super.key,
     required this.prefs,
     bool demoMode = true,
+    this.initialAnalytics = false,
     this.collector,
     this.testProfiles,
     this.alertPoster,
@@ -494,7 +498,7 @@ class _DashboardState extends State<Dashboard>
   bool _overflowing = false; // content taller than the capped window (scrolls)
   // Analytics renders as a body inside this dashboard (same header, same
   // menu), never as a separate route, so the chrome stays consistent.
-  bool _showingAnalytics = false;
+  late bool _showingAnalytics = widget.initialAnalytics;
   FleetRange _analyticsRange = FleetRange.now;
   final Map<String, DateTime> _lastNotified =
       {}; // debounce key -> time for notif spam reduction
@@ -508,6 +512,7 @@ class _DashboardState extends State<Dashboard>
   Timer? _tick;
   Timer? _windowMovePersistTimer;
   int _windowMoveRevision = 0;
+  int _windowGeometryRevision = 0;
   final GlobalKey _contentKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
 
@@ -817,6 +822,7 @@ class _DashboardState extends State<Dashboard>
 
   @override
   void dispose() {
+    _windowGeometryRevision++;
     if (widget._hostIntegration) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);
@@ -1231,15 +1237,53 @@ class _DashboardState extends State<Dashboard>
   /// safety net. Capped at the screen height (see [_maxWindowHeight]).
   void _applySize() {
     if (!widget._hostIntegration) return;
+    final revision = ++_windowGeometryRevision;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      // Analytics keeps whatever size the window has (its body scrolls); the
-      // quota view's content-hugging resize resumes when it closes.
-      if (_showingAnalytics) return;
+      if (!mounted || revision != _windowGeometryRevision) return;
       final maxH = _maxWindowHeight();
       double w;
       double h;
-      if (_compact) {
+      if (_showingAnalytics) {
+        Rect? currentBounds;
+        try {
+          currentBounds = await windowManager.getBounds();
+        } catch (_) {}
+        if (!mounted ||
+            revision != _windowGeometryRevision ||
+            !_showingAnalytics) {
+          return;
+        }
+        final workAreas = await desktopWorkAreas();
+        if (!mounted ||
+            revision != _windowGeometryRevision ||
+            !_showingAnalytics) {
+          return;
+        }
+        final geometry = analyticsWindowGeometry(
+          currentSize: currentBounds?.size ?? _expandedMinimumWindowSize,
+          currentPosition: currentBounds?.topLeft ?? _windowPos,
+          workAreas: workAreas,
+          fallbackMaximumHeight: maxH,
+        );
+        try {
+          final position = geometry.position;
+          if (position == null) {
+            await windowManager.setSize(geometry.size);
+          } else {
+            await windowManager.setBounds(position & geometry.size);
+          }
+          if (!mounted ||
+              revision != _windowGeometryRevision ||
+              !_showingAnalytics) {
+            return;
+          }
+          if (position != null && position != _windowPos) {
+            _windowPos = position;
+            unawaited(_persistPrefs());
+          }
+        } catch (_) {}
+        return;
+      } else if (_compact) {
         final n = _displayed.length.clamp(1, _shotsMode ? 16 : 8);
         final maxCompactWidth = _shotsMode ? 680.0 : 400.0;
         w = (n * 46 + 96).clamp(140.0, maxCompactWidth).toDouble();
@@ -1312,15 +1356,17 @@ class _DashboardState extends State<Dashboard>
     });
   }
 
-  /// True total content height (viewport + any overflow), read from the scroll
-  /// position. This reflects wrapped text exactly and, unlike measuring the
-  /// content render box, never collapses to the viewport height. Null until the
-  /// scroll view is laid out.
+  /// True total content height (viewport + overflow), when the scroll position
+  /// proves content exceeds the viewport. A non-overflowing viewport is not a
+  /// content measurement because Analytics may have enlarged the host window.
   double? _measuredContentHeight() {
     if (!_scroll.hasClients) return null;
     final pos = _scroll.position;
     if (!pos.hasViewportDimension) return null;
-    return pos.viewportDimension + pos.maxScrollExtent;
+    return measuredOverflowContentHeight(
+      viewportHeight: pos.viewportDimension,
+      maxScrollExtent: pos.maxScrollExtent,
+    );
   }
 
   /// Largest height we will give the window: the screen height (of the display
@@ -1339,10 +1385,12 @@ class _DashboardState extends State<Dashboard>
 
   void _toggleCompact() {
     setState(() {
-      _compact = !_compact;
-      // The compact strip is the quota view; leaving analytics keeps the
-      // header's collapse button honest in both directions.
-      if (_compact) _showingAnalytics = false;
+      if (_showingAnalytics) {
+        _showingAnalytics = false;
+        _compact = true;
+      } else {
+        _compact = !_compact;
+      }
     });
     if (widget._hostIntegration) {
       unawaited(
@@ -1464,7 +1512,7 @@ class _DashboardState extends State<Dashboard>
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
 
-    if (_showingAnalytics && !_compact && !_loading) {
+    if (_showingAnalytics && !_loading) {
       // Analytics fills the window under the same header as the quota view
       // and scrolls internally, so the chrome never changes between views.
       return Scaffold(
@@ -1892,6 +1940,9 @@ class _DashboardState extends State<Dashboard>
       showAccounts: _showAccounts,
     );
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final stackHeaderActions =
+        largeText ||
+        (_showingAnalytics && MediaQuery.sizeOf(context).width < 360);
     final titleCluster = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1989,7 +2040,7 @@ class _DashboardState extends State<Dashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (largeText) ...[
+            if (stackHeaderActions) ...[
               titleCluster,
               Align(
                 alignment: Alignment.centerRight,
@@ -2706,19 +2757,20 @@ class _DashboardState extends State<Dashboard>
 
   void _showHelp() => _showSetup();
 
-  /// Shows the analytics body in this window, under the same header and menu
-  /// as the quota view. No resize, no move, no route push: only the body under
-  /// the header changes, and it scrolls to fit whatever size the window has.
+  /// Shows the analytics body in this window, under the same header and menu.
+  /// Short content-hugged quota windows grow to a useful display-bounded
+  /// viewport; Analytics still scrolls when the host grants less space.
   void _showFleet({FleetRange initialRange = FleetRange.now}) {
     setState(() {
       _showingAnalytics = true;
       _analyticsRange = initialRange;
     });
+    _applySize();
   }
 
   void _closeFleet() {
     setState(() => _showingAnalytics = false);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   /// Compact setup/help panel: a short intro, then every provider account from
@@ -3616,7 +3668,8 @@ class ProviderTile extends StatelessWidget {
                     _Dot(statusColor),
                   if (planLabel != null) ...[
                     const SizedBox(width: 6),
-                    Flexible(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 104),
                       child: Semantics(
                         label: planDetail,
                         excludeSemantics: true,

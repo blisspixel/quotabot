@@ -525,8 +525,13 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   its card, so it can be reconnected from the app without a terminal.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
-  a route, moving, or resizing the window; the body scrolls within the current
-  size and the header's Back to quotas control restores the quota body. It is a
+  a route. Entry grows a short content-hugged quota window to the normal
+  Analytics viewport and adjusts its position only when necessary to keep the
+  resulting bounds inside the current display's work area. User-enlarged
+  dimensions are preserved when they fit. The body retains a visible scroll
+  fallback, large-text card headings stack instead of overflowing, and the
+  header's Back to quotas control resumes content-hugged quota sizing, or
+  compact-strip sizing when Analytics was opened from compact mode. It is a
   range switch (Now / 7d / 90d): the live view ranks headroom and shows a
   consumption donut; the historical views recompute `Insights` and the heatmap
   from the raw buckets.

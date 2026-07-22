@@ -176,6 +176,46 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('constrained analytics keeps a visible scroll affordance', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 220));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final data = [
+      _q('codex', 'Codex', 20, asOf: now, resetsAt: now + 3600),
+      _q('claude', 'Claude', 45, asOf: now, resetsAt: now + 7200),
+    ];
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: data,
+          buckets: {'codex': _buckets(45), 'claude': _buckets(65)},
+          dark: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+    final scrollView = tester.widget<SingleChildScrollView>(
+      find.byType(SingleChildScrollView),
+    );
+    expect(scrollbar.thumbVisibility, isTrue);
+    expect(scrollbar.controller, same(scrollView.controller));
+    expect(scrollView.controller!.hasClients, isTrue);
+    expect(scrollView.controller!.position.maxScrollExtent, greaterThan(0));
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -120),
+    );
+    await tester.pump();
+    expect(scrollView.controller!.offset, greaterThan(0));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('analytics ranges expose selection and work from the keyboard', (
     tester,
   ) async {

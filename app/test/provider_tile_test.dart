@@ -951,6 +951,47 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('provider disclosure caret anchors to the trailing card edge', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(340, 260));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final quota = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: 'Google Antigravity Professional',
+      account: 'a-very-long-account-name@example.com',
+      plan: 'team_premium_with_extended_access',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 340,
+          child: ProviderTile(
+            quota: quota,
+            cardColor: const Color(0xFF1A1A1A),
+            showAccounts: true,
+            onToggle: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final card = tester.getRect(find.byType(ProviderTile));
+    final caret = tester.getRect(find.byIcon(Icons.expand_more_rounded));
+    final planText = tester.widget<Text>(
+      find.text('team premium with extended access'),
+    );
+    expect(planText.maxLines, 1);
+    expect(planText.overflow, TextOverflow.ellipsis);
+    expect(card.right - caret.right, closeTo(12, 1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('analytics card semantics disambiguate visible accounts', (
     tester,
   ) async {

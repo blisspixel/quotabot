@@ -14,15 +14,25 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/webhook.dart';
 
-Widget _wrap(Widget child, {bool disableAnimations = false}) {
+Widget _wrap(
+  Widget child, {
+  bool disableAnimations = false,
+  TextScaler? textScaler,
+}) {
   final chrome = AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
   return MaterialApp(
     theme: ThemeData.dark().copyWith(extensions: [chrome]),
-    builder: disableAnimations
-        ? (context, built) => MediaQuery(
-            data: MediaQuery.of(context).copyWith(disableAnimations: true),
-            child: built!,
-          )
+    builder: disableAnimations || textScaler != null
+        ? (context, built) {
+            final media = MediaQuery.of(context);
+            return MediaQuery(
+              data: media.copyWith(
+                disableAnimations: disableAnimations,
+                textScaler: textScaler ?? media.textScaler,
+              ),
+              child: built!,
+            );
+          }
         : null,
     home: child,
   );
@@ -1091,6 +1101,71 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('analytics header remains usable at the target window width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(340, 760);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      _wrap(
+        const Dashboard.test(prefs: Prefs(showAccounts: true)),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Quota analytics'));
+    await tester.pump();
+
+    for (final tooltip in [
+      'Refresh now',
+      'Back to quotas',
+      'Collapse',
+      'Setup and help',
+      'Close',
+    ]) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(340), reason: tooltip);
+    }
+    final analyticsLayoutError = tester.takeException();
+    expect(
+      analyticsLayoutError,
+      isNull,
+      reason: analyticsLayoutError is FlutterError
+          ? analyticsLayoutError.toStringDeep()
+          : analyticsLayoutError?.toString(),
+    );
+  });
+
+  testWidgets(
+    'analytics renders over compact mode and Back restores the strip',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      await tester.pumpWidget(
+        _wrap(
+          const Dashboard.test(
+            prefs: Prefs(compact: true, showAccounts: true),
+            initialAnalytics: true,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(FleetScreen), findsOneWidget);
+      expect(find.byTooltip('Back to quotas'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Back to quotas'));
+      await tester.pump();
+      expect(find.byType(FleetScreen), findsNothing);
+      expect(find.byTooltip('Expand'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('app applies theme and text-scale changes to the full subtree', (
     tester,
