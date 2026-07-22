@@ -60,7 +60,7 @@ String _joinedCredentialProviderNames(List<String> providers) {
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-const Size _compactMinimumWindowSize = Size(120, 40);
+const Size _compactMinimumWindowSize = Size(200, 40);
 const Size _expandedMinimumWindowSize = Size(320, 120);
 
 @visibleForTesting
@@ -817,8 +817,18 @@ class _DashboardState extends State<Dashboard>
   Future<void> _setShotCompact(bool value) async {
     if (_compact != value) {
       setState(() => _compact = value);
-      _applySize();
     }
+    if (widget._hostIntegration) {
+      try {
+        await windowManager.setMinimumSize(
+          desktopMinimumWindowSize(compact: value),
+        );
+      } catch (_) {}
+    }
+    // Reconcile the first expanded capture too. Screenshot mode starts expanded,
+    // so limiting this call to state changes captured the estimate-sized frame
+    // before rendered content could establish the final window height.
+    _applySize();
     await Future<void>.delayed(const Duration(milliseconds: 650));
     await WidgetsBinding.instance.endOfFrame;
   }
@@ -1356,8 +1366,6 @@ class _DashboardState extends State<Dashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || revision != _windowGeometryRevision) return;
       final maxH = _maxWindowHeight();
-      double w;
-      double h;
       if (_showingAnalytics) {
         Rect? currentBounds;
         try {
@@ -1400,18 +1408,52 @@ class _DashboardState extends State<Dashboard>
         return;
       } else if (_compact) {
         final n = _displayed.length.clamp(1, _shotsMode ? 16 : 8);
-        final maxCompactWidth = _shotsMode ? 680.0 : 400.0;
-        w = (n * 46 + 96).clamp(140.0, maxCompactWidth).toDouble();
-        h = 50;
+        final maxCompactWidth = _shotsMode ? 680.0 : 560.0;
+        final desiredWidth = (n * 46 + 240)
+            .clamp(200.0, maxCompactWidth)
+            .toDouble();
+        Rect? currentBounds;
+        try {
+          currentBounds = await windowManager.getBounds();
+        } catch (_) {}
+        if (!mounted || revision != _windowGeometryRevision || !_compact) {
+          return;
+        }
+        final workAreas = await desktopWorkAreas();
+        if (!mounted || revision != _windowGeometryRevision || !_compact) {
+          return;
+        }
+        final geometry = compactWindowGeometry(
+          desiredSize: Size(desiredWidth, 50),
+          currentSize: currentBounds?.size ?? _compactMinimumWindowSize,
+          currentPosition: currentBounds?.topLeft ?? _windowPos,
+          workAreas: workAreas,
+        );
+        try {
+          final position = geometry.position;
+          if (position == null) {
+            await windowManager.setSize(geometry.size);
+          } else {
+            await windowManager.setBounds(position & geometry.size);
+          }
+          if (!mounted || revision != _windowGeometryRevision || !_compact) {
+            return;
+          }
+          if (position != null && position != _windowPos) {
+            _windowPos = position;
+            unawaited(_persistPrefs());
+          }
+        } catch (_) {}
+        return;
       } else {
         final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-        w = 340;
+        const w = 340.0;
         // Estimates tuned to the real rendered heights so the frameless window
         // hugs the content (no translucent dead space below it). The body
         // scrolls, so a small undershoot is caught rather than clipped.
-        h = _showFirstRunPrompt
-            ? 112
-            : 62; // header row, onboarding, and outer paddings
+        var h = _showFirstRunPrompt
+            ? 112.0
+            : 62.0; // header row, onboarding, and outer paddings
         if (_displayed.isEmpty) {
           h +=
               _activeProfileLegacyCredentialFilterProviders.isNotEmpty ||
@@ -1487,9 +1529,6 @@ class _DashboardState extends State<Dashboard>
         } catch (_) {}
         return;
       }
-      try {
-        await windowManager.setSize(Size(w, h));
-      } catch (_) {}
     });
   }
 
@@ -1942,87 +1981,217 @@ class _DashboardState extends State<Dashboard>
     final fg = chrome.foreground;
     final displayed = _displayed;
     final counts = _providerCounts(displayed);
+    final suggestion = _routeSuggestion(now);
+    final routeLine = desktopRouteSignalLine(
+      suggestion,
+      _visible,
+      now,
+      showAccounts: _showAccounts,
+    );
+    final routeDetail = desktopRouteDetailLine(
+      suggestion,
+      _visible,
+      now,
+      showAccounts: _showAccounts,
+    );
+    final compactWidth = MediaQuery.sizeOf(context).width;
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final showRouteProviderName = compactWidth >= (largeText ? 520 : 360);
+    final routeIconOnly = largeText && compactWidth < 300;
     return SizedBox(
       height: 46,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 6, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onPanStart: widget._hostIntegration
-                    ? (_) => windowManager.startDragging()
-                    : null,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: _shotsMode
-                      ? const NeverScrollableScrollPhysics()
-                      : const ClampingScrollPhysics(),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (displayed.isEmpty)
-                        Text(
-                          'No providers',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.caption,
-                            color: muted,
-                          ),
-                        )
-                      else
-                        for (int i = 0; i < displayed.length; i++)
-                          Padding(
-                            padding: EdgeInsets.only(
-                              right: i == displayed.length - 1 ? 0 : 10,
-                            ),
-                            child: _FocusableCompactProviderChip(
-                              key: ValueKey(
-                                'compact-provider-${quotaDisplayKey(displayed[i])}',
-                              ),
-                              message: _compactTooltip(
-                                displayed[i],
-                                counts,
-                                now,
-                              ),
-                              child: _compactChip(displayed[i], now, fg),
-                            ),
-                          ),
-                    ],
-                  ),
-                ),
+        child: FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: Row(
+            children: [
+              _compactRouteButton(
+                suggestion,
+                routeLine,
+                routeDetail,
+                fg,
+                providerCounts: counts,
+                showProviderName: showRouteProviderName,
+                iconOnly: routeIconOnly,
               ),
-            ),
-            if (_preferenceStorageWarning != null)
-              Tooltip(
-                message: _preferenceStorageWarning!,
-                child: Semantics(
-                  label: _preferenceStorageWarning,
-                  liveRegion: true,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.warning_amber_rounded,
-                      size: 16,
-                      color: Color(0xFFD29922),
+              const SizedBox(width: 5),
+              Container(width: 1, height: 24, color: chrome.tileBorder),
+              const SizedBox(width: 5),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onPanStart: widget._hostIntegration
+                      ? (_) => windowManager.startDragging()
+                      : null,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: _shotsMode
+                        ? const NeverScrollableScrollPhysics()
+                        : const ClampingScrollPhysics(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (displayed.isEmpty)
+                          Text(
+                            'No providers',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppType.caption,
+                              color: muted,
+                            ),
+                          )
+                        else
+                          for (int i = 0; i < displayed.length; i++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                right: i == displayed.length - 1 ? 0 : 10,
+                              ),
+                              child: _FocusableCompactProviderChip(
+                                key: ValueKey(
+                                  'compact-provider-${quotaDisplayKey(displayed[i])}',
+                                ),
+                                message: _compactTooltip(
+                                  displayed[i],
+                                  counts,
+                                  now,
+                                ),
+                                child: _compactChip(displayed[i], now, fg),
+                              ),
+                            ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            _iconButton(
-              Icons.open_in_full_rounded,
-              muted,
-              _toggleCompact,
-              tooltip: 'Expand',
+              if (_preferenceStorageWarning != null)
+                Tooltip(
+                  message: _preferenceStorageWarning!,
+                  child: Semantics(
+                    label: _preferenceStorageWarning,
+                    liveRegion: true,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Color(0xFFD29922),
+                      ),
+                    ),
+                  ),
+                ),
+              _iconButton(
+                Icons.open_in_full_rounded,
+                muted,
+                _toggleCompact,
+                tooltip: 'Expand',
+              ),
+              _iconButton(
+                Icons.close_rounded,
+                muted,
+                widget._hostIntegration ? windowManager.close : null,
+                tooltip: 'Close',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _compactRouteButton(
+    RouteSuggestion suggestion,
+    String routeLine,
+    String routeDetail,
+    Color fg, {
+    required Map<String, int> providerCounts,
+    required bool showProviderName,
+    required bool iconOnly,
+  }) {
+    final chrome = AppChromeTheme.of(context);
+    final candidate = suggestion.recommended;
+    final noRoute = candidate == null;
+    final routedQuota = candidate == null
+        ? null
+        : _visible
+              .where(
+                (quota) =>
+                    quota.provider == candidate.provider &&
+                    quota.account == candidate.account,
+              )
+              .firstOrNull;
+    final providerName = candidate == null || !showProviderName
+        ? null
+        : routedQuota == null
+        ? candidate.provider
+        : _shouldShowAccount(routedQuota, providerCounts)
+        ? '${routedQuota.displayName} '
+              '(${quotaAccountDisplayLabel(routedQuota.account)})'
+        : routedQuota.displayName;
+    final tone = noRoute ? const Color(0xFFD29922) : chrome.accent;
+    const radius = BorderRadius.all(Radius.circular(6));
+    void showExplanation() => _showRouteExplanation(suggestion, routeLine);
+    return Semantics(
+      label: '$routeLine. Open decision details.',
+      button: true,
+      onTap: showExplanation,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: routeDetail,
+        child: InkWell(
+          key: const ValueKey('compact-route-decision'),
+          focusNode: _routeExplanationFocusNode,
+          onTap: showExplanation,
+          borderRadius: radius,
+          child: Container(
+            height: 30,
+            constraints: BoxConstraints(
+              maxWidth: iconOnly
+                  ? 28
+                  : providerName == null
+                  ? 100
+                  : 240,
             ),
-            _iconButton(
-              Icons.close_rounded,
-              muted,
-              widget._hostIntegration ? windowManager.close : null,
-              tooltip: 'Close',
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: tone.withValues(alpha: 0.10),
+              borderRadius: radius,
+              border: Border.all(color: tone.withValues(alpha: 0.55)),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  noRoute ? Icons.block_rounded : Icons.alt_route_rounded,
+                  size: 13,
+                  color: tone,
+                ),
+                if (!iconOnly) ...[
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      noRoute
+                          ? 'No route'
+                          : providerName == null
+                          ? 'Next'
+                          : 'Next $providerName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppType.small,
+                        fontWeight: FontWeight.w700,
+                        color: noRoute ? tone : fg,
+                      ),
+                    ),
+                  ),
+                ],
+                if (candidate != null && !iconOnly) ...[
+                  const SizedBox(width: 5),
+                  ProviderLogo(candidate.provider, size: 14, color: fg),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -4803,59 +4972,87 @@ class WindowBar extends StatelessWidget {
     final color = evidenceLabel == null ? _availColor(remaining) : muted;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final chrome = AppChromeTheme.of(context);
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final showsReset =
+        evidenceLabel == null && !view.rolledOver && view.resetsAt != null;
     final value = evidenceLabel != null
         ? view.rolledOver
               ? 'reset passed ($evidenceLabel)'
               : '${remaining.round()}% $evidenceLabel'
         : view.rolledOver
         ? 'ready'
-        : view.resetsAt != null
-        ? '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
+        : showsReset
+        ? largeText
+              ? '${remaining.round()}% free\n${resetLabel(view.resetsAt, now)}'
+              : '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
         : '${remaining.round()}% free';
+
+    final label = _WindowBarText(
+      text: view.label,
+      maxLines: 2,
+      softWrap: true,
+      style: TextStyle(
+        fontSize: AppType.label,
+        fontWeight: FontWeight.w600,
+        color: muted,
+      ),
+    );
+    final meter = TweenAnimationBuilder<double>(
+      // Ease the fill to its new level on refresh so a jump reads as motion,
+      // not a flicker.
+      tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) =>
+          QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
+    );
+    final valueText = _WindowBarText(
+      text: value,
+      maxLines: showsReset
+          ? largeText
+                ? 4
+                : 3
+          : largeText
+          ? 2
+          : 1,
+      softWrap: showsReset || largeText,
+      textAlign: TextAlign.end,
+      style: TextStyle(
+        fontSize: AppType.small,
+        fontWeight: FontWeight.w600,
+        color: evidenceLabel != null
+            ? muted
+            : view.rolledOver
+            ? const Color(0xFF3FB950)
+            : fg,
+      ),
+    );
+
+    if (largeText) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: label),
+              const SizedBox(width: 8),
+              Expanded(flex: 2, child: valueText),
+            ],
+          ),
+          const SizedBox(height: 4),
+          meter,
+        ],
+      );
+    }
 
     return Row(
       children: [
-        Expanded(
-          flex: 2,
-          child: _WindowBarText(
-            text: view.label,
-            style: TextStyle(
-              fontSize: AppType.label,
-              fontWeight: FontWeight.w600,
-              color: muted,
-            ),
-          ),
-        ),
+        Expanded(flex: 5, child: label),
         const SizedBox(width: 6),
-        Expanded(
-          flex: 7,
-          child: TweenAnimationBuilder<double>(
-            // Ease the fill to its new level on refresh so a jump reads as
-            // motion, not a flicker.
-            tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-            builder: (context, v, _) =>
-                QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
-          ),
-        ),
+        Expanded(flex: 5, child: meter),
         const SizedBox(width: 8),
-        Expanded(
-          flex: 5,
-          child: _WindowBarText(
-            text: value,
-            textAlign: TextAlign.end,
-            style: TextStyle(
-              fontSize: AppType.small,
-              fontWeight: FontWeight.w600,
-              color: evidenceLabel != null
-                  ? muted
-                  : view.rolledOver
-                  ? const Color(0xFF3FB950)
-                  : fg,
-            ),
-          ),
-        ),
+        Expanded(flex: 8, child: valueText),
       ],
     );
   }
@@ -4865,11 +5062,15 @@ class _WindowBarText extends StatelessWidget {
   final String text;
   final TextStyle style;
   final TextAlign textAlign;
+  final int maxLines;
+  final bool softWrap;
 
   const _WindowBarText({
     required this.text,
     required this.style,
     this.textAlign = TextAlign.start,
+    this.maxLines = 1,
+    this.softWrap = false,
   });
 
   @override
@@ -4881,8 +5082,8 @@ class _WindowBarText extends StatelessWidget {
       excludeFromSemantics: true,
       child: Text(
         text,
-        maxLines: 1,
-        softWrap: false,
+        maxLines: maxLines,
+        softWrap: softWrap,
         overflow: TextOverflow.ellipsis,
         textAlign: textAlign,
         style: style,

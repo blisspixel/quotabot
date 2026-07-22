@@ -584,19 +584,18 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
 - The window is frameless via `window_manager`, with a transparent background
   so the rounded card can hug its content and any surplus window height is
   invisible. Always on top and taskbar entry are optional and controlled by
-  prefs. The body is scrollable and the window height comes from a deterministic
-  content-size estimate (provider and window counts) capped at the screen
-  height; live render-measurement proved unreliable because window_manager's
-  pixel units don't match Flutter's logical pixels under display scaling. This
-  fixes the "BOTTOM OVERFLOWED" banner that appeared with many providers, so all
-  providers display without an overflow. Small minimum size supports compact
-  mode. Dragging works on the full header bar and content/cards area (buttons
-  excluded).
+  prefs. The body is scrollable and expanded quota height comes from the actual
+  rendered content when measurement is available, with the deterministic
+  provider/window estimate retained as a bounded fallback. Logical dimensions
+  are reconciled with the active display work area before `window_manager`
+  applies them. Content that cannot fit keeps an explicit scrollbar rather than
+  hiding the last provider. Compact mode has its own bounded minimum. Dragging
+  works on the full header bar and content/cards area (buttons excluded).
 - `ProviderTile` computes the binding window (the one with the least headroom)
   and defaults to a tight view: the window bars with their reset countdowns
-  (e.g. "80%  3d12h"), plus the always-actionable failure, drift, and last-known
-  signals. If the binding window is exhausted, the card collapses to a single
-  line; otherwise it renders one `WindowBar` per window. Clicking a card expands
+  or absolute far reset times, plus the always-actionable failure, drift, and
+  last-known signals. If the binding window is exhausted, the card collapses to
+  a single line; otherwise it renders one `WindowBar` per window. Clicking a card expands
   it to reveal the full provenance line, the model-specific rows, the recent
   "usually ~X% free" line, and the burn forecast. That forecast is worded plainly
   from the shared `classifyForecast` (the same one `top` shows): a runway estimate
@@ -626,8 +625,13 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   grey is still used when no data is available. The OS application icon
   (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style mark
   (light/dark friendly) for the desktop icon.
-- A whole-widget compact strip (logo plus status dot per provider) and the full
-  card view, plus hide/show per provider. In the card view, per-card expansion
+- A whole-widget compact strip pins the shared next-route or no-safe-route
+  control before the horizontally scrollable provider logos and status dots.
+  It opens the same decision detail as expanded mode, and a widget-order focus
+  traversal group keeps every clipped provider chip keyboard reachable. The
+  compact window uses a 200 logical-pixel minimum and display-bounded automatic
+  width. The full card view also supports hide/show per provider. In the card
+  view, per-card expansion
   toggles the card's own detail - the provenance line, model-specific rows, and
   analytics - on top of the tight default, and it also groups distinct account
   identities when work and personal accounts coexist. Expansion state is keyed by
@@ -636,6 +640,11 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   labels remain hidden. `prefs.dart` persists hidden providers, compact state,
   cadence, always on top, taskbar visibility, enable notifications,
   showAccounts, and window position across restarts.
+- `WindowBar` keeps normal text in a compact three-column row with safe reset
+  wrap points. At large text it reflows label and value above a full-width meter,
+  preserving common normalized window names and far reset times at the 320
+  logical-pixel expanded minimum. An unusual provider-supplied label remains
+  bounded to two visible lines and exposes its complete tooltip and semantics.
 - Named profiles live under the per-user quotabot config directory as
   `quotabot.profile.v1` JSON files. Profile names and provider ids are validated
   against safe filename/id characters, profile files are bounded in size, and

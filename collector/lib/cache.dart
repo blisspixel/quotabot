@@ -3037,6 +3037,23 @@ Map<String, dynamic>? _readAnalyticsIncidentMarkerSync(
   }
 }
 
+File _analyticsDigestLockFile(String provider, String accountDigest) => File(
+      '${quotabotDir('cache').path}/evidence_${_safeProviderStem(provider)}_account_$accountDigest.lock',
+    );
+
+bool _analyticsDigestLockPathIsUnsafe(File lockFile) {
+  if (Directory(lockFile.path).existsSync() ||
+      Link(lockFile.path).existsSync()) {
+    return true;
+  }
+  final existingType = FileSystemEntity.typeSync(
+    lockFile.path,
+    followLinks: false,
+  );
+  return existingType != FileSystemEntityType.notFound &&
+      existingType != FileSystemEntityType.file;
+}
+
 T? _tryWithAnalyticsDigestLock<T>(
   String provider,
   String accountDigest,
@@ -3045,21 +3062,8 @@ T? _tryWithAnalyticsDigestLock<T>(
   RandomAccessFile? lock;
   var locked = false;
   try {
-    final lockFile = File(
-      '${cacheDir().path}/evidence_${_safeProviderStem(provider)}_account_$accountDigest.lock',
-    );
-    if (Directory(lockFile.path).existsSync() ||
-        Link(lockFile.path).existsSync()) {
-      return null;
-    }
-    final existingType = FileSystemEntity.typeSync(
-      lockFile.path,
-      followLinks: false,
-    );
-    if (existingType != FileSystemEntityType.notFound &&
-        existingType != FileSystemEntityType.file) {
-      return null;
-    }
+    final lockFile = _analyticsDigestLockFile(provider, accountDigest);
+    if (_analyticsDigestLockPathIsUnsafe(lockFile)) return null;
     restrictOwnerOnlyDirectory(lockFile.parent);
     if (!lockFile.existsSync()) lockFile.createSync(recursive: true);
     restrictOwnerOnlyFile(lockFile);
@@ -3135,6 +3139,30 @@ _AnalyticsIncidentResolution _persistAnalyticsIncidentForExactAccount(
   String account, {
   required int? providerRowIndex,
 }) {
+  final digest = accountIdentityDigest(account);
+  try {
+    if (_analyticsDigestLockPathIsUnsafe(
+      _analyticsDigestLockFile(provider, digest),
+    )) {
+      final marker = File(
+        '${quotabotDir('cache').path}/${_analyticsMigrationFileNameForDigest(provider, digest)}',
+      );
+      final record = _readAnalyticsIncidentMarkerSync(marker, nowEpoch());
+      return _AnalyticsIncidentResolution(
+        record == null
+            ? null
+            : _analyticsIncidentEntry(
+                record,
+                provider,
+                digest,
+                providerRowIndex: providerRowIndex,
+              ),
+        complete: false,
+      );
+    }
+  } catch (_) {
+    return const _AnalyticsIncidentResolution(null, complete: false);
+  }
   AnalyticsStorageNotice? initialNotice;
   Map<String, dynamic>? initialRecord;
   try {
@@ -3146,7 +3174,6 @@ _AnalyticsIncidentResolution _persistAnalyticsIncidentForExactAccount(
   if (initialNotice == null) {
     return const _AnalyticsIncidentResolution(null, complete: true);
   }
-  final digest = accountIdentityDigest(account);
   final resolved = _tryWithAnalyticsDigestLock(provider, digest, () {
     final record = _readAnalyticsMigrationRecord(provider, account);
     final markerChanged = (initialRecord == null) != (record == null) ||

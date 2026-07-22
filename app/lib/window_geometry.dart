@@ -12,6 +12,49 @@ const double _expandedFallbackHeight = 120;
 
 typedef AnalyticsWindowGeometry = ({Size size, Offset? position});
 typedef QuotaWindowGeometry = ({Size size, Offset? position, bool overflowing});
+typedef CompactWindowGeometry = ({Size size, Offset? position});
+
+/// Fits the compact strip inside the work area that currently owns the window.
+///
+/// Collapsing can make the strip wider than the expanded card. Clamp both axes
+/// and shift the existing position just enough to keep the whole strip visible.
+CompactWindowGeometry compactWindowGeometry({
+  required Size desiredSize,
+  required Size currentSize,
+  required Offset? currentPosition,
+  required List<Rect> workAreas,
+}) {
+  final desiredWidth = desiredSize.width.isFinite && desiredSize.width > 0
+      ? desiredSize.width
+      : _preferredAnalyticsWindowSize.width;
+  final desiredHeight = desiredSize.height.isFinite && desiredSize.height > 0
+      ? desiredSize.height
+      : _headerHeight;
+  final usable = workAreas.where(_usableWorkArea).toList();
+  if (usable.isEmpty) {
+    return (
+      size: Size(desiredWidth, desiredHeight),
+      position: _validPosition(currentPosition) ? currentPosition : null,
+    );
+  }
+
+  final target = _workAreaForWindow(
+    currentPosition: currentPosition,
+    currentSize: currentSize,
+    workAreas: usable,
+  );
+  final size = Size(
+    math.min(desiredWidth, target.width),
+    math.min(desiredHeight, target.height),
+  );
+  final position = _validPosition(currentPosition)
+      ? Offset(
+          _fitAxis(currentPosition!.dx, target.left, target.right, size.width),
+          _fitAxis(currentPosition.dy, target.top, target.bottom, size.height),
+        )
+      : null;
+  return (size: size, position: position);
+}
 
 /// Hugs the rendered quota content while keeping the whole window inside the
 /// current display work area.

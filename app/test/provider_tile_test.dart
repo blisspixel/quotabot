@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
@@ -290,7 +291,7 @@ void main() {
       final windowText = tester.widget<Text>(find.text(windowLabel));
       expect(modelText.maxLines, 1);
       expect(modelText.overflow, TextOverflow.ellipsis);
-      expect(windowText.maxLines, 1);
+      expect(windowText.maxLines, 2);
       expect(windowText.overflow, TextOverflow.ellipsis);
       expect(tester.takeException(), isNull);
       semantics.dispose();
@@ -1271,14 +1272,79 @@ void main() {
     );
     await tester.pump();
 
-    // The headroom and the absolute reset share the right column; the day and
-    // time stay whole (matched by \s across the non-breaking space) so a long
-    // reset wraps cleanly under the headroom instead of orphaning "PM".
+    // The headroom and absolute reset share the right column at ordinary text.
+    // Safe spaces let the full day and time wrap only when the column needs it.
     expect(
       find.textContaining(
         RegExp(r'37% free\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d.*[AP]M'),
       ),
       findsOneWidget,
+    );
+    final value = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          (widget.data?.startsWith('37% free') ?? false) &&
+          (widget.data?.contains(RegExp(r'[AP]M')) ?? false),
+    );
+    expect(tester.widget<Text>(value).data, isNot(contains('\n')));
+    expect(
+      tester.renderObject<RenderParagraph>(value).didExceedMaxLines,
+      false,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('minimum width paints monthly and far reset at 2x text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 420));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final far = now + 9 * 86400;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: ProviderTile(
+            quota: ProviderQuota(
+              provider: claudeProviderId,
+              displayName: 'Claude',
+              account: 'default',
+              asOf: now,
+              windows: [
+                QuotaWindow(label: 'monthly', usedPercent: 63, resetsAt: far),
+              ],
+            ),
+            cardColor: const Color(0xFF1A1A1A),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final monthly = find.text('monthly');
+    expect(monthly, findsOneWidget);
+    expect(
+      tester.renderObject<RenderParagraph>(monthly).didExceedMaxLines,
+      false,
+    );
+    final value = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          (widget.data?.startsWith('37% free') ?? false) &&
+          (widget.data?.contains(RegExp(r'[AP]M')) ?? false),
+    );
+    expect(value, findsOneWidget);
+    expect(tester.widget<Text>(value).data, contains('\n'));
+    expect(
+      tester.renderObject<RenderParagraph>(value).didExceedMaxLines,
+      false,
     );
     expect(tester.takeException(), isNull);
   });

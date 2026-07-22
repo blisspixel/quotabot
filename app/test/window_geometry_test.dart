@@ -6,6 +6,30 @@ import 'package:quotabot/window_geometry.dart';
 void main() {
   const windowSize = Size(340, 760);
 
+  test('compact strip stays inside the current display work area', () {
+    expect(
+      compactWindowGeometry(
+        desiredSize: const Size(560, 50),
+        currentSize: const Size(340, 760),
+        currentPosition: const Offset(300, 80),
+        workAreas: const [Rect.fromLTWH(0, 0, 340, 500)],
+      ),
+      (size: const Size(340, 50), position: const Offset(0, 80)),
+    );
+  });
+
+  test('compact strip retains a safe fallback without display metadata', () {
+    expect(
+      compactWindowGeometry(
+        desiredSize: const Size(480, 50),
+        currentSize: const Size(340, 760),
+        currentPosition: const Offset(-120, 40),
+        workAreas: const [],
+      ),
+      (size: const Size(480, 50), position: const Offset(-120, 40)),
+    );
+  });
+
   test('quota window trusts rendered content over an undersized estimate', () {
     expect(
       quotaWindowGeometry(

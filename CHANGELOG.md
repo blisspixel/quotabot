@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Compact desktop mode now pins the shared routing answer as a `Next` provider
+  or explicit `No route` control, including the selected account when account
+  labels are enabled. Pointer, keyboard, and assistive activation open the same
+  explanation and selectable decision id as expanded mode, and explicit widget
+  focus order keeps every horizontally clipped provider chip reachable.
 - The expanded desktop recommendation now has a visible, keyboard-accessible
   details control for the shared reason, evidence freshness and scope, spend
   class, fallback, and selectable decision id. First-run provider review now
@@ -83,6 +88,16 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Provider quota rows no longer truncate common window names such as `monthly`
+  or actionable far reset times at narrow widths and 200 percent text. Large
+  text reflows the label and value above a full-width meter, while ordinary
+  layouts give reset text safe wrap points instead of replacing the time with
+  ellipsis. Unusual provider-supplied labels retain complete tooltip and
+  assistive text.
+- Compact resizing now clamps and repositions the strip inside its active
+  display work area. README capture also reapplies the mode-specific native
+  minimum and rendered-content geometry before each frame, so compact media is
+  content-hugged and the first expanded image cannot omit a later provider.
 - The expanded desktop no longer drops its routing answer when no provider is
   safe. It shows an explicit fail-soft fallback and keeps the full no-route
   reason inspectable, while stale evidence remains unroutable. Signed-out

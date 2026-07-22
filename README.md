@@ -77,7 +77,8 @@ Highlights:
   light/dark theme, supports per-profile themes including a high-contrast Hacker
   mode, pins always-on-top or to the taskbar, measures the rendered provider
   cards so no row is clipped, stays inside the active display, scrolls only when
-  the full list cannot fit, and collapses to a tiny status strip.
+  the full list cannot fit, and collapses to a compact strip that keeps the next
+  route or no-safe-route state visible.
 - **Explainable and fail-soft.** The expanded desktop always shows either the
   next route or an explicit no-safe-route fallback. Its visible details control
   opens the shared reason, evidence freshness and scope, spend class, fallback,
@@ -124,6 +125,11 @@ The expanded header keeps the routing answer visible even when no provider is
 safe. Select its details control to inspect why the decision was made, how fresh
 and authoritative the evidence is, whether it can create metered spend, what to
 do if the route fails, and the decision id used across other quotabot surfaces.
+The compact strip pins the same answer as a keyboard-accessible `Next` provider
+or `No route` control and opens the same details without requiring a hover.
+Common quota-window labels and complete reset times reflow at large text sizes
+instead of being cut off; unusual provider-supplied labels retain their full
+tooltip and screen-reader text.
 
 When a provider offers a redeemable off-cycle reset (Codex's reset credits),
 quotabot flags it prominently in green on the card, in `doctor`, and in `top`,

@@ -12,8 +12,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   right are excluded). The expanded window measures its rendered cards and
   grows without clipping them while staying inside the active display. The body
   shows a scrollbar only when the complete list cannot fit in that work area.
-- **Collapse:** shrink to a compact strip of provider logos with one status dot
-  each; expand to restore the full view.
+- **Collapse:** shrink to a compact strip that pins the next-route or
+  no-safe-route control beside the provider logos and status dots; expand to
+  restore the full view. The route control opens the shared decision details,
+  and keyboard traversal reaches horizontally clipped provider chips in order.
 - **Menu:** hide or show individual providers, set the refresh cadence (smart,
   every 15 minutes, or every hour), choose the icon sort (default, alphabetical,
   most available, most used), choose or manage a named profile, and toggle
@@ -41,13 +43,16 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   only after that dialog closes. Dismiss remains an immediate, explicit way to
   hide the prompt.
 - **Route signal:** the expanded header always shows the next recommended route
-  or an explicit no-safe-route fallback. The adjacent details button works with
-  pointer or keyboard and opens the shared reason, evidence freshness and
-  scope, spend class, fallback, and selectable decision id. Material burn
-  adjustments and confidence remain in this detail instead of crowding the
-  glance line. Account names appear only when needed to distinguish multiple
-  accounts.
-- **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
+  or an explicit no-safe-route fallback. Compact mode pins the same answer as a
+  `Next` provider or `No route` control. Both work with pointer or keyboard and
+  open the shared reason, evidence freshness and scope, spend class, fallback,
+  and selectable decision id. Material burn adjustments and confidence remain
+  in this detail instead of crowding the glance line. Account names appear only
+  when needed to distinguish multiple accounts.
+- **Reset countdowns** appear beside usage. Common window names and complete far
+  reset times wrap at narrow widths, and at large text the label and reset reflow
+  above a full-width meter so the actionable time is not cut off. An unusual
+  provider-supplied label keeps its complete tooltip and assistive text.
 - **Trust line:** the tight card keeps the always-actionable signals - a failed
   live read, provider drift, and the last-known label on the bar. Expanding a
   card reveals the full provenance line: live, cached, or provider-drift state,

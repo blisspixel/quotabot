@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show Tristate;
+import 'dart:ui' show SemanticsAction, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -233,7 +233,7 @@ void main() {
   });
 
   test('expanded mode keeps a viable desktop minimum width', () {
-    expect(desktopMinimumWindowSize(compact: true), const Size(120, 40));
+    expect(desktopMinimumWindowSize(compact: true), const Size(200, 40));
     expect(desktopMinimumWindowSize(compact: false), const Size(320, 120));
   });
 
@@ -1083,6 +1083,223 @@ void main() {
     expect(find.bySemanticsLabel(warning), findsOneWidget);
   });
 
+  testWidgets('compact mode pins recommendation details at minimum width', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            _routeQuota('antigravity', 'Antigravity', now),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final decision = find.byKey(const ValueKey('compact-route-decision'));
+    final decisionSemantics = find.bySemanticsLabel(
+      RegExp(r'Next: Antigravity.*Open decision details'),
+    );
+    final decisionSemanticsNode = find.semantics.byLabel(
+      RegExp(r'Next: Antigravity.*Open decision details'),
+    );
+    expect(decision, findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
+    expect(decisionSemantics, findsOneWidget);
+    expect(
+      tester
+          .getSemantics(decisionSemantics)
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+    expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(find.byTooltip('Close'), findsOneWidget);
+
+    final decisionButton = tester.widget<InkWell>(decision);
+    expect(decisionButton.focusNode, isNotNull);
+    decisionButton.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Why this recommendation?'), findsOneWidget);
+    expect(find.textContaining('Use antigravity'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Close'));
+    await tester.pumpAndSettle();
+    expect(decisionButton.focusNode!.hasFocus, isTrue);
+
+    tester.semantics.performAction(decisionSemanticsNode, SemanticsAction.tap);
+    await tester.pumpAndSettle();
+    expect(find.text('Why this recommendation?'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('compact route preserves selected account identity', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            showAccounts: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => _multiAccountClaude(now),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Next Claude (personal@example.com)'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          r'Next: Claude \(personal@example\.com\).*Open decision details',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('compact-route-decision')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Next: Claude (personal@example.com)'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('compact no-route decision stays explicit at minimum width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final decision = find.byKey(const ValueKey('compact-route-decision'));
+    expect(decision, findsOneWidget);
+    expect(find.text('No route'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(r'No safe route.*Open decision details')),
+      findsOneWidget,
+    );
+
+    await tester.tap(decision);
+    await tester.pumpAndSettle();
+    expect(find.text('Why no route is safe'), findsOneWidget);
+    expect(find.textContaining('No live quota data.'), findsOneWidget);
+    expect(find.textContaining('Fallback:'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact warning and no-route controls fit at 2x text', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    const warning = 'Settings not loaded (storage unavailable)';
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          startupStorageWarning: warning,
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.bySemanticsLabel(RegExp(r'No safe route.*Open decision details')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    for (final tooltip in ['Expand', 'Close']) {
+      final control = find.byTooltip(tooltip);
+      expect(control, findsOneWidget);
+      final rect = tester.getRect(control);
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+    }
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
   testWidgets(
     'compact provider chips focus and reveal overflow from keyboard',
     (tester) async {
@@ -1132,12 +1349,30 @@ void main() {
         greaterThan(tester.getRect(horizontalScroll).right),
       );
 
-      for (var i = 0; i < providers.length; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      final decision = tester.widget<InkWell>(
+        find.byKey(const ValueKey('compact-route-decision')),
+      );
+      expect(decision.focusNode?.hasFocus, isTrue);
+
+      var reachedLastProvider = false;
+      for (var i = 0; i < providers.length + 3; i++) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pumpAndSettle();
+        if (tester
+                .getSemantics(lastChip)
+                .getSemanticsData()
+                .flagsCollection
+                .isFocused ==
+            Tristate.isTrue) {
+          reachedLastProvider = true;
+          break;
+        }
       }
 
       final focused = tester.getSemantics(lastChip).getSemanticsData();
+      expect(reachedLastProvider, isTrue);
       expect(focused.flagsCollection.isFocused, Tristate.isTrue);
       expect(
         tester.getRect(lastChip).left,
@@ -1220,6 +1455,7 @@ void main() {
     await tester.tap(find.byTooltip('Collapse'));
     await tester.pump();
     expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(find.text('Next Antigravity'), findsOneWidget);
     expect(find.byType(ProviderTile), findsNothing);
 
     await tester.tap(find.byTooltip('Expand'));
