@@ -1092,6 +1092,27 @@ void main() {
       );
     });
 
+    test('degraded trust detail never calls a service error throttling', () {
+      const now = 1782046566;
+      final degraded = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'user@example.com',
+        asOf: now - 60,
+        ok: false,
+        stale: true,
+        error: 'Antigravity fetchAvailableModels request returned HTTP 503',
+        pipeHealth: providerPipeHealthDegraded,
+        httpStatus: 503,
+        retryAfterSeconds: 45,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+      final detail = desktopProviderTrustDetail(degraded, now);
+
+      expect(detail, contains('provider error - retrying in 45s'));
+      expect(detail, isNot(contains('throttled')));
+    });
+
     test('never calls questionable or clock-invalid evidence live', () {
       const now = 1782046566;
       final suspect = _quota(

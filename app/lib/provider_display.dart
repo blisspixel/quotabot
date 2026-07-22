@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
+import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/webhook.dart';
 
 import 'profile_ui.dart';
@@ -257,14 +258,12 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
   if (quota.stale &&
       quota.driftReason == null &&
       quota.error?.isNotEmpty == true) {
-    final throttled =
-        quota.pipeHealth == providerPipeHealthThrottled ||
-        quota.pipeHealth == providerPipeHealthDegraded;
-    if (throttled) {
-      detail.add(
-        'Provider is responding slowly (throttled): ${quota.error}. Showing '
-        'last-known quota and backing off; it retries automatically.',
-      );
+    final retry = providerRetrySummary(
+      quota,
+      showingLastKnown: quota.hasWindows,
+    );
+    if (retry != null) {
+      detail.add('Recovery: $retry. Diagnostic: ${quota.error}.');
     } else {
       detail.add(
         quota.hasWindows

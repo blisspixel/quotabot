@@ -1,4 +1,5 @@
 import 'package:quotabot_collector/labels.dart';
+import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -50,6 +51,73 @@ void main() {
       expect(countdown(1000 + 2 * 86400 + 3 * 3600, 1000), '2d3h');
       expect(countdown(1000 + 3 * 3600 + 20 * 60, 1000), '3h20m');
       expect(countdown(1000 + 45 * 60, 1000), '0h45m');
+    });
+  });
+
+  group('provider failure labels', () {
+    ProviderQuota failure({
+      required String pipeHealth,
+      int? httpStatus,
+      int? retryAfterSeconds,
+    }) =>
+        ProviderQuota.error(
+          'antigravity',
+          'Antigravity',
+          'bounded diagnostic',
+          1000,
+          pipeHealth: pipeHealth,
+          httpStatus: httpStatus,
+          retryAfterSeconds: retryAfterSeconds,
+        );
+
+    test('distinguishes timeout rate limit and service error', () {
+      expect(
+        providerFailureSummary(
+          failure(pipeHealth: providerPipeHealthThrottled),
+        ),
+        'provider slow - retrying',
+      );
+      expect(
+        providerFailureSummary(
+          failure(
+            pipeHealth: providerPipeHealthThrottled,
+            httpStatus: 429,
+            retryAfterSeconds: 120,
+          ),
+        ),
+        'rate limited - retrying in 2m',
+      );
+      expect(
+        providerFailureSummary(
+          failure(
+            pipeHealth: providerPipeHealthDegraded,
+            httpStatus: 503,
+            retryAfterSeconds: 45,
+          ),
+          showingLastKnown: true,
+        ),
+        'provider error - retrying in 45s, showing last known',
+      );
+    });
+
+    test('keeps auth and ordinary failures outside temporary copy', () {
+      final auth = ProviderQuota.error(
+        'antigravity',
+        'Antigravity',
+        'bounded auth diagnostic',
+        1000,
+        httpStatus: 403,
+      );
+      final ordinary = ProviderQuota.error(
+        'antigravity',
+        'Antigravity',
+        'invalid response',
+        1000,
+      );
+
+      expect(providerRetrySummary(auth), isNull);
+      expect(providerFailureSummary(auth), 'live quota needs reconnecting');
+      expect(providerFailureSummary(ordinary), 'invalid response');
     });
   });
 }

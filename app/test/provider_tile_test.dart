@@ -762,11 +762,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a throttled read reads as throttled, not failed', (
-    tester,
-  ) async {
-    // A slow or rate-limited read retains last-known quota and reads as a
-    // temporary, self-recovering "throttled - retrying", not a red failure.
+  testWidgets('a slow read says provider slow, not throttled', (tester) async {
+    // A timeout retains last-known quota but does not claim an HTTP rate limit.
     final throttled = ProviderQuota.fromJson({
       ..._q(60).toJson(),
       'stale': true,
@@ -782,13 +779,149 @@ void main() {
 
     expect(find.text('40% last known'), findsOneWidget);
     expect(
-      find.text('throttled - retrying, showing last known'),
+      find.text('provider slow - retrying, showing last known'),
       findsOneWidget,
     );
     expect(find.text('live read failed - showing last known'), findsNothing);
     expect(
-      find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
+      find.bySemanticsLabel(RegExp('provider slow', caseSensitive: false)),
       findsWidgets,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a degraded read says provider error, not throttled', (
+    tester,
+  ) async {
+    final degraded = ProviderQuota.fromJson({
+      ..._q(60).toJson(),
+      'stale': true,
+      'ok': false,
+      'error': 'Antigravity fetchAvailableModels request returned HTTP 503',
+      'pipe_health': 'degraded',
+    });
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: degraded, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('40% last known'), findsOneWidget);
+    expect(
+      find.text('provider error - retrying, showing last known'),
+      findsOneWidget,
+    );
+    expect(find.text('throttled - retrying, showing last known'), findsNothing);
+    expect(
+      find.bySemanticsLabel(RegExp('provider error', caseSensitive: false)),
+      findsWidgets,
+    );
+    expect(
+      find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final failure
+      in <
+        ({
+          String name,
+          String error,
+          String pipeHealth,
+          int? httpStatus,
+          int? retryAfterSeconds,
+          String summary,
+        })
+      >[
+        (
+          name: 'timeout',
+          error: 'Antigravity loadCodeAssist request timed out',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: null,
+          retryAfterSeconds: null,
+          summary: 'provider slow - retrying',
+        ),
+        (
+          name: 'rate limit',
+          error: 'Antigravity loadCodeAssist request returned HTTP 429',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: 429,
+          retryAfterSeconds: 120,
+          summary: 'rate limited - retrying in 2m',
+        ),
+        (
+          name: 'service error',
+          error: 'Antigravity fetchAvailableModels request returned HTTP 503',
+          pipeHealth: providerPipeHealthDegraded,
+          httpStatus: 503,
+          retryAfterSeconds: 45,
+          summary: 'provider error - retrying in 45s',
+        ),
+      ]) {
+    testWidgets('first-read ${failure.name} leads with recovery', (
+      tester,
+    ) async {
+      final quota = ProviderQuota.error(
+        'antigravity',
+        'Antigravity',
+        failure.error,
+        1782000000,
+        account: 'user@example.com',
+        pipeHealth: failure.pipeHealth,
+        httpStatus: failure.httpStatus,
+        retryAfterSeconds: failure.retryAfterSeconds,
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          ProviderTile(quota: quota, cardColor: Colors.white, onConnect: () {}),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text(failure.summary), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Connect'), findsNothing);
+      expect(
+        find.bySemanticsLabel(
+          RegExp(RegExp.escape(failure.error), caseSensitive: false),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('auth fallback preserves status and shows reconnect recovery', (
+    tester,
+  ) async {
+    final quota = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'user@example.com',
+      asOf: 1782000000,
+      ok: true,
+      status: 'Gemini 3 Pro',
+      error:
+          'Antigravity loadCodeAssist request returned HTTP 403 - run: '
+          'quotabot login antigravity',
+      perMachine: true,
+      httpStatus: 403,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(quota: quota, cardColor: Colors.white, onConnect: () {}),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Gemini 3 Pro'), findsOneWidget);
+    expect(find.text('live quota needs reconnecting'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Connect'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp('HTTP 403', caseSensitive: false)),
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
   });

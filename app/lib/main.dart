@@ -14,6 +14,7 @@ import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
 import 'package:quotabot_collector/drift.dart';
+import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -3779,18 +3780,13 @@ class ProviderTile extends StatelessWidget {
                   quota.stale &&
                   quota.driftReason == null &&
                   quota.error?.isNotEmpty == true)
-                _providerStaleFailureRow(
-                  quota.error!,
-                  driftColor,
-                  throttled:
-                      quota.pipeHealth == providerPipeHealthThrottled ||
-                      quota.pipeHealth == providerPipeHealthDegraded,
-                ),
+                _providerStaleFailureRow(quota, driftColor),
               // Surface the in-app login right where the failure shows, so a
               // provider that supports quotabot's own grant (Grok, Antigravity)
               // can be reconnected without a terminal. Kept out of the tight/
               // expanded gate because a failed login is always actionable.
               if (onConnect != null &&
+                  providerRetrySummary(quota) == null &&
                   !quota.isLocal &&
                   (quota.stale || !trustedEvidence))
                 Padding(
@@ -3828,7 +3824,11 @@ class ProviderTile extends StatelessWidget {
               else if (quota.windows.isEmpty)
                 ((quota.status ?? '').isNotEmpty
                     ? _statusOnlyRow(quota, muted, fg)
-                    : _noData(quota.error, muted))
+                    : _noData(
+                        providerFailureSummary(quota),
+                        muted,
+                        detail: quota.error,
+                      ))
               else if (!completeWindowEvidence)
                 _noData(
                   'quota balance unavailable - not used for routing',
@@ -4121,21 +4121,18 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _providerStaleFailureRow(
-    String reason,
-    Color color, {
-    bool throttled = false,
-  }) {
-    // A throttled or slow pipe is temporary and self-recovering, so it reads as
-    // "throttled - retrying" in amber rather than a red "live read failed" that
-    // implies a broken login or a bad response.
+  Widget _providerStaleFailureRow(ProviderQuota quota, Color color) {
+    final retryLabel = providerRetrySummary(quota, showingLastKnown: true);
+    final retrying = retryLabel != null;
+    // Temporary provider pushback stays amber and self-recovering, while the
+    // label preserves whether the evidence is throttling or service degradation.
     const throttleColor = Color(0xFFD29922);
-    final rowColor = throttled ? throttleColor : color;
-    final detail = throttled
-        ? 'The provider is responding slowly (throttled). Showing last-known '
-              'quota and backing off; it retries automatically. Reason: $reason'
+    final rowColor = retrying ? throttleColor : color;
+    final detail = retrying
+        ? 'Automatic recovery: $retryLabel. Diagnostic: ${quota.error}'
         : 'The latest live quota read failed. Showing last-known quota; routing '
-              'is disabled until a clean read succeeds. Reason: $reason';
+              'is disabled until a clean read succeeds. Reason: ${quota.error}';
+    final label = retryLabel ?? 'live read failed - showing last known';
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Semantics(
@@ -4149,7 +4146,7 @@ class ProviderTile extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                throttled
+                retrying
                     ? Icons.hourglass_top_rounded
                     : Icons.cloud_off_rounded,
                 size: 13,
@@ -4158,9 +4155,7 @@ class ProviderTile extends StatelessWidget {
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
-                  throttled
-                      ? 'throttled - retrying, showing last known'
-                      : 'live read failed - showing last known',
+                  label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -4322,14 +4317,19 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _noData(String? err, Color muted) {
+  Widget _noData(String? err, Color muted, {String? detail}) {
     final trimmed = err?.trim();
     final msg = trimmed == null || trimmed.isEmpty ? 'no live data' : trimmed;
+    final diagnostic = detail?.trim();
+    final fullMessage =
+        diagnostic == null || diagnostic.isEmpty || diagnostic == msg
+        ? msg
+        : '$msg. Diagnostic: $diagnostic';
     return Tooltip(
-      message: msg,
+      message: fullMessage,
       excludeFromSemantics: true,
       child: Semantics(
-        label: msg,
+        label: fullMessage,
         excludeSemantics: true,
         child: Row(
           children: [
@@ -4382,6 +4382,15 @@ class ProviderTile extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: AppType.small, color: muted),
+            ),
+          ),
+        if (quota.error?.trim().isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 19),
+            child: _noData(
+              providerFailureSummary(quota),
+              muted,
+              detail: quota.error,
             ),
           ),
       ],

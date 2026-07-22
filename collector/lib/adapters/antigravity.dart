@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -52,6 +53,28 @@ typedef AntigravityFetchModels = Future<Map<String, dynamic>?> Function(
   String access,
   String? project,
 );
+
+class _AntigravityRequestFailure implements Exception {
+  final String method;
+  final int? httpStatus;
+  final int? retryAfterSeconds;
+  final bool timedOut;
+
+  const _AntigravityRequestFailure({
+    required this.method,
+    this.httpStatus,
+    this.retryAfterSeconds,
+    this.timedOut = false,
+  });
+
+  String get message {
+    if (timedOut) return 'Antigravity $method request timed out';
+    if (httpStatus != null) {
+      return 'Antigravity $method request returned HTTP $httpStatus';
+    }
+    return 'Antigravity $method request failed';
+  }
+}
 
 /// Antigravity (Google) adapter.
 ///
@@ -429,7 +452,12 @@ class AntigravityAdapter {
     var account = source.account;
     final plan = source.plan;
 
-    ProviderQuota offline(String note) => ProviderQuota(
+    ProviderQuota offline(
+      String note, {
+      int? httpStatus,
+      int? retryAfterSeconds,
+    }) =>
+        ProviderQuota(
           provider: id,
           displayName: name,
           account: account,
@@ -444,6 +472,8 @@ class AntigravityAdapter {
           windows: const [],
           modelQuotas: source.modelQuotas,
           perMachine: true,
+          httpStatus: httpStatus,
+          retryAfterSeconds: retryAfterSeconds,
         );
 
     try {
@@ -603,6 +633,33 @@ class AntigravityAdapter {
         windows: windows,
         modelQuotas: liveModelQuotas,
       );
+    } on _AntigravityRequestFailure catch (failure) {
+      final status = failure.httpStatus;
+      if (status == 401 || status == 403) {
+        return offline(
+          '${failure.message} - run: quotabot login antigravity '
+          '(then sign in with this account)',
+          httpStatus: status,
+          retryAfterSeconds: failure.retryAfterSeconds,
+        );
+      }
+      final health = failure.timedOut
+          ? providerPipeHealthThrottled
+          : status == null
+              ? null
+              : providerPipeHealthForHttpStatus(status);
+      return ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: account,
+        plan: plan,
+        asOf: asOf,
+        ok: false,
+        error: failure.message,
+        pipeHealth: health,
+        httpStatus: status,
+        retryAfterSeconds: failure.retryAfterSeconds,
+      );
     } catch (e) {
       final health = providerPipeHealthForReadError(e);
       return ProviderQuota(
@@ -712,7 +769,10 @@ class AntigravityAdapter {
     final payload = {if (tier != null) 'tierId': tier, 'metadata': _metadata};
     for (var attempt = 0; attempt < 5; attempt++) {
       final resp = await _post(access, 'onboardUser', payload);
-      if (resp == null) return null; // 401/403 or error: do not spin
+      // An injected no-data result stops provisioning. Production HTTP and
+      // transport failures carry their bounded request evidence to the outer
+      // account result instead of spinning here.
+      if (resp == null) return null;
       if (resp['done'] == true) {
         final proj = _extractProjectId(
           (resp['response'] is Map)
@@ -733,16 +793,31 @@ class AntigravityAdapter {
     Map<String, dynamic> body,
   ) async {
     final post = _http?.post ?? sharedHttpClient.post;
-    final resp = await post(
-      Uri.parse('$_api:$method'),
-      headers: {
-        'Authorization': 'Bearer $access',
-        'Content-Type': 'application/json',
-        'User-Agent': 'antigravity',
-      },
-      body: jsonEncode(body),
-    ).timeout(_requestTimeout);
-    if (resp.statusCode != 200) return null;
+    late final http.Response resp;
+    try {
+      resp = await post(
+        Uri.parse('$_api:$method'),
+        headers: {
+          'Authorization': 'Bearer $access',
+          'Content-Type': 'application/json',
+          'User-Agent': 'antigravity',
+        },
+        body: jsonEncode(body),
+      ).timeout(_requestTimeout);
+    } on TimeoutException {
+      throw _AntigravityRequestFailure(method: method, timedOut: true);
+    } on http.ClientException {
+      throw _AntigravityRequestFailure(method: method);
+    } on IOException {
+      throw _AntigravityRequestFailure(method: method);
+    }
+    if (resp.statusCode != 200) {
+      throw _AntigravityRequestFailure(
+        method: method,
+        httpStatus: resp.statusCode,
+        retryAfterSeconds: retryAfterSeconds(resp.headers['retry-after']),
+      );
+    }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 

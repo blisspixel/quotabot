@@ -520,9 +520,10 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   "usually ~X% free" line, and the burn forecast. That forecast is worded plainly
   from the shared `classifyForecast` (the same one `top` shows): a runway estimate
   or, once a strand is material, a plain warning, shown only with a real burn
-  signal, never invented. A provider whose live read failed and that supports
-  quotabot's own login (Grok, Antigravity) also shows an inline Connect action on
-  its card, so it can be reconnected from the app without a terminal.
+  signal, never invented. A provider that supports quotabot's own login (Grok,
+  Antigravity) shows an inline Connect action for authentication or reconnection
+  failures, so it can be reconnected from the app without a terminal. Automatic
+  timeout, rate-limit, and service-error recovery does not show that action.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
   a route. Entry grows a short content-hugged quota window to the normal
@@ -595,10 +596,12 @@ as the nearest reset recedes. A provider that is spent (or nearly so) but whose
 reset is far away is not watched closely - it just sits there until it resets -
 so it relaxes like a healthy provider rather than pinning the whole fleet to a
 fast poll. A cycle that returns nothing live backs off to one hour, then six.
-When a provider keeps throttling (a request timeout or an HTTP 429), the back-off
-escalates each consecutive throttled cycle - twenty minutes, then forty, then
-ninety - and honors an explicit retry-after, so quotabot stops checking a
-provider that keeps pushing back; an imminent reset is still caught promptly. A
+When a provider keeps pushing back, the back-off escalates each consecutive
+cycle - twenty minutes, then forty, then ninety - and honors an explicit
+retry-after, so quotabot stops checking a provider that is not ready; an
+imminent reset is still caught promptly. A timeout reads as `provider slow`,
+HTTP 429 as `rate limited`, and HTTP 5xx as `provider error`, while all three
+retain the same bounded automatic recovery policy. A
 fixed cadence (15 minutes or 1 hour) can be chosen from the menu instead of the
 smart schedule. `top` and `watch` share the same `nextRefreshSeconds`, so all
 three poll alike.

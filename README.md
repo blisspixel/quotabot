@@ -102,8 +102,10 @@ shorter one, so a spent weekly cap collapses the card to a single "weekly spent 
 resets in 2d" line rather than showing a green 5 hour bar you cannot use. Click a
 card to expand it for the full provenance line, model-specific rows, and
 analytics; a failed live read, drift, and last-known signals stay on the tight
-card because they are always actionable, and a provider that supports quotabot's
-own login (Grok, Antigravity) shows an inline Connect button when its read fails.
+card because they are always actionable. A provider that supports quotabot's
+own login (Grok, Antigravity) shows an inline Connect button for authentication
+or reconnection failures. Automatic timeout, rate-limit, and service-error
+recovery does not show that action.
 Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
 Cold on-device models are ranked with a conservative metadata-only hardware-fit

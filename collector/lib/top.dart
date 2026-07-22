@@ -449,11 +449,10 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     String trustTag = '',
     String accountTag = ''}) {
   if (!q.ok) {
+    final retry = providerRetrySummary(q);
     final text = q.driftReason != null
         ? 'legacy evidence quarantined'
-        : q.error?.isNotEmpty == true
-            ? q.error!
-            : 'read failed';
+        : retry ?? (q.error?.isNotEmpty == true ? q.error! : 'read failed');
     final visibleTags = _visibleInlineTags(
       width: width,
       text: text,
@@ -463,14 +462,25 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     return [
       _line([
         ..._rowHead(q.displayName, '', selected: selected, palette: p),
-        _Cell(text, (s, t) => s.red(t)),
+        _Cell(text, retry == null ? (s, t) => s.red(t) : (s, t) => s.yellow(t)),
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
+      if (retry != null && q.error?.isNotEmpty == true)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell('diagnostic: ${q.error}', (s, t) => s.dim(t)),
+        ], width, s),
     ];
   }
   if (q.windows.isEmpty) {
     final status = q.status?.isNotEmpty == true ? q.status! : 'no live data';
+    final authRecovery = (q.httpStatus == 401 || q.httpStatus == 403) &&
+            q.provider == 'antigravity'
+        ? 'live quota needs reconnecting - run: quotabot login antigravity'
+        : null;
+    final failureSummary = authRecovery ?? providerFailureSummary(q);
     final visibleTags = _visibleInlineTags(
       width: width,
       text: status,
@@ -484,6 +494,18 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
+      if (q.error?.isNotEmpty == true && failureSummary != q.error)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell(failureSummary, (s, t) => s.yellow(t)),
+        ], width, s),
+      if (q.error?.isNotEmpty == true)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell('diagnostic: ${q.error}', (s, t) => s.dim(t)),
+        ], width, s),
     ];
   }
 
@@ -671,14 +693,14 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       q.stale &&
       q.driftReason == null &&
       q.error?.isNotEmpty == true) {
-    final throttled = q.pipeHealth == providerPipeHealthThrottled ||
-        q.pipeHealth == providerPipeHealthDegraded;
+    final retry = providerRetrySummary(q, showingLastKnown: true);
     rows.add(_line([
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
-      throttled
-          ? _Cell('throttled - retrying: ${q.error}', (s, t) => s.yellow(t))
-          : _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
+      if (retry != null)
+        _Cell('$retry: ${q.error}', (s, t) => s.yellow(t))
+      else
+        _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
     ], width, s));
   }
   for (final d in q.details) {

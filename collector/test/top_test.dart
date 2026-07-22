@@ -19,6 +19,9 @@ ProviderQuota _q(
   bool active = false,
   String? source,
   bool perMachine = false,
+  String? pipeHealth,
+  int? httpStatus,
+  int? retryAfterSeconds,
   String account = 'a',
   int asOf = _now,
   List<String> details = const [],
@@ -39,6 +42,9 @@ ProviderQuota _q(
       active: active,
       source: source,
       perMachine: perMachine,
+      pipeHealth: pipeHealth,
+      httpStatus: httpStatus,
+      retryAfterSeconds: retryAfterSeconds,
       details: details,
       models: models,
       resetCreditsAvailable: resetCreditsAvailable,
@@ -279,6 +285,95 @@ void main() {
     expect(rendered, contains('80% last'));
     expect(
         rendered, contains('live read failed: invalid Claude usage response'));
+  });
+
+  test('rate limits and provider errors have distinct retry copy', () {
+    final windows = [QuotaWindow(label: 'weekly', usedPercent: 20)];
+    final throttled = _plain(
+      _frame([
+        _q(
+          'claude',
+          windows,
+          stale: true,
+          error: 'HTTP 429',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: 429,
+          retryAfterSeconds: 120,
+        ),
+      ], width: 100)
+          .join('\n'),
+    );
+    final degraded = _plain(
+      _frame([
+        _q(
+          'antigravity',
+          windows,
+          stale: true,
+          error: 'HTTP 503',
+          pipeHealth: providerPipeHealthDegraded,
+          httpStatus: 503,
+          retryAfterSeconds: 45,
+        ),
+      ], width: 100)
+          .join('\n'),
+    );
+
+    expect(
+      throttled,
+      contains('rate limited - retrying in 2m, showing last known: HTTP 429'),
+    );
+    expect(throttled, isNot(contains('provider error')));
+    expect(
+      degraded,
+      contains(
+          'provider error - retrying in 45s, showing last known: HTTP 503'),
+    );
+    expect(degraded, isNot(contains('rate limited')));
+  });
+
+  test('first-read pushback leads with recovery and keeps a diagnostic', () {
+    final rendered = _plain(
+      _frame([
+        _q(
+          'antigravity',
+          const [],
+          ok: false,
+          error: 'Antigravity loadCodeAssist request returned HTTP 429',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: 429,
+          retryAfterSeconds: 120,
+        ),
+      ], width: 100)
+          .join('\n'),
+    );
+
+    expect(rendered, contains('rate limited - retrying in 2m'));
+    expect(
+      rendered,
+      contains(
+          'diagnostic: Antigravity loadCodeAssist request returned HTTP 429'),
+    );
+  });
+
+  test('status fallback surfaces reconnect recovery', () {
+    final rendered = _plain(
+      _frame([
+        _q(
+          'antigravity',
+          const [],
+          status: 'Gemini 3 Pro',
+          error: 'Antigravity loadCodeAssist request returned HTTP 403 - run: '
+              'quotabot login antigravity',
+          httpStatus: 403,
+          perMachine: true,
+        ),
+      ], width: 120)
+          .join('\n'),
+    );
+
+    expect(rendered, contains('Gemini 3 Pro'));
+    expect(rendered, contains('live quota needs reconnecting'));
+    expect(rendered, contains('quotabot login antigravity'));
   });
 
   test('provider drift is distinct from an ordinary cached read', () {

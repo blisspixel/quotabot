@@ -34,15 +34,15 @@ Notable changes to quotabot. Newest first.
   requested" after sending OSC 52 because terminals do not acknowledge whether
   they accepted the clipboard request, and global CLI help now describes the
   current machine-readable output surface accurately.
-- A slow or rate-limited live read (a request timeout, or an HTTP 429) now reads
-  as "throttled - retrying" in amber rather than a red "live read failed", in the
-  desktop card, `quotabot top`, and the machine-readable trust detail, because it
-  is temporary and self-recovering rather than a broken login or a bad response.
+- Temporary provider pushback now reads as "provider slow - retrying" for a
+  request timeout, "rate limited - retrying" for HTTP 429, or "provider error -
+  retrying" for HTTP 5xx across desktop, `quotabot top`, and trust detail. The
+  amber recovery state remains distinct from a broken login or bad response.
 - The adaptive refresh cadence now leans gentle by default (fast only when a reset
   is imminent, about twenty minutes at the healthy baseline, up to twice a day as
   resets recede) because quota moves slowly and a cloud read can be rate-limited.
-  When a provider keeps throttling, the back-off escalates each consecutive
-  throttled cycle - twenty minutes, then forty, then ninety - and honors an
+  When provider pushback continues, the back-off escalates each consecutive
+  retry cycle - twenty minutes, then forty, then ninety - and honors an
   explicit retry-after, so quotabot stops checking a provider that keeps pushing
   back instead of re-hitting it. An imminent reset is still caught promptly.
 - Desktop card interactions were polished: a hover accent edge and click cursor on
@@ -50,6 +50,20 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- The TypeScript MCP client lockfile now resolves `fast-uri` 3.1.4, closing the
+  host-confusion issue in GHSA-v2hh-gcrm-f6hx without changing the direct MCP
+  SDK dependency.
+- Antigravity Cloud Code failures now retain the bounded request stage, HTTP
+  status, and parsed `Retry-After` delay instead of collapsing every non-200
+  response into missing live quota. Authorization failures keep the documented
+  local fallback and reconnect guidance, while rate limits and service errors
+  feed the existing stale-evidence and adaptive-backoff paths without storing
+  response bodies.
+- Desktop and terminal retry notices now distinguish a slow timeout, an HTTP
+  rate limit, and a provider service error instead of labeling all three as
+  quota throttling. First-read failures lead with recovery timing, retain the
+  bounded diagnostic in details, and do not offer reconnection for temporary
+  provider pushback.
 - Quota Analytics now grows a short content-hugged quota window into a useful
   display-bounded viewport on entry, keeps a visible scrollbar when its cards
   exceed the available height, stacks card headings at large text sizes, and

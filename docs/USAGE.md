@@ -20,18 +20,21 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   provider has more than one account on screen.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
-  configured. A provider whose live read failed and that supports quotabot's own
-  login (Grok, Antigravity) also shows an inline Connect button on its card, so
-  it can be reconnected from the app without a terminal.
+  configured. A provider that supports quotabot's own login (Grok, Antigravity)
+  shows an inline Connect button for authentication or reconnection failures,
+  so it can be reconnected from the app without a terminal. Automatic timeout,
+  rate-limit, and service-error recovery does not show that action.
 - **Smart schedule:** the default leans gentle because quota moves slowly and a
   cloud read can be rate-limited. It refreshes fast only when a reset is imminent,
   settles around twenty minutes at the healthy baseline, and relaxes to as little
   as twice a day when everything is calm or a provider is spent with a far-off
   reset. A long-spent provider never pulls the fleet into fast polling. A provider
-  that keeps throttling (a timeout or an HTTP 429) backs the schedule off further
-  each cycle - twenty minutes, then forty, then ninety - honoring any retry-after,
-  so quotabot stops checking a provider that keeps pushing back. Such a provider
-  reads as "throttled - retrying", not "live read failed".
+  that keeps pushing back backs the schedule off further each cycle - twenty
+  minutes, then forty, then ninety - honoring any Retry-After, so quotabot stops
+  checking a provider that is not ready. A request timeout reads as "provider
+  slow - retrying", HTTP 429 reads as "rate limited - retrying", and HTTP 5xx
+  reads as "provider error - retrying". Temporary provider pushback does not
+  offer a reconnect action; HTTP 401 and 403 keep that repair path.
 - **Route signal:** the expanded header shows the next recommended route, its
   current free headroom, any material burn discount, and confidence. Account
   names still appear only when needed to distinguish multiple accounts.

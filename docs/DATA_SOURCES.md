@@ -330,6 +330,11 @@ State lives in the Antigravity globalStorage SQLite database at
   unavailable. A successful live read is preferred and is not overridden by local
   settings data; local fallback snapshots are classified
   `this_machine_fallback` and marked `per_machine`.
+- Cloud Code request failures retain only a fixed method name, sanitized HTTP
+  status, and parsed `Retry-After` delay. Response bodies and raw exception text
+  are never stored. A 401 or 403 keeps the local fallback with reconnect
+  guidance; a timeout, 429, or 5xx remains failed live evidence so last-trusted
+  server quota can stay visibly stale and the adaptive refresh can back off.
 - The Code Assist tier field reports `free-tier` even for paid accounts, so it is
   not used as a plan signal; when the quota endpoint returns nothing the adapter
   says so honestly rather than mislabeling the account as free.
