@@ -253,6 +253,41 @@ void main() {
     expect(result.stdout as String, isEmpty);
   });
 
+  test('check rejects unsafe exact account before collection', () async {
+    final unsafe = 'work${String.fromCharCode(7)}account';
+    final accountResult = await runCli([
+      'check',
+      'claude',
+      '--account=$unsafe',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    final providerResult = await runCli([
+      'check',
+      unsafe,
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(accountResult, 64);
+    expect(accountResult.stdout as String, isEmpty);
+    expect(
+      accountResult.stderr as String,
+      contains('bounded account identity'),
+    );
+    expect(
+      accountResult.stderr as String,
+      isNot(contains(String.fromCharCode(7))),
+    );
+    expectExitCode(providerResult, 64);
+    expect(providerResult.stdout as String, isEmpty);
+    expect(providerResult.stderr as String, contains('safe provider name'));
+    expect(
+      providerResult.stderr as String,
+      isNot(contains(String.fromCharCode(7))),
+    );
+  });
+
   test('check exits unavailable for an exhausted mock provider', () async {
     final result = await runCli([
       'check',
@@ -266,10 +301,21 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.check.v1');
     expect(json['as_of'], isA<int>());
+    expect(json['captured_at'], isA<int>());
+    expect(json['staleness_seconds'], isA<int>());
+    expect(json['snapshot_source'], 'simulation');
     expect(json['provider'], 'claude');
+    expect(json['matched_account_count'], 1);
+    expect(json['selection_mode'], 'only');
     expect(json['source_class'], 'authoritative_live');
+    expect(json['ok'], isTrue);
+    expect(json['live_read_succeeded'], isFalse,
+        reason: 'simulation must not claim an adapter read');
     expect(json['available'], isFalse);
     expect(json['headroom_percent'], 0);
+    final runtimeAccess = json['runtime_access'] as Map<String, dynamic>;
+    expect(runtimeAccess['collection_executed'], isFalse);
+    expect(runtimeAccess['providers'], isEmpty);
   });
 
   test('check exits unavailable for a stale cached mock provider', () async {

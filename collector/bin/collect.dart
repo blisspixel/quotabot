@@ -79,25 +79,35 @@ Future<List<ProviderQuota>> _read([
 ]) =>
     _withSpinner(
       'reading quota',
-      () => _collectProfiled(profile, excludedProviders: excludedProviders),
+      () => _collectProfiled(
+        profile,
+        excludedProviders: excludedProviders,
+      ),
     );
 
 class _VerifiedRead {
   final List<ProviderQuota> results;
+  final List<ProviderQuota> unfilteredResults;
   final RuntimeAccessReport runtimeAccess;
 
-  const _VerifiedRead(this.results, this.runtimeAccess);
+  const _VerifiedRead(
+    this.results,
+    this.runtimeAccess, {
+    required this.unfilteredResults,
+  });
 }
 
 Future<_VerifiedRead> _readForVerify([
   QuotaProfile? profile,
   Set<String> excludedProviders = const {},
+  Set<String>? adapterProviderIds,
 ]) =>
     _withSpinner(
       'reading quota',
       () => _collectProfiledForVerify(
         profile,
         excludedProviders: excludedProviders,
+        adapterProviderIds: adapterProviderIds,
       ),
     );
 
@@ -115,6 +125,7 @@ Future<List<ProviderQuota>> _collectProfiled(
 Future<_VerifiedRead> _collectProfiledForVerify(
   QuotaProfile? profile, {
   Set<String> excludedProviders = const {},
+  Set<String>? adapterProviderIds,
 }) async {
   _printSimulationNoticeIfNeeded();
   if (_simulatedSnapshot != null) {
@@ -129,16 +140,45 @@ Future<_VerifiedRead> _collectProfiledForVerify(
         includeNetwork: true,
         providers: const [],
       ),
+      unfilteredResults: List.of(_simulatedSnapshot!),
     );
   }
-  final collected = await collectAllWithRuntimeAccess();
+  final collected = await collectAllWithRuntimeAccess(
+    adapterProviderIds: adapterProviderIds,
+  );
   final profiled = profile == null
       ? List.of(collected.providers)
       : applyProfile(collected.providers, profile);
   return _VerifiedRead(
     filterExcludedProviders(profiled, excludedProviders),
     collected.runtimeAccess,
+    unfilteredResults: collected.providers,
   );
+}
+
+Set<String> _adapterIdsForScope(
+  QuotaProfile? profile,
+  Set<String> excludedProviders,
+) =>
+    {
+      for (final entry in kProviderAdapterRegistry)
+        if (!excludedProviders.contains(entry.id) &&
+            (profile == null ||
+                profile.allowsProviderAdapter(
+                  entry.id,
+                  isLocal: entry.localRuntime,
+                )))
+          entry.id,
+    };
+
+ProviderAdapterRegistration? _providerAdapterForName(String name) {
+  final byId = providerAdapterById(name);
+  if (byId != null) return byId;
+  final normalizedName = name.trim().toLowerCase();
+  for (final entry in kProviderAdapterRegistry) {
+    if (entry.displayName.toLowerCase() == normalizedName) return entry;
+  }
+  return null;
 }
 
 Map<String, dynamic> _snapshot(
@@ -273,7 +313,13 @@ Future<void> main(List<String> rawArgs) async {
         exitCode = 64;
         return;
       }
-      await _check(pos[1], wantsJson, profile, excludedProviders);
+      await _check(
+        pos[1],
+        wantsJson,
+        profile,
+        excludedProviders,
+        account: _stringOption(flags, 'account', null),
+      );
       return;
     case 'suggest':
       final providerRoute = flags.contains('--provider-route');
@@ -1157,6 +1203,8 @@ String? _commandOptionError(String command, Set<String> flags) {
     }
   }
   switch (command) {
+    case 'check':
+      allowed.add('account');
     case 'manual':
       allowed.addAll(const {
         'account',
@@ -1775,7 +1823,7 @@ void _printHelp() {
     ' (--webhook URL, --json, --once, --waste-threshold N)',
   );
   stdout.writeln(
-    '  check <provider>    whether one provider is usable now, and its reset',
+    '  check <provider>    whether one provider is usable now; add --account for one returned account',
   );
   stdout.writeln(
     '  models              known model candidates, with budget + capabilities',
@@ -1830,6 +1878,9 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --include-accounts  report: include account labels in Markdown',
+  );
+  stdout.writeln(
+    '  --account=VALUE     check: exact returned account; verify: exact drift-recovery account',
   );
   stdout.writeln(
     '  --profile=NAME      use a local named profile view',
@@ -2178,33 +2229,103 @@ Future<void> _check(
   String name,
   bool wantsJson,
   QuotaProfile? profile,
-  Set<String> excludedProviders,
-) async {
-  final results = await _read(profile, excludedProviders);
+  Set<String> excludedProviders, {
+  String? account,
+}) async {
+  if (name.trim().isEmpty ||
+      name.length > 128 ||
+      stripTerminalControl(name) != name) {
+    stderr.writeln('quotabot: check requires a safe provider name');
+    exitCode = _exitUsage;
+    return;
+  }
+  if (account != null &&
+      (account.trim().isEmpty ||
+          account.length > 512 ||
+          stripTerminalControl(account) != account)) {
+    stderr.writeln(
+      'quotabot: --account requires a non-empty bounded account identity',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
+  final targetAdapter = _providerAdapterForName(name);
+  final rawKey = name.trim().toLowerCase();
+  final key = targetAdapter?.id ?? normalizeProviderId(name) ?? rawKey;
+  final allowedAdapterIds = _adapterIdsForScope(profile, excludedProviders);
+  final targetAdapterIds = {
+    if (targetAdapter != null && allowedAdapterIds.contains(targetAdapter.id))
+      targetAdapter.id,
+  };
+  final read = await _readForVerify(
+    profile,
+    excludedProviders,
+    targetAdapterIds,
+  );
+  final results = read.results;
   final now = nowEpoch();
-  final key = name.toLowerCase();
+  bool matchesTarget(ProviderQuota result) =>
+      result.provider == key || result.displayName.toLowerCase() == rawKey;
+  final matches = results.where(matchesTarget).toList();
+  final unfilteredMatches =
+      read.unfilteredResults.where(matchesTarget).toList();
   final q = bestProviderAccountForCheck(
-    results.where(
-      (r) => r.provider == key || r.displayName.toLowerCase() == key,
-    ),
+    matches,
     now,
+    account: account,
   );
   if (q == null) {
+    final hiddenByFilter = (targetAdapter != null &&
+            !allowedAdapterIds.contains(targetAdapter.id)) ||
+        (unfilteredMatches.isNotEmpty && matches.isEmpty);
+    final unavailableKnownProvider = targetAdapter != null &&
+        !hiddenByFilter &&
+        account == null &&
+        unfilteredMatches.isEmpty;
+    final reason = hiddenByFilter
+        ? 'filtered'
+        : account != null && matches.isNotEmpty
+            ? 'account_not_found'
+            : targetAdapter != null
+                ? 'provider_not_returned'
+                : 'unknown_provider';
     if (wantsJson) {
       print(_jsonPretty({
         'schema': quotabotCheckV1SchemaId,
         'as_of': now,
         'provider': key,
+        if (account != null) 'account': account,
         'found': false,
+        'reason': reason,
+        'snapshot_source': _usingSimulation ? 'simulation' : 'live',
+        'runtime_access': read.runtimeAccess.toJson(),
       }));
-    } else if (excludedProviders.contains(key)) {
-      stderr.writeln('provider "$name" is hidden by the current --exclude '
-          'or profile filter; drop the filter to check it');
+    } else if (hiddenByFilter) {
+      stderr.writeln(
+        'provider "$name" is hidden by the current --exclude or profile '
+        'filter; drop the filter to check it',
+      );
+    } else if (account != null && matches.isNotEmpty) {
+      stderr.writeln(
+        'no account "$account" for provider "$name" in the current view',
+      );
+    } else if (unavailableKnownProvider) {
+      stdout.writeln(
+        '${style.bold(targetAdapter.displayName)}: ${style.red('unavailable')} '
+        '${style.dim('(adapter returned no current row)')}',
+      );
+    } else if (targetAdapter != null) {
+      stderr.writeln('provider "$name" returned no row in the current view');
     } else {
       stderr.writeln('no provider named "$name"');
-      stderr.writeln('known: ${results.map((r) => r.provider).join(', ')}');
+      final known = {
+        for (final entry in kProviderAdapterRegistry) entry.id,
+        for (final result in results) result.provider,
+      }.toList()
+        ..sort();
+      stderr.writeln('known: ${known.join(', ')}');
     }
-    exitCode = _exitUsage;
+    exitCode = unavailableKnownProvider ? _exitUnavailable : _exitUsage;
     return;
   }
   final head = providerHeadroom(q, now);
@@ -2213,6 +2334,24 @@ Future<void> _check(
   final available =
       q.isLocal ? isLocalRuntimeAvailableAt(q, now) : availability.available;
   final trusted = !q.isLocal && isTrustedQuotaEvidenceAt(q, now);
+  final matchedAccountCount =
+      matches.map((match) => match.account).toSet().length;
+  final selectionMode = account != null
+      ? 'exact'
+      : matchedAccountCount > 1
+          ? 'best_available'
+          : 'only';
+  final registration = providerAdapterById(q.provider);
+  final verification = buildVerificationReport(
+    [q],
+    now,
+    os: Platform.operatingSystem,
+    filtered: true,
+    registry: registration == null
+        ? const <ProviderAdapterRegistration>[]
+        : [registration],
+    runtimeAccess: read.runtimeAccess,
+  ).providers.single;
   // Stable exit code so a script can branch on usability without parsing output.
   exitCode = available ? 0 : _exitUnavailable;
   final reset = binding?.resetsAt;
@@ -2220,16 +2359,29 @@ Future<void> _check(
     print(_jsonPretty({
       'schema': quotabotCheckV1SchemaId,
       'as_of': now,
+      'captured_at': q.asOf,
+      if (q.asOf > 0) 'staleness_seconds': q.asOf > now ? 0 : now - q.asOf,
+      'snapshot_source': _usingSimulation ? 'simulation' : 'live',
       'provider': q.provider,
       'account': q.account,
+      'matched_account_count': matchedAccountCount,
+      'selection_mode': selectionMode,
       'source_class': q.sourceClass.wireName,
+      'ok': q.ok,
+      'live_read_succeeded': verification.liveReadSucceeded,
       'available': available,
       'headroom_percent': head,
       'resets_at': reset,
       'stale': q.stale,
+      'per_machine': q.perMachine,
       if (q.error?.isNotEmpty == true) 'error': q.error,
       if (q.driftReason != null) 'drift_reason': q.driftReason,
       if (q.driftObservedAt != null) 'drift_observed_at': q.driftObservedAt,
+      if (q.pipeHealth != null) 'pipe_health': q.pipeHealth,
+      if (q.httpStatus != null) 'http_status': q.httpStatus,
+      if (q.retryAfterSeconds != null)
+        'retry_after_seconds': q.retryAfterSeconds,
+      'runtime_access': read.runtimeAccess.toJson(),
     }));
     return;
   }
@@ -2260,8 +2412,13 @@ Future<void> _check(
                   ? style.dim(' (unverified)')
                   : '';
   final sourceTag = style.dim(' (${q.sourceClass.label})');
+  final accountTag = account != null || matchedAccountCount > 1
+      ? ' (${quotaAccountDisplayLabel(q.account)})'
+      : '';
   stdout.writeln(
-      '${style.bold(q.displayName)}: $label$pct$rs$staleTag$sourceTag');
+    '${style.bold('${q.displayName}$accountTag')}: '
+    '$label$pct$rs$staleTag$sourceTag',
+  );
   if (q.driftReason != null) {
     stdout.writeln(
       style.red(
@@ -2884,7 +3041,14 @@ Future<void> _runVerify(
   Set<String> excludedProviders, {
   bool requireLive = false,
 }) async {
-  final read = await _readForVerify(profile, excludedProviders);
+  final adapterProviderIds = profile == null && excludedProviders.isEmpty
+      ? null
+      : _adapterIdsForScope(profile, excludedProviders);
+  final read = await _readForVerify(
+    profile,
+    excludedProviders,
+    adapterProviderIds,
+  );
   final results = read.results;
   final report = buildVerificationReport(
     results,
@@ -3083,10 +3247,16 @@ void _printVerify(
   print('');
   if (failed != 0) {
     print(style.red('  $failed check(s) failed; see details above'));
+  } else if (requireLive && !report.liveReadScopeValid) {
+    print(
+      style.red(
+        '  strict live verification selected no provider adapters',
+      ),
+    );
   } else if (requireLive && !report.allLiveReadsSucceeded) {
     print(
       style.red(
-        '  ${report.liveReadFailureCount} selected provider read(s) did not '
+        '  ${report.liveReadFailureCount} selected provider adapter(s) did not '
         'succeed live',
       ),
     );

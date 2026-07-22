@@ -83,6 +83,26 @@ class QuotaProfile {
     return true;
   }
 
+  /// Whether collecting [provider] could produce at least one row visible in
+  /// this profile. Account-specific filters stay post-collection because a
+  /// multi-account adapter must run before its returned identities are known.
+  bool allowsProviderAdapter(
+    String provider, {
+    required bool isLocal,
+  }) {
+    final normalized = normalizeProviderId(provider);
+    if (normalized == null) return false;
+    if (_hiddenSet(hiddenProviders).contains(normalized)) return false;
+    final allowedProviders = _providerSet(providers);
+    if (allowedProviders.isNotEmpty && !allowedProviders.contains(normalized)) {
+      return false;
+    }
+    if (routingPolicy == ProfileRoutingPolicy.localOnly && !isLocal) {
+      return false;
+    }
+    return true;
+  }
+
   List<ProviderQuota> filter(List<ProviderQuota> quotas) =>
       quotas.where(allows).toList();
 

@@ -115,6 +115,12 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['provider'], 'codex');
     expect(json['found'], isFalse);
+    expect(json['reason'], 'filtered');
+    final runtimeAccess = json['runtime_access'] as Map<String, dynamic>;
+    expect(runtimeAccess['collection_executed'], isFalse,
+        reason: 'demo mode is a manifest-only read');
+    expect(runtimeAccess['providers'], isEmpty,
+        reason: 'an excluded check must not invoke another adapter');
   });
 
   test('check names a filtered provider as hidden, not unknown', () async {
@@ -124,6 +130,23 @@ void main() {
     final err = result.stderr as String;
     expect(err, contains('hidden by the current'));
     expect(err, isNot(contains('no provider named')));
+  });
+
+  test('check treats a known adapter with no current row as unavailable',
+      () async {
+    final machine = await runCli(['check', 'kiro', '--json']);
+    final human = await runCli(['check', 'kiro', '--no-color']);
+
+    expectExitCode(machine, 69);
+    final json = jsonDecode(machine.stdout as String) as Map<String, dynamic>;
+    expect(json['provider'], 'kiro');
+    expect(json['found'], isFalse);
+    expect(json['reason'], 'provider_not_returned');
+
+    expectExitCode(human, 69);
+    expect(human.stdout as String, contains('Kiro: unavailable'));
+    expect(human.stdout as String, contains('returned no current row'));
+    expect(human.stderr as String, isEmpty);
   });
 
   test('watch once excludes named providers before alerting', () async {

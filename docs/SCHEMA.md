@@ -238,12 +238,22 @@ code, responses, credentials, or exception messages.
 
 `quotabot check <provider> --json` and MCP `check_provider_availability` emit
 `quotabot.check.v1`: `schema`, `as_of`, `provider`, then either `found: false`
-(CLI, unknown name), an `error` note (MCP, unknown provider/account), or
-`account`, `source_class`, `available`, `headroom_percent`, `resets_at`, and
-`stale`, with an optional plain `error` when a failed live read is showing
-last-known evidence, plus optional `drift_reason` and `drift_observed_at`. This is
-deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
-no `providers` array. `available` means usable from current evidence and above
+(CLI, with `reason` set to `filtered`, `account_not_found`,
+`provider_not_returned`, or `unknown_provider`), an `error` note (MCP, unknown
+provider/account), or `account`, `source_class`, `available`,
+`headroom_percent`, `resets_at`, and `stale`, with an optional plain `error` when
+a failed live read is showing last-known evidence, plus optional `drift_reason`
+and `drift_observed_at`.
+
+The CLI's successful form additionally carries `captured_at`,
+`staleness_seconds`, `snapshot_source`, `matched_account_count`,
+`selection_mode` (`only`, `best_available`, or `exact`), `ok`,
+`live_read_succeeded`, `per_machine`, optional `pipe_health`, `http_status`, and
+`retry_after_seconds`, plus the scoped `quotabot.explain.v1` `runtime_access`
+observation. Its `found: false` form still carries `snapshot_source` and
+`runtime_access`. These additive CLI fields are not promised on the MCP response.
+This is deliberately not a `quotabot.v1` snapshot: it answers for one provider
+and has no `providers` array. `available` means usable from current evidence and above
 the practical spent floor; stale cached cloud quota has `available: false` even
 when `headroom_percent` still carries a last-known value. A drift result follows
 the same rule: its percentage, when present, is last-trusted evidence, not
@@ -393,10 +403,11 @@ own, outside the `quotabot` CLI's documented exit-code contract.
 
 - `schema`: always `quotabot.verify.v1`.
 - `generated_at`, `os`, `require_live`, the honesty-only `honesty_passed`,
+  `selected_adapter_count`, `live_read_scope_valid`,
   `all_live_reads_succeeded`, and the run-level `passed` verdict. By default,
   `passed` has the same value as `honesty_passed`. With CLI `--require-live`, it
-  is false unless every selected provider adapter produced a fresh accepted
-  read.
+  is false unless at least one provider adapter was selected and every selected
+  adapter produced a fresh accepted read.
 - `providers`: one record per provider account, with `provider`,
   `display_name`, `account`, `state` (`live`, `cached`, `out_of_quota`,
   `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`, and
@@ -434,8 +445,8 @@ other contract here. A truthful absence (a signed-out account or a local
 runtime that is not running) passes the honesty contract but has
 `live_read_succeeded: false`; the failing states are lying numbers, silent
 failures, provider drift, and contract drift. The CLI exits 65 when any check
-fails, and also exits 65 when `--require-live` is set and a selected adapter did
-not return a fresh accepted read.
+fails, and also exits 65 when `--require-live` is set and no adapter was selected
+or a selected adapter did not return a fresh accepted read.
 
 ## `quotabot.explain.v1`
 

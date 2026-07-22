@@ -131,4 +131,29 @@ void main() {
     expectExitCode(result, 64);
     expect(result.stderr as String, contains('no profile named "missing"'));
   });
+
+  test('check describes a known provider outside profile scope as hidden',
+      () async {
+    saveProfile(
+      const QuotaProfile(name: 'codex-only', providers: {'codex'}),
+      dir: Directory('${temp.path}/quotabot/profiles'),
+    );
+    saveProfile(
+      const QuotaProfile(name: 'quiet', hiddenProviders: {'claude'}),
+      dir: Directory('${temp.path}/quotabot/profiles'),
+    );
+
+    for (final profile in const ['codex-only', 'quiet']) {
+      final result = await runCli([
+        'check',
+        'claude',
+        '--no-color',
+        '--profile=$profile',
+      ]);
+
+      expectExitCode(result, 64);
+      expect(result.stderr as String, contains('hidden by the current'));
+      expect(result.stderr as String, isNot(contains('no provider named')));
+    }
+  });
 }

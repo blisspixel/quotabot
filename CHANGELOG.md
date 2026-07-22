@@ -5,6 +5,15 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- `check <provider>` now invokes only that built-in adapter instead of refreshing
+  the full fleet. Filtered `verify --require-live` runs only the adapters allowed
+  by its profile, exclusions, and local-only policy, and its observed runtime
+  access names that exact contact scope. Account filters remain post-collection
+  because multi-account adapters must return their account set first.
+- CLI `check` now accepts `--account=EXACT_ACCOUNT`, identifies automatic
+  multi-account selection, and adds capture age, simulation origin, live-read
+  result, bounded transport diagnostics, and runtime-access evidence to
+  `quotabot.check.v1`.
 - Deterministic simulation now ignores ambient route leases and passive
   installed-tool detection, marks every human quota surface as synthetic, and
   records `snapshot_source: "simulation"` on CLI snapshots. A mock run now
@@ -41,6 +50,13 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Strict `verify --require-live` now fails closed when filters select no provider
+  adapters. The JSON record includes `selected_adapter_count` and
+  `live_read_scope_valid`, and human output names the empty scope instead of
+  displaying a green vacuous result.
+- A known provider hidden by a profile is now described as filtered rather than
+  unknown, and check fallback guidance distinguishes unavailable exit 69 from
+  usage errors.
 - Antigravity reads now use an existing Cloud Code project returned by
   `loadCodeAssist` instead of repeating account onboarding in every new process.
   Already-onboarded accounts avoid an unnecessary mutation and its extra

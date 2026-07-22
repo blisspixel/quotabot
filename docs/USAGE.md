@@ -125,7 +125,7 @@ metadata. Add `--json` to any read command for machine output.
 | `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
 | `calibration`          | How often quotabot's predictions come true (history). |
 | `manual`               | List, set, or remove self-reported quota entries.     |
-| `check <provider>`     | Whether one provider is usable now, and its reset.    |
+| `check <provider>`     | Collect and check one provider; optional exact `--account`. |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, best windows, pace.   |
 | `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
@@ -243,7 +243,8 @@ quotabot verify --require-live  # exit 65 unless every selected read is fresh an
 Exit code is `0` when every snapshot is reading correctly or failing with a
 plain reason, and `65` when any honesty check fails. With `--require-live`, 65
 also means at least one selected provider did not produce a fresh accepted
-adapter read. Each record also names the provider's own usage surface (for example
+adapter read, or the filters selected no provider adapter at all. Each record
+also names the provider's own usage surface (for example
 `/usage` in Claude Code) so you can confirm the numbers by hand; the mechanical
 checks cannot know the provider's side of the conversation. Undetected local
 runtimes are reported as truthful absences, not failures. `--profile`,
@@ -251,15 +252,19 @@ runtimes are reported as truthful absences, not failures. `--profile`,
 claimed-provider coverage check then reports itself skipped instead of
 misreading the filter. An unfiltered `--require-live` run selects the whole
 built-in adapter fleet, including local runtimes; use a profile or exclusions
-when the strict gate should cover only a subset. Manual entries are not adapter
-reads and do not satisfy or fail the strict live-read aggregate.
+when the strict gate should cover only a subset. Provider-level profile and
+exclusion rules are applied before adapter I/O, so unselected adapters are not
+contacted. Account allowlists and hidden account targets are applied after the
+selected multi-account adapter returns. Manual entries are not adapter reads; a
+strict scope containing only manual rows fails because it selected no adapter.
 
 `verify --json` includes `runtime_access`, a `quotabot.explain.v1` object for
 the collection. For real reads it is `mode: "runtime_access_observation"` and
 marks provider rows whose adapters were invoked. For simulations it remains a
-manifest with `collection_executed: false`. Profile and exclude filters are
-applied after the quota read today, so the runtime access observation reports
-the full adapter read surface rather than only the filtered output rows.
+manifest with `collection_executed: false`. For filtered real verification, its
+provider rows are the exact adapter set invoked. The top level also includes
+`selected_adapter_count` and `live_read_scope_valid`, so an empty or mistyped
+automation scope cannot look green.
 
 ### Runtime access manifest (`quotabot explain`)
 
@@ -430,27 +435,36 @@ output:
 
 - `0` success: the command ran, and (for `check` and a piped `top`) at least one
   provider is usable right now.
-- `64` usage error: a bad argument or an unknown provider name.
+- `64` usage error: a bad argument, unknown provider name, filtered target, or
+  requested account that is not present in the current view.
 - `65` verification failure: a `verify` run found at least one snapshot failing
   its honesty checks (a lying number, provider drift, a silent failure, or
   contract drift), or `--require-live` found a selected provider adapter that
-  did not return a fresh accepted read.
+  did not return a fresh accepted read or selected no adapter.
 - `69` unavailable: the named provider (`check`), or the whole fleet (piped
-  `top`), has no usable quota at the moment. `check` uses this code for
-  provider-drift evidence because last-trusted headroom is not current capacity.
+  `top`), has no usable quota at the moment. `check` also uses this code when a
+  known provider adapter returns no current row, or for provider-drift evidence
+  because last-trusted headroom is not current capacity.
 
 For metered providers, `available` means more than the practical spent floor is
 left. Quotabot treats 1.5% or less remaining headroom as unavailable so
 near-zero provider reads that round to `1% free` do not route work into an
 already exhausted cap.
 
-For example, `quotabot check claude || quotabot suggest --json` falls through to a
-route only when Claude is spent.
+Exit 69 means the named provider has no usable capacity from current evidence.
+Do not use a bare shell `||` as a spent-only branch unless the script separately
+handles exit 64, because invalid, filtered, and missing account targets are
+usage errors rather than quota exhaustion.
 
-The human `check` line appends one concise provenance label such as
-`(authoritative)` or `(this-machine fallback)`. Its JSON form emits the exact
-`source_class` wire value. The normalized label is not another freshness state:
-`cached` and `provider drift` can apply independently.
+`check` resolves the named built-in provider before I/O and invokes no unrelated
+built-in adapter. Add `--account=EXACT_ACCOUNT` to select one returned account;
+without it, the best current account wins deterministically. The human line
+names that account when several match and appends one concise provenance label
+such as `(authoritative)` or `(this-machine fallback)`. Its JSON form emits the
+exact `source_class`, matched-account count, selection mode, evidence capture
+time and age, simulation origin, live-read result, bounded degraded transport
+detail, and scoped `runtime_access`. The normalized source label is not another
+freshness state: `cached` and `provider drift` can apply independently.
 
 ### Models, calibration, and risk
 

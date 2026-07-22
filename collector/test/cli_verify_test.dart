@@ -302,6 +302,43 @@ void main() {
     expect(json['passed'], isFalse);
   });
 
+  test('verify --require-live fails closed when filters select no adapters',
+      () async {
+    final excludeAll = kProviderAdapterRegistry
+        .map((registration) => registration.id)
+        .join(',');
+    final machine = await runCli([
+      'verify',
+      '--json',
+      '--require-live',
+      '--exclude=$excludeAll',
+    ]);
+    final human = await runCli([
+      'verify',
+      '--no-color',
+      '--require-live',
+      '--exclude=$excludeAll',
+    ]);
+
+    expectExitCode(machine, 65);
+    final json = jsonDecode(machine.stdout as String) as Map<String, dynamic>;
+    expect(json['honesty_passed'], isTrue);
+    expect(json['selected_adapter_count'], 0);
+    expect(json['live_read_scope_valid'], isFalse);
+    expect(json['all_live_reads_succeeded'], isFalse);
+    expect(json['passed'], isFalse);
+    expect(json['providers'], isEmpty);
+    final runtimeAccess = json['runtime_access'] as Map<String, dynamic>;
+    expect(runtimeAccess['collection_executed'], isTrue);
+    expect(runtimeAccess['providers'], isEmpty);
+
+    expectExitCode(human, 65);
+    expect(
+      human.stdout as String,
+      contains('strict live verification selected no provider adapters'),
+    );
+  });
+
   test('verify human output names provider drift and trusted provenance',
       () async {
     final result = await runCli([

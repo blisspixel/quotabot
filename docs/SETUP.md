@@ -29,7 +29,8 @@ Its exit code confirms that the status rendered truthfully, not that every row
 is a fresh live adapter read. Automation that requires fresh evidence should use
 `quotabot verify --require-live`; an unfiltered strict run covers the whole
 built-in fleet, so use `--profile=NAME` or `--exclude=PROVIDER,...` to select the
-intended scope.
+intended adapter contact and verdict scope. A strict run that selects no adapter
+fails with exit 65 instead of passing vacuously.
 The one-line release installers install the CLI only. Tagged releases built by
 the current workflow also attach verified portable desktop bundles; follow
 [Desktop release bundles](DESKTOP-DISTRIBUTION.md) for checksum and provenance

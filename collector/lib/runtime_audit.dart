@@ -188,23 +188,12 @@ RuntimeAccessReport buildRuntimeAccessReport({
           return false;
         }
         if (excludedProviders.contains(p.provider)) return false;
-        if (profile != null) {
-          final normalizedProviders = profile.providers
-              .map((p) => normalizeProviderId(p) ?? p)
-              .where((p) => p.isNotEmpty)
-              .toSet();
-          if (normalizedProviders.isNotEmpty &&
-              !normalizedProviders.contains(p.provider)) {
-            return false;
-          }
-          final hidden = profile.hiddenProviders
-              .map((p) => normalizeProviderId(p) ?? p)
-              .toSet();
-          if (hidden.contains(p.provider)) return false;
-          if (profile.routingPolicy == ProfileRoutingPolicy.localOnly &&
-              !_localProviderIds.contains(p.provider)) {
-            return false;
-          }
+        if (profile != null &&
+            !profile.allowsProviderAdapter(
+              p.provider,
+              isLocal: _localProviderIds.contains(p.provider),
+            )) {
+          return false;
         }
         return true;
       })

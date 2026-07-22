@@ -62,9 +62,10 @@ quotabot suggest
 If a provider is not current, `doctor` shows its evidence state and repair hint.
 Use `quotabot verify --require-live` when automation must fail unless selected
 provider reads are live. An unfiltered strict run checks the whole built-in
-fleet; use `--profile=NAME` or `--exclude=PROVIDER,...` to select its scope. See
-[Setup](docs/SETUP.md) for inspect-before-run, idle-machine login, update, and
-uninstall paths.
+fleet; use `--profile=NAME` or `--exclude=PROVIDER,...` to constrain both the
+verdict and which adapters are contacted. A strict run with no selected adapter
+fails closed. See [Setup](docs/SETUP.md) for inspect-before-run, idle-machine
+login, update, and uninstall paths.
 
 Highlights:
 
@@ -348,6 +349,8 @@ tracked as a 1.0 acceptance item. Details in
 
 ```bash
 quotabot suggest              # balanced provider recommendation
+quotabot check claude         # collect and evaluate only Claude
+quotabot check claude --account=EXACT_ACCOUNT  # select one returned account
 quotabot suggest --local-first  # prefer a reachable local runtime
 quotabot suggest --task=hard  # one model, included quota/local by default
 quotabot models               # current registry entries, availability, budget, capabilities
@@ -355,6 +358,11 @@ quotabot watch                # alert on a low binding window and name the next 
 quotabot verify               # test one read for truthful behavior
 quotabot verify --require-live # also fail on a cached or failed adapter read
 ```
+
+`check` does not refresh unrelated built-in providers. Without `--account`, it
+chooses the best current account deterministically and names that account when
+more than one matches. Its JSON form includes evidence age, selection mode,
+live-read status, and the observed runtime-access scope.
 
 The defaults are deliberate:
 

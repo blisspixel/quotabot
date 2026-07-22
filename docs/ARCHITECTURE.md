@@ -55,7 +55,7 @@ collector/ (Dart package)
   report.dart        pure markdown and quotabot.report.v1 assembly
   mcp.dart           MCP tool shapes, output schemas, shared server factory
   mcp_http.dart      Opt-in Streamable HTTP MCP wrapper with loopback guards
-  collector.dart     collectAll(): run adapters, apply cache; package exports
+  collector.dart     full or provider-scoped adapter collection, cache; exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      nvidia, ollama, lmstudio, lemonade (thin I/O shells)
   auth/              tokens + store, PKCE/loopback util, anthropic, openai,
@@ -160,7 +160,8 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   auth file and caches them separately. Antigravity scans the active account and
   profile databases, attempts live reads for each discovered account, refreshes
   the Gemini CLI token from disk when it is the active token source, and runs the
-  Cloud Code onboarding step before reading per-model quota.
+  Cloud Code onboarding step only when `loadCodeAssist` has not already returned
+  an onboarded project before reading per-model quota.
 - Claude's current usage response separates shared session and weekly windows
   from optional model-scoped weekly limits. Shared windows govern provider
   routing; a scoped row is a sparse model-budget overlay, so spending it cannot
@@ -231,6 +232,16 @@ tray Quit flushes the final snapshot before teardown.
 
 `collectAll()` runs every adapter concurrently (Antigravity via multi-account
 profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`):
+
+Provider-specific CLI `check` resolves its adapter before I/O and runs only that
+registry row. Filtered strict verification computes the registry subset from its
+profile, exclusions, and local-only policy before I/O, so its `runtime_access`
+observation matches the adapters actually invoked. Account allowlists and hidden
+account targets remain post-collection because a multi-account adapter must run
+before returned account identities are known. The bounded local manual-entry
+file is still read so a manual provider can be checked without any built-in
+adapter call. Normal status, desktop, MCP snapshot, and routing reads retain the
+full-fleet `collectAll()` behavior.
 
 1. Capture a local observation generation, then run the adapter. The generation
    marks when collection began, so an older slow read cannot finish late and
@@ -543,7 +554,9 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   against safe filename/id characters, profile files are bounded in size, and
   filtering is pure over the already-normalized `ProviderQuota` list.
 - The CLI loads `--profile=NAME` once, then every quota-reading command consumes
-  the same profiled snapshot. Missing profiles fail with usage exit code 64.
+  the same profile semantics. `check` and filtered strict verification also use
+  the provider-level portion of that profile before adapter execution; account
+  filters remain post-collection. Missing profiles fail with usage exit code 64.
 - The MCP tools accept optional `profile` and exact `account` filters, applying
   the same pure profile filter before account narrowing for quota, routing,
   availability, and model responses. Missing profiles return a structured
