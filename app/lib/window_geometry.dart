@@ -14,6 +14,28 @@ typedef AnalyticsWindowGeometry = ({Size size, Offset? position});
 typedef QuotaWindowGeometry = ({Size size, Offset? position, bool overflowing});
 typedef CompactWindowGeometry = ({Size size, Offset? position});
 
+/// Width requested by the compact strip before display-work-area clamping.
+///
+/// Duplicate provider accounts need enough room to keep the selected account
+/// visible. Large text receives a wider identity budget rather than removing
+/// the routing answer from the smallest product surface.
+double compactDesiredWindowWidth({
+  required int providerCount,
+  required bool needsAccountIdentity,
+  required bool largeText,
+  bool shotsMode = false,
+}) {
+  final count = providerCount.clamp(1, shotsMode ? 16 : 8);
+  final maximum = shotsMode ? 680.0 : 560.0;
+  final base = count * 46 + 240.0;
+  final identityFloor = needsAccountIdentity
+      ? largeText
+            ? 520.0
+            : 360.0
+      : 0.0;
+  return math.max(base, identityFloor).clamp(200.0, maximum).toDouble();
+}
+
 /// Fits the compact strip inside the work area that currently owns the window.
 ///
 /// Collapsing can make the strip wider than the expanded card. Clamp both axes

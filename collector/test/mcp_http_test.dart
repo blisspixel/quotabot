@@ -8,6 +8,7 @@ import 'package:quotabot_collector/models.dart';
 import 'package:test/test.dart';
 
 const _now = 1782000000;
+const _token = '0123456789abcdef0123456789abcdef';
 
 ProviderQuota _quota(String provider, double usedPercent) => ProviderQuota(
       provider: provider,
@@ -52,7 +53,7 @@ class _Harness {
   Future<void> stop() => server.stop();
 }
 
-Future<_Harness> _start({String? token}) async {
+Future<_Harness> _start({String token = _token}) async {
   final port = await _freePort();
   final server = buildQuotabotStreamableHttpServer(
     config: QuotabotMcpHttpConfig(port: port, bearerToken: token),
@@ -69,19 +70,17 @@ Future<_Harness> _start({String? token}) async {
   return _Harness(server, Uri.parse('http://127.0.0.1:$port/mcp'));
 }
 
-Future<McpClient> _connect(Uri uri, {String? token}) async {
+Future<McpClient> _connect(Uri uri, {String token = _token}) async {
   final client = McpClient(
     const Implementation(name: 'quotabot-http-test', version: '1.0.0'),
   );
   final transport = StreamableHttpClientTransport(
     uri,
-    opts: token == null
-        ? null
-        : StreamableHttpClientTransportOptions(
-            requestInit: {
-              'headers': {'Authorization': 'Bearer $token'},
-            },
-          ),
+    opts: StreamableHttpClientTransportOptions(
+      requestInit: {
+        'headers': {'Authorization': 'Bearer $token'},
+      },
+    ),
   );
   await client.connect(transport);
   return client;
@@ -186,8 +185,17 @@ void main() {
     expect(alertJson['schema'], 'quotabot.alerts.v1');
   });
 
-  test('optional bearer token protects Streamable HTTP sessions', () async {
-    final harness = await _start(token: 'secret-token');
+  test('required bearer token protects Streamable HTTP sessions', () async {
+    expect(
+      () => buildQuotabotStreamableHttpServer(
+        config: const QuotabotMcpHttpConfig(),
+        snapshot: () async => const [],
+        burnByProvider: (providers, now) => const <String, BurnStat>{},
+      ),
+      throwsArgumentError,
+    );
+
+    final harness = await _start();
     addTearDown(harness.stop);
 
     final denied = await http.post(
@@ -200,10 +208,36 @@ void main() {
     );
     expect(denied.statusCode, HttpStatus.forbidden);
 
-    final client = await _connect(harness.uri, token: 'secret-token');
+    final client = await _connect(harness.uri);
     addTearDown(client.close);
     final tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name), contains('suggest_provider'));
+  });
+
+  test('rejects oversized and indeterminate HTTP request bodies', () async {
+    final harness = await _start();
+    addTearDown(harness.stop);
+
+    final headers = {
+      HttpHeaders.authorizationHeader: 'Bearer $_token',
+      HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+      HttpHeaders.contentTypeHeader: 'application/json',
+    };
+    final oversized = await http.post(
+      harness.uri,
+      headers: headers,
+      body: List<int>.filled(maxMcpHttpRequestBytes + 1, 0x20),
+    );
+    expect(oversized.statusCode, HttpStatus.forbidden);
+
+    final rawClient = HttpClient();
+    addTearDown(() => rawClient.close(force: true));
+    final chunked = await rawClient.postUrl(harness.uri);
+    headers.forEach(chunked.headers.set);
+    chunked.add(utf8.encode(jsonEncode(_initializeBody())));
+    final chunkedResponse = await chunked.close();
+    await chunkedResponse.drain<void>();
+    expect(chunkedResponse.statusCode, HttpStatus.forbidden);
   });
 
   test('DNS rebinding and endpoint hardening reject unsafe requests', () async {
@@ -224,7 +258,12 @@ void main() {
     final wrongPath = await http.get(harness.uri.replace(path: '/wrong'));
     expect(wrongPath.statusCode, HttpStatus.notFound);
 
-    final wrongMethod = await http.put(harness.uri);
+    final wrongMethod = await http.put(
+      harness.uri,
+      headers: {
+        HttpHeaders.authorizationHeader: 'Bearer $_token',
+      },
+    );
     expect(wrongMethod.statusCode, HttpStatus.methodNotAllowed);
   });
 

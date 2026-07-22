@@ -38,15 +38,9 @@ python quotabot_mcp_stdio.py
 npx tsx quotabot_mcp_stdio.ts
 ```
 
-Streamable HTTP snippets expect a running loopback server:
-
-```bash
-cd collector
-dart run bin/mcp_server.dart --http --port 8722 --path /mcp
-```
-
-With bearer auth, keep the secret in an environment variable rather than a
-literal command argument or an undocumented scratch file:
+Streamable HTTP requires bearer auth. Keep the secret in an environment
+variable rather than a literal command argument or an undocumented scratch
+file:
 
 ```bash
 cd collector
@@ -83,10 +77,11 @@ python integrations/mcp_clients/quotabot_mcp_http.py
 python integrations/mcp_clients/quotabot_mcp_stdio.py
 ```
 
-Optional environment:
+Environment:
 
 - `QUOTABOT_MCP_URL`: defaults to `http://127.0.0.1:8722/mcp`.
-- `QUOTABOT_MCP_TOKEN`: bearer token for Streamable HTTP.
+- `QUOTABOT_MCP_TOKEN`: required bearer token for Streamable HTTP; use at least
+  32 characters.
 - `QUOTABOT_TASK`: `simple`, `standard`, or `hard`, sent to `suggest_model`.
 - `QUOTABOT_COLLECTOR_DIR`: collector directory for stdio. Defaults to this
   repository's `collector/`.
@@ -99,6 +94,8 @@ loopback spellings, embedded credentials, fragments, and malformed ports before
 reading the bearer token or constructing the HTTP transport. Explicit ports,
 paths, and query strings are allowed. The check intentionally does not resolve
 DNS names.
+HTTP POST bodies must declare their length and cannot exceed 256 KiB. The Python
+and TypeScript MCP SDK transports set the length automatically.
 
 ## TypeScript
 

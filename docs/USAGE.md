@@ -495,6 +495,13 @@ including same-provider sibling routes. Machine-readable alerts carry
 route is named. Stale, failed, drifted, or source-class-invalid evidence does
 not fire an alert.
 
+`--interval` must be an integer number of seconds; malformed values exit with
+usage status 64 instead of silently selecting a different cadence. Continuous
+watch mode reports one failure edge to standard error, increases its bounded
+retry backoff while collection remains unavailable, and reports one recovery
+edge when collection succeeds again. JSON standard output remains reserved for
+`quotabot.alert.v1` records.
+
 ```bash
 quotabot watch                                   # print alerts, adaptive cadence
 quotabot watch --once                            # a single pass (cron-friendly)
@@ -510,6 +517,8 @@ accident; a stray or stale URL is refused rather than silently sent. The desktop
 widget raises the same low-quota alerts (as a notification) and can POST to the
 same kind of webhook, set from its menu under "Alert webhook"; loopback is the
 default there too, with an explicit "allow external host" checkbox.
+CLI rejection and startup diagnostics describe webhook delivery state without
+echoing the configured URL, whose path or query may contain a bearer secret.
 
 Beyond low-quota alerts, the desktop widget raises two more local notifications:
 a scheduled "Quota reset soon" reminder before a heavily used window resets, and
@@ -913,16 +922,19 @@ Run MCP Streamable HTTP only when a client cannot use stdio:
 
 ```bash
 cd collector
-dart run bin/mcp_server.dart --http --port 8722 --path /mcp
+export QUOTABOT_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+dart run bin/mcp_server.dart --http --port 8722 --path /mcp --token-env QUOTABOT_MCP_TOKEN
 ```
 
 The HTTP transport binds only to `localhost`, `127.0.0.1`, or `::1`, enables
 DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and uses the
-same tool/resource factory as stdio. Add `--token-file PATH`, `--token-env NAME`,
-or `--token TOKEN` to require `Authorization: Bearer ...`; prefer a local
-owner-only token file for normal use. A literal `--token TOKEN` can be exposed
-through shell history or process inspection, so reserve it for ephemeral local
-testing. The endpoint is MCP Streamable HTTP, not the plain JSON endpoint below.
+same tool/resource factory as stdio. `--token-file PATH`, `--token-env NAME`, or
+`--token TOKEN` is required, and the resolved token must contain at least 32
+characters. Prefer a local owner-only token file for normal use. A literal
+`--token TOKEN` can be exposed through shell history or process inspection, so
+reserve it for ephemeral local testing. POST bodies must declare `Content-Length`
+and cannot exceed 256 KiB; the supported MCP clients do this automatically. The
+endpoint is MCP Streamable HTTP, not the plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
 `collector/bin/example_routing_agent.dart` for a Dart routing example, and

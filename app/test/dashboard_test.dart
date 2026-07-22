@@ -1083,6 +1083,31 @@ void main() {
     expect(find.bySemanticsLabel(warning), findsOneWidget);
   });
 
+  testWidgets('tray initialization failure explains close behavior', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          trayInitializer: () async => throw StateError('private details'),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text(trayUnavailableMessage), findsOneWidget);
+    expect(find.textContaining('private details'), findsNothing);
+    expect(find.bySemanticsLabel(trayUnavailableMessage), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Collapse'));
+    await tester.pump();
+    expect(find.byTooltip(trayUnavailableMessage), findsOneWidget);
+    expect(find.textContaining('private details'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('compact mode pins recommendation details at minimum width', (
     tester,
   ) async {
@@ -1158,7 +1183,7 @@ void main() {
   ) async {
     final semantics = tester.ensureSemantics();
     tester.view.devicePixelRatio = 1;
-    tester.view.physicalSize = const Size(480, 600);
+    tester.view.physicalSize = const Size(360, 600);
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -1197,6 +1222,80 @@ void main() {
     );
     expect(tester.takeException(), isNull);
     semantics.dispose();
+  });
+
+  testWidgets('compact auto width keeps a visible route at 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(286, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            _routeQuota('antigravity', 'Antigravity', now),
+          ],
+        ),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Next'), findsOneWidget);
+    for (final tooltip in ['Expand', 'Close']) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(286), reason: tooltip);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact no-route auto width stays visible at 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(286, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('No route'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('compact no-route decision stays explicit at minimum width', (
@@ -1295,6 +1394,8 @@ void main() {
       final rect = tester.getRect(control);
       expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
       expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+      expect(rect.width, greaterThanOrEqualTo(28), reason: tooltip);
+      expect(rect.height, greaterThanOrEqualTo(28), reason: tooltip);
     }
     expect(tester.takeException(), isNull);
     semantics.dispose();

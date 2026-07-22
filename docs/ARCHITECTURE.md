@@ -430,7 +430,10 @@ for `quotas://alerts`, so clients react by reading the resource instead of
 polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
 by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
 keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
-rejects batch JSON-RPC payloads, and can require a bearer token.
+rejects batch JSON-RPC payloads, requires a bearer token of at least 32
+characters, and rejects indeterminate or larger-than-256-KiB POST bodies in the
+pre-body admission hook. The pinned upstream transport therefore never buffers
+an unauthenticated or unbounded request body.
 `bin/example_routing_agent.dart` shows the same logic used for direct Dart
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
@@ -578,6 +581,12 @@ print, optionally POST), the desktop app's notifier, and the MCP
 `postAlert`, which refuses a non-loopback host unless explicitly allowed and
 never throws, so delivery fails soft. An alert is just the binding-window
 forecast viewed as a threshold crossing, so it shares the same model as `top`.
+Watch startup and external-host rejection diagnostics never echo the configured
+URL because webhook paths and queries can carry bearer credentials.
+`bin/collect.dart` strictly validates an explicit watch interval. Its
+`WatchLoopHealth` state emits only a failure edge and a recovery edge on standard
+error, tracks the consecutive failure count used by bounded retry backoff, and
+leaves JSON standard output reserved for alert records.
 
 ## The UI
 
@@ -630,8 +639,13 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   It opens the same decision detail as expanded mode, and a widget-order focus
   traversal group keeps every clipped provider chip keyboard reachable. The
   compact window uses a 200 logical-pixel minimum and display-bounded automatic
-  width. The full card view also supports hide/show per provider. In the card
-  view, per-card expansion
+  width that reserves space for the route label and visible duplicate-provider
+  account identity. Window chrome retains at least a 28 by 28 logical-pixel
+  target, and provider focus and expansion transitions become immediate when
+  reduced motion is requested. If tray initialization fails, a bounded warning
+  explains that Close will exit instead of silently changing behavior. The full
+  card view also supports hide/show per provider. In the card view, per-card
+  expansion
   toggles the card's own detail - the provenance line, model-specific rows, and
   analytics - on top of the tight default, and it also groups distinct account
   identities when work and personal accounts coexist. Expansion state is keyed by

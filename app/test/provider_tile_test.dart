@@ -31,7 +31,18 @@ Insights _ins({double? burn, double? burnSe}) => Insights(
   burnSePerHour: burnSe,
 );
 
-Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+Widget _wrap(Widget child, {bool disableAnimations = false}) => MaterialApp(
+  builder: disableAnimations
+      ? (context, built) {
+          final media = MediaQuery.of(context);
+          return MediaQuery(
+            data: media.copyWith(disableAnimations: true),
+            child: built!,
+          );
+        }
+      : null,
+  home: Scaffold(body: child),
+);
 
 double _contrastRatio(Color foreground, Color background) {
   final lighter = foreground.computeLuminance() > background.computeLuminance()
@@ -1083,6 +1094,34 @@ void main() {
     final decoration = focusRing.decoration as BoxDecoration;
     expect(decoration.border, isNotNull);
     semantics.dispose();
+  });
+
+  testWidgets('provider interactions honor reduced motion', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(40),
+          cardColor: Colors.white,
+          insights: _ins(burn: 2, burnSe: 1),
+          onToggle: () {},
+        ),
+        disableAnimations: true,
+      ),
+    );
+    await tester.pump();
+
+    final focusTransition = tester.widget<AnimatedContainer>(
+      find.byType(AnimatedContainer),
+    );
+    final disclosureTransition = tester.widget<AnimatedRotation>(
+      find.byType(AnimatedRotation),
+    );
+    final meterTransition = tester.widget<TweenAnimationBuilder<double>>(
+      find.byType(TweenAnimationBuilder<double>),
+    );
+    expect(focusTransition.duration, Duration.zero);
+    expect(disclosureTransition.duration, Duration.zero);
+    expect(meterTransition.duration, Duration.zero);
   });
 
   testWidgets('provider disclosure caret anchors to the trailing card edge', (

@@ -16,6 +16,7 @@ from tools.desktop_readiness_smoke import (
     _read_json_if_ready,
     assert_bundle_unchanged,
     await_readiness,
+    build_readiness_failure_report,
     build_readiness_report,
     desktop_bundle_identity,
     desktop_bundle_root,
@@ -23,6 +24,7 @@ from tools.desktop_readiness_smoke import (
     isolated_config_environment,
     launch_command,
     macos_app_process_ids,
+    main as readiness_main,
     stop_process,
     valid_windows_tray_rect,
     validate_report_destination,
@@ -203,6 +205,9 @@ class DesktopReadinessTests(unittest.TestCase):
                 written,
                 {
                     "schema": REPORT_SCHEMA,
+                    "status": "passed",
+                    "stage": "complete",
+                    "failure_reason": None,
                     "platform": "windows",
                     "launch_pid": 31415,
                     "launch_process_stopped": True,
@@ -220,6 +225,66 @@ class DesktopReadinessTests(unittest.TestCase):
                     "tray_ready": True,
                 },
             )
+
+    def test_failure_report_is_bounded_and_contains_no_paths(self) -> None:
+        identity = {
+            "bundle_schema": "quotabot.desktop-bundle.v1",
+            "bundle_sha256": "b" * 64,
+            "bundle_entry_count": 4,
+            "bundle_bytes": 80,
+        }
+
+        for stage in ("launch", "readiness", "cleanup", "bundle_verification"):
+            with self.subTest(stage=stage):
+                report = build_readiness_failure_report(
+                    platform="windows",
+                    stage=stage,
+                    launch_pid=31415,
+                    launch_process_stopped=stage != "cleanup",
+                    executable_name="quotabot.exe",
+                    executable_digest="a" * 64,
+                    bundle_identity=identity,
+                    bundle_unchanged=False if stage == "bundle_verification" else None,
+                    isolated_config=True,
+                    window_ready=stage in {"cleanup", "bundle_verification"},
+                    tray_ready=stage in {"cleanup", "bundle_verification"},
+                )
+                serialized = json.dumps(report, sort_keys=True)
+                self.assertEqual(report["status"], "failed")
+                self.assertEqual(report["stage"], stage)
+                self.assertEqual(report["failure_reason"], f"{stage}_failed")
+                self.assertNotIn("C:\\", serialized)
+                self.assertNotIn("private details", serialized)
+
+    def test_missing_executable_still_writes_failure_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_temp:
+            temporary = Path(raw_temp)
+            missing = temporary / "private" / "quotabot.exe"
+            report_path = temporary / "readiness.json"
+            argv = [
+                "desktop_readiness_smoke.py",
+                "--executable",
+                str(missing),
+                "--report",
+                str(report_path),
+            ]
+
+            with unittest.mock.patch.object(sys, "argv", argv):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Desktop executable not found"
+                ):
+                    readiness_main()
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["stage"], "validate_executable")
+            self.assertEqual(
+                report["failure_reason"],
+                "validate_executable_failed",
+            )
+            self.assertEqual(report["executable_name"], "quotabot.exe")
+            self.assertIsNone(report["executable_sha256"])
+            self.assertNotIn(str(temporary), json.dumps(report, sort_keys=True))
             self.assertEqual(list(temporary.glob(".*.tmp")), [])
 
     def test_selects_only_the_exact_macos_bundle_executable(self) -> None:

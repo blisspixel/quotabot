@@ -77,6 +77,9 @@ void main() {
 
       expect(find.byTooltip('Expand'), findsOneWidget);
       expect(find.bySemanticsLabel('Expand'), findsOneWidget);
+      final enabledSize = tester.getSize(find.byTooltip('Expand'));
+      expect(enabledSize.width, greaterThanOrEqualTo(28));
+      expect(enabledSize.height, greaterThanOrEqualTo(28));
       var node = tester.getSemantics(find.bySemanticsLabel('Expand'));
       expect(
         node.getSemanticsData().flagsCollection.isEnabled,
@@ -98,6 +101,9 @@ void main() {
           ),
         ),
       );
+      final disabledSize = tester.getSize(find.byTooltip('Refreshing quotas'));
+      expect(disabledSize.width, greaterThanOrEqualTo(28));
+      expect(disabledSize.height, greaterThanOrEqualTo(28));
       node = tester.getSemantics(find.bySemanticsLabel('Refreshing quotas'));
       expect(
         node.getSemanticsData().flagsCollection.isEnabled,

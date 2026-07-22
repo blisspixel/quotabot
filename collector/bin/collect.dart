@@ -1584,6 +1584,35 @@ void _printManualEntries(List<ManualQuotaEntry> entries) {
 String _manualNumber(double value) =>
     value == value.roundToDouble() ? value.toInt().toString() : '$value';
 
+/// Bounded health state for the long-running watch loop.
+///
+/// Poll exceptions advance the same backoff streak as unsuccessful snapshots.
+/// Only the failure edge and the next successful edge return diagnostics, so a
+/// persistent outage cannot flood an operator's stderr stream.
+class WatchLoopHealth {
+  int failStreak = 0;
+  bool _pollFailureActive = false;
+
+  String? recordSnapshot({required bool anyLive}) {
+    if (!anyLive) return recordPollFailed();
+    failStreak = 0;
+    if (!_pollFailureActive) return null;
+    _pollFailureActive = false;
+    return 'quotabot watch: quota refresh recovered.';
+  }
+
+  String? recordPollFailed() {
+    failStreak++;
+    if (_pollFailureActive) return null;
+    _pollFailureActive = true;
+    return 'quotabot watch: quota refresh failed; retrying with backoff.';
+  }
+}
+
+/// Describes configured webhook delivery without exposing a secret-capable URL.
+String watchWebhookDeliverySummary(String? webhook) =>
+    webhook == null ? '' : ' with webhook delivery enabled';
+
 /// Reads an `--name=int` option from [flags], or [dflt] when absent or invalid.
 int _intOption(Iterable<String> flags, String name, int dflt) {
   final prefix = '--$name=';
@@ -2103,9 +2132,18 @@ Future<void> _runWatch(
   final wasteThresholdRaw = _stringOption(flags, 'waste-threshold', null);
   final wasteThreshold =
       wasteThresholdRaw == null ? null : double.tryParse(wasteThresholdRaw);
-  final fixedInterval = flags.any((f) => f.startsWith('--interval='))
-      ? _intOption(flags, 'interval', 60).clamp(2, 86400)
-      : null;
+  final fixedIntervalRaw = _stringOption(flags, 'interval', null);
+  final parsedFixedInterval =
+      fixedIntervalRaw == null ? null : int.tryParse(fixedIntervalRaw);
+  final fixedInterval = parsedFixedInterval?.clamp(2, 86400);
+
+  if (fixedIntervalRaw != null && parsedFixedInterval == null) {
+    stderr.writeln(
+      'quotabot: --interval must be an integer number of seconds',
+    );
+    exitCode = _exitUsage;
+    return;
+  }
 
   if (wasteThresholdRaw != null &&
       (wasteThreshold == null ||
@@ -2121,7 +2159,7 @@ Future<void> _runWatch(
   // rather than silently dropping every POST later.
   if (webhook != null && !allowExternal && !isLoopbackUrl(webhook)) {
     stderr.writeln('quotabot: webhook host is not loopback; pass '
-        '--allow-external to post to "$webhook"');
+        '--allow-external to enable external delivery');
     exitCode = 64;
     return;
   }
@@ -2129,15 +2167,15 @@ Future<void> _runWatch(
   final client = http.Client();
   var armed = <String>{};
   var wasteArmed = <String>{};
-  var failStreak = 0;
+  final health = WatchLoopHealth();
   var data = <ProviderQuota>[];
 
-  Future<int> pass() async {
+  Future<({int fired, String? healthMessage})> pass() async {
     data =
         await _collectProfiled(profile, excludedProviders: excludedProviders);
     final now = nowEpoch();
     final anyLive = data.any((q) => q.ok && q.hasWindows && !q.stale);
-    failStreak = anyLive ? 0 : failStreak + 1;
+    final healthMessage = health.recordSnapshot(anyLive: anyLive);
     final suggestion = _suggestFor(
       data,
       now,
@@ -2193,14 +2231,14 @@ Future<void> _runWatch(
         }
       }
     }
-    return fired.length;
+    return (fired: fired.length, healthMessage: healthMessage);
   }
 
   if (once) {
-    final fired = await pass();
+    final result = await pass();
     // A one-shot run that fired nothing must still confirm it ran, so an empty
     // result reads as "checked, all clear" instead of a hang or a broken read.
-    if (fired == 0 && !wantsJson) {
+    if (result.fired == 0 && !wantsJson) {
       final scope = wasteThreshold == null
           ? 'no window has crossed into red'
           : 'no window is red and no renewing quota is projected to go to waste';
@@ -2214,8 +2252,9 @@ Future<void> _runWatch(
     final wasteText = wasteThreshold == null
         ? ''
         : ' and projected waste >= ${wasteThreshold.toStringAsFixed(1)}%';
+    final webhookText = watchWebhookDeliverySummary(webhook);
     stderr.writeln('quotabot watch: alerting on red crossings$wasteText'
-        '${webhook != null ? ' -> $webhook' : ''}. Ctrl-C to stop.');
+        '$webhookText. Ctrl-C to stop.');
   }
 
   final quit = Completer<void>();
@@ -2226,13 +2265,18 @@ Future<void> _runWatch(
   Timer? timer;
   late final Future<void> Function() loop;
   loop = () async {
+    String? healthMessage;
     try {
-      await pass();
+      final result = await pass();
+      healthMessage = result.healthMessage;
     } catch (_) {
-      // Keep watching across a transient collection error.
+      healthMessage = health.recordPollFailed();
+    }
+    if (healthMessage != null) {
+      stderr.writeln(healthMessage);
     }
     final secs = fixedInterval ??
-        nextRefreshSeconds(data, nowEpoch(), failStreak: failStreak);
+        nextRefreshSeconds(data, nowEpoch(), failStreak: health.failStreak);
     timer = Timer(Duration(seconds: secs), loop);
   };
 

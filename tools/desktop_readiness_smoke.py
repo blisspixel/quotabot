@@ -20,7 +20,7 @@ from typing import Any
 
 
 SCHEMA = "quotabot.desktop-readiness.v1"
-REPORT_SCHEMA = "quotabot.desktop-readiness-report.v2"
+REPORT_SCHEMA = "quotabot.desktop-readiness-report.v3"
 BUNDLE_SCHEMA = "quotabot.desktop-bundle.v1"
 READINESS_ENV = "QUOTABOT_DESKTOP_READINESS_FILE"
 MAX_BUNDLE_ENTRIES = 4096
@@ -265,6 +265,9 @@ def build_readiness_report(
     return {
         "schema": REPORT_SCHEMA,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "status": "passed",
+        "stage": "complete",
+        "failure_reason": None,
         "platform": platform,
         "launch_pid": launch_pid,
         "launch_process_stopped": True,
@@ -275,6 +278,45 @@ def build_readiness_report(
         "isolated_config": True,
         "window_ready": True,
         "tray_ready": True,
+    }
+
+
+def build_readiness_failure_report(
+    *,
+    platform: str,
+    stage: str,
+    launch_pid: int | None,
+    launch_process_stopped: bool,
+    executable_name: str,
+    executable_digest: str | None,
+    bundle_identity: dict[str, Any] | None,
+    bundle_unchanged: bool | None,
+    isolated_config: bool,
+    window_ready: bool,
+    tray_ready: bool,
+) -> dict[str, Any]:
+    """Build bounded failure evidence without paths, logs, or exceptions."""
+
+    identity = bundle_identity or {}
+    return {
+        "schema": REPORT_SCHEMA,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "status": "failed",
+        "stage": stage,
+        "failure_reason": f"{stage}_failed",
+        "platform": platform,
+        "launch_pid": launch_pid,
+        "launch_process_stopped": launch_process_stopped,
+        "executable_name": executable_name,
+        "executable_sha256": executable_digest,
+        "bundle_schema": identity.get("bundle_schema"),
+        "bundle_sha256": identity.get("bundle_sha256"),
+        "bundle_entry_count": identity.get("bundle_entry_count"),
+        "bundle_bytes": identity.get("bundle_bytes"),
+        "bundle_unchanged": bundle_unchanged,
+        "isolated_config": isolated_config,
+        "window_ready": window_ready,
+        "tray_ready": tray_ready,
     }
 
 
@@ -549,80 +591,155 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     executable = args.executable.resolve()
-    if not executable.is_file():
-        raise RuntimeError(f"Desktop executable not found: {executable}")
-    if args.timeout <= 0:
-        raise RuntimeError("Desktop readiness timeout must be positive")
-
-    platform = host_platform()
-    bundle_root = desktop_bundle_root(executable, platform)
-    if args.report is not None:
-        validate_report_destination(args.report, bundle_root)
-    bundle_before = desktop_bundle_identity(executable, platform)
+    platform = "unknown"
+    stage = "validate_executable"
+    failure_stage: str | None = None
     launch_pid: int | None = None
-    with tempfile.TemporaryDirectory(prefix="quotabot-desktop-readiness-") as raw_temp:
-        temporary_directory = Path(raw_temp)
-        readiness_file = temporary_directory / "readiness.json"
-        log_file = temporary_directory / "desktop.log"
-        command = launch_command(executable, platform, readiness_file)
-        environment = os.environ.copy()
-        environment[READINESS_ENV] = str(readiness_file)
-        environment["QUOTABOT_DEMO"] = "1"
-        environment.update(
-            isolated_config_environment(platform, temporary_directory / "config")
-        )
+    process: subprocess.Popen[bytes] | None = None
+    launch_process_stopped = False
+    executable_digest: str | None = None
+    bundle_before: dict[str, Any] | None = None
+    bundle_unchanged: bool | None = None
+    isolated_config = False
+    window_ready = False
+    tray_ready = False
+    report_destination_safe = args.report is not None
 
-        with log_file.open("wb") as output:
-            process = subprocess.Popen(
-                command,
-                cwd=executable.parent,
-                env=environment,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                start_new_session=os.name != "nt",
-            )
+    try:
+        if not executable.is_file():
+            raise RuntimeError(f"Desktop executable not found: {executable}")
+        executable_digest = executable_sha256(executable)
+
+        stage = "validate_timeout"
+        if args.timeout <= 0:
+            raise RuntimeError("Desktop readiness timeout must be positive")
+
+        stage = "resolve_platform"
+        platform = host_platform()
+        stage = "resolve_bundle"
+        bundle_root = desktop_bundle_root(executable, platform)
+        if args.report is not None:
+            stage = "validate_report_destination"
             try:
-                await_readiness(
-                    process,
-                    readiness_file,
-                    platform,
-                    args.timeout,
-                )
-                if platform == "windows":
-                    await_windows_tray(process)
-                launch_pid = process.pid
-            except RuntimeError as error:
-                output.flush()
-                log_tail = log_file.read_text(encoding="utf-8", errors="replace")[
-                    -4000:
-                ]
-                if log_tail.strip():
-                    raise RuntimeError(
-                        f"{error}\nDesktop log tail:\n{log_tail}"
-                    ) from error
+                validate_report_destination(args.report, bundle_root)
+            except Exception:
+                report_destination_safe = False
                 raise
-            finally:
+
+        stage = "bundle_identity"
+        bundle_before = desktop_bundle_identity(executable, platform)
+        with tempfile.TemporaryDirectory(
+            prefix="quotabot-desktop-readiness-"
+        ) as raw_temp:
+            temporary_directory = Path(raw_temp)
+            readiness_file = temporary_directory / "readiness.json"
+            log_file = temporary_directory / "desktop.log"
+            command = launch_command(executable, platform, readiness_file)
+            environment = os.environ.copy()
+            environment[READINESS_ENV] = str(readiness_file)
+            environment["QUOTABOT_DEMO"] = "1"
+            environment.update(
+                isolated_config_environment(
+                    platform,
+                    temporary_directory / "config",
+                )
+            )
+            isolated_config = True
+
+            stage = "launch"
+            with log_file.open("wb") as output:
+                process = subprocess.Popen(
+                    command,
+                    cwd=executable.parent,
+                    env=environment,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=os.name != "nt",
+                )
+                launch_pid = process.pid
                 try:
-                    if platform == "macos":
-                        stop_macos_app(executable)
+                    stage = "readiness"
+                    await_readiness(
+                        process,
+                        readiness_file,
+                        platform,
+                        args.timeout,
+                    )
+                    window_ready = True
+                    tray_ready = True
+                    if platform == "windows":
+                        stage = "native_tray"
+                        await_windows_tray(process)
+                except RuntimeError as error:
+                    failure_stage = stage
+                    output.flush()
+                    log_tail = log_file.read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    )[-4000:]
+                    if log_tail.strip():
+                        raise RuntimeError(
+                            f"{error}\nDesktop log tail:\n{log_tail}"
+                        ) from error
+                    raise
                 finally:
-                    stop_process(process)
+                    try:
+                        if platform == "macos":
+                            stop_macos_app(executable)
+                        stop_process(process)
+                    except Exception:
+                        failure_stage = "cleanup"
+                        raise
+                    finally:
+                        launch_process_stopped = process.poll() is not None
 
-        if launch_pid is None:
-            raise RuntimeError("Desktop readiness evidence was not produced")
-        if process.poll() is None:
-            raise RuntimeError("Desktop launch process did not stop after readiness")
-        bundle_after = desktop_bundle_identity(executable, platform)
-        assert_bundle_unchanged(bundle_before, bundle_after)
-        report = build_readiness_report(
-            platform,
-            launch_pid,
-            executable,
-            bundle_before,
+            if launch_pid is None:
+                failure_stage = "readiness"
+                raise RuntimeError("Desktop readiness evidence was not produced")
+            if process.poll() is None:
+                failure_stage = "cleanup"
+                raise RuntimeError(
+                    "Desktop launch process did not stop after readiness"
+                )
+            stage = "bundle_verification"
+            bundle_after = desktop_bundle_identity(executable, platform)
+            bundle_unchanged = False
+            assert_bundle_unchanged(bundle_before, bundle_after)
+            bundle_unchanged = True
+            report = build_readiness_report(
+                platform,
+                launch_pid,
+                executable,
+                bundle_before,
+            )
+
+        if args.report is not None:
+            stage = "report_write"
+            write_report(args.report, report)
+    except Exception:
+        failed_report = build_readiness_failure_report(
+            platform=platform,
+            stage=failure_stage or stage,
+            launch_pid=launch_pid,
+            launch_process_stopped=launch_process_stopped,
+            executable_name=executable.name,
+            executable_digest=executable_digest,
+            bundle_identity=bundle_before,
+            bundle_unchanged=bundle_unchanged,
+            isolated_config=isolated_config,
+            window_ready=window_ready,
+            tray_ready=tray_ready,
         )
-
-    if args.report is not None:
-        write_report(args.report, report)
+        if args.report is not None and report_destination_safe:
+            try:
+                write_report(args.report, failed_report)
+            except Exception:
+                print(
+                    "Desktop readiness failed and its evidence report "
+                    "could not be written.",
+                    file=sys.stderr,
+                )
+        raise
 
     print(f"Desktop window and tray readiness passed on {platform}.")
     print(json.dumps(report, sort_keys=True))

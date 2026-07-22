@@ -138,6 +138,7 @@ final bool _demoMode =
     _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
 final DesktopReadinessProbe _desktopReadiness =
     DesktopReadinessProbe.fromEnvironment();
+final Completer<void> _nativeWindowReady = Completer<void>();
 
 /// Boundary around the live route, captured for screenshots.
 final GlobalKey _shotBoundaryKey = GlobalKey();
@@ -291,6 +292,9 @@ Future<void> main() async {
       await windowManager.setAlwaysOnTop(prefs.alwaysOnTop);
       await windowManager.focus();
       _desktopReadiness.recordWindowReady();
+      if (!_nativeWindowReady.isCompleted) {
+        _nativeWindowReady.complete();
+      }
     }),
   );
 
@@ -442,6 +446,10 @@ typedef ProfileDeleter = void Function(String name);
 
 typedef ProfileSaver = void Function(QuotaProfile profile);
 
+typedef TrayInitializer = Future<void> Function();
+
+const String trayUnavailableMessage = 'Tray unavailable; Close exits the app.';
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   final String? startupStorageWarning;
@@ -463,6 +471,8 @@ class Dashboard extends StatefulWidget {
   final ProfileDeleter? profileDeleter;
   @visibleForTesting
   final ProfileSaver? profileSaver;
+  @visibleForTesting
+  final TrayInitializer? trayInitializer;
   final RouteLeaseStore leaseStore;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
@@ -476,6 +486,7 @@ class Dashboard extends StatefulWidget {
       providerConnector = null,
       profileDeleter = null,
       profileSaver = null,
+      trayInitializer = null,
       leaseStore = const FileRouteLeaseStore();
 
   /// Builds a deterministic dashboard without desktop plugin or preference
@@ -494,6 +505,7 @@ class Dashboard extends StatefulWidget {
     this.providerConnector,
     this.profileDeleter,
     this.profileSaver,
+    this.trayInitializer,
     this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
   }) : _hostIntegration = false,
@@ -561,6 +573,7 @@ class _DashboardState extends State<Dashboard>
   String? _lastWebhookDeliveryStatus;
   bool? _lastWebhookDeliveryFailed;
   bool _notificationDeliveryFailed = false;
+  bool _trayUnavailable = false;
   late String? _settingsStorageWarning = widget.startupStorageWarning;
   String? _profileStorageWarning;
   String? get _preferenceStorageWarning =>
@@ -780,7 +793,6 @@ class _DashboardState extends State<Dashboard>
       windowManager.addListener(this);
       trayManager.addListener(this);
       screenRetriever.addListener(this);
-      unawaited(_initTray());
       unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
       unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
       unawaited(
@@ -788,6 +800,14 @@ class _DashboardState extends State<Dashboard>
           desktopMinimumWindowSize(compact: _compact),
         ),
       );
+      unawaited(
+        _nativeWindowReady.future.then((_) {
+          if (mounted) _applySize();
+        }),
+      );
+    }
+    if (widget._hostIntegration || widget.trayInitializer != null) {
+      unawaited(_initTray());
     }
     _refresh();
     if (_shotsMode) unawaited(_exportShots());
@@ -981,38 +1001,51 @@ class _DashboardState extends State<Dashboard>
   // menu is the way back and the only place that truly quits.
   Future<void> _initTray() async {
     try {
-      await trayManager.setIcon(
-        Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
-      );
-      // tray_manager 0.5.3 does not implement setToolTip on Linux. Calling the
-      // unsupported method aborts the rest of tray initialization there.
-      if (!Platform.isLinux) {
-        await trayManager.setToolTip('quotabot');
-      }
-      await trayManager.setContextMenu(
-        Menu(
-          items: [
-            MenuItem(key: 'show', label: 'Show quotabot'),
-            MenuItem(key: 'refresh', label: 'Refresh now'),
-            MenuItem(key: 'analytics', label: 'Quota analytics'),
-            MenuItem.separator(),
-            MenuItem(key: 'quit', label: 'Quit'),
-          ],
-        ),
-      );
-      if (_desktopReadiness.enabled && Platform.isMacOS) {
-        final bounds = await trayManager.getBounds();
-        if (bounds == null || bounds.isEmpty) {
-          throw StateError('Native tray bounds are unavailable.');
+      final injectedInitializer = widget.trayInitializer;
+      if (injectedInitializer != null) {
+        await injectedInitializer();
+      } else {
+        await trayManager.setIcon(
+          Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
+        );
+        // tray_manager 0.5.3 does not implement setToolTip on Linux. Calling
+        // the unsupported method aborts the rest of tray initialization there.
+        if (!Platform.isLinux) {
+          await trayManager.setToolTip('quotabot');
         }
+        await trayManager.setContextMenu(
+          Menu(
+            items: [
+              MenuItem(key: 'show', label: 'Show quotabot'),
+              MenuItem(key: 'refresh', label: 'Refresh now'),
+              MenuItem(key: 'analytics', label: 'Quota analytics'),
+              MenuItem.separator(),
+              MenuItem(key: 'quit', label: 'Quit'),
+            ],
+          ),
+        );
+        if (_desktopReadiness.enabled && Platform.isMacOS) {
+          final bounds = await trayManager.getBounds();
+          if (bounds == null || bounds.isEmpty) {
+            throw StateError('Native tray bounds are unavailable.');
+          }
+        }
+        // Only now that the tray exists do we redirect close to hide:
+        // otherwise a platform without a tray would have no way to reopen a
+        // hidden window.
+        await windowManager.setPreventClose(true);
       }
-      // Only now that the tray exists do we redirect close to hide: otherwise a
-      // platform without a tray would have no way to reopen a hidden window.
-      await windowManager.setPreventClose(true);
       _desktopReadiness.recordTrayReady(true);
     } catch (_) {
       // No tray on this platform/session; the window keeps normal close-to-quit.
       _desktopReadiness.recordTrayReady(false);
+      if (widget._hostIntegration) {
+        stderr.writeln('quotabot: $trayUnavailableMessage');
+      }
+      if (mounted && !_trayUnavailable) {
+        setState(() => _trayUnavailable = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+      }
     }
   }
 
@@ -1408,10 +1441,16 @@ class _DashboardState extends State<Dashboard>
         return;
       } else if (_compact) {
         final n = _displayed.length.clamp(1, _shotsMode ? 16 : 8);
-        final maxCompactWidth = _shotsMode ? 680.0 : 560.0;
-        final desiredWidth = (n * 46 + 240)
-            .clamp(200.0, maxCompactWidth)
-            .toDouble();
+        final counts = _providerCounts(_displayed);
+        final needsAccountIdentity =
+            _showAccounts && counts.values.any((count) => count > 1);
+        final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+        final desiredWidth = compactDesiredWindowWidth(
+          providerCount: n,
+          needsAccountIdentity: needsAccountIdentity,
+          largeText: largeText,
+          shotsMode: _shotsMode,
+        );
         Rect? currentBounds;
         try {
           currentBounds = await windowManager.getBounds();
@@ -1997,7 +2036,7 @@ class _DashboardState extends State<Dashboard>
     final compactWidth = MediaQuery.sizeOf(context).width;
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final showRouteProviderName = compactWidth >= (largeText ? 520 : 360);
-    final routeIconOnly = largeText && compactWidth < 300;
+    final routeIconOnly = largeText && compactWidth < 240;
     return SizedBox(
       height: 46,
       child: Padding(
@@ -2080,6 +2119,22 @@ class _DashboardState extends State<Dashboard>
                     ),
                   ),
                 ),
+              if (_trayUnavailable)
+                Tooltip(
+                  message: trayUnavailableMessage,
+                  child: Semantics(
+                    label: trayUnavailableMessage,
+                    liveRegion: true,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Color(0xFFD29922),
+                      ),
+                    ),
+                  ),
+                ),
               _iconButton(
                 Icons.open_in_full_rounded,
                 muted,
@@ -2129,6 +2184,7 @@ class _DashboardState extends State<Dashboard>
               '(${quotaAccountDisplayLabel(routedQuota.account)})'
         : routedQuota.displayName;
     final tone = noRoute ? const Color(0xFFD29922) : chrome.accent;
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     const radius = BorderRadius.all(Radius.circular(6));
     void showExplanation() => _showRouteExplanation(suggestion, routeLine);
     return Semantics(
@@ -2150,6 +2206,8 @@ class _DashboardState extends State<Dashboard>
                   ? 28
                   : providerName == null
                   ? 100
+                  : largeText
+                  ? 360
                   : 240,
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -2414,6 +2472,7 @@ class _DashboardState extends State<Dashboard>
             ),
             if (_preferenceStorageWarning != null)
               _warningLine(_preferenceStorageWarning!, warning),
+            if (_trayUnavailable) _warningLine(trayUnavailableMessage, warning),
             if (_lastRefreshError != null)
               _warningLine(_lastRefreshError!, warning),
           ],
@@ -3818,7 +3877,9 @@ class _FocusableProviderCardState extends State<_FocusableProviderCard> {
           if (_hover != hover) setState(() => _hover = hover);
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
+          duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
+              ? Duration.zero
+              : const Duration(milliseconds: 130),
           curve: Curves.easeOut,
           foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(11),
@@ -4087,7 +4148,11 @@ class ProviderTile extends StatelessWidget {
                       // One chevron that rotates, so expand and collapse read as
                       // the same control moving rather than two different icons.
                       turns: expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 160),
+                      duration:
+                          MediaQuery.maybeOf(context)?.disableAnimations ??
+                              false
+                          ? Duration.zero
+                          : const Duration(milliseconds: 160),
                       curve: Curves.easeOut,
                       child: Icon(
                         Icons.expand_more_rounded,
@@ -5001,7 +5066,9 @@ class WindowBar extends StatelessWidget {
       // Ease the fill to its new level on refresh so a jump reads as motion,
       // not a flicker.
       tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
-      duration: const Duration(milliseconds: 320),
+      duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
+          ? Duration.zero
+          : const Duration(milliseconds: 320),
       curve: Curves.easeOutCubic,
       builder: (context, v, _) =>
           QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),

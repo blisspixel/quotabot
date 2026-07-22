@@ -76,9 +76,12 @@ Highlights:
 - **Easy and good-looking.** A small frameless widget that follows the system
   light/dark theme, supports per-profile themes including a high-contrast Hacker
   mode, pins always-on-top or to the taskbar, measures the rendered provider
-  cards so no row is clipped, stays inside the active display, scrolls only when
-  the full list cannot fit, and collapses to a compact strip that keeps the next
-  route or no-safe-route state visible.
+  cards so no row is clipped, reconciles that measurement after native window
+  startup, stays inside the active display, scrolls only when the full list
+  cannot fit, and collapses to a compact strip that keeps the next route or
+  no-safe-route state visible. Compact sizing also reserves room for a selected
+  account when duplicate providers are shown, honors reduced motion, and keeps
+  window controls usable at large text sizes.
 - **Explainable and fail-soft.** The expanded desktop always shows either the
   next route or an explicit no-safe-route fallback. Its visible details control
   opens the shared reason, evidence freshness and scope, spend class, fallback,
@@ -127,6 +130,8 @@ and authoritative the evidence is, whether it can create metered spend, what to
 do if the route fails, and the decision id used across other quotabot surfaces.
 The compact strip pins the same answer as a keyboard-accessible `Next` provider
 or `No route` control and opens the same details without requiring a hover.
+Automatic compact width keeps that label visible and reserves account-label
+space when duplicate providers are present.
 Common quota-window labels and complete reset times reflow at large text sizes
 instead of being cut off; unusual provider-supplied labels retain their full
 tooltip and screen-reader text.
@@ -368,11 +373,14 @@ to ignore.
 The packaged Windows release gate starts each candidate with isolated local
 configuration and a candidate-only single-instance guard, so validation can run
 beside an installed tray instance without surfacing or replacing it. Its bounded
-v2 report records a UTC timestamp, the launch process, the runner executable
-digest, a deterministic digest plus aggregate counts for the complete Flutter bundle,
+v3 report records a UTC timestamp, pass or failure status and stage, the launch
+process, the runner executable digest, and a deterministic digest plus aggregate
+counts for the complete Flutter bundle,
 native window and tray results, isolated-config state, and cleanup. It hashes the
 bundle before launch and after cleanup, so changed Dart code, plugins, or assets
-cannot hide behind an unchanged native runner. Archive checksum and provenance,
+cannot hide behind an unchanged native runner. Failure reports retain no raw
+errors, logs, or filesystem paths and are preserved by CI and release workflows.
+Archive checksum and provenance,
 application signing, and native accessibility remain separate release gates;
 Narrator, keyboard-only focus order, visible focus, and critical-flow semantics
 still require interactive evidence.
@@ -423,6 +431,10 @@ quotabot watch                # alert on a low binding window and name the next 
 quotabot verify               # test one read for truthful behavior
 quotabot verify --require-live # also fail on a cached or failed adapter read
 ```
+
+Continuous watch mode rejects malformed intervals and writes one failure edge
+and one recovery edge to standard error while retrying. JSON standard output
+remains reserved for `quotabot.alert.v1` records.
 
 `check` does not refresh unrelated built-in providers. Without `--account`, it
 chooses the best current account deterministically and names that account when
@@ -476,7 +488,9 @@ source file, model response, credential, or exception.
 
 For agent integration, use the MCP server described in [AGENTS.md](AGENTS.md).
 It exposes live and cache-only decisions, model filters, resources, and expiring
-local reservations over stdio or opt-in loopback HTTP with bearer auth available.
+local reservations over stdio or opt-in loopback HTTP. HTTP requires a bearer
+token and rejects indeterminate or larger-than-256-KiB request bodies before
+buffering them.
 A smaller
 plain loopback JSON endpoint is available for clients that do not speak MCP.
 For an execution handoff, the [LiteLLM example](integrations/litellm/) consumes

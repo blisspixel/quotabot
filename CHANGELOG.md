@@ -5,6 +5,10 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Packaged desktop readiness now writes a bounded v3 report for both passing and
+  failing runs. Failure evidence names the completed stage without retaining raw
+  errors, logs, or filesystem paths, and CI and release workflows preserve the
+  report even when readiness fails.
 - Compact desktop mode now pins the shared routing answer as a `Next` provider
   or explicit `No route` control, including the selected account when account
   labels are enabled. Pointer, keyboard, and assistive activation open the same
@@ -17,13 +21,34 @@ Notable changes to quotabot. Newest first.
   completes immediately.
 - Packaged Windows readiness is now isolated from the user's installed tray
   instance, and every packaged readiness run uses isolated local quotabot
-  configuration. The v2 harness report retains a UTC timestamp, launch PID, and
-  narrow runner executable SHA-256 plus a bounded deterministic digest, entry count, and byte
-  count for the complete Flutter bundle. The bundle is hashed before launch and
-  after cleanup, so the gate fails if product code, plugins, or assets change
-  during readiness. Native window and tray results and confirmed process cleanup
-  remain part of the report, while archive checksum, provenance, signing, and
-  accessibility evidence stay separate release claims.
+  configuration. The v3 harness report retains a UTC timestamp, launch PID, and
+  narrow runner executable SHA-256 plus a bounded deterministic digest, entry
+  count, and byte count for the complete Flutter bundle. The bundle is hashed
+  before launch and after cleanup, so the gate fails if product code, plugins,
+  or assets change during readiness. Native window and tray results and
+  confirmed process cleanup remain part of the report, while archive checksum,
+  provenance, signing, and accessibility evidence stay separate release claims.
+
+### Fixed
+- Desktop startup now reapplies rendered-content sizing after native window
+  setup finishes, preventing the initial fixed height from cutting off the quota
+  list on cold starts, including at large text sizes.
+- MCP Streamable HTTP now requires a bearer token of at least 32 characters and
+  rejects POST bodies without a declared length or above 256 KiB before the
+  pinned transport can buffer them. This closes a local unauthenticated memory
+  exhaustion path while leaving stdio unchanged.
+- `quotabot watch` no longer writes configured webhook URLs to diagnostics.
+  External-host rejection and the startup banner now report delivery state
+  without persisting secret-capable path or query values.
+- Compact desktop sizing now reserves room for the visible route label and, when
+  enabled, duplicate-provider account identity. Large-text compact controls stay
+  visible, provider interactions honor reduced-motion settings, and window
+  chrome targets retain at least a 28 by 28 logical-pixel hit area.
+- Continuous `quotabot watch` now rejects malformed intervals and reports one
+  actionable failure edge plus one recovery edge while retrying with bounded
+  backoff. JSON standard output remains reserved for alert records.
+- If native tray initialization fails, the desktop app now shows a bounded
+  warning that Close will exit instead of silently changing window behavior.
 - Default quota snapshots now include a bounded
   `quotabot.analytics-incident-inventory.v1` object. Mixed-version analytics
   incidents remain visible when an account is no longer in the current

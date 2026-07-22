@@ -1098,4 +1098,60 @@ void main() {
       contains('--waste-threshold must be between 0 and 100'),
     );
   });
+
+  test('watch rejects a malformed fixed interval before collecting', () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--interval=nope',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(
+      result.stderr as String,
+      contains('--interval must be an integer number of seconds'),
+    );
+    expect(result.stdout as String, isNot(contains('all clear')));
+  });
+
+  test('watch diagnostics never echo a secret-capable webhook URL', () async {
+    const webhook =
+        'https://hooks.example.invalid/services/SYNTHETIC_SECRET_TOKEN';
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--webhook=$webhook',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('webhook host is not loopback'));
+    expect(result.stderr as String, isNot(contains(webhook)));
+    expect(result.stderr as String, isNot(contains('SYNTHETIC_SECRET_TOKEN')));
+
+    final summary = cli.watchWebhookDeliverySummary(webhook);
+    expect(summary, contains('webhook delivery enabled'));
+    expect(summary, isNot(contains(webhook)));
+    expect(summary, isNot(contains('SYNTHETIC_SECRET_TOKEN')));
+  });
+
+  test('watch health reports one failure edge and one recovery edge', () {
+    final health = cli.WatchLoopHealth();
+
+    expect(
+      health.recordSnapshot(anyLive: false),
+      'quotabot watch: quota refresh failed; retrying with backoff.',
+    );
+    expect(health.failStreak, 1);
+    expect(health.recordPollFailed(), isNull);
+    expect(health.failStreak, 2);
+
+    expect(
+      health.recordSnapshot(anyLive: true),
+      'quotabot watch: quota refresh recovered.',
+    );
+    expect(health.failStreak, 0);
+    expect(health.recordSnapshot(anyLive: true), isNull);
+  });
 }

@@ -34,7 +34,10 @@ export function requireLoopbackMcpUrl(value: string): URL {
 
 export function mcpBearerHeaders() {
   const token = process.env.QUOTABOT_MCP_TOKEN?.trim();
-  return token ? { Authorization: `Bearer ${token}` } : undefined;
+  if (token === undefined || token.length < 32) {
+    throw new Error("QUOTABOT_MCP_TOKEN must contain at least 32 characters");
+  }
+  return { Authorization: `Bearer ${token}` };
 }
 
 export function structuredContent(result: unknown): Record<string, unknown> {

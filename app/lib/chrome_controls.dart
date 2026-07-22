@@ -19,13 +19,14 @@ class AppChromeIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = InkWell(
-      onTap: onTap,
-      focusNode: focusNode,
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: Icon(icon, size: 15, color: color),
+    final button = SizedBox(
+      width: 28,
+      height: 28,
+      child: InkWell(
+        onTap: onTap,
+        focusNode: focusNode,
+        borderRadius: BorderRadius.circular(6),
+        child: Center(child: Icon(icon, size: 15, color: color)),
       ),
     );
     return Tooltip(

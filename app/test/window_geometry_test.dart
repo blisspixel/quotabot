@@ -4,6 +4,38 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/window_geometry.dart';
 
 void main() {
+  group('compactDesiredWindowWidth', () {
+    test('keeps the ordinary one-provider strip compact', () {
+      expect(
+        compactDesiredWindowWidth(
+          providerCount: 1,
+          needsAccountIdentity: false,
+          largeText: true,
+        ),
+        286,
+      );
+    });
+
+    test('reserves account identity space at normal and large text', () {
+      expect(
+        compactDesiredWindowWidth(
+          providerCount: 2,
+          needsAccountIdentity: true,
+          largeText: false,
+        ),
+        360,
+      );
+      expect(
+        compactDesiredWindowWidth(
+          providerCount: 2,
+          needsAccountIdentity: true,
+          largeText: true,
+        ),
+        520,
+      );
+    });
+  });
+
   const windowSize = Size(340, 760);
 
   test('compact strip stays inside the current display work area', () {

@@ -15,6 +15,8 @@ import 'util.dart';
 const defaultMcpHttpHost = '127.0.0.1';
 const defaultMcpHttpPort = 8722;
 const defaultMcpHttpPath = '/mcp';
+const maxMcpHttpRequestBytes = 256 * 1024;
+const minMcpHttpBearerTokenCharacters = 32;
 
 class QuotabotMcpHttpConfig {
   final String host;
@@ -80,6 +82,16 @@ StreamableMcpServer buildQuotabotStreamableHttpServer({
   if (config.port < 1 || config.port > 65535) {
     throw ArgumentError.value(config.port, 'port', 'port must be 1..65535');
   }
+  final bearerToken = config.bearerToken?.trim();
+  if (bearerToken == null ||
+      bearerToken.length < minMcpHttpBearerTokenCharacters) {
+    throw ArgumentError.value(
+      null,
+      'bearerToken',
+      'Streamable HTTP MCP requires a bearer token of at least '
+          '$minMcpHttpBearerTokenCharacters characters',
+    );
+  }
 
   return StreamableMcpServer(
     host: config.host,
@@ -91,7 +103,7 @@ StreamableMcpServer buildQuotabotStreamableHttpServer({
         config.allowedOrigins ?? defaultMcpAllowedOrigins(config.port),
     strictProtocolVersionHeaderValidation: true,
     rejectBatchJsonRpcPayloads: true,
-    authenticationHandler: _authenticatorFor(config.bearerToken),
+    authenticationHandler: _requestAdmissionFor(bearerToken),
     serverFactory: (_) => buildQuotabotMcpServer(
       snapshot: snapshot,
       burnByProvider: burnByProvider,
@@ -105,15 +117,23 @@ StreamableMcpServer buildQuotabotStreamableHttpServer({
   );
 }
 
-FutureOr<StreamableMcpAuthenticationResult> Function(dynamic)?
-    _authenticatorFor(String? bearerToken) {
-  final token = bearerToken?.trim();
-  if (token == null || token.isEmpty) return null;
-  return (request) => request is HttpRequest && _hasBearerToken(request, token)
-      ? const StreamableMcpAuthenticationResult.allow()
-      : const StreamableMcpAuthenticationResult.unauthorized(
-          errorDescription: 'missing or invalid bearer token',
-        );
+FutureOr<StreamableMcpAuthenticationResult> Function(dynamic)
+    _requestAdmissionFor(String bearerToken) {
+  return (request) {
+    if (request is! HttpRequest || !_hasBearerToken(request, bearerToken)) {
+      return const StreamableMcpAuthenticationResult.unauthorized(
+        errorDescription: 'missing or invalid bearer token',
+      );
+    }
+    if (request.method == 'POST' &&
+        (request.contentLength < 0 ||
+            request.contentLength > maxMcpHttpRequestBytes)) {
+      return const StreamableMcpAuthenticationResult.unauthorized(
+        errorDescription: 'request body length is missing or too large',
+      );
+    }
+    return const StreamableMcpAuthenticationResult.allow();
+  };
 }
 
 bool _hasBearerToken(HttpRequest request, String expected) {

@@ -124,9 +124,12 @@ python tools/desktop_readiness_smoke.py `
   --report .agent/windows-readiness.json
 ```
 
-The v2 report includes a UTC timestamp, launch PID, narrow runner executable
-SHA-256, isolated-config state, app-authored window and tray readiness, and confirmed
-launch-process cleanup. It also records a domain-separated SHA-256, entry count,
+The v3 report includes pass or failure status, the completed stage, a UTC
+timestamp, launch PID, narrow runner executable SHA-256, isolated-config state,
+app-authored window and tray readiness, and confirmed launch-process cleanup.
+Unreached checks remain null. Failure evidence is intentionally bounded and
+contains no raw error, log, or filesystem path. It also records a
+domain-separated SHA-256, entry count,
 and regular-file byte count for the complete platform bundle. Relative paths,
 regular-file contents, and link targets are hashed in deterministic order;
 links are never followed, traversal is bounded, and the before-launch identity
@@ -134,6 +137,10 @@ must match the after-cleanup identity. These fields use the
 `quotabot.desktop-bundle.v1` identity schema. Write the report outside the
 candidate bundle. On Windows, the tray result is independently backed by the
 native Shell rectangle check.
+
+CI and release workflows upload the Windows and Linux report on both success and
+failure, so a failed readiness gate retains diagnostic evidence without exposing
+host details.
 
 This bundle identity proves which extracted product payload passed readiness. It
 does not replace the archive checksum and provenance checks, application
