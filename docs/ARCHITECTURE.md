@@ -320,6 +320,34 @@ The transaction never contacts a provider and never touches quota snapshots,
 credentials, profiles, preferences, leases, alerts, other identities, or
 provider-only compatibility analytics. It deliberately does not attempt an
 exact merge.
+
+Mixed-version state also has a separate digest-private incident inventory. A
+detected checkpoint mismatch is persisted under the existing identity evidence
+lock with explicit tier flags, a first-recorded timestamp, and a random 128-bit
+incident reference. On upgrade, a valid older marker can be checked using only
+validated exact identity evidence from its canonical local snapshot; quotabot
+never guesses an account from a filename. A valid explicit marker that lacks a
+reference is upgraded under the same canonical digest lock. Recovery preserves
+the reference and first-recorded time while any tier remains conflicted, then
+removes both when every tier is resolved.
+
+The default unfiltered snapshot enumerates markers with an asynchronous,
+non-link-following scan. It caps directory entries, candidate markers, emitted
+incidents, each marker size, total marker bytes, and cached identity evidence.
+The result says `complete`, `partial`, or `suppressed` and includes bounded
+invalid, unverifiable, and truncation evidence, so an empty partial list cannot
+be mistaken for a clean cache. An incident exposes provider, fixed tiers,
+recorded time, and its random reference. It exposes a provider-row index only
+when the exact identity is already visible in the enclosing snapshot. Raw
+accounts, account digests, paths, and recovery authority are absent. Profiled
+or excluded snapshots inspect visible exact rows only, preventing local marker
+enumeration from bypassing the requested view. This inventory never contributes
+quota, availability, burn, routing, or recovery authorization.
+The in-memory result also attributes verifiable uncertainty to canonical
+provider ids while keeping malformed or truncated uncertainty global. Desktop
+profile views therefore retain an in-scope or global partial warning without
+revealing a known out-of-scope provider incident. Those attribution fields are
+not serialized.
 Drift diagnostics use separate per-provider/account records in the cache
 directory. They remain attached to cache-only and failed-read fallbacks so a
 process restart or transient provider failure cannot silently clear the warning.

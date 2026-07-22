@@ -71,6 +71,35 @@ void main() {
       cli.statsHistoryAvailabilityLabel(healthy, notices),
       'no history yet',
     );
+
+    const hiddenIncident = AnalyticsStorageIncident(
+      provider: codexProviderId,
+      tiers: ['buckets'],
+      recordedAt: 1782000100,
+      incidentId: '0123456789abcdef0123456789abcdef',
+    );
+    const inventory = AnalyticsIncidentInventory(
+      incidents: [hiddenIncident],
+      state: 'complete',
+      scope: 'all_local',
+      scannedMarkers: 1,
+      unverifiableMarkers: 0,
+      invalidMarkers: 0,
+      truncated: false,
+    );
+    final incidentFields = cli.analyticsIncidentSnapshotFields(inventory);
+    final incidentJson = jsonEncode(incidentFields);
+    expect(incidentJson, contains('"analytics_incident_inventory"'));
+    expect(incidentJson, contains('"exact_account_in_snapshot":false'));
+    expect(incidentJson, contains('"state":"complete"'));
+    expect(
+      cli.unavailableAnalyticsIncidentSummary([hiddenIncident]),
+      allOf(
+        contains('Codex account not currently available'),
+        contains('Current quota and routing are unaffected'),
+        contains('reconnect'),
+      ),
+    );
   });
 
   test('doctor keeps sparse model quota separate from shared limits', () {
@@ -202,6 +231,11 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.v1');
     expect(json['snapshot_source'], 'simulation');
+    final incidentInventory =
+        json['analytics_incident_inventory'] as Map<String, dynamic>;
+    expect(incidentInventory['state'], 'suppressed');
+    expect(incidentInventory['scope'], 'simulation');
+    expect(incidentInventory['incidents'], isEmpty);
     final providers = json['providers'] as List;
     expect(providers, hasLength(1));
     final claude = providers.single as Map<String, dynamic>;
@@ -491,6 +525,8 @@ void main() {
     expectExitCode(doctor, 0);
     final output = doctor.stdout as String;
     expect(output, isNot(contains('History incomplete')));
+    expect(output, isNot(contains('Inventory incomplete')));
+    expect(output, isNot(contains('Local analytics incidents')));
     expect(output, isNot(contains('storage_notice')));
   });
 
@@ -691,7 +727,9 @@ void main() {
     );
     expect(
       help.stdout as String,
-      contains('verify recovery: exact account from quotabot --json'),
+      contains(
+        'recovery: exact current account from unfiltered quotabot --json',
+      ),
     );
     expect(
       help.stdout as String,

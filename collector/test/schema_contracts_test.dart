@@ -14,7 +14,10 @@ void main() {
       final rootProperties =
           quotabotV1JsonSchema['properties'] as Map<String, Object?>;
       expect(rootProperties, contains('snapshot_source'));
+      expect(rootProperties, contains('analytics_incident_inventory'));
       final defs = quotabotV1JsonSchema[r'$defs'] as Map<String, Object?>;
+      expect(defs, contains('analyticsIncidentInventory'));
+      expect(defs, contains('analyticsIncident'));
       final provider = defs['providerQuota'] as Map<String, Object?>;
       final properties = provider['properties'] as Map<String, Object?>;
       expect(properties, contains('source_class'));
@@ -130,6 +133,88 @@ void main() {
       };
 
       expect(validateQuotabotV1Snapshot(snapshot), isEmpty);
+    });
+
+    test('validates the analytics incident inventory and provider-row join',
+        () {
+      final snapshot = {
+        'schema': quotabotV1SchemaId,
+        'snapshot_source': 'live',
+        'generated_at': 1782000000,
+        'providers': [
+          ProviderQuota(
+            provider: 'codex',
+            displayName: 'Codex',
+            account: 'credential:opaque',
+            asOf: 1782000000,
+            windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+          ).toJson(),
+        ],
+        'analytics_incident_inventory': {
+          'schema': quotabotAnalyticsIncidentInventoryV1SchemaId,
+          'state': 'complete',
+          'scope': 'all_local',
+          'scanned_markers': 1,
+          'unverifiable_markers': 0,
+          'invalid_markers': 0,
+          'truncated': false,
+          'incidents': [
+            {
+              'schema': quotabotAnalyticsIncidentV1SchemaId,
+              'state': 'diverged',
+              'provider': 'codex',
+              'tiers': ['history', 'buckets'],
+              'recorded_at': 1782000000,
+              'exact_account_in_snapshot': true,
+              'provider_row_index': 0,
+              'incident_id': '0123456789abcdef0123456789abcdef',
+            },
+          ],
+        },
+      };
+
+      expect(validateQuotabotV1Snapshot(snapshot), isEmpty);
+    });
+
+    test('rejects contradictory or identity-bearing incident inventory', () {
+      final errors = validateQuotabotV1Snapshot({
+        'schema': quotabotV1SchemaId,
+        'snapshot_source': 'live',
+        'generated_at': 1782000000,
+        'providers': const <Object?>[],
+        'analytics_incident_inventory': {
+          'schema': quotabotAnalyticsIncidentInventoryV1SchemaId,
+          'state': 'complete',
+          'scope': 'simulation',
+          'scanned_markers': 1,
+          'unverifiable_markers': 1,
+          'invalid_markers': 0,
+          'truncated': true,
+          'incidents': [
+            {
+              'schema': quotabotAnalyticsIncidentV1SchemaId,
+              'state': 'diverged',
+              'provider': 'codex',
+              'tiers': ['history', 'history'],
+              'recorded_at': 1782000000,
+              'exact_account_in_snapshot': false,
+              'provider_row_index': 0,
+              'incident_id': 'not-hex',
+              'account_digest': 'secret',
+            },
+          ],
+        },
+      });
+
+      expect(errors, contains(contains('complete requires no incomplete')));
+      expect(
+        errors,
+        contains(contains('simulation requires state suppressed')),
+      );
+      expect(errors, contains(contains('provider_row_index')));
+      expect(errors, contains(contains('incident_id')));
+      expect(errors, contains(contains('tiers')));
+      expect(errors, contains(contains('account_digest is prohibited')));
     });
 
     test('rejects an unknown snapshot source when present', () {

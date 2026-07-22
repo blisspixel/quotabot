@@ -400,18 +400,29 @@ only for an unambiguous single-account snapshot. Conflict evaluation uses the
 more conservative post-pooling result from both possible hourly cutoff sets.
 Healthy providers keep the pooled result matching the current hour offset, so
 the conflict cannot penalize a route competitor. Analytics and `doctor` show a
-warning, while `stats` reports bucket-tier
-conflicts on the rows that consume those buckets. Closing the older process stops
-further divergence but does not restore quarantined history. Current quota
-snapshots, provider credentials, and the **Now** view remain available. quotabot
-does not guess at an ambiguous analytics delta. To recover without deleting
-unrelated local state, obtain the exact account value from `quotabot --json`,
-then inspect each affected tier named by `doctor`:
+warning, while `stats` reports bucket-tier conflicts on the rows that consume
+those buckets. The default unfiltered JSON snapshot keeps a bounded incident
+inventory even when an affected account is no longer current. A partial
+inventory is not proof of a clean cache, and filtered views never reintroduce
+out-of-scope incidents. Closing the older process stops further divergence but
+does not restore quarantined history. Current quota snapshots, provider
+credentials, and the **Now** view remain available. quotabot does not guess at
+an ambiguous analytics delta.
+
+To recover without deleting unrelated local state, obtain the exact account
+value from the matching current provider row in `quotabot --json`, then inspect
+each affected tier named by `doctor`:
 
 ```bash
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=buckets
 ```
+
+If the incident says the exact account is not in the snapshot, reconnect that
+account and rerun `doctor` first. The inventory deliberately omits unavailable
+account identities and its random incident reference is not recovery authority.
+For a provider with several current accounts, use the inventory's
+`provider_row_index` to select the exact row instead of guessing.
 
 Inspection is read-only and makes no provider call. After stopping every older
 process and reviewing the reported impact, rerun the selected command with
@@ -528,6 +539,13 @@ procedures above.
   changes. If the provider-owned view
   changed shape or semantics, retain the verification output and report the
   mismatch rather than deleting the cache.
+- **Analytics says its incident inventory is incomplete:** current quota and
+  routing remain available, but an empty incident list is not a clean result.
+  Stop older quotabot processes, rerun an unfiltered `quotabot doctor`, and
+  inspect its invalid, unverifiable, or truncation evidence. Reconnect an
+  unavailable affected account before using the exact scoped recovery command.
+  Do not delete the cache merely to silence the warning; retained generations
+  are the recovery evidence.
 - **`quotabot` not found after install:** restart your terminal so the new PATH
   entry is picked up. On Windows, open a fresh PowerShell window.
 - **Windows blocks the downloaded exe:** it is unsigned for now. Verify the

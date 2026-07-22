@@ -58,20 +58,22 @@ void main() {
       dir: Directory('${temp.path}/quotabot/profiles'),
     );
 
-    final doctor = await runCli([
-      'doctor',
-      '--no-color',
-      '--profile=prefer-codex',
-    ]);
-    final top = await runCli([
-      'top',
-      '--no-color',
-      '--profile=prefer-codex',
-    ]);
-    final report = await runCli([
-      'report',
-      '--json',
-      '--profile=prefer-codex',
+    final [doctor, top, report] = await Future.wait([
+      runCli([
+        'doctor',
+        '--no-color',
+        '--profile=prefer-codex',
+      ]),
+      runCli([
+        'top',
+        '--no-color',
+        '--profile=prefer-codex',
+      ]),
+      runCli([
+        'report',
+        '--json',
+        '--profile=prefer-codex',
+      ]),
     ]);
 
     expectExitCode(doctor, 0);
@@ -104,12 +106,14 @@ void main() {
       dir: Directory('${temp.path}/quotabot/profiles'),
     );
 
-    final human = await runCli([
-      'doctor',
-      '--no-color',
-      '--profile=legacy-codex',
+    final [human, machine] = await Future.wait([
+      runCli([
+        'doctor',
+        '--no-color',
+        '--profile=legacy-codex',
+      ]),
+      runCli(['--json', '--profile=legacy-codex']),
     ]);
-    final machine = await runCli(['--json', '--profile=legacy-codex']);
 
     expectExitCode(human, 0);
     expect(

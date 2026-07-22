@@ -270,6 +270,95 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('unavailable analytics incidents remain visible without a card', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const incident = AnalyticsStorageIncident(
+      provider: 'codex',
+      tiers: ['buckets'],
+      recordedAt: 1782000100,
+      incidentId: '0123456789abcdef0123456789abcdef',
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('claude', 'Claude', 30)],
+          buckets: const {},
+          dark: true,
+          analyticsIncidents: const [incident],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('History incomplete'), findsNothing);
+    expect(find.textContaining('Codex'), findsNothing);
+
+    await tester.tap(find.text('7d'));
+    await tester.pump();
+    expect(find.textContaining('not currently available'), findsOneWidget);
+    expect(
+      find.textContaining('Current quota and routing are unaffected'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('reconnect'), findsOneWidget);
+    expect(find.textContaining('Install the CLI from Setup'), findsOneWidget);
+    expect(find.text('affected history is unavailable'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('History incomplete.*not currently available.*reconnect'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Now'));
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets('partial analytics incident scans never look clean', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('claude', 'Claude', 30)],
+          buckets: const {},
+          dark: true,
+          analyticsIncidentInventoryPartial: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('History status incomplete'), findsNothing);
+    await tester.tap(find.text('7d'));
+    await tester.pump();
+    expect(find.textContaining('History status incomplete'), findsOneWidget);
+    expect(find.textContaining('does not prove'), findsOneWidget);
+    expect(find.text('history status is unavailable'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsNothing);
+    expect(
+      find.textContaining('Current quota and routing are unaffected'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Install the CLI from Setup'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('History status incomplete.*does not prove.*quotabot doctor'),
+      ),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
   testWidgets('constrained analytics keeps a visible scroll affordance', (
     tester,
   ) async {

@@ -10,6 +10,7 @@ import 'package:quotabot/prefs.dart';
 import 'package:quotabot/provider_display.dart';
 import 'package:quotabot/quota_loading_indicator.dart';
 import 'package:quotabot/theme_spec.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -128,6 +129,106 @@ void main() {
   tearDown(() {
     appThemeSpec.value = appThemeSystem;
     textScale.value = 1;
+  });
+
+  test('analytics incident inventory follows the active desktop view', () {
+    const incidents = [
+      AnalyticsStorageIncident(
+        provider: 'codex',
+        tiers: ['history'],
+        recordedAt: 1782000000,
+      ),
+      AnalyticsStorageIncident(
+        provider: 'claude',
+        tiers: ['buckets'],
+        recordedAt: 1782000000,
+      ),
+    ];
+    const defaultProfile = QuotaProfile(name: 'default');
+    const claudeProfile = QuotaProfile(
+      name: 'claude-only',
+      providers: {'claude'},
+    );
+    const exactAccountProfile = QuotaProfile(
+      name: 'exact',
+      providers: {'claude'},
+      accounts: {
+        'claude': {'credential:opaque'},
+      },
+    );
+
+    expect(
+      analyticsIncidentsForView(incidents, defaultProfile, const {}),
+      hasLength(2),
+    );
+    expect(
+      analyticsIncidentsForView(
+        incidents,
+        claudeProfile,
+        const {},
+      ).single.provider,
+      'claude',
+    );
+    expect(
+      analyticsIncidentsForView(incidents, exactAccountProfile, const {}),
+      isEmpty,
+    );
+    expect(
+      analyticsIncidentsForView(incidents, defaultProfile, const {
+        'claude|credential:opaque',
+      }).map((incident) => incident.provider),
+      ['codex'],
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'claude'},
+        false,
+        defaultProfile,
+        const {},
+      ),
+      isTrue,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'claude'},
+        false,
+        claudeProfile,
+        const {},
+      ),
+      isTrue,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'codex'},
+        false,
+        claudeProfile,
+        const {},
+      ),
+      isFalse,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'claude'},
+        false,
+        defaultProfile,
+        const {'claude'},
+      ),
+      isFalse,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {},
+        true,
+        claudeProfile,
+        const {'claude'},
+      ),
+      isTrue,
+    );
   });
 
   test('expanded mode keeps a viable desktop minimum width', () {

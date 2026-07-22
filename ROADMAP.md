@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-19. This file is the forward plan. It records brief shipped
+Updated 2026-07-22. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -264,6 +264,17 @@ provider, before a forecast is built on top of it.
   `doctor` surface affected tiers, while `stats --json` annotates bucket-tier
   conflicts on the rows that consume them, without exposing raw account or path
   data.
+- **Done:** mixed-version incident inventory now survives an account leaving the
+  current snapshot. Existing valid migration markers are upgraded under the
+  identity evidence lock with explicit tier flags, a first-recorded timestamp,
+  and a random stable incident reference. The default snapshot performs a
+  bounded regular-file scan and reports `complete`, `partial`, or `suppressed`
+  state plus truncation and unverifiable counts. It emits no unavailable
+  account, digest, path, or recovery authority. Filtered snapshots inspect only
+  visible identities, and current incidents include a safe provider-row index
+  for exact automation joins. Desktop Analytics and `doctor` distinguish an
+  unavailable account from a proven sign-out and never present a partial scan as
+  a clean inventory.
 - **Done:** a local-only `verify --recover-analytics` handoff now inspects one
   exact provider/account/tier without writing, then requires `--yes` before it
   moves only that tier's canonical and legacy files into a bounded owner-only
@@ -284,6 +295,11 @@ provider, before a forecast is built on top of it.
   quotabot will not guess between losing newer samples and double-counting the
   shared baseline. Stop older processes before upgrading, and do not run an
   older build against migrated state.
+- **Remaining:** an opaque recovery target for an unavailable account. Do not
+  make the random incident reference recovery authority until exact legacy
+  ownership, collision behavior, and confirmation semantics can be proven
+  without exposing or guessing the account identity. Reconnection and an exact
+  current provider row remain required today.
 - Pin every remaining supported response shape with sanitized fixtures.
 - **Done:** Antigravity weekly-window semantics resolved from live evidence. The
   Cloud Code endpoint reports each model's single binding limit with no window

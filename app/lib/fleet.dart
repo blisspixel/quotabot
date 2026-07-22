@@ -50,6 +50,8 @@ class FleetScreen extends StatefulWidget {
   final bool showAccounts;
   final FleetRange initialRange;
   final List<AnalyticsStorageNotice> analyticsNotices;
+  final List<AnalyticsStorageIncident> analyticsIncidents;
+  final bool analyticsIncidentInventoryPartial;
 
   const FleetScreen({
     super.key,
@@ -60,6 +62,8 @@ class FleetScreen extends StatefulWidget {
     this.showAccounts = false,
     this.initialRange = FleetRange.now,
     this.analyticsNotices = const [],
+    this.analyticsIncidents = const [],
+    this.analyticsIncidentInventoryPartial = false,
   });
 
   @override
@@ -109,9 +113,15 @@ class _FleetScreenState extends State<FleetScreen> {
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final analyticsNotices = _relevantAnalyticsNotices;
-    final hasBucketStorageConflict = analyticsNotices.any(
-      (notice) => notice.tiers.contains('buckets'),
-    );
+    final analyticsIncidents = [
+      for (final incident in widget.analyticsIncidents)
+        if (!incident.exactAccountInSnapshot) incident,
+    ];
+    final hasBucketStorageConflict =
+        analyticsNotices.any((notice) => notice.tiers.contains('buckets')) ||
+        analyticsIncidents.any(
+          (incident) => incident.tiers.contains('buckets'),
+        );
     final providerCounts = _providerCounts();
     final nodes = <_Node>[];
     for (final q in widget.data) {
@@ -143,14 +153,24 @@ class _FleetScreenState extends State<FleetScreen> {
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (analyticsNotices.isNotEmpty) ...[
-                          _analyticsStorageWarning(analyticsNotices, c),
+                        if (analyticsNotices.isNotEmpty ||
+                            analyticsIncidents.isNotEmpty ||
+                            widget.analyticsIncidentInventoryPartial) ...[
+                          _analyticsStorageWarning(
+                            analyticsNotices,
+                            analyticsIncidents,
+                            c,
+                            inventoryPartial:
+                                widget.analyticsIncidentInventoryPartial,
+                          ),
                           const SizedBox(height: 10),
                         ],
                         _historyView(
                           now,
                           c,
                           hasStorageConflict: hasBucketStorageConflict,
+                          hasUnverifiedStorage:
+                              widget.analyticsIncidentInventoryPartial,
                         ),
                       ],
                     ),
@@ -477,17 +497,40 @@ class _FleetScreenState extends State<FleetScreen> {
 
   Widget _analyticsStorageWarning(
     List<AnalyticsStorageNotice> notices,
-    ({Color panel, Color fg, Color muted, Color line}) c,
-  ) {
-    final message = notices.length == 1
-        ? '${notices.single.summary} The desktop cannot perform this recovery. '
-              'Install the CLI from Setup first if needed.'
-        : 'History incomplete - local analytics changed unexpectedly for '
-              '${notices.length} provider accounts. Affected analytics are '
-              'quarantined. Close every older quotabot process now. Exact merge '
-              'is unavailable. Run quotabot doctor for the scoped '
-              'archive-and-reset path. The desktop cannot perform this '
-              'recovery. Install the CLI from Setup first if needed.';
+    List<AnalyticsStorageIncident> incidents,
+    ({Color panel, Color fg, Color muted, Color line}) c, {
+    required bool inventoryPartial,
+  }) {
+    final summary = notices.isEmpty && incidents.isEmpty
+        ? 'History status incomplete - local analytics markers could not all '
+              'be verified within the bounded inventory scan. An empty '
+              'incident list does not prove that local analytics are clear. '
+              'Current quota and routing are unaffected. Run quotabot doctor '
+              'for details. Install the CLI from Setup first if needed.'
+        : notices.isEmpty
+        ? _unavailableAnalyticsStorageMessage(incidents)
+        : incidents.isEmpty && notices.length == 1
+        ? '${notices.single.summary} The desktop cannot perform this '
+              'recovery. Install the CLI from Setup first if needed.'
+        : incidents.isEmpty
+        ? 'History incomplete - local analytics changed unexpectedly '
+              'for ${notices.length} provider accounts. Affected analytics '
+              'are quarantined. Close every older quotabot process now. '
+              'Exact merge is unavailable. Run quotabot doctor for the '
+              'scoped archive-and-reset path. The desktop cannot perform '
+              'this recovery. Install the CLI from Setup first if needed.'
+        : 'History incomplete - local analytics remain quarantined for '
+              '${notices.length} current and ${incidents.length} accounts '
+              'not currently available. Current quota and routing are '
+              'unaffected. Close every older quotabot process now. Run '
+              'quotabot doctor for current accounts. Reconnect any signed-out '
+              'account for exact recovery targeting. The desktop cannot '
+              'perform this recovery. Install the CLI from Setup first if '
+              'needed.';
+    final message = !inventoryPartial || (notices.isEmpty && incidents.isEmpty)
+        ? summary
+        : '$summary Inventory inspection was also incomplete, so this list '
+              'may omit another local incident.';
     const amber = Color(0xFFD29922);
     return Semantics(
       container: true,
@@ -516,10 +559,35 @@ class _FleetScreenState extends State<FleetScreen> {
     );
   }
 
+  String _unavailableAnalyticsStorageMessage(
+    List<AnalyticsStorageIncident> incidents,
+  ) {
+    if (incidents.length == 1) {
+      final incident = incidents.single;
+      final tier = incident.tiers.length == 1
+          ? incident.tiers.single == 'history'
+                ? 'recent history'
+                : 'hourly analytics'
+          : 'recent history and hourly analytics';
+      return 'History incomplete - a ${incident.providerName} account not '
+          'currently available has local $tier in quarantine. Current quota '
+          'and routing are unaffected. If the account is signed out, reconnect '
+          'it, then run quotabot doctor for exact recovery targeting. The '
+          'desktop cannot perform this recovery. Install the CLI from Setup '
+          'first if needed.';
+    }
+    return 'History incomplete - local analytics for ${incidents.length} '
+        'accounts not currently available remain quarantined. Current quota '
+        'and routing are unaffected. Reconnect any signed-out account, then '
+        'run quotabot doctor for exact recovery targeting. The desktop cannot '
+        'perform this recovery. Install the CLI from Setup first if needed.';
+  }
+
   Widget _historyView(
     int now,
     ({Color panel, Color fg, Color muted, Color line}) c, {
     required bool hasStorageConflict,
+    required bool hasUnverifiedStorage,
   }) {
     final textScaler = MediaQuery.textScalerOf(context);
     final tz = DateTime.now().timeZoneOffset;
@@ -571,6 +639,8 @@ class _FleetScreenState extends State<FleetScreen> {
         _empty(
           hasStorageConflict
               ? 'affected history is unavailable'
+              : hasUnverifiedStorage
+              ? 'history status is unavailable'
               : 'history is still warming up',
           c.muted,
         ),

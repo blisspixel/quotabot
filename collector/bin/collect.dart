@@ -183,16 +183,19 @@ ProviderAdapterRegistration? _providerAdapterForName(String name) {
 }
 
 Map<String, dynamic> _snapshot(
-  List<ProviderQuota> results, [
+  List<ProviderQuota> results,
+  AnalyticsIncidentInventory incidentInventory, [
   QuotaProfile? profile,
-]) =>
-    {
-      'schema': quotabotV1SchemaId,
-      if (profile != null) 'profile': profile.name,
-      'snapshot_source': _usingSimulation ? 'simulation' : 'live',
-      'generated_at': nowEpoch(),
-      'providers': results.map((r) => r.toJson()).toList(),
-    };
+]) {
+  return {
+    'schema': quotabotV1SchemaId,
+    if (profile != null) 'profile': profile.name,
+    'snapshot_source': _usingSimulation ? 'simulation' : 'live',
+    'generated_at': nowEpoch(),
+    'providers': results.map((r) => r.toJson()).toList(),
+    ...analyticsIncidentSnapshotFields(incidentInventory),
+  };
+}
 
 void _printSimulationNotice() {
   stdout.writeln(
@@ -503,16 +506,23 @@ Future<void> main(List<String> rawArgs) async {
 
   // Snapshot and the default status table share one collect.
   final results = await _read(profile, excludedProviders);
+  final incidentInventory = _usingSimulation
+      ? const AnalyticsIncidentInventory.suppressed()
+      : await analyticsStorageIncidentInventory(
+          results,
+          includeUnavailable: profile == null && excludedProviders.isEmpty,
+        );
   if (cmd == 'json' || (cmd.isEmpty && wantsJson)) {
-    print(_jsonPretty(_snapshot(results, profile)));
+    print(_jsonPretty(_snapshot(results, incidentInventory, profile)));
     return;
   }
   if (cmd.isEmpty || cmd == 'status' || cmd == 'doctor') {
     wantsJson
-        ? print(_jsonPretty(_snapshot(results, profile)))
+        ? print(_jsonPretty(_snapshot(results, incidentInventory, profile)))
         : _printDoctor(
             results,
             preferenceOrder: profile?.preferenceOrder ?? const [],
+            analyticsIncidentInventory: incidentInventory,
           );
     return;
   }
@@ -741,6 +751,40 @@ String analyticsStorageSummary(List<AnalyticsStorageNotice> notices) =>
             'quarantined. Close every older quotabot process now. Exact merge '
             'is unavailable. Run quotabot doctor for the scoped '
             'archive-and-reset path.';
+
+/// Additive snapshot field for the bounded local analytics incident inventory.
+/// Incident JSON omits raw accounts and digests and never becomes provider
+/// availability or routing data.
+Map<String, dynamic> analyticsIncidentSnapshotFields(
+  AnalyticsIncidentInventory inventory,
+) =>
+    <String, dynamic>{
+      'analytics_incident_inventory': inventory.toJson(),
+    };
+
+/// Human summary for unresolved incidents whose exact account is absent from
+/// the current snapshot.
+String unavailableAnalyticsIncidentSummary(
+  List<AnalyticsStorageIncident> incidents,
+) {
+  if (incidents.length == 1) {
+    final incident = incidents.single;
+    final provider = incident.providerName;
+    final tier = incident.tiers.length == 1
+        ? incident.tiers.single == 'history'
+            ? 'recent history'
+            : 'hourly analytics'
+        : 'recent history and hourly analytics';
+    return 'History incomplete - a $provider account not currently available '
+        'in this snapshot has local $tier in quarantine. Current quota and '
+        'routing are unaffected. If the account is signed out, reconnect it, '
+        'then run quotabot doctor for exact recovery targeting.';
+  }
+  return 'History incomplete - local analytics for ${incidents.length} '
+      'accounts not currently available in this snapshot remain quarantined. '
+      'Current quota and routing are unaffected. Reconnect any signed-out '
+      'account, then run quotabot doctor for exact recovery targeting.';
+}
 
 /// Builds the analytics series shown by `quotabot stats`.
 ///
@@ -1931,7 +1975,10 @@ void _printHelp() {
     '  --include-accounts  report: include account labels in Markdown',
   );
   stdout.writeln(
-    '  --account=VALUE     check: exact returned account; verify recovery: exact account from quotabot --json',
+    '  --account=VALUE     check: exact returned account; recovery: exact current account from unfiltered quotabot --json',
+  );
+  stdout.writeln(
+    '                      if an incident account is unavailable, reconnect it and rerun doctor first',
   );
   stdout.writeln(
     '  --profile=NAME      use a local named profile view',
@@ -2003,7 +2050,7 @@ void _printHelp() {
     '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
   );
   stdout.writeln(
-    '  --recover-analytics=P --account=A --tier=history|buckets  inspect one exact analytics quarantine; add --yes to archive and restart that tier empty',
+    '  --recover-analytics=P --account=A --tier=history|buckets  inspect one exact current-account quarantine; add --yes to archive and restart that tier empty',
   );
   stdout.writeln(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
@@ -2896,6 +2943,7 @@ String doctorModelSummary(
 void _printDoctor(
   List<ProviderQuota> results, {
   List<String> preferenceOrder = const [],
+  required AnalyticsIncidentInventory analyticsIncidentInventory,
 }) {
   final now = nowEpoch();
   final storageNoticesByIdentity = _usingSimulation
@@ -2904,6 +2952,10 @@ void _printDoctor(
           for (final notice in analyticsStorageNoticesForQuotas(results))
             quotaIdentityKey(notice.provider, notice.account): notice,
         };
+  final unavailableIncidents = [
+    for (final incident in analyticsIncidentInventory.incidents)
+      if (!incident.exactAccountInSnapshot) incident,
+  ];
   print(
     '${style.bold('quotabot')}  ${style.dim('your quota across providers, 0 usage tokens')}\n',
   );
@@ -2997,6 +3049,42 @@ void _printDoctor(
           '  $indent ${_stateColumn('')} ${style.dim('-> inspect scoped reset: '
               'quotabot verify --recover-analytics=${q.provider} '
               '--account=EXACT_ACCOUNT --tier=$tier')}',
+        );
+      }
+    }
+  }
+
+  if (unavailableIncidents.isNotEmpty ||
+      analyticsIncidentInventory.state == 'partial') {
+    print('\n${style.bold('Local analytics incidents')}');
+    if (unavailableIncidents.isNotEmpty) {
+      print(
+        '  ${style.yellow(unavailableAnalyticsIncidentSummary(unavailableIncidents))}',
+      );
+    }
+    if (analyticsIncidentInventory.state == 'partial') {
+      print(
+        '  ${style.yellow('Inventory incomplete - local marker inspection was '
+            'bounded or could not verify every marker. An empty incident list '
+            'does not prove that local analytics are clear. Current quota and '
+            'routing are unaffected.')}',
+      );
+    }
+    for (final incident in unavailableIncidents) {
+      final provider = incident.providerName;
+      final age = compactAge(
+        (now - incident.recordedAt).clamp(0, 1 << 31).toInt(),
+        suffix: ' ago',
+      );
+      print(
+        '  $provider  ${incident.tiers.join(' + ')}  recorded $age  '
+        '(exact account not in snapshot)',
+      );
+      for (final tier in incident.tiers) {
+        print(
+          '    -> after reconnecting: quotabot verify '
+          '--recover-analytics=${incident.provider} '
+          '--account=EXACT_ACCOUNT --tier=$tier',
         );
       }
     }

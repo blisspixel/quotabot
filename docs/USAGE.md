@@ -119,21 +119,38 @@ checkpoint. If neither exists, an already eligible provider-only series remains
 usable only for an unambiguous single-account snapshot. Its conflict burn uses
 the more conservative post-pooling result from both possible hourly cutoff sets,
 while healthy providers keep the result for the actual current hour offset.
-This prevents quarantine from improving that provider's relative rank as time passes. The
-desktop 7d/90d ranges show an accessible amber notice for any affected tier;
-only a bucket conflict replaces the bucket
-view's warming copy. `doctor` prints every affected tier, and `stats --json`
-adds `storage_notice` when the row's hourly bucket tier is affected.
+This prevents quarantine from improving that provider's relative rank as time
+passes. The desktop 7d/90d ranges show an accessible amber notice for any
+affected tier; only a bucket conflict replaces the bucket view's warming copy.
+An incomplete incident scan replaces warming copy with an unknown status rather
+than implying that analytics are clean. `doctor` prints every current affected
+tier, and `stats --json` adds `storage_notice` when the row's hourly bucket tier
+is affected.
 The **Now** view and current quota evidence are unchanged. Close all older
 quotabot processes immediately to prevent further divergence. Closing them does
-not restore quarantined history. `doctor` prints an inspection template for
-each affected tier. Obtain the exact account value from `quotabot --json`, then
-run the template without `--yes` for a read-only plan:
+not restore quarantined history.
+
+The default unfiltered `quotabot --json` snapshot includes
+`analytics_incident_inventory`. `complete` proves that its bounded scan verified
+every marker it inspected; `partial` means its incident list may be incomplete,
+and `suppressed` is used by deterministic simulation. Current incidents carry a
+`provider_row_index` that joins safely to the `providers` array. Unavailable
+incidents expose no account or digest. Profile and exclusion views inspect only
+their visible identities, so they do not reintroduce hidden provider metadata.
+
+`doctor` prints an inspection template for each current affected tier. Obtain
+the exact account value from the matching current provider row, then run the
+template without `--yes` for a read-only plan:
 
 ```bash
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=buckets --json
 ```
+
+If the incident account is not in the current snapshot, reconnect it and rerun
+`doctor` first. With several current accounts for one provider, use
+`provider_row_index` rather than guessing. The incident reference is correlation
+metadata, not recovery authority, and cannot replace the exact account.
 
 The inspection makes no provider or model call and creates no recovery lock or
 bundle. It reports the active tiers, whether the target is ready, the planned

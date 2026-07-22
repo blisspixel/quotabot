@@ -67,6 +67,62 @@ const Size _expandedMinimumWindowSize = Size(320, 120);
 Size desktopMinimumWindowSize({required bool compact}) =>
     compact ? _compactMinimumWindowSize : _expandedMinimumWindowSize;
 
+@visibleForTesting
+List<AnalyticsStorageIncident> analyticsIncidentsForView(
+  Iterable<AnalyticsStorageIncident> incidents,
+  QuotaProfile profile,
+  Set<String> hidden,
+) {
+  final effectiveProfile = profileWithoutUiPrefs(profile);
+  final hiddenTargets = {
+    ...effectiveProfile.hiddenProviders,
+    ...hidden,
+  }.map(normalizeHiddenTarget).nonNulls.toSet();
+  bool hasExactAccountScope(String provider) =>
+      effectiveProfile.accounts.entries.any(
+        (entry) =>
+            normalizeProviderId(entry.key) == provider &&
+            entry.value.isNotEmpty,
+      );
+  return [
+    for (final incident in incidents)
+      if (effectiveProfile.allowsProviderAdapter(
+            incident.provider,
+            isLocal: false,
+          ) &&
+          !hasExactAccountScope(incident.provider) &&
+          !hiddenTargets.any(
+            (target) =>
+                target == incident.provider ||
+                target.startsWith('${incident.provider}|'),
+          ))
+        incident,
+  ];
+}
+
+@visibleForTesting
+bool analyticsIncidentPartialForView(
+  bool inventoryPartial,
+  Set<String> uncertainProviders,
+  bool globalUncertainty,
+  QuotaProfile profile,
+  Set<String> hidden,
+) {
+  if (!inventoryPartial) return false;
+  if (globalUncertainty || uncertainProviders.isEmpty) return true;
+  final effectiveProfile = profileWithoutUiPrefs(profile);
+  final hiddenProviders = {...effectiveProfile.hiddenProviders, ...hidden}
+      .map(normalizeHiddenTarget)
+      .nonNulls
+      .where((target) => !target.contains('|'))
+      .toSet();
+  return uncertainProviders.any(
+    (provider) =>
+        effectiveProfile.allowsProviderAdapter(provider, isLocal: false) &&
+        !hiddenProviders.contains(provider),
+  );
+}
+
 const Color _quotaGreen = Color(0xFF3FB950);
 const String _windowsAppUserModelId = 'io.quotabot.app';
 const String _windowsNotificationGuid = 'f3063433-3b97-5b9f-9448-2f70cbbf4ad1';
@@ -488,6 +544,10 @@ class _DashboardState extends State<Dashboard>
   Map<String, List<HeadroomBucket>> _buckets = {};
   Map<String, BurnStat> _burnStats = {};
   List<AnalyticsStorageNotice> _analyticsStorageNotices = const [];
+  List<AnalyticsStorageIncident> _analyticsStorageIncidents = const [];
+  bool _analyticsIncidentInventoryPartial = false;
+  Set<String> _analyticsIncidentUncertainProviders = const {};
+  bool _analyticsIncidentGlobalUncertainty = false;
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   String? _lastRefreshError;
   String? _lastWebhookDeliveryStatus;
@@ -524,6 +584,22 @@ class _DashboardState extends State<Dashboard>
 
   List<ProviderQuota> get _visible =>
       _profiledData.where((q) => !hiddenTargetsQuota(_hidden, q)).toList();
+
+  List<AnalyticsStorageIncident> get _visibleAnalyticsStorageIncidents {
+    return analyticsIncidentsForView(
+      _analyticsStorageIncidents,
+      _activeProfile,
+      _hidden,
+    );
+  }
+
+  bool get _analyticsIncidentPartialVisible => analyticsIncidentPartialForView(
+    _analyticsIncidentInventoryPartial,
+    _analyticsIncidentUncertainProviders,
+    _analyticsIncidentGlobalUncertainty,
+    _activeProfile,
+    _hidden,
+  );
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
@@ -1075,9 +1151,22 @@ class _DashboardState extends State<Dashboard>
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final analyticsStorageNotices = widget._hostIntegration
-          ? analyticsStorageNoticesForQuotas(active)
-          : const <AnalyticsStorageNotice>[];
+      final analyticsStorage = widget._hostIntegration
+          ? await Isolate.run(() async {
+              final notices = analyticsStorageNoticesForQuotas(active);
+              final inventory = await analyticsStorageIncidentInventory(active);
+              return (notices: notices, inventory: inventory);
+            })
+          : (
+              notices: const <AnalyticsStorageNotice>[],
+              inventory: const AnalyticsIncidentInventory.suppressed(),
+            );
+      final analyticsStorageNotices = analyticsStorage.notices;
+      final analyticsIncidentInventory = analyticsStorage.inventory;
+      final analyticsStorageIncidents = [
+        for (final incident in analyticsIncidentInventory.incidents)
+          if (!incident.exactAccountInSnapshot) incident,
+      ];
       final burnStats = widget._hostIntegration
           ? recentBurnStatsByQuota(active, nowSec)
           : <String, BurnStat>{};
@@ -1107,6 +1196,13 @@ class _DashboardState extends State<Dashboard>
         _buckets = {};
         _burnStats = burnStats;
         _analyticsStorageNotices = analyticsStorageNotices;
+        _analyticsStorageIncidents = analyticsStorageIncidents;
+        _analyticsIncidentInventoryPartial =
+            analyticsIncidentInventory.state == 'partial';
+        _analyticsIncidentUncertainProviders =
+            analyticsIncidentInventory.uncertainProviders;
+        _analyticsIncidentGlobalUncertainty =
+            analyticsIncidentInventory.globalUncertainty;
         _routeSummary = routeSummary;
         _lastRefreshError = anyLive
             ? null
@@ -1192,6 +1288,10 @@ class _DashboardState extends State<Dashboard>
       _buckets = {};
       _burnStats = cli_demo.demoBurnStats();
       _analyticsStorageNotices = const [];
+      _analyticsStorageIncidents = const [];
+      _analyticsIncidentInventoryPartial = false;
+      _analyticsIncidentUncertainProviders = const {};
+      _analyticsIncidentGlobalUncertainty = false;
       _routeSummary = demoRoutedRequestSummary();
       final rawInsights = <String, Insights>{};
       for (final q in demo) {
@@ -1545,6 +1645,9 @@ class _DashboardState extends State<Dashboard>
                   showAccounts: _showAccounts,
                   routedRequests: _routeSummary,
                   analyticsNotices: _analyticsStorageNotices,
+                  analyticsIncidents: _visibleAnalyticsStorageIncidents,
+                  analyticsIncidentInventoryPartial:
+                      _analyticsIncidentPartialVisible,
                   initialRange: _analyticsRange,
                 ),
               ),

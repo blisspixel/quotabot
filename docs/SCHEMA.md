@@ -17,6 +17,10 @@ The root object contains:
 - `account_filter`: optional exact account label when a router narrowed a view.
 - `error`: optional fail-soft error note.
 - `providers`: an array of provider snapshots.
+- `analytics_incident_inventory`: optional additive
+  `quotabot.analytics-incident-inventory.v1` local inventory. Current CLI
+  snapshots emit it; other transports may omit it. It is diagnostic metadata,
+  never quota, availability, routing, or recovery authorization.
 
 Provider snapshots keep these stable fields:
 
@@ -447,6 +451,54 @@ runtime that is not running) passes the honesty contract but has
 failures, provider drift, and contract drift. The CLI exits 65 when any check
 fails, and also exits 65 when `--require-live` is set and no adapter was selected
 or a selected adapter did not return a fresh accepted read.
+
+## `quotabot.analytics-incident-inventory.v1`
+
+Current CLI `quotabot.v1` snapshots include one bounded local analytics incident
+inventory:
+
+- `schema`: always `quotabot.analytics-incident-inventory.v1`.
+- `state`: `complete`, `partial`, or `suppressed`. Only `complete` proves that
+  the configured bounded scan finished without invalid, unverifiable, or
+  truncated evidence. `partial` means the incident list may be incomplete.
+  Deterministic simulation uses `suppressed` and reads no host markers.
+- `scope`: `all_local` for a default unfiltered snapshot,
+  `visible_snapshot` when a profile or exclusion is active, or `simulation`.
+  Visible-only scope directly inspects exact rows already present and does not
+  enumerate out-of-scope local markers.
+- `scanned_markers`: number of candidate migration markers inspected by the
+  bounded full scan.
+- `unverifiable_markers`: valid markers whose current conflict state could not
+  be proven because exact local identity evidence was unavailable.
+- `invalid_markers`: candidate marker files rejected for type, size, name,
+  schema, provider, digest, timestamp, or parse failure.
+- `truncated`: true when a directory-entry, marker-count, output-count, or total
+  byte bound stopped the scan.
+- `incidents`: zero or more `quotabot.analytics-incident.v1` objects.
+
+Each incident contains:
+
+- `schema`: always `quotabot.analytics-incident.v1`.
+- `state`: always `diverged`.
+- `provider`: canonical registered provider id.
+- `tiers`: one or both fixed values `history` and `buckets`.
+- `recorded_at`: Unix epoch second when current quotabot first recorded the
+  incident. A migrated older explicit marker may retain its marker observation
+  time when no separate first-recorded field existed.
+- `exact_account_in_snapshot`: true only when the enclosing `providers` array
+  already contains the exact identity.
+- `provider_row_index`: present only when `exact_account_in_snapshot` is true;
+  zero-based index into the enclosing `providers` array. This is the safe join
+  for multi-account automation.
+- `incident_id`: optional random 128-bit lowercase hexadecimal local correlation
+  reference. New and successfully upgraded valid markers retain it across
+  snapshots and scoped recovery while any tier remains unresolved. It is not an
+  account identifier, recovery target, credential, or authorization token.
+
+Incident JSON never contains an unavailable account, account digest, local
+path, prompt, code, credential, or exception. If the exact account is absent,
+reconnect it and obtain the exact current row before invoking recovery. Do not
+infer a clean cache from `incidents: []` unless `state` is `complete`.
 
 ## `quotabot.analytics-recovery.v1`
 

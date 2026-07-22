@@ -143,9 +143,16 @@ wrong-account, or concurrently superseded evidence. History and all other local
 metadata remain unchanged.
 
 If `doctor` or desktop Analytics reports a mixed-version analytics quarantine,
-first stop every older quotabot process. Copy the provider row's exact `account`
-field from `quotabot --json`, then inspect one affected tier without writing
-recovery data or contacting a provider:
+first stop every older quotabot process. A default unfiltered `quotabot --json`
+snapshot includes a bounded `analytics_incident_inventory`; its `state` is
+`complete` only when every inspected marker was verified. The inventory keeps
+the provider, affected tiers, stable local incident reference, and a safe
+provider-row index when the exact account is already in that snapshot. It never
+publishes an unavailable account, account digest, local path, or recovery
+authority. Profiled and excluded views inspect visible rows only.
+
+Copy the current provider row's exact `account` field, then inspect one affected
+tier without writing recovery data or contacting a provider:
 
 ```bash
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
@@ -159,6 +166,13 @@ bounded recovery path, not an exact merge of ambiguous generations. Recovery
 refuses a lossy legacy file when it cannot prove that the file belongs only to
 the requested account. Retrying a completed command returns its prior evidence
 bundle receipt instead of treating the target as a new failure.
+
+If the incident says its exact account is not in the snapshot, quotabot cannot
+truthfully reconstruct that recovery target from the digest-private inventory.
+Reconnect the account, rerun `quotabot doctor`, and use the now-visible exact
+account. With several accounts for one provider, match the incident's
+`provider_row_index` to the `providers` array before copying the account. A
+partial inventory is not proof that local analytics are clear.
 
 An ordinary live-read failure follows the same evidence rule. Cached quota keeps
 its original capture time and last observed percentage. A reset time passing does

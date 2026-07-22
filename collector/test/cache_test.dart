@@ -1756,7 +1756,7 @@ void main() {
   });
 
   test('mixed-version analytics writes fail closed without losing evidence',
-      () {
+      () async {
     const provider = codexProviderId;
     const account = 'acct';
     const now = 1782000000;
@@ -1839,6 +1839,20 @@ void main() {
       loadBuckets(provider, account: account, fallbackToProvider: false),
       isEmpty,
     );
+    final visibleInventory = await analyticsStorageIncidentInventory([initial]);
+    expect(
+      visibleInventory.complete,
+      isTrue,
+      reason: jsonEncode(visibleInventory.toJson()),
+    );
+    expect(visibleInventory.incidents, hasLength(1));
+    expect(
+      visibleInventory.incidents.single.exactAccountInSnapshot,
+      isTrue,
+    );
+    expect(visibleInventory.incidents.single.providerRowIndex, 0);
+    final initialIncidentId = visibleInventory.incidents.single.incidentId;
+    expect(initialIncidentId, matches(RegExp(r'^[a-f0-9]{32}$')));
     final burnAfter = recentBurnStatsByQuota([initial], now);
     expect(burnAfter[accountKey]?.perHour, burnBefore[accountKey]?.perHour);
     expect(
@@ -1884,12 +1898,245 @@ void main() {
     expect(marker['schema'], 'quotabot.analytics-migration.v1');
     expect(marker['provider'], provider);
     expect(marker['account_digest'], accountIdentityDigest(account));
+    expect(marker['history_conflict'], isTrue);
+    expect(marker['buckets_conflict'], isTrue);
+    expect(marker['incident_id'], initialIncidentId);
+    expect(marker['incident_observed_at'], isA<int>());
     expect(markerText, isNot(contains(account)));
     expect(markerText, isNot(contains(cacheDir().path)));
     expect(
       analyticsStorageNoticesForQuotas([initial]).single.toJson(),
       containsPair('state', 'diverged'),
     );
+    final hiddenInventory = await analyticsStorageIncidentInventory(const []);
+    expect(hiddenInventory.complete, isTrue);
+    expect(hiddenInventory.incidents, hasLength(1));
+    expect(
+      hiddenInventory.incidents.single.exactAccountInSnapshot,
+      isFalse,
+    );
+    expect(hiddenInventory.incidents.single.incidentId, marker['incident_id']);
+    expect(hiddenInventory.incidents.single.tiers, ['history', 'buckets']);
+    final inventoryJson = jsonEncode(hiddenInventory.toJson());
+    expect(inventoryJson, contains('"exact_account_in_snapshot":false'));
+    expect(inventoryJson, contains('"state":"complete"'));
+    expect(inventoryJson, isNot(contains(account)));
+    expect(inventoryJson, isNot(contains(accountIdentityDigest(account))));
+    expect(inventoryJson, isNot(contains(cacheDir().path)));
+  });
+
+  test('analytics incident inventory validates markers and stays bounded',
+      () async {
+    const provider = codexProviderId;
+    final dir = cacheDir();
+    for (var index = 0; index < 300; index++) {
+      final digest = accountIdentityDigest('account-$index');
+      File(
+        '${dir.path}/analytics_migration_${provider}_account_$digest.json',
+      ).writeAsStringSync(
+        jsonEncode({
+          'schema': 'quotabot.analytics-migration.v1',
+          'provider': provider,
+          'account_digest': digest,
+          'observed_at': 1782000000 + index,
+          'history_conflict': true,
+          'incident_id': index.toRadixString(16).padLeft(32, '0'),
+        }),
+      );
+    }
+    final ignoredDigest = accountIdentityDigest('ignored');
+    File(
+      '${dir.path}/analytics_migration_${provider}_account_$ignoredDigest.json',
+    ).writeAsStringSync(
+      jsonEncode({
+        'schema': 'quotabot.analytics-migration.v1',
+        'provider': provider,
+        'account_digest': ignoredDigest,
+        'observed_at': 1782000500,
+      }),
+    );
+    File('${dir.path}/analytics_migration_forged.json').writeAsStringSync(
+      jsonEncode({
+        'schema': 'quotabot.analytics-migration.v1',
+        'provider': provider,
+        'account_digest': ignoredDigest,
+        'observed_at': 1782000500,
+        'buckets_conflict': true,
+      }),
+    );
+
+    final inventory = await analyticsStorageIncidentInventory(const []);
+    final incidents = inventory.incidents;
+
+    expect(incidents.length, inInclusiveRange(1, 256));
+    expect(inventory.complete, isFalse);
+    expect(inventory.truncated, isTrue);
+    expect(inventory.globalUncertainty, isTrue);
+    expect(
+        incidents.every((incident) => incident.provider == provider), isTrue);
+    expect(
+      incidents.every((incident) => incident.tiers.length == 1),
+      isTrue,
+    );
+    expect(jsonEncode(incidents.map((entry) => entry.toJson()).toList()),
+        isNot(contains(ignoredDigest)));
+  });
+
+  test('analytics incident inventory respects visible scope and reports gaps',
+      () async {
+    final now = nowEpoch();
+    const visibleAccount = 'visible-account';
+    final visibleQuota = ProviderQuota(
+      provider: codexProviderId,
+      displayName: 'Codex',
+      account: visibleAccount,
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    saveSnapshot(visibleQuota);
+    final dir = cacheDir();
+    void writeMarker(
+      String provider,
+      String digest,
+      Map<String, dynamic> fields,
+    ) {
+      File(
+        '${dir.path}/analytics_migration_${provider}_account_$digest.json',
+      ).writeAsStringSync(
+        jsonEncode({
+          'schema': 'quotabot.analytics-migration.v1',
+          'provider': provider,
+          'account_digest': digest,
+          'observed_at': now,
+          ...fields,
+        }),
+      );
+    }
+
+    final visibleDigest = accountIdentityDigest(visibleAccount);
+    final hiddenDigest = accountIdentityDigest('hidden-account');
+    final unverifiableDigest = accountIdentityDigest('unverifiable-account');
+    final invalidDigest = accountIdentityDigest('invalid-account');
+    writeMarker(codexProviderId, visibleDigest, {
+      'history_conflict': true,
+      'incident_id': '0123456789abcdef0123456789abcdef',
+    });
+    writeMarker(claudeProviderId, hiddenDigest, {
+      'buckets_conflict': true,
+    });
+    writeMarker(grokProviderId, unverifiableDigest, {
+      'history': {'digest': 'unverifiable', 'count': 0},
+    });
+    final invalidMarker = File(
+      '${dir.path}/analytics_migration_${antigravityProviderId}_account_$invalidDigest.json',
+    );
+    invalidMarker.writeAsStringSync('{}');
+
+    final visible = await analyticsStorageIncidentInventory(
+      [visibleQuota],
+      includeUnavailable: false,
+      now: now,
+    );
+    expect(visible.complete, isTrue);
+    expect(visible.scope, 'visible_snapshot');
+    expect(visible.scannedMarkers, 0);
+    expect(visible.incidents, hasLength(1));
+    expect(visible.incidents.single.provider, codexProviderId);
+    expect(visible.incidents.single.providerRowIndex, 0);
+    expect(jsonEncode(visible.toJson()), isNot(contains(hiddenDigest)));
+    expect(jsonEncode(visible.toJson()), isNot(contains(claudeProviderId)));
+
+    final full = await analyticsStorageIncidentInventory(
+      const [],
+      now: now,
+    );
+    expect(full.complete, isFalse);
+    expect(full.scope, 'all_local');
+    expect(
+      full.incidents,
+      hasLength(2),
+      reason: jsonEncode(full.toJson()),
+    );
+    expect(full.unverifiableMarkers, 1);
+    expect(full.invalidMarkers, 1);
+    expect(full.uncertainProviders, contains(grokProviderId));
+    expect(full.globalUncertainty, isTrue);
+    final hiddenIncident = full.incidents.singleWhere(
+      (incident) => incident.provider == claudeProviderId,
+    );
+    expect(hiddenIncident.recordedAt, now);
+    expect(hiddenIncident.incidentId, matches(RegExp(r'^[a-f0-9]{32}$')));
+    final upgradedHidden = jsonDecode(
+      File(
+        '${dir.path}/analytics_migration_${claudeProviderId}_account_$hiddenDigest.json',
+      ).readAsStringSync(),
+    ) as Map<String, dynamic>;
+    expect(upgradedHidden['incident_observed_at'], now);
+    final healthyMarker = jsonDecode(
+      File(
+        '${dir.path}/analytics_migration_${grokProviderId}_account_$unverifiableDigest.json',
+      ).readAsStringSync(),
+    ) as Map<String, dynamic>;
+    expect(healthyMarker, isNot(contains('incident_id')));
+    expect(healthyMarker, isNot(contains('incident_observed_at')));
+    final fullJson = jsonEncode(full.toJson());
+    expect(fullJson, contains('"state":"partial"'));
+    expect(fullJson, isNot(contains(visibleDigest)));
+    expect(fullJson, isNot(contains(hiddenDigest)));
+    expect(fullJson, isNot(contains(unverifiableDigest)));
+    expect(fullJson, isNot(contains(invalidDigest)));
+  });
+
+  test('analytics incident inventory fails soft on identity lock failure',
+      () async {
+    final now = nowEpoch();
+    const provider = codexProviderId;
+    const account = 'contended-account';
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      plan: 'pro',
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    saveSnapshot(quota);
+    final digest = accountIdentityDigest(account);
+    final marker = File(
+      '${cacheDir().path}/analytics_migration_${provider}_account_$digest.json',
+    );
+    marker.writeAsStringSync(
+      jsonEncode({
+        'schema': 'quotabot.analytics-migration.v1',
+        'provider': provider,
+        'account_digest': digest,
+        'observed_at': now,
+        'history_conflict': true,
+      }),
+    );
+    final lockFile = File(
+      '${cacheDir().path}/evidence_${provider}_account_$digest.lock',
+    );
+    if (lockFile.existsSync()) lockFile.deleteSync();
+    Directory(lockFile.path).createSync();
+    final clock = Stopwatch()..start();
+    final inventory = await analyticsStorageIncidentInventory(
+      [quota],
+      includeUnavailable: false,
+      now: now,
+    );
+    clock.stop();
+
+    expect(clock.elapsed, lessThan(const Duration(seconds: 3)));
+    expect(inventory.state, 'partial');
+    expect(inventory.uncertainProviders, {provider});
+    expect(inventory.globalUncertainty, isFalse);
+    expect(inventory.incidents, hasLength(1));
+    expect(inventory.incidents.single.incidentId, isNull);
+    final output = jsonEncode(inventory.toJson());
+    expect(output, isNot(contains(digest)));
+    expect(output, isNot(contains(cacheDir().path)));
   });
 
   test('analytics recovery inspection is read-only and recovery is scoped', () {
@@ -2012,7 +2259,7 @@ void main() {
     expect(loadHistory(provider, account: account), hasLength(1));
   });
 
-  test('analytics recovery clears only the selected conflicted tier', () {
+  test('analytics recovery clears only the selected conflicted tier', () async {
     const provider = codexProviderId;
     const account = 'acct';
     const now = 1782000000;
@@ -2047,6 +2294,11 @@ void main() {
       analyticsStorageNotice(provider, account: account)?.tiers,
       ['history', 'buckets'],
     );
+    final initialInventory = await analyticsStorageIncidentInventory([
+      quota(20, now),
+    ]);
+    final incidentId = initialInventory.incidents.single.incidentId;
+    final recordedAt = initialInventory.incidents.single.recordedAt;
 
     final historyRecovery =
         recoverAnalyticsStorage(provider, account, 'history');
@@ -2060,6 +2312,12 @@ void main() {
       analyticsStorageNotice(provider, account: account)?.tiers,
       ['buckets'],
     );
+    final partialInventory = await analyticsStorageIncidentInventory([
+      quota(20, now),
+    ]);
+    expect(partialInventory.incidents.single.tiers, ['buckets']);
+    expect(partialInventory.incidents.single.incidentId, incidentId);
+    expect(partialInventory.incidents.single.recordedAt, recordedAt);
     expect(loadHistory(provider, account: account), isEmpty);
     expect(
       loadBuckets(provider, account: account, fallbackToProvider: false),
@@ -2074,6 +2332,11 @@ void main() {
     expect(analyticsStorageNotice(provider, account: account), isNull);
     expect(legacyBuckets.existsSync(), isFalse);
     expect(canonicalBuckets.existsSync(), isFalse);
+    final resolvedInventory = await analyticsStorageIncidentInventory([
+      quota(20, now),
+    ]);
+    expect(resolvedInventory.incidents, isEmpty);
+    expect(resolvedInventory.complete, isTrue);
   });
 
   test('malformed analytics marker can be archived one tier at a time', () {

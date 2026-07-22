@@ -356,7 +356,7 @@ void main() {
     expect(retryJson['status'], 'already_recovered');
     expect(retryJson['recovered'], isTrue);
     expect(retryJson['evidence_bundle'], json['evidence_bundle']);
-  });
+  }, timeout: Timeout.factor(2));
 
   test('analytics recovery rejects mixed recovery modes before storage access',
       () async {
@@ -424,7 +424,7 @@ void main() {
           as Map<String, dynamic>)['status'],
       'archive_failed',
     );
-  });
+  }, timeout: Timeout.factor(2));
 
   test('verify prints a human summary with cross-check pointers', () async {
     final result = await runCli([

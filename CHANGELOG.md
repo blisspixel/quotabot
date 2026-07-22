@@ -5,6 +5,14 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Default quota snapshots now include a bounded
+  `quotabot.analytics-incident-inventory.v1` object. Mixed-version analytics
+  incidents remain visible when an account is no longer in the current
+  snapshot, while profile and exclusion views inspect only their visible rows.
+  Complete, partial, truncated, invalid, and unverifiable scan outcomes are
+  explicit. Incident records contain no unavailable account, account digest,
+  path, or recovery authority; a current incident carries only its safe
+  provider-row index for automation joins.
 - Mixed-version analytics warnings now lead to a scoped local recovery path.
   `verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
   --tier=history|buckets` performs a no-write inspection; adding `--yes`
@@ -61,6 +69,13 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Analytics quarantine no longer disappears or falls back to ordinary warming
+  copy solely because the affected account is unavailable. Existing valid
+  markers are upgraded under the identity evidence lock with explicit conflict
+  state, a stable random incident reference, and a first-recorded timestamp.
+  Desktop Analytics and `doctor` use neutral account-availability wording,
+  explain the reconnect requirement, preserve the CLI-install handoff, and warn
+  when a bounded inventory scan cannot prove a clean result.
 - Mixed-version writes can no longer silently split account-scoped analytics
   between canonical and legacy filenames. Versioned, permission-hardened
   checkpoints
