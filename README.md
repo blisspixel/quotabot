@@ -184,14 +184,16 @@ tier without writing recovery data or contacting a provider:
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
 ```
 
-After reviewing the impact, add `--yes` to archive that tier's canonical and
-legacy files into an owner-only local evidence bundle and restart only that tier
-empty. Current quota, credentials, preferences, other accounts, provider-level
-compatibility analytics, and the unselected tier remain in place. This is a
-bounded recovery path, not an exact merge of ambiguous generations. Recovery
-refuses a lossy legacy file when it cannot prove that the file belongs only to
-the requested account. Retrying a completed command returns its prior evidence
-bundle receipt instead of treating the target as a new failure.
+The read-only inspection states the planned action before confirmation. After
+reviewing it, add `--yes` to archive that tier's canonical and legacy files into
+an owner-only local evidence bundle. Raw history is then exactly merged only
+when strict row validation and one unique ordered-checkpoint overlap prove both
+branch deltas. Ambiguous history and aggregate buckets restart only the selected
+tier empty. Current quota, credentials, preferences, other accounts,
+provider-level compatibility analytics, and the unselected tier remain in
+place. Recovery refuses a lossy legacy file when it cannot prove that the file
+belongs only to the requested account. Retrying a completed command returns its
+prior evidence bundle receipt instead of treating the target as a new failure.
 
 If the incident says its exact account is not in the snapshot, quotabot cannot
 truthfully reconstruct that recovery target from the digest-private inventory.

@@ -1932,6 +1932,216 @@ void main() {
     expect(inventoryJson, isNot(contains(cacheDir().path)));
   });
 
+  test('analytics recovery exactly merges uniquely aligned raw history', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          plan: 'pro',
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+
+    final baseline = quota(20, now);
+    final canonicalOnly = quota(25, now + 30);
+    final legacyOnly = quota(35, now + 60);
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync('${jsonEncode(baseline.toJson())}\n');
+
+    saveSnapshot(canonicalOnly);
+    legacyHistory.writeAsStringSync(
+      '${legacyHistory.readAsStringSync()}${jsonEncode(legacyOnly.toJson())}\n',
+    );
+
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['history'],
+    );
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'history');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isTrue);
+    expect(inspection.toJson()['impact'], {
+      'selected_tier': 'would be archived, then exactly merged',
+      'exact_merge_available': true,
+      'exact_merge_performed': false,
+      'preserved': isA<List<dynamic>>(),
+    });
+
+    final result = recoverAnalyticsStorage(provider, account, 'history');
+    expect(result.recovered, isTrue);
+    expect(result.exactMergeAvailable, isTrue);
+    expect(result.exactMergePerformed, isTrue);
+    expect(result.status, 'recovered');
+    expect(result.detail, contains('exactly merged'));
+    expect(legacyHistory.existsSync(), isFalse);
+    expect(analyticsStorageNotice(provider, account: account), isNull);
+    expect(
+      loadHistory(provider, account: account).map((row) => row.asOf),
+      [now, now + 30, now + 60],
+    );
+
+    final canonicalHistory = File(
+      '${cacheDir().path}/history_${provider}_${accountStorageStem(account)}.jsonl',
+    );
+    final manifestFile = File('${result.evidenceBundle}/manifest.json');
+    final manifest =
+        jsonDecode(manifestFile.readAsStringSync()) as Map<String, dynamic>;
+    expect(manifest['exact_merge_performed'], isTrue);
+    expect(manifest['selected_tier_action'], 'archived_then_exactly_merged');
+    expect(manifest['merged_rows'], 3);
+    expect(manifest['merged_sha256'], matches(RegExp(r'^[a-f0-9]{64}$')));
+    expect(manifest['merged_bytes'], canonicalHistory.lengthSync());
+    final manifestText = jsonEncode(manifest);
+    expect(manifestText, isNot(contains(account)));
+    expect(manifestText, isNot(contains(cacheDir().path)));
+
+    manifest['state'] = 'checkpoint_pending';
+    manifest['exact_merge_performed'] = false;
+    manifestFile.writeAsStringSync(jsonEncode(manifest));
+    final interrupted = recoverAnalyticsStorage(provider, account, 'history');
+    expect(interrupted.status, 'recovered_receipt_incomplete');
+    expect(interrupted.exactMergePerformed, isTrue);
+
+    manifest['state'] = 'complete';
+    manifest['exact_merge_performed'] = true;
+    manifestFile.writeAsStringSync(jsonEncode(manifest));
+    final retry = recoverAnalyticsStorage(provider, account, 'history');
+    expect(retry.status, 'already_recovered');
+    expect(retry.exactMergePerformed, isTrue);
+
+    legacyHistory
+        .writeAsStringSync('${jsonEncode(quota(40, now + 90).toJson())}\n');
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['history'],
+    );
+    expect(loadHistory(provider, account: account), isEmpty);
+  });
+
+  test('ambiguous raw history overlap retains archive-and-reset recovery', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final repeated = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final later = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now + 60,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 30)],
+    );
+    final encoded = jsonEncode(repeated.toJson());
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync('$encoded\n$encoded\n');
+
+    saveSnapshot(later);
+    legacyHistory.writeAsStringSync(
+      '${legacyHistory.readAsStringSync()}${jsonEncode(later.toJson())}\n',
+    );
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'history');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isFalse);
+    expect(
+      (inspection.toJson()['impact'] as Map)['selected_tier'],
+      'would be archived, then restarted empty',
+    );
+  });
+
+  test('nonmonotonic raw history retains archive-and-reset recovery', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final baseline = [quota(20, now), quota(25, now + 60)];
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync(
+        '${baseline.map((row) => jsonEncode(row.toJson())).join('\n')}\n',
+      );
+
+    saveSnapshot(quota(30, now + 120));
+    legacyHistory.writeAsStringSync(
+      '${baseline.map((row) => jsonEncode(row.toJson())).join('\n')}\n'
+      '${jsonEncode(quota(40, now + 240).toJson())}\n'
+      '${jsonEncode(quota(35, now + 180).toJson())}\n',
+    );
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'history');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isFalse);
+    expect(
+      (inspection.toJson()['impact'] as Map)['selected_tier'],
+      'would be archived, then restarted empty',
+    );
+  });
+
+  test('exact raw history merge retains the newest capped union', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+        );
+    final baseline = [
+      for (var index = 0; index < 200; index++)
+        jsonEncode(quota(now + index * 60).toJson()),
+    ];
+    final legacyHistory = File(
+      '${cacheDir().path}/history_${provider}_$account.jsonl',
+    )..writeAsStringSync('${baseline.join('\n')}\n');
+
+    saveSnapshot(quota(now + 200 * 60));
+    legacyHistory.writeAsStringSync(
+      '${baseline.skip(1).join('\n')}\n'
+      '${jsonEncode(quota(now + 201 * 60).toJson())}\n',
+    );
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'history');
+    expect(inspection.exactMergeAvailable, isTrue);
+    final result = recoverAnalyticsStorage(provider, account, 'history');
+    expect(result.exactMergePerformed, isTrue);
+
+    final canonicalHistory = File(
+      '${cacheDir().path}/history_${provider}_${accountStorageStem(account)}.jsonl',
+    );
+    final rows = canonicalHistory
+        .readAsLinesSync()
+        .where((line) => line.trim().isNotEmpty)
+        .map((line) => ProviderQuota.fromJson(
+              jsonDecode(line) as Map<String, dynamic>,
+            ))
+        .toList();
+    expect(rows, hasLength(200));
+    expect(rows.first.asOf, now + 2 * 60);
+    expect(rows.last.asOf, now + 201 * 60);
+  });
+
   test('analytics incident inventory validates markers and stays bounded',
       () async {
     const provider = codexProviderId;
@@ -2200,6 +2410,7 @@ void main() {
     );
 
     expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isTrue);
     expect(inspection.status, 'ready');
     expect(inspection.activeTiers, ['history']);
     expect(inspection.toJson()['schema'], 'quotabot.analytics-recovery.v1');
@@ -2216,13 +2427,17 @@ void main() {
     final recovered = recoverAnalyticsStorage(provider, account, 'history');
 
     expect(recovered.recovered, isTrue);
+    expect(recovered.exactMergePerformed, isTrue);
     expect(recovered.status, 'recovered');
     expect(recovered.activeTiers, isEmpty);
     expect(recovered.archivedRoles, contains('canonical-history'));
     expect(recovered.archivedRoles, contains('legacy-history'));
     expect(recovered.archivedRoles, contains('migration-marker'));
     expect(analyticsStorageNotice(provider, account: account), isNull);
-    expect(loadHistory(provider, account: account), isEmpty);
+    expect(
+      loadHistory(provider, account: account).map((row) => row.asOf),
+      [now, now + 60],
+    );
     expect(accountCacheFile().readAsBytesSync(), snapshotBefore);
     expect(canonicalBuckets.readAsBytesSync(), bucketsBefore);
     expect(providerBuckets.readAsBytesSync(), providerBucketsBefore);
@@ -2236,7 +2451,7 @@ void main() {
     expect(manifestJson['schema'], 'quotabot.analytics-recovery-evidence.v1');
     expect(manifestJson['state'], 'complete');
     expect(manifestJson['account_digest'], accountIdentityDigest(account));
-    expect(manifestJson['exact_merge_performed'], isFalse);
+    expect(manifestJson['exact_merge_performed'], isTrue);
     expect(manifestText, isNot(contains(account)));
     expect(manifestText, isNot(contains(cacheDir().path)));
     expect(
@@ -2263,7 +2478,10 @@ void main() {
     manifest.writeAsStringSync(jsonEncode(interruptedManifest));
 
     saveSnapshot(quota(account, 45, now + 120));
-    expect(loadHistory(provider, account: account), hasLength(1));
+    expect(
+      loadHistory(provider, account: account).map((row) => row.asOf),
+      [now, now + 60, now + 120],
+    );
   });
 
   test('analytics recovery clears only the selected conflicted tier', () async {
@@ -2311,6 +2529,7 @@ void main() {
         recoverAnalyticsStorage(provider, account, 'history');
 
     expect(historyRecovery.recovered, isTrue);
+    expect(historyRecovery.exactMergePerformed, isTrue);
     expect(historyRecovery.activeTiers, ['buckets']);
     expect(legacyHistory.existsSync(), isFalse);
     expect(legacyBuckets.existsSync(), isTrue);
@@ -2325,7 +2544,10 @@ void main() {
     expect(partialInventory.incidents.single.tiers, ['buckets']);
     expect(partialInventory.incidents.single.incidentId, incidentId);
     expect(partialInventory.incidents.single.recordedAt, recordedAt);
-    expect(loadHistory(provider, account: account), isEmpty);
+    expect(
+      loadHistory(provider, account: account).map((row) => row.asOf),
+      [now, now + 60],
+    );
     expect(
       loadBuckets(provider, account: account, fallbackToProvider: false),
       isEmpty,

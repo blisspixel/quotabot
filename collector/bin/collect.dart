@@ -748,9 +748,9 @@ String analyticsStorageSummary(List<AnalyticsStorageNotice> notices) =>
         ? notices.single.summary
         : 'History incomplete - local analytics changed unexpectedly for '
             '${notices.length} provider accounts. Affected analytics are '
-            'quarantined. Close every older quotabot process now. Exact merge '
-            'is unavailable. Run quotabot doctor for the scoped '
-            'archive-and-reset path.';
+            'quarantined. Close every older quotabot process now. Run quotabot '
+            'doctor for scoped recovery. Raw history is merged only when its '
+            'ordered checkpoint proves both deltas.';
 
 /// Additive snapshot field for the bounded local analytics incident inventory.
 /// Incident JSON omits raw accounts and digests and never becomes provider
@@ -1968,7 +1968,7 @@ void _printHelp() {
     '                      recover one provider-drift baseline with --recover-drift, --account, and --yes',
   );
   stdout.writeln(
-    '                      inspect or archive one quarantined analytics tier with --recover-analytics, --account, and --tier',
+    '                      inspect or recover one quarantined analytics tier with --recover-analytics, --account, and --tier',
   );
   stdout.writeln(
     '  explain             show local reads and network hosts in the runtime trust boundary',
@@ -2079,7 +2079,7 @@ void _printHelp() {
     '  --recover-drift=P --account=A --yes  verify and replace one exact drift baseline',
   );
   stdout.writeln(
-    '  --recover-analytics=P --account=A --tier=history|buckets  inspect one exact current-account quarantine; add --yes to archive and restart that tier empty',
+    '  --recover-analytics=P --account=A --tier=history|buckets  inspect one exact current-account quarantine; add --yes to archive first, then exact-merge provable history or restart the tier empty',
   );
   stdout.writeln(
     '  --use-expiring-quota suggest: prefer qualifying included quota projected to expire unused',
@@ -3406,7 +3406,9 @@ void _printAnalyticsStorageRecovery(AnalyticsStorageRecoveryResult result) {
     print('  ${style.green('READY')} ${result.detail}');
     print(
       style.dim(
-        '  Rerun this exact command with --yes to perform the scoped archive-and-reset.',
+        result.exactMergeAvailable
+            ? '  Rerun this exact command with --yes to archive both generations and install the exact history merge.'
+            : '  Rerun this exact command with --yes to perform the scoped archive-and-reset.',
       ),
     );
   } else {
@@ -3422,8 +3424,11 @@ void _printAnalyticsStorageRecovery(AnalyticsStorageRecoveryResult result) {
   }
   print(
     style.dim(
-      '  Exact merge is unavailable. Current quota, credentials, preferences, '
-      'other identities, and unselected analytics remain unchanged.',
+      result.exactMergePerformed
+          ? '  Exact history merge completed. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.'
+          : result.exactMergeAvailable
+              ? '  Exact history merge is checkpoint-proven for this evidence. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.'
+              : '  Exact merge is not provable for this evidence. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.',
     ),
   );
 }

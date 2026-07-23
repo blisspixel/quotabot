@@ -83,7 +83,9 @@ void main() {
     expect(
       cli.analyticsStorageWarningForQuota(affected, notices),
       allOf(
-          contains('Exact merge is unavailable'), contains('quotabot doctor')),
+        contains('ordered checkpoint proves both deltas'),
+        contains('quotabot doctor'),
+      ),
     );
     expect(cli.analyticsStorageWarningForQuota(healthy, notices), isNull);
     expect(

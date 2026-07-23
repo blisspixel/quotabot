@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Scoped mixed-version Analytics recovery now previews whether raw history has
+  one exact ordered-checkpoint merge or requires archive-and-reset. Confirmed
+  exact merges archive both originals first, validate every row and branch,
+  install and verify the capped chronological union, and record its row count
+  and SHA-256 in the owner-only evidence manifest. Ambiguous history and all
+  aggregate bucket conflicts retain the existing fail-closed reset behavior.
 - Desktop widget tests now enforce labeled controls, 28 by 28 desktop targets,
   and text contrast across expanded, compact, and Analytics surfaces in light,
   dark, and Hacker themes. Native keyboard and screen-reader evidence remains a
@@ -68,9 +74,10 @@ Notable changes to quotabot. Newest first.
   `verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
   --tier=history|buckets` performs a no-write inspection; adding `--yes`
   archives only that exact tier into an owner-only, digest-verified evidence
-  bundle and restarts it empty. The command makes no provider call, preserves
-  unrelated quota and local state, keeps any unselected tier quarantined, and
-  explicitly states that no exact merge was performed. Recovery holds both
+  bundle. It exactly merges raw history when the ordered checkpoint uniquely
+  proves both valid branch deltas; ambiguous history and aggregate buckets
+  restart empty. The command makes no provider call, preserves unrelated quota
+  and local state, and keeps any unselected tier quarantined. Recovery holds both
   legacy and canonical evidence locks, refuses legacy files shared by colliding
   account identities, and returns the retained evidence receipt on retry. The
   desktop warning now states that recovery requires the separately installed

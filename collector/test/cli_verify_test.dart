@@ -40,6 +40,16 @@ void main() {
     );
     setQuotabotDirOverrideForTesting(temp);
     try {
+      File('${cacheDir().path}/history_${provider}_$account.jsonl')
+          .writeAsStringSync(
+        '${jsonEncode(ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: now - 60,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 15)],
+        ).toJson())}\n',
+      );
       saveSnapshot(quota);
       File('${cacheDir().path}/history_${provider}_$account.jsonl')
           .writeAsStringSync(
@@ -50,6 +60,35 @@ void main() {
           asOf: now + 60,
           windows: [QuotaWindow(label: 'weekly', usedPercent: 35)],
         ).toJson())}\n',
+      );
+      expect(
+        analyticsStorageNotice(provider, account: account)?.tiers,
+        ['history'],
+      );
+    } finally {
+      setQuotabotDirOverrideForTesting(null);
+    }
+  }
+
+  void seedMergeableAnalyticsHistoryConflict() {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    ProviderQuota quota(double used, int asOf) => ProviderQuota(
+          provider: provider,
+          displayName: 'Codex',
+          account: account,
+          asOf: asOf,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    setQuotabotDirOverrideForTesting(temp);
+    try {
+      final legacy = File(
+        '${cacheDir().path}/history_${provider}_$account.jsonl',
+      )..writeAsStringSync('${jsonEncode(quota(20, now).toJson())}\n');
+      saveSnapshot(quota(25, now + 30));
+      legacy.writeAsStringSync(
+        '${legacy.readAsStringSync()}${jsonEncode(quota(35, now + 60).toJson())}\n',
       );
       expect(
         analyticsStorageNotice(provider, account: account)?.tiers,
@@ -286,6 +325,7 @@ void main() {
     expect(json, isNot(contains('runtime_access')));
     final impact = json['impact'] as Map<String, dynamic>;
     expect(impact['selected_tier'], 'would be archived, then restarted empty');
+    expect(impact['exact_merge_available'], isFalse);
     expect(impact['exact_merge_performed'], isFalse);
     expect(recoveryRoot.existsSync(), isFalse);
     final human = await runCli([
@@ -298,7 +338,7 @@ void main() {
     expectExitCode(human, 0);
     expect(human.stdout, contains('READY'));
     expect(human.stdout, contains('Rerun this exact command with --yes'));
-    expect(human.stdout, contains('Exact merge is unavailable'));
+    expect(human.stdout, contains('Exact merge is not provable'));
     expect(human.stdout, contains('unselected analytics remain unchanged'));
     expect(
       {
@@ -308,6 +348,68 @@ void main() {
       before,
     );
   });
+
+  test('analytics recovery previews and performs exact raw-history merge',
+      () async {
+    seedMergeableAnalyticsHistoryConflict();
+
+    final inspection = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--json',
+    ]);
+    expectExitCode(inspection, 0);
+    final inspectionJson =
+        jsonDecode(inspection.stdout as String) as Map<String, dynamic>;
+    final inspectionImpact = inspectionJson['impact'] as Map<String, dynamic>;
+    expect(inspectionImpact['exact_merge_available'], isTrue);
+    expect(inspectionImpact['exact_merge_performed'], isFalse);
+    expect(
+      inspectionImpact['selected_tier'],
+      'would be archived, then exactly merged',
+    );
+
+    final result = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--yes',
+      '--json',
+    ]);
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    final impact = json['impact'] as Map<String, dynamic>;
+    expect(json['recovered'], isTrue);
+    expect(impact['exact_merge_available'], isTrue);
+    expect(impact['exact_merge_performed'], isTrue);
+    expect(impact['selected_tier'], 'archived, then exactly merged');
+    expect(json['detail'], contains('exactly merged'));
+
+    setQuotabotDirOverrideForTesting(temp);
+    try {
+      expect(
+        loadHistory(codexProviderId, account: 'acct').map((row) => row.asOf),
+        [1782000000, 1782000030, 1782000060],
+      );
+    } finally {
+      setQuotabotDirOverrideForTesting(null);
+    }
+
+    final human = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=history',
+      '--yes',
+      '--no-color',
+    ]);
+    expectExitCode(human, 0);
+    expect(human.stdout, contains('ALREADY RECOVERED'));
+    expect(human.stdout, contains('Exact history merge completed'));
+  }, timeout: Timeout.factor(2));
 
   test('analytics recovery confirmation archives only the selected tier',
       () async {

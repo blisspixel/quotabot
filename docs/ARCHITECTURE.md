@@ -309,17 +309,23 @@ bucket file must carry exact ownership evidence, so colliding account stems are
 never adopted or moved. A manifest records byte counts and SHA-256 digests with
 an opaque account digest and no raw source paths. An explicit recovery guard is
 installed before originals move. Only after every archive digest verifies and
-every selected path, including paths absent at inspection, remains absent does
-the migration marker admit an immutable empty selected-tier checkpoint. A
-still-conflicted other tier retains its conflict flag and trusted checkpoint.
+every selected path, including paths absent at inspection, remains absent can
+the selected tier be replaced. Raw history receives an exact merge only when
+strict parsing proves the exact provider/account identity, trusted evidence,
+monotonic branch order, one unique ordered-checkpoint suffix overlap per branch,
+and enough retained baseline to reconstruct the 200-row cap. The merged
+canonical file is atomically installed and digest-verified before the migration
+marker admits an empty legacy checkpoint. Ambiguous history and aggregate
+buckets restart empty. A still-conflicted other tier retains its conflict flag
+and trusted checkpoint.
 Failures before checkpoint admission retain quarantine and partial archives
 retain their manifest. If manifest finalization fails after admission, retry
 returns the retained receipt as `recovered_receipt_incomplete`. A late legacy
-write differs from the empty baseline and reactivates quarantine.
+write differs from the empty legacy baseline and reactivates quarantine.
 The transaction never contacts a provider and never touches quota snapshots,
 credentials, profiles, preferences, leases, alerts, other identities, or
-provider-only compatibility analytics. It deliberately does not attempt an
-exact merge.
+provider-only compatibility analytics. Aggregate-bucket subtraction remains
+unimplemented and fail closed.
 
 Mixed-version state also has a separate digest-private incident inventory. A
 detected checkpoint mismatch is persisted under the existing identity evidence

@@ -431,13 +431,15 @@ Inspection is read-only and makes no provider call. After stopping every older
 process and reviewing the reported impact, rerun the selected command with
 `--yes`. quotabot moves only that exact tier's canonical and legacy files into
 an owner-only evidence bundle under the local `analytics-recovery` directory,
-verifies SHA-256 digests, and restarts the tier empty. It preserves current
-quota, credentials, profiles, preferences, manual entries, leases, alerts,
-other provider accounts, provider-only compatibility analytics, and the
-unselected tier. If both tiers are quarantined, recover them separately. This
-does not perform an exact merge. It refuses a legacy file shared by colliding
-account identities, and a retry after success returns the retained bundle
-receipt. Retain that bundle for a future proven reconciliation. Portable
+and verifies SHA-256 digests. When strict row checks and one unique ordered
+checkpoint overlap prove both raw-history deltas, it installs and verifies their
+capped chronological merge. Ambiguous history and aggregate buckets restart the
+selected tier empty. It preserves current quota, credentials, profiles,
+preferences, manual entries, leases, alerts, other provider accounts,
+provider-only compatibility analytics, and the unselected tier. If both tiers
+are quarantined, recover them separately. It refuses a legacy file shared by
+colliding account identities, and a retry after success returns the retained
+bundle receipt. Portable
 desktop bundles do not perform this recovery; install the CLI first if only the
 desktop is present. Use the full local-data reset below only when deleting all
 local state is actually intended.

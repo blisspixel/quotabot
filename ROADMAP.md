@@ -278,8 +278,13 @@ provider, before a forecast is built on top of it.
 - **Done:** a local-only `verify --recover-analytics` handoff now inspects one
   exact provider/account/tier without writing, then requires `--yes` before it
   moves only that tier's canonical and legacy files into a bounded owner-only
-  evidence bundle and admits an empty checkpoint. The receipt records fixed
-  roles, byte counts, and SHA-256 digests without raw account or source paths.
+  evidence bundle. For raw history, inspection and confirmation recompute a
+  strict merge plan from valid exact-identity rows and one unique ordered
+  checkpoint overlap per branch. A proven plan installs and verifies the capped
+  chronological multiset; ambiguous history and buckets admit an empty
+  checkpoint. The receipt records fixed roles, byte counts, and SHA-256 digests
+  without raw account or source paths. Exact history manifests also record the
+  installed row count, byte count, and digest.
   Recovery holds the canonical and lossy legacy lock domains together, refuses
   colliding legacy evidence that is not exclusively owned by the requested
   account, and returns the completed receipt on retry.
@@ -289,9 +294,13 @@ provider, before a forecast is built on top of it.
   to finalize the manifest after admission returns
   `recovered_receipt_incomplete` with the retained evidence bundle and a nonzero
   exit. A late legacy writer re-triggers quarantine.
-- **Remaining:** exact merge reconciliation of a detected mixed-version delta. Raw
-  history can use the ordered checkpoint, while aggregate buckets need a proven
-  additive subtraction before any merge. Until that repair is implemented,
+- **Done:** exact raw-history reconciliation uses the ordered checkpoint only
+  when both retained branches have one unique suffix alignment, every row is
+  valid trusted evidence for the exact identity, branch time is monotonic, and
+  enough baseline remains to reconstruct the 200-row cap. Missing, malformed,
+  ambiguous, or nonmonotonic evidence keeps the archive-and-reset plan.
+- **Remaining:** aggregate buckets need proven additive subtraction with strict
+  aggregate invariants before any exact merge. Until that repair is implemented,
   quotabot will not guess between losing newer samples and double-counting the
   shared baseline. Stop older processes before upgrading, and do not run an
   older build against migrated state.

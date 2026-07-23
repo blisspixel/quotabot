@@ -505,7 +505,8 @@ infer a clean cache from `incidents: []` unless `state` is `complete`.
 `quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
 --tier=history|buckets --json` emits a local analytics recovery receipt. Without
 `--yes`, the command is a read-only inspection and creates no recovery lock or
-bundle. With `--yes`, it archives and resets only the selected exact tier. It
+bundle. With `--yes`, it archives only the selected exact tier before either
+exactly merging checkpoint-proven raw history or restarting that tier empty. It
 makes no provider or model call in either mode.
 
 - `schema`: always `quotabot.analytics-recovery.v1`.
@@ -516,20 +517,22 @@ makes no provider or model call in either mode.
 - `active_tiers`: quarantined tiers still active when the result was produced.
 - `ready`: true only when an inspection proves the target can enter the
   confirmed transaction.
-- `recovered`: true only when the selected tier reached an empty admitted
-  checkpoint. A rare `recovered_receipt_incomplete` status keeps this true but
-  exits 65 because the on-disk manifest could not be finalized.
+- `recovered`: true only when the selected tier reached an admitted exact merge
+  or empty checkpoint. A rare `recovered_receipt_incomplete` status keeps this
+  true but exits 65 because the on-disk manifest could not be finalized.
 - `status` and `detail`: a bounded machine verdict and plain-language result.
   Stable operational statuses include `ready`, `recovered`,
   `already_recovered`, `recovered_receipt_incomplete`,
   `no_active_conflict`, `tier_not_conflicted`, `unsupported_target`,
   `invalid_target`, `unsafe_evidence`, `shared_legacy_evidence`,
   `evidence_too_large`,
-  `evidence_changed`, `archive_failed`, `marker_write_failed`, `rediverged`,
-  and `recovery_unavailable`.
-- `impact`: the selected-tier action, `exact_merge_performed: false`, and the
-  local surfaces preserved by the transaction. The action is destructive only
-  for a `ready` inspection or a confirmed transaction; a failed inspection
+  `evidence_changed`, `archive_failed`, `merge_install_failed`,
+  `marker_write_failed`, `rediverged`, and `recovery_unavailable`.
+- `impact`: the selected-tier action, additive `exact_merge_available` and
+  `exact_merge_performed` booleans, and the local surfaces preserved by the
+  transaction. Inspection sets availability only when a strict raw-history plan
+  exists; confirmation recomputes it under lock. The action changes files only
+  for a `ready` inspection followed by confirmation; a failed inspection
   reports the selected tier as unchanged.
 - `evidence_bundle` and `archived_roles`: present after an archive starts. The
   bundle path is returned only to the local caller; role names are fixed and do
@@ -546,11 +549,12 @@ provider-drift recovery cannot be combined with this command.
 Each created bundle contains `manifest.json` with schema
 `quotabot.analytics-recovery-evidence.v1`. The manifest records `state`,
 provider, opaque `account_digest`, tier, observation time, selected action,
-`exact_merge_performed: false`, and fixed-role file entries with byte counts,
-SHA-256 digests, archive state, and whether the original was moved. It never
-contains the raw account, original source path, quota samples, prompts, code, or
-credentials. The selected tier restarts empty; the bundle is retained for audit
-or a future exact reconciliation.
+`exact_merge_performed`, and fixed-role file entries with byte counts, SHA-256
+digests, archive state, and whether the original was moved. A completed exact
+raw-history merge also records `exact_merge_installed`, `merged_rows`,
+`merged_bytes`, and `merged_sha256`. It never contains the raw account, original
+source path, quota samples, prompts, code, or credentials. Ambiguous history and
+aggregate buckets restart empty; every bundle is retained for audit.
 
 ## `quotabot.explain.v1`
 

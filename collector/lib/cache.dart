@@ -89,8 +89,9 @@ class AnalyticsStorageNotice {
         : 'recent history and hourly analytics';
     return 'History incomplete - local $tierLabel changed unexpectedly. '
         'Affected analytics are quarantined. Close every older quotabot process '
-        'now. Exact merge is unavailable. Run quotabot doctor for the scoped '
-        'archive-and-reset path.';
+        'now. Run quotabot doctor for the scoped recovery path. Raw history is '
+        'merged only when its ordered checkpoint proves both deltas; every '
+        'other case remains fail closed.';
   }
 
   Map<String, dynamic> toJson() => {
@@ -205,7 +206,8 @@ class _AnalyticsIncidentResolution {
   const _AnalyticsIncidentResolution(this.entry, {required this.complete});
 }
 
-/// Inspect or archive-and-reset outcome for one exact analytics conflict tier.
+/// Inspect or archive-first recovery outcome for one exact analytics conflict
+/// tier.
 ///
 /// The result is intentionally bounded. The explicitly supplied account is
 /// returned to the caller. The manifest and opaque bundle id omit raw account
@@ -219,6 +221,8 @@ class AnalyticsStorageRecoveryResult {
   final List<String> activeTiers;
   final bool ready;
   final bool recovered;
+  final bool exactMergeAvailable;
+  final bool exactMergePerformed;
   final String status;
   final String detail;
   final String? evidenceBundle;
@@ -232,6 +236,8 @@ class AnalyticsStorageRecoveryResult {
     required this.activeTiers,
     required this.ready,
     required this.recovered,
+    this.exactMergeAvailable = false,
+    this.exactMergePerformed = false,
     required this.status,
     required this.detail,
     this.evidenceBundle,
@@ -250,14 +256,19 @@ class AnalyticsStorageRecoveryResult {
         'status': status,
         'detail': detail,
         'impact': {
-          'selected_tier': recovered
-              ? 'archived, then restarted empty'
-              : evidenceBundle != null
-                  ? 'archive attempted; quarantine retained'
-                  : mode == 'inspect' && ready
-                      ? 'would be archived, then restarted empty'
-                      : 'unchanged',
-          'exact_merge_performed': false,
+          'selected_tier': exactMergePerformed
+              ? 'archived, then exactly merged'
+              : recovered
+                  ? 'archived, then restarted empty'
+                  : evidenceBundle != null
+                      ? 'archive attempted; quarantine retained'
+                      : mode == 'inspect' && ready
+                          ? exactMergeAvailable
+                              ? 'would be archived, then exactly merged'
+                              : 'would be archived, then restarted empty'
+                          : 'unchanged',
+          'exact_merge_available': exactMergeAvailable,
+          'exact_merge_performed': exactMergePerformed,
           'preserved': _analyticsRecoveryPreserved,
         },
         if (evidenceBundle != null) 'evidence_bundle': evidenceBundle,
@@ -281,6 +292,37 @@ class _AnalyticsRecoveryEvidence {
     required this.precheckDigest,
     required this.moveOriginal,
   });
+}
+
+class _AnalyticsHistoryRow {
+  final int asOf;
+  final String digest;
+  final String line;
+
+  const _AnalyticsHistoryRow({
+    required this.asOf,
+    required this.digest,
+    required this.line,
+  });
+}
+
+class _AnalyticsHistoryBranch {
+  final List<_AnalyticsHistoryRow> rows;
+  final int baselineOverlap;
+
+  const _AnalyticsHistoryBranch(this.rows, this.baselineOverlap);
+
+  List<_AnalyticsHistoryRow> get delta => rows.sublist(baselineOverlap);
+}
+
+class _AnalyticsHistoryMergePlan {
+  final List<String> lines;
+
+  const _AnalyticsHistoryMergePlan(this.lines);
+
+  String get encoded => '${lines.join('\n')}\n';
+  List<int> get bytes => utf8.encode(encoded);
+  String get digest => sha256.convert(bytes).toString();
 }
 
 String _accountStem(String account) => accountStorageStem(account);
@@ -1966,6 +2008,8 @@ AnalyticsStorageRecoveryResult _analyticsRecoveryResult({
   required List<String> activeTiers,
   required bool ready,
   required bool recovered,
+  bool exactMergeAvailable = false,
+  bool exactMergePerformed = false,
   required String status,
   required String detail,
   String? evidenceBundle,
@@ -1979,6 +2023,8 @@ AnalyticsStorageRecoveryResult _analyticsRecoveryResult({
       activeTiers: List.unmodifiable(activeTiers),
       ready: ready,
       recovered: recovered,
+      exactMergeAvailable: exactMergeAvailable,
+      exactMergePerformed: exactMergePerformed,
       status: status,
       detail: detail,
       evidenceBundle: evidenceBundle,
@@ -2116,6 +2162,169 @@ String? _legacyHistoryRecoveryFailure(
   return (evidence: evidence, failure: null);
 }
 
+_AnalyticsRecoveryEvidence? _analyticsRecoveryEvidenceByRole(
+  List<_AnalyticsRecoveryEvidence> evidence,
+  String role,
+) {
+  for (final item in evidence) {
+    if (item.role == role) return item;
+  }
+  return null;
+}
+
+List<_AnalyticsHistoryRow>? _strictAnalyticsHistoryRows(
+  List<int> bytes,
+  String provider,
+  String account,
+) {
+  try {
+    final rows = <_AnalyticsHistoryRow>[];
+    for (final rawLine in const LineSplitter().convert(utf8.decode(bytes))) {
+      final line = rawLine.trim();
+      if (line.isEmpty) continue;
+      final decoded = jsonDecode(line);
+      if (decoded is! Map) return null;
+      final quota = ProviderQuota.fromJson(decoded.cast<String, dynamic>());
+      if (quota.provider != provider ||
+          quota.account != account ||
+          !_isRegisteredCacheEvidence(quota) ||
+          !isTrustedQuotaEvidenceAtCapture(quota)) {
+        return null;
+      }
+      rows.add(
+        _AnalyticsHistoryRow(
+          asOf: quota.asOf,
+          digest: _lineDigest(line),
+          line: line,
+        ),
+      );
+      if (rows.length > _historyCap) return null;
+    }
+    for (var index = 1; index < rows.length; index++) {
+      if (rows[index].asOf < rows[index - 1].asOf) return null;
+    }
+    return rows;
+  } catch (_) {
+    return null;
+  }
+}
+
+_AnalyticsHistoryBranch? _analyticsHistoryBranch(
+  List<_AnalyticsHistoryRow> rows,
+  List<String> baselineDigests,
+) {
+  if (baselineDigests.isEmpty) {
+    return _AnalyticsHistoryBranch(rows, 0);
+  }
+  final matches = <int>[];
+  final limit = min(rows.length, baselineDigests.length);
+  for (var overlap = 1; overlap <= limit; overlap++) {
+    var matchesSuffix = true;
+    final baselineOffset = baselineDigests.length - overlap;
+    for (var index = 0; index < overlap; index++) {
+      if (rows[index].digest != baselineDigests[baselineOffset + index]) {
+        matchesSuffix = false;
+        break;
+      }
+    }
+    if (matchesSuffix) matches.add(overlap);
+  }
+  if (matches.length != 1) return null;
+  return _AnalyticsHistoryBranch(rows, matches.single);
+}
+
+_AnalyticsHistoryMergePlan? _exactAnalyticsHistoryMergePlan(
+  String provider,
+  String account,
+  List<_AnalyticsRecoveryEvidence> evidence,
+) {
+  final canonical =
+      _analyticsRecoveryEvidenceByRole(evidence, 'canonical-history');
+  final legacy = _analyticsRecoveryEvidenceByRole(evidence, 'legacy-history');
+  final marker = _analyticsRecoveryEvidenceByRole(evidence, 'migration-marker');
+  if (canonical == null || legacy == null || marker == null) return null;
+
+  try {
+    final markerDecoded = jsonDecode(utf8.decode(marker.precheckBytes));
+    if (markerDecoded is! Map) return null;
+    final record = markerDecoded.cast<String, dynamic>();
+    if (record['schema'] != _analyticsMigrationSchema ||
+        record['provider'] != provider ||
+        record['account_digest'] != accountIdentityDigest(account)) {
+      return null;
+    }
+    final checkpoint = record['history'];
+    if (checkpoint is! Map) return null;
+    final rawDigests = checkpoint['row_digests'];
+    final count = checkpoint['count'];
+    final digest = checkpoint['digest'];
+    if (rawDigests is! List ||
+        count is! int ||
+        digest is! String ||
+        count != rawDigests.length ||
+        count > _historyCap ||
+        rawDigests.any(
+          (value) =>
+              value is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(value),
+        )) {
+      return null;
+    }
+    final baselineDigests = rawDigests.cast<String>();
+    if (_contentDigest(baselineDigests.join('\n')) != digest) return null;
+
+    final canonicalRows = _strictAnalyticsHistoryRows(
+      canonical.precheckBytes,
+      provider,
+      account,
+    );
+    final legacyRows = _strictAnalyticsHistoryRows(
+      legacy.precheckBytes,
+      provider,
+      account,
+    );
+    if (canonicalRows == null || legacyRows == null) return null;
+    final canonicalBranch =
+        _analyticsHistoryBranch(canonicalRows, baselineDigests);
+    final legacyBranch = _analyticsHistoryBranch(legacyRows, baselineDigests);
+    if (canonicalBranch == null || legacyBranch == null) return null;
+
+    final delta = <_AnalyticsHistoryRow>[
+      ...canonicalBranch.delta,
+      ...legacyBranch.delta,
+    ]..sort((left, right) {
+        final byTime = left.asOf.compareTo(right.asOf);
+        return byTime != 0 ? byTime : left.digest.compareTo(right.digest);
+      });
+    final baselineNeeded = max(
+      0,
+      min(baselineDigests.length, _historyCap - delta.length),
+    );
+    final baselineSource =
+        canonicalBranch.baselineOverlap >= legacyBranch.baselineOverlap
+            ? canonicalBranch
+            : legacyBranch;
+    if (baselineSource.baselineOverlap < baselineNeeded) return null;
+    final retainedBaseline = baselineSource.rows
+        .take(baselineSource.baselineOverlap)
+        .skip(baselineSource.baselineOverlap - baselineNeeded)
+        .toList(growable: false);
+    if (retainedBaseline.isNotEmpty &&
+        delta.any((row) => row.asOf < retainedBaseline.last.asOf)) {
+      return null;
+    }
+
+    final merged = <_AnalyticsHistoryRow>[...retainedBaseline, ...delta];
+    final kept = merged.length > _historyCap
+        ? merged.sublist(merged.length - _historyCap)
+        : merged;
+    return _AnalyticsHistoryMergePlan(
+      [for (final row in kept) row.line],
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Read-only readiness check for one exact quarantined analytics tier.
 ///
 /// This never creates a recovery bundle or lock file and never contacts a
@@ -2226,6 +2435,13 @@ AnalyticsStorageRecoveryResult inspectAnalyticsStorageRecovery(
               : 'Selected recovery evidence is not a stable regular-file set.',
     );
   }
+  final exactHistoryMerge = selectedTier == 'history'
+      ? _exactAnalyticsHistoryMergePlan(
+          canonicalProvider,
+          account,
+          evidence.evidence,
+        )
+      : null;
   return _analyticsRecoveryResult(
     mode: 'inspect',
     provider: canonicalProvider,
@@ -2234,10 +2450,15 @@ AnalyticsStorageRecoveryResult inspectAnalyticsStorageRecovery(
     activeTiers: activeTiers,
     ready: true,
     recovered: false,
+    exactMergeAvailable: exactHistoryMerge != null,
     status: 'ready',
-    detail: 'Ready to archive this exact tier and restart it empty. '
-        'Exact merge is unavailable; every listed preserved surface remains '
-        'unchanged.',
+    detail: exactHistoryMerge != null
+        ? 'Ready to archive both raw-history generations and install their '
+            'exact checkpoint-proven merge. Every listed preserved surface '
+            'remains unchanged.'
+        : 'Ready to archive this exact tier and restart it empty. Exact merge '
+            'is not provable for this evidence; every listed preserved surface '
+            'remains unchanged.',
   );
 }
 
@@ -2275,6 +2496,9 @@ void _writeAnalyticsRecoveryManifest(
   required String state,
   required List<_AnalyticsRecoveryEvidence> evidence,
   required Set<String> archivedRoles,
+  _AnalyticsHistoryMergePlan? exactHistoryMerge,
+  bool exactMergeInstalled = false,
+  bool exactMergePerformed = false,
   String? failure,
 }) {
   final manifest = File('${bundle.path}/manifest.json');
@@ -2287,8 +2511,18 @@ void _writeAnalyticsRecoveryManifest(
       'account_digest': accountIdentityDigest(account),
       'tier': tier,
       'observed_at': nowEpoch(),
-      'exact_merge_performed': false,
-      'selected_tier_action': 'archived_then_restarted_empty',
+      'exact_merge_performed': exactMergePerformed,
+      'selected_tier_action': exactMergePerformed
+          ? 'archived_then_exactly_merged'
+          : exactHistoryMerge != null
+              ? 'archive_then_exact_merge_planned'
+              : 'archived_then_restarted_empty',
+      if (exactMergeInstalled && exactHistoryMerge != null) ...{
+        'exact_merge_installed': true,
+        'merged_rows': exactHistoryMerge.lines.length,
+        'merged_bytes': exactHistoryMerge.bytes.length,
+        'merged_sha256': exactHistoryMerge.digest,
+      },
       'files': [
         for (final item in evidence)
           {
@@ -2471,6 +2705,7 @@ AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
     if (decoded is! Map ||
         decoded['schema'] != _analyticsRecoveryEvidenceSchema ||
         (decoded['state'] != 'complete' &&
+            decoded['state'] != 'checkpoint_admitted' &&
             decoded['state'] != 'checkpoint_pending' &&
             decoded['state'] != 'archiving') ||
         decoded['provider'] != provider ||
@@ -2488,6 +2723,12 @@ AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
       }
     }
     final complete = decoded['state'] == 'complete';
+    // A retained recovery receipt is written only with the admitted checkpoint.
+    // If final manifest writing stopped after the verified merge was installed,
+    // the receipt plus exact_merge_installed still proves the admitted outcome.
+    final exactMergePerformed = tier == 'history' &&
+        (decoded['exact_merge_performed'] == true ||
+            decoded['exact_merge_installed'] == true);
     return _analyticsRecoveryResult(
       mode: 'recover',
       provider: provider,
@@ -2496,11 +2737,19 @@ AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
       activeTiers: activeTiers,
       ready: false,
       recovered: true,
+      exactMergeAvailable: exactMergePerformed,
+      exactMergePerformed: exactMergePerformed,
       status: complete ? 'already_recovered' : 'recovered_receipt_incomplete',
       detail: complete
-          ? 'A prior completed scoped recovery already archived this tier.'
-          : 'The selected tier restarted empty, but its evidence manifest '
-              'was interrupted before finalization.',
+          ? exactMergePerformed
+              ? 'A prior completed scoped recovery already archived and '
+                  'exactly merged this tier.'
+              : 'A prior completed scoped recovery already archived this tier.'
+          : exactMergePerformed
+              ? 'The selected history was exactly merged, but its evidence '
+                  'manifest was interrupted before finalization.'
+              : 'The selected tier restarted empty, but its evidence manifest '
+                  'was interrupted before finalization.',
       evidenceBundle: bundle.path,
       archivedRoles: roles,
     );
@@ -2524,12 +2773,14 @@ AnalyticsStorageRecoveryResult _recoveryFailureFromInspection(
       detail: inspection.detail,
     );
 
-/// Archives and clears one exact quarantined analytics tier.
+/// Archives and recovers one exact quarantined analytics tier.
 ///
-/// This is intentionally not a merge. Every selected canonical and legacy
-/// regular file is moved into an owner-only evidence bundle before an empty
-/// checkpoint is admitted. An explicit recovery guard replaces the old marker
-/// before selected files move, so interruption fails closed.
+/// Every selected canonical and legacy regular file is moved into an owner-only
+/// evidence bundle before any replacement is admitted. Raw history is exactly
+/// merged only when the ordered checkpoint proves one unique retained baseline
+/// overlap for each valid branch. Every other history case and all aggregate
+/// bucket cases restart empty. An explicit recovery guard replaces the old
+/// marker before selected files move, so interruption fails closed.
 AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
   String provider,
   String account,
@@ -2604,6 +2855,13 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
         );
       }
       final evidence = scanned.evidence;
+      final exactHistoryMerge = selectedTier == 'history'
+          ? _exactAnalyticsHistoryMergePlan(
+              canonicalProvider,
+              account,
+              evidence,
+            )
+          : null;
       final previous = _readAnalyticsMigrationRecord(
         canonicalProvider,
         account,
@@ -2633,6 +2891,8 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
       }
 
       final archivedRoles = <String>{};
+      var exactMergeInstalled = false;
+      var exactMergeAdmitted = false;
       void finishManifest(String state, [String? failure]) {
         _writeAnalyticsRecoveryManifest(
           bundle,
@@ -2642,6 +2902,9 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           state: state,
           evidence: evidence,
           archivedRoles: archivedRoles,
+          exactHistoryMerge: exactHistoryMerge,
+          exactMergeInstalled: exactMergeInstalled,
+          exactMergePerformed: exactMergeAdmitted,
           failure: failure,
         );
       }
@@ -2820,6 +3083,43 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           );
         }
 
+        if (exactHistoryMerge != null) {
+          try {
+            final mergedFile = _historyFile(
+              canonicalProvider,
+              account: account,
+            );
+            _atomicWriteBytes(mergedFile, exactHistoryMerge.bytes);
+            enforceOwnerOnlyFile(mergedFile);
+            final installed = mergedFile.readAsBytesSync();
+            if (installed.length != exactHistoryMerge.bytes.length ||
+                sha256.convert(installed).toString() !=
+                    exactHistoryMerge.digest) {
+              throw const FileSystemException(
+                'installed history merge verification failed',
+              );
+            }
+            exactMergeInstalled = true;
+          } catch (_) {
+            finishManifest('failed', 'merge_install_failed');
+            return _analyticsRecoveryResult(
+              mode: 'recover',
+              provider: canonicalProvider,
+              account: account,
+              tier: selectedTier,
+              activeTiers: inspection.activeTiers,
+              ready: false,
+              recovered: false,
+              exactMergeAvailable: true,
+              status: 'merge_install_failed',
+              detail: 'The exact history merge could not be installed and '
+                  'verified. The recovery guard keeps quarantine active.',
+              evidenceBundle: bundle.path,
+              archivedRoles: archivedRoles.toList(),
+            );
+          }
+        }
+
         finishManifest('checkpoint_pending');
 
         final replacement = _analyticsMigrationRecordAfterRecovery(
@@ -2849,9 +3149,14 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
             activeTiers: inspection.activeTiers,
             ready: false,
             recovered: false,
+            exactMergeAvailable: exactHistoryMerge != null,
+            exactMergePerformed: false,
             status: 'marker_write_failed',
-            detail: 'The empty analytics checkpoint could not be stored. The '
-                'quarantine remains active.',
+            detail: exactMergeInstalled
+                ? 'The exact history merge was installed, but its checkpoint '
+                    'could not be stored. Quarantine remains active.'
+                : 'The empty analytics checkpoint could not be stored. The '
+                    'quarantine remains active.',
             evidenceBundle: bundle.path,
             archivedRoles: archivedRoles.toList(),
           );
@@ -2871,6 +3176,8 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
             activeTiers: remaining?.tiers ?? const [],
             ready: false,
             recovered: false,
+            exactMergeAvailable: exactHistoryMerge != null,
+            exactMergePerformed: false,
             status: 'rediverged',
             detail: 'The selected tier changed again before verification. '
                 'Its quarantine remains active.',
@@ -2879,7 +3186,9 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           );
         }
 
+        exactMergeAdmitted = exactMergeInstalled;
         try {
+          finishManifest('checkpoint_admitted');
           finishManifest('complete');
         } catch (_) {
           return _analyticsRecoveryResult(
@@ -2890,9 +3199,14 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
             activeTiers: remaining?.tiers ?? const [],
             ready: false,
             recovered: true,
+            exactMergeAvailable: exactHistoryMerge != null,
+            exactMergePerformed: exactMergeAdmitted,
             status: 'recovered_receipt_incomplete',
-            detail: 'The selected tier restarted empty, but its evidence '
-                'manifest could not be finalized.',
+            detail: exactMergeInstalled
+                ? 'The selected history was exactly merged, but its evidence '
+                    'manifest could not be finalized.'
+                : 'The selected tier restarted empty, but its evidence '
+                    'manifest could not be finalized.',
             evidenceBundle: bundle.path,
             archivedRoles: archivedRoles.toList(),
           );
@@ -2905,9 +3219,14 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           activeTiers: remaining?.tiers ?? const [],
           ready: false,
           recovered: true,
+          exactMergeAvailable: exactHistoryMerge != null,
+          exactMergePerformed: exactMergeAdmitted,
           status: 'recovered',
-          detail: 'Selected analytics were archived and restarted empty. '
-              'Exact merge was not performed.',
+          detail: exactMergeInstalled
+              ? 'Selected raw-history generations were archived and exactly '
+                  'merged.'
+              : 'Selected analytics were archived and restarted empty. Exact '
+                  'merge was not provable for this evidence.',
           evidenceBundle: bundle.path,
           archivedRoles: archivedRoles.toList(),
         );
@@ -2923,9 +3242,15 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           activeTiers: inspection.activeTiers,
           ready: false,
           recovered: false,
+          exactMergeAvailable: exactHistoryMerge != null,
+          exactMergePerformed: false,
           status: 'archive_failed',
-          detail: 'Recovery stopped before an empty checkpoint was admitted. '
-              'The quarantine remains active.',
+          detail: exactMergeInstalled
+              ? 'Recovery stopped after the exact history merge was installed '
+                  'but before its checkpoint was admitted. Quarantine remains '
+                  'active.'
+              : 'Recovery stopped before an empty checkpoint was admitted. '
+                  'The quarantine remains active.',
           evidenceBundle: bundle.path,
           archivedRoles: archivedRoles.toList(),
         );
