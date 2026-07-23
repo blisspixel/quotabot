@@ -315,13 +315,35 @@ class _AnalyticsHistoryBranch {
   List<_AnalyticsHistoryRow> get delta => rows.sublist(baselineOverlap);
 }
 
-class _AnalyticsHistoryMergePlan {
-  final List<String> lines;
+class _AnalyticsRecoveryMergePlan {
+  final String tier;
+  final int itemCount;
+  final List<int> bytes;
 
-  const _AnalyticsHistoryMergePlan(this.lines);
+  const _AnalyticsRecoveryMergePlan({
+    required this.tier,
+    required this.itemCount,
+    required this.bytes,
+  });
 
-  String get encoded => '${lines.join('\n')}\n';
-  List<int> get bytes => utf8.encode(encoded);
+  factory _AnalyticsRecoveryMergePlan.history(List<String> lines) =>
+      _AnalyticsRecoveryMergePlan(
+        tier: 'history',
+        itemCount: lines.length,
+        bytes: utf8.encode('${lines.join('\n')}\n'),
+      );
+
+  factory _AnalyticsRecoveryMergePlan.buckets(
+    List<HeadroomBucket> buckets,
+  ) =>
+      _AnalyticsRecoveryMergePlan(
+        tier: 'buckets',
+        itemCount: buckets.length,
+        bytes: utf8.encode(
+          jsonEncode(buckets.map((bucket) => bucket.toJson()).toList()),
+        ),
+      );
+
   String get digest => sha256.convert(bytes).toString();
 }
 
@@ -2233,7 +2255,7 @@ _AnalyticsHistoryBranch? _analyticsHistoryBranch(
   return _AnalyticsHistoryBranch(rows, matches.single);
 }
 
-_AnalyticsHistoryMergePlan? _exactAnalyticsHistoryMergePlan(
+_AnalyticsRecoveryMergePlan? _exactAnalyticsHistoryMergePlan(
   String provider,
   String account,
   List<_AnalyticsRecoveryEvidence> evidence,
@@ -2317,9 +2339,445 @@ _AnalyticsHistoryMergePlan? _exactAnalyticsHistoryMergePlan(
     final kept = merged.length > _historyCap
         ? merged.sublist(merged.length - _historyCap)
         : merged;
-    return _AnalyticsHistoryMergePlan(
+    return _AnalyticsRecoveryMergePlan.history(
       [for (final row in kept) row.line],
     );
+  } catch (_) {
+    return null;
+  }
+}
+
+const int _maxExactAnalyticsSamplesPerBucket = 0x7fffffff;
+
+double _analyticsNumericTolerance(Iterable<double> values) {
+  var scale = 1.0;
+  for (final value in values) {
+    final magnitude = value.abs();
+    if (magnitude > scale) scale = magnitude;
+  }
+  return 0.0000001 + scale * 0.000000000001;
+}
+
+bool _analyticsNear(double left, double right) =>
+    (left - right).abs() <= _analyticsNumericTolerance([left, right]);
+
+bool _analyticsInRange(double value, double lower, double upper) {
+  final tolerance = _analyticsNumericTolerance([value, lower, upper]);
+  return value >= lower - tolerance && value <= upper + tolerance;
+}
+
+bool _validAnalyticsBucketFields({
+  required int count,
+  required double sum,
+  required double sumSq,
+  required int exhausted,
+  required List<int> hist,
+}) {
+  if (count < 0 ||
+      count > _maxExactAnalyticsSamplesPerBucket ||
+      exhausted < 0 ||
+      exhausted > count ||
+      !sum.isFinite ||
+      !sumSq.isFinite ||
+      sum < 0 ||
+      sumSq < 0 ||
+      hist.length != kHistBins) {
+    return false;
+  }
+  var histCount = 0;
+  var minimumSum = 0.0;
+  var maximumSum = 0.0;
+  var minimumSumSq = 0.0;
+  var maximumSumSq = 0.0;
+  const binWidth = 100 / kHistBins;
+  for (var index = 0; index < hist.length; index++) {
+    final binCount = hist[index];
+    if (binCount < 0 ||
+        binCount > _maxExactAnalyticsSamplesPerBucket - histCount) {
+      return false;
+    }
+    histCount += binCount;
+    final lower = index * binWidth;
+    final upper = index == kHistBins - 1 ? 100.0 : (index + 1) * binWidth;
+    minimumSum += binCount * lower;
+    maximumSum += binCount * upper;
+    minimumSumSq += binCount * lower * lower;
+    maximumSumSq += binCount * upper * upper;
+  }
+  if (histCount != count || exhausted > hist.first) return false;
+  if (count == 0) {
+    return exhausted == 0 && _analyticsNear(sum, 0) && _analyticsNear(sumSq, 0);
+  }
+  if (!_analyticsInRange(sum, minimumSum, maximumSum) ||
+      !_analyticsInRange(sumSq, minimumSumSq, maximumSumSq) ||
+      !_analyticsInRange(sum, 0, count * 100.0) ||
+      !_analyticsInRange(sumSq, 0, count * 10000.0) ||
+      !_analyticsInRange(sumSq, 0, 100 * sum)) {
+    return false;
+  }
+  if (count == 1 && !_analyticsNear(sumSq, sum * sum)) return false;
+  final minimumMoment = sum * sum / count;
+  return sumSq + _analyticsNumericTolerance([sumSq, minimumMoment]) >=
+      minimumMoment;
+}
+
+bool _validStrictAnalyticsBucket(HeadroomBucket bucket) {
+  if (bucket.start < 0 ||
+      bucket.start % kBucketSpan != 0 ||
+      bucket.count <= 0 ||
+      !_validAnalyticsBucketFields(
+        count: bucket.count,
+        sum: bucket.sum,
+        sumSq: bucket.sumSq,
+        exhausted: bucket.exhausted,
+        hist: bucket.hist,
+      ) ||
+      !bucket.min.isFinite ||
+      !bucket.max.isFinite ||
+      bucket.min < 0 ||
+      bucket.max > 100 ||
+      bucket.min > bucket.max) {
+    return false;
+  }
+  if (bucket.count == 1) {
+    if (!_analyticsNear(bucket.min, bucket.max) ||
+        !_analyticsNear(bucket.sum, bucket.min) ||
+        !_analyticsNear(bucket.sumSq, bucket.min * bucket.min)) {
+      return false;
+    }
+  } else {
+    final minimumExtremaSum = bucket.max + (bucket.count - 1) * bucket.min;
+    final maximumExtremaSum = bucket.min + (bucket.count - 1) * bucket.max;
+    final minimumExtremaSumSq =
+        bucket.max * bucket.max + (bucket.count - 1) * bucket.min * bucket.min;
+    final maximumExtremaSumSq =
+        bucket.min * bucket.min + (bucket.count - 1) * bucket.max * bucket.max;
+    if (!_analyticsInRange(
+          bucket.sum,
+          minimumExtremaSum,
+          maximumExtremaSum,
+        ) ||
+        !_analyticsInRange(
+          bucket.sumSq,
+          minimumExtremaSumSq,
+          maximumExtremaSumSq,
+        )) {
+      return false;
+    }
+  }
+  if (!_analyticsInRange(
+        bucket.sum,
+        bucket.count * bucket.min,
+        bucket.count * bucket.max,
+      ) ||
+      !_analyticsInRange(
+        bucket.sumSq,
+        bucket.count * bucket.min * bucket.min,
+        bucket.count * bucket.max * bucket.max,
+      )) {
+    return false;
+  }
+  final minBin =
+      (bucket.min / (100 / kHistBins)).floor().clamp(0, kHistBins - 1);
+  final maxBin =
+      (bucket.max / (100 / kHistBins)).floor().clamp(0, kHistBins - 1);
+  if (bucket.hist[minBin] == 0 || bucket.hist[maxBin] == 0) return false;
+  for (var index = 0; index < minBin; index++) {
+    if (bucket.hist[index] != 0) return false;
+  }
+  for (var index = maxBin + 1; index < kHistBins; index++) {
+    if (bucket.hist[index] != 0) return false;
+  }
+  return true;
+}
+
+HeadroomBucket? _strictAnalyticsBucket(Object? raw) {
+  if (raw is! Map) return null;
+  try {
+    final decoded = raw.cast<String, dynamic>();
+    final start = decoded['s'];
+    final count = decoded['n'];
+    final sum = decoded['sum'];
+    final sumSq = decoded['sq'];
+    final minValue = decoded['min'];
+    final maxValue = decoded['max'];
+    final exhausted = decoded['x'];
+    final rawHist = decoded['h'];
+    if (start is! int ||
+        count is! int ||
+        sum is! num ||
+        sumSq is! num ||
+        minValue is! num ||
+        maxValue is! num ||
+        exhausted is! int ||
+        rawHist is! List ||
+        rawHist.length != kHistBins ||
+        rawHist.any((value) => value is! int)) {
+      return null;
+    }
+    final bucket = HeadroomBucket(
+      start: start,
+      count: count,
+      sum: sum.toDouble(),
+      sumSq: sumSq.toDouble(),
+      min: minValue.toDouble(),
+      max: maxValue.toDouble(),
+      exhausted: exhausted,
+      hist: rawHist.cast<int>().toList(growable: false),
+    );
+    return _validStrictAnalyticsBucket(bucket) ? bucket : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+List<HeadroomBucket>? _strictAnalyticsBuckets(Object? raw) {
+  if (raw is! List || raw.length > _maxAnalyticsCheckpointBuckets) {
+    return null;
+  }
+  final buckets = <HeadroomBucket>[];
+  var previousStart = -1;
+  for (final entry in raw) {
+    final bucket = _strictAnalyticsBucket(entry);
+    if (bucket == null || bucket.start <= previousStart) return null;
+    buckets.add(bucket);
+    previousStart = bucket.start;
+  }
+  return buckets;
+}
+
+List<HeadroomBucket>? _strictAnalyticsBucketBytes(List<int> bytes) {
+  try {
+    return _strictAnalyticsBuckets(jsonDecode(utf8.decode(bytes)));
+  } catch (_) {
+    return null;
+  }
+}
+
+bool _analyticsBucketCovers(
+  HeadroomBucket branch,
+  HeadroomBucket baseline,
+) {
+  if (branch.start != baseline.start ||
+      branch.count < baseline.count ||
+      branch.exhausted < baseline.exhausted ||
+      branch.sum < baseline.sum ||
+      branch.sumSq < baseline.sumSq ||
+      branch.min > baseline.min ||
+      branch.max < baseline.max) {
+    return false;
+  }
+  final hist = <int>[];
+  for (var index = 0; index < kHistBins; index++) {
+    final delta = branch.hist[index] - baseline.hist[index];
+    if (delta < 0) return false;
+    hist.add(delta);
+  }
+  final deltaCount = branch.count - baseline.count;
+  final deltaSum = branch.sum - baseline.sum;
+  final deltaSumSq = branch.sumSq - baseline.sumSq;
+  final deltaExhausted = branch.exhausted - baseline.exhausted;
+  if (!_validAnalyticsBucketFields(
+    count: deltaCount,
+    sum: deltaSum,
+    sumSq: deltaSumSq,
+    exhausted: deltaExhausted,
+    hist: hist,
+  )) {
+    return false;
+  }
+  return deltaCount != 0 ||
+      (_analyticsNear(branch.min, baseline.min) &&
+          _analyticsNear(branch.max, baseline.max));
+}
+
+bool _validAnalyticsBucketBranch(
+  List<HeadroomBucket> branch,
+  List<HeadroomBucket> baseline,
+) {
+  if (baseline.isEmpty) return true;
+  if (branch.isEmpty) return true;
+  final baselineIndex = <int, int>{
+    for (var index = 0; index < baseline.length; index++)
+      baseline[index].start: index,
+  };
+  final branchByStart = {for (final bucket in branch) bucket.start: bucket};
+  int? firstOverlap;
+  for (final bucket in branch) {
+    final index = baselineIndex[bucket.start];
+    if (index == null) {
+      if (bucket.start <= baseline.last.start) return false;
+      continue;
+    }
+    if (!_analyticsBucketCovers(bucket, baseline[index])) return false;
+    firstOverlap ??= index;
+  }
+  if (firstOverlap == null) return branch.first.start > baseline.last.start;
+  for (var index = firstOverlap; index < baseline.length; index++) {
+    final retained = branchByStart[baseline[index].start];
+    if (retained == null ||
+        !_analyticsBucketCovers(retained, baseline[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+HeadroomBucket _copyAnalyticsBucket(HeadroomBucket bucket) => HeadroomBucket(
+      start: bucket.start,
+      count: bucket.count,
+      sum: bucket.sum,
+      sumSq: bucket.sumSq,
+      min: bucket.min,
+      max: bucket.max,
+      exhausted: bucket.exhausted,
+      hist: List<int>.of(bucket.hist),
+    );
+
+HeadroomBucket? _mergeAnalyticsBucketRows(
+  List<HeadroomBucket> branches, {
+  HeadroomBucket? subtract,
+}) {
+  if (branches.isEmpty) return null;
+  var count = -(subtract?.count ?? 0);
+  var sum = -(subtract?.sum ?? 0);
+  var sumSq = -(subtract?.sumSq ?? 0);
+  var exhausted = -(subtract?.exhausted ?? 0);
+  final hist = [
+    for (var index = 0; index < kHistBins; index++)
+      -(subtract?.hist[index] ?? 0),
+  ];
+  var minimum = double.infinity;
+  var maximum = double.negativeInfinity;
+  for (final branch in branches) {
+    if (branch.start != branches.first.start ||
+        branch.count > _maxExactAnalyticsSamplesPerBucket - count) {
+      return null;
+    }
+    count += branch.count;
+    sum += branch.sum;
+    sumSq += branch.sumSq;
+    exhausted += branch.exhausted;
+    if (branch.min < minimum) minimum = branch.min;
+    if (branch.max > maximum) maximum = branch.max;
+    for (var index = 0; index < kHistBins; index++) {
+      if (branch.hist[index] >
+          _maxExactAnalyticsSamplesPerBucket - hist[index]) {
+        return null;
+      }
+      hist[index] += branch.hist[index];
+    }
+  }
+  final merged = HeadroomBucket(
+    start: branches.first.start,
+    count: count,
+    sum: sum,
+    sumSq: sumSq,
+    min: minimum,
+    max: maximum,
+    exhausted: exhausted,
+    hist: hist,
+  );
+  return _validStrictAnalyticsBucket(merged) ? merged : null;
+}
+
+_AnalyticsRecoveryMergePlan? _exactAnalyticsBucketMergePlan(
+  String provider,
+  String account,
+  List<_AnalyticsRecoveryEvidence> evidence,
+) {
+  final canonical =
+      _analyticsRecoveryEvidenceByRole(evidence, 'canonical-buckets');
+  final legacy = _analyticsRecoveryEvidenceByRole(evidence, 'legacy-buckets');
+  final marker = _analyticsRecoveryEvidenceByRole(evidence, 'migration-marker');
+  if (canonical == null || legacy == null || marker == null) return null;
+
+  try {
+    final markerDecoded = jsonDecode(utf8.decode(marker.precheckBytes));
+    if (markerDecoded is! Map) return null;
+    final record = markerDecoded.cast<String, dynamic>();
+    if (record['schema'] != _analyticsMigrationSchema ||
+        record['provider'] != provider ||
+        record['account_digest'] != accountIdentityDigest(account)) {
+      return null;
+    }
+    final checkpoint = record['buckets'];
+    if (checkpoint is! Map) return null;
+    final rawBuckets = checkpoint['buckets'];
+    final count = checkpoint['count'];
+    final digest = checkpoint['digest'];
+    if (rawBuckets is! List ||
+        count is! int ||
+        digest is! String ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) ||
+        count != rawBuckets.length ||
+        count > _maxAnalyticsCheckpointBuckets ||
+        _contentDigest(jsonEncode(rawBuckets)) != digest) {
+      return null;
+    }
+    final baseline = _strictAnalyticsBuckets(rawBuckets);
+    final canonicalBuckets =
+        _strictAnalyticsBucketBytes(canonical.precheckBytes);
+    final legacyBuckets = _strictAnalyticsBucketBytes(legacy.precheckBytes);
+    if (baseline == null ||
+        canonicalBuckets == null ||
+        legacyBuckets == null ||
+        !_validAnalyticsBucketBranch(canonicalBuckets, baseline) ||
+        !_validAnalyticsBucketBranch(legacyBuckets, baseline)) {
+      return null;
+    }
+
+    final baselineByStart = {
+      for (final bucket in baseline) bucket.start: bucket,
+    };
+    final canonicalByStart = {
+      for (final bucket in canonicalBuckets) bucket.start: bucket,
+    };
+    final legacyByStart = {
+      for (final bucket in legacyBuckets) bucket.start: bucket,
+    };
+    final starts = <int>{
+      ...canonicalByStart.keys,
+      ...legacyByStart.keys,
+    }.toList()
+      ..sort();
+    final merged = <HeadroomBucket>[];
+    for (final start in starts) {
+      final checkpointBucket = baselineByStart[start];
+      final canonicalBucket = canonicalByStart[start];
+      final legacyBucket = legacyByStart[start];
+      HeadroomBucket? result;
+      if (checkpointBucket != null) {
+        if ((canonicalBucket != null &&
+                !_analyticsBucketCovers(canonicalBucket, checkpointBucket)) ||
+            (legacyBucket != null &&
+                !_analyticsBucketCovers(legacyBucket, checkpointBucket))) {
+          return null;
+        }
+        if (canonicalBucket != null && legacyBucket != null) {
+          result = _mergeAnalyticsBucketRows(
+            [canonicalBucket, legacyBucket],
+            subtract: checkpointBucket,
+          );
+        } else {
+          final retained = canonicalBucket ?? legacyBucket;
+          if (retained != null) result = _copyAnalyticsBucket(retained);
+        }
+      } else {
+        final branches = [
+          if (canonicalBucket != null) canonicalBucket,
+          if (legacyBucket != null) legacyBucket,
+        ];
+        result = _mergeAnalyticsBucketRows(branches);
+      }
+      if (result == null) return null;
+      merged.add(result);
+    }
+    final kept = merged.length > _maxAnalyticsCheckpointBuckets
+        ? merged.sublist(merged.length - _maxAnalyticsCheckpointBuckets)
+        : merged;
+    final plan = _AnalyticsRecoveryMergePlan.buckets(kept);
+    return plan.bytes.length <= _maxJsonBytes ? plan : null;
   } catch (_) {
     return null;
   }
@@ -2435,13 +2893,17 @@ AnalyticsStorageRecoveryResult inspectAnalyticsStorageRecovery(
               : 'Selected recovery evidence is not a stable regular-file set.',
     );
   }
-  final exactHistoryMerge = selectedTier == 'history'
+  final exactMerge = selectedTier == 'history'
       ? _exactAnalyticsHistoryMergePlan(
           canonicalProvider,
           account,
           evidence.evidence,
         )
-      : null;
+      : _exactAnalyticsBucketMergePlan(
+          canonicalProvider,
+          account,
+          evidence.evidence,
+        );
   return _analyticsRecoveryResult(
     mode: 'inspect',
     provider: canonicalProvider,
@@ -2450,12 +2912,16 @@ AnalyticsStorageRecoveryResult inspectAnalyticsStorageRecovery(
     activeTiers: activeTiers,
     ready: true,
     recovered: false,
-    exactMergeAvailable: exactHistoryMerge != null,
+    exactMergeAvailable: exactMerge != null,
     status: 'ready',
-    detail: exactHistoryMerge != null
-        ? 'Ready to archive both raw-history generations and install their '
-            'exact checkpoint-proven merge. Every listed preserved surface '
-            'remains unchanged.'
+    detail: exactMerge != null
+        ? selectedTier == 'history'
+            ? 'Ready to archive both raw-history generations and install '
+                'their exact checkpoint-proven merge. Every listed preserved '
+                'surface remains unchanged.'
+            : 'Ready to archive both aggregate-bucket generations and install '
+                'their exact checkpoint-proven merge. Every listed preserved '
+                'surface remains unchanged.'
         : 'Ready to archive this exact tier and restart it empty. Exact merge '
             'is not provable for this evidence; every listed preserved surface '
             'remains unchanged.',
@@ -2496,7 +2962,7 @@ void _writeAnalyticsRecoveryManifest(
   required String state,
   required List<_AnalyticsRecoveryEvidence> evidence,
   required Set<String> archivedRoles,
-  _AnalyticsHistoryMergePlan? exactHistoryMerge,
+  _AnalyticsRecoveryMergePlan? exactMerge,
   bool exactMergeInstalled = false,
   bool exactMergePerformed = false,
   String? failure,
@@ -2514,14 +2980,17 @@ void _writeAnalyticsRecoveryManifest(
       'exact_merge_performed': exactMergePerformed,
       'selected_tier_action': exactMergePerformed
           ? 'archived_then_exactly_merged'
-          : exactHistoryMerge != null
+          : exactMerge != null
               ? 'archive_then_exact_merge_planned'
               : 'archived_then_restarted_empty',
-      if (exactMergeInstalled && exactHistoryMerge != null) ...{
+      if (exactMergeInstalled && exactMerge != null) ...{
         'exact_merge_installed': true,
-        'merged_rows': exactHistoryMerge.lines.length,
-        'merged_bytes': exactHistoryMerge.bytes.length,
-        'merged_sha256': exactHistoryMerge.digest,
+        if (exactMerge.tier == 'history')
+          'merged_rows': exactMerge.itemCount
+        else
+          'merged_buckets': exactMerge.itemCount,
+        'merged_bytes': exactMerge.bytes.length,
+        'merged_sha256': exactMerge.digest,
       },
       'files': [
         for (final item in evidence)
@@ -2726,9 +3195,8 @@ AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
     // A retained recovery receipt is written only with the admitted checkpoint.
     // If final manifest writing stopped after the verified merge was installed,
     // the receipt plus exact_merge_installed still proves the admitted outcome.
-    final exactMergePerformed = tier == 'history' &&
-        (decoded['exact_merge_performed'] == true ||
-            decoded['exact_merge_installed'] == true);
+    final exactMergePerformed = decoded['exact_merge_performed'] == true ||
+        decoded['exact_merge_installed'] == true;
     return _analyticsRecoveryResult(
       mode: 'recover',
       provider: provider,
@@ -2743,10 +3211,10 @@ AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
       detail: complete
           ? exactMergePerformed
               ? 'A prior completed scoped recovery already archived and '
-                  'exactly merged this tier.'
+                  'exactly merged the selected $tier.'
               : 'A prior completed scoped recovery already archived this tier.'
           : exactMergePerformed
-              ? 'The selected history was exactly merged, but its evidence '
+              ? 'The selected analytics were exactly merged, but the evidence '
                   'manifest was interrupted before finalization.'
               : 'The selected tier restarted empty, but its evidence manifest '
                   'was interrupted before finalization.',
@@ -2778,9 +3246,11 @@ AnalyticsStorageRecoveryResult _recoveryFailureFromInspection(
 /// Every selected canonical and legacy regular file is moved into an owner-only
 /// evidence bundle before any replacement is admitted. Raw history is exactly
 /// merged only when the ordered checkpoint proves one unique retained baseline
-/// overlap for each valid branch. Every other history case and all aggregate
-/// bucket cases restart empty. An explicit recovery guard replaces the old
-/// marker before selected files move, so interruption fails closed.
+/// overlap for each valid branch. Aggregate buckets are exactly merged only
+/// when strict invariants prove both additive branches and their retained
+/// checkpoint suffixes. Every unprovable case restarts empty. An explicit
+/// recovery guard replaces the old marker before selected files move, so
+/// interruption fails closed.
 AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
   String provider,
   String account,
@@ -2855,13 +3325,17 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
         );
       }
       final evidence = scanned.evidence;
-      final exactHistoryMerge = selectedTier == 'history'
+      final exactMerge = selectedTier == 'history'
           ? _exactAnalyticsHistoryMergePlan(
               canonicalProvider,
               account,
               evidence,
             )
-          : null;
+          : _exactAnalyticsBucketMergePlan(
+              canonicalProvider,
+              account,
+              evidence,
+            );
       final previous = _readAnalyticsMigrationRecord(
         canonicalProvider,
         account,
@@ -2902,7 +3376,7 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           state: state,
           evidence: evidence,
           archivedRoles: archivedRoles,
-          exactHistoryMerge: exactHistoryMerge,
+          exactMerge: exactMerge,
           exactMergeInstalled: exactMergeInstalled,
           exactMergePerformed: exactMergeAdmitted,
           failure: failure,
@@ -3083,20 +3557,18 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           );
         }
 
-        if (exactHistoryMerge != null) {
+        if (exactMerge != null) {
           try {
-            final mergedFile = _historyFile(
-              canonicalProvider,
-              account: account,
-            );
-            _atomicWriteBytes(mergedFile, exactHistoryMerge.bytes);
+            final mergedFile = selectedTier == 'history'
+                ? _historyFile(canonicalProvider, account: account)
+                : _bucketsFile(canonicalProvider, account: account);
+            _atomicWriteBytes(mergedFile, exactMerge.bytes);
             enforceOwnerOnlyFile(mergedFile);
             final installed = mergedFile.readAsBytesSync();
-            if (installed.length != exactHistoryMerge.bytes.length ||
-                sha256.convert(installed).toString() !=
-                    exactHistoryMerge.digest) {
+            if (installed.length != exactMerge.bytes.length ||
+                sha256.convert(installed).toString() != exactMerge.digest) {
               throw const FileSystemException(
-                'installed history merge verification failed',
+                'installed analytics merge verification failed',
               );
             }
             exactMergeInstalled = true;
@@ -3112,8 +3584,8 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
               recovered: false,
               exactMergeAvailable: true,
               status: 'merge_install_failed',
-              detail: 'The exact history merge could not be installed and '
-                  'verified. The recovery guard keeps quarantine active.',
+              detail: 'The exact $selectedTier merge could not be installed '
+                  'and verified. The recovery guard keeps quarantine active.',
               evidenceBundle: bundle.path,
               archivedRoles: archivedRoles.toList(),
             );
@@ -3149,12 +3621,12 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
             activeTiers: inspection.activeTiers,
             ready: false,
             recovered: false,
-            exactMergeAvailable: exactHistoryMerge != null,
+            exactMergeAvailable: exactMerge != null,
             exactMergePerformed: false,
             status: 'marker_write_failed',
             detail: exactMergeInstalled
-                ? 'The exact history merge was installed, but its checkpoint '
-                    'could not be stored. Quarantine remains active.'
+                ? 'The exact $selectedTier merge was installed, but its '
+                    'checkpoint could not be stored. Quarantine remains active.'
                 : 'The empty analytics checkpoint could not be stored. The '
                     'quarantine remains active.',
             evidenceBundle: bundle.path,
@@ -3176,7 +3648,7 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
             activeTiers: remaining?.tiers ?? const [],
             ready: false,
             recovered: false,
-            exactMergeAvailable: exactHistoryMerge != null,
+            exactMergeAvailable: exactMerge != null,
             exactMergePerformed: false,
             status: 'rediverged',
             detail: 'The selected tier changed again before verification. '
@@ -3199,12 +3671,12 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
             activeTiers: remaining?.tiers ?? const [],
             ready: false,
             recovered: true,
-            exactMergeAvailable: exactHistoryMerge != null,
+            exactMergeAvailable: exactMerge != null,
             exactMergePerformed: exactMergeAdmitted,
             status: 'recovered_receipt_incomplete',
             detail: exactMergeInstalled
-                ? 'The selected history was exactly merged, but its evidence '
-                    'manifest could not be finalized.'
+                ? 'The selected analytics were exactly merged, but the '
+                    'evidence manifest could not be finalized.'
                 : 'The selected tier restarted empty, but its evidence '
                     'manifest could not be finalized.',
             evidenceBundle: bundle.path,
@@ -3219,12 +3691,15 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           activeTiers: remaining?.tiers ?? const [],
           ready: false,
           recovered: true,
-          exactMergeAvailable: exactHistoryMerge != null,
+          exactMergeAvailable: exactMerge != null,
           exactMergePerformed: exactMergeAdmitted,
           status: 'recovered',
           detail: exactMergeInstalled
-              ? 'Selected raw-history generations were archived and exactly '
-                  'merged.'
+              ? selectedTier == 'history'
+                  ? 'Selected raw-history generations were archived and '
+                      'exactly merged.'
+                  : 'Selected aggregate-bucket generations were archived and '
+                      'exactly merged.'
               : 'Selected analytics were archived and restarted empty. Exact '
                   'merge was not provable for this evidence.',
           evidenceBundle: bundle.path,
@@ -3242,13 +3717,13 @@ AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
           activeTiers: inspection.activeTiers,
           ready: false,
           recovered: false,
-          exactMergeAvailable: exactHistoryMerge != null,
+          exactMergeAvailable: exactMerge != null,
           exactMergePerformed: false,
           status: 'archive_failed',
           detail: exactMergeInstalled
-              ? 'Recovery stopped after the exact history merge was installed '
-                  'but before its checkpoint was admitted. Quarantine remains '
-                  'active.'
+              ? 'Recovery stopped after the exact $selectedTier merge was '
+                  'installed but before its checkpoint was admitted. '
+                  'Quarantine remains active.'
               : 'Recovery stopped before an empty checkpoint was admitted. '
                   'The quarantine remains active.',
           evidenceBundle: bundle.path,

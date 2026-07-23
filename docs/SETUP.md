@@ -433,8 +433,11 @@ process and reviewing the reported impact, rerun the selected command with
 an owner-only evidence bundle under the local `analytics-recovery` directory,
 and verifies SHA-256 digests. When strict row checks and one unique ordered
 checkpoint overlap prove both raw-history deltas, it installs and verifies their
-capped chronological merge. Ambiguous history and aggregate buckets restart the
-selected tier empty. It preserves current quota, credentials, profiles,
+capped chronological merge. For aggregate buckets, it requires unique aligned
+starts, a complete retained checkpoint suffix, and valid bounded count,
+histogram, moment, exhausted-count, and extrema fields before installing
+canonical plus legacy minus the shared checkpoint once. Unprovable evidence
+restarts the selected tier empty. It preserves current quota, credentials, profiles,
 preferences, manual entries, leases, alerts, other provider accounts,
 provider-only compatibility analytics, and the unselected tier. If both tiers
 are quarantined, recover them separately. It refuses a legacy file shared by

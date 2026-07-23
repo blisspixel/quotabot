@@ -3407,7 +3407,7 @@ void _printAnalyticsStorageRecovery(AnalyticsStorageRecoveryResult result) {
     print(
       style.dim(
         result.exactMergeAvailable
-            ? '  Rerun this exact command with --yes to archive both generations and install the exact history merge.'
+            ? '  Rerun this exact command with --yes to archive both generations and install the exact ${result.tier == 'history' ? 'raw-history' : 'aggregate-bucket'} merge.'
             : '  Rerun this exact command with --yes to perform the scoped archive-and-reset.',
       ),
     );
@@ -3425,9 +3425,9 @@ void _printAnalyticsStorageRecovery(AnalyticsStorageRecoveryResult result) {
   print(
     style.dim(
       result.exactMergePerformed
-          ? '  Exact history merge completed. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.'
+          ? '  Exact ${result.tier == 'history' ? 'raw-history' : 'aggregate-bucket'} merge completed. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.'
           : result.exactMergeAvailable
-              ? '  Exact history merge is checkpoint-proven for this evidence. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.'
+              ? '  Exact ${result.tier == 'history' ? 'raw-history' : 'aggregate-bucket'} merge is checkpoint-proven for this evidence. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.'
               : '  Exact merge is not provable for this evidence. Current quota, credentials, preferences, other identities, and unselected analytics remain unchanged.',
     ),
   );

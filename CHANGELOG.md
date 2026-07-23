@@ -5,12 +5,15 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
-- Scoped mixed-version Analytics recovery now previews whether raw history has
-  one exact ordered-checkpoint merge or requires archive-and-reset. Confirmed
-  exact merges archive both originals first, validate every row and branch,
-  install and verify the capped chronological union, and record its row count
-  and SHA-256 in the owner-only evidence manifest. Ambiguous history and all
-  aggregate bucket conflicts retain the existing fail-closed reset behavior.
+- Scoped mixed-version Analytics recovery now previews whether raw history or
+  aggregate buckets have one exact checkpoint-proven merge or require
+  archive-and-reset. Confirmed exact merges archive both originals first. Raw
+  history validates every row and ordered branch before installing the capped
+  chronological union. Aggregate recovery validates ordering, retained suffixes,
+  additive dominance, histograms, moments, exhausted counts, and extrema before
+  installing canonical plus legacy minus the shared checkpoint. Evidence
+  manifests record the installed row or bucket count and SHA-256. Ambiguous or
+  malformed evidence retains the fail-closed reset behavior.
 - Desktop widget tests now enforce labeled controls, 28 by 28 desktop targets,
   and text contrast across expanded, compact, and Analytics surfaces in light,
   dark, and Hacker themes. Native keyboard and screen-reader evidence remains a

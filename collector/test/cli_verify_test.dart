@@ -99,6 +99,37 @@ void main() {
     }
   }
 
+  void seedMergeableAnalyticsBucketConflict() {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    setQuotabotDirOverrideForTesting(temp);
+    try {
+      File('${cacheDir().path}/${provider}_$account.json')
+          .writeAsStringSync(jsonEncode(quota.toJson()));
+      final baseline = HeadroomBucket(start: bucketStart(now))..add(80);
+      final legacy = File(
+        '${cacheDir().path}/buckets_${provider}_$account.json',
+      )..writeAsStringSync(jsonEncode([baseline.toJson()]));
+      recordHeadroomSample(provider, 70, now, account: account);
+      baseline.add(40);
+      legacy.writeAsStringSync(jsonEncode([baseline.toJson()]));
+      expect(
+        analyticsStorageNotice(provider, account: account)?.tiers,
+        ['buckets'],
+      );
+    } finally {
+      setQuotabotDirOverrideForTesting(null);
+    }
+  }
+
   test('verify --json passes a healthy simulated snapshot', () async {
     final result = await runCli([
       'verify',
@@ -408,7 +439,35 @@ void main() {
     ]);
     expectExitCode(human, 0);
     expect(human.stdout, contains('ALREADY RECOVERED'));
-    expect(human.stdout, contains('Exact history merge completed'));
+    expect(human.stdout, contains('Exact raw-history merge completed'));
+  }, timeout: Timeout.factor(2));
+
+  test('analytics recovery previews an exact aggregate-bucket merge', () async {
+    seedMergeableAnalyticsBucketConflict();
+
+    final human = await runCli([
+      'verify',
+      '--recover-analytics=codex',
+      '--account=acct',
+      '--tier=buckets',
+      '--no-color',
+    ]);
+
+    expectExitCode(human, 0);
+    expect(human.stderr, isEmpty);
+    expect(human.stdout, contains('READY'));
+    expect(
+      human.stdout,
+      contains('exact checkpoint-proven merge'),
+    );
+    expect(
+      human.stdout,
+      contains('install the exact aggregate-bucket merge'),
+    );
+    expect(
+      human.stdout,
+      contains('Exact aggregate-bucket merge is checkpoint-proven'),
+    );
   }, timeout: Timeout.factor(2));
 
   test('analytics recovery confirmation archives only the selected tier',

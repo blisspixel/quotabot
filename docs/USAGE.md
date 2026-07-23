@@ -168,9 +168,9 @@ metadata, not recovery authority, and cannot replace the exact account.
 
 The inspection makes no provider or model call and creates no recovery lock or
 bundle. It reports the active tiers, whether the target is ready, and whether
-raw history has one exact ordered-checkpoint merge or requires restart. After
-every older process is stopped, add `--yes` to archive and recover only the
-selected tier:
+raw history or aggregate buckets have one exact checkpoint-proven merge or
+require restart. After every older process is stopped, add `--yes` to archive
+and recover only the selected tier:
 
 ```bash
 quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history --yes
@@ -183,10 +183,15 @@ owner-only bundle, copies the migration marker, and verifies each SHA-256
 digest. Raw history is exactly merged only when both files contain valid trusted
 rows for the exact identity, each branch has one unique ordered-checkpoint
 suffix overlap and monotonic time, and enough baseline remains to reconstruct
-the 200-row cap. The installed chronological multiset is digest-verified before
-the marker admits an empty legacy checkpoint. Ambiguous history and aggregate
-buckets restart empty. A legacy bucket file must have exact ownership evidence;
-shared colliding legacy evidence is refused. The JSON
+the 200-row cap. Aggregate buckets are exactly merged only when each checkpoint
+and branch row has a unique aligned start and valid bounded count, histogram,
+moment, exhausted-count, and extrema fields. Retained checkpoint rows must form
+a complete suffix whose additive fields remain present in each branch. The
+installed aggregate is canonical plus legacy minus the shared checkpoint once,
+bounded to the newest 90-day series. Each installed merge is digest-verified
+before the marker admits an empty legacy checkpoint. Unprovable evidence
+restarts the selected tier empty. A legacy bucket file must have exact ownership
+evidence; shared colliding legacy evidence is refused. The JSON
 receipt is `quotabot.analytics-recovery.v1`; its evidence manifest is
 `quotabot.analytics-recovery-evidence.v1` and contains fixed file roles and the
 opaque account digest, never the raw account or source path. Current quota,

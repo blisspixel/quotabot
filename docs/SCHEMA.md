@@ -506,8 +506,8 @@ infer a clean cache from `incidents: []` unless `state` is `complete`.
 --tier=history|buckets --json` emits a local analytics recovery receipt. Without
 `--yes`, the command is a read-only inspection and creates no recovery lock or
 bundle. With `--yes`, it archives only the selected exact tier before either
-exactly merging checkpoint-proven raw history or restarting that tier empty. It
-makes no provider or model call in either mode.
+exactly merging checkpoint-proven raw history or aggregate buckets, or restarting
+that tier empty. It makes no provider or model call in either mode.
 
 - `schema`: always `quotabot.analytics-recovery.v1`.
 - `mode`: `inspect` or `recover`.
@@ -531,9 +531,9 @@ makes no provider or model call in either mode.
 - `impact`: the selected-tier action, additive `exact_merge_available` and
   `exact_merge_performed` booleans, and the local surfaces preserved by the
   transaction. Inspection sets availability only when a strict raw-history plan
-  exists; confirmation recomputes it under lock. The action changes files only
-  for a `ready` inspection followed by confirmation; a failed inspection
-  reports the selected tier as unchanged.
+  or strict aggregate-bucket plan exists; confirmation recomputes it under lock.
+  The action changes files only for a `ready` inspection followed by
+  confirmation; a failed inspection reports the selected tier as unchanged.
 - `evidence_bundle` and `archived_roles`: present after an archive starts. The
   bundle path is returned only to the local caller; role names are fixed and do
   not contain account or source-path text.
@@ -551,10 +551,11 @@ Each created bundle contains `manifest.json` with schema
 provider, opaque `account_digest`, tier, observation time, selected action,
 `exact_merge_performed`, and fixed-role file entries with byte counts, SHA-256
 digests, archive state, and whether the original was moved. A completed exact
-raw-history merge also records `exact_merge_installed`, `merged_rows`,
-`merged_bytes`, and `merged_sha256`. It never contains the raw account, original
-source path, quota samples, prompts, code, or credentials. Ambiguous history and
-aggregate buckets restart empty; every bundle is retained for audit.
+merge also records `exact_merge_installed`, `merged_rows` for raw history or
+`merged_buckets` for aggregate buckets, `merged_bytes`, and `merged_sha256`. It
+never contains the raw account, original source path, quota samples, prompts,
+code, or credentials. Evidence without one strict merge proof restarts empty;
+every bundle is retained for audit.
 
 ## `quotabot.explain.v1`
 

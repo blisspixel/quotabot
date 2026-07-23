@@ -186,10 +186,13 @@ quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=hist
 
 The read-only inspection states the planned action before confirmation. After
 reviewing it, add `--yes` to archive that tier's canonical and legacy files into
-an owner-only local evidence bundle. Raw history is then exactly merged only
-when strict row validation and one unique ordered-checkpoint overlap prove both
-branch deltas. Ambiguous history and aggregate buckets restart only the selected
-tier empty. Current quota, credentials, preferences, other accounts,
+an owner-only local evidence bundle. Raw history is exactly merged only when
+strict row validation and one unique ordered-checkpoint overlap prove both
+branch deltas. Aggregate buckets are exactly merged only when strict count,
+histogram, moment, extrema, ordering, and retained-checkpoint-suffix checks prove
+that the shared baseline can be subtracted once. Evidence that fails either
+proof restarts only the selected tier empty. Current quota, credentials,
+preferences, other accounts,
 provider-level compatibility analytics, and the unselected tier remain in
 place. Recovery refuses a lossy legacy file when it cannot prove that the file
 belongs only to the requested account. Retrying a completed command returns its

@@ -313,19 +313,25 @@ every selected path, including paths absent at inspection, remains absent can
 the selected tier be replaced. Raw history receives an exact merge only when
 strict parsing proves the exact provider/account identity, trusted evidence,
 monotonic branch order, one unique ordered-checkpoint suffix overlap per branch,
-and enough retained baseline to reconstruct the 200-row cap. The merged
-canonical file is atomically installed and digest-verified before the migration
-marker admits an empty legacy checkpoint. Ambiguous history and aggregate
-buckets restart empty. A still-conflicted other tier retains its conflict flag
-and trusted checkpoint.
+and enough retained baseline to reconstruct the 200-row cap. Aggregate buckets
+receive an exact merge only when every checkpoint and branch row has one unique
+aligned start and valid bounded counts, histograms, moments, exhausted counts,
+and extrema. Any retained checkpoint rows must form a complete suffix, and each
+branch's additive fields must cover that baseline. The aggregate merge computes
+canonical plus legacy minus the shared checkpoint once, retains independent new
+buckets, and keeps the newest bounded 90-day series. The merged canonical file
+is atomically installed and digest-verified before the migration marker admits
+an empty legacy checkpoint. Unprovable evidence restarts the selected tier
+empty. A still-conflicted other tier retains its conflict flag and trusted
+checkpoint.
 Failures before checkpoint admission retain quarantine and partial archives
 retain their manifest. If manifest finalization fails after admission, retry
 returns the retained receipt as `recovered_receipt_incomplete`. A late legacy
 write differs from the empty legacy baseline and reactivates quarantine.
 The transaction never contacts a provider and never touches quota snapshots,
 credentials, profiles, preferences, leases, alerts, other identities, or
-provider-only compatibility analytics. Aggregate-bucket subtraction remains
-unimplemented and fail closed.
+provider-only compatibility analytics. Aggregate-bucket reconciliation fails
+closed whenever any exact-merge invariant cannot be proven.
 
 Mixed-version state also has a separate digest-private incident inventory. A
 detected checkpoint mismatch is persisted under the existing identity evidence

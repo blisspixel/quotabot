@@ -2142,6 +2142,402 @@ void main() {
     expect(rows.last.asOf, now + 201 * 60);
   });
 
+  test('analytics recovery exactly merges checkpoint-proven buckets', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final alignedNow = bucketStart(now);
+    HeadroomBucket bucket(int start, List<double> values) {
+      final result = HeadroomBucket(start: start);
+      for (final value in values) {
+        result.add(value);
+      }
+      return result;
+    }
+
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    File('${cacheDir().path}/${provider}_$account.json')
+        .writeAsStringSync(jsonEncode(quota.toJson()));
+    final older = bucket(alignedNow - 3600, [90]);
+    final shared = bucket(alignedNow, [80]);
+    final legacyBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync(jsonEncode([
+        older.toJson(),
+        shared.toJson(),
+      ]));
+
+    recordHeadroomSample(provider, 70, now, account: account);
+    shared.add(40);
+    legacyBuckets.writeAsStringSync(jsonEncode([
+      older.toJson(),
+      shared.toJson(),
+    ]));
+
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['buckets'],
+    );
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'buckets');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isTrue);
+    expect(
+      (inspection.toJson()['impact'] as Map)['selected_tier'],
+      'would be archived, then exactly merged',
+    );
+
+    final result = recoverAnalyticsStorage(provider, account, 'buckets');
+    expect(result.recovered, isTrue);
+    expect(result.exactMergePerformed, isTrue);
+    expect(result.detail, contains('aggregate'));
+    expect(legacyBuckets.existsSync(), isFalse);
+    expect(analyticsStorageNotice(provider, account: account), isNull);
+    final merged =
+        loadBuckets(provider, account: account, fallbackToProvider: false);
+    expect(merged, hasLength(2));
+    expect(merged.first.start, alignedNow - 3600);
+    expect(merged.first.count, 1);
+    expect(merged.last.start, alignedNow);
+    expect(merged.last.count, 3);
+    expect(merged.last.sum, closeTo(190, 0.000001));
+    expect(merged.last.sumSq, closeTo(12900, 0.000001));
+    expect(merged.last.min, 40);
+    expect(merged.last.max, 80);
+    expect(merged.last.hist.reduce((left, right) => left + right), 3);
+
+    final manifestFile = File('${result.evidenceBundle}/manifest.json');
+    final manifest = jsonDecode(
+      manifestFile.readAsStringSync(),
+    ) as Map<String, dynamic>;
+    expect(manifest['exact_merge_performed'], isTrue);
+    expect(manifest['merged_buckets'], 2);
+    expect(manifest['merged_rows'], isNull);
+    expect(manifest['merged_sha256'], matches(RegExp(r'^[a-f0-9]{64}$')));
+
+    manifest['state'] = 'checkpoint_pending';
+    manifest['exact_merge_performed'] = false;
+    manifestFile.writeAsStringSync(jsonEncode(manifest));
+    final interrupted = recoverAnalyticsStorage(provider, account, 'buckets');
+    expect(interrupted.status, 'recovered_receipt_incomplete');
+    expect(interrupted.exactMergePerformed, isTrue);
+
+    manifest['state'] = 'complete';
+    manifest['exact_merge_performed'] = true;
+    manifestFile.writeAsStringSync(jsonEncode(manifest));
+    final retry = recoverAnalyticsStorage(provider, account, 'buckets');
+    expect(retry.status, 'already_recovered');
+    expect(retry.exactMergePerformed, isTrue);
+
+    legacyBuckets.writeAsStringSync(
+      jsonEncode([
+        bucket(alignedNow, [30]).toJson()
+      ]),
+    );
+    expect(
+      analyticsStorageNotice(provider, account: account)?.tiers,
+      ['buckets'],
+    );
+    expect(
+      loadBuckets(provider, account: account, fallbackToProvider: false),
+      isEmpty,
+    );
+  });
+
+  test('exact bucket merge accepts retention suffixes and new buckets', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final alignedNow = bucketStart(now);
+    HeadroomBucket bucket(int start, List<double> values) {
+      final result = HeadroomBucket(start: start);
+      for (final value in values) {
+        result.add(value);
+      }
+      return result;
+    }
+
+    final baseline = [
+      bucket(alignedNow - 7200, [90]),
+      bucket(alignedNow - 3600, [80]),
+      bucket(alignedNow, [70]),
+    ];
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    File('${cacheDir().path}/${provider}_$account.json')
+        .writeAsStringSync(jsonEncode(quota.toJson()));
+    final legacy = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync(
+        jsonEncode(baseline.map((item) => item.toJson()).toList()),
+      );
+    recordHeadroomSample(provider, 60, now, account: account);
+
+    final canonical = File(
+      '${cacheDir().path}/buckets_${provider}_${accountStorageStem(account)}.json',
+    );
+    canonical.writeAsStringSync(jsonEncode([
+      bucket(alignedNow - 3600, [80, 50]).toJson(),
+      bucket(alignedNow, [70, 60]).toJson(),
+    ]));
+    legacy.writeAsStringSync(jsonEncode([
+      bucket(alignedNow, [70, 40]).toJson(),
+      bucket(alignedNow + 3600, [30]).toJson(),
+    ]));
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'buckets');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isTrue);
+    final recovery = recoverAnalyticsStorage(provider, account, 'buckets');
+    expect(recovery.exactMergePerformed, isTrue);
+    final merged =
+        loadBuckets(provider, account: account, fallbackToProvider: false);
+    expect(merged.map((item) => item.start), [
+      alignedNow - 3600,
+      alignedNow,
+      alignedNow + 3600,
+    ]);
+    expect(merged.map((item) => item.count), [2, 3, 1]);
+    expect(merged[0].sum, closeTo(130, 0.000001));
+    expect(merged[1].sum, closeTo(170, 0.000001));
+    expect(merged[2].sum, closeTo(30, 0.000001));
+  });
+
+  test('exact bucket merge accepts independent branches from empty baseline',
+      () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final alignedNow = bucketStart(now);
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    File('${cacheDir().path}/${provider}_$account.json')
+        .writeAsStringSync(jsonEncode(quota.toJson()));
+    final legacy = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync('[]');
+
+    recordHeadroomSample(provider, 70, now, account: account);
+    final legacyBucket = HeadroomBucket(start: alignedNow)..add(40);
+    legacy.writeAsStringSync(jsonEncode([legacyBucket.toJson()]));
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'buckets');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isTrue);
+    final recovery = recoverAnalyticsStorage(provider, account, 'buckets');
+    expect(recovery.exactMergePerformed, isTrue);
+    final merged =
+        loadBuckets(provider, account: account, fallbackToProvider: false);
+    expect(merged, hasLength(1));
+    expect(merged.single.count, 2);
+    expect(merged.single.sum, closeTo(110, 0.000001));
+    expect(merged.single.min, 40);
+    expect(merged.single.max, 70);
+  });
+
+  test('exact bucket merge rejects ambiguous checkpoint evidence', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final alignedNow = bucketStart(now);
+    HeadroomBucket bucket(int start, List<double> values) {
+      final result = HeadroomBucket(start: start);
+      for (final value in values) {
+        result.add(value);
+      }
+      return result;
+    }
+
+    void clearStorage() {
+      final directory = cacheDir();
+      for (final entity in directory.listSync()) {
+        entity.deleteSync(recursive: true);
+      }
+    }
+
+    void expectRejected(
+      String reason,
+      List<Map<String, dynamic>> canonicalRows,
+      List<Map<String, dynamic>> legacyRows,
+    ) {
+      clearStorage();
+      final baseline = [
+        bucket(alignedNow - 7200, [90]),
+        bucket(alignedNow - 3600, [80]),
+        bucket(alignedNow, [70]),
+      ];
+      final quota = ProviderQuota(
+        provider: provider,
+        displayName: 'Codex',
+        account: account,
+        asOf: now,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+      File('${cacheDir().path}/${provider}_$account.json')
+          .writeAsStringSync(jsonEncode(quota.toJson()));
+      final legacy = File(
+        '${cacheDir().path}/buckets_${provider}_$account.json',
+      )..writeAsStringSync(
+          jsonEncode(baseline.map((item) => item.toJson()).toList()),
+        );
+      recordHeadroomSample(provider, 60, now, account: account);
+      File(
+        '${cacheDir().path}/buckets_${provider}_${accountStorageStem(account)}.json',
+      ).writeAsStringSync(jsonEncode(canonicalRows));
+      legacy.writeAsStringSync(jsonEncode(legacyRows));
+
+      final inspection =
+          inspectAnalyticsStorageRecovery(provider, account, 'buckets');
+      expect(inspection.ready, isTrue, reason: reason);
+      expect(inspection.exactMergeAvailable, isFalse, reason: reason);
+    }
+
+    final first = bucket(alignedNow - 7200, [90]).toJson();
+    final middle = bucket(alignedNow - 3600, [80]).toJson();
+    final last = bucket(alignedNow, [70]).toJson();
+    expectRejected(
+      'a retained checkpoint branch must be a complete suffix',
+      [first, last],
+      [middle, last],
+    );
+    expectRejected(
+      'a branch cannot remove checkpoint samples',
+      [
+        bucket(alignedNow - 3600, [80]).toJson(),
+        bucket(alignedNow, [70]).toJson(),
+      ],
+      [
+        bucket(alignedNow - 3600, [80]).toJson(),
+        bucket(alignedNow, [60]).toJson(),
+      ],
+    );
+    expectRejected(
+      'duplicate bucket starts are ambiguous',
+      [middle, middle, last],
+      [last],
+    );
+    final impossibleMoment = bucket(alignedNow, [70, 40]).toJson()
+      ..['sq'] = 6700;
+    expectRejected(
+      'aggregate moments must be possible for their extrema',
+      [middle, last],
+      [impossibleMoment],
+    );
+    expectRejected(
+      'a new pre-checkpoint bucket cannot be distinguished from a gap',
+      [
+        bucket(alignedNow - 10800, [85]).toJson(),
+        last,
+      ],
+      [last],
+    );
+  });
+
+  test('exact bucket merge keeps the newest bounded aggregate union', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final firstStart = bucketStart(now);
+    final cap = kRetentionDays * 24 + 2;
+    Map<String, dynamic> bucket(int start, double value) =>
+        (HeadroomBucket(start: start)..add(value)).toJson();
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    File('${cacheDir().path}/${provider}_$account.json')
+        .writeAsStringSync(jsonEncode(quota.toJson()));
+    final legacy = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync('[]');
+    recordHeadroomSample(provider, 90, now, account: account);
+
+    final canonical = File(
+      '${cacheDir().path}/buckets_${provider}_${accountStorageStem(account)}.json',
+    );
+    canonical.writeAsStringSync(jsonEncode([
+      for (var index = 0; index < cap; index++)
+        bucket(firstStart + index * kBucketSpan, 80),
+    ]));
+    legacy.writeAsStringSync(jsonEncode([
+      for (var index = 0; index < cap; index++)
+        bucket(firstStart + (cap + index) * kBucketSpan, 70),
+    ]));
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'buckets');
+    expect(inspection.exactMergeAvailable, isTrue);
+    final recovery = recoverAnalyticsStorage(provider, account, 'buckets');
+    expect(recovery.exactMergePerformed, isTrue);
+    final merged =
+        loadBuckets(provider, account: account, fallbackToProvider: false);
+    expect(merged, hasLength(cap));
+    expect(merged.first.start, firstStart + cap * kBucketSpan);
+    expect(merged.last.start, firstStart + (2 * cap - 1) * kBucketSpan);
+  });
+
+  test('inconsistent bucket aggregate retains archive-and-reset recovery', () {
+    const provider = codexProviderId;
+    const account = 'acct';
+    const now = 1782000000;
+    final alignedNow = bucketStart(now);
+    final quota = ProviderQuota(
+      provider: provider,
+      displayName: 'Codex',
+      account: account,
+      asOf: now,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    File('${cacheDir().path}/${provider}_$account.json')
+        .writeAsStringSync(jsonEncode(quota.toJson()));
+    final baseline = HeadroomBucket(start: alignedNow)..add(80);
+    final legacyBuckets = File(
+      '${cacheDir().path}/buckets_${provider}_$account.json',
+    )..writeAsStringSync(jsonEncode([baseline.toJson()]));
+
+    recordHeadroomSample(provider, 70, now, account: account);
+    legacyBuckets.writeAsStringSync(jsonEncode([
+      {
+        ...baseline.toJson(),
+        'n': 2,
+        'sum': 120,
+        'sq': 8000,
+        'min': 40,
+        'h': List<int>.filled(kHistBins, 0),
+      },
+    ]));
+
+    final inspection =
+        inspectAnalyticsStorageRecovery(provider, account, 'buckets');
+    expect(inspection.ready, isTrue);
+    expect(inspection.exactMergeAvailable, isFalse);
+    expect(
+      (inspection.toJson()['impact'] as Map)['selected_tier'],
+      'would be archived, then restarted empty',
+    );
+  });
+
   test('analytics incident inventory validates markers and stays bounded',
       () async {
     const provider = codexProviderId;
@@ -2557,10 +2953,18 @@ void main() {
         recoverAnalyticsStorage(provider, account, 'buckets');
 
     expect(bucketsRecovery.recovered, isTrue);
+    expect(bucketsRecovery.exactMergePerformed, isTrue);
     expect(bucketsRecovery.activeTiers, isEmpty);
     expect(analyticsStorageNotice(provider, account: account), isNull);
     expect(legacyBuckets.existsSync(), isFalse);
-    expect(canonicalBuckets.existsSync(), isFalse);
+    expect(canonicalBuckets.existsSync(), isTrue);
+    final recoveredBuckets =
+        loadBuckets(provider, account: account, fallbackToProvider: false);
+    expect(recoveredBuckets, hasLength(2));
+    expect(recoveredBuckets.first.count, 1);
+    expect(recoveredBuckets.first.sum, closeTo(90, 0.000001));
+    expect(recoveredBuckets.last.count, 2);
+    expect(recoveredBuckets.last.sum, closeTo(145, 0.000001));
     final resolvedInventory = await analyticsStorageIncidentInventory([
       quota(20, now),
     ]);
