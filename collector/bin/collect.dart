@@ -11,6 +11,7 @@ import 'package:quotabot_collector/auth/openai_auth.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/cache.dart';
+import 'package:quotabot_collector/collect_progress.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/drift.dart';
@@ -72,19 +73,42 @@ Future<T> _withSpinner<T>(String label, Future<T> Function() task) async {
   }
 }
 
-/// Collects every provider's quota behind the spinner, then applies an optional
-/// local profile view.
+/// Collects every provider's quota, then applies an optional local profile view.
+/// Interactive terminals get a live per-provider progress display (a header, one
+/// committed line per provider as it settles, and a single rewritten status
+/// line); piped or scripted runs and simulation snapshots read silently so their
+/// output stays clean.
 Future<List<ProviderQuota>> _read([
   QuotaProfile? profile,
   Set<String> excludedProviders = const {},
-]) =>
-    _withSpinner(
-      'reading quota',
-      () => _collectProfiled(
-        profile,
-        excludedProviders: excludedProviders,
-      ),
+]) async {
+  if (!stderr.hasTerminal || _simulatedSnapshot != null) {
+    return _collectProfiled(profile, excludedProviders: excludedProviders);
+  }
+  final sw = Stopwatch()..start();
+  final progress = FleetProgress(
+    sink: stderr,
+    pending: [for (final entry in kProviderAdapterRegistry) entry.displayName],
+    elapsedSeconds: () => sw.elapsed.inSeconds,
+    dim: style.dim,
+  );
+  progress.start();
+  final timer = Timer.periodic(
+    const Duration(milliseconds: 120),
+    (_) => progress.tick(),
+  );
+  try {
+    return await _collectProfiled(
+      profile,
+      excludedProviders: excludedProviders,
+      onProviderDone: (id, displayName, ok) =>
+          progress.providerDone(displayName, ok),
     );
+  } finally {
+    timer.cancel();
+    progress.stop();
+  }
+}
 
 class _VerifiedRead {
   final List<ProviderQuota> results;
@@ -115,9 +139,11 @@ Future<_VerifiedRead> _readForVerify([
 Future<List<ProviderQuota>> _collectProfiled(
   QuotaProfile? profile, {
   Set<String> excludedProviders = const {},
+  CollectProgress? onProviderDone,
 }) async {
   _printSimulationNoticeIfNeeded();
-  final results = _simulatedSnapshot ?? await collectAll();
+  final results =
+      _simulatedSnapshot ?? await collectAll(onProviderDone: onProviderDone);
   final profiled =
       profile == null ? List.of(results) : applyProfile(results, profile);
   return filterExcludedProviders(profiled, excludedProviders);
@@ -1727,6 +1753,12 @@ Future<void> _runTop(
   final quit = Completer<void>();
   Timer? repaint;
   var terminalActive = true;
+  // First-load progress so the initial "reading quota" frame shows which
+  // providers are in and which are still outstanding instead of a static line.
+  final progressTotal = kProviderAdapterRegistry.length;
+  var progressDone = 0;
+  final progressPending = <String>{};
+  var loadStart = nowEpoch();
 
   // The sorted, unhidden providers plus the routing suggestion for this frame,
   // computed together so the cursor, the rows, and the route line agree.
@@ -1747,7 +1779,19 @@ Future<void> _runTop(
     final now = nowEpoch();
     final List<String> lines;
     if (loading && data.isEmpty) {
-      lines = ['  ${style.bold('quotabot')}', '', '  reading quota...'];
+      final elapsed = now - loadStart;
+      lines = [
+        '  ${style.bold('quotabot')}',
+        '',
+        fleetProgressLine(
+          spinner: fleetSpinnerFrame(elapsed),
+          done: progressDone,
+          total: progressTotal,
+          elapsedSeconds: elapsed,
+          pending: progressPending.toList(),
+        ),
+        '  ${style.dim('live reads, usually under a minute')}',
+      ];
     } else {
       final f = frame();
       final visible = f.visible;
@@ -1794,8 +1838,24 @@ Future<void> _runTop(
   }
 
   final reloader = TopRefreshCoordinator<List<ProviderQuota>>(
-    collect: () =>
-        _collectProfiled(profile, excludedProviders: excludedProviders),
+    collect: () {
+      progressDone = 0;
+      progressPending
+        ..clear()
+        ..addAll({
+          for (final entry in kProviderAdapterRegistry) entry.displayName,
+        });
+      loadStart = nowEpoch();
+      return _collectProfiled(
+        profile,
+        excludedProviders: excludedProviders,
+        onProviderDone: (id, displayName, ok) {
+          progressDone++;
+          progressPending.remove(displayName);
+          if (loading && data.isEmpty) draw();
+        },
+      );
+    },
     apply: (fresh) {
       data = fresh;
       lastCollect = nowEpoch();
@@ -3178,6 +3238,14 @@ void _printDoctor(
       '  (Aider/Cline etc. often use underlying provider quotas already tracked above.)',
     );
   }
+
+  print('\n${style.cyan('Diagnostics:')}');
+  print('  Cache directory: ${cacheDir().path}');
+  try {
+    final ledger = File('${cacheDir().path}/leases.json');
+    final sz = ledger.existsSync() ? ledger.lengthSync() : 0;
+    print('  Local ledger:    ${sz > 0 ? '$sz bytes' : 'empty or missing'}');
+  } catch (_) {}
 }
 
 /// `explain`: a dry-run manifest of provider metadata reads and network hosts.

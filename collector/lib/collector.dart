@@ -393,9 +393,21 @@ Future<List<ProviderQuota>> _listWithDeadline(
           ],
         );
 
+/// Reports one provider adapter settling during a fleet collection, so a caller
+/// can render live progress instead of a blank wait. [ok] is whether the adapter
+/// produced at least one usable row; a false value still counts as done.
+typedef CollectProgress = void Function(
+  String providerId,
+  String displayName,
+  bool ok,
+);
+
 /// Runs every provider adapter concurrently and returns their snapshots.
-/// Shared by the CLI (bin/collect.dart) and the desktop app.
-Future<List<ProviderQuota>> collectAll() => _collectAllProviders();
+/// Shared by the CLI (bin/collect.dart) and the desktop app. [onProviderDone]
+/// fires once per adapter as it settles, in completion order, so an interactive
+/// caller can show which providers are in and which are still outstanding.
+Future<List<ProviderQuota>> collectAll({CollectProgress? onProviderDone}) =>
+    _collectAllProviders(onProviderDone: onProviderDone);
 
 /// Runs a normal collection and also returns the audited runtime access surface
 /// for the adapters that were invoked. The access records intentionally come
@@ -404,6 +416,7 @@ Future<List<ProviderQuota>> collectAll() => _collectAllProviders();
 Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess({
   Set<String>? adapterProviderIds,
   List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
+  CollectProgress? onProviderDone,
 }) async {
   final selectedRegistry = _selectedAdapterRegistry(
     registry,
@@ -435,6 +448,7 @@ Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess({
     skipDemoCheck: true,
     adapterProviderIds: adapterProviderIds,
     registry: registry,
+    onProviderDone: onProviderDone,
   );
   return CollectedQuotaSnapshot(
     providers: results,
@@ -454,6 +468,7 @@ Future<List<ProviderQuota>> _collectAllProviders({
   bool skipDemoCheck = false,
   Set<String>? adapterProviderIds,
   List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
+  CollectProgress? onProviderDone,
 }) async {
   final selectedRegistry = _selectedAdapterRegistry(
     registry,
@@ -479,7 +494,17 @@ Future<List<ProviderQuota>> _collectAllProviders({
     sweepStaleTempFiles(); // once per process, clear any crash leftovers
   }
   final collected = await Future.wait([
-    for (final entry in selectedRegistry) _collectRegistered(entry),
+    for (final entry in selectedRegistry)
+      _collectRegistered(entry).then((group) {
+        if (onProviderDone != null) {
+          onProviderDone(
+            entry.id,
+            entry.displayName,
+            group.any((quota) => quota.ok),
+          );
+        }
+        return group;
+      }),
   ]);
   final manual = loadManualProviderQuotas();
   // A local runtime that is not running is not ok; drop it so users who do not
