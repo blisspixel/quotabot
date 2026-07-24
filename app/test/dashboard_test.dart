@@ -1334,7 +1334,7 @@ void main() {
     expect(decision, findsOneWidget);
     expect(find.text('No route'), findsOneWidget);
     expect(
-      find.bySemanticsLabel(RegExp(r'No safe route.*Open decision details')),
+      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
       findsOneWidget,
     );
 
@@ -1384,7 +1384,7 @@ void main() {
     await tester.pump();
 
     expect(
-      find.bySemanticsLabel(RegExp(r'No safe route.*Open decision details')),
+      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
       findsOneWidget,
     );
     expect(find.bySemanticsLabel(warning), findsOneWidget);
@@ -1901,7 +1901,10 @@ void main() {
     expect(find.text('80% last known'), findsOneWidget);
     expect(find.textContaining('80% free'), findsNothing);
     expect(find.textContaining('Next: Claude'), findsNothing);
-    expect(find.text('No safe route - use requested model'), findsOneWidget);
+    expect(
+      find.text('Quota data is stale - use your usual model'),
+      findsOneWidget,
+    );
     expect(find.byTooltip('Explain why no route is safe'), findsOneWidget);
     expect(find.text('live read failed - showing last known'), findsOneWidget);
     expect(

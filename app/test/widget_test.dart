@@ -951,11 +951,12 @@ void main() {
       expect(suggestion.recommended, isNull);
       expect(
         desktopRouteSignalLine(suggestion, [grok], now),
-        'No safe route - use requested model',
+        'No quota data - use your usual model',
       );
       expect(
         desktopRouteDetailLine(suggestion, [grok], now),
         allOf(
+          startsWith('No quota data |'),
           contains('No live quota data.'),
           contains('Fallback: No quota signal - use the model you requested.'),
         ),

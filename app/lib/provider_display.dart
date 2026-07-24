@@ -107,6 +107,19 @@ String desktopRouteSignalLine(
 }) {
   final candidate = suggestion.recommended;
   if (candidate == null) {
+    // A null recommendation does not always mean every route is spent. When the
+    // live read failed or the only evidence is stale, quotabot has no fresh
+    // quota to route on - the cards still show last-known numbers. Say that
+    // plainly instead of "No safe route", which reads as "you are out of quota
+    // everywhere" and alarms a user who in fact has quota that just could not be
+    // read this cycle.
+    final noEvidence = switch (suggestion.decisionCode) {
+      RouteDecisionCode.noData => 'No quota data - use your usual model',
+      RouteDecisionCode.staleEvidence =>
+        'Quota data is stale - use your usual model',
+      _ => null,
+    };
+    if (noEvidence != null) return noEvidence;
     final fallback = suggestion.fallback;
     final provider = fallback.provider;
     final display = provider == null
@@ -149,8 +162,13 @@ String desktopRouteDetailLine(
 }) {
   final candidate = suggestion.recommended;
   if (candidate == null) {
+    final headline = switch (suggestion.decisionCode) {
+      RouteDecisionCode.noData => 'No quota data',
+      RouteDecisionCode.staleEvidence => 'Quota data is stale',
+      _ => 'No safe route',
+    };
     return <String>[
-      'No safe route',
+      headline,
       'Receipt: ${suggestion.receipt.decisionId}',
       'Decision: ${suggestion.explanation}',
     ].join(' | ');
