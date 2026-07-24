@@ -364,6 +364,79 @@ bool _isCollapsedSpent(ProviderQuota q, int now) {
   return binding != null && headroom != null && headroom <= kSpentHeadroomFloor;
 }
 
+/// The three bands the `top` dashboard groups providers into, borrowing htop's
+/// "read the shape, not the digits" idea: usable-now floats up, has-evidence-but-
+/// not-live sits in the middle, and dead weight collapses to a single line.
+enum TopSection {
+  /// Live, trusted quota with usable headroom - the routes you can take now.
+  active,
+
+  /// Has quota evidence but is not a live usable route: spent, stale/cached,
+  /// drifted, or unverified. Rendered as compact one-liners.
+  cached,
+
+  /// No live quota to show at all (no windows, not configured, unreachable
+  /// local runtime). Collapsed into one dim line so it never dominates.
+  idle,
+}
+
+/// Classifies one provider into its [TopSection] at [now]. Pure and total, so
+/// the renderer and the cursor-navigation model can agree on ordering by both
+/// calling it over the same sorted list.
+TopSection topSectionFor(ProviderQuota q, int now) {
+  if (q.isLocal) {
+    return isLocalRuntimeAvailableAt(q, now)
+        ? TopSection.active
+        : TopSection.idle;
+  }
+  if (q.windows.isEmpty) return TopSection.idle;
+  final headroom = providerHeadroom(q, now);
+  if (headroom == null) return TopSection.cached;
+  final liveUsable = q.ok &&
+      !q.stale &&
+      q.driftReason == null &&
+      isTrustedQuotaEvidenceAt(q, now);
+  if (!liveUsable) return TopSection.cached;
+  if (headroom <= kSpentHeadroomFloor) return TopSection.cached;
+  return TopSection.active;
+}
+
+/// A snapshot partitioned into the three [TopSection] bands, order preserved
+/// from the input (so an already-sorted list stays sorted within each band).
+class TopSectionGroups {
+  final List<ProviderQuota> active;
+  final List<ProviderQuota> cached;
+  final List<ProviderQuota> idle;
+
+  const TopSectionGroups({
+    required this.active,
+    required this.cached,
+    required this.idle,
+  });
+
+  /// The rows a cursor can land on: active then cached, in render order. Idle
+  /// providers collapse to one shared line and are not individually selectable.
+  List<ProviderQuota> get selectable => [...active, ...cached];
+}
+
+/// Splits [providers] into active/cached/idle bands, preserving input order.
+TopSectionGroups partitionTopSections(List<ProviderQuota> providers, int now) {
+  final active = <ProviderQuota>[];
+  final cached = <ProviderQuota>[];
+  final idle = <ProviderQuota>[];
+  for (final q in providers) {
+    switch (topSectionFor(q, now)) {
+      case TopSection.active:
+        active.add(q);
+      case TopSection.cached:
+        cached.add(q);
+      case TopSection.idle:
+        idle.add(q);
+    }
+  }
+  return TopSectionGroups(active: active, cached: cached, idle: idle);
+}
+
 int _trailingTagBudget(
   int width,
   ({bool reset, bool forecast}) columns,
