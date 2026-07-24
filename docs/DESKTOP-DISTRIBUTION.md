@@ -166,11 +166,7 @@ version. The app stores profiles, history, preferences, leases, grants, and
 cache outside these portable bundle directories, so switching binaries does not
 erase that metadata.
 
-To uninstall while preserving data, close quotabot and remove only the extracted
-desktop directory or `quotabot.app`. The CLI install is separate. Follow
-[SETUP.md](SETUP.md#update-uninstall-and-rollback) only if the CLI should also be
-removed. Deleting quotabot's local metadata is a separate destructive action and
-is never required for an update, rollback, or normal uninstall.
+To uninstall while preserving data, you can run the uninstall scripts hosted in the repository root (`uninstall.ps1` for Windows, `uninstall.sh` for macOS/Linux). These scripts cleanly remove the extracted desktop directory, `quotabot.app`, and the CLI. Follow [SETUP.md](SETUP.md#update-uninstall-and-rollback) for the one-line remote execution commands. Deleting quotabot's local metadata is a separate destructive action (`--purge`) and is never required for an update, rollback, or normal uninstall.
 
 ## Maintainer verification
 

@@ -320,32 +320,16 @@ Then run `quotabot --version` and `quotabot doctor`.
 macOS and Linux:
 
 ```bash
-rm -f "$HOME/.local/bin/quotabot"
-rm -rf "$HOME/.local/share/quotabot"
-rm -rf "$HOME/.local/share/.quotabot-versions"
+curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/uninstall.sh | bash
 ```
 
-Windows PowerShell removes only the installed bundle and its user PATH entry,
-leaving other `%LOCALAPPDATA%\quotabot` metadata intact:
+Windows (PowerShell) removes the installed bundle and its user PATH entry:
 
 ```powershell
-$installDir = Join-Path $env:LOCALAPPDATA 'quotabot\bin'
-$installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$kept = @($userPath -split ';' | Where-Object { $_ -and $_ -ne $installDir })
-[Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
-foreach ($name in @('bin', 'lib')) {
-  $path = Join-Path $installRoot $name
-  $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-  if (-not $item) { continue }
-  if ($item.LinkType) {
-    Remove-Item -LiteralPath $path -Force
-  } else {
-    Remove-Item -LiteralPath $path -Recurse -Force
-  }
-}
-Remove-Item -LiteralPath (Join-Path $installRoot 'cli-versions') -Recurse -Force -ErrorAction SilentlyContinue
+irm https://raw.githubusercontent.com/blisspixel/quotabot/main/uninstall.ps1 | iex
 ```
+
+By default, the uninstall scripts preserve your local configuration and history. To perform a complete removal including all local metadata, add the `--purge` or `-Purge` flag when executing the scripts locally, or append it to the remote execution (e.g. `| bash -s -- --purge`).
 
 Open a new terminal after uninstalling. Desktop release bundles and source-setup
 desktop installs are separate from the release CLI. The source setup locations
