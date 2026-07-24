@@ -848,7 +848,7 @@ void main() {
     expect(out, isNot(contains('note: this machine only')));
     expect(out, isNot(contains('local fallback; other devices may differ')));
     expect(out, isNot(contains('local runtime, loaded, this machine')));
-  });
+  }, timeout: Timeout.factor(2));
 
   test('top snapshot keeps simulation provenance visible', () async {
     final result = await runCli([

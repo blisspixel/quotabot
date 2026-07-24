@@ -439,15 +439,17 @@ void main() {
             flush: true,
           );
         final recordPath = '${quotabotDir('auth').path}/$provider.json';
-        Link(recordPath).createSync(linkedTarget.path);
+        try {
+          Link(recordPath).createSync(linkedTarget.path);
+        } on FileSystemException {
+          if (Platform.isWindows) return;
+          rethrow;
+        }
 
         expect(TokenStore.loadRecord(provider), isNull);
         expect(TokenStore.load(provider), isNull);
         expect(linkedTarget.readAsStringSync(), contains('linked-secret'));
       },
-      skip: Platform.isWindows
-          ? 'ordinary Windows test accounts cannot create symbolic links'
-          : false,
     );
 
     test('save tolerates a reader during atomic replacement', () async {
