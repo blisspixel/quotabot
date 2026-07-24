@@ -384,12 +384,21 @@ enum TopSection {
 /// the renderer and the cursor-navigation model can agree on ordering by both
 /// calling it over the same sorted list.
 TopSection topSectionFor(ProviderQuota q, int now) {
+  // A failure is never idle: a signed-out provider, a rejected read, quarantined
+  // evidence, or a provider pushing back is the most actionable thing on the
+  // screen, so it keeps its own full row (error, recovery hint, and diagnostic)
+  // in the middle band. An HTTP status or retry hint marks a read that actually
+  // reached the provider and failed, which separates a 403 that needs
+  // reconnecting from a passively detected tool that simply has no quota API.
+  final failing = !q.ok ||
+      q.driftReason != null ||
+      q.httpStatus != null ||
+      (q.retryAfterSeconds ?? 0) > 0;
   if (q.isLocal) {
-    return isLocalRuntimeAvailableAt(q, now)
-        ? TopSection.active
-        : TopSection.idle;
+    if (isLocalRuntimeAvailableAt(q, now)) return TopSection.active;
+    return failing ? TopSection.cached : TopSection.idle;
   }
-  if (q.windows.isEmpty) return TopSection.idle;
+  if (q.windows.isEmpty) return failing ? TopSection.cached : TopSection.idle;
   final headroom = providerHeadroom(q, now);
   if (headroom == null) return TopSection.cached;
   final liveUsable = q.ok &&
@@ -520,7 +529,8 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     {bool selected = false,
     ({bool reset, bool forecast}) columns = (reset: true, forecast: true),
     String trustTag = '',
-    String accountTag = ''}) {
+    String accountTag = '',
+    bool compact = false}) {
   if (!q.ok) {
     final retry = providerRetrySummary(q);
     final text = q.driftReason != null
@@ -567,13 +577,13 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
-      if (q.error?.isNotEmpty == true && failureSummary != q.error)
+      if (!compact && q.error?.isNotEmpty == true && failureSummary != q.error)
         _line([
           const _Cell('  '),
           _Cell(' ' * (_nameW + _labelW)),
           _Cell(failureSummary, (s, t) => s.yellow(t)),
         ], width, s),
-      if (q.error?.isNotEmpty == true)
+      if (!compact && q.error?.isNotEmpty == true)
         _line([
           const _Cell('  '),
           _Cell(' ' * (_nameW + _labelW)),
@@ -752,6 +762,12 @@ List<String> _localRows(
 /// a way to keep working now?" and not only "when does it come back?".
 List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
   final rows = <String>[];
+  // Detail text is indented past the name and label columns, so it must be
+  // trimmed against the space that actually remains. Yielding at a word boundary
+  // with an ellipsis keeps a recovery hint readable instead of clipping it
+  // mid-word at the frame edge.
+  final detailRoom = width - 2 - (_nameW + _labelW);
+  String fit(String text) => _fitReason(text, detailRoom);
   // A redeemable off-cycle reset leads in green: it is the way to keep working
   // now, so it must not read as one more dim note under a spent card.
   final reset = resetAvailableMessage(q);
@@ -771,16 +787,16 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
       if (retry != null)
-        _Cell('$retry: ${q.error}', (s, t) => s.yellow(t))
+        _Cell(fit('$retry: ${q.error}'), (s, t) => s.yellow(t))
       else
-        _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
+        _Cell(fit('live read failed: ${q.error}'), (s, t) => s.red(t)),
     ], width, s));
   }
   for (final d in q.details) {
     rows.add(_line([
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
-      _Cell(d, (s, t) => s.dim(t)),
+      _Cell(fit(d), (s, t) => s.dim(t)),
     ], width, s));
   }
   return rows;
@@ -843,6 +859,39 @@ double? _poolHeadroom(List<ProviderQuota> providers, int now) {
 /// Builds the content lines of one `top` frame. [clock] is supplied by the
 /// caller (the only time-of-day text), [width] is the terminal width, and
 /// [color] turns ANSI styling on or off.
+/// A labeled band divider, e.g. "  ACTIVE 3 ─────────────". The rule runs to the
+/// frame edge so the eye tracks one horizontal group at a time, the way htop
+/// separates its meters from its process list.
+String _sectionHeader(
+  String label,
+  int count,
+  int width,
+  AnsiStyle s,
+  Palette p,
+) {
+  final head = '  $label $count ';
+  final fill = width - head.length;
+  return _line([
+    const _Cell('  '),
+    _Cell(label, (s, t) => _accent(s, p, t)),
+    _Cell(' $count ', (s, t) => s.dim(t)),
+    if (fill > 0) _Cell('─' * fill, (s, t) => s.dim(t)),
+  ], width, s);
+}
+
+/// The idle providers' names joined for one collapsed line, trimmed to [budget]
+/// by summarizing the tail rather than clipping a name mid-word.
+String idleProviderNames(List<String> names, int budget) {
+  if (names.isEmpty) return '';
+  final joined = names.join(' · ');
+  if (joined.length <= budget || names.length == 1) return joined;
+  for (var keep = names.length - 1; keep >= 1; keep--) {
+    final text = '${names.take(keep).join(' · ')} +${names.length - keep} more';
+    if (text.length <= budget) return text;
+  }
+  return '${names.length} providers';
+}
+
 List<String> renderTopFrame({
   required List<ProviderQuota> providers,
   required RouteSuggestion suggestion,
@@ -958,17 +1007,58 @@ List<String> renderTopFrame({
   bool isSelected(ProviderQuota q) =>
       q.provider == selected &&
       (selectedAccount == null || q.account == selectedAccount);
-  for (final q in cloud) {
+  // Group by what the user can act on. Live routes float to the top, evidence
+  // that is not a live route sits below them, and providers with no live quota
+  // collapse to a single line instead of a screenful of diagnostics.
+  final groups = partitionTopSections([...cloud, ...local], now);
+
+  void renderRow(ProviderQuota q, {bool compact = false}) {
+    if (q.isLocal) {
+      lines.addAll(_localRows(q, now, w, s, p, selected: isSelected(q)));
+      return;
+    }
     final visibleTags =
         trustTags[q] ?? (trustTag: '', accountTag: accountTagFor(q));
     lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q],
         selected: isSelected(q),
         columns: columns,
         trustTag: visibleTags.trustTag,
-        accountTag: visibleTags.accountTag));
+        accountTag: visibleTags.accountTag,
+        compact: compact));
   }
-  for (final q in local) {
-    lines.addAll(_localRows(q, now, w, s, p, selected: isSelected(q)));
+
+  // Headers only earn their line when they separate something. A fleet that is
+  // entirely one band reads better as a plain list.
+  final populated = [
+    if (groups.active.isNotEmpty) 1,
+    if (groups.cached.isNotEmpty) 1,
+    if (groups.idle.isNotEmpty) 1,
+  ].length;
+  final showSections = populated > 1;
+
+  if (groups.active.isNotEmpty) {
+    if (showSections) {
+      lines.add(_sectionHeader('ACTIVE', groups.active.length, w, s, p));
+    }
+    groups.active.forEach(renderRow);
+  }
+  if (groups.cached.isNotEmpty) {
+    if (showSections) {
+      lines.add(_sectionHeader('CACHED', groups.cached.length, w, s, p));
+    }
+    groups.cached.forEach(renderRow);
+  }
+  if (groups.idle.isNotEmpty) {
+    if (showSections) {
+      lines.add(_sectionHeader('IDLE', groups.idle.length, w, s, p));
+    }
+    // These providers have nothing to act on, so each keeps a single compact
+    // row: name, status, and provenance stay visible (they are still evidence),
+    // but the verbose setup hint that used to wrap and clip mid-word is dropped.
+    // The hint remains available in full from quotabot doctor.
+    for (final q in groups.idle) {
+      renderRow(q, compact: true);
+    }
   }
 
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));

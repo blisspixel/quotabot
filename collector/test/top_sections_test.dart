@@ -12,6 +12,7 @@ ProviderQuota _q(
   String? status,
   String? error,
   String? driftReason,
+  int? httpStatus,
   int asOf = _now,
 }) =>
     ProviderQuota(
@@ -25,6 +26,7 @@ ProviderQuota _q(
       status: status,
       error: error,
       driftReason: driftReason,
+      httpStatus: httpStatus,
     );
 
 QuotaWindow _w(int usedPercent) => QuotaWindow(
@@ -74,9 +76,37 @@ void main() {
       );
     });
 
-    test('a hard error with no windows is idle', () {
+    test('a hard failure keeps its own row instead of collapsing to idle', () {
+      // A failed read is the most actionable thing on screen, so it must not be
+      // swept into the collapsed idle band where its error would be dropped.
       expect(
         topSectionFor(_q('windsurf', const [], ok: false, error: 'boom'), _now),
+        TopSection.cached,
+      );
+    });
+
+    test('a reachable-but-rejected read stays visible for its recovery hint',
+        () {
+      expect(
+        topSectionFor(
+          _q('antigravity', const [],
+              status: 'Gemini 3 Pro',
+              error: 'HTTP 403 - run: quotabot login antigravity',
+              httpStatus: 403),
+          _now,
+        ),
+        TopSection.cached,
+      );
+    });
+
+    test('a passively detected tool with no quota API is idle', () {
+      expect(
+        topSectionFor(
+          _q('cursor', const [],
+              status: 'no live data',
+              error: 'Cursor installed (free tier or no data)'),
+          _now,
+        ),
         TopSection.idle,
       );
     });
