@@ -430,6 +430,24 @@ Each provider row also carries a compact trust tag with live, cached, or
 provider-drift state, normalized source class, spend class, stale age when
 relevant, and account identity when needed to disambiguate duplicate providers.
 
+Rows are grouped by what you can act on. Live usable routes lead, evidence that
+is not a live route follows (a spent window, cached last-known values, or
+quarantined drift), and providers with no live quota - a passively detected tool
+with no quota API, or one that is not configured - collapse to one compact row
+each at the bottom. The group headings appear only when more than one group is
+present, so a fleet that is entirely live still reads as a plain list. A failed
+read, quarantined evidence, or a provider that answered with an HTTP error or a
+retry pushback is never treated as idle: it keeps its full row with the error and
+its recovery hint, because that is the most actionable thing on screen. Long
+detail text yields at a word boundary with an ellipsis instead of clipping
+mid-word, and the complete hint stays available from `quotabot doctor`.
+
+Because a live fleet read contacts every provider, it can take tens of seconds.
+An interactive run prints a progress line per provider as it lands, with a
+running count, elapsed time, and which providers are still outstanding, so a slow
+read is visibly working rather than indistinguishable from a hang. Piped or
+scripted runs stay silent so their output remains clean.
+
 ```bash
 quotabot top                # adaptive refresh (the default)
 quotabot top --interval=2   # pin a fixed rate instead (minimum 2s)

@@ -227,8 +227,15 @@ or data shape. The exact assignments and verification methods are documented in
 
 The same view is available live in the terminal with `quotabot top`, a small
 dashboard that redraws in place and, when it has enough history, notes which
-window is likely to run out first. Full walkthrough of the widget, analytics, and
-CLI: [docs/USAGE.md](docs/USAGE.md).
+window is likely to run out first. It groups the fleet by what you can act on:
+live usable routes first, then evidence that is not a live route (spent, cached,
+or drifted), then providers with no live quota as one compact row each. Those
+headings appear only when there is more than one group, so a uniform fleet still
+reads as a plain list. A failed read, quarantined evidence, or a provider that
+answered with an error keeps its full row and recovery hint rather than being
+treated as idle. A live fleet read contacts every provider, so an interactive
+run prints its progress as each provider lands instead of a silent wait. Full
+walkthrough of the widget, analytics, and CLI: [docs/USAGE.md](docs/USAGE.md).
 
 ## Provider status
 
