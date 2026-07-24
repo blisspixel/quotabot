@@ -36,13 +36,19 @@ String routeCandidateGlanceLine(
       : c.stale
           ? style.dim(pct)
           : style.health(c.headroom!, pct);
-  final qualifier = c.driftReason != null
+  var qualifier = c.driftReason != null
       ? c.headroom == null
           ? 'no trusted quota'
           : 'last trusted'
       : c.stale
           ? 'last known'
           : 'free';
+  if (c.leaseDiscount > 0) {
+    qualifier += ' (-% reserved)';
+  }
+  if (c.pipeDiscount > 0) {
+    qualifier += ' (-% degraded)';
+  }
   // A candidate can be unroutable for reasons other than being spent. Show the
   // real one, matching the distinctions suggestRoute's reason draws: drift or
   // staleness reads "unavailable"; a provider with headroom but no catalog model
