@@ -54,20 +54,31 @@ class _Harness {
 }
 
 Future<_Harness> _start({String token = _token}) async {
-  final port = await _freePort();
-  final server = buildQuotabotStreamableHttpServer(
-    config: QuotabotMcpHttpConfig(port: port, bearerToken: token),
-    snapshot: () async => _fixture(),
-    burnByProvider: (providers, now) => const <String, BurnStat>{},
-    now: () => _now,
-    catalog: const {
-      'claude': [
-        ModelInfo(id: 'claude-http-test', contextTokens: 200000, tools: true),
-      ],
-    },
-  );
-  await server.start();
-  return _Harness(server, Uri.parse('http://127.0.0.1:$port/mcp'));
+  // Asking the operating system for a free port and then binding it is a race:
+  // the probe socket must close before the server can claim that port, and any
+  // suite running in parallel can take it in the gap. The server under test
+  // needs a known port to build its URL, so retry with a fresh one rather than
+  // failing the whole run over a lost race.
+  for (var attempt = 0;; attempt++) {
+    final port = await _freePort();
+    final server = buildQuotabotStreamableHttpServer(
+      config: QuotabotMcpHttpConfig(port: port, bearerToken: token),
+      snapshot: () async => _fixture(),
+      burnByProvider: (providers, now) => const <String, BurnStat>{},
+      now: () => _now,
+      catalog: const {
+        'claude': [
+          ModelInfo(id: 'claude-http-test', contextTokens: 200000, tools: true),
+        ],
+      },
+    );
+    try {
+      await server.start();
+      return _Harness(server, Uri.parse('http://127.0.0.1:$port/mcp'));
+    } on SocketException {
+      if (attempt >= 9) rethrow;
+    }
+  }
 }
 
 Future<McpClient> _connect(Uri uri, {String token = _token}) async {
