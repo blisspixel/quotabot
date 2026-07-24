@@ -1281,11 +1281,25 @@ void main() {
         throwsA(isA<StateError>()),
       );
 
-      final server = await HttpServer.bind(
-        InternetAddress.loopbackIPv4,
-        1455,
+      // The provider registers a fixed callback port, so this check cannot move
+      // to an ephemeral one. Releasing a listening socket is not instantaneous
+      // on every platform, so poll briefly rather than asserting on the first
+      // attempt: the point is that the port becomes bindable again, not that it
+      // is bindable within a single event-loop turn.
+      HttpServer? server;
+      for (var attempt = 0; attempt < 25 && server == null; attempt++) {
+        try {
+          server = await HttpServer.bind(InternetAddress.loopbackIPv4, 1455);
+        } on SocketException {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+      expect(
+        server,
+        isNotNull,
+        reason: 'login never released callback port 1455',
       );
-      await server.close(force: true);
+      await server!.close(force: true);
     });
 
     test('refresh maps the token response and keeps rotation', () async {

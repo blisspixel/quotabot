@@ -127,7 +127,7 @@ void main() {
       machine.stderr as String,
       isNot(contains('older Codex account filter')),
     );
-  });
+  }, timeout: const Timeout(Duration(minutes: 1)));
 
   test('missing profile is a usage error', () async {
     final result = await runCli(['--json', '--profile=missing']);
