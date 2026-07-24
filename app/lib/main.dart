@@ -597,6 +597,7 @@ class _DashboardState extends State<Dashboard>
   Timer? _windowMovePersistTimer;
   int _windowMoveRevision = 0;
   int _windowGeometryRevision = 0;
+  bool _windowVisible = true;
   final GlobalKey _contentKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
 
@@ -815,7 +816,7 @@ class _DashboardState extends State<Dashboard>
     // Thirty seconds is plenty when the labels are in minutes, and avoids the
     // distraction of a per-second ticking clock.
     _tick = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
+      if (mounted && _windowVisible) setState(() {});
     });
   }
 
@@ -1050,8 +1051,10 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<void> _showWindow() async {
+    _windowVisible = true;
     await windowManager.show();
     await windowManager.focus();
+    if (mounted) setState(() {});
   }
 
   Future<void> _quit() async {
@@ -1089,7 +1092,19 @@ class _DashboardState extends State<Dashboard>
   @override
   void onWindowClose() {
     // Closing hides to the tray (see [_initTray]); Quit lives in the tray menu.
+    _windowVisible = false;
     unawaited(windowManager.hide());
+  }
+
+  @override
+  void onWindowMinimize() {
+    _windowVisible = false;
+  }
+
+  @override
+  void onWindowRestore() {
+    _windowVisible = true;
+    if (mounted) setState(() {});
   }
 
   Future<bool> _persistPrefs({bool saveProfileUiState = false}) async {
@@ -1235,7 +1250,48 @@ class _DashboardState extends State<Dashboard>
             q.pipeHealth == providerPipeHealthDegraded,
       );
       _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
-      setState(() {
+      if (_windowVisible) {
+        setState(() {
+          _profiles = profiles;
+          _activeProfile = _profileByName(selectedProfile);
+          _applyProfileUiState(_activeProfile);
+          _data = active;
+          _setupData = setupRows;
+          _loading = false;
+          _updated = DateTime.now();
+          _history = {};
+          _heatmaps = {};
+          _buckets = {};
+          _burnStats = burnStats;
+          _analyticsStorageNotices = analyticsStorageNotices;
+          _analyticsStorageIncidents = analyticsStorageIncidents;
+          _analyticsIncidentInventoryPartial =
+              analyticsIncidentInventory.state == 'partial';
+          _analyticsIncidentUncertainProviders =
+              analyticsIncidentInventory.uncertainProviders;
+          _analyticsIncidentGlobalUncertainty =
+              analyticsIncidentInventory.globalUncertainty;
+          _routeSummary = routeSummary;
+          _lastRefreshError = anyLive
+              ? null
+              : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
+          final tz = DateTime.now().timeZoneOffset;
+          final rawInsights = <String, Insights>{};
+          if (widget._hostIntegration) {
+            for (final q in active) {
+              final key = quotaDisplayKey(q);
+              _history[key] = loadHistory(q.provider, account: q.account);
+              if (!q.isLocal) {
+                final buckets = loadBuckets(q.provider, account: q.account);
+                _buckets[key] = buckets;
+                rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
+                _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
+              }
+            }
+          }
+          _insights = shrinkInsightsReliability(rawInsights);
+        });
+      } else {
         _profiles = profiles;
         _activeProfile = _profileByName(selectedProfile);
         _applyProfileUiState(_activeProfile);
@@ -1274,7 +1330,7 @@ class _DashboardState extends State<Dashboard>
           }
         }
         _insights = shrinkInsightsReliability(rawInsights);
-      });
+      }
       if (widget._hostIntegration || widget.alertPoster != null) {
         // Fire-and-forget: notification and webhook posting must not delay the
         // refresh completing or the post-frame resize; _checkAndNotify swallows
@@ -1463,7 +1519,7 @@ class _DashboardState extends State<Dashboard>
           return;
         }
         final geometry = compactWindowGeometry(
-          desiredSize: Size(desiredWidth, 50),
+          desiredSize: Size(desiredWidth, largeText ? 68 : 50),
           currentSize: currentBounds?.size ?? _compactMinimumWindowSize,
           currentPosition: currentBounds?.topLeft ?? _windowPos,
           workAreas: workAreas,
@@ -1779,10 +1835,20 @@ class _DashboardState extends State<Dashboard>
       body: Scrollbar(
         controller: _scroll,
         thumbVisibility: _overflowing,
-        child: SingleChildScrollView(
-          controller: _scroll,
-          physics: const ClampingScrollPhysics(),
-          child: _contentBox(chrome, _contentKey),
+        child: NotificationListener<SizeChangedLayoutNotification>(
+          onNotification: (notification) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _applySize();
+            });
+            return true;
+          },
+          child: SingleChildScrollView(
+            controller: _scroll,
+            physics: const ClampingScrollPhysics(),
+            child: SizeChangedLayoutNotifier(
+              child: _contentBox(chrome, _contentKey),
+            ),
+          ),
         ),
       ),
     );
@@ -2037,8 +2103,8 @@ class _DashboardState extends State<Dashboard>
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final showRouteProviderName = compactWidth >= (largeText ? 520 : 360);
     final routeIconOnly = largeText && compactWidth < 240;
-    return SizedBox(
-      height: 46,
+    return Container(
+      constraints: BoxConstraints(minHeight: largeText ? 64 : 46),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 6, 0),
         child: FocusTraversalGroup(
@@ -2200,8 +2266,8 @@ class _DashboardState extends State<Dashboard>
           onTap: showExplanation,
           borderRadius: radius,
           child: Container(
-            height: 30,
             constraints: BoxConstraints(
+              minHeight: 30,
               maxWidth: iconOnly
                   ? 28
                   : providerName == null
