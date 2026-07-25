@@ -1180,6 +1180,41 @@ class _DashboardState extends State<Dashboard>
     }
   }
 
+  /// Analytics storage notices for [active], computed off the UI isolate when
+  /// that is possible. Advisory data must not be able to fail a refresh that has
+  /// already collected quota, so an isolate that cannot spawn falls back to this
+  /// isolate, and a failure there degrades to no notices rather than throwing.
+  Future<
+    ({
+      List<AnalyticsStorageNotice> notices,
+      AnalyticsIncidentInventory inventory,
+    })
+  >
+  _collectAnalyticsStorage(List<ProviderQuota> active) async {
+    Future<
+      ({
+        List<AnalyticsStorageNotice> notices,
+        AnalyticsIncidentInventory inventory,
+      })
+    >
+    compute() async => (
+      notices: analyticsStorageNoticesForQuotas(active),
+      inventory: await analyticsStorageIncidentInventory(active),
+    );
+    try {
+      return await Isolate.run(compute);
+    } catch (_) {
+      try {
+        return await compute();
+      } catch (_) {
+        return (
+          notices: const <AnalyticsStorageNotice>[],
+          inventory: const AnalyticsIncidentInventory.suppressed(),
+        );
+      }
+    }
+  }
+
   Future<void> _refresh() {
     final inFlight = _refreshInFlight;
     if (inFlight != null) return inFlight;
@@ -1228,12 +1263,15 @@ class _DashboardState extends State<Dashboard>
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      // Analytics notices are advisory: they annotate quota that has already
+      // been collected successfully. So this must never be able to fail the
+      // refresh that produced it. An isolate can fail to spawn on some machines
+      // - the collect above guards for exactly that - and letting the throw
+      // escape here would discard a good fleet read, retain nothing on a cold
+      // start, and leave the dashboard permanently empty while reporting a
+      // failed refresh. Fall back to the main isolate, then to no notices.
       final analyticsStorage = widget._hostIntegration
-          ? await Isolate.run(() async {
-              final notices = analyticsStorageNoticesForQuotas(active);
-              final inventory = await analyticsStorageIncidentInventory(active);
-              return (notices: notices, inventory: inventory);
-            })
+          ? await _collectAnalyticsStorage(active)
           : (
               notices: const <AnalyticsStorageNotice>[],
               inventory: const AnalyticsIncidentInventory.suppressed(),
@@ -1260,6 +1298,46 @@ class _DashboardState extends State<Dashboard>
             q.pipeHealth == providerPipeHealthDegraded,
       );
       _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
+
+      // Load per-provider history and analytics BEFORE touching state. This is
+      // real file I/O, and doing it inside a setState callback means a throw
+      // mutates the fields already assigned above it and then never schedules a
+      // rebuild, because setState only marks the element dirty after its
+      // callback returns. One provider's unreadable analytics must also not
+      // discard a whole successful fleet read, so each is guarded on its own and
+      // simply contributes no history.
+      final tz = DateTime.now().timeZoneOffset;
+      final loadedHistory = <String, List<ProviderQuota>>{};
+      final loadedBuckets = <String, List<HeadroomBucket>>{};
+      final loadedHeatmaps = <String, List<List<double?>>>{};
+      final rawInsights = <String, Insights>{};
+      if (widget._hostIntegration) {
+        for (final q in active) {
+          final key = quotaDisplayKey(q);
+          try {
+            loadedHistory[key] = loadHistory(q.provider, account: q.account);
+            if (!q.isLocal) {
+              final providerBuckets = loadBuckets(
+                q.provider,
+                account: q.account,
+              );
+              loadedBuckets[key] = providerBuckets;
+              rawInsights[key] = Insights.from(
+                providerBuckets,
+                nowSec,
+                tzOffset: tz,
+              );
+              loadedHeatmaps[key] = smoothedWeekHourHeatmap(
+                providerBuckets,
+                tzOffset: tz,
+              );
+            }
+          } catch (_) {
+            // Advisory analytics only; quota for this provider still renders.
+          }
+        }
+      }
+      final loadedInsights = shrinkInsightsReliability(rawInsights);
       // Apply a completed refresh with setState whenever this widget is alive.
       // Gating the rebuild on tracked window visibility instead is unsafe: if
       // that flag ever desyncs from the real window - a minimize event that
@@ -1280,9 +1358,9 @@ class _DashboardState extends State<Dashboard>
           _setupData = setupRows;
           _loading = false;
           _updated = DateTime.now();
-          _history = {};
-          _heatmaps = {};
-          _buckets = {};
+          _history = loadedHistory;
+          _heatmaps = loadedHeatmaps;
+          _buckets = loadedBuckets;
           _burnStats = burnStats;
           _analyticsStorageNotices = analyticsStorageNotices;
           _analyticsStorageIncidents = analyticsStorageIncidents;
@@ -1296,21 +1374,7 @@ class _DashboardState extends State<Dashboard>
           _lastRefreshError = anyLive
               ? null
               : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
-          final tz = DateTime.now().timeZoneOffset;
-          final rawInsights = <String, Insights>{};
-          if (widget._hostIntegration) {
-            for (final q in active) {
-              final key = quotaDisplayKey(q);
-              _history[key] = loadHistory(q.provider, account: q.account);
-              if (!q.isLocal) {
-                final buckets = loadBuckets(q.provider, account: q.account);
-                _buckets[key] = buckets;
-                rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
-                _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
-              }
-            }
-          }
-          _insights = shrinkInsightsReliability(rawInsights);
+          _insights = loadedInsights;
         });
       } else {
         _profiles = profiles;
@@ -1320,9 +1384,9 @@ class _DashboardState extends State<Dashboard>
         _setupData = setupRows;
         _loading = false;
         _updated = DateTime.now();
-        _history = {};
-        _heatmaps = {};
-        _buckets = {};
+        _history = loadedHistory;
+        _heatmaps = loadedHeatmaps;
+        _buckets = loadedBuckets;
         _burnStats = burnStats;
         _analyticsStorageNotices = analyticsStorageNotices;
         _analyticsStorageIncidents = analyticsStorageIncidents;
@@ -1336,21 +1400,7 @@ class _DashboardState extends State<Dashboard>
         _lastRefreshError = anyLive
             ? null
             : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
-        final tz = DateTime.now().timeZoneOffset;
-        final rawInsights = <String, Insights>{};
-        if (widget._hostIntegration) {
-          for (final q in active) {
-            final key = quotaDisplayKey(q);
-            _history[key] = loadHistory(q.provider, account: q.account);
-            if (!q.isLocal) {
-              final buckets = loadBuckets(q.provider, account: q.account);
-              _buckets[key] = buckets;
-              rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
-              _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
-            }
-          }
-        }
-        _insights = shrinkInsightsReliability(rawInsights);
+        _insights = loadedInsights;
       }
       if (widget._hostIntegration || widget.alertPoster != null) {
         // Fire-and-forget: notification and webhook posting must not delay the
