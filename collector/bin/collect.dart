@@ -15,6 +15,7 @@ import 'package:quotabot_collector/collect_progress.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/drift.dart';
+import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/route_render.dart';
@@ -236,6 +237,14 @@ void _printSimulationNoticeIfNeeded() {
 }
 
 Future<void> main(List<String> rawArgs) async {
+  try {
+    await _runMain(rawArgs);
+  } finally {
+    closeSharedHttpClient();
+  }
+}
+
+Future<void> _runMain(List<String> rawArgs) async {
   final args = _normalizeArgs(rawArgs);
   final optionTerminator = args.indexOf('--');
   final flags = <String>{};

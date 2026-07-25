@@ -87,6 +87,40 @@ void main() {
       expect(q.error, 'not running');
     });
 
+    test('keeps reachable inventory beyond the old two-second deadline',
+        () async {
+      final client = MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/tags':
+            await Future<void>.delayed(const Duration(milliseconds: 2100));
+            return http.Response(
+              jsonEncode({
+                'models': [
+                  {'name': 'slow-but-live:7b'},
+                ],
+              }),
+              200,
+            );
+          case '/api/ps':
+            return http.Response(jsonEncode({'models': <Object>[]}), 200);
+          case '/api/show':
+            return http.Response(
+              jsonEncode({
+                'capabilities': ['completion'],
+              }),
+              200,
+            );
+          default:
+            return http.Response('unexpected', 404);
+        }
+      });
+
+      final q = await OllamaAdapter(client: client).collect();
+
+      expect(q.ok, isTrue);
+      expect(q.models.single.id, 'slow-but-live:7b');
+    });
+
     test('refuses a non-loopback host without contacting it', () async {
       var calls = 0;
       final client = MockClient((_) async {
