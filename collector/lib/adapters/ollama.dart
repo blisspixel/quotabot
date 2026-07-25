@@ -75,6 +75,15 @@ class OllamaAdapter {
   /// daemon that may be serving a generation at the same time.
   static const capabilityProbeConcurrency = 4;
 
+  /// The installed-model inventory is the evidence that the runtime exists, so
+  /// allow a daemon under startup or disk pressure longer than optional detail
+  /// reads. A shorter deadline made a reachable runtime disappear from a fleet
+  /// snapshot when `/api/tags` took just over two seconds.
+  static const inventoryRequestTimeout = Duration(seconds: 5);
+
+  /// Loaded-state and per-model details fail soft without hiding inventory.
+  static const detailRequestTimeout = Duration(seconds: 2);
+
   /// Wall-clock budget for the capability pass, independent of the per-request
   /// timeout, so a daemon that answers slowly cannot hold up a fleet read. No
   /// new batch starts once it is spent, and models not reached stay undeclared.
@@ -103,7 +112,10 @@ class OllamaAdapter {
       return _nonLoopback(asOf);
     }
     try {
-      final installed = await _models('/api/tags');
+      final installed = await _models(
+        '/api/tags',
+        timeout: inventoryRequestTimeout,
+      );
       if (installed == null) return _notRunning(asOf);
       final loaded = await _models('/api/ps') ?? const [];
       return localRuntimeQuota(
@@ -120,11 +132,14 @@ class OllamaAdapter {
 
   /// Fetches and parses an Ollama model list endpoint, or null when the daemon
   /// is unreachable.
-  Future<List<LocalModel>?> _models(String path) async {
+  Future<List<LocalModel>?> _models(
+    String path, {
+    Duration timeout = detailRequestTimeout,
+  }) async {
     try {
       final resp = await (_http?.get ?? sharedHttpClient.get)(
         Uri.parse('${baseUrl(environment: _environment)}$path'),
-      ).timeout(const Duration(seconds: 2));
+      ).timeout(timeout);
       if (resp.statusCode != 200) return null;
       return ollamaModelsFromJson(jsonDecode(resp.body));
     } catch (_) {
@@ -192,7 +207,7 @@ class OllamaAdapter {
         Uri.parse('${baseUrl(environment: _environment)}/api/show'),
         headers: const {'Content-Type': 'application/json'},
         body: jsonEncode({'model': model.name}),
-      ).timeout(const Duration(seconds: 2));
+      ).timeout(detailRequestTimeout);
       if (resp.statusCode != 200) return null;
       return ollamaShowFromJson(jsonDecode(resp.body));
     } catch (_) {

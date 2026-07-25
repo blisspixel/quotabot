@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:mcp_dart/mcp_dart.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/expiring_single_flight.dart';
+import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/mcp_http.dart';
 import 'package:quotabot_collector/mcp_server_options.dart';
@@ -17,6 +18,14 @@ import 'package:quotabot_collector/util.dart';
 /// All tool shapes, schemas, and behavior live in `lib/mcp.dart`; this is a thin
 /// wiring shell that supplies the live snapshot and burn sources.
 Future<void> main(List<String> args) async {
+  try {
+    await _runMain(args);
+  } finally {
+    closeSharedHttpClient();
+  }
+}
+
+Future<void> _runMain(List<String> args) async {
   late final McpServerCliOptions options;
   try {
     options = McpServerCliOptions.parse(args);
@@ -112,5 +121,15 @@ Future<void> main(List<String> args) async {
     cachedSnapshot: cachedDecisionSnapshot,
     leaseStore: leaseStore,
   );
+  final done = Completer<void>();
+  // The high-level server does not expose its transport-close callback. Keep
+  // main alive until stdio closes so the shared provider client can be released
+  // by main's finally block after the last request, not immediately after the
+  // transport starts.
+  // ignore: deprecated_member_use
+  server.server.onclose = () {
+    if (!done.isCompleted) done.complete();
+  };
   await server.connect(StdioServerTransport());
+  await done.future;
 }
