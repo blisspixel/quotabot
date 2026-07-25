@@ -429,6 +429,12 @@ screen and repaints countdowns every second.
 Each provider row also carries a compact trust tag with live, cached, or
 provider-drift state, normalized source class, spend class, stale age when
 relevant, and account identity when needed to disambiguate duplicate providers.
+On a terminal 100 columns or wider, a row with nothing unusual to disclose drops
+that tag so the meter can use the width: repeating "(live, authoritative, quota
+plan)" down every healthy row buries the rows that need attention. Cached,
+drifted, this-machine, passive, status-only, and failed rows always keep their
+tag, and a narrower terminal keeps every tag. Nothing is lost either way - the
+same provenance is on the selected row and in `quotabot doctor`.
 
 Rows are grouped by what you can act on. Live usable routes lead, evidence that
 is not a live route follows (a spent window, cached last-known values, or
@@ -445,8 +451,11 @@ mid-word, and the complete hint stays available from `quotabot doctor`.
 Because a live fleet read contacts every provider, it can take tens of seconds.
 An interactive run prints a progress line per provider as it lands, with a
 running count, elapsed time, and which providers are still outstanding, so a slow
-read is visibly working rather than indistinguishable from a hang. Piped or
-scripted runs stay silent so their output remains clean.
+read is visibly working rather than indistinguishable from a hang. That display
+goes to standard error, and only when standard error is a terminal: piping
+standard output keeps the data clean while you still watch the read work, and
+redirecting standard error silences it. This applies to every command that
+performs a fleet read, not only `top`, which draws its own loading frame.
 
 ```bash
 quotabot top                # adaptive refresh (the default)

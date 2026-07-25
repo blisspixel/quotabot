@@ -5,6 +5,16 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- `quotabot top` now groups the fleet into active, cached, and idle bands so
+  usable routes lead and providers with nothing to act on stop competing for
+  attention. Headings appear only when more than one band is present, so a
+  uniform fleet still reads as a plain list, and a failed, drifted, or
+  rejected read is never treated as idle.
+- An interactive fleet read now streams progress on standard error: a header,
+  one committed line per provider as it settles, and a status line carrying the
+  running count, elapsed time, and which providers are outstanding. It is
+  written only when standard error is a terminal, so piping standard output
+  stays clean, and it covers every command that performs a fleet read.
 - `docs/PRINCIPLES.md` states what quotabot refuses to do - no account, no
   subscription or paid tier, no telemetry of any kind, no advertising, no
   inference call, and no hosted service to depend on - along with why each
@@ -15,6 +25,23 @@ Notable changes to quotabot. Newest first.
   and a full-spectrum rainbow. Select with `--theme=NAME`.
 
 ### Fixed
+- Windows consoles are now assumed to support 24-bit color. Neither conhost nor
+  `cmd.exe` advertises truecolor through `COLORTERM` or `TERM`, so detection
+  downgraded them to sixteen flat colors, which silently discarded the gradient
+  meters and made every palette render identically.
+- A provenance tag no longer shrinks the meter to a stub. The tag was budgeted
+  against the bare minimum bar, so a mid-width terminal could render a worse
+  frame than a narrow one where the tag simply did not fit. At 100 columns or
+  more the tag that repeats identically on every healthy row is dropped so the
+  meter can use the width; rows with something to disclose always keep theirs.
+- `quotabot uninstall --purge` removed only the cache directory on Windows,
+  targeted a macOS path quotabot does not use so it silently removed nothing,
+  and ignored `XDG_CONFIG_HOME` on Linux. OAuth grants, profiles, manual
+  entries, and leases could survive a purge that reported complete removal. It
+  now resolves the same per-user data root the rest of the product uses and
+  reports when something could not be deleted.
+- Lease and pipe-health discounts printed a literal `(-% reserved)` and
+  `(-% degraded)` on the route glance line instead of the discount amount.
 - The desktop dashboard could sit permanently empty while reporting a failed
   refresh. Advisory analytics notices were computed in a second isolate with no
   fallback after quota had already been collected, so an isolate that could not

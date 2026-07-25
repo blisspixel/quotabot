@@ -82,8 +82,8 @@ enum TopSort {
 }
 
 /// Reorders [providers] for display under [sort], reading each provider's routing
-/// metrics from [suggestion]. The render still groups cloud above local; this
-/// only sets the order within each group.
+/// metrics from [suggestion]. The render groups rows into active, cached, and
+/// idle bands; this only sets the order within a band.
 ///
 /// Stable and total: providers the sort cannot rank (no metric yet, or a local
 /// runtime under a cloud-only metric) keep their original relative order and sink
@@ -395,7 +395,8 @@ enum TopSection {
   cached,
 
   /// No live quota to show at all (no windows, not configured, unreachable
-  /// local runtime). Collapsed into one dim line so it never dominates.
+  /// local runtime). Each keeps a single compact row, without the verbose setup
+  /// hint, so these never dominate the frame.
   idle,
 }
 
@@ -907,19 +908,6 @@ String _sectionHeader(
     _Cell(' $count ', (s, t) => s.dim(t)),
     if (fill > 0) _Cell('─' * fill, (s, t) => s.dim(t)),
   ], width, s);
-}
-
-/// The idle providers' names joined for one collapsed line, trimmed to [budget]
-/// by summarizing the tail rather than clipping a name mid-word.
-String idleProviderNames(List<String> names, int budget) {
-  if (names.isEmpty) return '';
-  final joined = names.join(' · ');
-  if (joined.length <= budget || names.length == 1) return joined;
-  for (var keep = names.length - 1; keep >= 1; keep--) {
-    final text = '${names.take(keep).join(' · ')} +${names.length - keep} more';
-    if (text.length <= budget) return text;
-  }
-  return '${names.length} providers';
 }
 
 List<String> renderTopFrame({

@@ -84,10 +84,14 @@ Highlights:
   window controls usable at large text sizes. Widget tests enforce labeled
   controls, Windows desktop target sizes, and text contrast across expanded,
   compact, and Analytics surfaces in light, dark, and Hacker themes.
-- **Explainable and fail-soft.** The expanded desktop always shows either the
-  next route or an explicit no-safe-route fallback. Its visible details control
-  opens the shared reason, evidence freshness and scope, spend class, fallback,
-  and selectable decision id without requiring a hover.
+- **Explainable and fail-soft.** The expanded desktop always shows an answer:
+  the next route, an explicit no-safe-route fallback when every route really is
+  spent, or a distinct no-quota-data state when a read failed or only stale
+  evidence remains. The last two are deliberately not the same sentence, because
+  "no safe route" reads as being out of quota when the truth is that quotabot
+  could not read it. Its visible details control opens the shared reason,
+  evidence freshness and scope, spend class, fallback, and selectable decision
+  id without requiring a hover.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, smoothed and reset-aware best times to
   run). Outputs contain quota and routing metadata, never prompts, code, model

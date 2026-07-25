@@ -69,13 +69,22 @@ if [ "$purge" -eq 1 ]; then
   if [ -d "$HOME/.cache/quotabot" ]; then
     rm -rf "$HOME/.cache/quotabot"
   fi
-  # Quotabot data dir varies by OS
-  if [ "$os" = "darwin" ] && [ -d "$HOME/Library/Application Support/quotabot" ]; then
-    rm -rf "$HOME/Library/Application Support/quotabot"
-  elif [ "$os" = "linux" ] && [ -d "$HOME/.config/quotabot" ]; then
-    rm -rf "$HOME/.config/quotabot"
+  # Resolve the data directory the way quotabot itself does: XDG_CONFIG_HOME
+  # when set, otherwise ~/.config, on every POSIX platform including macOS.
+  # Purging a macOS-looking Application Support path removed nothing while
+  # still reporting success, and ignoring XDG_CONFIG_HOME left a relocated
+  # directory behind. This root holds OAuth grants under auth/ as well as
+  # profiles, manual entries, leases, and loopback tokens, so a purge that
+  # misses it leaves credentials on disk.
+  data_root="${XDG_CONFIG_HOME:-$HOME/.config}/quotabot"
+  if [ -d "$data_root" ]; then
+    rm -rf "$data_root"
   fi
-  ok 'Purged quotabot data directory'
+  if [ -d "$data_root" ]; then
+    printf 'Some files under %s could not be removed; delete it manually.\n' "$data_root" >&2
+  else
+    ok "Purged quotabot data directory ($data_root)"
+  fi
 fi
 
 printf '\n\033[32mquotabot has been successfully uninstalled.\033[0m\n'

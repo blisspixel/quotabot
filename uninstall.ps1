@@ -69,11 +69,18 @@ if (Test-Path $desktopRoot) {
 
 if ($Purge) {
   Write-Step 'Purging metadata, cache, and logs'
-  $cacheDir = Join-Path $installRoot 'cache'
-  if (Test-Path $cacheDir) {
-    Remove-Item -LiteralPath $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+  # Remove the whole per-user data root, not only the cache. quotabot also
+  # stores OAuth grants under auth\, plus profiles, manual entries, leases,
+  # loopback tokens, and analytics recovery bundles. Purging the cache alone
+  # left credentials on disk after a run that reported complete removal.
+  if (Test-Path $installRoot) {
+    Remove-Item -LiteralPath $installRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
-  Write-Ok 'Purged quotabot data directory'
+  if (Test-Path $installRoot) {
+    Write-Warning "Some files under $installRoot could not be removed. Close any running quotabot and delete that directory manually."
+  } else {
+    Write-Ok "Purged quotabot data directory ($installRoot)"
+  }
 }
 
 Write-Host ''

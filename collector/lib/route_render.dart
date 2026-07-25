@@ -44,10 +44,10 @@ String routeCandidateGlanceLine(
           ? 'last known'
           : 'free';
   if (c.leaseDiscount > 0) {
-    qualifier += ' (-% reserved)';
+    qualifier += ' (-${c.leaseDiscount.round()}% reserved)';
   }
   if (c.pipeDiscount > 0) {
-    qualifier += ' (-% degraded)';
+    qualifier += ' (-${c.pipeDiscount.round()}% degraded)';
   }
   // A candidate can be unroutable for reasons other than being spent. Show the
   // real one, matching the distinctions suggestRoute's reason draws: drift or
