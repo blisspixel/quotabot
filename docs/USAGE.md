@@ -658,7 +658,15 @@ Filter to what a task needs with a coarse `--task=simple|standard|hard` profile 
 explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 `--require-reasoning`, `--tier-floor=standard`, `--tier-ceiling=standard`. quotabot
 never sees the task; you supply the requirements, and it returns the models that
-meet them with budget. The same filters are arguments on the MCP `list_models`
+meet them with budget. Local models are filtered on the capabilities their own
+runtime declares, so `--require-tools --budget=local` returns the on-device
+models the runtime says can call tools. A capability the runtime never declared
+is never assumed, so a runtime that publishes only model names has nothing a
+capability filter can admit. A tier floor still excludes local models, whose
+tier is unknown, so `--task=hard` continues to prefer a cloud model. A model the
+runtime declares as an embedding model is listed with an `embedding` label but
+is never suggested as a route, since it cannot serve a generation request; a
+runtime that states no kind keeps its models routable. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 `quotabot models` and MCP `list_models` default to `budget=any` for inspection.
 Concrete CLI suggestions and MCP `suggest_model` default to `budget=quota`, which

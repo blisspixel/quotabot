@@ -62,10 +62,24 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       final models = lmStudioNativeFromJson(_fixtureMap(entry.fixtureFile));
       expect(models!.installed, hasLength(2));
       expect(models.loaded.single.name, 'llama-3.1-8b');
+      // v0 declares tool use in its capability array and vision through the
+      // model type, so both reach the capability gates.
+      expect(models.loaded.single.tools, isTrue);
+      expect(models.loaded.single.vision, isFalse);
+      final vlm = models.installed.firstWhere((m) => m.name == 'mistral-7b');
+      expect(vlm.tools, isFalse);
+      expect(vlm.vision, isTrue);
+      // Both are generative types, so neither is removed from routing.
+      expect(models.installed.map((m) => m.embedding), everyElement(isFalse));
     case ProviderFixtureKind.ollamaTags:
       final models = ollamaModelsFromJson(_fixtureMap(entry.fixtureFile));
       expect(models.single.name, 'qwen2.5-coder:7b');
       expect(models.single.param, '7B');
+      // The model list carries the content digest used to cache capabilities,
+      // but declares no capability of its own; `/api/show` does that.
+      expect(models.single.digest, isNotNull);
+      expect(models.single.tools, isNull);
+      expect(models.single.vision, isNull);
     case ProviderFixtureKind.lemonadeModels:
       final models = lmStudioCompatFromJson(_fixtureMap(entry.fixtureFile));
       expect(models, hasLength(2));

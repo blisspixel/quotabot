@@ -498,14 +498,20 @@ format overhead can differ from the estimate.
 
 - Ollama: `GET /api/tags` (installed) and `GET /api/ps` (loaded). `/api/ps` also
   reports each running model's `context_length`, which quotabot reads for the
-  loaded model's context window, so no `/api/show` call is needed. Honors
-  `OLLAMA_HOST`, default `http://127.0.0.1:11434`.
+  loaded model's context window. Neither list declares what a model can do, so
+  quotabot also reads `POST /api/show` per model for its `capabilities` array
+  (tool use and vision) and its architecture-prefixed
+  `<arch>.context_length`. Honors `OLLAMA_HOST`, default
+  `http://127.0.0.1:11434`.
 - LM Studio: `GET /api/v1/models` (the current native REST API, 0.4.0+), which
   reports loaded instances with the running context length, on-disk size,
   object-shaped quantization, a real parameter size (`params_string`), and
-  capabilities. Falls back to the older native `GET /api/v0/models` (a per-model
-  loaded/not-loaded `state`), then the OpenAI-compatible `GET /v1/models` (names
-  only, no load state). Honors `LMSTUDIO_HOST`, default `http://127.0.0.1:1234`.
+  capabilities (`vision` and `trained_for_tool_use` flags). Falls back to the
+  older native `GET /api/v0/models` (a per-model loaded/not-loaded `state`, a
+  `capabilities` array carrying `tool_use`, and a `type` where `vlm` is a
+  vision-language model), then the OpenAI-compatible `GET /v1/models` (names
+  only, no load state, no capabilities).
+  Honors `LMSTUDIO_HOST`, default `http://127.0.0.1:1234`.
   The LM Studio local server must be started (Developer tab, or `lms server
   start`); loading a model in the chat window does not start it. Metadata only;
   never loads or invokes a model. The v0 shape carries `arch` (architecture), not
@@ -513,6 +519,39 @@ format overhead can differ from the estimate.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
   (falling back to `/v1/models`). Honors `LEMONADE_HOST` and `LEMONADE_PORT`;
   the default is `http://127.0.0.1:13305`.
+
+A runtime also states each model's kind, and quotabot uses it in the opposite
+direction from a capability. Ollama declares `completion` for every model that
+can generate text, and LM Studio types a model `embedding`; a model declared
+that way stays listed for inspection but is never recommended as a route,
+because it cannot serve a generation request. Here an absent statement is never
+read as a denial: a runtime that says nothing about kind keeps its models
+routable, so a listing that publishes only names loses nothing. That asymmetry
+is deliberate. Requiring a capability must fail closed, because acting on an
+unproven capability breaks the request; excluding a model must fail open,
+because acting on unproven absence removes a route that works.
+
+Declared capabilities are what let a local model satisfy `--require-tools`,
+`--require-vision`, or `--min-context`. quotabot never infers one from a model
+name: a capability the runtime did not declare fails a requirement for it, so a
+runtime that lists only names (any OpenAI-compatible endpoint, including
+Lemonade's) can never satisfy a capability filter. Where a runtime states an
+exhaustive list, an entry missing from it is real evidence of absence and is
+recorded as such. For a model that is not loaded, the reported context window is
+the maximum the model supports, not a promise about the context the runtime will
+choose when it loads it; a loaded model reports its actual running context
+instead, and that always wins.
+
+Ollama's per-model capability read is bounded on purpose. Results are cached for
+the process by the runtime's own content digest, so a refresh loop re-probes
+nothing and a model re-pulled under the same tag is probed again under its new
+digest. At most 48 models are probed per read with at most 4 requests in flight,
+and no further batch starts once the pass budget is spent; anything unresolved
+keeps undeclared capabilities rather than a guess. A library larger than the cap
+is worked through across reads, because each read starts from what is already
+cached. `/api/show` returns the model's manifest and
+never loads or runs it, so the read remains metadata-only and zero-token like
+every other quotabot read.
 
 All three host overrides must resolve syntactically to `localhost`, an IPv4
 loopback address, or `::1`. Credential-bearing, LAN, and public destinations
@@ -532,9 +571,13 @@ Current compatibility limits:
   listed (reachable via the local runtime) but only under `--budget=any`.
 - LM Studio's native `GET /api/v1/models` (0.4.0+) is now the preferred read,
   with `/api/v0/models` and the OpenAI-compatible `/v1/models` as fallbacks. The
-  v1 shape is pinned by a fixture captured from a real 0.4.0+ server. Remaining:
-  thread v1's `capabilities` (vision, tool use) onto local model entries so the
-  capability gates apply to local models too.
+  v1 shape is pinned by a fixture captured from a real 0.4.0+ server. Both
+  native shapes declare vision and tool use and reach the capability gates; the
+  compatibility fallback declares neither, so a capability filter cannot admit
+  a model discovered only through it.
+- A local runtime states what a model can do, not whether it does it well.
+  quotabot ranks a declared-capable local model by load state and passive
+  hardware fit, and never by measured quality or throughput.
 
 ## Cloud model catalog audit
 

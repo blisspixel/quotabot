@@ -3907,6 +3907,9 @@ void _printModels(
                   ));
     final caps = [
       if (m.tier != null) m.tier!,
+      // An embedding model is listed for inspection but is never routable, so
+      // say what it is rather than leaving an empty capability column.
+      if (m.embedding == true) 'embedding',
       if (m.tools == true) 'tools',
       if (m.vision == true) 'vision',
       if (m.reasoning != null) 'reason',

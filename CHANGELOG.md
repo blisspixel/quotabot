@@ -5,6 +5,20 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Added
+- Local models now carry the capabilities their runtime declares, so a
+  capability filter can finally select one. Ollama declares tool use, vision,
+  and the model's maximum context per model through `POST /api/show`, and LM
+  Studio declares them in its native model list (v1 as capability flags, v0 as
+  a tool-use array plus the `vlm` model type). Until now no local model
+  declared anything, so `--require-tools`, `--require-vision`, and
+  `--min-context` silently rejected every one of them, including under
+  `--budget=local`. An OpenAI-compatible listing such as Lemonade's declares
+  nothing and still cannot satisfy a capability requirement, because an
+  undeclared capability is never assumed. The Ollama capability read is bounded
+  and cached by the runtime's own content digest, so a refresh loop re-probes
+  nothing and a re-pulled tag is probed again; it reads model metadata only and
+  never loads or runs a model. `quotabot explain --network` lists the new
+  endpoint.
 - `quotabot top` now groups the fleet into active, cached, and idle bands so
   usable routes lead and providers with nothing to act on stop competing for
   attention. Headings appear only when more than one band is present, so a
@@ -25,6 +39,15 @@ Notable changes to quotabot. Newest first.
   and a full-spectrum rainbow. Select with `--theme=NAME`.
 
 ### Fixed
+- An embedding model can no longer be recommended as a route. Ollama declares
+  `completion` for every model that can generate text and LM Studio types a
+  model `embedding`, so a model declared that way is now excluded from model
+  suggestions, with a reason that says so when nothing else is reachable. It
+  stays listed by `quotabot models`, labeled `embedding`, because listing is
+  inspection. Previously a small embedding model could outrank a real coder
+  model on hardware fit and win a local suggestion it could never serve. A
+  runtime that states no kind keeps its models routable: requiring a capability
+  fails closed, but excluding a model fails open.
 - Windows consoles are now assumed to support 24-bit color. Neither conhost nor
   `cmd.exe` advertises truecolor through `COLORTERM` or `TERM`, so detection
   downgraded them to sixteen flat colors, which silently discarded the gradient

@@ -451,8 +451,21 @@ recommendation is aligned to what the user actually wants.
   across CLI/MCP JSON, and explains it in plain model suggestions. Probes are
   bounded, cached, fail soft, and never load or invoke a model; fit remains
   advisory because runtimes may split memory.
-- Remaining local-first QOL: thread declared local tool/vision capabilities into
-  capability gates, and add local-first stretch behavior when cloud quota is
+- **Done (local capability gates):** local models now carry the capabilities
+  their runtime declares, so a capability filter can select one. Ollama declares
+  tool use, vision, and the model's maximum context per model; LM Studio
+  declares them in both native model-list shapes. Previously no local model
+  declared anything, so every capability filter silently rejected all of them,
+  including under `--budget=local`. An undeclared capability is still never
+  assumed, so an OpenAI-compatible listing satisfies no capability filter. The
+  Ollama read is bounded and cached by the runtime's content digest, stays
+  metadata-only, and never loads or runs a model. The same evidence closed the
+  matching defect in the other direction: a model a runtime declares as an
+  embedding model stays listed for inspection but is no longer a routing
+  candidate, because it cannot serve a generation request. An undeclared kind
+  stays routable, since requiring a capability must fail closed while excluding
+  a model must fail open.
+- Remaining local-first QOL: local-first stretch behavior when cloud quota is
   low.
 - **Done (multi-account):** provider accounts discovered on one machine can be
   shown together in one dashboard. Account-scoped profiles, cache, drift,

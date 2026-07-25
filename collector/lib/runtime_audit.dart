@@ -401,6 +401,9 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
             'Ollama installed model metadata'),
         _localRuntime(env, 'OLLAMA_HOST', ollamaDefaultPort, '/api/ps',
             'Ollama loaded model metadata'),
+        _localRuntime(env, 'OLLAMA_HOST', ollamaDefaultPort, '/api/show',
+            'Ollama per-model declared capabilities and maximum context',
+            method: 'POST'),
       ],
     ),
     ProviderRuntimeAccess(
@@ -598,13 +601,14 @@ RuntimeAccessRecord _localRuntime(
   String path,
   String purpose, {
   String? portVariable,
+  String method = 'GET',
 }) {
   final origin = resolveLocalRuntimeOrigin(
     env[variable],
     defaultPort,
     rawPort: portVariable == null ? null : env[portVariable],
   );
-  return _http('GET', origin.authority, path, purpose, scheme: origin.scheme);
+  return _http(method, origin.authority, path, purpose, scheme: origin.scheme);
 }
 
 String _home(Map<String, String> env) =>
