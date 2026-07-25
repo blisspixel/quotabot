@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -53,6 +54,28 @@ typedef AntigravityFetchModels = Future<Map<String, dynamic>?> Function(
   String? project,
 );
 
+class _AntigravityRequestFailure implements Exception {
+  final String method;
+  final int? httpStatus;
+  final int? retryAfterSeconds;
+  final bool timedOut;
+
+  const _AntigravityRequestFailure({
+    required this.method,
+    this.httpStatus,
+    this.retryAfterSeconds,
+    this.timedOut = false,
+  });
+
+  String get message {
+    if (timedOut) return 'Antigravity $method request timed out';
+    if (httpStatus != null) {
+      return 'Antigravity $method request returned HTTP $httpStatus';
+    }
+    return 'Antigravity $method request failed';
+  }
+}
+
 /// Antigravity (Google) adapter.
 ///
 /// Antigravity is a VS Code fork that stores its account and Google OAuth token
@@ -73,6 +96,7 @@ class AntigravityAdapter {
   final AntigravityOnboardUser? _onboardUserFn;
   final AntigravityFetchModels? _fetchModelsFn;
   final http.Client? _http;
+  final Duration _requestTimeout;
   final List<String> Function()? _dbPathSource;
   final String? Function()? _activeAccountSource;
   final bool Function()? _hasGeminiCredsSource;
@@ -85,6 +109,7 @@ class AntigravityAdapter {
     AntigravityOnboardUser? onboardUser,
     AntigravityFetchModels? fetchModels,
     http.Client? client,
+    Duration requestTimeout = const Duration(seconds: 15),
     List<String> Function()? dbPathSource,
     String? Function()? activeAccountSource,
     bool Function()? hasGeminiCreds,
@@ -95,6 +120,7 @@ class AntigravityAdapter {
         _onboardUserFn = onboardUser,
         _fetchModelsFn = fetchModels,
         _http = client,
+        _requestTimeout = requestTimeout,
         _dbPathSource = dbPathSource,
         _activeAccountSource = activeAccountSource,
         _hasGeminiCredsSource = hasGeminiCreds;
@@ -426,7 +452,12 @@ class AntigravityAdapter {
     var account = source.account;
     final plan = source.plan;
 
-    ProviderQuota offline(String note) => ProviderQuota(
+    ProviderQuota offline(
+      String note, {
+      int? httpStatus,
+      int? retryAfterSeconds,
+    }) =>
+        ProviderQuota(
           provider: id,
           displayName: name,
           account: account,
@@ -441,6 +472,8 @@ class AntigravityAdapter {
           windows: const [],
           modelQuotas: source.modelQuotas,
           perMachine: true,
+          httpStatus: httpStatus,
+          retryAfterSeconds: retryAfterSeconds,
         );
 
     try {
@@ -541,20 +574,27 @@ class AntigravityAdapter {
       }
 
       var project = _extractProjectId(findKey(load, 'cloudaicompanionProject'));
-      final onboarded = _projectCache[account];
-      if (onboarded != null) {
-        project = onboarded;
-      } else {
-        final tier = _pickOnboardTier(
-          load['allowedTiers'],
-          (load['currentTier'] is Map)
-              ? (load['currentTier'] as Map)['id']?.toString()
-              : null,
-        );
-        final p = await (_onboardUserFn ?? _onboardUser)(access, tier);
-        if (p != null) {
-          project = p;
-          _projectCache[account] = p;
+      // A project returned by loadCodeAssist means this account is already
+      // onboarded. Repeating onboardUser on every short-lived CLI process adds
+      // a needless mutation and another timeout/rate-limit boundary. This
+      // matches the official Gemini CLI setup flow: onboard only when the load
+      // response has no usable project.
+      if (project == null) {
+        final onboarded = _projectCache[account];
+        if (onboarded != null) {
+          project = onboarded;
+        } else {
+          final tier = _pickOnboardTier(
+            load['allowedTiers'],
+            (load['currentTier'] is Map)
+                ? (load['currentTier'] as Map)['id']?.toString()
+                : null,
+          );
+          final p = await (_onboardUserFn ?? _onboardUser)(access, tier);
+          if (p != null) {
+            project = p;
+            _projectCache[account] = p;
+          }
         }
       }
 
@@ -592,6 +632,33 @@ class AntigravityAdapter {
         ],
         windows: windows,
         modelQuotas: liveModelQuotas,
+      );
+    } on _AntigravityRequestFailure catch (failure) {
+      final status = failure.httpStatus;
+      if (status == 401 || status == 403) {
+        return offline(
+          '${failure.message} - run: quotabot login antigravity '
+          '(then sign in with this account)',
+          httpStatus: status,
+          retryAfterSeconds: failure.retryAfterSeconds,
+        );
+      }
+      final health = failure.timedOut
+          ? providerPipeHealthThrottled
+          : status == null
+              ? null
+              : providerPipeHealthForHttpStatus(status);
+      return ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: account,
+        plan: plan,
+        asOf: asOf,
+        ok: false,
+        error: failure.message,
+        pipeHealth: health,
+        httpStatus: status,
+        retryAfterSeconds: failure.retryAfterSeconds,
       );
     } catch (e) {
       final health = providerPipeHealthForReadError(e);
@@ -702,7 +769,10 @@ class AntigravityAdapter {
     final payload = {if (tier != null) 'tierId': tier, 'metadata': _metadata};
     for (var attempt = 0; attempt < 5; attempt++) {
       final resp = await _post(access, 'onboardUser', payload);
-      if (resp == null) return null; // 401/403 or error: do not spin
+      // An injected no-data result stops provisioning. Production HTTP and
+      // transport failures carry their bounded request evidence to the outer
+      // account result instead of spinning here.
+      if (resp == null) return null;
       if (resp['done'] == true) {
         final proj = _extractProjectId(
           (resp['response'] is Map)
@@ -723,16 +793,31 @@ class AntigravityAdapter {
     Map<String, dynamic> body,
   ) async {
     final post = _http?.post ?? sharedHttpClient.post;
-    final resp = await post(
-      Uri.parse('$_api:$method'),
-      headers: {
-        'Authorization': 'Bearer $access',
-        'Content-Type': 'application/json',
-        'User-Agent': 'antigravity',
-      },
-      body: jsonEncode(body),
-    ).timeout(const Duration(seconds: 10));
-    if (resp.statusCode != 200) return null;
+    late final http.Response resp;
+    try {
+      resp = await post(
+        Uri.parse('$_api:$method'),
+        headers: {
+          'Authorization': 'Bearer $access',
+          'Content-Type': 'application/json',
+          'User-Agent': 'antigravity',
+        },
+        body: jsonEncode(body),
+      ).timeout(_requestTimeout);
+    } on TimeoutException {
+      throw _AntigravityRequestFailure(method: method, timedOut: true);
+    } on http.ClientException {
+      throw _AntigravityRequestFailure(method: method);
+    } on IOException {
+      throw _AntigravityRequestFailure(method: method);
+    }
+    if (resp.statusCode != 200) {
+      throw _AntigravityRequestFailure(
+        method: method,
+        httpStatus: resp.statusCode,
+        retryAfterSeconds: retryAfterSeconds(resp.headers['retry-after']),
+      );
+    }
     return jsonDecode(resp.body) as Map<String, dynamic>;
   }
 

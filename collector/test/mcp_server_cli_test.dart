@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:quotabot_collector/mcp_server_options.dart';
 import 'package:test/test.dart';
 
+const _token = '0123456789abcdef0123456789abcdef';
+
 void main() {
   test('usage documents stdio and Streamable HTTP modes', () {
     expect(mcpServerUsage, contains('bin/mcp_server.dart --http'));
@@ -19,13 +21,13 @@ void main() {
       '--path',
       'custom',
       '--token',
-      'secret',
+      _token,
     ]);
     expect(separated.http, isTrue);
     expect(separated.host, 'localhost');
     expect(separated.port, 9999);
     expect(separated.path, '/custom');
-    expect(separated.token, 'secret');
+    expect(separated.token, _token);
 
     final equals = McpServerCliOptions.parse([
       '--http',
@@ -57,6 +59,10 @@ void main() {
       () => McpServerCliOptions.parse(['--http', '--token']),
       throwsFormatException,
     );
+    expect(
+      () => McpServerCliOptions.parse(['--http']),
+      throwsFormatException,
+    );
   });
 
   test('token-file loading trims tokens and fails soft for missing files',
@@ -66,7 +72,7 @@ void main() {
       if (await temp.exists()) await temp.delete(recursive: true);
     });
     final tokenFile = File('${temp.path}${Platform.pathSeparator}token.txt');
-    await tokenFile.writeAsString('  secret-token  \n');
+    await tokenFile.writeAsString('  $_token  \n');
     if (!Platform.isWindows) {
       final chmod = await Process.run('chmod', ['600', tokenFile.path]);
       expect(chmod.exitCode, 0);
@@ -79,7 +85,19 @@ void main() {
         tokenFile.path,
       ]),
     );
-    expect(loaded, 'secret-token');
+    expect(loaded, _token);
+
+    await tokenFile.writeAsString('too-short');
+    expect(
+      () => loadMcpBearerToken(
+        McpServerCliOptions.parse([
+          '--http',
+          '--token-file',
+          tokenFile.path,
+        ]),
+      ),
+      throwsFormatException,
+    );
 
     expect(
       () => loadMcpBearerToken(

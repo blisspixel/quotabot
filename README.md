@@ -38,13 +38,60 @@ login.
 
 <p align="center"><sub>Demo mode: the desktop widget, compact strip, 90-day analytics view, and <code>quotabot top</code>.</sub></p>
 
+## Quick start
+
+Install the latest verified CLI release:
+
+**macOS / Linux**
+```bash
+curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
+```
+
+Restart the terminal, then get one truthful status and one recommendation:
+
+```bash
+quotabot doctor
+quotabot suggest
+```
+
+If a provider is not current, `doctor` shows its evidence state and repair hint.
+Credential-related failures for Claude, Codex, Grok, and Antigravity name the
+exact `quotabot login PROVIDER` recovery command; temporary timeouts, rate
+limits, and service failures keep their automatic retry guidance instead.
+Use `quotabot verify --require-live` when automation must fail unless selected
+provider reads are live. An unfiltered strict run checks the whole built-in
+fleet; use `--profile=NAME` or `--exclude=PROVIDER,...` to constrain both the
+verdict and which adapters are contacted. A strict run with no selected adapter
+fails closed. See [Setup](docs/SETUP.md) for inspect-before-run, idle-machine
+login, update, and uninstall paths.
+
 Highlights:
 
 - **Cross-platform.** One codebase on Windows, macOS, and Linux.
 - **Easy and good-looking.** A small frameless widget that follows the system
   light/dark theme, supports per-profile themes including a high-contrast Hacker
-  mode, pins always-on-top or to the taskbar, and collapses to a tiny status
-  strip.
+  mode, pins always-on-top or to the taskbar, measures the rendered provider
+  cards so no row is clipped, reconciles that measurement after native window
+  startup, stays inside the active display, scrolls only when the full list
+  cannot fit, and collapses to a compact strip that keeps the next route or
+  no-safe-route state visible. Compact sizing also reserves room for a selected
+  account when duplicate providers are shown, honors reduced motion, and keeps
+  window controls usable at large text sizes. Widget tests enforce labeled
+  controls, Windows desktop target sizes, and text contrast across expanded,
+  compact, and Analytics surfaces in light, dark, and Hacker themes.
+- **Explainable and fail-soft.** The expanded desktop always shows an answer:
+  the next route, an explicit no-safe-route fallback when every route really is
+  spent, or a distinct no-quota-data state when a read failed or only stale
+  evidence remains. The last two are deliberately not the same sentence, because
+  "no safe route" reads as being out of quota when the truth is that quotabot
+  could not read it. Its visible details control opens the shared reason,
+  evidence freshness and scope, spend class, fallback, and selectable decision
+  id without requiring a hover.
 - **Useful analytics, no surveillance.** Insight into your own usage patterns
   (distribution, reliability, trend, smoothed and reset-aware best times to
   run). Outputs contain quota and routing metadata, never prompts, code, model
@@ -64,6 +111,22 @@ Highlights:
   webhooks remain loopback-only unless you explicitly allow an external host. No
   path sends prompts, code, model output, or other user content.
 
+## The deal
+
+No account. No subscription or paid tier. No telemetry, not opt-out and not
+opt-in. No advertising or upsell. No inference: this is a tool for people who
+use AI that makes no model call itself, so the meter never consumes the thing it
+measures. No lock-in either, because nothing it needs runs on our machines -
+there are none. If this project stopped tomorrow, your installed copy keeps
+working.
+
+Those are meant to be checked, not believed. `quotabot explain` prints every
+file read and network destination per adapter, `quotabot --json` is the whole
+snapshot in plain text, and pulling your network cable still renders cached
+quota, labeled stale, because nothing waits on a login.
+[docs/PRINCIPLES.md](docs/PRINCIPLES.md) states each promise, why it exists, and
+how to verify it yourself.
+
 ## What it shows
 
 Each provider is a card that defaults to a tight view: one bar per rolling window
@@ -73,13 +136,27 @@ shorter one, so a spent weekly cap collapses the card to a single "weekly spent 
 resets in 2d" line rather than showing a green 5 hour bar you cannot use. Click a
 card to expand it for the full provenance line, model-specific rows, and
 analytics; a failed live read, drift, and last-known signals stay on the tight
-card because they are always actionable, and a provider that supports quotabot's
-own login (Grok, Antigravity) shows an inline Connect button when its read fails.
+card because they are always actionable. A provider that supports quotabot's
+own login (Grok, Antigravity) shows an inline Connect button for authentication
+or reconnection failures. Automatic timeout, rate-limit, and service-error
+recovery does not show that action.
 Local runtimes have no quota, so their
 card reports installed and loaded models instead, and acts as a routing fallback.
 Cold on-device models are ranked with a conservative metadata-only hardware-fit
 signal from current RAM and largest-GPU capacity. It never loads a model or runs
 a throughput probe, and it remains advisory because runtimes can split memory.
+
+The expanded header keeps the routing answer visible even when no provider is
+safe. Select its details control to inspect why the decision was made, how fresh
+and authoritative the evidence is, whether it can create metered spend, what to
+do if the route fails, and the decision id used across other quotabot surfaces.
+The compact strip pins the same answer as a keyboard-accessible `Next` provider
+or `No route` control and opens the same details without requiring a hover.
+Automatic compact width keeps that label visible and reserves account-label
+space when duplicate providers are present.
+Common quota-window labels and complete reset times reflow at large text sizes
+instead of being cut off; unusual provider-supplied labels retain their full
+tooltip and screen-reader text.
 
 When a provider offers a redeemable off-cycle reset (Codex's reset credits),
 quotabot flags it prominently in green on the card, in `doctor`, and in `top`,
@@ -111,6 +188,43 @@ provider/account baseline. It refuses stale, malformed, failed, duplicate,
 wrong-account, or concurrently superseded evidence. History and all other local
 metadata remain unchanged.
 
+If `doctor` or desktop Analytics reports a mixed-version analytics quarantine,
+first stop every older quotabot process. A default unfiltered `quotabot --json`
+snapshot includes a bounded `analytics_incident_inventory`; its `state` is
+`complete` only when every inspected marker was verified. The inventory keeps
+the provider, affected tiers, stable local incident reference, and a safe
+provider-row index when the exact account is already in that snapshot. It never
+publishes an unavailable account, account digest, local path, or recovery
+authority. Profiled and excluded views inspect visible rows only.
+
+Copy the current provider row's exact `account` field, then inspect one affected
+tier without writing recovery data or contacting a provider:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
+```
+
+The read-only inspection states the planned action before confirmation. After
+reviewing it, add `--yes` to archive that tier's canonical and legacy files into
+an owner-only local evidence bundle. Raw history is exactly merged only when
+strict row validation and one unique ordered-checkpoint overlap prove both
+branch deltas. Aggregate buckets are exactly merged only when strict count,
+histogram, moment, extrema, ordering, and retained-checkpoint-suffix checks prove
+that the shared baseline can be subtracted once. Evidence that fails either
+proof restarts only the selected tier empty. Current quota, credentials,
+preferences, other accounts,
+provider-level compatibility analytics, and the unselected tier remain in
+place. Recovery refuses a lossy legacy file when it cannot prove that the file
+belongs only to the requested account. Retrying a completed command returns its
+prior evidence bundle receipt instead of treating the target as a new failure.
+
+If the incident says its exact account is not in the snapshot, quotabot cannot
+truthfully reconstruct that recovery target from the digest-private inventory.
+Reconnect the account, rerun `quotabot doctor`, and use the now-visible exact
+account. With several accounts for one provider, match the incident's
+`provider_row_index` to the `providers` array before copying the account. A
+partial inventory is not proof that local analytics are clear.
+
 An ordinary live-read failure follows the same evidence rule. Cached quota keeps
 its original capture time and last observed percentage. A reset time passing does
 not prove the new window is unused, so stale evidence never becomes 100% free and
@@ -133,8 +247,15 @@ or data shape. The exact assignments and verification methods are documented in
 
 The same view is available live in the terminal with `quotabot top`, a small
 dashboard that redraws in place and, when it has enough history, notes which
-window is likely to run out first. Full walkthrough of the widget, analytics, and
-CLI: [docs/USAGE.md](docs/USAGE.md).
+window is likely to run out first. It groups the fleet by what you can act on:
+live usable routes first, then evidence that is not a live route (spent, cached,
+or drifted), then providers with no live quota as one compact row each. Those
+headings appear only when there is more than one group, so a uniform fleet still
+reads as a plain list. A failed read, quarantined evidence, or a provider that
+answered with an error keeps its full row and recovery hint rather than being
+treated as idle. A live fleet read contacts every provider, so an interactive
+run prints its progress as each provider lands instead of a silent wait. Full
+walkthrough of the widget, analytics, and CLI: [docs/USAGE.md](docs/USAGE.md).
 
 ## Provider status
 
@@ -159,10 +280,11 @@ session files for quota evidence. Because host tokens may expire on an idle
 machine, a one-time local `quotabot login claude` or `quotabot login codex` adds
 a separate refreshable grant designed to keep the account-wide read live there.
 Grants are local and are not synchronized, so run the login once on each idle
-machine that needs an independent live read, then use `quotabot doctor` to
-confirm that machine's current result. Refresh and expired-host fall-through
-have deterministic test coverage; dated real-account validation after an idle
-interval remains a tracked 1.0 evidence gate.
+machine that needs an independent live read, then inspect that machine with
+`quotabot doctor`. Use scoped `quotabot verify --require-live` when automation
+must enforce a fresh read. Refresh and expired-host fall-through have
+deterministic test coverage; dated real-account validation after an idle interval
+remains a tracked 1.0 evidence gate.
 Anthropic's usage response does not include a stable account id, so quotabot
 also reads the zero-cost OAuth profile metadata with the same credential. Its
 account and organization ids are hashed locally into the stable account-pool key
@@ -282,6 +404,22 @@ current Windows and macOS bundles are not yet application-signed; the guide
 keeps that limitation explicit rather than suggesting that an OS warning is safe
 to ignore.
 
+The packaged Windows release gate starts each candidate with isolated local
+configuration and a candidate-only single-instance guard, so validation can run
+beside an installed tray instance without surfacing or replacing it. Its bounded
+v3 report records a UTC timestamp, pass or failure status and stage, the launch
+process, the runner executable digest, and a deterministic digest plus aggregate
+counts for the complete Flutter bundle,
+native window and tray results, isolated-config state, and cleanup. It hashes the
+bundle before launch and after cleanup, so changed Dart code, plugins, or assets
+cannot hide behind an unchanged native runner. Failure reports retain no raw
+errors, logs, or filesystem paths and are preserved by CI and release workflows.
+Archive checksum and provenance, application signing, and native accessibility
+remain separate release gates. Automated widget checks cover labels, minimum
+desktop target sizes, and contrast across the shipped themes and primary
+surfaces; Narrator, keyboard-only focus order, visible focus, and critical-flow
+semantics still require interactive evidence.
+
 To build and install everything from source in one command, run
 `pwsh tools/setup.ps1` on Windows or `bash tools/setup.sh` on macOS/Linux (add
 `-CliOnly` / `--cli-only` for just the CLI). Windows creates a Desktop shortcut,
@@ -301,22 +439,26 @@ quotabot login claude        # opens a browser; paste the code it shows back
 quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow
 quotabot login antigravity   # opens a browser; sign in with the account you want
-quotabot doctor              # confirm it reads live
+quotabot doctor              # inspect status and repair guidance
 ```
 
 Claude and Codex read the same zero-cost account-wide usage endpoints either way;
 the grant only changes how the token can be refreshed. quotabot stores its own
 refresh token under your per-user config directory, independent of the app's
 credentials, and never writes the host app's credential files. A new or rotated
-grant is not written unless owner-only permission hardening succeeds. Confirm a
-live result with `quotabot doctor`; real-account evidence after an idle interval
-is still tracked as a 1.0 acceptance item. Details in
+grant is not written unless owner-only permission hardening succeeds. Inspect
+the result with `quotabot doctor`. For an automated fresh-read gate, use
+`quotabot verify --require-live` with a profile or exclusions that name the
+intended provider scope. Real-account evidence after an idle interval is still
+tracked as a 1.0 acceptance item. Details in
 [docs/SETUP.md](docs/SETUP.md#4-keep-a-provider-live-on-an-idle-machine-or-pin-an-account-optional).
 
 ## Routing for tools and agents
 
 ```bash
 quotabot suggest              # balanced provider recommendation
+quotabot check claude         # collect and evaluate only Claude
+quotabot check claude --account=EXACT_ACCOUNT  # select one returned account
 quotabot suggest --local-first  # prefer a reachable local runtime
 quotabot suggest --task=hard  # one model, included quota/local by default
 quotabot models               # current registry entries, availability, budget, capabilities
@@ -324,6 +466,15 @@ quotabot watch                # alert on a low binding window and name the next 
 quotabot verify               # test one read for truthful behavior
 quotabot verify --require-live # also fail on a cached or failed adapter read
 ```
+
+Continuous watch mode rejects malformed intervals and writes one failure edge
+and one recovery edge to standard error while retrying. JSON standard output
+remains reserved for `quotabot.alert.v1` records.
+
+`check` does not refresh unrelated built-in providers. Without `--account`, it
+chooses the best current account deterministically and names that account when
+more than one matches. Its JSON form includes evidence age, selection mode,
+live-read status, and the observed runtime-access scope.
 
 The defaults are deliberate:
 
@@ -372,7 +523,9 @@ source file, model response, credential, or exception.
 
 For agent integration, use the MCP server described in [AGENTS.md](AGENTS.md).
 It exposes live and cache-only decisions, model filters, resources, and expiring
-local reservations over stdio or opt-in loopback HTTP with bearer auth available.
+local reservations over stdio or opt-in loopback HTTP. HTTP requires a bearer
+token and rejects indeterminate or larger-than-256-KiB request bodies before
+buffering them.
 A smaller
 plain loopback JSON endpoint is available for clients that do not speak MCP.
 For an execution handoff, the [LiteLLM example](integrations/litellm/) consumes

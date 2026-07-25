@@ -51,8 +51,10 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   Live with no quotabot login when Claude Code has a valid signed-in token here;
   `quotabot login claude` adds a self-refreshing grant designed to keep the
   account-wide read live on a machine you have not opened Claude Code on
-  recently. Confirm the result with `quotabot doctor`; real-account evidence
-  after an idle interval remains a tracked 1.0 acceptance item.
+  recently. Inspect the result with `quotabot doctor`, and use scoped
+  `quotabot verify --require-live` when automation must enforce freshness;
+  real-account evidence after an idle interval remains a tracked 1.0 acceptance
+  item.
 - The usage endpoint does not return a stable account id, but the profile
 endpoint returns account and organization ids. quotabot hashes those ids to
 form the stable live snapshot, cache, drift, and lease identity and to collapse
@@ -74,10 +76,12 @@ account id enters quota output.
 - quotabot reads: the ChatGPT usage endpoint, reusing the OAuth access token
   Codex stores locally, or a self-refreshing grant from `quotabot login codex`
   when that token is expired. The grant path is designed to keep an idle machine
-  live and must be confirmed there with `quotabot doctor`; dated real-account
-  idle validation remains a tracked 1.0 acceptance item. If no account-wide read
-  succeeds, it fails closed with a login repair. It never opens Codex session
-  files, which can contain prompts and responses, for quota evidence.
+  live. Inspect it there with `quotabot doctor`, and use scoped
+  `quotabot verify --require-live` when automation must enforce freshness. Dated
+  real-account idle validation remains a tracked 1.0 acceptance item. If no
+  account-wide read succeeds, it fails closed with a login repair. It never opens
+  Codex session files, which can contain prompts and responses, for quota
+  evidence.
 
 ## Antigravity / Gemini (Google)
 

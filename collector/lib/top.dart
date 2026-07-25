@@ -82,8 +82,8 @@ enum TopSort {
 }
 
 /// Reorders [providers] for display under [sort], reading each provider's routing
-/// metrics from [suggestion]. The render still groups cloud above local; this
-/// only sets the order within each group.
+/// metrics from [suggestion]. The render groups rows into active, cached, and
+/// idle bands; this only sets the order within a band.
 ///
 /// Stable and total: providers the sort cannot rank (no metric yet, or a local
 /// runtime under a cloud-only metric) keep their original relative order and sink
@@ -196,6 +196,9 @@ const _rowCore = 2 + _nameW + _labelW + 3 + 10;
 const _resetCost = 2 + 13; // "  resets 4d12h"
 const _forecastCost = 13; // "  strand 76%" / "  ~4h left"
 const _minReadableBar = 10;
+
+/// Width at or above which the comfortable meter is protected from tags.
+const _tagReserveWidth = 100;
 const _minBar = 6;
 
 /// Which trailing columns fit at [width], decided once per frame so every row
@@ -315,6 +318,22 @@ String _topTrustTag(ProviderQuota q, int now) {
   return ' (${parts.join(', ')})';
 }
 
+/// True when a row is an ordinary, current, account-wide read with nothing
+/// unusual to disclose, so its provenance tag repeats what the band heading and
+/// the meter already say. Cached, drifted, this-machine, passive, status-only,
+/// and failed rows are never routine: those tags are the whole point.
+bool _isRoutineLiveRead(ProviderQuota q, int now) =>
+    q.ok &&
+    !q.stale &&
+    !q.isLocal &&
+    !q.perMachine &&
+    q.driftReason == null &&
+    q.suspect == null &&
+    q.sourceClassViolation == null &&
+    q.sourceClass == ProviderSourceClass.authoritativeLive &&
+    q.windows.isNotEmpty &&
+    isTrustedQuotaEvidenceAt(q, now);
+
 String _topReadState(ProviderQuota q, int now) {
   if (q.driftReason != null) {
     final age = q.asOf > 0 && now > q.asOf
@@ -364,6 +383,100 @@ bool _isCollapsedSpent(ProviderQuota q, int now) {
   return binding != null && headroom != null && headroom <= kSpentHeadroomFloor;
 }
 
+/// The three bands the `top` dashboard groups providers into, borrowing htop's
+/// "read the shape, not the digits" idea: usable-now floats up, has-evidence-but-
+/// not-live sits in the middle, and dead weight collapses to a single line.
+enum TopSection {
+  /// Live, trusted quota with usable headroom - the routes you can take now.
+  active,
+
+  /// Has quota evidence but is not a live usable route: spent, stale/cached,
+  /// drifted, or unverified. Rendered as compact one-liners.
+  cached,
+
+  /// No live quota to show at all (no windows, not configured, unreachable
+  /// local runtime). Each keeps a single compact row, without the verbose setup
+  /// hint, so these never dominate the frame.
+  idle,
+}
+
+/// Classifies one provider into its [TopSection] at [now]. Pure and total, so
+/// the renderer and the cursor-navigation model can agree on ordering by both
+/// calling it over the same sorted list.
+TopSection topSectionFor(ProviderQuota q, int now) {
+  // A failure is never idle: a signed-out provider, a rejected read, quarantined
+  // evidence, or a provider pushing back is the most actionable thing on the
+  // screen, so it keeps its own full row (error, recovery hint, and diagnostic)
+  // in the middle band. An HTTP status or retry hint marks a read that actually
+  // reached the provider and failed, which separates a 403 that needs
+  // reconnecting from a passively detected tool that simply has no quota API.
+  final failing = !q.ok ||
+      q.driftReason != null ||
+      q.httpStatus != null ||
+      (q.retryAfterSeconds ?? 0) > 0;
+  if (q.isLocal) {
+    if (isLocalRuntimeAvailableAt(q, now)) return TopSection.active;
+    return failing ? TopSection.cached : TopSection.idle;
+  }
+  if (q.windows.isEmpty) return failing ? TopSection.cached : TopSection.idle;
+  final headroom = providerHeadroom(q, now);
+  if (headroom == null) return TopSection.cached;
+  final liveUsable = q.ok &&
+      !q.stale &&
+      q.driftReason == null &&
+      isTrustedQuotaEvidenceAt(q, now);
+  if (!liveUsable) return TopSection.cached;
+  if (headroom <= kSpentHeadroomFloor) return TopSection.cached;
+  return TopSection.active;
+}
+
+/// A snapshot partitioned into the three [TopSection] bands, order preserved
+/// from the input (so an already-sorted list stays sorted within each band).
+class TopSectionGroups {
+  final List<ProviderQuota> active;
+  final List<ProviderQuota> cached;
+  final List<ProviderQuota> idle;
+
+  const TopSectionGroups({
+    required this.active,
+    required this.cached,
+    required this.idle,
+  });
+
+  /// The rows a cursor can land on: active then cached, in render order. Idle
+  /// providers collapse to one shared line and are not individually selectable.
+  List<ProviderQuota> get selectable => [...active, ...cached];
+}
+
+/// Splits [providers] into active/cached/idle bands, preserving input order.
+TopSectionGroups partitionTopSections(List<ProviderQuota> providers, int now) {
+  final active = <ProviderQuota>[];
+  final cached = <ProviderQuota>[];
+  final idle = <ProviderQuota>[];
+  for (final q in providers) {
+    switch (topSectionFor(q, now)) {
+      case TopSection.active:
+        active.add(q);
+      case TopSection.cached:
+        cached.add(q);
+      case TopSection.idle:
+        idle.add(q);
+    }
+  }
+  return TopSectionGroups(active: active, cached: cached, idle: idle);
+}
+
+/// The width a provenance tag may claim on a quota row.
+///
+/// The meter is the reason this view exists: it is what the eye reads first and
+/// what makes a full window legible at a glance. Budgeting tags against the bare
+/// minimum bar let a long tag such as "(live, authoritative, quota plan)" - which
+/// repeats on every healthy row and says the same thing each time - shrink the
+/// meter to a stub on a mid-width terminal, so a wider terminal could render a
+/// worse frame than a narrow one. Reserve a comfortable meter first and let tags
+/// have what is genuinely left over, so a tag appears only when it costs nothing
+/// that matters. Nothing is lost when it does not fit: the same provenance is on
+/// the selected row's detail and in doctor.
 int _trailingTagBudget(
   int width,
   ({bool reset, bool forecast}) columns,
@@ -447,13 +560,13 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     {bool selected = false,
     ({bool reset, bool forecast}) columns = (reset: true, forecast: true),
     String trustTag = '',
-    String accountTag = ''}) {
+    String accountTag = '',
+    bool compact = false}) {
   if (!q.ok) {
+    final retry = providerRetrySummary(q);
     final text = q.driftReason != null
         ? 'legacy evidence quarantined'
-        : q.error?.isNotEmpty == true
-            ? q.error!
-            : 'read failed';
+        : retry ?? (q.error?.isNotEmpty == true ? q.error! : 'read failed');
     final visibleTags = _visibleInlineTags(
       width: width,
       text: text,
@@ -463,14 +576,25 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
     return [
       _line([
         ..._rowHead(q.displayName, '', selected: selected, palette: p),
-        _Cell(text, (s, t) => s.red(t)),
+        _Cell(text, retry == null ? (s, t) => s.red(t) : (s, t) => s.yellow(t)),
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
+      if (retry != null && q.error?.isNotEmpty == true)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell('diagnostic: ${q.error}', (s, t) => s.dim(t)),
+        ], width, s),
     ];
   }
   if (q.windows.isEmpty) {
     final status = q.status?.isNotEmpty == true ? q.status! : 'no live data';
+    final authRecovery = (q.httpStatus == 401 || q.httpStatus == 403) &&
+            q.provider == 'antigravity'
+        ? 'live quota needs reconnecting - run: quotabot login antigravity'
+        : null;
+    final failureSummary = authRecovery ?? providerFailureSummary(q);
     final visibleTags = _visibleInlineTags(
       width: width,
       text: status,
@@ -484,6 +608,18 @@ List<String> _providerRows(ProviderQuota q, int now, int width, AnsiStyle s,
         _Cell(visibleTags.trustTag, (s, t) => s.dim(t)),
         _Cell(visibleTags.accountTag, (s, t) => s.dim(t)),
       ], width, s),
+      if (!compact && q.error?.isNotEmpty == true && failureSummary != q.error)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell(failureSummary, (s, t) => s.yellow(t)),
+        ], width, s),
+      if (!compact && q.error?.isNotEmpty == true)
+        _line([
+          const _Cell('  '),
+          _Cell(' ' * (_nameW + _labelW)),
+          _Cell('diagnostic: ${q.error}', (s, t) => s.dim(t)),
+        ], width, s),
     ];
   }
 
@@ -657,6 +793,12 @@ List<String> _localRows(
 /// a way to keep working now?" and not only "when does it come back?".
 List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
   final rows = <String>[];
+  // Detail text is indented past the name and label columns, so it must be
+  // trimmed against the space that actually remains. Yielding at a word boundary
+  // with an ellipsis keeps a recovery hint readable instead of clipping it
+  // mid-word at the frame edge.
+  final detailRoom = width - 2 - (_nameW + _labelW);
+  String fit(String text) => _fitReason(text, detailRoom);
   // A redeemable off-cycle reset leads in green: it is the way to keep working
   // now, so it must not read as one more dim note under a spent card.
   final reset = resetAvailableMessage(q);
@@ -671,21 +813,21 @@ List<String> _detailRows(ProviderQuota q, int width, AnsiStyle s) {
       q.stale &&
       q.driftReason == null &&
       q.error?.isNotEmpty == true) {
-    final throttled = q.pipeHealth == providerPipeHealthThrottled ||
-        q.pipeHealth == providerPipeHealthDegraded;
+    final retry = providerRetrySummary(q, showingLastKnown: true);
     rows.add(_line([
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
-      throttled
-          ? _Cell('throttled - retrying: ${q.error}', (s, t) => s.yellow(t))
-          : _Cell('live read failed: ${q.error}', (s, t) => s.red(t)),
+      if (retry != null)
+        _Cell(fit('$retry: ${q.error}'), (s, t) => s.yellow(t))
+      else
+        _Cell(fit('live read failed: ${q.error}'), (s, t) => s.red(t)),
     ], width, s));
   }
   for (final d in q.details) {
     rows.add(_line([
       const _Cell('  '),
       _Cell(' ' * (_nameW + _labelW)),
-      _Cell(d, (s, t) => s.dim(t)),
+      _Cell(fit(d), (s, t) => s.dim(t)),
     ], width, s));
   }
   return rows;
@@ -748,6 +890,26 @@ double? _poolHeadroom(List<ProviderQuota> providers, int now) {
 /// Builds the content lines of one `top` frame. [clock] is supplied by the
 /// caller (the only time-of-day text), [width] is the terminal width, and
 /// [color] turns ANSI styling on or off.
+/// A labeled band divider, e.g. "  ACTIVE 3 ─────────────". The rule runs to the
+/// frame edge so the eye tracks one horizontal group at a time, the way htop
+/// separates its meters from its process list.
+String _sectionHeader(
+  String label,
+  int count,
+  int width,
+  AnsiStyle s,
+  Palette p,
+) {
+  final head = '  $label $count ';
+  final fill = width - head.length;
+  return _line([
+    const _Cell('  '),
+    _Cell(label, (s, t) => _accent(s, p, t)),
+    _Cell(' $count ', (s, t) => s.dim(t)),
+    if (fill > 0) _Cell('─' * fill, (s, t) => s.dim(t)),
+  ], width, s);
+}
+
 List<String> renderTopFrame({
   required List<ProviderQuota> providers,
   required RouteSuggestion suggestion,
@@ -836,7 +998,13 @@ List<String> renderTopFrame({
   final trustTags = <ProviderQuota, ({String trustTag, String accountTag})>{};
   final tagBudget = _trailingTagBudget(w, columns) - evidenceWidthExtra;
   for (final q in cloud) {
-    final rawTrustTag = _topTrustTag(q, now);
+    // On a terminal with room to spare, a routine tag costs meter width while
+    // saying the same thing on every healthy row. Drop it there and let the
+    // meter grow; rows with something to disclose always keep their tag, and a
+    // narrow terminal keeps every tag because the meter is short regardless.
+    final rawTrustTag = w >= _tagReserveWidth && _isRoutineLiveRead(q, now)
+        ? ''
+        : _topTrustTag(q, now);
     final rawAccountTag = accountTagFor(q);
     final usesInlineTagFit =
         !q.ok || q.windows.isEmpty || _isCollapsedSpent(q, now);
@@ -863,17 +1031,58 @@ List<String> renderTopFrame({
   bool isSelected(ProviderQuota q) =>
       q.provider == selected &&
       (selectedAccount == null || q.account == selectedAccount);
-  for (final q in cloud) {
+  // Group by what the user can act on. Live routes float to the top, evidence
+  // that is not a live route sits below them, and providers with no live quota
+  // collapse to a single line instead of a screenful of diagnostics.
+  final groups = partitionTopSections([...cloud, ...local], now);
+
+  void renderRow(ProviderQuota q, {bool compact = false}) {
+    if (q.isLocal) {
+      lines.addAll(_localRows(q, now, w, s, p, selected: isSelected(q)));
+      return;
+    }
     final visibleTags =
         trustTags[q] ?? (trustTag: '', accountTag: accountTagFor(q));
     lines.addAll(_providerRows(q, now, w, s, p, barW, forecasts[q],
         selected: isSelected(q),
         columns: columns,
         trustTag: visibleTags.trustTag,
-        accountTag: visibleTags.accountTag));
+        accountTag: visibleTags.accountTag,
+        compact: compact));
   }
-  for (final q in local) {
-    lines.addAll(_localRows(q, now, w, s, p, selected: isSelected(q)));
+
+  // Headers only earn their line when they separate something. A fleet that is
+  // entirely one band reads better as a plain list.
+  final populated = [
+    if (groups.active.isNotEmpty) 1,
+    if (groups.cached.isNotEmpty) 1,
+    if (groups.idle.isNotEmpty) 1,
+  ].length;
+  final showSections = populated > 1;
+
+  if (groups.active.isNotEmpty) {
+    if (showSections) {
+      lines.add(_sectionHeader('ACTIVE', groups.active.length, w, s, p));
+    }
+    groups.active.forEach(renderRow);
+  }
+  if (groups.cached.isNotEmpty) {
+    if (showSections) {
+      lines.add(_sectionHeader('CACHED', groups.cached.length, w, s, p));
+    }
+    groups.cached.forEach(renderRow);
+  }
+  if (groups.idle.isNotEmpty) {
+    if (showSections) {
+      lines.add(_sectionHeader('IDLE', groups.idle.length, w, s, p));
+    }
+    // These providers have nothing to act on, so each keeps a single compact
+    // row: name, status, and provenance stay visible (they are still evidence),
+    // but the verbose setup hint that used to wrap and clip mid-word is dropped.
+    // The hint remains available in full from quotabot doctor.
+    for (final q in groups.idle) {
+      renderRow(q, compact: true);
+    }
   }
 
   lines.add(_line([_Cell('─' * w, (s, t) => s.dim(t))], w, s));
@@ -944,7 +1153,7 @@ List<String> renderTopFrame({
       ], 5),
       if (copied.isNotEmpty)
         _Seg([
-          _Cell('copied $copied  ', (s, t) => _accent(s, p, t)),
+          _Cell('copy requested $copied  ', (s, t) => _accent(s, p, t)),
         ], 3),
       if (updated.isNotEmpty)
         _Seg([

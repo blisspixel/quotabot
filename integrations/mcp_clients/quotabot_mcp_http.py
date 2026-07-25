@@ -10,6 +10,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from quotabot_mcp_common import (
     as_pretty_json,
+    require_mcp_bearer_token,
     require_routing_tools,
     require_loopback_mcp_url,
     routing_summary,
@@ -20,8 +21,8 @@ DEFAULT_MCP_URL = "http://127.0.0.1:8722/mcp"
 
 
 def bearer_headers() -> dict[str, str]:
-    token = os.environ.get("QUOTABOT_MCP_TOKEN", "").strip()
-    return {"Authorization": f"Bearer {token}"} if token else {}
+    token = require_mcp_bearer_token(os.environ.get("QUOTABOT_MCP_TOKEN"))
+    return {"Authorization": f"Bearer {token}"}
 
 
 async def main() -> int:

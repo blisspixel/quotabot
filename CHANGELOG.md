@@ -4,16 +4,219 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- Local models now carry the capabilities their runtime declares, so a
+  capability filter can finally select one. Ollama declares tool use, vision,
+  and the model's maximum context per model through `POST /api/show`, and LM
+  Studio declares them in its native model list (v1 as capability flags, v0 as
+  a tool-use array plus the `vlm` model type). Until now no local model
+  declared anything, so `--require-tools`, `--require-vision`, and
+  `--min-context` silently rejected every one of them, including under
+  `--budget=local`. An OpenAI-compatible listing such as Lemonade's declares
+  nothing and still cannot satisfy a capability requirement, because an
+  undeclared capability is never assumed. The Ollama capability read is bounded
+  and cached by the runtime's own content digest, so a refresh loop re-probes
+  nothing and a re-pulled tag is probed again; it reads model metadata only and
+  never loads or runs a model. `quotabot explain --network` lists the new
+  endpoint.
+- `quotabot top` now groups the fleet into active, cached, and idle bands so
+  usable routes lead and providers with nothing to act on stop competing for
+  attention. Headings appear only when more than one band is present, so a
+  uniform fleet still reads as a plain list, and a failed, drifted, or
+  rejected read is never treated as idle.
+- An interactive fleet read now streams progress on standard error: a header,
+  one committed line per provider as it settles, and a status line carrying the
+  running count, elapsed time, and which providers are outstanding. It is
+  written only when standard error is a terminal, so piping standard output
+  stays clean, and it covers every command that performs a fleet read.
+- `docs/PRINCIPLES.md` states what quotabot refuses to do - no account, no
+  subscription or paid tier, no telemetry of any kind, no advertising, no
+  inference call, and no hosted service to depend on - along with why each
+  refusal exists and the command that verifies it rather than asking to be
+  believed. The README carries a short version.
+- Seven more `top` palettes so the live view can match the terminal it sits in:
+  gruvbox, nord, dracula, catppuccin, tokyonight, a monochrome phosphor matrix,
+  and a full-spectrum rainbow. Select with `--theme=NAME`.
+
+### Fixed
+- An embedding model can no longer be recommended as a route. Ollama declares
+  `completion` for every model that can generate text and LM Studio types a
+  model `embedding`, so a model declared that way is now excluded from model
+  suggestions, with a reason that says so when nothing else is reachable. It
+  stays listed by `quotabot models`, labeled `embedding`, because listing is
+  inspection. Previously a small embedding model could outrank a real coder
+  model on hardware fit and win a local suggestion it could never serve. A
+  runtime that states no kind keeps its models routable: requiring a capability
+  fails closed, but excluding a model fails open.
+- Windows consoles are now assumed to support 24-bit color. Neither conhost nor
+  `cmd.exe` advertises truecolor through `COLORTERM` or `TERM`, so detection
+  downgraded them to sixteen flat colors, which silently discarded the gradient
+  meters and made every palette render identically.
+- A provenance tag no longer shrinks the meter to a stub. The tag was budgeted
+  against the bare minimum bar, so a mid-width terminal could render a worse
+  frame than a narrow one where the tag simply did not fit. At 100 columns or
+  more the tag that repeats identically on every healthy row is dropped so the
+  meter can use the width; rows with something to disclose always keep theirs.
+- `quotabot uninstall --purge` removed only the cache directory on Windows,
+  targeted a macOS path quotabot does not use so it silently removed nothing,
+  and ignored `XDG_CONFIG_HOME` on Linux. OAuth grants, profiles, manual
+  entries, and leases could survive a purge that reported complete removal. It
+  now resolves the same per-user data root the rest of the product uses and
+  reports when something could not be deleted.
+- Lease and pipe-health discounts printed a literal `(-% reserved)` and
+  `(-% degraded)` on the route glance line instead of the discount amount.
+- The desktop dashboard could sit permanently empty while reporting a failed
+  refresh. Advisory analytics notices were computed in a second isolate with no
+  fallback after quota had already been collected, so an isolate that could not
+  spawn discarded a good fleet read; on a cold start there was no previous
+  snapshot to retain. The same refresh also loaded history and buckets from disk
+  inside its `setState` callback, where a throw mutated state without ever
+  scheduling a rebuild. Analytics now fall back to the calling isolate and then
+  to no notices, are bounded by their own deadline, and all analytics loading
+  happens before state is touched, guarded per provider.
+- The whole-collect deadline was shorter than a realistic slow fleet read, so
+  every refresh timed out and a cold start never displayed anything.
+- Refresh results were applied without `setState` whenever tracked window
+  visibility said hidden, so a desynced flag froze the dashboard on its first
+  frame with no recovery. Window visibility now follows the events the platform
+  actually emits, including a window shown by the single-instance doorbell,
+  which emits `show` rather than `restore`.
+- A fresh install with nothing connected counted every poll as a failed read and
+  backed off to a multi-hour interval, so a provider connected outside the app
+  stayed invisible until a manual refresh. Nothing configured is now treated as
+  a setup state.
+- Window resizing after a refresh could be deferred to a frame that was never
+  scheduled, leaving content clipped until unrelated activity forced a repaint.
+- Listing profiles no longer throws out of desktop startup when the per-user
+  config directory is missing or unwritable; it degrades to the default profile,
+  matching how preference loading already handles that failure.
+- Owner-only hardening no longer repeats work that cannot change its outcome.
+  The account identity is resolved once per process rather than once per
+  hardened file, and a metadata directory is enforced once rather than on every
+  write into it. Enforcement shells out synchronously, so the repeats blocked
+  the event loop and serialized provider reads that are otherwise concurrent; a
+  full fleet read is now roughly twice as fast. Files are still hardened
+  individually, because each write replaces them through a temporary path.
+
 ### Changed
-- A slow or rate-limited live read (a request timeout, or an HTTP 429) now reads
-  as "throttled - retrying" in amber rather than a red "live read failed", in the
-  desktop card, `quotabot top`, and the machine-readable trust detail, because it
-  is temporary and self-recovering rather than a broken login or a bad response.
+- Scoped mixed-version Analytics recovery now previews whether raw history or
+  aggregate buckets have one exact checkpoint-proven merge or require
+  archive-and-reset. Confirmed exact merges archive both originals first. Raw
+  history validates every row and ordered branch before installing the capped
+  chronological union. Aggregate recovery validates ordering, retained suffixes,
+  additive dominance, histograms, moments, exhausted counts, and extrema before
+  installing canonical plus legacy minus the shared checkpoint. Evidence
+  manifests record the installed row or bucket count and SHA-256. Ambiguous or
+  malformed evidence retains the fail-closed reset behavior.
+- Desktop widget tests now enforce labeled controls, 28 by 28 desktop targets,
+  and text contrast across expanded, compact, and Analytics surfaces in light,
+  dark, and Hacker themes. Native keyboard and screen-reader evidence remains a
+  separate release gate.
+- Packaged desktop readiness now writes a bounded v3 report for both passing and
+  failing runs. Failure evidence names the completed stage without retaining raw
+  errors, logs, or filesystem paths, and CI and release workflows preserve the
+  report even when readiness fails.
+- Compact desktop mode now pins the shared routing answer as a `Next` provider
+  or explicit `No route` control, including the selected account when account
+  labels are enabled. Pointer, keyboard, and assistive activation open the same
+  explanation and selectable decision id as expanded mode, and explicit widget
+  focus order keeps every horizontally clipped provider chip reachable.
+- The expanded desktop recommendation now has a visible, keyboard-accessible
+  details control for the shared reason, evidence freshness and scope, spend
+  class, fallback, and selectable decision id. First-run provider review now
+  records completion after the Providers dialog closes; explicit Dismiss still
+  completes immediately.
+- Packaged Windows readiness is now isolated from the user's installed tray
+  instance, and every packaged readiness run uses isolated local quotabot
+  configuration. The v3 harness report retains a UTC timestamp, launch PID, and
+  narrow runner executable SHA-256 plus a bounded deterministic digest, entry
+  count, and byte count for the complete Flutter bundle. The bundle is hashed
+  before launch and after cleanup, so the gate fails if product code, plugins,
+  or assets change during readiness. Native window and tray results and
+  confirmed process cleanup remain part of the report, while archive checksum,
+  provenance, signing, and accessibility evidence stay separate release claims.
+
+### Fixed
+- Light theme muted copy and Analytics status, routing, token, cost, and trend
+  text now use contrast-safe display colors instead of low-contrast dark-theme
+  accents on white cards. Chart fills retain their existing visual palette.
+- Desktop startup now reapplies rendered-content sizing after native window
+  setup finishes, preventing the initial fixed height from cutting off the quota
+  list on cold starts, including at large text sizes.
+- MCP Streamable HTTP now requires a bearer token of at least 32 characters and
+  rejects POST bodies without a declared length or above 256 KiB before the
+  pinned transport can buffer them. This closes a local unauthenticated memory
+  exhaustion path while leaving stdio unchanged.
+- `quotabot watch` no longer writes configured webhook URLs to diagnostics.
+  External-host rejection and the startup banner now report delivery state
+  without persisting secret-capable path or query values.
+- Compact desktop sizing now reserves room for the visible route label and, when
+  enabled, duplicate-provider account identity. Large-text compact controls stay
+  visible, provider interactions honor reduced-motion settings, and window
+  chrome targets retain at least a 28 by 28 logical-pixel hit area.
+- Continuous `quotabot watch` now rejects malformed intervals and reports one
+  actionable failure edge plus one recovery edge while retrying with bounded
+  backoff. JSON standard output remains reserved for alert records.
+- If native tray initialization fails, the desktop app now shows a bounded
+  warning that Close will exit instead of silently changing window behavior.
+- Default quota snapshots now include a bounded
+  `quotabot.analytics-incident-inventory.v1` object. Mixed-version analytics
+  incidents remain visible when an account is no longer in the current
+  snapshot, while profile and exclusion views inspect only their visible rows.
+  Complete, partial, truncated, invalid, and unverifiable scan outcomes are
+  explicit. Incident records contain no unavailable account, account digest,
+  path, or recovery authority; a current incident carries only its safe
+  provider-row index for automation joins.
+- Mixed-version analytics warnings now lead to a scoped local recovery path.
+  `verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
+  --tier=history|buckets` performs a no-write inspection; adding `--yes`
+  archives only that exact tier into an owner-only, digest-verified evidence
+  bundle. It exactly merges raw history when the ordered checkpoint uniquely
+  proves both valid branch deltas; ambiguous history and aggregate buckets
+  restart empty. The command makes no provider call, preserves unrelated quota
+  and local state, and keeps any unselected tier quarantined. Recovery holds both
+  legacy and canonical evidence locks, refuses legacy files shared by colliding
+  account identities, and returns the retained evidence receipt on retry. The
+  desktop warning now states that recovery requires the separately installed
+  CLI instead of implying that the desktop can perform it.
+- `check <provider>` now invokes only that built-in adapter instead of refreshing
+  the full fleet. Filtered `verify --require-live` runs only the adapters allowed
+  by its profile, exclusions, and local-only policy, and its observed runtime
+  access names that exact contact scope. Account filters remain post-collection
+  because multi-account adapters must return their account set first.
+- CLI `check` now accepts `--account=EXACT_ACCOUNT`, identifies automatic
+  multi-account selection, and adds capture age, simulation origin, live-read
+  result, bounded transport diagnostics, and runtime-access evidence to
+  `quotabot.check.v1`.
+- Deterministic simulation now ignores ambient route leases and passive
+  installed-tool detection, marks every human quota surface as synthetic, and
+  records `snapshot_source: "simulation"` on CLI snapshots. A mock run now
+  produces the same route on machines with different local lease state.
+- Weekly Markdown reports now anonymize account labels by default, distinguish
+  multiple accounts with local report labels, and require
+  `--include-accounts` before provider-visible labels are included. The report
+  also names its decision id and evidence source.
+- `doctor` is now described consistently as the truthful inspection and repair
+  view. Setup guidance points strict automation to scoped
+  `verify --require-live` instead of implying that a successful `doctor` exit
+  proves every adapter read is fresh.
+- The README now puts the verified install, `doctor`, and `suggest` path before
+  provider internals, and its screenshots and animation are regenerated from the
+  current card, analytics, compact-strip, and terminal surfaces.
+- Fresh provenance now reads "captured just now" instead of "captured 0s ago"
+  across CLI, desktop, and reports. The interactive terminal says "copy
+  requested" after sending OSC 52 because terminals do not acknowledge whether
+  they accepted the clipboard request, and global CLI help now describes the
+  current machine-readable output surface accurately.
+- Temporary provider pushback now reads as "provider slow - retrying" for a
+  request timeout, "rate limited - retrying" for HTTP 429, or "provider error -
+  retrying" for HTTP 5xx across desktop, `quotabot top`, and trust detail. The
+  amber recovery state remains distinct from a broken login or bad response.
 - The adaptive refresh cadence now leans gentle by default (fast only when a reset
   is imminent, about twenty minutes at the healthy baseline, up to twice a day as
   resets recede) because quota moves slowly and a cloud read can be rate-limited.
-  When a provider keeps throttling, the back-off escalates each consecutive
-  throttled cycle - twenty minutes, then forty, then ninety - and honors an
+  When provider pushback continues, the back-off escalates each consecutive
+  retry cycle - twenty minutes, then forty, then ninety - and honors an
   explicit retry-after, so quotabot stops checking a provider that keeps pushing
   back instead of re-hitting it. An imminent reset is still caught promptly.
 - Desktop card interactions were polished: a hover accent edge and click cursor on
@@ -21,6 +224,101 @@ Notable changes to quotabot. Newest first.
   gradient fill, and the plan shown as a subtle chip badge.
 
 ### Fixed
+- Provider quota rows no longer truncate common window names such as `monthly`
+  or actionable far reset times at narrow widths and 200 percent text. Large
+  text reflows the label and value above a full-width meter, while ordinary
+  layouts give reset text safe wrap points instead of replacing the time with
+  ellipsis. Unusual provider-supplied labels retain complete tooltip and
+  assistive text.
+- Compact resizing now clamps and repositions the strip inside its active
+  display work area. README capture also reapplies the mode-specific native
+  minimum and rendered-content geometry before each frame, so compact media is
+  content-hugged and the first expanded image cannot omit a later provider.
+- The expanded desktop no longer drops its routing answer when no provider is
+  safe. It shows an explicit fail-soft fallback and keeps the full no-route
+  reason inspectable, while stale evidence remains unroutable. Signed-out
+  Claude, Codex, Grok, and Antigravity `doctor` rows now name their exact login
+  command, and shared no-data copy delegates provider-specific recovery to
+  `doctor` instead of listing only two providers. Throttled and degraded reads
+  remain automatic retry states.
+- The expanded desktop quota window now sizes from the rendered provider cards
+  instead of trusting a hand estimate, so wrapped status and recovery rows no
+  longer leave the final provider partially hidden. Growth is reconciled with
+  the active display work area, and an explicit scrollbar appears only when the
+  complete list cannot fit on screen. Returning from Analytics resumes the same
+  content-hugged, display-bounded quota layout.
+- Analytics incident inventory now rejects a directory, link, or other
+  non-regular evidence-lock path before invoking permission helpers. Corrupt or
+  hostile local lock state therefore fails soft without an avoidable Windows ACL
+  delay.
+- Analytics quarantine no longer disappears or falls back to ordinary warming
+  copy solely because the affected account is unavailable. Existing valid
+  markers are upgraded under the identity evidence lock with explicit conflict
+  state, a stable random incident reference, and a first-recorded timestamp.
+  Desktop Analytics and `doctor` use neutral account-availability wording,
+  explain the reconnect requirement, preserve the CLI-install handoff, and warn
+  when a bounded inventory scan cannot prove a clean result.
+- Mixed-version writes can no longer silently split account-scoped analytics
+  between canonical and legacy filenames. Versioned, permission-hardened
+  checkpoints
+  detect divergence, preserve both generations, and exclude only the affected
+  history tiers from displayed analytics. Divergent legacy data cannot affect
+  routing; a frozen last-trusted account baseline, or the already eligible
+  compatibility series for one unambiguous account, remains available with an
+  hourly-boundary conservative burn estimate enforced after cross-provider
+  pooling. Healthy competitors retain the current-offset pooled result, so
+  quarantine cannot improve relative route rank as evidence ages or when
+  collection occurs between hour boundaries.
+- Quota Analytics now distinguishes quarantined local history from a new
+  installation that is still warming up. Historical ranges show one accessible
+  warning, `doctor` prints every affected tier, and bucket-affected `stats
+  --json` rows carry a bounded `storage_notice`; the current quota and **Now**
+  views remain available.
+- The TypeScript MCP client lockfile now resolves `fast-uri` 3.1.4, closing the
+  host-confusion issue in GHSA-v2hh-gcrm-f6hx without changing the direct MCP
+  SDK dependency.
+- Antigravity Cloud Code failures now retain the bounded request stage, HTTP
+  status, and parsed `Retry-After` delay instead of collapsing every non-200
+  response into missing live quota. Authorization failures keep the documented
+  local fallback and reconnect guidance, while rate limits and service errors
+  feed the existing stale-evidence and adaptive-backoff paths without storing
+  response bodies.
+- Desktop and terminal retry notices now distinguish a slow timeout, an HTTP
+  rate limit, and a provider service error instead of labeling all three as
+  quota throttling. First-read failures lead with recovery timing, retain the
+  bounded diagnostic in details, and do not offer reconnection for temporary
+  provider pushback.
+- Quota Analytics now grows a short content-hugged quota window into a useful
+  display-bounded viewport on entry, keeps a visible scrollbar when its cards
+  exceed the available height, stacks card headings at large text sizes, and
+  returns to quota or compact-strip sizing on Back.
+- Provider-card disclosure chevrons now align with the trailing card padding
+  instead of drifting inward beside short plan badges such as `AI Pro` or `Pro`.
+- Strict `verify --require-live` now fails closed when filters select no provider
+  adapters. The JSON record includes `selected_adapter_count` and
+  `live_read_scope_valid`, and human output names the empty scope instead of
+  displaying a green vacuous result.
+- A known provider hidden by a profile is now described as filtered rather than
+  unknown, and check fallback guidance distinguishes unavailable exit 69 from
+  usage errors.
+- Antigravity reads now use an existing Cloud Code project returned by
+  `loadCodeAssist` instead of repeating account onboarding in every new process.
+  Already-onboarded accounts avoid an unnecessary mutation and its extra
+  timeout or provider-throttle boundary. Cloud Code requests now use a
+  15-second deadline under the existing 30-second whole-adapter ceiling, which
+  avoids reporting ordinary 10-second response variance as throttling.
+- The TypeScript MCP client sample now pins the transitive Hono Node adapter to
+  a patched 2.0 release, closing the Windows static-file path traversal reported
+  in GHSA-frvp-7c67-39w9 without changing the sample's MCP SDK version.
+- `quotabot.report.v1` now retains the selected account, decision code, complete
+  content-blind receipt, capture time and age, stale and machine scope, plus
+  bounded error, drift, pipe-health, HTTP, and retry evidence. Stored reports
+  can now be correlated with the same routing decision on other surfaces.
+- README demo capture now uses an isolated single-instance guard, resolves the
+  discovered Flutter executable before changing build directories, builds from
+  the existing locked package resolution, and carries normalized loaded models
+  in its synthetic local-runtime data. Maintainers can regenerate truthful demo
+  media while the installed tray app remains open.
 - Live reads no longer time out spuriously during a fleet poll. Each provider read
   used the top-level `http` helpers, which open and discard a fresh connection per
   call, so a concurrent poll opened many cold DNS/TLS connections at once and the

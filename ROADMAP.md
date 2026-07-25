@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-19. This file is the forward plan. It records brief shipped
+Updated 2026-07-22. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -103,12 +103,12 @@ can remain the preceding version until this line's tag workflow completes.
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
 | Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
-| Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; HTTP writes are authenticated lease-only metadata; LiteLLM atomically reserves remote routes and requires its own client bearer key on an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, exact-account recovery, provider-backed Claude/Codex pool identities, source docs, cache provenance, grant implementations, and expired-host fall-through fixtures exist; the Claude and Antigravity live parsers tolerate additive provider response-shape changes (new codenamed windows, usage-credit blocks, non-metered helper models) without discarding the account windows | Validate connected Claude/Codex grants on idle real-account machines; capture post-July-20 Fable entitlement evidence; link dated Windows evidence; close remaining response-shape fixtures and local-runtime compatibility gaps |
+| Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; MCP Streamable HTTP requires a bearer token and rejects indeterminate or larger-than-256-KiB POST bodies before upstream buffering; plain HTTP writes are authenticated lease-only metadata; LiteLLM atomically reserves remote routes and requires its own client bearer key on an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
+| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, exact-account recovery, provider-backed Claude/Codex pool identities, source docs, cache provenance, grant implementations, stage-scoped Antigravity HTTP and Retry-After evidence, and expired-host fall-through fixtures exist; the Claude and Antigravity live parsers tolerate additive provider response-shape changes (new codenamed windows, usage-credit blocks, non-metered helper models) without discarding the account windows | Validate connected Claude/Codex grants on idle real-account machines; capture post-July-20 Fable entitlement evidence; link dated Windows evidence; close remaining response-shape fixtures and local-runtime compatibility gaps |
 | Native provider evidence | Partial | Windows validation has been reported; WSL covers truthful Linux failure behavior | Link dated Windows evidence and confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
-| Installation and update | Ready for candidate rerun | CLI and desktop archives have required checksums, restricted attestations, exact-asset barriers, and clean-runner lifecycle gates. The v0.9.2 published CLI passed clean install and prior-version upgrade smoke on Windows, macOS, and Linux. Official `v*` tags cannot be moved or deleted, and releases published after the July 18 immutability activation are locked | Run every gate on the exact candidate, then sign and notarize desktop apps and repeat the complete lifecycle on the frozen 1.0 candidate |
-| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation, backed by the content-blind decision receipt and setup recovery guidance | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
-| Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, structured errors, `verify`, and `explain` exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
+| Installation and update | Ready for candidate rerun | CLI and desktop archives have required checksums, restricted attestations, exact-asset barriers, and clean-runner lifecycle gates. Packaged readiness isolates quotabot config; Windows candidates also isolate singleton state so an installed tray app remains untouched. The bounded v3 report records pass or failure status and stage, a UTC timestamp, launch PID, runner digest, deterministic complete-bundle digest with entry and byte counts, prelaunch/post-cleanup stability, native window/tray results, and cleanup without retaining raw errors, logs, or filesystem paths. CI and release workflows preserve it on failed readiness. The v0.9.2 published CLI passed clean install and prior-version upgrade smoke on Windows, macOS, and Linux. Official `v*` tags cannot be moved or deleted, and releases published after the July 18 immutability activation are locked | Run every gate on the exact candidate, then sign and notarize desktop apps and repeat the complete lifecycle on the frozen 1.0 candidate |
+| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation backed by the content-blind decision receipt. Expanded and compact desktop modes keep the next route or explicit no-safe-route fallback visible and open the same details and selectable decision id from a keyboard-accessible control. First-run provider review completes only after the dialog closes, and `doctor` gives credential-related errors an exact supported login command | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
+| Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, rendered-content quota sizing that is reconciled after native startup and stays inside the active work area, account-aware compact and responsive Analytics sizing, visible scroll fallbacks, compact widget-order and assistive-action coverage, reduced-motion provider interactions, usable chrome targets, common quota-window and reset-time reflow at 200 percent text, and automated label, 28 by 28 desktop target, and contrast checks across expanded, compact, and Analytics surfaces in every shipped theme exist. Explicit tray degradation, observable watch failure/recovery, structured errors, provider-scoped `check`, contact-scoped strict `verify`, fail-closed empty live scope, `explain`, deterministic host-isolated simulation, and provenance-complete privacy-safe weekly reports also exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
 | Release rehearsal | In progress | v0.9.2 passed the exact-asset and provenance audit plus clean native install, upgrade, source-setup, and persistent-state smoke | Run the same complete rehearsal on the frozen 1.0 candidate, including interactive desktop checks, then cut 1.0 |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
@@ -249,14 +249,70 @@ provider, before a forecast is built on top of it.
   account keys. During a one-way upgrade, exact-account legacy evidence remains
   readable, snapshot scans deduplicate canonical and legacy copies, and an
   ambiguous legacy bucket file can be claimed by only one verified identity.
-- **Remaining:** mixed-version concurrent writes and downgrades are not a
-  synchronization protocol. Once canonical history or bucket files exist, an
-  older binary can still append to a legacy path that canonical readers do not
-  merge. Safe aggregate reconciliation needs versioned baseline or generation
-  metadata; without it, merging can double-count the shared legacy samples while
-  choosing either file can discard newer samples. Stop
-  older quotabot processes before upgrading, and do not run an older build
-  against migrated state.
+- **Done:** account-scoped analytics now create a best-effort owner-only,
+  versioned legacy baseline checkpoint before the first canonical history or
+  bucket write. A
+  later mixed-version legacy write is detected per identity and tier; both
+  generations are preserved, affected display reads and writes fail closed,
+  and routing retains only the last trusted account baseline or the pre-existing
+  provider compatibility series for an unambiguous single-account snapshot.
+  Conflict evaluation retains the post-pooling conservative envelope from both
+  possible hourly cutoff sets for the affected identity while healthy identities
+  keep the actual current-offset result, so evidence cannot age into a more
+  optimistic relative route.
+  Desktop Analytics and
+  `doctor` surface affected tiers, while `stats --json` annotates bucket-tier
+  conflicts on the rows that consume them, without exposing raw account or path
+  data.
+- **Done:** mixed-version incident inventory now survives an account leaving the
+  current snapshot. Existing valid migration markers are upgraded under the
+  identity evidence lock with explicit tier flags, a first-recorded timestamp,
+  and a random stable incident reference. The default snapshot performs a
+  bounded regular-file scan and reports `complete`, `partial`, or `suppressed`
+  state plus truncation and unverifiable counts. It emits no unavailable
+  account, digest, path, or recovery authority. Filtered snapshots inspect only
+  visible identities, and current incidents include a safe provider-row index
+  for exact automation joins. Desktop Analytics and `doctor` distinguish an
+  unavailable account from a proven sign-out and never present a partial scan as
+  a clean inventory.
+- **Done:** a local-only `verify --recover-analytics` handoff now inspects one
+  exact provider/account/tier without writing, then requires `--yes` before it
+  moves only that tier's canonical and legacy files into a bounded owner-only
+  evidence bundle. Inspection and confirmation recompute a strict merge plan
+  from the selected tier's checkpoint and both retained branches. A proven raw
+  plan installs and verifies the capped chronological multiset. A proven bucket
+  plan installs and verifies the capped hourly aggregate union after subtracting
+  the shared checkpoint once. Unprovable evidence admits an empty checkpoint.
+  The receipt records fixed roles, byte counts, and SHA-256 digests without raw
+  account or source paths. Exact merge manifests also record the installed row
+  or bucket count, byte count, and digest.
+  Recovery holds the canonical and lossy legacy lock domains together, refuses
+  colliding legacy evidence that is not exclusively owned by the requested
+  account, and returns the completed receipt on retry.
+  Other identities, the unselected tier, provider-only compatibility analytics,
+  quota evidence, credentials, preferences, profiles, leases, and alerts remain
+  unchanged. Failures before checkpoint admission retain quarantine. A failure
+  to finalize the manifest after admission returns
+  `recovered_receipt_incomplete` with the retained evidence bundle and a nonzero
+  exit. A late legacy writer re-triggers quarantine.
+- **Done:** exact raw-history reconciliation uses the ordered checkpoint only
+  when both retained branches have one unique suffix alignment, every row is
+  valid trusted evidence for the exact identity, branch time is monotonic, and
+  enough baseline remains to reconstruct the 200-row cap. Missing, malformed,
+  ambiguous, or nonmonotonic evidence keeps the archive-and-reset plan.
+- **Done:** exact aggregate-bucket reconciliation validates aligned, strictly
+  ordered starts plus count, histogram, moment, exhausted-count, and extrema
+  invariants. Each retained checkpoint branch must be a complete suffix whose
+  additive fields cover the baseline. The merge computes canonical plus legacy
+  minus the shared checkpoint once, preserves independently added buckets,
+  applies the 90-day bucket cap, and verifies the installed digest. Missing,
+  malformed, decreasing, duplicate, gapped, oversized, or ambiguously owned
+  evidence keeps the archive-and-reset plan.
+- **Remaining:** an opaque recovery target for an unavailable account. Do not
+  make the random incident reference recovery authority until exact legacy
+  ownership, collision behavior, and confirmation semantics can be proven
+  without exposing or guessing the account identity. Reconnection and an exact
+  current provider row remain required today.
 - Pin every remaining supported response shape with sanitized fixtures.
 - **Done:** Antigravity weekly-window semantics resolved from live evidence. The
   Cloud Code endpoint reports each model's single binding limit with no window
@@ -367,6 +423,11 @@ recommendation is aligned to what the user actually wants.
 - **Done (shared explanation):** one plain human explanation shared by desktop,
   `doctor`, `suggest`, and `top`:
   winner, binding evidence, freshness and source, spend class, and fallback.
+  The expanded desktop keeps an explicit no-safe-route answer when no winner is
+  safe and exposes the explanation plus selectable decision id through a
+  keyboard-accessible details control rather than hover alone.
+  Compact mode pins the same next-route or no-safe-route answer, opens the same
+  detail, and keeps overflow provider chips reachable in widget focus order.
   Replace unexplained glance phrases such as "thin data"; reserve strand
   probability, shrinkage, pipe discount, and cost weight for expanded or
   machine-readable detail.
@@ -390,8 +451,21 @@ recommendation is aligned to what the user actually wants.
   across CLI/MCP JSON, and explains it in plain model suggestions. Probes are
   bounded, cached, fail soft, and never load or invoke a model; fit remains
   advisory because runtimes may split memory.
-- Remaining local-first QOL: thread declared local tool/vision capabilities into
-  capability gates, and add local-first stretch behavior when cloud quota is
+- **Done (local capability gates):** local models now carry the capabilities
+  their runtime declares, so a capability filter can select one. Ollama declares
+  tool use, vision, and the model's maximum context per model; LM Studio
+  declares them in both native model-list shapes. Previously no local model
+  declared anything, so every capability filter silently rejected all of them,
+  including under `--budget=local`. An undeclared capability is still never
+  assumed, so an OpenAI-compatible listing satisfies no capability filter. The
+  Ollama read is bounded and cached by the runtime's content digest, stays
+  metadata-only, and never loads or runs a model. The same evidence closed the
+  matching defect in the other direction: a model a runtime declares as an
+  embedding model stays listed for inspection but is no longer a routing
+  candidate, because it cannot serve a generation request. An undeclared kind
+  stays routable, since requiring a capability must fail closed while excluding
+  a model must fail open.
+- Remaining local-first QOL: local-first stretch behavior when cloud quota is
   low.
 - **Done (multi-account):** provider accounts discovered on one machine can be
   shown together in one dashboard. Account-scoped profiles, cache, drift,
@@ -438,7 +512,10 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   record remain required before this gate is closed.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
-  motion, and basic screen reader.
+  motion, and basic screen reader. Automated widget checks already enforce
+  labels, 28 by 28 desktop targets, and contrast across expanded, compact, and
+  Analytics surfaces in light, dark, and Hacker themes; do not treat them as
+  native assistive-technology evidence.
 - Run the three-OS clean install, previous-version upgrade, required-checksum,
   attestation, persistent-state, and source-setup matrix; exercise the
   inspect-before-run, update, data-preserving uninstall, destructive reset, and

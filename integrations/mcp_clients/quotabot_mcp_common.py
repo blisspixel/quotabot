@@ -15,6 +15,7 @@ _LOOPBACK_MCP_URL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _LOOPBACK_MCP_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_MIN_MCP_BEARER_TOKEN_CHARACTERS = 32
 _LOOPBACK_MCP_URL_ERROR = (
     "QUOTABOT_MCP_URL must use http or https with the exact loopback host "
     "localhost, 127.0.0.1, or ::1"
@@ -44,6 +45,17 @@ def require_loopback_mcp_url(value: str) -> str:
     ):
         raise ValueError(_LOOPBACK_MCP_URL_ERROR)
     return value
+
+
+def require_mcp_bearer_token(value: str | None) -> str:
+    """Require the minimum token shape enforced by the HTTP server."""
+    token = value.strip() if isinstance(value, str) else ""
+    if len(token) < _MIN_MCP_BEARER_TOKEN_CHARACTERS:
+        raise ValueError(
+            "QUOTABOT_MCP_TOKEN must contain at least "
+            f"{_MIN_MCP_BEARER_TOKEN_CHARACTERS} characters"
+        )
+    return token
 
 
 def structured_content(result: Any) -> dict[str, Any]:

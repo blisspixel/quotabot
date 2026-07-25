@@ -21,7 +21,7 @@ try {
   const headers = mcpBearerHeaders();
   const transport = new StreamableHTTPClientTransport(
     url,
-    headers ? { requestInit: { headers } } : undefined,
+    { requestInit: { headers } },
   );
   await client.connect(transport);
   await printRoutingDecision(client, {

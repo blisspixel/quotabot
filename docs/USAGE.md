@@ -9,9 +9,13 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   (bar-chart icon), collapse, the providers/settings menu, setup and help, and
   close. Hover for a tooltip on each.
 - **Move it:** drag the header bar or the cards area (the control buttons on the
-  right are excluded). The body scrolls and the window hugs its content.
-- **Collapse:** shrink to a compact strip of provider logos with one status dot
-  each; expand to restore the full view.
+  right are excluded). The expanded window measures its rendered cards and
+  grows without clipping them while staying inside the active display. The body
+  shows a scrollbar only when the complete list cannot fit in that work area.
+- **Collapse:** shrink to a compact strip that pins the next-route or
+  no-safe-route control beside the provider logos and status dots; expand to
+  restore the full view. The route control opens the shared decision details,
+  and keyboard traversal reaches horizontally clipped provider chips in order.
 - **Menu:** hide or show individual providers, set the refresh cadence (smart,
   every 15 minutes, or every hour), choose the icon sort (default, alphabetical,
   most available, most used), choose or manage a named profile, and toggle
@@ -20,22 +24,35 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   provider has more than one account on screen.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
-  configured. A provider whose live read failed and that supports quotabot's own
-  login (Grok, Antigravity) also shows an inline Connect button on its card, so
-  it can be reconnected from the app without a terminal.
+  configured. A provider that supports quotabot's own login (Grok, Antigravity)
+  shows an inline Connect button for authentication or reconnection failures,
+  so it can be reconnected from the app without a terminal. Automatic timeout,
+  rate-limit, and service-error recovery does not show that action.
 - **Smart schedule:** the default leans gentle because quota moves slowly and a
   cloud read can be rate-limited. It refreshes fast only when a reset is imminent,
   settles around twenty minutes at the healthy baseline, and relaxes to as little
   as twice a day when everything is calm or a provider is spent with a far-off
   reset. A long-spent provider never pulls the fleet into fast polling. A provider
-  that keeps throttling (a timeout or an HTTP 429) backs the schedule off further
-  each cycle - twenty minutes, then forty, then ninety - honoring any retry-after,
-  so quotabot stops checking a provider that keeps pushing back. Such a provider
-  reads as "throttled - retrying", not "live read failed".
-- **Route signal:** the expanded header shows the next recommended route, its
-  current free headroom, any material burn discount, and confidence. Account
-  names still appear only when needed to distinguish multiple accounts.
-- **Reset countdowns** appear next to usage (e.g. "80%  3d12h").
+  that keeps pushing back backs the schedule off further each cycle - twenty
+  minutes, then forty, then ninety - honoring any Retry-After, so quotabot stops
+  checking a provider that is not ready. A request timeout reads as "provider
+  slow - retrying", HTTP 429 reads as "rate limited - retrying", and HTTP 5xx
+  reads as "provider error - retrying". Temporary provider pushback does not
+  offer a reconnect action; HTTP 401 and 403 keep that repair path.
+- **First run:** Review opens the provider-status dialog and records completion
+  only after that dialog closes. Dismiss remains an immediate, explicit way to
+  hide the prompt.
+- **Route signal:** the expanded header always shows the next recommended route
+  or an explicit no-safe-route fallback. Compact mode pins the same answer as a
+  `Next` provider or `No route` control. Both work with pointer or keyboard and
+  open the shared reason, evidence freshness and scope, spend class, fallback,
+  and selectable decision id. Material burn adjustments and confidence remain
+  in this detail instead of crowding the glance line. Account names appear only
+  when needed to distinguish multiple accounts.
+- **Reset countdowns** appear beside usage. Common window names and complete far
+  reset times wrap at narrow widths, and at large text the label and reset reflow
+  above a full-width meter so the actionable time is not cut off. An unusual
+  provider-supplied label keeps its complete tooltip and assistive text.
 - **Trust line:** the tight card keeps the always-actionable signals - a failed
   live read, provider drift, and the last-known label on the bar. Expanding a
   card reveals the full provenance line: live, cached, or provider-drift state,
@@ -66,9 +83,14 @@ headroom palette as the terminal truecolor view.
 ## Quota Analytics
 
 Open it from the bar-chart button in the header. The analytics body replaces the
-quota body under the same header and menu, without moving or resizing the
-window. It scrolls within the current size, the header's Back to quotas control
-restores the quota body, and the view is switchable by time range:
+quota body under the same header and menu. A short content-hugged quota window
+grows to a useful size bounded by the current display, while dimensions you
+already enlarged are preserved when they fit. If needed, the window shifts only
+far enough to keep the resized view inside the display's work area. The body
+keeps a visible scrollbar when more content remains, card headings stack at
+large text sizes, and the header's Back to quotas control resumes content-hugged
+quota sizing, or compact-strip sizing if Analytics was opened from compact mode.
+The view is switchable by time range:
 
 - **Now:** pool-free and most-headroom chips, ranked headroom per provider with
   reset countdowns, a consumption-share donut, and LiteLLM routed-request totals
@@ -99,6 +121,92 @@ kept long term. Those history files store quota metadata only, never prompts or
 code; other bounded local stores such as grants, profiles, and leases are
 documented below.
 
+Account-scoped analytics use collision-resistant canonical filenames. At the
+first canonical write, quotabot records a best-effort owner-only, versioned
+checkpoint of
+any exact-account legacy history and bucket baseline. If an older process later
+writes a separate legacy generation, quotabot preserves both generations and
+fails closed for only the affected history tier. It does not merge an ambiguous
+delta or let divergent legacy data influence routing. Burn estimation retains
+the frozen canonical account baseline or its validated pre-divergence
+checkpoint. If neither exists, an already eligible provider-only series remains
+usable only for an unambiguous single-account snapshot. Its conflict burn uses
+the more conservative post-pooling result from both possible hourly cutoff sets,
+while healthy providers keep the result for the actual current hour offset.
+This prevents quarantine from improving that provider's relative rank as time
+passes. The desktop 7d/90d ranges show an accessible amber notice for any
+affected tier; only a bucket conflict replaces the bucket view's warming copy.
+An incomplete incident scan replaces warming copy with an unknown status rather
+than implying that analytics are clean. `doctor` prints every current affected
+tier, and `stats --json` adds `storage_notice` when the row's hourly bucket tier
+is affected.
+The **Now** view and current quota evidence are unchanged. Close all older
+quotabot processes immediately to prevent further divergence. Closing them does
+not restore quarantined history.
+
+The default unfiltered `quotabot --json` snapshot includes
+`analytics_incident_inventory`. `complete` proves that its bounded scan verified
+every marker it inspected; `partial` means its incident list may be incomplete,
+and `suppressed` is used by deterministic simulation. Current incidents carry a
+`provider_row_index` that joins safely to the `providers` array. Unavailable
+incidents expose no account or digest. Profile and exclusion views inspect only
+their visible identities, so they do not reintroduce hidden provider metadata.
+
+`doctor` prints an inspection template for each current affected tier. Obtain
+the exact account value from the matching current provider row, then run the
+template without `--yes` for a read-only plan:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=buckets --json
+```
+
+If the incident account is not in the current snapshot, reconnect it and rerun
+`doctor` first. With several current accounts for one provider, use
+`provider_row_index` rather than guessing. The incident reference is correlation
+metadata, not recovery authority, and cannot replace the exact account.
+
+The inspection makes no provider or model call and creates no recovery lock or
+bundle. It reports the active tiers, whether the target is ready, and whether
+raw history or aggregate buckets have one exact checkpoint-proven merge or
+require restart. After every older process is stopped, add `--yes` to archive
+and recover only the selected tier:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history --yes
+```
+
+Confirmed recovery holds both the exact provider/account evidence lock and the
+lossy legacy lock domain, accepts only bounded regular files, and caps archived
+evidence at 16 MiB. It moves selected canonical and legacy data into a unique
+owner-only bundle, copies the migration marker, and verifies each SHA-256
+digest. Raw history is exactly merged only when both files contain valid trusted
+rows for the exact identity, each branch has one unique ordered-checkpoint
+suffix overlap and monotonic time, and enough baseline remains to reconstruct
+the 200-row cap. Aggregate buckets are exactly merged only when each checkpoint
+and branch row has a unique aligned start and valid bounded count, histogram,
+moment, exhausted-count, and extrema fields. Retained checkpoint rows must form
+a complete suffix whose additive fields remain present in each branch. The
+installed aggregate is canonical plus legacy minus the shared checkpoint once,
+bounded to the newest 90-day series. Each installed merge is digest-verified
+before the marker admits an empty legacy checkpoint. Unprovable evidence
+restarts the selected tier empty. A legacy bucket file must have exact ownership
+evidence; shared colliding legacy evidence is refused. The JSON
+receipt is `quotabot.analytics-recovery.v1`; its evidence manifest is
+`quotabot.analytics-recovery-evidence.v1` and contains fixed file roles and the
+opaque account digest, never the raw account or source path. Current quota,
+credentials, profiles, preferences, manual entries, leases, alerts, every other
+identity, provider-only compatibility analytics, and the unselected tier remain
+unchanged. If the other tier is also conflicted it remains quarantined until it
+is recovered separately. A failure before checkpoint admission retains
+quarantine. If manifest finalization fails after admission, the command returns
+`recovered_receipt_incomplete`, the retained bundle, and exit 65. Retrying a
+complete recovery returns `already_recovered` with its original bundle receipt.
+A late legacy writer immediately re-triggers quarantine. Recovery never merges
+ambiguous generations. Portable desktop bundles cannot perform this repair;
+install the CLI if needed. Backup and
+rollback tradeoffs are documented in [SETUP.md](SETUP.md#roll-back).
+
 For an explicit tier-fit check, pass candidate plan caps as percentages of your
 current plan. Prices are optional and caller-supplied:
 
@@ -125,7 +233,7 @@ metadata. Add `--json` to any read command for machine output.
 | `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
 | `calibration`          | How often quotabot's predictions come true (history). |
 | `manual`               | List, set, or remove self-reported quota entries.     |
-| `check <provider>`     | Whether one provider is usable now, and its reset.    |
+| `check <provider>`     | Collect and check one provider; optional exact `--account`. |
 | `suggest`              | Which subscription to use next, ranked.               |
 | `stats [provider]`     | 90-day analytics: distribution, best windows, pace.   |
 | `report`               | Weekly quota-health markdown export, or JSON with `--json`. |
@@ -162,8 +270,13 @@ spent, so the provider is unavailable. `provider-drift` exposes stale
 last-trusted windows plus a rejected-observation diagnostic; `metadata` exposes
 a truthful status-only provider with no quota window.
 Simulation mode is separate from `QUOTABOT_DEMO=1`: it returns one exact provider
-state for assertions, skips live adapter calls, ignores real burn history, and
-does not read analytics buckets.
+state for assertions, skips live adapter calls, and ignores real burn history,
+analytics buckets, active route leases, and passive installed-tool detection.
+Human output begins with `SIMULATION - synthetic provider evidence`; terminal
+`top` keeps `SIMULATION` in its frame. Snapshot JSON adds
+`snapshot_source: "simulation"`, and routing receipts use the same source.
+A healthy mock is synthetic and therefore does not satisfy
+`verify --require-live`, which requires an accepted adapter read.
 
 ### Verification (`quotabot verify`)
 
@@ -238,7 +351,8 @@ quotabot verify --require-live  # exit 65 unless every selected read is fresh an
 Exit code is `0` when every snapshot is reading correctly or failing with a
 plain reason, and `65` when any honesty check fails. With `--require-live`, 65
 also means at least one selected provider did not produce a fresh accepted
-adapter read. Each record also names the provider's own usage surface (for example
+adapter read, or the filters selected no provider adapter at all. Each record
+also names the provider's own usage surface (for example
 `/usage` in Claude Code) so you can confirm the numbers by hand; the mechanical
 checks cannot know the provider's side of the conversation. Undetected local
 runtimes are reported as truthful absences, not failures. `--profile`,
@@ -246,15 +360,19 @@ runtimes are reported as truthful absences, not failures. `--profile`,
 claimed-provider coverage check then reports itself skipped instead of
 misreading the filter. An unfiltered `--require-live` run selects the whole
 built-in adapter fleet, including local runtimes; use a profile or exclusions
-when the strict gate should cover only a subset. Manual entries are not adapter
-reads and do not satisfy or fail the strict live-read aggregate.
+when the strict gate should cover only a subset. Provider-level profile and
+exclusion rules are applied before adapter I/O, so unselected adapters are not
+contacted. Account allowlists and hidden account targets are applied after the
+selected multi-account adapter returns. Manual entries are not adapter reads; a
+strict scope containing only manual rows fails because it selected no adapter.
 
 `verify --json` includes `runtime_access`, a `quotabot.explain.v1` object for
 the collection. For real reads it is `mode: "runtime_access_observation"` and
 marks provider rows whose adapters were invoked. For simulations it remains a
-manifest with `collection_executed: false`. Profile and exclude filters are
-applied after the quota read today, so the runtime access observation reports
-the full adapter read surface rather than only the filtered output rows.
+manifest with `collection_executed: false`. For filtered real verification, its
+provider rows are the exact adapter set invoked. The top level also includes
+`selected_adapter_count` and `live_read_scope_valid`, so an empty or mistyped
+automation scope cannot look green.
 
 ### Runtime access manifest (`quotabot explain`)
 
@@ -311,6 +429,33 @@ screen and repaints countdowns every second.
 Each provider row also carries a compact trust tag with live, cached, or
 provider-drift state, normalized source class, spend class, stale age when
 relevant, and account identity when needed to disambiguate duplicate providers.
+On a terminal 100 columns or wider, a row with nothing unusual to disclose drops
+that tag so the meter can use the width: repeating "(live, authoritative, quota
+plan)" down every healthy row buries the rows that need attention. Cached,
+drifted, this-machine, passive, status-only, and failed rows always keep their
+tag, and a narrower terminal keeps every tag. Nothing is lost either way - the
+same provenance is on the selected row and in `quotabot doctor`.
+
+Rows are grouped by what you can act on. Live usable routes lead, evidence that
+is not a live route follows (a spent window, cached last-known values, or
+quarantined drift), and providers with no live quota - a passively detected tool
+with no quota API, or one that is not configured - collapse to one compact row
+each at the bottom. The group headings appear only when more than one group is
+present, so a fleet that is entirely live still reads as a plain list. A failed
+read, quarantined evidence, or a provider that answered with an HTTP error or a
+retry pushback is never treated as idle: it keeps its full row with the error and
+its recovery hint, because that is the most actionable thing on screen. Long
+detail text yields at a word boundary with an ellipsis instead of clipping
+mid-word, and the complete hint stays available from `quotabot doctor`.
+
+Because a live fleet read contacts every provider, it can take tens of seconds.
+An interactive run prints a progress line per provider as it lands, with a
+running count, elapsed time, and which providers are still outstanding, so a slow
+read is visibly working rather than indistinguishable from a hang. That display
+goes to standard error, and only when standard error is a terminal: piping
+standard output keeps the data clean while you still watch the read work, and
+redirecting standard error silences it. This applies to every command that
+performs a fleet read, not only `top`, which draws its own loading frame.
 
 ```bash
 quotabot top                # adaptive refresh (the default)
@@ -336,7 +481,8 @@ Navigate and act with the keyboard: `j`/`k` (or the up/down arrows) move the
 cursor, `x` (or `h`) hides the selected provider for the session and `u` brings
 them all back, and `c` copies the recommended route (the provider to send the
 next request to) to your clipboard via the terminal, so you can paste it straight
-into a tool. The footer shows the hidden count and a brief "copied" confirmation.
+into a tool. The footer shows the hidden count and a brief "copy requested"
+status because OSC 52 does not report whether the terminal accepted it.
 
 A spent longer window collapses its
 provider to one line, the same binding-window rule the widget uses. Piped or on a dumb terminal it prints a single plain frame and
@@ -345,11 +491,30 @@ terminal the bars use a smooth gradient; it degrades to 256/16/no color.
 Windows Terminal and common truecolor terminals are detected automatically;
 `--truecolor` forces it where detection cannot.
 
-Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
-(phosphor CRT), `dark`, `light`, or `synthwave`. Roll your own in one line with
+Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`). A dashboard meant to
+stay open all day should match the terminal around it, so the built-ins include
+the schemes people already theme with:
+
+| Palette | Look |
+|---|---|
+| `default` | the shipped green-to-red headroom scale |
+| `green` | phosphor CRT |
+| `matrix` | monochrome phosphor, where the meter reads as glow intensity rather than hue |
+| `dark`, `light` | muted, for dark and light terminals |
+| `synthwave`, `rainbow` | high-saturation, full-spectrum |
+| `gruvbox`, `nord`, `dracula`, `catppuccin`, `tokyonight` | match a riced terminal |
+
+`quotabot top --help` lists whatever the build actually ships, which is the
+authoritative set. Roll your own in one line with
 `--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]`, each a 6-digit hex color from
-most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`. Palettes
-apply on truecolor terminals; elsewhere the standard headroom colors are used.
+most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`.
+
+Palettes need 24-bit color. quotabot assumes a Windows console can do it, since
+any Windows build that renders these escape sequences at all also supports
+truecolor even though `cmd.exe` advertises neither `COLORTERM` nor `TERM`. On a
+terminal that genuinely cannot, the standard headroom colors are used and every
+palette looks the same, which is the signal that the gradient is unavailable
+rather than the theme being ignored.
 
 ## Named profiles
 
@@ -386,6 +551,13 @@ including same-provider sibling routes. Machine-readable alerts carry
 route is named. Stale, failed, drifted, or source-class-invalid evidence does
 not fire an alert.
 
+`--interval` must be an integer number of seconds; malformed values exit with
+usage status 64 instead of silently selecting a different cadence. Continuous
+watch mode reports one failure edge to standard error, increases its bounded
+retry backoff while collection remains unavailable, and reports one recovery
+edge when collection succeeds again. JSON standard output remains reserved for
+`quotabot.alert.v1` records.
+
 ```bash
 quotabot watch                                   # print alerts, adaptive cadence
 quotabot watch --once                            # a single pass (cron-friendly)
@@ -401,6 +573,8 @@ accident; a stray or stale URL is refused rather than silently sent. The desktop
 widget raises the same low-quota alerts (as a notification) and can POST to the
 same kind of webhook, set from its menu under "Alert webhook"; loopback is the
 default there too, with an explicit "allow external host" checkbox.
+CLI rejection and startup diagnostics describe webhook delivery state without
+echoing the configured URL, whose path or query may contain a bearer secret.
 
 Beyond low-quota alerts, the desktop widget raises two more local notifications:
 a scheduled "Quota reset soon" reminder before a heavily used window resets, and
@@ -424,27 +598,36 @@ output:
 
 - `0` success: the command ran, and (for `check` and a piped `top`) at least one
   provider is usable right now.
-- `64` usage error: a bad argument or an unknown provider name.
+- `64` usage error: a bad argument, unknown provider name, filtered target, or
+  requested account that is not present in the current view.
 - `65` verification failure: a `verify` run found at least one snapshot failing
   its honesty checks (a lying number, provider drift, a silent failure, or
   contract drift), or `--require-live` found a selected provider adapter that
-  did not return a fresh accepted read.
+  did not return a fresh accepted read or selected no adapter.
 - `69` unavailable: the named provider (`check`), or the whole fleet (piped
-  `top`), has no usable quota at the moment. `check` uses this code for
-  provider-drift evidence because last-trusted headroom is not current capacity.
+  `top`), has no usable quota at the moment. `check` also uses this code when a
+  known provider adapter returns no current row, or for provider-drift evidence
+  because last-trusted headroom is not current capacity.
 
 For metered providers, `available` means more than the practical spent floor is
 left. Quotabot treats 1.5% or less remaining headroom as unavailable so
 near-zero provider reads that round to `1% free` do not route work into an
 already exhausted cap.
 
-For example, `quotabot check claude || quotabot suggest --json` falls through to a
-route only when Claude is spent.
+Exit 69 means the named provider has no usable capacity from current evidence.
+Do not use a bare shell `||` as a spent-only branch unless the script separately
+handles exit 64, because invalid, filtered, and missing account targets are
+usage errors rather than quota exhaustion.
 
-The human `check` line appends one concise provenance label such as
-`(authoritative)` or `(this-machine fallback)`. Its JSON form emits the exact
-`source_class` wire value. The normalized label is not another freshness state:
-`cached` and `provider drift` can apply independently.
+`check` resolves the named built-in provider before I/O and invokes no unrelated
+built-in adapter. Add `--account=EXACT_ACCOUNT` to select one returned account;
+without it, the best current account wins deterministically. The human line
+names that account when several match and appends one concise provenance label
+such as `(authoritative)` or `(this-machine fallback)`. Its JSON form emits the
+exact `source_class`, matched-account count, selection mode, evidence capture
+time and age, simulation origin, live-read result, bounded degraded transport
+detail, and scoped `runtime_access`. The normalized source label is not another
+freshness state: `cached` and `provider drift` can apply independently.
 
 ### Models, calibration, and risk
 
@@ -475,7 +658,15 @@ Filter to what a task needs with a coarse `--task=simple|standard|hard` profile 
 explicit flags: `--min-context=200k`, `--require-tools`, `--require-vision`,
 `--require-reasoning`, `--tier-floor=standard`, `--tier-ceiling=standard`. quotabot
 never sees the task; you supply the requirements, and it returns the models that
-meet them with budget. The same filters are arguments on the MCP `list_models`
+meet them with budget. Local models are filtered on the capabilities their own
+runtime declares, so `--require-tools --budget=local` returns the on-device
+models the runtime says can call tools. A capability the runtime never declared
+is never assumed, so a runtime that publishes only model names has nothing a
+capability filter can admit. A tier floor still excludes local models, whose
+tier is unknown, so `--task=hard` continues to prefer a cloud model. A model the
+runtime declares as an embedding model is listed with an `embedding` label but
+is never suggested as a route, since it cannot serve a generation request; a
+runtime that states no kind keeps its models routable. The same filters are arguments on the MCP `list_models`
 tool. Tiers are the providers' own product tiers, not a quotabot quality ranking.
 `quotabot models` and MCP `list_models` default to `budget=any` for inspection.
 Concrete CLI suggestions and MCP `suggest_model` default to `budget=quota`, which
@@ -626,8 +817,9 @@ recorded history and reports how often they come true, as a calibration
 percentage, a Brier score, and a reliability diagram. It fills in over time, once
 predictions' horizons have elapsed, and says plainly when there is not enough yet.
 
-`quotabot report` prints a shareable weekly quota-health markdown report with the
-current recommendation, provider headroom, reset times, seven-day history
+`quotabot report` prints a privacy-safe weekly quota-health Markdown report with
+the current recommendation, decision id, evidence source, provider headroom,
+reset times, seven-day history
 metrics, current sampled-day usable/spent streaks, and a compact sampled-day
 calendar where enough local history exists. Calendar markers are ASCII: `#`
 heavy use, `*` moderate-high, `+` moderate, `.` light, `!` mixed, and `x`
@@ -639,7 +831,13 @@ outrank a supported quiet pattern. Best-time window JSON also includes
 `usable_rate`, shrunk `shrunk_usable_rate`, and a reliability-weighted
 `scheduling_score`, so sparse quiet cells with spent samples are ranked below
 consistently usable windows. Add `--json` for the structured `quotabot.report.v1`
-shape. It is still local metadata only.
+shape. Markdown anonymizes account labels by default while keeping multiple
+accounts distinguishable. Add `--include-accounts` only when the local Markdown
+must show provider-visible account labels. JSON always keeps exact account
+identities for matching and adds the winning account, decision code, decision
+id, complete content-blind receipt, capture time and age, machine scope, stale
+state, and bounded failure or drift evidence. Review JSON before sharing it. It
+is still local metadata only.
 
 The desktop analytics screen also reads optional LiteLLM proxy metrics from
 `~/.quotabot/litellm-metrics.jsonl`, the default path used by the shipped
@@ -788,16 +986,19 @@ Run MCP Streamable HTTP only when a client cannot use stdio:
 
 ```bash
 cd collector
-dart run bin/mcp_server.dart --http --port 8722 --path /mcp
+export QUOTABOT_MCP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+dart run bin/mcp_server.dart --http --port 8722 --path /mcp --token-env QUOTABOT_MCP_TOKEN
 ```
 
 The HTTP transport binds only to `localhost`, `127.0.0.1`, or `::1`, enables
 DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and uses the
-same tool/resource factory as stdio. Add `--token-file PATH`, `--token-env NAME`,
-or `--token TOKEN` to require `Authorization: Bearer ...`; prefer a local
-owner-only token file for normal use. A literal `--token TOKEN` can be exposed
-through shell history or process inspection, so reserve it for ephemeral local
-testing. The endpoint is MCP Streamable HTTP, not the plain JSON endpoint below.
+same tool/resource factory as stdio. `--token-file PATH`, `--token-env NAME`, or
+`--token TOKEN` is required, and the resolved token must contain at least 32
+characters. Prefer a local owner-only token file for normal use. A literal
+`--token TOKEN` can be exposed through shell history or process inspection, so
+reserve it for ephemeral local testing. POST bodies must declare `Content-Length`
+and cannot exceed 256 KiB; the supported MCP clients do this automatically. The
+endpoint is MCP Streamable HTTP, not the plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
 `collector/bin/example_routing_agent.dart` for a Dart routing example, and

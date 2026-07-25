@@ -19,6 +19,9 @@ Start with the shortest path for what you need.
 
 ## Understand and trust the result
 
+- [PRINCIPLES.md](PRINCIPLES.md): what quotabot refuses to do - no account,
+  subscription, telemetry, or inference - why each refusal exists, and the
+  command that verifies it.
 - [DATA_SOURCES.md](DATA_SOURCES.md): source, auth, scope, and limitations for
   every provider class.
 - [SCHEMA.md](SCHEMA.md): stable JSON and MCP output contracts.

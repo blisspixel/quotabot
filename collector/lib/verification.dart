@@ -164,13 +164,49 @@ class VerificationReport {
         (provider) => provider.sourceClass != ProviderSourceClass.manual,
       );
 
-  bool get allLiveReadsSucceeded =>
-      _adapterReads.every((provider) => provider.liveReadSucceeded);
+  Set<String> get _selectedAdapterIds {
+    final selected = {
+      for (final provider in _adapterReads) provider.provider,
+    };
+    final access = runtimeAccess;
+    if (access != null && access.collectionExecuted) {
+      selected.addAll(
+        access.providers
+            .where((provider) => provider.observed)
+            .map((provider) => provider.provider),
+      );
+    }
+    return selected;
+  }
+
+  int get selectedAdapterCount => _selectedAdapterIds.length;
+
+  bool get liveReadScopeValid => selectedAdapterCount > 0;
+
+  bool get allLiveReadsSucceeded {
+    if (!liveReadScopeValid) return false;
+    final reads = _adapterReads.toList();
+    return _selectedAdapterIds.every((providerId) {
+      final matching = reads.where(
+        (provider) => provider.provider == providerId,
+      );
+      return matching.isNotEmpty &&
+          matching.every((provider) => provider.liveReadSucceeded);
+    });
+  }
 
   bool get passed => honestyPassed && (!requireLive || allLiveReadsSucceeded);
 
-  int get liveReadFailureCount =>
-      _adapterReads.where((provider) => !provider.liveReadSucceeded).length;
+  int get liveReadFailureCount {
+    final reads = _adapterReads.toList();
+    return _selectedAdapterIds.where((providerId) {
+      final matching = reads.where(
+        (provider) => provider.provider == providerId,
+      );
+      return matching.isEmpty ||
+          matching.any((provider) => !provider.liveReadSucceeded);
+    }).length;
+  }
 
   int get failCount =>
       providers.where((p) => !p.passed).length +
@@ -182,6 +218,8 @@ class VerificationReport {
         'os': os,
         'require_live': requireLive,
         'honesty_passed': honestyPassed,
+        'selected_adapter_count': selectedAdapterCount,
+        'live_read_scope_valid': liveReadScopeValid,
         'all_live_reads_succeeded': allLiveReadsSucceeded,
         'passed': passed,
         'providers': providers.map((p) => p.toJson()).toList(),

@@ -96,12 +96,88 @@ const _synthwave = Palette(
   accent: Rgb(0xC8, 0x78, 0xFF), // purple
 );
 
+/// The palettes people already rice their terminals with. Matching an existing
+/// setup matters more than inventing colors: a dashboard that is meant to stay
+/// open all day should look like it belongs on the desktop it sits on.
+const _gruvbox = Palette(
+  name: 'gruvbox',
+  healthy: Rgb(0xB8, 0xBB, 0x26),
+  tight: Rgb(0xFA, 0xBD, 0x2F),
+  low: Rgb(0xFE, 0x80, 0x19),
+  spent: Rgb(0xFB, 0x49, 0x34),
+  accent: Rgb(0x83, 0xA5, 0x98),
+);
+
+const _nord = Palette(
+  name: 'nord',
+  healthy: Rgb(0xA3, 0xBE, 0x8C),
+  tight: Rgb(0xEB, 0xCB, 0x8B),
+  low: Rgb(0xD0, 0x87, 0x70),
+  spent: Rgb(0xBF, 0x61, 0x6A),
+  accent: Rgb(0x88, 0xC0, 0xD0),
+);
+
+const _dracula = Palette(
+  name: 'dracula',
+  healthy: Rgb(0x50, 0xFA, 0x7B),
+  tight: Rgb(0xF1, 0xFA, 0x8C),
+  low: Rgb(0xFF, 0xB8, 0x6C),
+  spent: Rgb(0xFF, 0x55, 0x55),
+  accent: Rgb(0xBD, 0x93, 0xF9),
+);
+
+const _catppuccin = Palette(
+  name: 'catppuccin',
+  healthy: Rgb(0xA6, 0xE3, 0xA1),
+  tight: Rgb(0xF9, 0xE2, 0xAF),
+  low: Rgb(0xFA, 0xB3, 0x87),
+  spent: Rgb(0xF3, 0x8B, 0xA8),
+  accent: Rgb(0xCB, 0xA6, 0xF7),
+);
+
+const _tokyoNight = Palette(
+  name: 'tokyonight',
+  healthy: Rgb(0x9E, 0xCE, 0x6A),
+  tight: Rgb(0xE0, 0xAF, 0x68),
+  low: Rgb(0xFF, 0x9E, 0x64),
+  spent: Rgb(0xF7, 0x76, 0x8E),
+  accent: Rgb(0x7A, 0xA2, 0xF7),
+);
+
+/// Monochrome phosphor, for the CRT look. Every step is a brighter green, so the
+/// meter reads as glow intensity rather than hue.
+const _matrix = Palette(
+  name: 'matrix',
+  healthy: Rgb(0x39, 0xFF, 0x6A),
+  tight: Rgb(0x24, 0xC0, 0x4C),
+  low: Rgb(0x15, 0x84, 0x33),
+  spent: Rgb(0x0B, 0x4A, 0x1E),
+  accent: Rgb(0x8C, 0xFF, 0xB0),
+);
+
+/// Full-spectrum, for people who want the meter to be the wallpaper.
+const _rainbow = Palette(
+  name: 'rainbow',
+  healthy: Rgb(0x4C, 0xC9, 0xF0),
+  tight: Rgb(0x72, 0xEF, 0x36),
+  low: Rgb(0xFF, 0xD1, 0x00),
+  spent: Rgb(0xF7, 0x25, 0x85),
+  accent: Rgb(0xB5, 0x17, 0xFF),
+);
+
 const _builtins = {
   'default': kDefaultPalette,
   'green': _green,
   'dark': _dark,
   'light': _light,
   'synthwave': _synthwave,
+  'gruvbox': _gruvbox,
+  'nord': _nord,
+  'dracula': _dracula,
+  'catppuccin': _catppuccin,
+  'tokyonight': _tokyoNight,
+  'matrix': _matrix,
+  'rainbow': _rainbow,
 };
 
 /// The names of the built-in palettes, for help text.

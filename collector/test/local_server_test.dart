@@ -632,7 +632,12 @@ void main() {
       final linkedTarget = File('${root.path}/target')
         ..writeAsStringSync('$linkedToken\n', flush: true);
       final file = localHttpMutationTokenFile(dirFactory: () => dir);
-      Link(file.path).createSync(linkedTarget.path);
+      try {
+        Link(file.path).createSync(linkedTarget.path);
+      } on FileSystemException {
+        if (Platform.isWindows) return;
+        rethrow;
+      }
       try {
         expect(
           () => loadOrCreateLocalHttpMutationToken(dirFactory: () => dir),
@@ -643,9 +648,6 @@ void main() {
         if (root.existsSync()) root.deleteSync(recursive: true);
       }
     },
-    skip: Platform.isWindows
-        ? 'ordinary Windows test accounts cannot create symbolic links'
-        : false,
   );
 
   test('a credential published during creation is not overwritten', () async {

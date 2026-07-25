@@ -1548,7 +1548,7 @@ void main() {
       expect(s.fallback.provider, isNull);
       expect(
         s.reason,
-        'No live quota data. Open the provider app, or use quotabot login for Grok/Antigravity.',
+        'No live quota data. Run quotabot doctor for provider-specific recovery steps.',
       );
     });
 

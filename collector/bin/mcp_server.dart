@@ -96,9 +96,7 @@ Future<void> main(List<String> args) async {
       'quotabot MCP Streamable HTTP listening on '
       'http://${options.host}:${options.port}${normalizeMcpHttpPath(options.path)}',
     );
-    stderr.writeln(token == null
-        ? 'bearer token auth: disabled'
-        : 'bearer token auth: enabled');
+    stderr.writeln('bearer token auth: required and enabled');
     final done = Completer<void>();
     ProcessSignal.sigint.watch().listen((_) async {
       await server.stop();

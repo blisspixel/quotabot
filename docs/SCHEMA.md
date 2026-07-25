@@ -10,11 +10,17 @@ The root object contains:
 
 - `schema`: always `quotabot.v1`.
 - `generated_at`: Unix epoch seconds.
+- `snapshot_source`: collection mode for CLI snapshots, currently `live` or
+  `simulation`.
 - `profile`: optional local profile name when a filtered view produced the
   snapshot.
 - `account_filter`: optional exact account label when a router narrowed a view.
 - `error`: optional fail-soft error note.
 - `providers`: an array of provider snapshots.
+- `analytics_incident_inventory`: optional additive
+  `quotabot.analytics-incident-inventory.v1` local inventory. Current CLI
+  snapshots emit it; other transports may omit it. It is diagnostic metadata,
+  never quota, availability, routing, or recovery authorization.
 
 Provider snapshots keep these stable fields:
 
@@ -236,12 +242,22 @@ code, responses, credentials, or exception messages.
 
 `quotabot check <provider> --json` and MCP `check_provider_availability` emit
 `quotabot.check.v1`: `schema`, `as_of`, `provider`, then either `found: false`
-(CLI, unknown name), an `error` note (MCP, unknown provider/account), or
-`account`, `source_class`, `available`, `headroom_percent`, `resets_at`, and
-`stale`, with an optional plain `error` when a failed live read is showing
-last-known evidence, plus optional `drift_reason` and `drift_observed_at`. This is
-deliberately not a `quotabot.v1` snapshot: it answers for one provider and has
-no `providers` array. `available` means usable from current evidence and above
+(CLI, with `reason` set to `filtered`, `account_not_found`,
+`provider_not_returned`, or `unknown_provider`), an `error` note (MCP, unknown
+provider/account), or `account`, `source_class`, `available`,
+`headroom_percent`, `resets_at`, and `stale`, with an optional plain `error` when
+a failed live read is showing last-known evidence, plus optional `drift_reason`
+and `drift_observed_at`.
+
+The CLI's successful form additionally carries `captured_at`,
+`staleness_seconds`, `snapshot_source`, `matched_account_count`,
+`selection_mode` (`only`, `best_available`, or `exact`), `ok`,
+`live_read_succeeded`, `per_machine`, optional `pipe_health`, `http_status`, and
+`retry_after_seconds`, plus the scoped `quotabot.explain.v1` `runtime_access`
+observation. Its `found: false` form still carries `snapshot_source` and
+`runtime_access`. These additive CLI fields are not promised on the MCP response.
+This is deliberately not a `quotabot.v1` snapshot: it answers for one provider
+and has no `providers` array. `available` means usable from current evidence and above
 the practical spent floor; stale cached cloud quota has `available: false` even
 when `headroom_percent` still carries a last-known value. A drift result follows
 the same rule: its percentage, when present, is last-trusted evidence, not
@@ -265,7 +281,13 @@ problems.
 Each model entry includes provider/account, `source_class`, `local`,
 `available`, `stale`, `quota_backed`, capability hints where known, and the
 gating quota budget when the model is remote: `headroom_percent`, `resets_at`,
-and the `gating_window` label. A model gated by drifted last-trusted quota also
+and the `gating_window` label. Capability hints such as `tools`, `vision`, and
+`context_tokens` are present only where the source declared them: a committed
+catalog entry for a cloud model, and the runtime's own metadata for a local one.
+An absent hint means undeclared, not false, and never satisfies a filter that
+requires it. `embedding` works the other way: `true` marks a model the source
+declared as an embedding model, which stays listed but is never a routing
+candidate, while an absent value leaves the model routable. A model gated by drifted last-trusted quota also
 carries `drift_reason`
 and `drift_observed_at` and is unavailable. When a provider exposes per-model
 or provider-family quotas, those
@@ -336,8 +358,12 @@ prices or caps for this object. Calendar entries use the same sampled-day shape
 described below.
 
 `quotabot report --json` emits `quotabot.report.v1` with `schema`,
-`generated_at`, `recommended_provider`, `recommendation_reason`,
-`fallback_kind`, and `providers`. Provider rows include `source_class`, state,
+`generated_at`, `recommended_provider`, exact `recommended_account`,
+`recommendation_reason`, `fallback_kind`, `decision_code`, `decision_id`, the
+complete content-blind `receipt`, and `providers`. Provider rows include
+`source_class`, state, `ok`, `as_of`, `staleness_seconds`, `stale`, explicit
+`per_machine`, and optional `error`, `drift_reason`, `drift_observed_at`,
+`pipe_health`, `http_status`, and `retry_after_seconds` diagnostics,
 optional `spend_class` (the same spend label the markdown Trust column shows:
 `quota plan`, `metered plan`, `loaded`, `cold`, or a manual budget label),
 headroom/reset metadata, weekly p50 free percent, weekly reliability, weekly
@@ -387,10 +413,11 @@ own, outside the `quotabot` CLI's documented exit-code contract.
 
 - `schema`: always `quotabot.verify.v1`.
 - `generated_at`, `os`, `require_live`, the honesty-only `honesty_passed`,
+  `selected_adapter_count`, `live_read_scope_valid`,
   `all_live_reads_succeeded`, and the run-level `passed` verdict. By default,
   `passed` has the same value as `honesty_passed`. With CLI `--require-live`, it
-  is false unless every selected provider adapter produced a fresh accepted
-  read.
+  is false unless at least one provider adapter was selected and every selected
+  adapter produced a fresh accepted read.
 - `providers`: one record per provider account, with `provider`,
   `display_name`, `account`, `state` (`live`, `cached`, `out_of_quota`,
   `no_data`, `error`, `local`, or `undetected`), optional `plan`, `source`, and
@@ -428,8 +455,113 @@ other contract here. A truthful absence (a signed-out account or a local
 runtime that is not running) passes the honesty contract but has
 `live_read_succeeded: false`; the failing states are lying numbers, silent
 failures, provider drift, and contract drift. The CLI exits 65 when any check
-fails, and also exits 65 when `--require-live` is set and a selected adapter did
-not return a fresh accepted read.
+fails, and also exits 65 when `--require-live` is set and no adapter was selected
+or a selected adapter did not return a fresh accepted read.
+
+## `quotabot.analytics-incident-inventory.v1`
+
+Current CLI `quotabot.v1` snapshots include one bounded local analytics incident
+inventory:
+
+- `schema`: always `quotabot.analytics-incident-inventory.v1`.
+- `state`: `complete`, `partial`, or `suppressed`. Only `complete` proves that
+  the configured bounded scan finished without invalid, unverifiable, or
+  truncated evidence. `partial` means the incident list may be incomplete.
+  Deterministic simulation uses `suppressed` and reads no host markers.
+- `scope`: `all_local` for a default unfiltered snapshot,
+  `visible_snapshot` when a profile or exclusion is active, or `simulation`.
+  Visible-only scope directly inspects exact rows already present and does not
+  enumerate out-of-scope local markers.
+- `scanned_markers`: number of candidate migration markers inspected by the
+  bounded full scan.
+- `unverifiable_markers`: valid markers whose current conflict state could not
+  be proven because exact local identity evidence was unavailable.
+- `invalid_markers`: candidate marker files rejected for type, size, name,
+  schema, provider, digest, timestamp, or parse failure.
+- `truncated`: true when a directory-entry, marker-count, output-count, or total
+  byte bound stopped the scan.
+- `incidents`: zero or more `quotabot.analytics-incident.v1` objects.
+
+Each incident contains:
+
+- `schema`: always `quotabot.analytics-incident.v1`.
+- `state`: always `diverged`.
+- `provider`: canonical registered provider id.
+- `tiers`: one or both fixed values `history` and `buckets`.
+- `recorded_at`: Unix epoch second when current quotabot first recorded the
+  incident. A migrated older explicit marker may retain its marker observation
+  time when no separate first-recorded field existed.
+- `exact_account_in_snapshot`: true only when the enclosing `providers` array
+  already contains the exact identity.
+- `provider_row_index`: present only when `exact_account_in_snapshot` is true;
+  zero-based index into the enclosing `providers` array. This is the safe join
+  for multi-account automation.
+- `incident_id`: optional random 128-bit lowercase hexadecimal local correlation
+  reference. New and successfully upgraded valid markers retain it across
+  snapshots and scoped recovery while any tier remains unresolved. It is not an
+  account identifier, recovery target, credential, or authorization token.
+
+Incident JSON never contains an unavailable account, account digest, local
+path, prompt, code, credential, or exception. If the exact account is absent,
+reconnect it and obtain the exact current row before invoking recovery. Do not
+infer a clean cache from `incidents: []` unless `state` is `complete`.
+
+## `quotabot.analytics-recovery.v1`
+
+`quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT
+--tier=history|buckets --json` emits a local analytics recovery receipt. Without
+`--yes`, the command is a read-only inspection and creates no recovery lock or
+bundle. With `--yes`, it archives only the selected exact tier before either
+exactly merging checkpoint-proven raw history or aggregate buckets, or restarting
+that tier empty. It makes no provider or model call in either mode.
+
+- `schema`: always `quotabot.analytics-recovery.v1`.
+- `mode`: `inspect` or `recover`.
+- `provider`, `account`, and `tier`: the exact requested target. The account is
+  present because the caller supplied it and needs to match the receipt to the
+  request.
+- `active_tiers`: quarantined tiers still active when the result was produced.
+- `ready`: true only when an inspection proves the target can enter the
+  confirmed transaction.
+- `recovered`: true only when the selected tier reached an admitted exact merge
+  or empty checkpoint. A rare `recovered_receipt_incomplete` status keeps this
+  true but exits 65 because the on-disk manifest could not be finalized.
+- `status` and `detail`: a bounded machine verdict and plain-language result.
+  Stable operational statuses include `ready`, `recovered`,
+  `already_recovered`, `recovered_receipt_incomplete`,
+  `no_active_conflict`, `tier_not_conflicted`, `unsupported_target`,
+  `invalid_target`, `unsafe_evidence`, `shared_legacy_evidence`,
+  `evidence_too_large`,
+  `evidence_changed`, `archive_failed`, `merge_install_failed`,
+  `marker_write_failed`, `rediverged`, and `recovery_unavailable`.
+- `impact`: the selected-tier action, additive `exact_merge_available` and
+  `exact_merge_performed` booleans, and the local surfaces preserved by the
+  transaction. Inspection sets availability only when a strict raw-history plan
+  or strict aggregate-bucket plan exists; confirmation recomputes it under lock.
+  The action changes files only for a `ready` inspection followed by
+  confirmation; a failed inspection reports the selected tier as unchanged.
+- `evidence_bundle` and `archived_roles`: present after an archive starts. The
+  bundle path is returned only to the local caller; role names are fixed and do
+  not contain account or source-path text.
+
+Exit code is 0 for a ready inspection or a fully recovered tier, 64 for invalid
+or unsupported targeting, and 65 when a valid target is not ready or not safely
+recovered. `already_recovered` is a successful idempotent replay of the retained
+receipt. `recovered_receipt_incomplete` reports that checkpoint admission
+succeeded but manifest finalization did not, so it exits 65 with the evidence
+bundle still identified. Filters, simulation, strict live verification, and
+provider-drift recovery cannot be combined with this command.
+
+Each created bundle contains `manifest.json` with schema
+`quotabot.analytics-recovery-evidence.v1`. The manifest records `state`,
+provider, opaque `account_digest`, tier, observation time, selected action,
+`exact_merge_performed`, and fixed-role file entries with byte counts, SHA-256
+digests, archive state, and whether the original was moved. A completed exact
+merge also records `exact_merge_installed`, `merged_rows` for raw history or
+`merged_buckets` for aggregate buckets, `merged_bytes`, and `merged_sha256`. It
+never contains the raw account, original source path, quota samples, prompts,
+code, or credentials. Evidence without one strict merge proof restarts empty;
+every bundle is retained for audit.
 
 ## `quotabot.explain.v1`
 

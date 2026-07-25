@@ -168,6 +168,16 @@ class LmStudioAdapter {
           )
         : null;
     final quant = m['quantization'];
+    // v1 states capabilities as an object of flags. It carries only the ones it
+    // asserts, so a missing flag leaves the capability undeclared rather than
+    // denied; either way it cannot satisfy a requirement for that capability.
+    final capabilities = m['capabilities'];
+    final declared = capabilities is Map ? capabilities : null;
+    // v1's `type` separates a text generator from an embedding model. Unlike
+    // v0 it does not distinguish a vision model, which is why vision is read
+    // from the capability flags above rather than from the type.
+    final type =
+        m['type'] is String ? (m['type'] as String).trim().toLowerCase() : null;
     final model = (
       name: key,
       bytes: boundedIntFromWire(m['size_bytes'], min: 0),
@@ -184,6 +194,10 @@ class LmStudioAdapter {
             max: 100000000,
           ),
       cloud: false,
+      tools: _flag(declared?['trained_for_tool_use']),
+      vision: _flag(declared?['vision']),
+      embedding: _declaredEmbedding(type),
+      digest: null,
     );
     installed.add(model);
     if (isLoaded) loaded.add(model);
@@ -205,6 +219,19 @@ class LmStudioAdapter {
     if (m is! Map || m['id'] is! String) continue;
     final id = (m['id'] as String).trim();
     if (id.isEmpty) continue;
+    // v0 states tool use in an exhaustive `capabilities` array, so a present
+    // array that omits `tool_use` is evidence the model lacks it. Vision is not
+    // in that array; v0 carries it as the model `type`, where `vlm` is a
+    // vision-language model and `llm` or an embedding type is not.
+    final capabilities = m['capabilities'];
+    final declared = capabilities is List
+        ? <String>{
+            for (final c in capabilities)
+              if (c is String) c.trim().toLowerCase(),
+          }
+        : null;
+    final type =
+        m['type'] is String ? (m['type'] as String).trim().toLowerCase() : null;
     final model = (
       name: id,
       bytes: null,
@@ -226,6 +253,14 @@ class LmStudioAdapter {
             max: 100000000,
           ),
       cloud: false,
+      tools: declared?.contains('tool_use'),
+      vision: switch (type) {
+        'vlm' => true,
+        'llm' || 'embedding' || 'embeddings' => false,
+        _ => null,
+      },
+      embedding: _declaredEmbedding(type),
+      digest: null,
     );
     installed.add(model);
     if (m['state'] == 'loaded') loaded.add(model);
@@ -234,7 +269,8 @@ class LmStudioAdapter {
 }
 
 /// Parses an OpenAI-compatible `/v1/models` body into model names with no load
-/// state. Pure for testing.
+/// state. Pure for testing. The compatibility shape declares no capabilities,
+/// so every entry stays undeclared and no capability filter can admit it.
 List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
   final list = data is Map ? data['data'] : null;
   if (list is! List) return null;
@@ -252,6 +288,23 @@ List<LocalModel>? lmStudioCompatFromJson(dynamic data) {
           expiresAt: null,
           context: null,
           cloud: false,
+          tools: null,
+          vision: null,
+          embedding: null,
+          digest: null,
         ),
   ];
 }
+
+/// Reads a declared boolean flag, ignoring any other type a drifted runtime
+/// might send. An absent or unusable flag stays undeclared.
+bool? _flag(dynamic value) => value is bool ? value : null;
+
+/// Maps LM Studio's model `type` to whether it declares an embedding model. An
+/// unrecognized or absent type leaves the kind unknown, which keeps the model
+/// routable: only a stated non-generative kind removes it.
+bool? _declaredEmbedding(String? type) => switch (type) {
+      'embedding' || 'embeddings' => true,
+      'llm' || 'vlm' => false,
+      _ => null,
+    };

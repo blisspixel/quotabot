@@ -6,8 +6,35 @@ import 'package:test/test.dart';
 import 'support/cli_process.dart';
 
 void main() {
-  Future<ProcessResult> runCli(List<String> args) =>
-      runCollectCli(args, environment: {'QUOTABOT_DEMO': '1'});
+  // These tests drive the CLI as a subprocess, where an in-process directory
+  // override does not apply. Without an explicit base directory the subprocess
+  // resolves the real per-user config location, so this suite read and wrote the
+  // developer's own cache, analytics, and lease state: results depended on
+  // whatever that machine happened to hold, parallel suites could collide, and a
+  // test run could disturb real quota evidence. Demo mode only short-circuits
+  // collection, not the local metadata these commands still read and write.
+  // Point every platform's base directory at a private temp directory instead,
+  // the way the other CLI suites already do.
+  late Directory temp;
+
+  setUp(() {
+    temp = Directory.systemTemp.createTempSync('quotabot_cli_exclude_');
+  });
+
+  tearDown(() {
+    if (temp.existsSync()) temp.deleteSync(recursive: true);
+  });
+
+  Future<ProcessResult> runCli(List<String> args) => runCollectCli(
+        args,
+        environment: {
+          'QUOTABOT_DEMO': '1',
+          'LOCALAPPDATA': temp.path,
+          'XDG_CONFIG_HOME': temp.path,
+          'HOME': temp.path,
+          'USERPROFILE': temp.path,
+        },
+      );
 
   test('suggest excludes named providers from ranking', () async {
     final result = await runCli(['suggest', '--json', '--exclude=codex']);
@@ -115,6 +142,12 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['provider'], 'codex');
     expect(json['found'], isFalse);
+    expect(json['reason'], 'filtered');
+    final runtimeAccess = json['runtime_access'] as Map<String, dynamic>;
+    expect(runtimeAccess['collection_executed'], isFalse,
+        reason: 'demo mode is a manifest-only read');
+    expect(runtimeAccess['providers'], isEmpty,
+        reason: 'an excluded check must not invoke another adapter');
   });
 
   test('check names a filtered provider as hidden, not unknown', () async {
@@ -124,6 +157,23 @@ void main() {
     final err = result.stderr as String;
     expect(err, contains('hidden by the current'));
     expect(err, isNot(contains('no provider named')));
+  });
+
+  test('check treats a known adapter with no current row as unavailable',
+      () async {
+    final machine = await runCli(['check', 'kiro', '--json']);
+    final human = await runCli(['check', 'kiro', '--no-color']);
+
+    expectExitCode(machine, 69);
+    final json = jsonDecode(machine.stdout as String) as Map<String, dynamic>;
+    expect(json['provider'], 'kiro');
+    expect(json['found'], isFalse);
+    expect(json['reason'], 'provider_not_returned');
+
+    expectExitCode(human, 69);
+    expect(human.stdout as String, contains('Kiro: unavailable'));
+    expect(human.stdout as String, contains('returned no current row'));
+    expect(human.stderr as String, isEmpty);
   });
 
   test('watch once excludes named providers before alerting', () async {

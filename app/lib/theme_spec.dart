@@ -70,7 +70,7 @@ class AppChromeTheme extends ThemeExtension<AppChromeTheme> {
       border: dark ? const Color(0xFF2A2E36) : const Color(0xFFE2E4E8),
       tileBorder: dark ? const Color(0xFF272B33) : const Color(0xFFEDEEF1),
       foreground: dark ? Colors.white : const Color(0xFF111317),
-      muted: dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280),
+      muted: dark ? const Color(0xFF8A91A0) : const Color(0xFF69707E),
       gaugeTrack: dark ? const Color(0xFF333842) : const Color(0xFFD8DBE0),
       accent: dark ? const Color(0xFF58A6FF) : const Color(0xFF285AC8),
     );

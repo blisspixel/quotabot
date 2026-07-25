@@ -79,6 +79,129 @@ void main() {
       expect(lmStudioV1FromJson('nope'), isNull);
     });
 
+    test('v1 reads the declared capability flags', () {
+      // Shape captured from a real 0.4.0+ server: capabilities is an object
+      // that carries only the flags it asserts.
+      final r = lmStudioV1FromJson({
+        'models': [
+          {
+            'key': 'example/vision-8b',
+            'type': 'llm',
+            'max_context_length': 131072,
+            'loaded_instances': <Object>[],
+            'capabilities': {
+              'vision': true,
+              'trained_for_tool_use': true,
+              'reasoning': {
+                'allowed_options': ['off', 'on'],
+                'default': 'on',
+              },
+            },
+          },
+          {
+            'key': 'example/text-8b',
+            'loaded_instances': <Object>[],
+            'capabilities': {'trained_for_tool_use': false},
+          },
+          {'key': 'example/embed-v1', 'loaded_instances': <Object>[]},
+        ],
+      })!;
+      final vision =
+          r.installed.firstWhere((m) => m.name.endsWith('vision-8b'));
+      expect(vision.tools, isTrue);
+      expect(vision.vision, isTrue);
+      final text = r.installed.firstWhere((m) => m.name.endsWith('text-8b'));
+      expect(text.tools, isFalse);
+      // The object omits flags it does not assert, so vision stays undeclared
+      // rather than becoming a denial quotabot cannot back.
+      expect(text.vision, isNull);
+      final embed = r.installed.firstWhere((m) => m.name.endsWith('embed-v1'));
+      expect(embed.tools, isNull);
+      expect(embed.vision, isNull);
+    });
+
+    test('v1 reads the model kind from its type', () {
+      // v1 types a vision model as `llm` and only distinguishes an embedding
+      // model, which is why vision comes from the capability flags instead.
+      final r = lmStudioV1FromJson({
+        'models': [
+          {'key': 'gen', 'type': 'llm', 'loaded_instances': <Object>[]},
+          {'key': 'embed', 'type': 'embedding', 'loaded_instances': <Object>[]},
+          {'key': 'unknown', 'loaded_instances': <Object>[]},
+        ],
+      })!;
+      expect(
+        {for (final m in r.installed) m.name: m.embedding},
+        {'gen': false, 'embed': true, 'unknown': null},
+      );
+    });
+
+    test('v1 ignores a capability field that is not a declared flag', () {
+      final r = lmStudioV1FromJson({
+        'models': [
+          {
+            'key': 'drifted',
+            'loaded_instances': <Object>[],
+            'capabilities': {'vision': 'yes', 'trained_for_tool_use': 1},
+          },
+          {
+            'key': 'drifted-shape',
+            'loaded_instances': <Object>[],
+            'capabilities': ['vision'],
+          },
+        ],
+      })!;
+      for (final m in r.installed) {
+        expect(m.tools, isNull, reason: m.name);
+        expect(m.vision, isNull, reason: m.name);
+      }
+    });
+
+    test('v0 reads tool use from its list and vision from the model type', () {
+      // v0 carries an exhaustive capabilities array plus a model type, where
+      // `vlm` is a vision-language model.
+      final r = lmStudioNativeFromJson({
+        'data': [
+          {
+            'id': 'example/vision-8b',
+            'type': 'vlm',
+            'state': 'not-loaded',
+            'capabilities': ['tool_use'],
+          },
+          {
+            'id': 'example/text-8b',
+            'type': 'llm',
+            'state': 'not-loaded',
+            'capabilities': <String>[],
+          },
+          {'id': 'example/unknown', 'state': 'not-loaded'},
+        ],
+      })!;
+      final vision =
+          r.installed.firstWhere((m) => m.name.endsWith('vision-8b'));
+      expect(vision.tools, isTrue);
+      expect(vision.vision, isTrue);
+      final text = r.installed.firstWhere((m) => m.name.endsWith('text-8b'));
+      // A present array that omits tool_use is real evidence of its absence.
+      expect(text.tools, isFalse);
+      expect(text.vision, isFalse);
+      final unknown = r.installed.firstWhere((m) => m.name.endsWith('unknown'));
+      expect(unknown.tools, isNull);
+      expect(unknown.vision, isNull);
+      expect(unknown.embedding, isNull);
+      expect(vision.embedding, isFalse);
+      expect(text.embedding, isFalse);
+    });
+
+    test('v0 reads the model kind from its plural embedding type', () {
+      final r = lmStudioNativeFromJson({
+        'data': [
+          {'id': 'embed', 'type': 'embeddings', 'state': 'not-loaded'},
+        ],
+      })!;
+      expect(r.installed.single.embedding, isTrue);
+    });
+
     test('compat lists model names without load state', () {
       final r = lmStudioCompatFromJson({
         'data': [
@@ -88,6 +211,10 @@ void main() {
         ],
       });
       expect(r!.map((m) => m.name), ['m1', 'm2']);
+      // An OpenAI-compatible listing declares no capabilities, so no capability
+      // filter can admit these entries.
+      expect(r.first.tools, isNull);
+      expect(r.first.vision, isNull);
       expect(lmStudioCompatFromJson(42), isNull);
     });
   });
@@ -133,6 +260,94 @@ void main() {
       expect(r[0].cloud, isTrue);
       expect(r[1].cloud, isFalse);
     });
+
+    test('the model list declares no capabilities on its own', () {
+      final r = ollamaModelsFromJson({
+        'models': [
+          {'name': 'llama:8b', 'size': 1000, 'digest': 'sha256:abc'},
+        ],
+      });
+      expect(r.single.tools, isNull);
+      expect(r.single.vision, isNull);
+      expect(r.single.digest, 'sha256:abc');
+    });
+
+    test('keeps only a usable digest, since it is a cache key', () {
+      final r = ollamaModelsFromJson({
+        'models': [
+          {'name': 'a:1b', 'digest': '  '},
+          {'name': 'b:1b', 'digest': 42},
+          {'name': 'c:1b', 'digest': 'x' * 129},
+          {'name': 'd:1b'},
+        ],
+      });
+      expect(r.map((m) => m.digest), everyElement(isNull));
+    });
+
+    test('show reads declared capabilities and the model maximum context', () {
+      // Shape captured from a real Ollama 0.24 daemon.
+      final r = ollamaShowFromJson({
+        'capabilities': ['completion', 'vision', 'tools'],
+        'model_info': {
+          'mistral3.context_length': 393216,
+          // The pre-scaling training context describes something else and must
+          // not be mistaken for the model's context window.
+          'mistral3.rope.scaling.original_context_length': 8192,
+          'general.parameter_count': 23572403200,
+        },
+      })!;
+      expect(r.tools, isTrue);
+      expect(r.vision, isTrue);
+      expect(r.context, 393216);
+    });
+
+    test('show treats an absent capability as absent, not unknown', () {
+      final r = ollamaShowFromJson({
+        'capabilities': ['completion', 'tools', 'insert'],
+        'model_info': {'qwen2.context_length': 32768},
+      })!;
+      expect(r.tools, isTrue);
+      expect(r.vision, isFalse);
+      expect(r.context, 32768);
+    });
+
+    test('show separates a text generator from an embedding model', () {
+      final generator = ollamaShowFromJson({
+        'capabilities': ['completion', 'tools'],
+      })!;
+      expect(generator.embedding, isFalse);
+      // Every Ollama model that can generate declares `completion`; a list
+      // without it is an embedding model.
+      final embedder = ollamaShowFromJson({
+        'capabilities': ['embedding'],
+      })!;
+      expect(embedder.embedding, isTrue);
+      expect(embedder.tools, isFalse);
+      // An empty list asserts nothing, so the kind stays unknown and the model
+      // keeps its route rather than being removed on absent evidence.
+      final silent = ollamaShowFromJson({'capabilities': <Object>[]})!;
+      expect(silent.embedding, isNull);
+    });
+
+    test('show without a capability list leaves the model undeclared', () {
+      expect(ollamaShowFromJson({'model_info': <String, Object?>{}}), isNull);
+      expect(ollamaShowFromJson({'capabilities': 'tools'}), isNull);
+      expect(ollamaShowFromJson('nope'), isNull);
+    });
+
+    test('show survives unusable context metadata', () {
+      final r = ollamaShowFromJson({
+        'capabilities': <Object>[],
+        'model_info': {
+          'llama.context_length': -1,
+          'gemma.context_length': 'wide',
+          'context_length': 4096, // not architecture-prefixed
+        },
+      })!;
+      expect(r.tools, isFalse);
+      expect(r.vision, isFalse);
+      expect(r.context, isNull);
+    });
   });
 
   group('localRuntimeQuota', () {
@@ -151,6 +366,10 @@ void main() {
             expiresAt: null,
             context: null,
             cloud: false,
+            tools: null,
+            vision: null,
+            embedding: null,
+            digest: null,
           ),
         ],
         loaded: const [],
@@ -172,6 +391,10 @@ void main() {
           expiresAt: null,
           context: null,
           cloud: false,
+          tools: null,
+          vision: null,
+          embedding: null,
+          digest: null,
         ),
         (
           name: 'b',
@@ -182,6 +405,10 @@ void main() {
           expiresAt: null,
           context: null,
           cloud: false,
+          tools: null,
+          vision: null,
+          embedding: null,
+          digest: null,
         ),
       ];
       final loaded = <LocalModel>[
@@ -194,6 +421,10 @@ void main() {
           expiresAt: now + 1800,
           context: 8192,
           cloud: false,
+          tools: null,
+          vision: null,
+          embedding: null,
+          digest: null,
         ),
         installed[1],
       ];
@@ -229,6 +460,10 @@ void main() {
             expiresAt: null,
             context: null,
             cloud: true,
+            tools: null,
+            vision: null,
+            embedding: null,
+            digest: null,
           ),
           (
             name: 'llama3.2:3b',
@@ -239,6 +474,10 @@ void main() {
             expiresAt: null,
             context: null,
             cloud: false,
+            tools: null,
+            vision: null,
+            embedding: null,
+            digest: null,
           ),
         ],
         loaded: const [],

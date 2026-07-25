@@ -55,7 +55,7 @@ collector/ (Dart package)
   report.dart        pure markdown and quotabot.report.v1 assembly
   mcp.dart           MCP tool shapes, output schemas, shared server factory
   mcp_http.dart      Opt-in Streamable HTTP MCP wrapper with loopback guards
-  collector.dart     collectAll(): run adapters, apply cache; package exports
+  collector.dart     full or provider-scoped adapter collection, cache; exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      nvidia, ollama, lmstudio, lemonade (thin I/O shells)
   auth/              tokens + store, PKCE/loopback util, anthropic, openai,
@@ -112,8 +112,11 @@ network or disk access, so it is unit tested directly against fixtures. Adapters
 are thin shells: they fetch bytes (file, SQLite, or HTTP) and delegate parsing.
 This is why the core has high test coverage even though the adapters do I/O.
 `simulation.dart` follows the same rule: it produces deterministic
-`ProviderQuota` snapshots for CLI tests without adapter calls, history reads, or
-burn-history influence. It is intentionally separate from `demo.dart`, which is a
+`ProviderQuota` snapshots for CLI tests without adapter calls, history reads,
+analytics buckets, active route leases, or passive host-tool detection. Human
+surfaces retain an explicit simulation marker, while snapshot JSON and decision
+receipts retain the simulation source. It is intentionally separate from
+`demo.dart`, which is a
 believable multi-provider screenshot fleet rather than an exact assertion tool.
 The parser test layer includes seeded property/fuzz tests over malformed JSON,
 protobuf-like byte streams, gRPC-web frames, embedded-token blobs, and passive
@@ -157,7 +160,8 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   auth file and caches them separately. Antigravity scans the active account and
   profile databases, attempts live reads for each discovered account, refreshes
   the Gemini CLI token from disk when it is the active token source, and runs the
-  Cloud Code onboarding step before reading per-model quota.
+  Cloud Code onboarding step only when `loadCodeAssist` has not already returned
+  an onboarded project before reading per-model quota.
 - Claude's current usage response separates shared session and weekly windows
   from optional model-scoped weekly limits. Shared windows govern provider
   routing; a scoped row is a sparse model-budget overlay, so spending it cannot
@@ -229,6 +233,16 @@ tray Quit flushes the final snapshot before teardown.
 `collectAll()` runs every adapter concurrently (Antigravity via multi-account
 profile scan + per-account caches) and wraps each in a cache layer (`cache.dart`):
 
+Provider-specific CLI `check` resolves its adapter before I/O and runs only that
+registry row. Filtered strict verification computes the registry subset from its
+profile, exclusions, and local-only policy before I/O, so its `runtime_access`
+observation matches the adapters actually invoked. Account allowlists and hidden
+account targets remain post-collection because a multi-account adapter must run
+before returned account identities are known. The bounded local manual-entry
+file is still read so a manual provider can be checked without any built-in
+adapter call. Normal status, desktop, MCP snapshot, and routing reads retain the
+full-fleet `collectAll()` behavior.
+
 1. Capture a local observation generation, then run the adapter. The generation
    marks when collection began, so an older slow read cannot finish late and
    overwrite evidence from a newer collection.
@@ -257,6 +271,95 @@ metadata. Cache-only routing reads only canonical snapshot filenames that match
 the parsed provider/account identity and rejects snapshots dated materially in
 the future, so a stray JSON file in the cache directory cannot become a fresh
 routing recommendation.
+Account-scoped recent history and hourly buckets also use canonical opaque
+filenames. Their first canonical write stores a best-effort owner-only
+`quotabot.analytics-migration.v1` checkpoint for the exact-account legacy path:
+ordered raw-history row digests plus a bounded hourly aggregate baseline. The
+checkpoint contains a provider id and account digest, never a raw account, path,
+prompt, code, or credential. Reads compare the live legacy generation with that
+baseline. A changed or untrusted checkpoint quarantines only the affected
+history tier, preserves both generations, stops further writes to that tier, and
+surfaces a bounded diagnostic through desktop Analytics and human `doctor`;
+bucket-tier conflicts also annotate the affected `stats --json` row because
+that command reads hourly buckets. Ambiguous legacy data cannot influence
+routing. Burn-aware routing continues using frozen canonical account buckets or
+the validated pre-divergence checkpoint. If neither exists and the current
+snapshot has exactly one measured account, the same provider-only compatibility
+series that was eligible before conflict remains eligible. Conflict evaluation
+evaluates both possible hourly cutoff sets, applies cross-provider shrinkage to
+each complete candidate map, then retains the higher burn, higher uncertainty,
+and lower sample count for the conflicted identity. Healthy identities keep the
+pooled result matching the actual current hour offset, so conflict uncertainty
+cannot penalize their route position. Quarantine therefore cannot make the
+affected provider rank more optimistically as evidence ages. No automatic merge or
+deletion occurs when the delta cannot be proven, because choosing one generation
+can lose samples and combining both can double-count their shared baseline.
+The explicit recovery boundary is `verify --recover-analytics`. Its default
+mode only inspects one exact provider/account/tier. With `--yes`, it repeats the
+checks while holding both the identity's canonical evidence lock and its lossy
+legacy lock domain, even when a legacy file was absent at inspection time. It
+rejects links and other non-regular sources, enforces a 16 MiB total evidence
+cap, and creates a unique owner-only bundle outside the cache directory.
+Owner-only permissions on the recovery root, bundle, manifest, and archived
+files are checked and fail closed. Canonical and legacy files for only the
+selected tier are atomically moved into fixed-role archive names; the migration
+marker and legacy bucket-owner record, when applicable, are copied. A legacy
+history file must contain only rows for the requested identity, and a legacy
+bucket file must carry exact ownership evidence, so colliding account stems are
+never adopted or moved. A manifest records byte counts and SHA-256 digests with
+an opaque account digest and no raw source paths. An explicit recovery guard is
+installed before originals move. Only after every archive digest verifies and
+every selected path, including paths absent at inspection, remains absent can
+the selected tier be replaced. Raw history receives an exact merge only when
+strict parsing proves the exact provider/account identity, trusted evidence,
+monotonic branch order, one unique ordered-checkpoint suffix overlap per branch,
+and enough retained baseline to reconstruct the 200-row cap. Aggregate buckets
+receive an exact merge only when every checkpoint and branch row has one unique
+aligned start and valid bounded counts, histograms, moments, exhausted counts,
+and extrema. Any retained checkpoint rows must form a complete suffix, and each
+branch's additive fields must cover that baseline. The aggregate merge computes
+canonical plus legacy minus the shared checkpoint once, retains independent new
+buckets, and keeps the newest bounded 90-day series. The merged canonical file
+is atomically installed and digest-verified before the migration marker admits
+an empty legacy checkpoint. Unprovable evidence restarts the selected tier
+empty. A still-conflicted other tier retains its conflict flag and trusted
+checkpoint.
+Failures before checkpoint admission retain quarantine and partial archives
+retain their manifest. If manifest finalization fails after admission, retry
+returns the retained receipt as `recovered_receipt_incomplete`. A late legacy
+write differs from the empty legacy baseline and reactivates quarantine.
+The transaction never contacts a provider and never touches quota snapshots,
+credentials, profiles, preferences, leases, alerts, other identities, or
+provider-only compatibility analytics. Aggregate-bucket reconciliation fails
+closed whenever any exact-merge invariant cannot be proven.
+
+Mixed-version state also has a separate digest-private incident inventory. A
+detected checkpoint mismatch is persisted under the existing identity evidence
+lock with explicit tier flags, a first-recorded timestamp, and a random 128-bit
+incident reference. On upgrade, a valid older marker can be checked using only
+validated exact identity evidence from its canonical local snapshot; quotabot
+never guesses an account from a filename. A valid explicit marker that lacks a
+reference is upgraded under the same canonical digest lock. Recovery preserves
+the reference and first-recorded time while any tier remains conflicted, then
+removes both when every tier is resolved.
+
+The default unfiltered snapshot enumerates markers with an asynchronous,
+non-link-following scan. It caps directory entries, candidate markers, emitted
+incidents, each marker size, total marker bytes, and cached identity evidence.
+The result says `complete`, `partial`, or `suppressed` and includes bounded
+invalid, unverifiable, and truncation evidence, so an empty partial list cannot
+be mistaken for a clean cache. An incident exposes provider, fixed tiers,
+recorded time, and its random reference. It exposes a provider-row index only
+when the exact identity is already visible in the enclosing snapshot. Raw
+accounts, account digests, paths, and recovery authority are absent. Profiled
+or excluded snapshots inspect visible exact rows only, preventing local marker
+enumeration from bypassing the requested view. This inventory never contributes
+quota, availability, burn, routing, or recovery authorization.
+The in-memory result also attributes verifiable uncertainty to canonical
+provider ids while keeping malformed or truncated uncertainty global. Desktop
+profile views therefore retain an in-scope or global partial warning without
+revealing a known out-of-scope provider incident. Those attribution fields are
+not serialized.
 Drift diagnostics use separate per-provider/account records in the cache
 directory. They remain attached to cache-only and failed-read fallbacks so a
 process restart or transient provider failure cannot silently clear the warning.
@@ -339,7 +442,10 @@ for `quotas://alerts`, so clients react by reading the resource instead of
 polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
 by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
 keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
-rejects batch JSON-RPC payloads, and can require a bearer token.
+rejects batch JSON-RPC payloads, requires a bearer token of at least 32
+characters, and rejects indeterminate or larger-than-256-KiB POST bodies in the
+pre-body admission hook. The pinned upstream transport therefore never buffers
+an unauthenticated or unbounded request body.
 `bin/example_routing_agent.dart` shows the same logic used for direct Dart
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
@@ -404,8 +510,12 @@ bounded horizon, and projected unused quota above the threshold. Burn history is
 keyed by provider/account when the provider exposes a specific account, so
 multi-account providers can use the signal only from matching account history.
 Legacy provider-only buckets are still a fallback for unambiguous single-account
-snapshots. When present it lets included quota that would otherwise expire
-unused outrank local capacity, but the hard `budget=local` filter still wins.
+snapshots. A quarantined account prefers its frozen canonical buckets or
+validated pre-divergence checkpoint; when both are absent, the same
+single-account provider compatibility fallback remains eligible and uses the
+same conservative post-pooling, two-boundary burn estimate. When present it lets
+included quota that would otherwise expire unused outrank local capacity, but
+the hard `budget=local` filter still wins.
 `catalog_audit.dart` keeps the
 committed cloud catalog honest without adding runtime network calls: the standalone
 `bin/catalog_audit.dart` tool reads provider-owned model-list endpoints for
@@ -483,36 +593,47 @@ print, optionally POST), the desktop app's notifier, and the MCP
 `postAlert`, which refuses a non-loopback host unless explicitly allowed and
 never throws, so delivery fails soft. An alert is just the binding-window
 forecast viewed as a threshold crossing, so it shares the same model as `top`.
+Watch startup and external-host rejection diagnostics never echo the configured
+URL because webhook paths and queries can carry bearer credentials.
+`bin/collect.dart` strictly validates an explicit watch interval. Its
+`WatchLoopHealth` state emits only a failure edge and a recovery edge on standard
+error, tracks the consecutive failure count used by bounded retry backoff, and
+leaves JSON standard output reserved for alert records.
 
 ## The UI
 
 - The window is frameless via `window_manager`, with a transparent background
   so the rounded card can hug its content and any surplus window height is
   invisible. Always on top and taskbar entry are optional and controlled by
-  prefs. The body is scrollable and the window height comes from a deterministic
-  content-size estimate (provider and window counts) capped at the screen
-  height; live render-measurement proved unreliable because window_manager's
-  pixel units don't match Flutter's logical pixels under display scaling. This
-  fixes the "BOTTOM OVERFLOWED" banner that appeared with many providers, so all
-  providers display without an overflow. Small minimum size supports compact
-  mode. Dragging works on the full header bar and content/cards area (buttons
-  excluded).
+  prefs. The body is scrollable and expanded quota height comes from the actual
+  rendered content when measurement is available, with the deterministic
+  provider/window estimate retained as a bounded fallback. Logical dimensions
+  are reconciled with the active display work area before `window_manager`
+  applies them. Content that cannot fit keeps an explicit scrollbar rather than
+  hiding the last provider. Compact mode has its own bounded minimum. Dragging
+  works on the full header bar and content/cards area (buttons excluded).
 - `ProviderTile` computes the binding window (the one with the least headroom)
   and defaults to a tight view: the window bars with their reset countdowns
-  (e.g. "80%  3d12h"), plus the always-actionable failure, drift, and last-known
-  signals. If the binding window is exhausted, the card collapses to a single
-  line; otherwise it renders one `WindowBar` per window. Clicking a card expands
+  or absolute far reset times, plus the always-actionable failure, drift, and
+  last-known signals. If the binding window is exhausted, the card collapses to
+  a single line; otherwise it renders one `WindowBar` per window. Clicking a card expands
   it to reveal the full provenance line, the model-specific rows, the recent
   "usually ~X% free" line, and the burn forecast. That forecast is worded plainly
   from the shared `classifyForecast` (the same one `top` shows): a runway estimate
   or, once a strand is material, a plain warning, shown only with a real burn
-  signal, never invented. A provider whose live read failed and that supports
-  quotabot's own login (Grok, Antigravity) also shows an inline Connect action on
-  its card, so it can be reconnected from the app without a terminal.
+  signal, never invented. A provider that supports quotabot's own login (Grok,
+  Antigravity) shows an inline Connect action for authentication or reconnection
+  failures, so it can be reconnected from the app without a terminal. Automatic
+  timeout, rate-limit, and service-error recovery does not show that action.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
-  a route, moving, or resizing the window; the body scrolls within the current
-  size and the header's Back to quotas control restores the quota body. It is a
+  a route. Entry grows a short content-hugged quota window to the normal
+  Analytics viewport and adjusts its position only when necessary to keep the
+  resulting bounds inside the current display's work area. User-enlarged
+  dimensions are preserved when they fit. The body retains a visible scroll
+  fallback, large-text card headings stack instead of overflowing, and the
+  header's Back to quotas control resumes content-hugged quota sizing, or
+  compact-strip sizing when Analytics was opened from compact mode. It is a
   range switch (Now / 7d / 90d): the live view ranks headroom and shows a
   consumption donut; the historical views recompute `Insights` and the heatmap
   from the raw buckets.
@@ -525,8 +646,18 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   grey is still used when no data is available. The OS application icon
   (`app_icon.ico`) is separate and unchanged: a custom monochrome rune-style mark
   (light/dark friendly) for the desktop icon.
-- A whole-widget compact strip (logo plus status dot per provider) and the full
-  card view, plus hide/show per provider. In the card view, per-card expansion
+- A whole-widget compact strip pins the shared next-route or no-safe-route
+  control before the horizontally scrollable provider logos and status dots.
+  It opens the same decision detail as expanded mode, and a widget-order focus
+  traversal group keeps every clipped provider chip keyboard reachable. The
+  compact window uses a 200 logical-pixel minimum and display-bounded automatic
+  width that reserves space for the route label and visible duplicate-provider
+  account identity. Window chrome retains at least a 28 by 28 logical-pixel
+  target, and provider focus and expansion transitions become immediate when
+  reduced motion is requested. If tray initialization fails, a bounded warning
+  explains that Close will exit instead of silently changing behavior. The full
+  card view also supports hide/show per provider. In the card view, per-card
+  expansion
   toggles the card's own detail - the provenance line, model-specific rows, and
   analytics - on top of the tight default, and it also groups distinct account
   identities when work and personal accounts coexist. Expansion state is keyed by
@@ -535,12 +666,19 @@ forecast viewed as a threshold crossing, so it shares the same model as `top`.
   labels remain hidden. `prefs.dart` persists hidden providers, compact state,
   cadence, always on top, taskbar visibility, enable notifications,
   showAccounts, and window position across restarts.
+- `WindowBar` keeps normal text in a compact three-column row with safe reset
+  wrap points. At large text it reflows label and value above a full-width meter,
+  preserving common normalized window names and far reset times at the 320
+  logical-pixel expanded minimum. An unusual provider-supplied label remains
+  bounded to two visible lines and exposes its complete tooltip and semantics.
 - Named profiles live under the per-user quotabot config directory as
   `quotabot.profile.v1` JSON files. Profile names and provider ids are validated
   against safe filename/id characters, profile files are bounded in size, and
   filtering is pure over the already-normalized `ProviderQuota` list.
 - The CLI loads `--profile=NAME` once, then every quota-reading command consumes
-  the same profiled snapshot. Missing profiles fail with usage exit code 64.
+  the same profile semantics. `check` and filtered strict verification also use
+  the provider-level portion of that profile before adapter execution; account
+  filters remain post-collection. Missing profiles fail with usage exit code 64.
 - The MCP tools accept optional `profile` and exact `account` filters, applying
   the same pure profile filter before account narrowing for quota, routing,
   availability, and model responses. Missing profiles return a structured
@@ -574,10 +712,12 @@ as the nearest reset recedes. A provider that is spent (or nearly so) but whose
 reset is far away is not watched closely - it just sits there until it resets -
 so it relaxes like a healthy provider rather than pinning the whole fleet to a
 fast poll. A cycle that returns nothing live backs off to one hour, then six.
-When a provider keeps throttling (a request timeout or an HTTP 429), the back-off
-escalates each consecutive throttled cycle - twenty minutes, then forty, then
-ninety - and honors an explicit retry-after, so quotabot stops checking a
-provider that keeps pushing back; an imminent reset is still caught promptly. A
+When a provider keeps pushing back, the back-off escalates each consecutive
+cycle - twenty minutes, then forty, then ninety - and honors an explicit
+retry-after, so quotabot stops checking a provider that is not ready; an
+imminent reset is still caught promptly. A timeout reads as `provider slow`,
+HTTP 429 as `rate limited`, and HTTP 5xx as `provider error`, while all three
+retain the same bounded automatic recovery policy. A
 fixed cadence (15 minutes or 1 hour) can be chosen from the menu instead of the
 smart schedule. `top` and `watch` share the same `nextRefreshSeconds`, so all
 three poll alike.

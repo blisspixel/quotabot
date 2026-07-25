@@ -53,6 +53,66 @@ void main() {
     );
   });
 
+  test('scoped collection invokes and reports only selected adapters',
+      () async {
+    final calls = <String>[];
+    ProviderAdapterRegistration registration(
+      String id,
+      ProviderFixtureKind fixtureKind,
+    ) =>
+        ProviderAdapterRegistration(
+          id: id,
+          displayName: id,
+          adapterClass: ProviderAdapterClass.subscription,
+          sourceClasses: const {ProviderSourceClass.authoritativeLive},
+          collect: () async {
+            calls.add(id);
+            return [
+              ProviderQuota(
+                provider: id,
+                displayName: id,
+                account: 'default',
+                asOf: nowEpoch(),
+                ok: false,
+                error: 'test read unavailable',
+                sourceClass: ProviderSourceClass.authoritativeLive,
+              ),
+            ];
+          },
+          cached: false,
+          fixtureKind: fixtureKind,
+          fixtureFile: '$id.json',
+        );
+    final registry = [
+      registration(claudeProviderId, ProviderFixtureKind.claudeUsage),
+      registration(codexProviderId, ProviderFixtureKind.codexUsage),
+    ];
+
+    final selected = await collectAllWithRuntimeAccess(
+      adapterProviderIds: {'CLAUDE'},
+      registry: registry,
+    );
+
+    expect(calls, [claudeProviderId]);
+    expect(selected.providers.map((provider) => provider.provider), [
+      claudeProviderId,
+    ]);
+    expect(
+      selected.runtimeAccess.providers.map((provider) => provider.provider),
+      [claudeProviderId],
+    );
+    expect(selected.runtimeAccess.providers.single.observed, isTrue);
+
+    calls.clear();
+    final empty = await collectAllWithRuntimeAccess(
+      adapterProviderIds: const {},
+      registry: registry,
+    );
+    expect(calls, isEmpty);
+    expect(empty.providers, isEmpty);
+    expect(empty.runtimeAccess.providers, isEmpty);
+  });
+
   test('wrong adapter identity cannot read or poison another provider cache',
       () {
     final now = nowEpoch();

@@ -65,6 +65,9 @@ List<ProviderQuota> demoProviders(int now) {
     String? quant,
     int? vram,
     int? ctx,
+    bool? tools,
+    bool? vision,
+    bool? embedding,
   }) =>
       (
         name: name,
@@ -75,6 +78,10 @@ List<ProviderQuota> demoProviders(int now) {
         expiresAt: null,
         context: ctx,
         cloud: false,
+        tools: tools,
+        vision: vision,
+        embedding: embedding,
+        digest: null,
       );
 
   const gb = 1024 * 1024 * 1024;
@@ -102,10 +109,17 @@ List<ProviderQuota> demoProviders(int now) {
       name: 'Ollama',
       asOf: now,
       now: now,
+      // Capabilities mirror what these runtimes actually declare: Ollama and
+      // LM Studio publish them per model, while an OpenAI-compatible listing
+      // like Lemonade's declares nothing and stays unfiltered-out only under a
+      // profile that asks for no capability.
       installed: [
-        m('qwen2.5-coder:7b', bytes: 4 * gb),
-        m('llama3:8b', bytes: 5 * gb),
-        m('phi3:mini', bytes: 2 * gb),
+        m('qwen2.5-coder:7b',
+            bytes: 4 * gb, tools: true, vision: false, embedding: false),
+        m('llama3:8b',
+            bytes: 5 * gb, tools: true, vision: false, embedding: false),
+        m('phi3:mini',
+            bytes: 2 * gb, tools: false, vision: false, embedding: false),
       ],
       loaded: [
         m('qwen2.5-coder:7b',
@@ -118,8 +132,10 @@ List<ProviderQuota> demoProviders(int now) {
       asOf: now,
       now: now,
       installed: [
-        m('llama-3.1-8b', bytes: 5 * gb),
-        m('mistral-7b', bytes: 4 * gb),
+        m('llama-3.1-8b',
+            bytes: 5 * gb, tools: true, vision: false, embedding: false),
+        m('mistral-7b',
+            bytes: 4 * gb, tools: false, vision: false, embedding: false),
       ],
       loaded: [m('llama-3.1-8b', vram: 5 * gb, ctx: 16384)],
     ),

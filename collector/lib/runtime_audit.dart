@@ -188,23 +188,12 @@ RuntimeAccessReport buildRuntimeAccessReport({
           return false;
         }
         if (excludedProviders.contains(p.provider)) return false;
-        if (profile != null) {
-          final normalizedProviders = profile.providers
-              .map((p) => normalizeProviderId(p) ?? p)
-              .where((p) => p.isNotEmpty)
-              .toSet();
-          if (normalizedProviders.isNotEmpty &&
-              !normalizedProviders.contains(p.provider)) {
-            return false;
-          }
-          final hidden = profile.hiddenProviders
-              .map((p) => normalizeProviderId(p) ?? p)
-              .toSet();
-          if (hidden.contains(p.provider)) return false;
-          if (profile.routingPolicy == ProfileRoutingPolicy.localOnly &&
-              !_localProviderIds.contains(p.provider)) {
-            return false;
-          }
+        if (profile != null &&
+            !profile.allowsProviderAdapter(
+              p.provider,
+              isLocal: _localProviderIds.contains(p.provider),
+            )) {
+          return false;
         }
         return true;
       })
@@ -412,6 +401,9 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
             'Ollama installed model metadata'),
         _localRuntime(env, 'OLLAMA_HOST', ollamaDefaultPort, '/api/ps',
             'Ollama loaded model metadata'),
+        _localRuntime(env, 'OLLAMA_HOST', ollamaDefaultPort, '/api/show',
+            'Ollama per-model declared capabilities and maximum context',
+            method: 'POST'),
       ],
     ),
     ProviderRuntimeAccess(
@@ -609,13 +601,14 @@ RuntimeAccessRecord _localRuntime(
   String path,
   String purpose, {
   String? portVariable,
+  String method = 'GET',
 }) {
   final origin = resolveLocalRuntimeOrigin(
     env[variable],
     defaultPort,
     rawPort: portVariable == null ? null : env[portVariable],
   );
-  return _http('GET', origin.authority, path, purpose, scheme: origin.scheme);
+  return _http(method, origin.authority, path, purpose, scheme: origin.scheme);
 }
 
 String _home(Map<String, String> env) =>

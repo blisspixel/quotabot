@@ -439,15 +439,17 @@ void main() {
             flush: true,
           );
         final recordPath = '${quotabotDir('auth').path}/$provider.json';
-        Link(recordPath).createSync(linkedTarget.path);
+        try {
+          Link(recordPath).createSync(linkedTarget.path);
+        } on FileSystemException {
+          if (Platform.isWindows) return;
+          rethrow;
+        }
 
         expect(TokenStore.loadRecord(provider), isNull);
         expect(TokenStore.load(provider), isNull);
         expect(linkedTarget.readAsStringSync(), contains('linked-secret'));
       },
-      skip: Platform.isWindows
-          ? 'ordinary Windows test accounts cannot create symbolic links'
-          : false,
     );
 
     test('save tolerates a reader during atomic replacement', () async {
@@ -1249,11 +1251,20 @@ void main() {
 
   group('OpenAiAuth', () {
     test('login reports a busy callback port before showing the URL', () async {
-      final server = await HttpServer.bind(
-        InternetAddress.loopbackIPv4,
-        1455,
-      );
-      addTearDown(() => server.close(force: true));
+      // This suite repeatedly opens and closes the fixed provider callback port,
+      // so claiming it can lose a race with a socket that is still being
+      // released. Poll rather than fail the run on the first attempt; the test
+      // only needs the port occupied before login runs.
+      HttpServer? server;
+      for (var attempt = 0; attempt < 25 && server == null; attempt++) {
+        try {
+          server = await HttpServer.bind(InternetAddress.loopbackIPv4, 1455);
+        } on SocketException {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+      expect(server, isNotNull, reason: 'could not occupy callback port 1455');
+      addTearDown(() => server!.close(force: true));
       var showedUrl = false;
 
       await expectLater(
@@ -1279,11 +1290,25 @@ void main() {
         throwsA(isA<StateError>()),
       );
 
-      final server = await HttpServer.bind(
-        InternetAddress.loopbackIPv4,
-        1455,
+      // The provider registers a fixed callback port, so this check cannot move
+      // to an ephemeral one. Releasing a listening socket is not instantaneous
+      // on every platform, so poll briefly rather than asserting on the first
+      // attempt: the point is that the port becomes bindable again, not that it
+      // is bindable within a single event-loop turn.
+      HttpServer? server;
+      for (var attempt = 0; attempt < 25 && server == null; attempt++) {
+        try {
+          server = await HttpServer.bind(InternetAddress.loopbackIPv4, 1455);
+        } on SocketException {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+      expect(
+        server,
+        isNotNull,
+        reason: 'login never released callback port 1455',
       );
-      await server.close(force: true);
+      await server!.close(force: true);
     });
 
     test('refresh maps the token response and keeps rotation', () async {

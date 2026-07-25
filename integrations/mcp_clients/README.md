@@ -4,13 +4,17 @@ Runnable adoption snippets for using quotabot as a routing MCP server from
 Python or TypeScript. They call quota metadata tools only. They do not send
 prompts, code, or model requests.
 
-## SDK guidance checked June 29, 2026
+## SDK guidance checked July 21, 2026
 
 - Python: use the stable MCP Python SDK v1 line for production clients and pin
   `mcp>=1.28,<2`. PyPI latest was `1.28.1` when checked.
 - TypeScript: use `@modelcontextprotocol/sdk` and the high-level `Client` with
   `StreamableHTTPClientTransport` or `StdioClientTransport`. npm latest was
   `1.29.0` when checked.
+- TypeScript snippets require Node.js 20 or later. The lock overrides the MCP
+  SDK's transitive Hono Node adapter to patched version 2.0.11 because versions
+  below 2.0.5 are affected by the Windows path traversal in
+  [GHSA-frvp-7c67-39w9](https://github.com/advisories/GHSA-frvp-7c67-39w9).
 - Prefer stdio when the MCP client can spawn quotabot directly. Use Streamable
   HTTP when a host requires HTTP, keeping the endpoint on loopback and enabling
   bearer auth for long-lived processes.
@@ -21,8 +25,8 @@ prompts, code, or model requests.
   `notifications/resources/updated` to receive `quotabot.alerts.v1`.
 
 Sources checked: MCP Python SDK v1.x README and client docs, MCP Python SDK v1.x
-`streamable_http.py`, MCP TypeScript SDK v1.x README, client source, and
-Streamable HTTP transport source.
+`streamable_http.py`, MCP TypeScript SDK v1.x README, client source, Streamable
+HTTP transport source, and the Hono Node adapter advisory and v2 release notes.
 
 ## Start quotabot
 
@@ -34,15 +38,9 @@ python quotabot_mcp_stdio.py
 npx tsx quotabot_mcp_stdio.ts
 ```
 
-Streamable HTTP snippets expect a running loopback server:
-
-```bash
-cd collector
-dart run bin/mcp_server.dart --http --port 8722 --path /mcp
-```
-
-With bearer auth, keep the secret in an environment variable rather than a
-literal command argument or an undocumented scratch file:
+Streamable HTTP requires bearer auth. Keep the secret in an environment
+variable rather than a literal command argument or an undocumented scratch
+file:
 
 ```bash
 cd collector
@@ -79,10 +77,11 @@ python integrations/mcp_clients/quotabot_mcp_http.py
 python integrations/mcp_clients/quotabot_mcp_stdio.py
 ```
 
-Optional environment:
+Environment:
 
 - `QUOTABOT_MCP_URL`: defaults to `http://127.0.0.1:8722/mcp`.
-- `QUOTABOT_MCP_TOKEN`: bearer token for Streamable HTTP.
+- `QUOTABOT_MCP_TOKEN`: required bearer token for Streamable HTTP; use at least
+  32 characters.
 - `QUOTABOT_TASK`: `simple`, `standard`, or `hard`, sent to `suggest_model`.
 - `QUOTABOT_COLLECTOR_DIR`: collector directory for stdio. Defaults to this
   repository's `collector/`.
@@ -95,6 +94,8 @@ loopback spellings, embedded credentials, fragments, and malformed ports before
 reading the bearer token or constructing the HTTP transport. Explicit ports,
 paths, and query strings are allowed. The check intentionally does not resolve
 DNS names.
+HTTP POST bodies must declare their length and cannot exceed 256 KiB. The Python
+and TypeScript MCP SDK transports set the length automatically.
 
 ## TypeScript
 

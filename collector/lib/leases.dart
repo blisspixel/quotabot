@@ -685,24 +685,19 @@ List<RouteLease> _readLeaseLedger(File file) {
   if (file.lengthSync() > 1024 * 1024) {
     throw FileSystemException('oversized lease ledger', file.path);
   }
-  Object? decoded;
-  try {
-    decoded = jsonDecode(file.readAsStringSync());
-  } on FormatException {
-    throw FileSystemException('invalid lease ledger', file.path);
-  }
+  final decoded = jsonDecode(file.readAsStringSync());
   if (decoded is! List<Object?>) {
-    throw FileSystemException('invalid lease ledger', file.path);
+    throw const FormatException('lease ledger is not a JSON array');
   }
   final leases = <RouteLease>[];
   for (final entry in decoded) {
     if (entry is! Map<Object?, Object?>) {
-      throw FileSystemException('invalid lease ledger', file.path);
+      continue;
     }
     try {
       leases.add(RouteLease.fromJson(entry.cast<String, dynamic>()));
     } catch (_) {
-      throw FileSystemException('invalid lease ledger', file.path);
+      continue;
     }
   }
   return leases;

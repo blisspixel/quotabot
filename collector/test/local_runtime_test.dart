@@ -13,6 +13,10 @@ LocalModel _m(
   int? expiresAt,
   int? context,
   bool cloud = false,
+  bool? tools,
+  bool? vision,
+  bool? embedding,
+  String? digest,
 }) =>
     (
       name: name,
@@ -23,6 +27,10 @@ LocalModel _m(
       expiresAt: expiresAt,
       context: context,
       cloud: cloud,
+      tools: tools,
+      vision: vision,
+      embedding: embedding,
+      digest: digest,
     );
 
 void main() {
@@ -172,6 +180,31 @@ void main() {
       final joined = q.details.join(' | ');
       expect(joined, contains('MB'));
       expect(joined, contains('2 models loaded'));
+    });
+
+    test('carries declared capabilities onto the model inventory', () {
+      final q = localRuntimeQuota(
+        id: 'ollama',
+        name: 'Ollama',
+        asOf: 0,
+        installed: [
+          _m('capable:8b', tools: true, vision: true),
+          _m('text-only:8b', tools: false, vision: false),
+          _m('undeclared:8b'),
+        ],
+        loaded: const [],
+      );
+      final capable = q.models.firstWhere((m) => m.id == 'capable:8b');
+      expect(capable.tools, isTrue);
+      expect(capable.vision, isTrue);
+      final textOnly = q.models.firstWhere((m) => m.id == 'text-only:8b');
+      expect(textOnly.tools, isFalse);
+      expect(textOnly.vision, isFalse);
+      // A runtime that declared nothing stays unknown, so a capability
+      // requirement keeps failing closed against it.
+      final undeclared = q.models.firstWhere((m) => m.id == 'undeclared:8b');
+      expect(undeclared.tools, isNull);
+      expect(undeclared.vision, isNull);
     });
   });
 

@@ -42,6 +42,7 @@ ProviderQuota _local(
   String status,
   List<String> details, {
   bool active = false,
+  required List<ModelInfo> models,
 }) => ProviderQuota(
   provider: id,
   displayName: name,
@@ -52,6 +53,7 @@ ProviderQuota _local(
   status: status,
   active: active,
   details: details,
+  models: models,
 );
 
 int _now() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -85,14 +87,41 @@ List<ProviderQuota> demoData() => [
     _w('weekly', 57, 540000),
   ]),
   _p('cursor', 'Cursor', 'Pro', 'you@example.com', [_w('monthly', 38, 745200)]),
-  _local('ollama', 'Ollama', '3 models', 'qwen2.5-coder 7B Q4 loaded', const [
-    '4.4 GB VRAM . 32K ctx',
-    '3 installed . 18.6 GB on disk',
-  ], active: true),
-  _local('lmstudio', 'LM Studio', '2 models', 'llama-3.1-8B loaded', const [
-    '5.1 GB VRAM . 16K ctx',
-    '2 installed . 12.0 GB on disk',
-  ], active: true),
+  _local(
+    'ollama',
+    'Ollama',
+    '3 models',
+    'qwen2.5-coder 7B Q4 loaded',
+    const ['4.4 GB VRAM . 32K ctx', '3 installed . 18.6 GB on disk'],
+    active: true,
+    models: const [
+      ModelInfo(
+        id: 'qwen2.5-coder:7b',
+        displayName: 'qwen2.5-coder 7B Q4',
+        contextTokens: 32768,
+        local: true,
+        loaded: true,
+        quant: 'Q4',
+      ),
+    ],
+  ),
+  _local(
+    'lmstudio',
+    'LM Studio',
+    '2 models',
+    'llama-3.1-8B loaded',
+    const ['5.1 GB VRAM . 16K ctx', '2 installed . 12.0 GB on disk'],
+    active: true,
+    models: const [
+      ModelInfo(
+        id: 'llama-3.1-8b',
+        displayName: 'llama-3.1-8B',
+        contextTokens: 16384,
+        local: true,
+        loaded: true,
+      ),
+    ],
+  ),
 ];
 
 /// About 40 days of hourly buckets per metered provider so the analytics views

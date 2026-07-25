@@ -2,10 +2,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:quotabot_collector/analysis.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/insights.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/models.dart';
+import 'package:quotabot_collector/palette.dart';
 
 import 'headroom_colors.dart';
 import 'profile_ui.dart' show quotaDisplayKey, quotaShouldShowAccountLabel;
@@ -14,6 +16,12 @@ import 'typography.dart';
 
 /// Health color on the shared green-to-red scale (input is remaining free %).
 Color fleetColor(num freePct) => headroomColor(freePct);
+
+/// Health color for text on the current Analytics card surface.
+Color fleetTextColor(num freePct, {required bool dark}) => headroomColor(
+  freePct,
+  palette: dark ? kDefaultPalette : paletteFromSpec('light'),
+);
 
 /// The time window the dashboard is showing.
 enum FleetRange {
@@ -48,6 +56,9 @@ class FleetScreen extends StatefulWidget {
   final bool dark;
   final bool showAccounts;
   final FleetRange initialRange;
+  final List<AnalyticsStorageNotice> analyticsNotices;
+  final List<AnalyticsStorageIncident> analyticsIncidents;
+  final bool analyticsIncidentInventoryPartial;
 
   const FleetScreen({
     super.key,
@@ -57,6 +68,9 @@ class FleetScreen extends StatefulWidget {
     this.routedRequests,
     this.showAccounts = false,
     this.initialRange = FleetRange.now,
+    this.analyticsNotices = const [],
+    this.analyticsIncidents = const [],
+    this.analyticsIncidentInventoryPartial = false,
   });
 
   @override
@@ -65,8 +79,23 @@ class FleetScreen extends StatefulWidget {
 
 class _FleetScreenState extends State<FleetScreen> {
   late FleetRange _range = widget.initialRange;
+  final ScrollController _scrollController = ScrollController();
 
   bool get dark => widget.dark;
+  Color get _blueText =>
+      dark ? const Color(0xFF58A6FF) : const Color(0xFF285AC8);
+  Color get _greenText =>
+      dark ? const Color(0xFF3FB950) : const Color(0xFF238636);
+  Color get _amberText =>
+      dark ? const Color(0xFFD29922) : const Color(0xFF9A6700);
+  Color get _orangeText =>
+      dark ? const Color(0xFFDB6D28) : const Color(0xFFB45014);
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   /// The history buckets for [q], keyed the way the dashboard stores them
   /// (provider|account when the account is specific), with a plain provider-id
@@ -75,6 +104,17 @@ class _FleetScreenState extends State<FleetScreen> {
       widget.buckets[quotaDisplayKey(q)] ??
       widget.buckets[q.provider] ??
       const <HeadroomBucket>[];
+
+  List<AnalyticsStorageNotice> get _relevantAnalyticsNotices {
+    final identities = widget.data.map(quotaIdentityKeyFor).toSet();
+    return [
+      for (final notice in widget.analyticsNotices)
+        if (identities.contains(
+          quotaIdentityKey(notice.provider, notice.account),
+        ))
+          notice,
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -87,6 +127,16 @@ class _FleetScreenState extends State<FleetScreen> {
     );
 
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final analyticsNotices = _relevantAnalyticsNotices;
+    final analyticsIncidents = [
+      for (final incident in widget.analyticsIncidents)
+        if (!incident.exactAccountInSnapshot) incident,
+    ];
+    final hasBucketStorageConflict =
+        analyticsNotices.any((notice) => notice.tiers.contains('buckets')) ||
+        analyticsIncidents.any(
+          (incident) => incident.tiers.contains('buckets'),
+        );
     final providerCounts = _providerCounts();
     final nodes = <_Node>[];
     for (final q in widget.data) {
@@ -107,11 +157,39 @@ class _FleetScreenState extends State<FleetScreen> {
       children: [
         _tabs(c),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-            child: _range == FleetRange.now
-                ? _liveView(nodes, now, c)
-                : _historyView(now, c),
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+              child: _range == FleetRange.now
+                  ? _liveView(nodes, now, c)
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (analyticsNotices.isNotEmpty ||
+                            analyticsIncidents.isNotEmpty ||
+                            widget.analyticsIncidentInventoryPartial) ...[
+                          _analyticsStorageWarning(
+                            analyticsNotices,
+                            analyticsIncidents,
+                            c,
+                            inventoryPartial:
+                                widget.analyticsIncidentInventoryPartial,
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        _historyView(
+                          now,
+                          c,
+                          hasStorageConflict: hasBucketStorageConflict,
+                          hasUnverifiedStorage:
+                              widget.analyticsIncidentInventoryPartial,
+                        ),
+                      ],
+                    ),
+            ),
           ),
         ),
       ],
@@ -169,7 +247,7 @@ class _FleetScreenState extends State<FleetScreen> {
               child: _chip(
                 '${pool.round()}%',
                 'pool free',
-                fleetColor(pool),
+                fleetTextColor(pool, dark: dark),
                 c,
               ),
             ),
@@ -178,7 +256,7 @@ class _FleetScreenState extends State<FleetScreen> {
               child: _chip(
                 freest.label,
                 'most headroom (${freest.free.round()}%)',
-                fleetColor(freest.free),
+                fleetTextColor(freest.free, dark: dark),
                 c,
               ),
             ),
@@ -282,7 +360,7 @@ class _FleetScreenState extends State<FleetScreen> {
     final pipe = _pipeLine(summary);
     final pipeColor = summary.pipeHealth == litellmPipeHealthHealthy
         ? c.muted
-        : const Color(0xFFD29922);
+        : _amberText;
     return Padding(
       padding: const EdgeInsets.only(top: 10),
       child: _card(
@@ -298,7 +376,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   child: _routeMetric(
                     '${summary.totalRequests}',
                     '${summary.routedRequests} routed',
-                    const Color(0xFF58A6FF),
+                    _blueText,
                     c,
                   ),
                 ),
@@ -307,7 +385,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   child: _routeMetric(
                     _compactInt(summary.totalTokens),
                     'tokens',
-                    const Color(0xFF3FB950),
+                    _greenText,
                     c,
                   ),
                 ),
@@ -316,7 +394,7 @@ class _FleetScreenState extends State<FleetScreen> {
                   child: _routeMetric(
                     _money(summary.cost),
                     'tracked cost',
-                    const Color(0xFFD29922),
+                    _amberText,
                     c,
                   ),
                 ),
@@ -330,9 +408,7 @@ class _FleetScreenState extends State<FleetScreen> {
               style: TextStyle(
                 fontSize: AppType.caption,
                 height: 1.3,
-                color: summary.paidApiRequests > 0
-                    ? const Color(0xFFD29922)
-                    : c.muted,
+                color: summary.paidApiRequests > 0 ? _amberText : c.muted,
               ),
             ),
             const SizedBox(height: 4),
@@ -432,10 +508,100 @@ class _FleetScreenState extends State<FleetScreen> {
 
   // ---- history (7d / 90d) ---------------------------------------------
 
+  Widget _analyticsStorageWarning(
+    List<AnalyticsStorageNotice> notices,
+    List<AnalyticsStorageIncident> incidents,
+    ({Color panel, Color fg, Color muted, Color line}) c, {
+    required bool inventoryPartial,
+  }) {
+    final summary = notices.isEmpty && incidents.isEmpty
+        ? 'History status incomplete - local analytics markers could not all '
+              'be verified within the bounded inventory scan. An empty '
+              'incident list does not prove that local analytics are clear. '
+              'Current quota and routing are unaffected. Run quotabot doctor '
+              'for details. Install the CLI from Setup first if needed.'
+        : notices.isEmpty
+        ? _unavailableAnalyticsStorageMessage(incidents)
+        : incidents.isEmpty && notices.length == 1
+        ? '${notices.single.summary} The desktop cannot perform this '
+              'recovery. Install the CLI from Setup first if needed.'
+        : incidents.isEmpty
+        ? 'History incomplete - local analytics changed unexpectedly '
+              'for ${notices.length} provider accounts. Affected analytics '
+              'are quarantined. Close every older quotabot process now. '
+              'Exact merge is unavailable. Run quotabot doctor for the '
+              'scoped archive-and-reset path. The desktop cannot perform '
+              'this recovery. Install the CLI from Setup first if needed.'
+        : 'History incomplete - local analytics remain quarantined for '
+              '${notices.length} current and ${incidents.length} accounts '
+              'not currently available. Current quota and routing are '
+              'unaffected. Close every older quotabot process now. Run '
+              'quotabot doctor for current accounts. Reconnect any signed-out '
+              'account for exact recovery targeting. The desktop cannot '
+              'perform this recovery. Install the CLI from Setup first if '
+              'needed.';
+    final message = !inventoryPartial || (notices.isEmpty && incidents.isEmpty)
+        ? summary
+        : '$summary Inventory inspection was also incomplete, so this list '
+              'may omit another local incident.';
+    const amber = Color(0xFFD29922);
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: message,
+      child: ExcludeSemantics(
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: amber.withValues(alpha: dark ? 0.12 : 0.08),
+            border: Border.all(color: amber.withValues(alpha: 0.72)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            message,
+            style: TextStyle(
+              color: c.fg,
+              fontSize: 12,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _unavailableAnalyticsStorageMessage(
+    List<AnalyticsStorageIncident> incidents,
+  ) {
+    if (incidents.length == 1) {
+      final incident = incidents.single;
+      final tier = incident.tiers.length == 1
+          ? incident.tiers.single == 'history'
+                ? 'recent history'
+                : 'hourly analytics'
+          : 'recent history and hourly analytics';
+      return 'History incomplete - a ${incident.providerName} account not '
+          'currently available has local $tier in quarantine. Current quota '
+          'and routing are unaffected. If the account is signed out, reconnect '
+          'it, then run quotabot doctor for exact recovery targeting. The '
+          'desktop cannot perform this recovery. Install the CLI from Setup '
+          'first if needed.';
+    }
+    return 'History incomplete - local analytics for ${incidents.length} '
+        'accounts not currently available remain quarantined. Current quota '
+        'and routing are unaffected. Reconnect any signed-out account, then '
+        'run quotabot doctor for exact recovery targeting. The desktop cannot '
+        'perform this recovery. Install the CLI from Setup first if needed.';
+  }
+
   Widget _historyView(
     int now,
-    ({Color panel, Color fg, Color muted, Color line}) c,
-  ) {
+    ({Color panel, Color fg, Color muted, Color line}) c, {
+    required bool hasStorageConflict,
+    required bool hasUnverifiedStorage,
+  }) {
     final textScaler = MediaQuery.textScalerOf(context);
     final tz = DateTime.now().timeZoneOffset;
     final days = _range.days!;
@@ -483,7 +649,14 @@ class _FleetScreenState extends State<FleetScreen> {
         c,
         'OVER $days DAYS',
         'history',
-        _empty('history is still warming up', c.muted),
+        _empty(
+          hasStorageConflict
+              ? 'affected history is unavailable'
+              : hasUnverifiedStorage
+              ? 'history status is unavailable'
+              : 'history is still warming up',
+          c.muted,
+        ),
       );
     }
 
@@ -726,7 +899,7 @@ class _FleetScreenState extends State<FleetScreen> {
       trendStr =
           '${up ? '▲' : '▼'} ${trend.abs().toStringAsFixed(1)}%/d'
           '${r2 == null ? '' : ' r2 ${r2.toStringAsFixed(2)}'}';
-      trendCol = up ? const Color(0xFF3FB950) : const Color(0xFFDB6D28);
+      trendCol = up ? _greenText : _orangeText;
     }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -933,6 +1106,21 @@ class _FleetScreenState extends State<FleetScreen> {
     String subtitle,
     Widget child,
   ) {
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final titleText = Text(
+      title,
+      style: TextStyle(
+        fontSize: AppType.bodySmall,
+        fontWeight: FontWeight.w800,
+        color: c.fg,
+      ),
+    );
+    final subtitleText = Text(
+      subtitle,
+      maxLines: largeText ? 2 : 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: AppType.caption, color: c.muted),
+    );
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: BoxDecoration(
@@ -943,29 +1131,21 @@ class _FleetScreenState extends State<FleetScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: AppType.bodySmall,
-                  fontWeight: FontWeight.w800,
-                  color: c.fg,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: AppType.caption, color: c.muted),
-                ),
-              ),
-            ],
-          ),
+          if (largeText)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [titleText, const SizedBox(height: 2), subtitleText],
+            )
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                titleText,
+                const SizedBox(width: 8),
+                Expanded(child: subtitleText),
+              ],
+            ),
           const SizedBox(height: 10),
           child,
         ],
@@ -1186,7 +1366,7 @@ class _BarsPainter extends CustomPainter {
               text: '  $reset',
               style: TextStyle(
                 fontSize: AppType.label,
-                color: dark ? const Color(0xFF8A91A0) : const Color(0xFF6B7280),
+                color: dark ? const Color(0xFF8A91A0) : const Color(0xFF69707E),
               ),
             ),
         ],

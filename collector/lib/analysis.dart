@@ -1579,7 +1579,7 @@ RouteSuggestion suggestRoute(
   if (usable.isEmpty) {
     return result(
       null,
-      'No live quota data. Open the provider app, or use quotabot login for Grok/Antigravity.',
+      'No live quota data. Run quotabot doctor for provider-specific recovery steps.',
       decisionCode: RouteDecisionCode.noData,
     );
   }

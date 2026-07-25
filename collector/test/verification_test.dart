@@ -683,7 +683,7 @@ void main() {
       expect(detail, isNot(contains(identity)));
     });
 
-    test('manual entries are noted as self-reported, never failed', () {
+    test('manual entries stay honest but cannot satisfy strict live scope', () {
       final report = buildVerificationReport(
         [
           ProviderQuota(
@@ -703,9 +703,38 @@ void main() {
         requireLive: true,
       );
       expect(fleet(report, 'manual_entries').status, VerifyStatus.info);
-      expect(report.allLiveReadsSucceeded, isTrue,
+      expect(report.honestyPassed, isTrue);
+      expect(report.selectedAdapterCount, 0);
+      expect(report.liveReadScopeValid, isFalse);
+      expect(report.allLiveReadsSucceeded, isFalse,
           reason: 'manual rows are not provider adapter reads');
-      expect(report.passed, isTrue);
+      expect(report.passed, isFalse);
+    });
+
+    test('selected adapter without a returned row fails strict live scope', () {
+      final report = buildVerificationReport(
+        const [],
+        now,
+        os: 'windows',
+        filtered: true,
+        requireLive: true,
+        runtimeAccess: buildRuntimeAccessReport(
+          generatedAt: now,
+          includeReads: true,
+          includeNetwork: true,
+          observedProviderIds: {claudeProviderId},
+          collectionExecuted: true,
+          os: 'windows',
+          environment: const {},
+        ),
+      );
+
+      expect(report.honestyPassed, isTrue);
+      expect(report.selectedAdapterCount, 1);
+      expect(report.liveReadScopeValid, isTrue);
+      expect(report.allLiveReadsSucceeded, isFalse);
+      expect(report.liveReadFailureCount, 1);
+      expect(report.passed, isFalse);
     });
   });
 
@@ -724,6 +753,8 @@ void main() {
       expect(json['passed'], isTrue);
       expect(json['honesty_passed'], isTrue);
       expect(json['require_live'], isFalse);
+      expect(json['selected_adapter_count'], 1);
+      expect(json['live_read_scope_valid'], isTrue);
       expect(json['all_live_reads_succeeded'], isTrue);
       final provider = (json['providers'] as List).single as Map;
       expect(provider['provider'], 'claude');

@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:quotabot_collector/ansi.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/storage_keys.dart';
 import 'package:test/test.dart';
 
 import '../bin/collect.dart' as cli;
@@ -23,6 +25,107 @@ void main() {
   Future<ProcessResult> runCli(List<String> args) {
     return runCollectCli(args, environment: {'LOCALAPPDATA': temp.path});
   }
+
+  test('doctor does not call temporary transport failures a login problem', () {
+    const cases = [
+      ('Claude usage read timed out', providerPipeHealthThrottled, null),
+      ('HTTP 429', providerPipeHealthThrottled, 429),
+      ('HTTP 503', providerPipeHealthDegraded, 503),
+    ];
+
+    for (final (error, pipeHealth, httpStatus) in cases) {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: 1782046566,
+        ok: false,
+        error: error,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+      );
+
+      expect(cli.doctorRecoveryHint(quota, 'ERROR'), isNull, reason: error);
+    }
+  });
+
+  test('analytics storage diagnostics stay scoped and identity safe', () {
+    final affected = ProviderQuota(
+      provider: codexProviderId,
+      displayName: 'Codex',
+      account: 'secret@example.com',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+    final healthy = ProviderQuota(
+      provider: claudeProviderId,
+      displayName: 'Claude',
+      account: 'healthy@example.com',
+      asOf: 1782000000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 30)],
+    );
+    const notice = AnalyticsStorageNotice(
+      provider: codexProviderId,
+      account: 'secret@example.com',
+      tiers: ['history', 'buckets'],
+      observedAt: 1782000100,
+    );
+    final notices = {quotaIdentityKeyFor(affected): notice};
+
+    final fields = cli.statsStorageNoticeFields(affected, notices);
+    final encoded = jsonEncode(fields);
+    expect(fields['storage_notice'], isA<Map<String, dynamic>>());
+    expect(encoded, contains('"state":"diverged"'));
+    expect(encoded, contains('"tiers":["history","buckets"]'));
+    expect(encoded, isNot(contains('secret@example.com')));
+    expect(encoded, isNot(contains(r'C:\Users')));
+    expect(cli.statsStorageNoticeFields(healthy, notices), isEmpty);
+    expect(
+      cli.analyticsStorageWarningForQuota(affected, notices),
+      allOf(
+        contains('ordered checkpoint proves both deltas'),
+        contains('quotabot doctor'),
+      ),
+    );
+    expect(cli.analyticsStorageWarningForQuota(healthy, notices), isNull);
+    expect(
+      cli.statsHistoryAvailabilityLabel(affected, notices),
+      'affected history unavailable',
+    );
+    expect(
+      cli.statsHistoryAvailabilityLabel(healthy, notices),
+      'no history yet',
+    );
+
+    const hiddenIncident = AnalyticsStorageIncident(
+      provider: codexProviderId,
+      tiers: ['buckets'],
+      recordedAt: 1782000100,
+      incidentId: '0123456789abcdef0123456789abcdef',
+    );
+    const inventory = AnalyticsIncidentInventory(
+      incidents: [hiddenIncident],
+      state: 'complete',
+      scope: 'all_local',
+      scannedMarkers: 1,
+      unverifiableMarkers: 0,
+      invalidMarkers: 0,
+      truncated: false,
+    );
+    final incidentFields = cli.analyticsIncidentSnapshotFields(inventory);
+    final incidentJson = jsonEncode(incidentFields);
+    expect(incidentJson, contains('"analytics_incident_inventory"'));
+    expect(incidentJson, contains('"exact_account_in_snapshot":false'));
+    expect(incidentJson, contains('"state":"complete"'));
+    expect(
+      cli.unavailableAnalyticsIncidentSummary([hiddenIncident]),
+      allOf(
+        contains('Codex account not currently available'),
+        contains('Current quota and routing are unaffected'),
+        contains('reconnect'),
+      ),
+    );
+  });
 
   test('doctor keeps sparse model quota separate from shared limits', () {
     const now = 1782046566;
@@ -152,6 +255,12 @@ void main() {
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.v1');
+    expect(json['snapshot_source'], 'simulation');
+    final incidentInventory =
+        json['analytics_incident_inventory'] as Map<String, dynamic>;
+    expect(incidentInventory['state'], 'suppressed');
+    expect(incidentInventory['scope'], 'simulation');
+    expect(incidentInventory['incidents'], isEmpty);
     final providers = json['providers'] as List;
     expect(providers, hasLength(1));
     final claude = providers.single as Map<String, dynamic>;
@@ -252,6 +361,41 @@ void main() {
     expect(result.stdout as String, isEmpty);
   });
 
+  test('check rejects unsafe exact account before collection', () async {
+    final unsafe = 'work${String.fromCharCode(7)}account';
+    final accountResult = await runCli([
+      'check',
+      'claude',
+      '--account=$unsafe',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    final providerResult = await runCli([
+      'check',
+      unsafe,
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(accountResult, 64);
+    expect(accountResult.stdout as String, isEmpty);
+    expect(
+      accountResult.stderr as String,
+      contains('bounded account identity'),
+    );
+    expect(
+      accountResult.stderr as String,
+      isNot(contains(String.fromCharCode(7))),
+    );
+    expectExitCode(providerResult, 64);
+    expect(providerResult.stdout as String, isEmpty);
+    expect(providerResult.stderr as String, contains('safe provider name'));
+    expect(
+      providerResult.stderr as String,
+      isNot(contains(String.fromCharCode(7))),
+    );
+  });
+
   test('check exits unavailable for an exhausted mock provider', () async {
     final result = await runCli([
       'check',
@@ -265,10 +409,21 @@ void main() {
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     expect(json['schema'], 'quotabot.check.v1');
     expect(json['as_of'], isA<int>());
+    expect(json['captured_at'], isA<int>());
+    expect(json['staleness_seconds'], isA<int>());
+    expect(json['snapshot_source'], 'simulation');
     expect(json['provider'], 'claude');
+    expect(json['matched_account_count'], 1);
+    expect(json['selection_mode'], 'only');
     expect(json['source_class'], 'authoritative_live');
+    expect(json['ok'], isTrue);
+    expect(json['live_read_succeeded'], isFalse,
+        reason: 'simulation must not claim an adapter read');
     expect(json['available'], isFalse);
     expect(json['headroom_percent'], 0);
+    final runtimeAccess = json['runtime_access'] as Map<String, dynamic>;
+    expect(runtimeAccess['collection_executed'], isFalse);
+    expect(runtimeAccess['providers'], isEmpty);
   });
 
   test('check exits unavailable for a stale cached mock provider', () async {
@@ -360,8 +515,47 @@ void main() {
     expect((json['ranked'] as List), hasLength(1));
   });
 
-  test('suggest applies active cross-process leases to simulated quota',
-      () async {
+  test('stats and doctor suppress ambient simulated-account storage', () async {
+    final cache = Directory('${temp.path}/quotabot/cache')
+      ..createSync(recursive: true);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final prior = HeadroomBucket(start: bucketStart(now) - 3600)..add(90);
+    final current = HeadroomBucket(start: bucketStart(now))..add(40);
+    File('${cache.path}/buckets_claude.json').writeAsStringSync(
+      jsonEncode([prior.toJson(), current.toJson()]),
+    );
+    File(
+      '${cache.path}/analytics_migration_claude_'
+      '${accountStorageStem('simulated')}.json',
+    ).writeAsStringSync('{invalid marker');
+
+    final stats = await runCli([
+      'stats',
+      '--json',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(stats, 0);
+    final report = jsonDecode(stats.stdout as String) as Map<String, dynamic>;
+    final claude = report['claude'] as Map<String, dynamic>;
+    expect(claude['samples'], 0);
+    expect(claude, isNot(contains('storage_notice')));
+
+    final doctor = await runCli([
+      'doctor',
+      '--no-color',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+    expectExitCode(doctor, 0);
+    final output = doctor.stdout as String;
+    expect(output, isNot(contains('History incomplete')));
+    expect(output, isNot(contains('Inventory incomplete')));
+    expect(output, isNot(contains('Local analytics incidents')));
+    expect(output, isNot(contains('storage_notice')));
+  });
+
+  test('suggest ignores active cross-process leases in simulation', () async {
     final leaseStore = FileRouteLeaseStore(
       dirFactory: () => Directory('${temp.path}/quotabot/leases'),
       idFactory: () => 'cli-lease',
@@ -386,11 +580,13 @@ void main() {
     expectExitCode(result, 0);
     final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
     final claude = (json['ranked'] as List).single as Map<String, dynamic>;
-    expect(claude['lease_discount_percent'], 50.0);
+    expect(claude.containsKey('lease_discount_percent'), isFalse);
     expect(
       (claude['effective_headroom_percent'] as num).toDouble(),
-      lessThan((claude['headroom_percent'] as num).toDouble()),
+      (claude['headroom_percent'] as num).toDouble(),
     );
+    final receipt = json['receipt'] as Map<String, dynamic>;
+    expect((receipt['snapshot'] as Map)['source'], 'simulation');
   });
 
   test('suggest human output names trust provenance', () async {
@@ -403,6 +599,7 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
+    expect(out, contains('SIMULATION - synthetic provider evidence'));
     expect(out, contains('quota plan'));
     expect(out, contains('live'));
     expect(out, contains('captured'));
@@ -525,8 +722,13 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
+    expect(out, contains('SIMULATION - synthetic provider evidence'));
     expect(out, contains('[live, authoritative, quota plan, captured'));
     expect(out, isNot(contains('Claude (simulated)')));
+    expect(
+      out,
+      isNot(contains('Detected installed agentic dev coding tools')),
+    );
   });
 
   test('doctor shows cached failure before generic login guidance', () async {
@@ -543,7 +745,31 @@ void main() {
     expect(doctor.stdout as String, contains('simulated stale cache'));
     expect(doctor.stdout as String, isNot(contains('quotabot login claude')));
     expect(help.stdout as String, contains('adds a refreshable path'));
-    expect(help.stdout as String, contains('confirm with doctor'));
+    expect(help.stdout as String, contains('inspect with doctor'));
+    expect(
+      help.stdout as String,
+      contains('--recover-analytics=P --account=A --tier=history|buckets'),
+    );
+    expect(
+      help.stdout as String,
+      contains(
+        'recovery: exact current account from unfiltered quotabot --json',
+      ),
+    );
+    expect(
+      help.stdout as String,
+      contains(
+        'machine-readable output where supported (including suggest, models, report, verify)',
+      ),
+    );
+    expect(
+      help.stdout as String,
+      isNot(
+        contains(
+          'machine-readable output (status/check/suggest/stats/json)',
+        ),
+      ),
+    );
     expect(
       help.stdout as String,
       contains(
@@ -564,19 +790,23 @@ void main() {
     expect(help.stdout as String, isNot(contains('keeps it live')));
   });
 
-  test('doctor human output labels failed quota-plan provenance', () async {
-    final result = await runCli([
-      'doctor',
-      '--no-color',
-      '--mock-provider=grok',
-      '--state=signed-out',
-    ]);
+  for (final provider in ['claude', 'codex', 'grok', 'antigravity']) {
+    test('doctor gives $provider an exact signed-out recovery command',
+        () async {
+      final result = await runCli([
+        'doctor',
+        '--no-color',
+        '--mock-provider=$provider',
+        '--state=signed-out',
+      ]);
 
-    expectExitCode(result, 0);
-    final out = result.stdout as String;
-    expect(out, contains('[error, authoritative, quota plan, captured'));
-    expect(out, contains('simulated signed-out state'));
-  });
+      expectExitCode(result, 0);
+      final out = result.stdout as String;
+      expect(out, contains('[error, authoritative, quota plan, captured'));
+      expect(out, contains('simulated signed-out state'));
+      expect(out, contains('-> run: quotabot login $provider'));
+    });
+  }
 
   test('doctor human output explains provider drift and recovery', () async {
     final result = await runCli([
@@ -618,6 +848,20 @@ void main() {
     expect(out, isNot(contains('note: this machine only')));
     expect(out, isNot(contains('local fallback; other devices may differ')));
     expect(out, isNot(contains('local runtime, loaded, this machine')));
+  }, timeout: Timeout.factor(2));
+
+  test('top snapshot keeps simulation provenance visible', () async {
+    final result = await runCli([
+      'top',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 0);
+    expect(
+      result.stdout as String,
+      contains('SIMULATION - synthetic provider evidence'),
+    );
   });
 
   test('doctor provenance does not call plan strings account identities', () {
@@ -651,7 +895,8 @@ void main() {
 
   test('future capture label does not present clock skew as fresh', () {
     expect(cli.routeCaptureAgeLabel(1050, 1000), cli.routeFutureCaptureLabel);
-    expect(cli.routeCaptureAgeLabel(1000, 1000), 'captured 0s ago');
+    expect(cli.routeCaptureAgeLabel(1000, 1000), 'captured just now');
+    expect(cli.routeCaptureAgeLabel(999, 1000), 'captured 1s ago');
   });
 
   test('invalid simulation state is a usage error', () async {
@@ -708,6 +953,19 @@ void main() {
     }
   });
 
+  test('invalid simulated command does not emit normal output', () async {
+    final result = await runCli([
+      'suggest',
+      '--mock-provider=claude',
+      '--state=healthy',
+      '--risk=bogus',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('--risk'));
+    expect(result.stdout as String, isEmpty);
+  });
+
   test('unknown command fails before producing a snapshot', () async {
     final result = await runCollectCli(
       ['definitely-not-a-command', '--json'],
@@ -756,10 +1014,11 @@ void main() {
 
     expectExitCode(result, 0);
     final out = result.stdout as String;
+    expect(out, contains('SIMULATION - synthetic provider evidence'));
     expect(out, contains('[red] Claude 5h at 0% free'));
     expect(out, contains('fallback: wait for claude'));
     expect(out, contains('[live, authoritative, quota plan, captured'));
-    expect(out, isNot(contains('simulated')));
+    expect(out, isNot(contains('claude (simulated)')));
   });
 
   test('watch provenance names cached route evidence without duplicate emails',
@@ -840,5 +1099,61 @@ void main() {
       result.stderr as String,
       contains('--waste-threshold must be between 0 and 100'),
     );
+  });
+
+  test('watch rejects a malformed fixed interval before collecting', () async {
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--interval=nope',
+      '--mock-provider=claude',
+      '--state=healthy',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(
+      result.stderr as String,
+      contains('--interval must be an integer number of seconds'),
+    );
+    expect(result.stdout as String, isNot(contains('all clear')));
+  });
+
+  test('watch diagnostics never echo a secret-capable webhook URL', () async {
+    const webhook =
+        'https://hooks.example.invalid/services/SYNTHETIC_SECRET_TOKEN';
+    final result = await runCli([
+      'watch',
+      '--once',
+      '--webhook=$webhook',
+    ]);
+
+    expectExitCode(result, 64);
+    expect(result.stderr as String, contains('webhook host is not loopback'));
+    expect(result.stderr as String, isNot(contains(webhook)));
+    expect(result.stderr as String, isNot(contains('SYNTHETIC_SECRET_TOKEN')));
+
+    final summary = cli.watchWebhookDeliverySummary(webhook);
+    expect(summary, contains('webhook delivery enabled'));
+    expect(summary, isNot(contains(webhook)));
+    expect(summary, isNot(contains('SYNTHETIC_SECRET_TOKEN')));
+  });
+
+  test('watch health reports one failure edge and one recovery edge', () {
+    final health = cli.WatchLoopHealth();
+
+    expect(
+      health.recordSnapshot(anyLive: false),
+      'quotabot watch: quota refresh failed; retrying with backoff.',
+    );
+    expect(health.failStreak, 1);
+    expect(health.recordPollFailed(), isNull);
+    expect(health.failStreak, 2);
+
+    expect(
+      health.recordSnapshot(anyLive: true),
+      'quotabot watch: quota refresh recovered.',
+    );
+    expect(health.failStreak, 0);
+    expect(health.recordSnapshot(anyLive: true), isNull);
   });
 }

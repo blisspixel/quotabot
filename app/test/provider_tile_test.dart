@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/main.dart';
@@ -30,7 +31,18 @@ Insights _ins({double? burn, double? burnSe}) => Insights(
   burnSePerHour: burnSe,
 );
 
-Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
+Widget _wrap(Widget child, {bool disableAnimations = false}) => MaterialApp(
+  builder: disableAnimations
+      ? (context, built) {
+          final media = MediaQuery.of(context);
+          return MediaQuery(
+            data: media.copyWith(disableAnimations: true),
+            child: built!,
+          );
+        }
+      : null,
+  home: Scaffold(body: child),
+);
 
 double _contrastRatio(Color foreground, Color background) {
   final lighter = foreground.computeLuminance() > background.computeLuminance()
@@ -290,7 +302,7 @@ void main() {
       final windowText = tester.widget<Text>(find.text(windowLabel));
       expect(modelText.maxLines, 1);
       expect(modelText.overflow, TextOverflow.ellipsis);
-      expect(windowText.maxLines, 1);
+      expect(windowText.maxLines, 2);
       expect(windowText.overflow, TextOverflow.ellipsis);
       expect(tester.takeException(), isNull);
       semantics.dispose();
@@ -762,11 +774,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a throttled read reads as throttled, not failed', (
-    tester,
-  ) async {
-    // A slow or rate-limited read retains last-known quota and reads as a
-    // temporary, self-recovering "throttled - retrying", not a red failure.
+  testWidgets('a slow read says provider slow, not throttled', (tester) async {
+    // A timeout retains last-known quota but does not claim an HTTP rate limit.
     final throttled = ProviderQuota.fromJson({
       ..._q(60).toJson(),
       'stale': true,
@@ -782,13 +791,149 @@ void main() {
 
     expect(find.text('40% last known'), findsOneWidget);
     expect(
-      find.text('throttled - retrying, showing last known'),
+      find.text('provider slow - retrying, showing last known'),
       findsOneWidget,
     );
     expect(find.text('live read failed - showing last known'), findsNothing);
     expect(
-      find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
+      find.bySemanticsLabel(RegExp('provider slow', caseSensitive: false)),
       findsWidgets,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a degraded read says provider error, not throttled', (
+    tester,
+  ) async {
+    final degraded = ProviderQuota.fromJson({
+      ..._q(60).toJson(),
+      'stale': true,
+      'ok': false,
+      'error': 'Antigravity fetchAvailableModels request returned HTTP 503',
+      'pipe_health': 'degraded',
+    });
+
+    await tester.pumpWidget(
+      _wrap(ProviderTile(quota: degraded, cardColor: Colors.white)),
+    );
+    await tester.pump();
+
+    expect(find.text('40% last known'), findsOneWidget);
+    expect(
+      find.text('provider error - retrying, showing last known'),
+      findsOneWidget,
+    );
+    expect(find.text('throttled - retrying, showing last known'), findsNothing);
+    expect(
+      find.bySemanticsLabel(RegExp('provider error', caseSensitive: false)),
+      findsWidgets,
+    );
+    expect(
+      find.bySemanticsLabel(RegExp('throttled', caseSensitive: false)),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final failure
+      in <
+        ({
+          String name,
+          String error,
+          String pipeHealth,
+          int? httpStatus,
+          int? retryAfterSeconds,
+          String summary,
+        })
+      >[
+        (
+          name: 'timeout',
+          error: 'Antigravity loadCodeAssist request timed out',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: null,
+          retryAfterSeconds: null,
+          summary: 'provider slow - retrying',
+        ),
+        (
+          name: 'rate limit',
+          error: 'Antigravity loadCodeAssist request returned HTTP 429',
+          pipeHealth: providerPipeHealthThrottled,
+          httpStatus: 429,
+          retryAfterSeconds: 120,
+          summary: 'rate limited - retrying in 2m',
+        ),
+        (
+          name: 'service error',
+          error: 'Antigravity fetchAvailableModels request returned HTTP 503',
+          pipeHealth: providerPipeHealthDegraded,
+          httpStatus: 503,
+          retryAfterSeconds: 45,
+          summary: 'provider error - retrying in 45s',
+        ),
+      ]) {
+    testWidgets('first-read ${failure.name} leads with recovery', (
+      tester,
+    ) async {
+      final quota = ProviderQuota.error(
+        'antigravity',
+        'Antigravity',
+        failure.error,
+        1782000000,
+        account: 'user@example.com',
+        pipeHealth: failure.pipeHealth,
+        httpStatus: failure.httpStatus,
+        retryAfterSeconds: failure.retryAfterSeconds,
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          ProviderTile(quota: quota, cardColor: Colors.white, onConnect: () {}),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text(failure.summary), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Connect'), findsNothing);
+      expect(
+        find.bySemanticsLabel(
+          RegExp(RegExp.escape(failure.error), caseSensitive: false),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('auth fallback preserves status and shows reconnect recovery', (
+    tester,
+  ) async {
+    final quota = ProviderQuota(
+      provider: 'antigravity',
+      displayName: 'Antigravity',
+      account: 'user@example.com',
+      asOf: 1782000000,
+      ok: true,
+      status: 'Gemini 3 Pro',
+      error:
+          'Antigravity loadCodeAssist request returned HTTP 403 - run: '
+          'quotabot login antigravity',
+      perMachine: true,
+      httpStatus: 403,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(quota: quota, cardColor: Colors.white, onConnect: () {}),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Gemini 3 Pro'), findsOneWidget);
+    expect(find.text('live quota needs reconnecting'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Connect'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp('HTTP 403', caseSensitive: false)),
+      findsOneWidget,
     );
     expect(tester.takeException(), isNull);
   });
@@ -951,6 +1096,75 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('provider interactions honor reduced motion', (tester) async {
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: _q(40),
+          cardColor: Colors.white,
+          insights: _ins(burn: 2, burnSe: 1),
+          onToggle: () {},
+        ),
+        disableAnimations: true,
+      ),
+    );
+    await tester.pump();
+
+    final focusTransition = tester.widget<AnimatedContainer>(
+      find.byType(AnimatedContainer),
+    );
+    final disclosureTransition = tester.widget<AnimatedRotation>(
+      find.byType(AnimatedRotation),
+    );
+    final meterTransition = tester.widget<TweenAnimationBuilder<double>>(
+      find.byType(TweenAnimationBuilder<double>),
+    );
+    expect(focusTransition.duration, Duration.zero);
+    expect(disclosureTransition.duration, Duration.zero);
+    expect(meterTransition.duration, Duration.zero);
+  });
+
+  testWidgets('provider disclosure caret anchors to the trailing card edge', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(340, 260));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final quota = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: 'Google Antigravity Professional',
+      account: 'a-very-long-account-name@example.com',
+      plan: 'team_premium_with_extended_access',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        SizedBox(
+          width: 340,
+          child: ProviderTile(
+            quota: quota,
+            cardColor: const Color(0xFF1A1A1A),
+            showAccounts: true,
+            onToggle: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final card = tester.getRect(find.byType(ProviderTile));
+    final caret = tester.getRect(find.byIcon(Icons.expand_more_rounded));
+    final planText = tester.widget<Text>(
+      find.text('team premium with extended access'),
+    );
+    expect(planText.maxLines, 1);
+    expect(planText.overflow, TextOverflow.ellipsis);
+    expect(card.right - caret.right, closeTo(12, 1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('analytics card semantics disambiguate visible accounts', (
     tester,
   ) async {
@@ -1097,14 +1311,79 @@ void main() {
     );
     await tester.pump();
 
-    // The headroom and the absolute reset share the right column; the day and
-    // time stay whole (matched by \s across the non-breaking space) so a long
-    // reset wraps cleanly under the headroom instead of orphaning "PM".
+    // The headroom and absolute reset share the right column at ordinary text.
+    // Safe spaces let the full day and time wrap only when the column needs it.
     expect(
       find.textContaining(
         RegExp(r'37% free\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s\d.*[AP]M'),
       ),
       findsOneWidget,
+    );
+    final value = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          (widget.data?.startsWith('37% free') ?? false) &&
+          (widget.data?.contains(RegExp(r'[AP]M')) ?? false),
+    );
+    expect(tester.widget<Text>(value).data, isNot(contains('\n')));
+    expect(
+      tester.renderObject<RenderParagraph>(value).didExceedMaxLines,
+      false,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('minimum width paints monthly and far reset at 2x text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 420));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final far = now + 9 * 86400;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: ProviderTile(
+            quota: ProviderQuota(
+              provider: claudeProviderId,
+              displayName: 'Claude',
+              account: 'default',
+              asOf: now,
+              windows: [
+                QuotaWindow(label: 'monthly', usedPercent: 63, resetsAt: far),
+              ],
+            ),
+            cardColor: const Color(0xFF1A1A1A),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final monthly = find.text('monthly');
+    expect(monthly, findsOneWidget);
+    expect(
+      tester.renderObject<RenderParagraph>(monthly).didExceedMaxLines,
+      false,
+    );
+    final value = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          (widget.data?.startsWith('37% free') ?? false) &&
+          (widget.data?.contains(RegExp(r'[AP]M')) ?? false),
+    );
+    expect(value, findsOneWidget);
+    expect(tester.widget<Text>(value).data, contains('\n'));
+    expect(
+      tester.renderObject<RenderParagraph>(value).didExceedMaxLines,
+      false,
     );
     expect(tester.takeException(), isNull);
   });

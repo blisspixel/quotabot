@@ -13,8 +13,11 @@ enum ColorDepth { none, ansi16, ansi256, truecolor }
 /// Detects color depth from the environment: NO_COLOR/CLICOLOR=0 or no terminal
 /// means none; COLORTERM=truecolor/24bit means truecolor; a 256-color TERM means
 /// ansi256; otherwise basic 16-color. Pure for testing.
-ColorDepth detectColorDepth(Map<String, String> env,
-    {required bool hasTerminal}) {
+ColorDepth detectColorDepth(
+  Map<String, String> env, {
+  required bool hasTerminal,
+  bool windowsHost = false,
+}) {
   if (env.containsKey('NO_COLOR')) return ColorDepth.none;
   if (env['CLICOLOR'] == '0') return ColorDepth.none;
   if (!hasTerminal) return ColorDepth.none;
@@ -43,6 +46,14 @@ ColorDepth detectColorDepth(Map<String, String> env,
     return ColorDepth.truecolor;
   }
   if (term.contains('256')) return ColorDepth.ansi256;
+  // A Windows console that is rendering our escape sequences at all has virtual
+  // terminal processing enabled, and every Windows release that supports it also
+  // supports 24-bit color. Neither classic conhost nor cmd.exe advertises that
+  // through COLORTERM or TERM, so detection by environment alone downgraded them
+  // to sixteen flat colors and silently discarded the gradient meters and every
+  // theme. TERM is honored above, so a user who exports a narrower one still
+  // wins.
+  if (windowsHost && !env.containsKey('TERM')) return ColorDepth.truecolor;
   return ColorDepth.ansi16;
 }
 

@@ -1223,13 +1223,22 @@ ModelSuggestion suggestModel(
   double expiringQuotaThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
   int expiringQuotaMaxHours = kDefaultExpiringQuotaMaxHours,
 }) {
-  final ranked = buildModelRegistry(snapshot, now,
+  final matched = buildModelRegistry(snapshot, now,
       catalog: catalog, requirements: requirements)
     ..sort((a, b) => _recommendCompare(
           a,
           b,
           expiringQuotaByProvider: expiringQuotaByProvider,
         ));
+  // A model the source declares as an embedding model cannot serve a generation
+  // request, so it is never a routing candidate. It stays visible in listings,
+  // which are inspection rather than a recommendation. An undeclared kind is
+  // never treated as non-generative.
+  final ranked = [
+    for (final e in matched)
+      if (e.model.embedding != true) e
+  ];
+  final embeddingOnly = ranked.isEmpty && matched.isNotEmpty;
   ModelEntry? pick;
   for (final e in ranked) {
     if (e.available) {
@@ -1239,10 +1248,13 @@ ModelSuggestion suggestModel(
   }
   final reason = pick == null
       ? (ranked.isEmpty
-          ? snapshot.any((quota) => quota.driftReason != null)
-              ? 'Provider drift leaves no trusted model-budget evidence; run '
-                  'quotabot verify before routing.'
-              : 'No model meets the requirements; relax them or connect a provider.'
+          ? embeddingOnly
+              ? 'The only models that match are embedding models, which cannot '
+                  'serve a generation request.'
+              : snapshot.any((quota) => quota.driftReason != null)
+                  ? 'Provider drift leaves no trusted model-budget evidence; run '
+                      'quotabot verify before routing.'
+                  : 'No model meets the requirements; relax them or connect a provider.'
           : ranked.every((entry) => entry.driftReason != null)
               ? 'Models match, but provider drift leaves only stale '
                   'last-trusted quota evidence; run quotabot verify before '

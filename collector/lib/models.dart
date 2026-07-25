@@ -991,6 +991,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           maxOutputTokens: m.maxOutputTokens,
           tools: m.tools,
           vision: m.vision,
+          embedding: m.embedding,
           reasoning: m.reasoning == null ? null : t(m.reasoning!),
           tier: m.tier == null ? null : t(m.tier!),
           quotaIncludedUntil: m.quotaIncludedUntil,
@@ -1094,6 +1095,13 @@ class ModelInfo {
   /// Whether the model accepts image input, when known.
   final bool? vision;
 
+  /// True when the source declares this an embedding model rather than a text
+  /// generator. Such a model stays listed for inspection but is never
+  /// recommended as a route, because quotabot routes generation requests and an
+  /// embedding model cannot serve one. Null means undeclared, which is never
+  /// treated as non-generative.
+  final bool? embedding;
+
   /// Reasoning-tier hint (e.g. "reasoning"), when known.
   final String? reasoning;
 
@@ -1136,6 +1144,7 @@ class ModelInfo {
     this.maxOutputTokens,
     this.tools,
     this.vision,
+    this.embedding,
     this.reasoning,
     this.tier,
     this.quotaIncludedUntil,
@@ -1154,6 +1163,7 @@ class ModelInfo {
         if (maxOutputTokens != null) 'max_output_tokens': maxOutputTokens,
         if (tools != null) 'tools': tools,
         if (vision != null) 'vision': vision,
+        if (embedding != null) 'embedding': embedding,
         if (reasoning != null) 'reasoning': reasoning,
         if (tier != null) 'tier': tier,
         if (quotaIncludedUntil != null)
@@ -1173,6 +1183,7 @@ class ModelInfo {
         maxOutputTokens: (j['max_output_tokens'] as num?)?.toInt(),
         tools: j['tools'] as bool?,
         vision: j['vision'] as bool?,
+        embedding: j['embedding'] as bool?,
         reasoning: j['reasoning'] as String?,
         tier: j['tier'] as String?,
         quotaIncludedUntil: (j['quota_included_until'] as num?)?.toInt(),

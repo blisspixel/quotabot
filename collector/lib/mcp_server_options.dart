@@ -12,9 +12,9 @@ Options:
   --host HOST         Loopback bind host: localhost, 127.0.0.1, or ::1.
   --port PORT         TCP port, 1..65535. Default: 8722.
   --path PATH         MCP endpoint path. Default: /mcp.
-  --token TOKEN       Optional bearer token. Prefer --token-file for real use.
-  --token-env NAME    Read the optional bearer token from an environment variable.
-  --token-file PATH   Read the optional bearer token from a local file.
+  --token TOKEN       Required HTTP bearer token. Prefer --token-file for real use.
+  --token-env NAME    Read the required HTTP bearer token from an environment variable.
+  --token-file PATH   Read the required HTTP bearer token from a local file.
   --help              Show this usage.
 ''';
 
@@ -98,6 +98,15 @@ class McpServerCliOptions {
         'HTTP MCP host must be loopback: localhost, 127.0.0.1, or ::1',
       );
     }
+    if (http &&
+        !help &&
+        token == null &&
+        tokenEnv == null &&
+        tokenFile == null) {
+      throw const FormatException(
+        'HTTP MCP requires --token-file, --token-env, or --token',
+      );
+    }
 
     return McpServerCliOptions(
       http: http,
@@ -169,5 +178,11 @@ Future<String?> loadMcpBearerToken(McpServerCliOptions options) async {
 String _nonEmptyToken(String value, String source) {
   final token = value.trim();
   if (token.isEmpty) throw FormatException('$source token must not be empty');
+  if (token.length < minMcpHttpBearerTokenCharacters) {
+    throw FormatException(
+      '$source token must be at least '
+      '$minMcpHttpBearerTokenCharacters characters',
+    );
+  }
   return token;
 }
