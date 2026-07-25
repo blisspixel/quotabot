@@ -1045,7 +1045,7 @@ class _DashboardState extends State<Dashboard>
       }
       if (mounted && !_trayUnavailable) {
         setState(() => _trayUnavailable = true);
-        WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+        _applySize();
       }
     }
   }
@@ -1107,6 +1107,24 @@ class _DashboardState extends State<Dashboard>
     if (mounted) setState(() {});
   }
 
+  @override
+  void onWindowEvent(String eventName) {
+    // Track visibility from the events the platform actually emits rather than
+    // only from the paths this class controls. Showing a hidden window - the
+    // single-instance doorbell calls windowManager.show() directly - emits
+    // 'show', never 'restore', so relying on onWindowRestore alone left the flag
+    // stuck false on a fully visible window and suppressed the periodic tick
+    // that refreshes capture ages and reset countdowns.
+    final visible = switch (eventName) {
+      'show' || 'restore' || 'maximize' || 'focus' => true,
+      'hide' || 'minimize' => false,
+      _ => null,
+    };
+    if (visible == null || visible == _windowVisible) return;
+    _windowVisible = visible;
+    if (visible && mounted) setState(() {});
+  }
+
   Future<bool> _persistPrefs({bool saveProfileUiState = false}) async {
     if (!widget._hostIntegration && widget.prefsSaver == null) {
       return !saveProfileUiState || _saveActiveProfileUiState();
@@ -1148,7 +1166,7 @@ class _DashboardState extends State<Dashboard>
         'unavailable',
       );
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   void _setProfileStorageWarning(String? warning) {
@@ -1160,7 +1178,7 @@ class _DashboardState extends State<Dashboard>
         'unavailable',
       );
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   /// Collects provider quota, off the UI isolate in production so the
@@ -1201,11 +1219,16 @@ class _DashboardState extends State<Dashboard>
       notices: analyticsStorageNoticesForQuotas(active),
       inventory: await analyticsStorageIncidentInventory(active),
     );
+    // Bounded: this runs after quota is already in hand, and a stalled
+    // directory scan on a redirected or roaming profile would otherwise
+    // hold the refresh open forever, leaving _refreshInFlight set so every
+    // later refresh returns the same dead future and auto-polling stops.
+    const budget = Duration(seconds: 30);
     try {
-      return await Isolate.run(compute);
+      return await Isolate.run(compute).timeout(budget);
     } catch (_) {
       try {
-        return await compute();
+        return await compute().timeout(budget);
       } catch (_) {
         return (
           notices: const <AnalyticsStorageNotice>[],
@@ -1287,7 +1310,15 @@ class _DashboardState extends State<Dashboard>
           : <String, BurnStat>{};
       // Track systemic failure...
       final anyLive = hasSuccessfulRefreshEvidence(active, nowSec);
-      _failStreak = anyLive ? 0 : _failStreak + 1;
+      // Back off only for genuine read failures. A fresh install where
+      // nothing is connected yet has no live evidence either, and treating
+      // that as a failure pushed the poll interval straight to hours, so a
+      // provider connected outside the app stayed invisible until a manual
+      // refresh. Nothing configured is a setup state, not a failure.
+      final anyConfigured = active.any(
+        (quota) => quota.windows.isNotEmpty || quota.stale || quota.isLocal,
+      );
+      _failStreak = anyLive || !anyConfigured ? 0 : _failStreak + 1;
       // Track throttling separately from a full failure: a provider can push
       // back (a timeout or a 429) while others read fine, so the refresh cadence
       // can escalate its back-off from that provider without waiting for the
@@ -1408,7 +1439,7 @@ class _DashboardState extends State<Dashboard>
         // its own errors, so an unawaited failure cannot escape.
         unawaited(_checkAndNotify());
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+      _applySize();
     } catch (error) {
       // Catch Error as well as Exception: a latent adapter fault (a bad cast,
       // .first on empty) surfaces as an Error, and the isolate-failure fallback
@@ -1483,7 +1514,7 @@ class _DashboardState extends State<Dashboard>
       }
       _insights = shrinkInsightsReliability(rawInsights);
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
     _scheduleNext(); // keep the "as of" label current even in demo mode
     if (Platform.environment['QUOTABOT_SHOT'] == '1') {
       Future.delayed(const Duration(milliseconds: 1500), () {
@@ -2123,7 +2154,7 @@ class _DashboardState extends State<Dashboard>
   void _finishFirstRunSetup() {
     if (_setupDone) return;
     setState(() => _setupDone = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
     unawaited(_persistPrefs());
   }
 
@@ -2139,7 +2170,7 @@ class _DashboardState extends State<Dashboard>
       expanded: _expanded.contains(key),
       onToggle: () => setState(() {
         if (!_expanded.remove(key)) _expanded.add(key);
-        WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+        _applySize();
       }),
       onContextMenu: (pos) => _showCardMenu(q, pos),
       onConnect: widget._hostIntegration && _canConnectProvider(q.provider)
@@ -3059,7 +3090,7 @@ class _DashboardState extends State<Dashboard>
     setState(() => _textSize = t);
     textScale.value = t.scale; // applied app-wide by the MaterialApp builder
     unawaited(_persistPrefs());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   void _setCadence(Cadence c) {

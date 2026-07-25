@@ -236,8 +236,18 @@ QuotaProfile? loadProfile(String name, {Directory? dir}) {
 List<QuotaProfile> listProfiles({Directory? dir}) {
   final out = <QuotaProfile>[];
   final seen = <String>{};
-  final root = profilesDir(root: dir);
   if (seen.add(defaultProfileName)) out.add(QuotaProfile.defaultProfile());
+  // Resolving the profiles directory creates it, which throws when the config
+  // location is missing or unwritable. That must not escape: the desktop loads
+  // profiles while starting up, so this would take the window down before it
+  // ever rendered, even though preference loading already degrades to defaults
+  // for exactly the same failure. Always return at least the default profile.
+  final Directory root;
+  try {
+    root = profilesDir(root: dir);
+  } catch (_) {
+    return out;
+  }
   try {
     for (final entry in root.listSync()) {
       if (entry is! File || !entry.path.endsWith('.json')) continue;

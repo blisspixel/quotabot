@@ -4,6 +4,36 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- The desktop dashboard could sit permanently empty while reporting a failed
+  refresh. Advisory analytics notices were computed in a second isolate with no
+  fallback after quota had already been collected, so an isolate that could not
+  spawn discarded a good fleet read; on a cold start there was no previous
+  snapshot to retain. The same refresh also loaded history and buckets from disk
+  inside its `setState` callback, where a throw mutated state without ever
+  scheduling a rebuild. Analytics now fall back to the calling isolate and then
+  to no notices, are bounded by their own deadline, and all analytics loading
+  happens before state is touched, guarded per provider.
+- The whole-collect deadline was shorter than a realistic slow fleet read, so
+  every refresh timed out and a cold start never displayed anything.
+- Refresh results were applied without `setState` whenever tracked window
+  visibility said hidden, so a desynced flag froze the dashboard on its first
+  frame with no recovery. Window visibility now follows the events the platform
+  actually emits, including a window shown by the single-instance doorbell,
+  which emits `show` rather than `restore`.
+- A fresh install with nothing connected counted every poll as a failed read and
+  backed off to a multi-hour interval, so a provider connected outside the app
+  stayed invisible until a manual refresh. Nothing configured is now treated as
+  a setup state.
+- Window resizing after a refresh could be deferred to a frame that was never
+  scheduled, leaving content clipped until unrelated activity forced a repaint.
+- Listing profiles no longer throws out of desktop startup when the per-user
+  config directory is missing or unwritable; it degrades to the default profile,
+  matching how preference loading already handles that failure.
+- Owner-only file hardening no longer resolves the account identity once per
+  hardened file, which serialized concurrent provider reads behind repeated
+  synchronous process calls.
+
 ### Changed
 - Scoped mixed-version Analytics recovery now previews whether raw history or
   aggregate buckets have one exact checkpoint-proven merge or require
