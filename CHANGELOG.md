@@ -4,6 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Added
+- `docs/PRINCIPLES.md` states what quotabot refuses to do - no account, no
+  subscription or paid tier, no telemetry of any kind, no advertising, no
+  inference call, and no hosted service to depend on - along with why each
+  refusal exists and the command that verifies it rather than asking to be
+  believed. The README carries a short version.
+- Seven more `top` palettes so the live view can match the terminal it sits in:
+  gruvbox, nord, dracula, catppuccin, tokyonight, a monochrome phosphor matrix,
+  and a full-spectrum rainbow. Select with `--theme=NAME`.
+
 ### Fixed
 - The desktop dashboard could sit permanently empty while reporting a failed
   refresh. Advisory analytics notices were computed in a second isolate with no

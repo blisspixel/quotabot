@@ -107,6 +107,22 @@ Highlights:
   webhooks remain loopback-only unless you explicitly allow an external host. No
   path sends prompts, code, model output, or other user content.
 
+## The deal
+
+No account. No subscription or paid tier. No telemetry, not opt-out and not
+opt-in. No advertising or upsell. No inference: this is a tool for people who
+use AI that makes no model call itself, so the meter never consumes the thing it
+measures. No lock-in either, because nothing it needs runs on our machines -
+there are none. If this project stopped tomorrow, your installed copy keeps
+working.
+
+Those are meant to be checked, not believed. `quotabot explain` prints every
+file read and network destination per adapter, `quotabot --json` is the whole
+snapshot in plain text, and pulling your network cable still renders cached
+quota, labeled stale, because nothing waits on a login.
+[docs/PRINCIPLES.md](docs/PRINCIPLES.md) states each promise, why it exists, and
+how to verify it yourself.
+
 ## What it shows
 
 Each provider is a card that defaults to a tight view: one bar per rolling window
