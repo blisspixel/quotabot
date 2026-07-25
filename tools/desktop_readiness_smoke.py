@@ -333,12 +333,18 @@ def write_report(path: Path, payload: dict[str, Any]) -> None:
         try:
             temporary.chmod(0o600)
         except OSError:
+            # Best-effort hardening only. This report carries no secret, and the
+            # mode is not honored on every platform this gate runs on, so a
+            # failure to narrow permissions must not discard the report itself.
             pass
         temporary.replace(path)
     finally:
         try:
             temporary.unlink(missing_ok=True)
         except OSError:
+            # Cleanup of a leftover temporary file. On the success path replace()
+            # already renamed it away, so this only runs when the write failed,
+            # and it must never mask that original failure.
             pass
 
 
