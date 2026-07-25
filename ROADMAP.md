@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-22. This file is the forward plan. It records brief shipped
+Updated 2026-07-25. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -84,6 +84,29 @@ by being correct, quiet, and predictable, not by being large.
   testable. Provider I/O stays isolated and bounded.
 - **Machine-enforced quality.** Analyzer, tests, coverage, security checks,
   packaging checks, and contract checks are release gates, not aspirations.
+
+## Next
+
+One item, so there is never a question of what to pick up:
+
+**Cut 0.9.4.** `main` carries a body of merged, CI-green work that no user can
+install: the last published release is 0.9.3, and `CHANGELOG.md` has
+accumulated an `Unreleased` section since. Publishing it is worth doing before
+any further feature work for two reasons. It closes the gap between what the
+installer delivers and what the code does, which is the difference between a
+tool people use and a repository. And it rehearses the exact tag, artifact,
+checksum, and provenance path that the 1.0 release gate has to pass anyway, on
+a release where a mistake costs nothing. The procedure is
+[docs/dev/RELEASE.md](docs/dev/RELEASE.md); start by aligning every version
+marker and running `python tools/check_release_version.py --tag v0.9.4`.
+
+After that, the 1.0 evidence gates in the table below are the work, and most of
+what remains is evidence rather than code: native macOS and Linux provider
+records, desktop signing and notarization, an accessibility smoke on native
+hosts, and dated idle-machine validation of the Claude and Codex grants. Those
+need hardware, an account, or a signing authority rather than a patch, so they
+cannot be closed from a development machine alone. The one open code item is
+local-first stretch behavior when cloud quota is low, in the 0.9 section.
 
 ## Current state
 
