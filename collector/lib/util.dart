@@ -307,6 +307,25 @@ Future<void> enforceOwnerOnlyDirectoryAsync(
   }
 }
 
+/// Metadata directories already hardened by this process, by resolved path.
+///
+/// Every metadata write hardens its parent directory, and a fleet read performs
+/// dozens of writes into the same few directories. Enforcement shells out to a
+/// synchronous process, so repeating it per file blocked the event loop and
+/// serialized provider reads that are otherwise concurrent.
+///
+/// Unlike a file - which these writes replace through a temporary path, so each
+/// one is a genuinely new object needing its own ACL - a directory is enforced
+/// in place and keeps that protection for the life of the process. Re-running
+/// the identical command on the same path cannot change the outcome, so the
+/// repeat is pure cost. A directory that disappears is recreated and hardened
+/// again below, and an injected runner is never cached so tests stay
+/// deterministic.
+final Set<String> _hardenedDirectories = <String>{};
+
+/// Forgets which directories were hardened. For tests that assert enforcement.
+void resetHardenedDirectoryCacheForTest() => _hardenedDirectories.clear();
+
 /// Best-effort owner-only permissions for non-secret metadata directories.
 void restrictOwnerOnlyDirectory(
   Directory dir, {
@@ -314,7 +333,13 @@ void restrictOwnerOnlyDirectory(
   WindowsIdentityLookup? identityLookup,
 }) {
   try {
-    if (!dir.existsSync()) dir.createSync(recursive: true);
+    final existed = dir.existsSync();
+    if (!existed) dir.createSync(recursive: true);
+    // Only a directory that already existed can have been hardened earlier: a
+    // freshly created one needs enforcement even if its path was seen before.
+    final cacheable = run == null && identityLookup == null;
+    final key = dir.path;
+    if (cacheable && existed && _hardenedDirectories.contains(key)) return;
     if (Platform.isWindows) {
       final user = windowsAclPrincipal(lookup: identityLookup);
       if (user == null) return;
@@ -328,6 +353,7 @@ void restrictOwnerOnlyDirectory(
       Process.runSync('chmod', ['700', dir.path]);
       if (Platform.isMacOS) Process.runSync('chmod', ['-N', dir.path]);
     }
+    if (cacheable) _hardenedDirectories.add(key);
   } catch (_) {}
 }
 

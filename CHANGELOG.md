@@ -30,9 +30,13 @@ Notable changes to quotabot. Newest first.
 - Listing profiles no longer throws out of desktop startup when the per-user
   config directory is missing or unwritable; it degrades to the default profile,
   matching how preference loading already handles that failure.
-- Owner-only file hardening no longer resolves the account identity once per
-  hardened file, which serialized concurrent provider reads behind repeated
-  synchronous process calls.
+- Owner-only hardening no longer repeats work that cannot change its outcome.
+  The account identity is resolved once per process rather than once per
+  hardened file, and a metadata directory is enforced once rather than on every
+  write into it. Enforcement shells out synchronously, so the repeats blocked
+  the event loop and serialized provider reads that are otherwise concurrent; a
+  full fleet read is now roughly twice as fast. Files are still hardened
+  individually, because each write replaces them through a temporary path.
 
 ### Changed
 - Scoped mixed-version Analytics recovery now previews whether raw history or
