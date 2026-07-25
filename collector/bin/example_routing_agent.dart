@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
+import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/util.dart';
 
 /// Simple worked example of an agent using quotabot as a routing primitive.
@@ -14,6 +15,14 @@ import 'package:quotabot_collector/util.dart';
 ///
 /// Run with: dart run bin/example_routing_agent.dart
 Future<void> main() async {
+  try {
+    await _run();
+  } finally {
+    closeSharedHttpClient();
+  }
+}
+
+Future<void> _run() async {
   print('quotabot routing example agent');
   print('collecting current quotas (local metadata only, zero tokens)...\n');
 

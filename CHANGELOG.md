@@ -39,6 +39,14 @@ Notable changes to quotabot. Newest first.
   and a full-spectrum rainbow. Select with `--theme=NAME`.
 
 ### Fixed
+- A reachable Ollama runtime no longer disappears from fleet snapshots when
+  installed-model metadata takes just over two seconds to answer. The essential
+  `/api/tags` inventory now has a five-second deadline, while optional loaded
+  state and capability detail remain on their shorter bounded deadlines.
+- One-shot CLI reads no longer wait about 15 seconds after their output is
+  complete. The pooled HTTP client that keeps fleet requests reliable now
+  closes when the CLI, stdio MCP server, or routing example exits, while the
+  desktop and long-running servers retain connection reuse for their lifetime.
 - An embedding model can no longer be recommended as a route. Ollama declares
   `completion` for every model that can generate text and LM Studio types a
   model `embedding`, so a model declared that way is now excluded from model
