@@ -89,28 +89,17 @@ by being correct, quiet, and predictable, not by being large.
 
 One item, so there is never a question of what to pick up:
 
-**Cut 0.9.4.** `main` carries a body of merged, CI-green work that no user can
-install: the last published release is 0.9.3, and `CHANGELOG.md` has
-accumulated an `Unreleased` section since. Publishing it is worth doing before
-any further feature work for two reasons. It closes the gap between what the
-installer delivers and what the code does, which is the difference between a
-tool people use and a repository. And it rehearses the exact tag, artifact,
-checksum, and provenance path that the 1.0 release gate has to pass anyway, on
-a release where a mistake costs nothing. The procedure is
-[docs/dev/RELEASE.md](docs/dev/RELEASE.md); start by aligning every version
-marker and running `python tools/check_release_version.py --tag v0.9.4`.
-
-After that, the 1.0 evidence gates in the table below are the work, and most of
-what remains is evidence rather than code: native macOS and Linux provider
-records, desktop signing and notarization, an accessibility smoke on native
-hosts, and dated idle-machine validation of the Claude and Codex grants. Those
-need hardware, an account, or a signing authority rather than a patch, so they
-cannot be closed from a development machine alone. The one open code item is
-local-first stretch behavior when cloud quota is low, in the 0.9 section.
+**Finish local-first stretch behavior when cloud quota is low.** 0.9.4 closes
+the accumulated release gap, leaving this as the one open code item in the 0.9
+section. After it is closed, the remaining 1.0 work is evidence: native macOS
+and Linux provider records, desktop signing and notarization, an accessibility
+smoke on native hosts, and dated idle-machine validation of the Claude and
+Codex grants. Those need hardware, an account, or a signing authority rather
+than a patch, so they cannot be closed from a development machine alone.
 
 ## Current state
 
-The current line, **0.9.3**, contains the implemented core of the first three
+The current line, **0.9.4**, contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
 implementation milestones are not the same as closing every 1.0 evidence gate.

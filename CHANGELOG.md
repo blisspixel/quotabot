@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.4 - 2026-07-25
+
 ### Added
 - Local models now carry the capabilities their runtime declares, so a
   capability filter can finally select one. Ollama declares tool use, vision,
