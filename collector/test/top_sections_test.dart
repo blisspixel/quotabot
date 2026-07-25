@@ -1,3 +1,4 @@
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:test/test.dart';
@@ -134,6 +135,41 @@ void main() {
         groups.selectable.map((q) => q.provider),
         ['claude', 'grok', 'codex', 'kiro'],
       );
+    });
+  });
+
+  group('routine provenance tags', () {
+    List<String> frame(List<ProviderQuota> providers, int width) {
+      final suggestion = suggestRoute(providers, _now);
+      return renderTopFrame(
+        providers: providers,
+        suggestion: suggestion,
+        now: _now,
+        width: width,
+        color: false,
+        clock: '12:00:00',
+      );
+    }
+
+    ProviderQuota healthy() => _q('claude', [_w(20)]);
+
+    ProviderQuota cached() => _q('kiro', [_w(20)], stale: true);
+
+    test('a wide frame elides the routine tag so the meter can grow', () {
+      final wide = frame([healthy()], 140).join('\n');
+      expect(wide, isNot(contains('(live, authoritative')));
+      // The meter is what the width buys back.
+      expect(wide, contains('%'));
+    });
+
+    test('a narrow frame keeps the routine tag', () {
+      expect(frame([healthy()], 90).join('\n'), contains('live'));
+    });
+
+    test('a tag with something to disclose survives any width', () {
+      // Cached evidence is the case a reader must not miss, so unlike the
+      // routine tag it is never traded away for meter width.
+      expect(frame([cached()], 140).join('\n'), contains('cached'));
     });
   });
 }

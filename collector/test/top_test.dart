@@ -443,7 +443,10 @@ void main() {
         [QuotaWindow(label: 'monthly', usedPercent: 45)],
         source: providerQuotaManualSource,
       ),
-    ], width: 140);
+      // Narrow enough that every provenance tag is rendered: on a wide terminal
+      // the routine live tag is deliberately elided so the meter can grow, which
+      // the following test pins.
+    ], width: 90);
 
     expect(
       lines.any(

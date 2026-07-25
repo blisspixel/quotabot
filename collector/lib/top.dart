@@ -196,6 +196,9 @@ const _rowCore = 2 + _nameW + _labelW + 3 + 10;
 const _resetCost = 2 + 13; // "  resets 4d12h"
 const _forecastCost = 13; // "  strand 76%" / "  ~4h left"
 const _minReadableBar = 10;
+
+/// Width at or above which the comfortable meter is protected from tags.
+const _tagReserveWidth = 100;
 const _minBar = 6;
 
 /// Which trailing columns fit at [width], decided once per frame so every row
@@ -314,6 +317,22 @@ String _topTrustTag(ProviderQuota q, int now) {
   if (spendClass != null) parts.add(spendClass);
   return ' (${parts.join(', ')})';
 }
+
+/// True when a row is an ordinary, current, account-wide read with nothing
+/// unusual to disclose, so its provenance tag repeats what the band heading and
+/// the meter already say. Cached, drifted, this-machine, passive, status-only,
+/// and failed rows are never routine: those tags are the whole point.
+bool _isRoutineLiveRead(ProviderQuota q, int now) =>
+    q.ok &&
+    !q.stale &&
+    !q.isLocal &&
+    !q.perMachine &&
+    q.driftReason == null &&
+    q.suspect == null &&
+    q.sourceClassViolation == null &&
+    q.sourceClass == ProviderSourceClass.authoritativeLive &&
+    q.windows.isNotEmpty &&
+    isTrustedQuotaEvidenceAt(q, now);
 
 String _topReadState(ProviderQuota q, int now) {
   if (q.driftReason != null) {
@@ -446,6 +465,17 @@ TopSectionGroups partitionTopSections(List<ProviderQuota> providers, int now) {
   return TopSectionGroups(active: active, cached: cached, idle: idle);
 }
 
+/// The width a provenance tag may claim on a quota row.
+///
+/// The meter is the reason this view exists: it is what the eye reads first and
+/// what makes a full window legible at a glance. Budgeting tags against the bare
+/// minimum bar let a long tag such as "(live, authoritative, quota plan)" - which
+/// repeats on every healthy row and says the same thing each time - shrink the
+/// meter to a stub on a mid-width terminal, so a wider terminal could render a
+/// worse frame than a narrow one. Reserve a comfortable meter first and let tags
+/// have what is genuinely left over, so a tag appears only when it costs nothing
+/// that matters. Nothing is lost when it does not fit: the same provenance is on
+/// the selected row's detail and in doctor.
 int _trailingTagBudget(
   int width,
   ({bool reset, bool forecast}) columns,
@@ -980,7 +1010,13 @@ List<String> renderTopFrame({
   final trustTags = <ProviderQuota, ({String trustTag, String accountTag})>{};
   final tagBudget = _trailingTagBudget(w, columns) - evidenceWidthExtra;
   for (final q in cloud) {
-    final rawTrustTag = _topTrustTag(q, now);
+    // On a terminal with room to spare, a routine tag costs meter width while
+    // saying the same thing on every healthy row. Drop it there and let the
+    // meter grow; rows with something to disclose always keep their tag, and a
+    // narrow terminal keeps every tag because the meter is short regardless.
+    final rawTrustTag = w >= _tagReserveWidth && _isRoutineLiveRead(q, now)
+        ? ''
+        : _topTrustTag(q, now);
     final rawAccountTag = accountTagFor(q);
     final usesInlineTagFit =
         !q.ok || q.windows.isEmpty || _isCollapsedSpent(q, now);

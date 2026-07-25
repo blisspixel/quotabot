@@ -1690,7 +1690,8 @@ Future<void> _runTop(
   final color = _useColor(flags);
   final depth = flags.contains('--truecolor')
       ? ColorDepth.truecolor
-      : detectColorDepth(Platform.environment, hasTerminal: stdout.hasTerminal);
+      : detectColorDepth(Platform.environment,
+          hasTerminal: stdout.hasTerminal, windowsHost: Platform.isWindows);
   final palette = paletteFromSpec(
     _stringOption(flags, 'theme', Platform.environment['QUOTABOT_THEME']),
   );
