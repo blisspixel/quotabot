@@ -20,6 +20,9 @@ const quotabotCheckV1SchemaId = 'quotabot.check.v1';
 
 /// The `provider_with_most_headroom` pick shape.
 const quotabotHeadroomV1SchemaId = 'quotabot.headroom.v1';
+const quotabotAnalyticsIncidentInventoryV1SchemaId =
+    'quotabot.analytics-incident-inventory.v1';
+const quotabotAnalyticsIncidentV1SchemaId = 'quotabot.analytics-incident.v1';
 
 const _rootRequired = ['schema', 'generated_at', 'providers'];
 const _providerRequired = [
@@ -42,6 +45,10 @@ const quotabotV1JsonSchema = <String, Object?>{
   'required': _rootRequired,
   'properties': {
     'schema': {'const': quotabotV1SchemaId},
+    'snapshot_source': {
+      'type': 'string',
+      'enum': ['live', 'simulation'],
+    },
     'profile': {'type': 'string', 'minLength': 1},
     'account_filter': {'type': 'string', 'minLength': 1},
     'error': {'type': 'string'},
@@ -50,8 +57,87 @@ const quotabotV1JsonSchema = <String, Object?>{
       'type': 'array',
       'items': {r'$ref': r'#/$defs/providerQuota'},
     },
+    'analytics_incident_inventory': {
+      r'$ref': r'#/$defs/analyticsIncidentInventory',
+    },
   },
   r'$defs': {
+    'analyticsIncidentInventory': {
+      'type': 'object',
+      'additionalProperties': true,
+      'required': [
+        'schema',
+        'state',
+        'scope',
+        'scanned_markers',
+        'unverifiable_markers',
+        'invalid_markers',
+        'truncated',
+        'incidents',
+      ],
+      'properties': {
+        'schema': {'const': quotabotAnalyticsIncidentInventoryV1SchemaId},
+        'state': {
+          'type': 'string',
+          'enum': ['complete', 'partial', 'suppressed'],
+        },
+        'scope': {
+          'type': 'string',
+          'enum': ['all_local', 'visible_snapshot', 'simulation'],
+        },
+        'scanned_markers': {'type': 'integer', 'minimum': 0, 'maximum': 256},
+        'unverifiable_markers': {
+          'type': 'integer',
+          'minimum': 0,
+          'maximum': 256,
+        },
+        'invalid_markers': {
+          'type': 'integer',
+          'minimum': 0,
+          'maximum': 256,
+        },
+        'truncated': {'type': 'boolean'},
+        'incidents': {
+          'type': 'array',
+          'maxItems': 256,
+          'items': {r'$ref': r'#/$defs/analyticsIncident'},
+        },
+      },
+    },
+    'analyticsIncident': {
+      'type': 'object',
+      'additionalProperties': true,
+      'required': [
+        'schema',
+        'state',
+        'provider',
+        'tiers',
+        'recorded_at',
+        'exact_account_in_snapshot',
+      ],
+      'properties': {
+        'schema': {'const': quotabotAnalyticsIncidentV1SchemaId},
+        'state': {'const': 'diverged'},
+        'provider': {'type': 'string', 'minLength': 1},
+        'tiers': {
+          'type': 'array',
+          'minItems': 1,
+          'maxItems': 2,
+          'uniqueItems': true,
+          'items': {
+            'type': 'string',
+            'enum': ['history', 'buckets'],
+          },
+        },
+        'recorded_at': {'type': 'integer', 'minimum': 1},
+        'exact_account_in_snapshot': {'type': 'boolean'},
+        'provider_row_index': {'type': 'integer', 'minimum': 0},
+        'incident_id': {
+          'type': 'string',
+          'pattern': r'^[a-f0-9]{32}$',
+        },
+      },
+    },
     'providerQuota': {
       'type': 'object',
       'additionalProperties': true,
@@ -158,6 +244,7 @@ const quotabotV1JsonSchema = <String, Object?>{
         'max_output_tokens': {'type': 'integer', 'minimum': 1},
         'tools': {'type': 'boolean'},
         'vision': {'type': 'boolean'},
+        'embedding': {'type': 'boolean'},
         'reasoning': {'type': 'string'},
         'tier': {'type': 'string'},
         'quota_included_until': {'type': 'integer', 'minimum': 0},
@@ -199,6 +286,14 @@ List<String> validateQuotabotV1Snapshot(Map<String, dynamic> snapshot) {
   _checkOptionalString(snapshot, 'profile', r'$', errors);
   _checkOptionalString(snapshot, 'account_filter', r'$', errors);
   _checkOptionalString(snapshot, 'error', r'$', errors);
+  _checkStringEnum(
+    snapshot,
+    'snapshot_source',
+    r'$',
+    {'live', 'simulation'},
+    errors,
+    required: false,
+  );
   _checkNonNegativeInt(snapshot, 'generated_at', r'$', errors);
 
   final providers = snapshot['providers'];
@@ -217,7 +312,206 @@ List<String> validateQuotabotV1Snapshot(Map<String, dynamic> snapshot) {
       }
     }
   }
+  final incidentInventory = snapshot['analytics_incident_inventory'];
+  if (incidentInventory is Map<String, dynamic>) {
+    _validateAnalyticsIncidentInventory(
+      incidentInventory,
+      providers is List ? providers : const [],
+      snapshot['snapshot_source'],
+      errors,
+    );
+  } else if (incidentInventory is Map) {
+    _validateAnalyticsIncidentInventory(
+      incidentInventory.cast<String, dynamic>(),
+      providers is List ? providers : const [],
+      snapshot['snapshot_source'],
+      errors,
+    );
+  } else if (incidentInventory != null) {
+    errors.add(r'$.analytics_incident_inventory must be an object');
+  }
   return errors;
+}
+
+void _validateAnalyticsIncidentInventory(
+  Map<String, dynamic> inventory,
+  List<dynamic> providers,
+  Object? snapshotSource,
+  List<String> errors,
+) {
+  const path = r'$.analytics_incident_inventory';
+  const required = [
+    'schema',
+    'state',
+    'scope',
+    'scanned_markers',
+    'unverifiable_markers',
+    'invalid_markers',
+    'truncated',
+    'incidents',
+  ];
+  _checkRequired(inventory, required, path, errors);
+  if (inventory['schema'] != quotabotAnalyticsIncidentInventoryV1SchemaId) {
+    errors.add(
+      '$path.schema must be "$quotabotAnalyticsIncidentInventoryV1SchemaId"',
+    );
+  }
+  _checkStringEnum(
+    inventory,
+    'state',
+    path,
+    {'complete', 'partial', 'suppressed'},
+    errors,
+  );
+  _checkStringEnum(
+    inventory,
+    'scope',
+    path,
+    {'all_local', 'visible_snapshot', 'simulation'},
+    errors,
+  );
+  for (final field in const [
+    'scanned_markers',
+    'unverifiable_markers',
+    'invalid_markers',
+  ]) {
+    _checkIntRange(
+      inventory,
+      field,
+      path,
+      errors,
+      min: 0,
+      max: 256,
+    );
+  }
+  _checkBool(inventory, 'truncated', path, errors);
+
+  final state = inventory['state'];
+  final scope = inventory['scope'];
+  final scanned = inventory['scanned_markers'];
+  final unverifiable = inventory['unverifiable_markers'];
+  final invalid = inventory['invalid_markers'];
+  final truncated = inventory['truncated'];
+  if (state == 'complete' &&
+      (unverifiable != 0 || invalid != 0 || truncated != false)) {
+    errors.add('$path.state complete requires no incomplete scan evidence');
+  }
+  if (state == 'suppressed' &&
+      (scope != 'simulation' ||
+          scanned != 0 ||
+          unverifiable != 0 ||
+          invalid != 0 ||
+          truncated != false)) {
+    errors.add('$path.state suppressed requires an empty simulation scan');
+  }
+  if (scope == 'simulation' && state != 'suppressed') {
+    errors.add('$path.scope simulation requires state suppressed');
+  }
+  if (snapshotSource == 'simulation' && state != 'suppressed') {
+    errors.add('$path must be suppressed for a simulation snapshot');
+  }
+  if (snapshotSource == 'live' && state == 'suppressed') {
+    errors.add('$path must not be suppressed for a live snapshot');
+  }
+
+  final incidents = inventory['incidents'];
+  if (incidents is! List) {
+    errors.add('$path.incidents must be an array');
+    return;
+  }
+  if (incidents.length > 256) {
+    errors.add('$path.incidents must contain at most 256 entries');
+  }
+  for (var index = 0; index < incidents.length; index++) {
+    final incident = incidents[index];
+    final incidentPath = '$path.incidents[$index]';
+    if (incident is Map<String, dynamic>) {
+      _validateAnalyticsIncident(
+        incident,
+        incidentPath,
+        providers,
+        errors,
+      );
+    } else if (incident is Map) {
+      _validateAnalyticsIncident(
+        incident.cast<String, dynamic>(),
+        incidentPath,
+        providers,
+        errors,
+      );
+    } else {
+      errors.add('$incidentPath must be an object');
+    }
+  }
+}
+
+void _validateAnalyticsIncident(
+  Map<String, dynamic> incident,
+  String path,
+  List<dynamic> providers,
+  List<String> errors,
+) {
+  const required = [
+    'schema',
+    'state',
+    'provider',
+    'tiers',
+    'recorded_at',
+    'exact_account_in_snapshot',
+  ];
+  _checkRequired(incident, required, path, errors);
+  if (incident['schema'] != quotabotAnalyticsIncidentV1SchemaId) {
+    errors.add('$path.schema must be "$quotabotAnalyticsIncidentV1SchemaId"');
+  }
+  if (incident['state'] != 'diverged') {
+    errors.add('$path.state must be "diverged"');
+  }
+  _checkNonEmptyString(incident, 'provider', path, errors);
+  _checkPositiveInt(incident, 'recorded_at', path, errors);
+  _checkBool(incident, 'exact_account_in_snapshot', path, errors);
+  for (final prohibited in const [
+    'account',
+    'account_digest',
+    'path',
+    'recovery_target',
+  ]) {
+    if (incident.containsKey(prohibited)) {
+      errors.add('$path.$prohibited is prohibited');
+    }
+  }
+  final rowIndex = incident['provider_row_index'];
+  if (rowIndex != null &&
+      (rowIndex is! int || rowIndex < 0 || rowIndex >= providers.length)) {
+    errors.add('$path.provider_row_index must reference a provider row');
+  }
+  final incidentId = incident['incident_id'];
+  if (incidentId != null &&
+      (incidentId is! String ||
+          !RegExp(r'^[a-f0-9]{32}$').hasMatch(incidentId))) {
+    errors.add('$path.incident_id must be 32 lowercase hexadecimal characters');
+  }
+  final tiers = incident['tiers'];
+  if (tiers is! List ||
+      tiers.isEmpty ||
+      tiers.length > 2 ||
+      tiers.any((tier) => tier != 'history' && tier != 'buckets') ||
+      tiers.toSet().length != tiers.length) {
+    errors.add('$path.tiers must contain one or both unique analytics tiers');
+  }
+  final exact = incident['exact_account_in_snapshot'];
+  if (exact == true && rowIndex == null) {
+    errors.add('$path.provider_row_index is required for an exact account');
+  }
+  if (exact == false && rowIndex != null) {
+    errors.add('$path.provider_row_index requires an exact account');
+  }
+  if (rowIndex is int && rowIndex >= 0 && rowIndex < providers.length) {
+    final providerRow = providers[rowIndex];
+    final providerId = providerRow is Map ? providerRow['provider'] : null;
+    if (providerId != incident['provider']) {
+      errors.add('$path.provider_row_index must reference the same provider');
+    }
+  }
 }
 
 void _validateProvider(
@@ -480,6 +774,7 @@ void _validateModel(
   _checkPositiveInt(model, 'max_output_tokens', path, errors, required: false);
   _checkBool(model, 'tools', path, errors, required: false);
   _checkBool(model, 'vision', path, errors, required: false);
+  _checkBool(model, 'embedding', path, errors, required: false);
   _checkOptionalString(model, 'display_name', path, errors);
   _checkOptionalString(model, 'reasoning', path, errors);
   _checkOptionalString(model, 'tier', path, errors);

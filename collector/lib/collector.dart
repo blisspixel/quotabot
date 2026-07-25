@@ -8,6 +8,7 @@ import 'drift.dart';
 import 'local_hardware.dart';
 import 'manual_quota.dart';
 import 'models.dart';
+import 'profiles.dart';
 import 'provider_adapters.dart';
 import 'runtime_audit.dart';
 import 'util.dart';
@@ -392,19 +393,49 @@ Future<List<ProviderQuota>> _listWithDeadline(
           ],
         );
 
+/// Reports one provider adapter settling during a fleet collection, so a caller
+/// can render live progress instead of a blank wait. [ok] is whether the adapter
+/// produced at least one usable row; a false value still counts as done.
+typedef CollectProgress = void Function(
+  String providerId,
+  String displayName,
+  bool ok,
+);
+
 /// Runs every provider adapter concurrently and returns their snapshots.
-/// Shared by the CLI (bin/collect.dart) and the desktop app.
-Future<List<ProviderQuota>> collectAll() => _collectAllProviders();
+/// Shared by the CLI (bin/collect.dart) and the desktop app. [onProviderDone]
+/// fires once per adapter as it settles, in completion order, so an interactive
+/// caller can show which providers are in and which are still outstanding.
+Future<List<ProviderQuota>> collectAll({CollectProgress? onProviderDone}) =>
+    _collectAllProviders(onProviderDone: onProviderDone);
 
 /// Runs a normal collection and also returns the audited runtime access surface
 /// for the adapters that were invoked. The access records intentionally come
 /// from the same static map as `quotabot explain`; the observation is which
 /// adapters participated in this run.
-Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess() async {
+Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess({
+  Set<String>? adapterProviderIds,
+  List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
+  CollectProgress? onProviderDone,
+}) async {
+  final selectedRegistry = _selectedAdapterRegistry(
+    registry,
+    adapterProviderIds,
+  );
   if (Platform.environment['QUOTABOT_DEMO'] == '1') {
     final asOf = nowEpoch();
+    final providers = demoProviders(asOf);
+    final selectedIds = {
+      for (final entry in selectedRegistry) entry.id,
+    };
     return CollectedQuotaSnapshot(
-      providers: demoProviders(asOf),
+      providers: adapterProviderIds == null
+          ? providers
+          : providers
+              .where(
+                (provider) => selectedIds.contains(provider.provider),
+              )
+              .toList(),
       runtimeAccess: buildRuntimeAccessReport(
         generatedAt: asOf,
         includeReads: true,
@@ -413,7 +444,12 @@ Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess() async {
       ),
     );
   }
-  final results = await _collectAllProviders(skipDemoCheck: true);
+  final results = await _collectAllProviders(
+    skipDemoCheck: true,
+    adapterProviderIds: adapterProviderIds,
+    registry: registry,
+    onProviderDone: onProviderDone,
+  );
   return CollectedQuotaSnapshot(
     providers: results,
     runtimeAccess: buildRuntimeAccessReport(
@@ -421,7 +457,7 @@ Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess() async {
       includeReads: true,
       includeNetwork: true,
       observedProviderIds: {
-        for (final entry in kProviderAdapterRegistry) entry.id,
+        for (final entry in selectedRegistry) entry.id,
       },
       collectionExecuted: true,
     ),
@@ -430,18 +466,45 @@ Future<CollectedQuotaSnapshot> collectAllWithRuntimeAccess() async {
 
 Future<List<ProviderQuota>> _collectAllProviders({
   bool skipDemoCheck = false,
+  Set<String>? adapterProviderIds,
+  List<ProviderAdapterRegistration> registry = kProviderAdapterRegistry,
+  CollectProgress? onProviderDone,
 }) async {
+  final selectedRegistry = _selectedAdapterRegistry(
+    registry,
+    adapterProviderIds,
+  );
   // Demo mode: synthetic data for previews and screenshots. Returns before any
   // adapter call or analytics write, so it touches no account and no history.
   if (!skipDemoCheck && Platform.environment['QUOTABOT_DEMO'] == '1') {
-    return demoProviders(nowEpoch());
+    final providers = demoProviders(nowEpoch());
+    final selectedIds = {
+      for (final entry in selectedRegistry) entry.id,
+    };
+    return adapterProviderIds == null
+        ? providers
+        : providers
+            .where(
+              (provider) => selectedIds.contains(provider.provider),
+            )
+            .toList();
   }
   if (!_sweptTemp) {
     _sweptTemp = true;
     sweepStaleTempFiles(); // once per process, clear any crash leftovers
   }
   final collected = await Future.wait([
-    for (final entry in kProviderAdapterRegistry) _collectRegistered(entry),
+    for (final entry in selectedRegistry)
+      _collectRegistered(entry).then((group) {
+        if (onProviderDone != null) {
+          onProviderDone(
+            entry.id,
+            entry.displayName,
+            group.any((quota) => quota.ok),
+          );
+        }
+        return group;
+      }),
   ]);
   final manual = loadManualProviderQuotas();
   // A local runtime that is not running is not ok; drop it so users who do not
@@ -477,6 +540,21 @@ Future<List<ProviderQuota>> _collectAllProviders({
   ];
   _recordAnalytics(results);
   return results;
+}
+
+List<ProviderAdapterRegistration> _selectedAdapterRegistry(
+  List<ProviderAdapterRegistration> registry,
+  Set<String>? adapterProviderIds,
+) {
+  if (adapterProviderIds == null) return List.of(registry);
+  final selected = adapterProviderIds
+      .map((provider) => normalizeProviderId(provider))
+      .nonNulls
+      .toSet();
+  return [
+    for (final entry in registry)
+      if (selected.contains(entry.id)) entry,
+  ];
 }
 
 String _localHardwareDetail(LocalHardwareInfo hardware) {

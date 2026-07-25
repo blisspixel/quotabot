@@ -11,6 +11,47 @@ Future<int> _unusedLoopbackPort() async {
 }
 
 void main() {
+  test('explicit desktop automation selects singleton isolation', () {
+    expect(
+      isolateSingleInstanceForAutomation(
+        screenshotCapture: false,
+        readinessProbe: false,
+      ),
+      isFalse,
+    );
+    expect(
+      isolateSingleInstanceForAutomation(
+        screenshotCapture: true,
+        readinessProbe: false,
+      ),
+      isTrue,
+    );
+    expect(
+      isolateSingleInstanceForAutomation(
+        screenshotCapture: false,
+        readinessProbe: true,
+      ),
+      isTrue,
+    );
+    expect(
+      isolateSingleInstanceForAutomation(
+        screenshotCapture: true,
+        readinessProbe: true,
+      ),
+      isTrue,
+    );
+  });
+
+  test('ephemeral guards do not contend with a running app', () async {
+    final first = SingleInstanceGuard.ephemeral();
+    final second = SingleInstanceGuard.ephemeral();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+
+    expect(await first.tryBecomePrimary(onShowRequested: () async {}), isTrue);
+    expect(await second.tryBecomePrimary(onShowRequested: () async {}), isTrue);
+  });
+
   test(
     'a second instance detects the first and is told to step aside',
     () async {

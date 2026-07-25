@@ -67,6 +67,8 @@ void main() {
       'codex',
       'ollama',
     ]);
+    expect(hidden.allowsProviderAdapter('grok', isLocal: false), isFalse);
+    expect(hidden.allowsProviderAdapter('codex', isLocal: false), isTrue);
 
     final hiddenAccount = QuotaProfile(
       name: 'quiet-work',
@@ -81,12 +83,21 @@ void main() {
     expect(hiddenTargetsQuota({'grok| work@example.com '}, fleet[1]), isTrue);
     expect(hiddenTargetsQuota({'grok| work@example.com '}, fleet[2]), isFalse);
     expect(normalizeHiddenTarget('grok|bad${String.fromCharCode(7)}'), isNull);
+    expect(
+      hiddenAccount.allowsProviderAdapter('grok', isLocal: false),
+      isTrue,
+      reason: 'an account-specific filter cannot skip the whole adapter',
+    );
 
     final local = QuotaProfile(
       name: 'offline',
       routingPolicy: ProfileRoutingPolicy.localOnly,
     );
     expect(applyProfile(fleet, local).map((q) => q.provider), ['ollama']);
+    expect(local.allowsProviderAdapter('ollama', isLocal: true), isTrue);
+    expect(local.allowsProviderAdapter('codex', isLocal: false), isFalse);
+    expect(work.allowsProviderAdapter('grok', isLocal: false), isTrue);
+    expect(work.allowsProviderAdapter('codex', isLocal: false), isFalse);
   });
 
   test('round-trips profile JSON with normalized provider ids', () {

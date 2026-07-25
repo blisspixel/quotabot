@@ -1,8 +1,9 @@
-/// Shared human-facing time labels. Pure and side-effect free, so both the
-/// collector surfaces (terminal `top`, the CLI, the report) and the adapters
-/// render a reset or a countdown the same way rather than each keeping its own
-/// copy of the arithmetic.
+/// Shared human-facing time and recovery labels. Pure and side-effect free, so
+/// collector and desktop surfaces render the same evidence without duplicating
+/// arithmetic or failure classification.
 library;
+
+import 'models.dart';
 
 /// A coarse "resets in ..." label for an optional reset time: `soon` when
 /// unknown, `now` when already reached, else the largest whole unit (`3d`, `5h`).
@@ -32,6 +33,62 @@ String compactAge(int seconds, {String suffix = '', bool floorNow = false}) {
   if (seconds < 5400) return '${(seconds / 60).round()}m$suffix';
   if (seconds < 129600) return '${(seconds / 3600).round()}h$suffix';
   return '${(seconds / 86400).round()}d$suffix';
+}
+
+const capturedInFutureLabel = 'captured in the future';
+
+/// A complete capture-age phrase for provenance and trust labels.
+///
+/// Exact current evidence reads naturally as `captured just now`; older
+/// evidence keeps the compact elapsed unit, and clock skew stays explicit.
+String capturedAgeLabel(int capturedAt, int now) {
+  if (capturedAt <= 0) return '';
+  if (capturedAt > now) return capturedInFutureLabel;
+  final elapsed = now - capturedAt;
+  if (elapsed == 0) return 'captured just now';
+  return 'captured ${compactAge(elapsed, suffix: ' ago')}';
+}
+
+/// Concise temporary-provider recovery copy derived only from bounded quota
+/// diagnostics. A timeout is not called a rate limit, and a 5xx is not called
+/// throttling. Returns null for auth, parsing, setup, and other failures.
+String? providerRetrySummary(
+  ProviderQuota quota, {
+  bool showingLastKnown = false,
+}) {
+  final cause = switch (quota.pipeHealth) {
+    providerPipeHealthThrottled =>
+      quota.httpStatus == 429 ? 'rate limited' : 'provider slow',
+    providerPipeHealthDegraded => 'provider error',
+    _ => null,
+  };
+  if (cause == null) return null;
+  final retryAfter = quota.retryAfterSeconds;
+  final retry = retryAfter == null
+      ? ''
+      : retryAfter <= 0
+          ? ' now'
+          : ' in ${compactAge(retryAfter)}';
+  final evidence = showingLastKnown ? ', showing last known' : '';
+  return '$cause - retrying$retry$evidence';
+}
+
+/// Primary failure copy for compact user surfaces. Exact request-stage and HTTP
+/// evidence stays available in [ProviderQuota.error] for diagnostics.
+String providerFailureSummary(
+  ProviderQuota quota, {
+  bool showingLastKnown = false,
+}) {
+  final retry = providerRetrySummary(
+    quota,
+    showingLastKnown: showingLastKnown,
+  );
+  if (retry != null) return retry;
+  if (quota.httpStatus == 401 || quota.httpStatus == 403) {
+    return 'live quota needs reconnecting';
+  }
+  final error = quota.error?.trim();
+  return error == null || error.isEmpty ? 'no live data' : error;
 }
 
 /// A compact two-unit countdown to [resetsAt]: `now` when reached, `2d3h` when a

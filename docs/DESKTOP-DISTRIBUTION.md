@@ -13,7 +13,13 @@ Each archive is built on its native GitHub-hosted runner, checked for the
 expected Flutter bundle shape, checksum-verified, and given a GitHub build
 provenance attestation before the draft release can be published. The release
 stays a draft if any CLI or desktop build, clean-host lifecycle check, readiness
-check, attestation, or upload fails. The lifecycle check installs two versioned
+check, attestation, or upload fails. The Windows candidate check also isolates
+configuration and singleton state, binds a structured v3 pass or failure report
+to the launched process, runner digest, and deterministic complete-bundle
+digest, verifies the bundle is unchanged after cleanup, preserves bounded
+failure evidence in CI and release jobs, and leaves an installed tray instance
+untouched.
+The lifecycle check installs two versioned
 copies, launches the Windows and Linux copies, exercises rollback, removes both
 application directories, and proves a persistent-state sentinel remains. A final
 asset audit rejects a draft with any missing, duplicate, or unexpected file,
@@ -160,11 +166,7 @@ version. The app stores profiles, history, preferences, leases, grants, and
 cache outside these portable bundle directories, so switching binaries does not
 erase that metadata.
 
-To uninstall while preserving data, close quotabot and remove only the extracted
-desktop directory or `quotabot.app`. The CLI install is separate. Follow
-[SETUP.md](SETUP.md#update-uninstall-and-rollback) only if the CLI should also be
-removed. Deleting quotabot's local metadata is a separate destructive action and
-is never required for an update, rollback, or normal uninstall.
+To uninstall while preserving data, you can run the uninstall scripts hosted in the repository root (`uninstall.ps1` for Windows, `uninstall.sh` for macOS/Linux). These scripts cleanly remove the extracted desktop directory, `quotabot.app`, and the CLI. Follow [SETUP.md](SETUP.md#update-uninstall-and-rollback) for the one-line remote execution commands. Deleting quotabot's local metadata is a separate destructive action (`--purge`) and is never required for an update, rollback, or normal uninstall.
 
 ## Maintainer verification
 
@@ -188,7 +190,13 @@ python tools/verify_desktop_archive.py release/quotabot-<os>-<arch>-desktop.<ext
 Clean native release jobs download the draft assets by release asset id,
 reverify checksum and provenance, and exercise side-by-side update, rollback,
 and data-preserving uninstall mechanics. Windows and Linux also require the
-native window and tray readiness contract to pass. macOS hosted runners build,
-extract, and validate the app archive, but the final interactive launch, status
-item, signing, notarization, and accessibility evidence must come from a native
-interactive release host.
+native window and tray readiness contract to pass. The bounded v3 report records
+pass or failure status and stage, a UTC timestamp, launch PID, narrow runner
+digest, complete-bundle digest and aggregate counts, prelaunch/post-cleanup
+stability, isolated-config state, readiness, and cleanup. Unreached checks are
+null and failure evidence contains no raw errors, logs, or filesystem paths.
+Archive checksum and provenance remain separately verified, and the
+report is not signing or accessibility evidence. macOS hosted runners build,
+extract, and validate the app archive, but the final
+interactive launch, status item, signing, notarization, and accessibility
+evidence must come from a native interactive release host.

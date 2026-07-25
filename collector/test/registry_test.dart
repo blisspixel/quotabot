@@ -103,6 +103,112 @@ void main() {
     expect(suggestion.ranked.single.available, isFalse);
   });
 
+  test('a capability filter admits a local model the runtime declares', () {
+    final snapshot = [
+      _local('ollama', const [
+        ModelInfo(id: 'seer:24b', local: true, tools: true, vision: true),
+        ModelInfo(id: 'coder:32b', local: true, tools: true, vision: false),
+        ModelInfo(id: 'legacy:7b', local: true),
+      ]),
+    ];
+
+    List<String> idsFor(ModelRequirements r) =>
+        buildModelRegistry(snapshot, _now, requirements: r)
+            .map((e) => e.model.id)
+            .toList();
+
+    expect(
+      idsFor(const ModelRequirements(requireTools: true)),
+      unorderedEquals(['seer:24b', 'coder:32b']),
+    );
+    expect(idsFor(const ModelRequirements(requireVision: true)), ['seer:24b']);
+    // A model whose runtime declared nothing is never assumed capable.
+    expect(
+      idsFor(const ModelRequirements(requireTools: true)),
+      isNot(contains('legacy:7b')),
+    );
+  });
+
+  test('a declared local model can win a capability-filtered suggestion', () {
+    final suggestion = suggestModel(
+      [
+        _local('ollama', const [
+          ModelInfo(id: 'legacy:7b', local: true),
+          ModelInfo(id: 'seer:24b', local: true, tools: true, vision: true),
+        ]),
+      ],
+      _now,
+      requirements: const ModelRequirements(
+        requireVision: true,
+        budgetPolicy: ModelBudgetPolicy.local,
+      ),
+    );
+
+    expect(suggestion.recommended?.model.id, 'seer:24b');
+    expect(suggestion.ranked.map((e) => e.model.id), ['seer:24b']);
+  });
+
+  test('a declared embedding model is listed but never recommended', () {
+    final snapshot = [
+      _local('lmstudio', const [
+        // Small enough to outrank the generator on hardware fit, which is
+        // exactly how it used to win a local suggestion.
+        ModelInfo(
+          id: 'nomic-embed-text',
+          local: true,
+          embedding: true,
+          sizeBytes: 84106624,
+        ),
+        ModelInfo(
+          id: 'coder-8b',
+          local: true,
+          embedding: false,
+          sizeBytes: 5000000000,
+        ),
+      ]),
+    ];
+
+    // Listing is inspection, so the embedding model stays visible.
+    final listed = buildModelRegistry(snapshot, _now).map((e) => e.model.id);
+    expect(listed, containsAll(['nomic-embed-text', 'coder-8b']));
+
+    final suggestion = suggestModel(snapshot, _now);
+    expect(suggestion.recommended?.model.id, 'coder-8b');
+    expect(
+      suggestion.ranked.map((e) => e.model.id),
+      isNot(contains('nomic-embed-text')),
+    );
+  });
+
+  test('an embedding-only runtime explains why it cannot be routed to', () {
+    final suggestion = suggestModel(
+      [
+        _local('lmstudio', const [
+          ModelInfo(id: 'nomic-embed-text', local: true, embedding: true),
+        ]),
+      ],
+      _now,
+    );
+
+    expect(suggestion.recommended, isNull);
+    expect(suggestion.ranked, isEmpty);
+    expect(suggestion.reason, contains('embedding models'));
+    expect(suggestion.reason, contains('cannot'));
+  });
+
+  test('an undeclared model kind stays routable', () {
+    // A runtime that lists only names says nothing about kind. Absent evidence
+    // must never remove a route that works today.
+    final suggestion = suggestModel(
+      [
+        _local('lemonade', const [ModelInfo(id: 'gpt-oss-20b', local: true)]),
+      ],
+      _now,
+    );
+
+    expect(suggestion.recommended?.model.id, 'gpt-oss-20b');
+  });
+
   test('stale local runtime evidence cannot make a model available', () {
     final stale = _local(
       'ollama',

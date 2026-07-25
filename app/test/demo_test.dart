@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/demo.dart';
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/models.dart';
 
 void main() {
@@ -27,6 +28,9 @@ void main() {
       if (quota.isLocal) {
         expect(quota.active, isTrue);
         expect(quota.details, isNotEmpty);
+        expect(quota.models, isNotEmpty);
+        expect(quota.models.any((model) => model.loaded), isTrue);
+        expect(isLocalRuntimeAvailableAt(quota, after), isTrue);
         expect(quota.windows, isEmpty);
       } else {
         expect(quota.account, 'you@example.com');

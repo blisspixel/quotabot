@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 
 import 'drift.dart';
 import 'insights.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
 import 'provider_ids.dart';
+import 'schema_contracts.dart';
 import 'storage_keys.dart';
 import 'util.dart';
 
@@ -38,6 +42,310 @@ const _driftSchema = 'quotabot.provider-drift.v1';
 const _cacheObservedAtMicrosKey = 'cache_observed_at_micros';
 const _driftObservedAtMicrosKey = 'observed_at_micros';
 const _legacyBucketOwnerSchema = 'quotabot.legacy-bucket-owner.v1';
+const _analyticsMigrationSchema = 'quotabot.analytics-migration.v1';
+const _analyticsLegacyBucketOwnerDigestKey = 'legacy_bucket_owner_digest';
+const _analyticsRecoverySchema = 'quotabot.analytics-recovery.v1';
+const _analyticsRecoveryEvidenceSchema =
+    'quotabot.analytics-recovery-evidence.v1';
+const _maxAnalyticsMigrationBytes = 1024 * 1024;
+const _maxAnalyticsCheckpointBuckets = kRetentionDays * 24 + 2;
+const _maxAnalyticsRecoveryEvidenceBytes = 16 * 1024 * 1024;
+const _maxAnalyticsIncidents = 256;
+const _maxAnalyticsIncidentScanBytes = 16 * 1024 * 1024;
+const _maxAnalyticsIncidentDirectoryEntries = 4096;
+const _maxAnalyticsIdentityBytes = 64 * 1024;
+const _maxAnalyticsIncidentScanDuration = Duration(seconds: 10);
+const _analyticsRecoveryTiers = {'history', 'buckets'};
+const _analyticsRecoveryPreserved = [
+  'current quota and credentials',
+  'profiles, preferences, manual entries, leases, and alerts',
+  'every other provider account',
+  'the unselected analytics tier',
+  'provider-only compatibility analytics',
+];
+
+/// Bounded, identity-safe evidence that a legacy analytics path changed after
+/// the current canonical path was established, or that its checkpoint is no
+/// longer trustworthy. Affected tiers fail closed until reconciliation can
+/// prove a delta.
+class AnalyticsStorageNotice {
+  final String provider;
+  final String account;
+  final List<String> tiers;
+  final int observedAt;
+
+  const AnalyticsStorageNotice({
+    required this.provider,
+    required this.account,
+    required this.tiers,
+    required this.observedAt,
+  });
+
+  String get summary {
+    final tierLabel = tiers.length == 1
+        ? tiers.single == 'history'
+            ? 'recent history'
+            : 'hourly analytics'
+        : 'recent history and hourly analytics';
+    return 'History incomplete - local $tierLabel changed unexpectedly. '
+        'Affected analytics are quarantined. Close every older quotabot process '
+        'now. Run quotabot doctor for the scoped recovery path. Raw history is '
+        'merged only when its ordered checkpoint proves both deltas; every '
+        'other case remains fail closed.';
+  }
+
+  Map<String, dynamic> toJson() => {
+        'state': 'diverged',
+        'tiers': tiers,
+        'observed_at': observedAt,
+        'detail': summary,
+      };
+}
+
+/// Public evidence for one unresolved local analytics incident.
+///
+/// No raw account, account digest, path, or recovery authority is retained in
+/// this object. A provider row index is present only when the exact identity is
+/// already visible in the enclosing snapshot.
+class AnalyticsStorageIncident {
+  final String provider;
+  final List<String> tiers;
+  final int recordedAt;
+  final int? providerRowIndex;
+  final String? incidentId;
+
+  const AnalyticsStorageIncident({
+    required this.provider,
+    required this.tiers,
+    required this.recordedAt,
+    this.providerRowIndex,
+    this.incidentId,
+  });
+
+  bool get exactAccountInSnapshot => providerRowIndex != null;
+
+  String get providerName =>
+      providerAdapterById(provider)?.displayName ?? provider;
+
+  Map<String, dynamic> toJson() => {
+        'schema': quotabotAnalyticsIncidentV1SchemaId,
+        'state': 'diverged',
+        'provider': provider,
+        'tiers': tiers,
+        'recorded_at': recordedAt,
+        'exact_account_in_snapshot': exactAccountInSnapshot,
+        if (providerRowIndex != null) 'provider_row_index': providerRowIndex,
+        if (incidentId != null) 'incident_id': incidentId,
+      };
+}
+
+/// Bounded scan result for the local analytics incident inventory.
+///
+/// A partial result never means clean. Consumers can use [state] and the
+/// bounded counts to distinguish a verified empty inventory from incomplete
+/// local evidence.
+class AnalyticsIncidentInventory {
+  final List<AnalyticsStorageIncident> incidents;
+  final String state;
+  final String scope;
+  final int scannedMarkers;
+  final int unverifiableMarkers;
+  final int invalidMarkers;
+  final bool truncated;
+  final Set<String> uncertainProviders;
+  final bool globalUncertainty;
+
+  const AnalyticsIncidentInventory({
+    required this.incidents,
+    required this.state,
+    required this.scope,
+    required this.scannedMarkers,
+    required this.unverifiableMarkers,
+    required this.invalidMarkers,
+    required this.truncated,
+    this.uncertainProviders = const {},
+    this.globalUncertainty = false,
+  });
+
+  const AnalyticsIncidentInventory.suppressed()
+      : incidents = const [],
+        state = 'suppressed',
+        scope = 'simulation',
+        scannedMarkers = 0,
+        unverifiableMarkers = 0,
+        invalidMarkers = 0,
+        truncated = false,
+        uncertainProviders = const {},
+        globalUncertainty = false;
+
+  bool get complete => state == 'complete';
+
+  Map<String, dynamic> toJson() => {
+        'schema': quotabotAnalyticsIncidentInventoryV1SchemaId,
+        'state': state,
+        'scope': scope,
+        'scanned_markers': scannedMarkers,
+        'unverifiable_markers': unverifiableMarkers,
+        'invalid_markers': invalidMarkers,
+        'truncated': truncated,
+        'incidents': [for (final incident in incidents) incident.toJson()],
+      };
+}
+
+class _AnalyticsIncidentEntry {
+  final AnalyticsStorageIncident incident;
+  final String accountDigest;
+
+  const _AnalyticsIncidentEntry(this.incident, this.accountDigest);
+}
+
+class _AnalyticsIncidentResolution {
+  final _AnalyticsIncidentEntry? entry;
+  final bool complete;
+
+  const _AnalyticsIncidentResolution(this.entry, {required this.complete});
+}
+
+/// Inspect or archive-first recovery outcome for one exact analytics conflict
+/// tier.
+///
+/// The result is intentionally bounded. The explicitly supplied account is
+/// returned to the caller. The manifest and opaque bundle id omit raw account
+/// and source-path text; archived source files retain their original quota
+/// metadata by design and are protected by checked owner-only permissions.
+class AnalyticsStorageRecoveryResult {
+  final String mode;
+  final String provider;
+  final String account;
+  final String tier;
+  final List<String> activeTiers;
+  final bool ready;
+  final bool recovered;
+  final bool exactMergeAvailable;
+  final bool exactMergePerformed;
+  final String status;
+  final String detail;
+  final String? evidenceBundle;
+  final List<String> archivedRoles;
+
+  const AnalyticsStorageRecoveryResult({
+    required this.mode,
+    required this.provider,
+    required this.account,
+    required this.tier,
+    required this.activeTiers,
+    required this.ready,
+    required this.recovered,
+    this.exactMergeAvailable = false,
+    this.exactMergePerformed = false,
+    required this.status,
+    required this.detail,
+    this.evidenceBundle,
+    this.archivedRoles = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'schema': _analyticsRecoverySchema,
+        'mode': mode,
+        'provider': provider,
+        'account': account,
+        'tier': tier,
+        'active_tiers': activeTiers,
+        'ready': ready,
+        'recovered': recovered,
+        'status': status,
+        'detail': detail,
+        'impact': {
+          'selected_tier': exactMergePerformed
+              ? 'archived, then exactly merged'
+              : recovered
+                  ? 'archived, then restarted empty'
+                  : evidenceBundle != null
+                      ? 'archive attempted; quarantine retained'
+                      : mode == 'inspect' && ready
+                          ? exactMergeAvailable
+                              ? 'would be archived, then exactly merged'
+                              : 'would be archived, then restarted empty'
+                          : 'unchanged',
+          'exact_merge_available': exactMergeAvailable,
+          'exact_merge_performed': exactMergePerformed,
+          'preserved': _analyticsRecoveryPreserved,
+        },
+        if (evidenceBundle != null) 'evidence_bundle': evidenceBundle,
+        if (archivedRoles.isNotEmpty) 'archived_roles': archivedRoles,
+      };
+}
+
+class _AnalyticsRecoveryEvidence {
+  final String role;
+  final File source;
+  final String extension;
+  final List<int> precheckBytes;
+  final String precheckDigest;
+  final bool moveOriginal;
+
+  const _AnalyticsRecoveryEvidence({
+    required this.role,
+    required this.source,
+    required this.extension,
+    required this.precheckBytes,
+    required this.precheckDigest,
+    required this.moveOriginal,
+  });
+}
+
+class _AnalyticsHistoryRow {
+  final int asOf;
+  final String digest;
+  final String line;
+
+  const _AnalyticsHistoryRow({
+    required this.asOf,
+    required this.digest,
+    required this.line,
+  });
+}
+
+class _AnalyticsHistoryBranch {
+  final List<_AnalyticsHistoryRow> rows;
+  final int baselineOverlap;
+
+  const _AnalyticsHistoryBranch(this.rows, this.baselineOverlap);
+
+  List<_AnalyticsHistoryRow> get delta => rows.sublist(baselineOverlap);
+}
+
+class _AnalyticsRecoveryMergePlan {
+  final String tier;
+  final int itemCount;
+  final List<int> bytes;
+
+  const _AnalyticsRecoveryMergePlan({
+    required this.tier,
+    required this.itemCount,
+    required this.bytes,
+  });
+
+  factory _AnalyticsRecoveryMergePlan.history(List<String> lines) =>
+      _AnalyticsRecoveryMergePlan(
+        tier: 'history',
+        itemCount: lines.length,
+        bytes: utf8.encode('${lines.join('\n')}\n'),
+      );
+
+  factory _AnalyticsRecoveryMergePlan.buckets(
+    List<HeadroomBucket> buckets,
+  ) =>
+      _AnalyticsRecoveryMergePlan(
+        tier: 'buckets',
+        itemCount: buckets.length,
+        bytes: utf8.encode(
+          jsonEncode(buckets.map((bucket) => bucket.toJson()).toList()),
+        ),
+      );
+
+  String get digest => sha256.convert(bytes).toString();
+}
 
 String _accountStem(String account) => accountStorageStem(account);
 
@@ -53,7 +361,11 @@ List<File> _driftFiles(String provider, String account) {
   return canonical.path == legacy.path ? [canonical] : [canonical, legacy];
 }
 
-List<File> _evidenceLockFiles(String provider, String account) {
+List<File> _evidenceLockFiles(
+  String provider,
+  String account, {
+  bool includeLegacy = false,
+}) {
   final accountScoped =
       _accountScopedProviders.contains(provider) && _hasAccount(account);
   final scope = accountScoped ? _accountStem(account) : 'provider';
@@ -61,7 +373,9 @@ List<File> _evidenceLockFiles(String provider, String account) {
   final canonical = File(
     '$dir/evidence_${_safeProviderStem(provider)}_$scope.lock',
   );
-  if (!accountScoped || !_legacyAccountArtifactsExist(provider, account, dir)) {
+  if (!accountScoped ||
+      (!includeLegacy &&
+          !_legacyAccountArtifactsExist(provider, account, dir))) {
     return [canonical];
   }
   final legacy = File(
@@ -89,9 +403,14 @@ bool _legacyAccountArtifactsExist(
 T _withEvidenceLock<T>(
   String provider,
   String account,
-  T Function() run,
-) {
-  final files = _evidenceLockFiles(provider, account);
+  T Function() run, {
+  bool includeLegacy = false,
+}) {
+  final files = _evidenceLockFiles(
+    provider,
+    account,
+    includeLegacy: includeLegacy,
+  );
   T lockAt(int index) {
     if (index == files.length) return run();
     final file = files[index];
@@ -122,6 +441,16 @@ void _atomicWrite(File f, String contents) {
   if (!tmp.existsSync()) tmp.createSync(recursive: true);
   restrictOwnerOnlyFile(tmp);
   tmp.writeAsStringSync(contents);
+  tmp.renameSync(f.path);
+  restrictOwnerOnlyFile(f);
+}
+
+void _atomicWriteBytes(File f, List<int> contents) {
+  restrictOwnerOnlyDirectory(f.parent);
+  final tmp = File('${f.path}.$pid.tmp');
+  if (!tmp.existsSync()) tmp.createSync(recursive: true);
+  restrictOwnerOnlyFile(tmp);
+  tmp.writeAsBytesSync(contents, flush: true);
   tmp.renameSync(f.path);
   restrictOwnerOnlyFile(f);
 }
@@ -521,6 +850,14 @@ void saveHistory(ProviderQuota q) {
   if (!isTrustedQuotaEvidenceAt(q, nowEpoch())) return;
   try {
     final f = _historyFile(q.provider, account: q.account);
+    if (_hasAccount(q.account) &&
+        !_ensureHistoryMigrationBaseline(
+          q.provider,
+          q.account,
+          canonicalExisted: f.existsSync(),
+        )) {
+      return;
+    }
     final line = jsonEncode(_persistedSnapshotJson(q));
     final lines = f.existsSync() && f.lengthSync() <= _maxHistoryBytes
         ? f.readAsLinesSync().where((l) => l.trim().isNotEmpty).toList()
@@ -772,6 +1109,7 @@ List<ProviderQuota> loadCachedSnapshots({int? now}) {
       if (!name.endsWith('.json') ||
           name.startsWith('buckets_') ||
           name.startsWith('drift_') ||
+          name.startsWith('analytics_migration_') ||
           name.startsWith('legacy_bucket_owner_')) {
         continue;
       }
@@ -1147,6 +1485,2825 @@ File _legacyBucketsFile(String provider, {String? account}) {
   );
 }
 
+File _analyticsMigrationFile(String provider, String account) => File(
+      '${cacheDir().path}/analytics_migration_${_safeProviderStem(provider)}_${_accountStem(account)}.json',
+    );
+
+String _analyticsMigrationFileNameForDigest(
+  String provider,
+  String accountDigest,
+) =>
+    'analytics_migration_${_safeProviderStem(provider)}_account_$accountDigest.json';
+
+List<File> _analyticsRecoveryTierFiles(
+  String provider,
+  String account,
+  String tier,
+) {
+  final candidates = tier == 'history'
+      ? [
+          _historyFile(provider, account: account),
+          _legacyHistoryFile(provider, account: account),
+        ]
+      : [
+          _bucketsFile(provider, account: account),
+          _legacyBucketsFile(provider, account: account),
+        ];
+  final seen = <String>{};
+  return [
+    for (final file in candidates)
+      if (seen.add(file.path)) file
+  ];
+}
+
+String _contentDigest(String value) =>
+    sha256.convert(utf8.encode(value)).toString();
+
+String _lineDigest(String line) => _contentDigest(line.trim());
+
+Map<String, dynamic> _historyCheckpoint(String provider, String account) {
+  final lines = _legacyHistoryLinesForIdentity(provider, account);
+  final rowDigests = lines.map(_lineDigest).toList(growable: false);
+  return {
+    'digest': _contentDigest(rowDigests.join('\n')),
+    'count': rowDigests.length,
+    'row_digests': rowDigests,
+  };
+}
+
+Map<String, dynamic> _emptyHistoryCheckpoint() => {
+      'digest': _contentDigest(''),
+      'count': 0,
+      'row_digests': const <String>[],
+    };
+
+Map<String, dynamic> _emptyBucketCheckpoint() => {
+      'digest': _contentDigest('[]'),
+      'count': 0,
+      'buckets': const <Map<String, dynamic>>[],
+    };
+
+({bool valid, List<HeadroomBucket> buckets}) _readBucketFile(File file) {
+  if (!file.existsSync()) return (valid: true, buckets: const []);
+  if (file.lengthSync() > _maxJsonBytes) {
+    return (valid: false, buckets: const []);
+  }
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! List) return (valid: false, buckets: const []);
+    final buckets = <HeadroomBucket>[];
+    for (final entry in decoded) {
+      if (entry is! Map) continue;
+      try {
+        buckets.add(
+          HeadroomBucket.fromJson(entry.cast<String, dynamic>()),
+        );
+      } catch (_) {}
+    }
+    buckets.sort((a, b) => a.start.compareTo(b.start));
+    return (valid: true, buckets: buckets);
+  } catch (_) {
+    return (valid: false, buckets: const []);
+  }
+}
+
+Map<String, dynamic>? _bucketCheckpoint(File file) {
+  final read = _readBucketFile(file);
+  if (!read.valid || read.buckets.length > _maxAnalyticsCheckpointBuckets) {
+    return null;
+  }
+  final baseline = read.buckets.map((bucket) => bucket.toJson()).toList();
+  return {
+    'digest': _contentDigest(jsonEncode(baseline)),
+    'count': baseline.length,
+    'buckets': baseline,
+  };
+}
+
+Map<String, dynamic>? _readAnalyticsMigrationRecord(
+  String provider,
+  String account,
+) {
+  final file = _analyticsMigrationFile(provider, account);
+  if (!file.existsSync() || file.lengthSync() > _maxAnalyticsMigrationBytes) {
+    return null;
+  }
+  try {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return null;
+    final record = decoded.cast<String, dynamic>();
+    if (record['schema'] != _analyticsMigrationSchema ||
+        record['provider'] != provider ||
+        record['account_digest'] != accountIdentityDigest(account)) {
+      return null;
+    }
+    return record;
+  } catch (_) {
+    return null;
+  }
+}
+
+Map<String, dynamic> _newAnalyticsMigrationRecord(
+  String provider,
+  String account,
+) =>
+    {
+      'schema': _analyticsMigrationSchema,
+      'provider': provider,
+      'account_digest': accountIdentityDigest(account),
+      'observed_at': nowEpoch(),
+    };
+
+bool _validAnalyticsIncidentId(Object? value) =>
+    value is String && RegExp(r'^[a-f0-9]{32}$').hasMatch(value);
+
+bool _validAnalyticsIncidentTimestamp(Object? value) =>
+    value is int && value > 0;
+
+String _newAnalyticsIncidentId() {
+  final random = Random.secure();
+  return List<int>.generate(16, (_) => random.nextInt(256))
+      .map((value) => value.toRadixString(16).padLeft(2, '0'))
+      .join();
+}
+
+void _markAnalyticsConflict(
+  Map<String, dynamic> record,
+  String tier,
+  String reason,
+) {
+  record['${tier}_conflict'] = true;
+  record['${tier}_reason'] = reason;
+  if (!_validAnalyticsIncidentId(record['incident_id'])) {
+    record['incident_id'] = _newAnalyticsIncidentId();
+  }
+  if (!_validAnalyticsIncidentTimestamp(record['incident_observed_at'])) {
+    record['incident_observed_at'] = nowEpoch();
+  }
+}
+
+void _copyAnalyticsIncidentMetadata(
+  Map<String, dynamic> target,
+  Map<String, dynamic>? source,
+) {
+  final incidentId = source?['incident_id'];
+  if (_validAnalyticsIncidentId(incidentId)) {
+    target['incident_id'] = incidentId;
+  }
+  final observedAt = source?['incident_observed_at'];
+  if (_validAnalyticsIncidentTimestamp(observedAt)) {
+    target['incident_observed_at'] = observedAt;
+  }
+}
+
+bool _writeAnalyticsMigrationRecord(
+  String provider,
+  String account,
+  Map<String, dynamic> record,
+) {
+  try {
+    record['observed_at'] = nowEpoch();
+    final encoded = jsonEncode(record);
+    if (utf8.encode(encoded).length > _maxAnalyticsMigrationBytes) return false;
+    _atomicWrite(_analyticsMigrationFile(provider, account), encoded);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+bool _checkpointMatches(Object? baseline, Map<String, dynamic> current) {
+  if (baseline is! Map) return false;
+  return baseline['digest'] == current['digest'] &&
+      baseline['count'] == current['count'];
+}
+
+List<({int asOf, String digest})> _historyCheckpointRows(
+  Iterable<String> lines,
+) {
+  final rows = <({int asOf, String digest})>[];
+  for (final line in lines) {
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is! Map) continue;
+      final quota = ProviderQuota.fromJson(decoded.cast<String, dynamic>());
+      rows.add((asOf: quota.asOf, digest: _lineDigest(line)));
+    } catch (_) {}
+  }
+  return rows;
+}
+
+bool _canonicalHistoryCoversLegacy(
+  String provider,
+  String account,
+) {
+  final legacyLines = _legacyHistoryLinesForIdentity(provider, account);
+  if (legacyLines.isEmpty) return true;
+  final canonicalLines = _historyLinesForIdentity(
+    _historyFile(provider, account: account),
+    provider,
+    account,
+  );
+  final canonical = _historyCheckpointRows(canonicalLines);
+  if (canonical.isEmpty) return false;
+  final oldestCanonical = canonical
+      .map((row) => row.asOf)
+      .reduce((left, right) => left < right ? left : right);
+  final canonicalDigests = canonical.map((row) => row.digest).toSet();
+  for (final row in _historyCheckpointRows(legacyLines)) {
+    if (row.asOf >= oldestCanonical && !canonicalDigests.contains(row.digest)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _bucketCovers(HeadroomBucket canonical, HeadroomBucket legacy) {
+  const epsilon = 0.000001;
+  if (canonical.count < legacy.count ||
+      canonical.sum + epsilon < legacy.sum ||
+      canonical.sumSq + epsilon < legacy.sumSq ||
+      canonical.exhausted < legacy.exhausted) {
+    return false;
+  }
+  if (legacy.count > 0 &&
+      (canonical.min > legacy.min + epsilon ||
+          canonical.max + epsilon < legacy.max)) {
+    return false;
+  }
+  for (var index = 0; index < kHistBins; index++) {
+    if (canonical.hist[index] < legacy.hist[index]) return false;
+  }
+  return true;
+}
+
+bool _canonicalBucketsCoverLegacy(File canonicalFile, File legacyFile) {
+  final canonicalRead = _readBucketFile(canonicalFile);
+  final legacyRead = _readBucketFile(legacyFile);
+  if (!canonicalRead.valid || !legacyRead.valid) return false;
+  if (legacyRead.buckets.isEmpty) return true;
+  if (canonicalRead.buckets.isEmpty) return false;
+  if (!legacyFile.lastModifiedSync().isBefore(
+        canonicalFile.lastModifiedSync(),
+      )) {
+    return false;
+  }
+  final byStart = {
+    for (final bucket in canonicalRead.buckets) bucket.start: bucket,
+  };
+  final oldestCanonical = canonicalRead.buckets.first.start;
+  for (final legacy in legacyRead.buckets) {
+    if (legacy.start < oldestCanonical) continue;
+    final canonical = byStart[legacy.start];
+    if (canonical == null || !_bucketCovers(canonical, legacy)) return false;
+  }
+  return true;
+}
+
+bool _ensureHistoryMigrationBaseline(
+  String provider,
+  String account, {
+  required bool canonicalExisted,
+}) {
+  final canonical = _historyFile(provider, account: account);
+  final legacy = _legacyHistoryFile(provider, account: account);
+  if (canonical.path == legacy.path) return true;
+  final marker = _analyticsMigrationFile(provider, account);
+  final existing = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && existing == null) return false;
+  final record = existing ?? _newAnalyticsMigrationRecord(provider, account);
+  if (record['history_conflict'] == true) return false;
+  final current = _historyCheckpoint(provider, account);
+  if (record.containsKey('history')) {
+    if (_checkpointMatches(record['history'], current)) return true;
+    _markAnalyticsConflict(
+      record,
+      'history',
+      'legacy history changed after checkpoint',
+    );
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  if (canonicalExisted && !_canonicalHistoryCoversLegacy(provider, account)) {
+    _markAnalyticsConflict(
+      record,
+      'history',
+      'legacy history changed before checkpoint',
+    );
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  record['history'] = current;
+  if (_writeAnalyticsMigrationRecord(provider, account, record)) return true;
+  record.remove('history');
+  _markAnalyticsConflict(
+    record,
+    'history',
+    'legacy history checkpoint could not be stored',
+  );
+  _writeAnalyticsMigrationRecord(provider, account, record);
+  return false;
+}
+
+bool _ensureBucketMigrationBaseline(
+  String provider,
+  String account, {
+  required bool canonicalExisted,
+}) {
+  final canonical = _bucketsFile(provider, account: account);
+  final legacy = _legacyBucketsFile(provider, account: account);
+  if (canonical.path == legacy.path) return true;
+  final marker = _analyticsMigrationFile(provider, account);
+  final existing = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && existing == null) return false;
+  final record = existing ?? _newAnalyticsMigrationRecord(provider, account);
+  if (record['buckets_conflict'] == true) return false;
+  final legacyOwned = !legacy.existsSync() ||
+      _legacyBucketOwnerAllows(provider, account, claim: true);
+  if (!legacyOwned) return true;
+  final current = _bucketCheckpoint(legacy);
+  if (current == null) {
+    _markAnalyticsConflict(
+      record,
+      'buckets',
+      'legacy hourly analytics are invalid',
+    );
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  if (record.containsKey('buckets')) {
+    if (_checkpointMatches(record['buckets'], current)) return true;
+    _markAnalyticsConflict(
+      record,
+      'buckets',
+      'legacy hourly analytics changed after checkpoint',
+    );
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  if (canonicalExisted &&
+      legacy.existsSync() &&
+      !_canonicalBucketsCoverLegacy(canonical, legacy)) {
+    _markAnalyticsConflict(
+      record,
+      'buckets',
+      'legacy hourly analytics changed before checkpoint',
+    );
+    _writeAnalyticsMigrationRecord(provider, account, record);
+    return false;
+  }
+  record['buckets'] = current;
+  if (_writeAnalyticsMigrationRecord(provider, account, record)) return true;
+  record.remove('buckets');
+  _markAnalyticsConflict(
+    record,
+    'buckets',
+    'legacy hourly analytics checkpoint could not be stored',
+  );
+  _writeAnalyticsMigrationRecord(provider, account, record);
+  return false;
+}
+
+int _fileObservedAt(File file) {
+  try {
+    return file.lastModifiedSync().millisecondsSinceEpoch ~/ 1000;
+  } catch (_) {
+    return nowEpoch();
+  }
+}
+
+bool _historyMigrationConflict(String provider, String account) {
+  final canonical = _historyFile(provider, account: account);
+  final legacy = _legacyHistoryFile(provider, account: account);
+  if (canonical.path == legacy.path) return false;
+  final marker = _analyticsMigrationFile(provider, account);
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && record == null) return true;
+  if (record?['history_conflict'] == true) return true;
+  final current = _historyCheckpoint(provider, account);
+  if (record?.containsKey('history') == true) {
+    return !_checkpointMatches(record?['history'], current);
+  }
+  if (!canonical.existsSync()) return false;
+  if ((current['count'] as int) == 0 && record == null) return false;
+  return true;
+}
+
+bool _bucketMigrationConflict(String provider, String account) {
+  final canonical = _bucketsFile(provider, account: account);
+  final legacy = _legacyBucketsFile(provider, account: account);
+  if (canonical.path == legacy.path) return false;
+  final marker = _analyticsMigrationFile(provider, account);
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  if (marker.existsSync() && record == null) return true;
+  if (record?['buckets_conflict'] == true) return true;
+  final legacyOwned = !legacy.existsSync() ||
+      _legacyBucketOwnerAllows(provider, account, claim: false);
+  if (record?.containsKey('buckets') == true) {
+    if (!legacyOwned) return true;
+    final current = _bucketCheckpoint(legacy);
+    return current == null || !_checkpointMatches(record?['buckets'], current);
+  }
+  if (!canonical.existsSync()) return false;
+  if (!legacyOwned) return false;
+  if (!legacy.existsSync()) return false;
+  final current = _bucketCheckpoint(legacy);
+  return current == null || record != null || (current['count'] as int) > 0;
+}
+
+List<HeadroomBucket>? _bucketsFromCheckpoint(Object? checkpoint) {
+  if (checkpoint is! Map) return null;
+  final rawBuckets = checkpoint['buckets'];
+  final count = checkpoint['count'];
+  final digest = checkpoint['digest'];
+  if (rawBuckets is! List ||
+      count is! int ||
+      digest is! String ||
+      count != rawBuckets.length ||
+      count > _maxAnalyticsCheckpointBuckets ||
+      _contentDigest(jsonEncode(rawBuckets)) != digest) {
+    return null;
+  }
+  final buckets = <HeadroomBucket>[];
+  try {
+    for (final entry in rawBuckets) {
+      if (entry is! Map) return null;
+      buckets.add(HeadroomBucket.fromJson(entry.cast<String, dynamic>()));
+    }
+  } catch (_) {
+    return null;
+  }
+  buckets.sort((left, right) => left.start.compareTo(right.start));
+  return buckets;
+}
+
+List<HeadroomBucket> _trustedBucketsDuringConflict(
+  String provider,
+  String account,
+) {
+  final canonical = _bucketsFile(provider, account: account);
+  if (canonical.existsSync()) {
+    final read = _readBucketFile(canonical);
+    if (read.valid) return List<HeadroomBucket>.of(read.buckets);
+  }
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  return List<HeadroomBucket>.of(
+    _bucketsFromCheckpoint(record?['buckets']) ?? const [],
+  );
+}
+
+double? _conservativeMaximum(double? left, double? right) {
+  final finiteLeft = left != null && left.isFinite ? left : null;
+  final finiteRight = right != null && right.isFinite ? right : null;
+  if (finiteLeft == null) return finiteRight;
+  if (finiteRight == null) return finiteLeft;
+  return finiteLeft >= finiteRight ? finiteLeft : finiteRight;
+}
+
+BurnStat _conservativeBurnStat(BurnStat left, BurnStat right) => BurnStat(
+      perHour: _conservativeMaximum(left.perHour, right.perHour),
+      sePerHour: _conservativeMaximum(left.sePerHour, right.sePerHour),
+      samples: left.samples <= right.samples ? left.samples : right.samples,
+    );
+
+({BurnStat onBoundary, BurnStat afterBoundary}) _conflictBurnCandidates(
+  List<HeadroomBucket> buckets, {
+  int? lookbackHours,
+}) {
+  if (buckets.isEmpty) {
+    return (
+      onBoundary: const BurnStat(),
+      afterBoundary: const BurnStat(),
+    );
+  }
+
+  BurnStat evaluate(int evaluationTime) => lookbackHours == null
+      ? burnRateWithError(buckets, evaluationTime)
+      : burnRateWithError(
+          buckets,
+          evaluationTime,
+          lookbackHours: lookbackHours,
+        );
+
+  // The trusted snapshot records hourly bucket starts, not the sub-hour offset
+  // of the last healthy evaluation. An exact-hour cutoff includes one boundary
+  // bucket that every later offset excludes. Evaluate both possible sets and
+  // retain both candidates so the conservative envelope can be enforced after
+  // cross-provider shrinkage as well as before it.
+  final onBoundary = evaluate(buckets.last.start);
+  final afterBoundary = evaluate(buckets.last.start + 1);
+  return (onBoundary: onBoundary, afterBoundary: afterBoundary);
+}
+
+/// Returns a bounded mixed-version analytics warning for one identity. No path,
+/// raw account, sample, or file content leaves the storage boundary.
+AnalyticsStorageNotice? analyticsStorageNotice(
+  String provider, {
+  String? account,
+}) {
+  final exactAccount = account != null && _hasAccount(account) ? account : null;
+  if (exactAccount == null) return null;
+  final tiers = <String>[];
+  if (_historyMigrationConflict(provider, exactAccount)) tiers.add('history');
+  if (_bucketMigrationConflict(provider, exactAccount)) tiers.add('buckets');
+  if (tiers.isEmpty) return null;
+  final legacyHistory = _legacyHistoryFile(provider, account: exactAccount);
+  final legacyBuckets = _legacyBucketsFile(provider, account: exactAccount);
+  final marker = _analyticsMigrationFile(provider, exactAccount);
+  final observedAt = [legacyHistory, legacyBuckets, marker]
+      .where((file) => file.existsSync())
+      .map(_fileObservedAt)
+      .fold(0, (latest, value) => value > latest ? value : latest);
+  return AnalyticsStorageNotice(
+    provider: provider,
+    account: exactAccount,
+    tiers: List.unmodifiable(tiers),
+    observedAt: observedAt == 0 ? nowEpoch() : observedAt,
+  );
+}
+
+AnalyticsStorageRecoveryResult _analyticsRecoveryResult({
+  required String mode,
+  required String provider,
+  required String account,
+  required String tier,
+  required List<String> activeTiers,
+  required bool ready,
+  required bool recovered,
+  bool exactMergeAvailable = false,
+  bool exactMergePerformed = false,
+  required String status,
+  required String detail,
+  String? evidenceBundle,
+  List<String> archivedRoles = const [],
+}) =>
+    AnalyticsStorageRecoveryResult(
+      mode: mode,
+      provider: provider,
+      account: account,
+      tier: tier,
+      activeTiers: List.unmodifiable(activeTiers),
+      ready: ready,
+      recovered: recovered,
+      exactMergeAvailable: exactMergeAvailable,
+      exactMergePerformed: exactMergePerformed,
+      status: status,
+      detail: detail,
+      evidenceBundle: evidenceBundle,
+      archivedRoles: List.unmodifiable(archivedRoles),
+    );
+
+String? _legacyHistoryRecoveryFailure(
+  List<int> bytes,
+  String provider,
+  String account,
+) {
+  try {
+    for (final line in const LineSplitter().convert(utf8.decode(bytes))) {
+      if (line.trim().isEmpty) continue;
+      final decoded = jsonDecode(line);
+      if (decoded is! Map ||
+          decoded['provider'] is! String ||
+          decoded['account'] is! String) {
+        return 'unsafe_evidence';
+      }
+      if (decoded['provider'] != provider || decoded['account'] != account) {
+        return 'shared_legacy_evidence';
+      }
+    }
+  } catch (_) {
+    return 'unsafe_evidence';
+  }
+  return null;
+}
+
+({List<_AnalyticsRecoveryEvidence> evidence, String? failure})
+    _analyticsRecoveryEvidence(
+  String provider,
+  String account,
+  String tier,
+) {
+  final candidates =
+      <({String role, File source, String extension, bool moveOriginal})>[];
+  if (tier == 'history') {
+    candidates.addAll([
+      (
+        role: 'canonical-history',
+        source: _historyFile(provider, account: account),
+        extension: '.jsonl',
+        moveOriginal: true,
+      ),
+      (
+        role: 'legacy-history',
+        source: _legacyHistoryFile(provider, account: account),
+        extension: '.jsonl',
+        moveOriginal: true,
+      ),
+    ]);
+  } else {
+    candidates.addAll([
+      (
+        role: 'canonical-buckets',
+        source: _bucketsFile(provider, account: account),
+        extension: '.json',
+        moveOriginal: true,
+      ),
+      (
+        role: 'legacy-buckets',
+        source: _legacyBucketsFile(provider, account: account),
+        extension: '.json',
+        moveOriginal: true,
+      ),
+      (
+        role: 'legacy-bucket-owner',
+        source: _legacyBucketOwnerFile(provider, account),
+        extension: '.json',
+        moveOriginal: false,
+      ),
+    ]);
+  }
+  candidates.add((
+    role: 'migration-marker',
+    source: _analyticsMigrationFile(provider, account),
+    extension: '.json',
+    moveOriginal: false,
+  ));
+
+  final evidence = <_AnalyticsRecoveryEvidence>[];
+  final seenPaths = <String>{};
+  var totalBytes = 0;
+  for (final candidate in candidates) {
+    if (!seenPaths.add(candidate.source.path)) continue;
+    final type = FileSystemEntity.typeSync(
+      candidate.source.path,
+      followLinks: false,
+    );
+    if (type == FileSystemEntityType.notFound) continue;
+    if (type != FileSystemEntityType.file) {
+      return (evidence: const [], failure: 'unsafe_evidence');
+    }
+    try {
+      final length = candidate.source.lengthSync();
+      if (length < 0 ||
+          length > _maxAnalyticsRecoveryEvidenceBytes ||
+          totalBytes + length > _maxAnalyticsRecoveryEvidenceBytes) {
+        return (evidence: const [], failure: 'evidence_too_large');
+      }
+      final bytes = candidate.source.readAsBytesSync();
+      if (bytes.length != length ||
+          totalBytes + bytes.length > _maxAnalyticsRecoveryEvidenceBytes) {
+        return (evidence: const [], failure: 'evidence_changed');
+      }
+      if (candidate.role == 'legacy-history') {
+        final failure = _legacyHistoryRecoveryFailure(
+          bytes,
+          provider,
+          account,
+        );
+        if (failure != null) return (evidence: const [], failure: failure);
+      }
+      if (candidate.role == 'legacy-buckets' &&
+          !_legacyBucketRecoveryOwned(provider, account)) {
+        return (evidence: const [], failure: 'shared_legacy_evidence');
+      }
+      totalBytes += bytes.length;
+      evidence.add(
+        _AnalyticsRecoveryEvidence(
+          role: candidate.role,
+          source: candidate.source,
+          extension: candidate.extension,
+          precheckBytes: bytes,
+          precheckDigest: sha256.convert(bytes).toString(),
+          moveOriginal: candidate.moveOriginal,
+        ),
+      );
+    } catch (_) {
+      return (evidence: const [], failure: 'unsafe_evidence');
+    }
+  }
+  return (evidence: evidence, failure: null);
+}
+
+_AnalyticsRecoveryEvidence? _analyticsRecoveryEvidenceByRole(
+  List<_AnalyticsRecoveryEvidence> evidence,
+  String role,
+) {
+  for (final item in evidence) {
+    if (item.role == role) return item;
+  }
+  return null;
+}
+
+List<_AnalyticsHistoryRow>? _strictAnalyticsHistoryRows(
+  List<int> bytes,
+  String provider,
+  String account,
+) {
+  try {
+    final rows = <_AnalyticsHistoryRow>[];
+    for (final rawLine in const LineSplitter().convert(utf8.decode(bytes))) {
+      final line = rawLine.trim();
+      if (line.isEmpty) continue;
+      final decoded = jsonDecode(line);
+      if (decoded is! Map) return null;
+      final quota = ProviderQuota.fromJson(decoded.cast<String, dynamic>());
+      if (quota.provider != provider ||
+          quota.account != account ||
+          !_isRegisteredCacheEvidence(quota) ||
+          !isTrustedQuotaEvidenceAtCapture(quota)) {
+        return null;
+      }
+      rows.add(
+        _AnalyticsHistoryRow(
+          asOf: quota.asOf,
+          digest: _lineDigest(line),
+          line: line,
+        ),
+      );
+      if (rows.length > _historyCap) return null;
+    }
+    for (var index = 1; index < rows.length; index++) {
+      if (rows[index].asOf < rows[index - 1].asOf) return null;
+    }
+    return rows;
+  } catch (_) {
+    return null;
+  }
+}
+
+_AnalyticsHistoryBranch? _analyticsHistoryBranch(
+  List<_AnalyticsHistoryRow> rows,
+  List<String> baselineDigests,
+) {
+  if (baselineDigests.isEmpty) {
+    return _AnalyticsHistoryBranch(rows, 0);
+  }
+  final matches = <int>[];
+  final limit = min(rows.length, baselineDigests.length);
+  for (var overlap = 1; overlap <= limit; overlap++) {
+    var matchesSuffix = true;
+    final baselineOffset = baselineDigests.length - overlap;
+    for (var index = 0; index < overlap; index++) {
+      if (rows[index].digest != baselineDigests[baselineOffset + index]) {
+        matchesSuffix = false;
+        break;
+      }
+    }
+    if (matchesSuffix) matches.add(overlap);
+  }
+  if (matches.length != 1) return null;
+  return _AnalyticsHistoryBranch(rows, matches.single);
+}
+
+_AnalyticsRecoveryMergePlan? _exactAnalyticsHistoryMergePlan(
+  String provider,
+  String account,
+  List<_AnalyticsRecoveryEvidence> evidence,
+) {
+  final canonical =
+      _analyticsRecoveryEvidenceByRole(evidence, 'canonical-history');
+  final legacy = _analyticsRecoveryEvidenceByRole(evidence, 'legacy-history');
+  final marker = _analyticsRecoveryEvidenceByRole(evidence, 'migration-marker');
+  if (canonical == null || legacy == null || marker == null) return null;
+
+  try {
+    final markerDecoded = jsonDecode(utf8.decode(marker.precheckBytes));
+    if (markerDecoded is! Map) return null;
+    final record = markerDecoded.cast<String, dynamic>();
+    if (record['schema'] != _analyticsMigrationSchema ||
+        record['provider'] != provider ||
+        record['account_digest'] != accountIdentityDigest(account)) {
+      return null;
+    }
+    final checkpoint = record['history'];
+    if (checkpoint is! Map) return null;
+    final rawDigests = checkpoint['row_digests'];
+    final count = checkpoint['count'];
+    final digest = checkpoint['digest'];
+    if (rawDigests is! List ||
+        count is! int ||
+        digest is! String ||
+        count != rawDigests.length ||
+        count > _historyCap ||
+        rawDigests.any(
+          (value) =>
+              value is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(value),
+        )) {
+      return null;
+    }
+    final baselineDigests = rawDigests.cast<String>();
+    if (_contentDigest(baselineDigests.join('\n')) != digest) return null;
+
+    final canonicalRows = _strictAnalyticsHistoryRows(
+      canonical.precheckBytes,
+      provider,
+      account,
+    );
+    final legacyRows = _strictAnalyticsHistoryRows(
+      legacy.precheckBytes,
+      provider,
+      account,
+    );
+    if (canonicalRows == null || legacyRows == null) return null;
+    final canonicalBranch =
+        _analyticsHistoryBranch(canonicalRows, baselineDigests);
+    final legacyBranch = _analyticsHistoryBranch(legacyRows, baselineDigests);
+    if (canonicalBranch == null || legacyBranch == null) return null;
+
+    final delta = <_AnalyticsHistoryRow>[
+      ...canonicalBranch.delta,
+      ...legacyBranch.delta,
+    ]..sort((left, right) {
+        final byTime = left.asOf.compareTo(right.asOf);
+        return byTime != 0 ? byTime : left.digest.compareTo(right.digest);
+      });
+    final baselineNeeded = max(
+      0,
+      min(baselineDigests.length, _historyCap - delta.length),
+    );
+    final baselineSource =
+        canonicalBranch.baselineOverlap >= legacyBranch.baselineOverlap
+            ? canonicalBranch
+            : legacyBranch;
+    if (baselineSource.baselineOverlap < baselineNeeded) return null;
+    final retainedBaseline = baselineSource.rows
+        .take(baselineSource.baselineOverlap)
+        .skip(baselineSource.baselineOverlap - baselineNeeded)
+        .toList(growable: false);
+    if (retainedBaseline.isNotEmpty &&
+        delta.any((row) => row.asOf < retainedBaseline.last.asOf)) {
+      return null;
+    }
+
+    final merged = <_AnalyticsHistoryRow>[...retainedBaseline, ...delta];
+    final kept = merged.length > _historyCap
+        ? merged.sublist(merged.length - _historyCap)
+        : merged;
+    return _AnalyticsRecoveryMergePlan.history(
+      [for (final row in kept) row.line],
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+const int _maxExactAnalyticsSamplesPerBucket = 0x7fffffff;
+
+double _analyticsNumericTolerance(Iterable<double> values) {
+  var scale = 1.0;
+  for (final value in values) {
+    final magnitude = value.abs();
+    if (magnitude > scale) scale = magnitude;
+  }
+  return 0.0000001 + scale * 0.000000000001;
+}
+
+bool _analyticsNear(double left, double right) =>
+    (left - right).abs() <= _analyticsNumericTolerance([left, right]);
+
+bool _analyticsInRange(double value, double lower, double upper) {
+  final tolerance = _analyticsNumericTolerance([value, lower, upper]);
+  return value >= lower - tolerance && value <= upper + tolerance;
+}
+
+bool _validAnalyticsBucketFields({
+  required int count,
+  required double sum,
+  required double sumSq,
+  required int exhausted,
+  required List<int> hist,
+}) {
+  if (count < 0 ||
+      count > _maxExactAnalyticsSamplesPerBucket ||
+      exhausted < 0 ||
+      exhausted > count ||
+      !sum.isFinite ||
+      !sumSq.isFinite ||
+      sum < 0 ||
+      sumSq < 0 ||
+      hist.length != kHistBins) {
+    return false;
+  }
+  var histCount = 0;
+  var minimumSum = 0.0;
+  var maximumSum = 0.0;
+  var minimumSumSq = 0.0;
+  var maximumSumSq = 0.0;
+  const binWidth = 100 / kHistBins;
+  for (var index = 0; index < hist.length; index++) {
+    final binCount = hist[index];
+    if (binCount < 0 ||
+        binCount > _maxExactAnalyticsSamplesPerBucket - histCount) {
+      return false;
+    }
+    histCount += binCount;
+    final lower = index * binWidth;
+    final upper = index == kHistBins - 1 ? 100.0 : (index + 1) * binWidth;
+    minimumSum += binCount * lower;
+    maximumSum += binCount * upper;
+    minimumSumSq += binCount * lower * lower;
+    maximumSumSq += binCount * upper * upper;
+  }
+  if (histCount != count || exhausted > hist.first) return false;
+  if (count == 0) {
+    return exhausted == 0 && _analyticsNear(sum, 0) && _analyticsNear(sumSq, 0);
+  }
+  if (!_analyticsInRange(sum, minimumSum, maximumSum) ||
+      !_analyticsInRange(sumSq, minimumSumSq, maximumSumSq) ||
+      !_analyticsInRange(sum, 0, count * 100.0) ||
+      !_analyticsInRange(sumSq, 0, count * 10000.0) ||
+      !_analyticsInRange(sumSq, 0, 100 * sum)) {
+    return false;
+  }
+  if (count == 1 && !_analyticsNear(sumSq, sum * sum)) return false;
+  final minimumMoment = sum * sum / count;
+  return sumSq + _analyticsNumericTolerance([sumSq, minimumMoment]) >=
+      minimumMoment;
+}
+
+bool _validStrictAnalyticsBucket(HeadroomBucket bucket) {
+  if (bucket.start < 0 ||
+      bucket.start % kBucketSpan != 0 ||
+      bucket.count <= 0 ||
+      !_validAnalyticsBucketFields(
+        count: bucket.count,
+        sum: bucket.sum,
+        sumSq: bucket.sumSq,
+        exhausted: bucket.exhausted,
+        hist: bucket.hist,
+      ) ||
+      !bucket.min.isFinite ||
+      !bucket.max.isFinite ||
+      bucket.min < 0 ||
+      bucket.max > 100 ||
+      bucket.min > bucket.max) {
+    return false;
+  }
+  if (bucket.count == 1) {
+    if (!_analyticsNear(bucket.min, bucket.max) ||
+        !_analyticsNear(bucket.sum, bucket.min) ||
+        !_analyticsNear(bucket.sumSq, bucket.min * bucket.min)) {
+      return false;
+    }
+  } else {
+    final minimumExtremaSum = bucket.max + (bucket.count - 1) * bucket.min;
+    final maximumExtremaSum = bucket.min + (bucket.count - 1) * bucket.max;
+    final minimumExtremaSumSq =
+        bucket.max * bucket.max + (bucket.count - 1) * bucket.min * bucket.min;
+    final maximumExtremaSumSq =
+        bucket.min * bucket.min + (bucket.count - 1) * bucket.max * bucket.max;
+    if (!_analyticsInRange(
+          bucket.sum,
+          minimumExtremaSum,
+          maximumExtremaSum,
+        ) ||
+        !_analyticsInRange(
+          bucket.sumSq,
+          minimumExtremaSumSq,
+          maximumExtremaSumSq,
+        )) {
+      return false;
+    }
+  }
+  if (!_analyticsInRange(
+        bucket.sum,
+        bucket.count * bucket.min,
+        bucket.count * bucket.max,
+      ) ||
+      !_analyticsInRange(
+        bucket.sumSq,
+        bucket.count * bucket.min * bucket.min,
+        bucket.count * bucket.max * bucket.max,
+      )) {
+    return false;
+  }
+  final minBin =
+      (bucket.min / (100 / kHistBins)).floor().clamp(0, kHistBins - 1);
+  final maxBin =
+      (bucket.max / (100 / kHistBins)).floor().clamp(0, kHistBins - 1);
+  if (bucket.hist[minBin] == 0 || bucket.hist[maxBin] == 0) return false;
+  for (var index = 0; index < minBin; index++) {
+    if (bucket.hist[index] != 0) return false;
+  }
+  for (var index = maxBin + 1; index < kHistBins; index++) {
+    if (bucket.hist[index] != 0) return false;
+  }
+  return true;
+}
+
+HeadroomBucket? _strictAnalyticsBucket(Object? raw) {
+  if (raw is! Map) return null;
+  try {
+    final decoded = raw.cast<String, dynamic>();
+    final start = decoded['s'];
+    final count = decoded['n'];
+    final sum = decoded['sum'];
+    final sumSq = decoded['sq'];
+    final minValue = decoded['min'];
+    final maxValue = decoded['max'];
+    final exhausted = decoded['x'];
+    final rawHist = decoded['h'];
+    if (start is! int ||
+        count is! int ||
+        sum is! num ||
+        sumSq is! num ||
+        minValue is! num ||
+        maxValue is! num ||
+        exhausted is! int ||
+        rawHist is! List ||
+        rawHist.length != kHistBins ||
+        rawHist.any((value) => value is! int)) {
+      return null;
+    }
+    final bucket = HeadroomBucket(
+      start: start,
+      count: count,
+      sum: sum.toDouble(),
+      sumSq: sumSq.toDouble(),
+      min: minValue.toDouble(),
+      max: maxValue.toDouble(),
+      exhausted: exhausted,
+      hist: rawHist.cast<int>().toList(growable: false),
+    );
+    return _validStrictAnalyticsBucket(bucket) ? bucket : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+List<HeadroomBucket>? _strictAnalyticsBuckets(Object? raw) {
+  if (raw is! List || raw.length > _maxAnalyticsCheckpointBuckets) {
+    return null;
+  }
+  final buckets = <HeadroomBucket>[];
+  var previousStart = -1;
+  for (final entry in raw) {
+    final bucket = _strictAnalyticsBucket(entry);
+    if (bucket == null || bucket.start <= previousStart) return null;
+    buckets.add(bucket);
+    previousStart = bucket.start;
+  }
+  return buckets;
+}
+
+List<HeadroomBucket>? _strictAnalyticsBucketBytes(List<int> bytes) {
+  try {
+    return _strictAnalyticsBuckets(jsonDecode(utf8.decode(bytes)));
+  } catch (_) {
+    return null;
+  }
+}
+
+bool _analyticsBucketCovers(
+  HeadroomBucket branch,
+  HeadroomBucket baseline,
+) {
+  if (branch.start != baseline.start ||
+      branch.count < baseline.count ||
+      branch.exhausted < baseline.exhausted ||
+      branch.sum < baseline.sum ||
+      branch.sumSq < baseline.sumSq ||
+      branch.min > baseline.min ||
+      branch.max < baseline.max) {
+    return false;
+  }
+  final hist = <int>[];
+  for (var index = 0; index < kHistBins; index++) {
+    final delta = branch.hist[index] - baseline.hist[index];
+    if (delta < 0) return false;
+    hist.add(delta);
+  }
+  final deltaCount = branch.count - baseline.count;
+  final deltaSum = branch.sum - baseline.sum;
+  final deltaSumSq = branch.sumSq - baseline.sumSq;
+  final deltaExhausted = branch.exhausted - baseline.exhausted;
+  if (!_validAnalyticsBucketFields(
+    count: deltaCount,
+    sum: deltaSum,
+    sumSq: deltaSumSq,
+    exhausted: deltaExhausted,
+    hist: hist,
+  )) {
+    return false;
+  }
+  return deltaCount != 0 ||
+      (_analyticsNear(branch.min, baseline.min) &&
+          _analyticsNear(branch.max, baseline.max));
+}
+
+bool _validAnalyticsBucketBranch(
+  List<HeadroomBucket> branch,
+  List<HeadroomBucket> baseline,
+) {
+  if (baseline.isEmpty) return true;
+  if (branch.isEmpty) return true;
+  final baselineIndex = <int, int>{
+    for (var index = 0; index < baseline.length; index++)
+      baseline[index].start: index,
+  };
+  final branchByStart = {for (final bucket in branch) bucket.start: bucket};
+  int? firstOverlap;
+  for (final bucket in branch) {
+    final index = baselineIndex[bucket.start];
+    if (index == null) {
+      if (bucket.start <= baseline.last.start) return false;
+      continue;
+    }
+    if (!_analyticsBucketCovers(bucket, baseline[index])) return false;
+    firstOverlap ??= index;
+  }
+  if (firstOverlap == null) return branch.first.start > baseline.last.start;
+  for (var index = firstOverlap; index < baseline.length; index++) {
+    final retained = branchByStart[baseline[index].start];
+    if (retained == null ||
+        !_analyticsBucketCovers(retained, baseline[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+HeadroomBucket _copyAnalyticsBucket(HeadroomBucket bucket) => HeadroomBucket(
+      start: bucket.start,
+      count: bucket.count,
+      sum: bucket.sum,
+      sumSq: bucket.sumSq,
+      min: bucket.min,
+      max: bucket.max,
+      exhausted: bucket.exhausted,
+      hist: List<int>.of(bucket.hist),
+    );
+
+HeadroomBucket? _mergeAnalyticsBucketRows(
+  List<HeadroomBucket> branches, {
+  HeadroomBucket? subtract,
+}) {
+  if (branches.isEmpty) return null;
+  var count = -(subtract?.count ?? 0);
+  var sum = -(subtract?.sum ?? 0);
+  var sumSq = -(subtract?.sumSq ?? 0);
+  var exhausted = -(subtract?.exhausted ?? 0);
+  final hist = [
+    for (var index = 0; index < kHistBins; index++)
+      -(subtract?.hist[index] ?? 0),
+  ];
+  var minimum = double.infinity;
+  var maximum = double.negativeInfinity;
+  for (final branch in branches) {
+    if (branch.start != branches.first.start ||
+        branch.count > _maxExactAnalyticsSamplesPerBucket - count) {
+      return null;
+    }
+    count += branch.count;
+    sum += branch.sum;
+    sumSq += branch.sumSq;
+    exhausted += branch.exhausted;
+    if (branch.min < minimum) minimum = branch.min;
+    if (branch.max > maximum) maximum = branch.max;
+    for (var index = 0; index < kHistBins; index++) {
+      if (branch.hist[index] >
+          _maxExactAnalyticsSamplesPerBucket - hist[index]) {
+        return null;
+      }
+      hist[index] += branch.hist[index];
+    }
+  }
+  final merged = HeadroomBucket(
+    start: branches.first.start,
+    count: count,
+    sum: sum,
+    sumSq: sumSq,
+    min: minimum,
+    max: maximum,
+    exhausted: exhausted,
+    hist: hist,
+  );
+  return _validStrictAnalyticsBucket(merged) ? merged : null;
+}
+
+_AnalyticsRecoveryMergePlan? _exactAnalyticsBucketMergePlan(
+  String provider,
+  String account,
+  List<_AnalyticsRecoveryEvidence> evidence,
+) {
+  final canonical =
+      _analyticsRecoveryEvidenceByRole(evidence, 'canonical-buckets');
+  final legacy = _analyticsRecoveryEvidenceByRole(evidence, 'legacy-buckets');
+  final marker = _analyticsRecoveryEvidenceByRole(evidence, 'migration-marker');
+  if (canonical == null || legacy == null || marker == null) return null;
+
+  try {
+    final markerDecoded = jsonDecode(utf8.decode(marker.precheckBytes));
+    if (markerDecoded is! Map) return null;
+    final record = markerDecoded.cast<String, dynamic>();
+    if (record['schema'] != _analyticsMigrationSchema ||
+        record['provider'] != provider ||
+        record['account_digest'] != accountIdentityDigest(account)) {
+      return null;
+    }
+    final checkpoint = record['buckets'];
+    if (checkpoint is! Map) return null;
+    final rawBuckets = checkpoint['buckets'];
+    final count = checkpoint['count'];
+    final digest = checkpoint['digest'];
+    if (rawBuckets is! List ||
+        count is! int ||
+        digest is! String ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) ||
+        count != rawBuckets.length ||
+        count > _maxAnalyticsCheckpointBuckets ||
+        _contentDigest(jsonEncode(rawBuckets)) != digest) {
+      return null;
+    }
+    final baseline = _strictAnalyticsBuckets(rawBuckets);
+    final canonicalBuckets =
+        _strictAnalyticsBucketBytes(canonical.precheckBytes);
+    final legacyBuckets = _strictAnalyticsBucketBytes(legacy.precheckBytes);
+    if (baseline == null ||
+        canonicalBuckets == null ||
+        legacyBuckets == null ||
+        !_validAnalyticsBucketBranch(canonicalBuckets, baseline) ||
+        !_validAnalyticsBucketBranch(legacyBuckets, baseline)) {
+      return null;
+    }
+
+    final baselineByStart = {
+      for (final bucket in baseline) bucket.start: bucket,
+    };
+    final canonicalByStart = {
+      for (final bucket in canonicalBuckets) bucket.start: bucket,
+    };
+    final legacyByStart = {
+      for (final bucket in legacyBuckets) bucket.start: bucket,
+    };
+    final starts = <int>{
+      ...canonicalByStart.keys,
+      ...legacyByStart.keys,
+    }.toList()
+      ..sort();
+    final merged = <HeadroomBucket>[];
+    for (final start in starts) {
+      final checkpointBucket = baselineByStart[start];
+      final canonicalBucket = canonicalByStart[start];
+      final legacyBucket = legacyByStart[start];
+      HeadroomBucket? result;
+      if (checkpointBucket != null) {
+        if ((canonicalBucket != null &&
+                !_analyticsBucketCovers(canonicalBucket, checkpointBucket)) ||
+            (legacyBucket != null &&
+                !_analyticsBucketCovers(legacyBucket, checkpointBucket))) {
+          return null;
+        }
+        if (canonicalBucket != null && legacyBucket != null) {
+          result = _mergeAnalyticsBucketRows(
+            [canonicalBucket, legacyBucket],
+            subtract: checkpointBucket,
+          );
+        } else {
+          final retained = canonicalBucket ?? legacyBucket;
+          if (retained != null) result = _copyAnalyticsBucket(retained);
+        }
+      } else {
+        final branches = [
+          if (canonicalBucket != null) canonicalBucket,
+          if (legacyBucket != null) legacyBucket,
+        ];
+        result = _mergeAnalyticsBucketRows(branches);
+      }
+      if (result == null) return null;
+      merged.add(result);
+    }
+    final kept = merged.length > _maxAnalyticsCheckpointBuckets
+        ? merged.sublist(merged.length - _maxAnalyticsCheckpointBuckets)
+        : merged;
+    final plan = _AnalyticsRecoveryMergePlan.buckets(kept);
+    return plan.bytes.length <= _maxJsonBytes ? plan : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Read-only readiness check for one exact quarantined analytics tier.
+///
+/// This never creates a recovery bundle or lock file and never contacts a
+/// provider. A confirmed recovery must repeat every check while holding the
+/// exact provider/account evidence lock.
+AnalyticsStorageRecoveryResult inspectAnalyticsStorageRecovery(
+  String provider,
+  String account,
+  String tier,
+) {
+  final canonicalProvider =
+      canonicalizeProviderId(provider.trim().toLowerCase());
+  final selectedTier = tier.trim().toLowerCase();
+  if (providerAdapterById(canonicalProvider) == null) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'unsupported_target',
+      detail: 'The provider is not registered with this quotabot build.',
+    );
+  }
+  if (!_hasAccount(account)) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'invalid_target',
+      detail: 'Recovery requires one exact non-placeholder account identity.',
+    );
+  }
+  if (!_analyticsRecoveryTiers.contains(selectedTier)) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'invalid_target',
+      detail: 'Tier must be history or buckets.',
+    );
+  }
+
+  final notice = analyticsStorageNotice(
+    canonicalProvider,
+    account: account,
+  );
+  final activeTiers = notice?.tiers ?? const <String>[];
+  if (notice == null) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: false,
+      status: 'no_active_conflict',
+      detail: 'No analytics storage conflict is active for this identity.',
+    );
+  }
+  if (!activeTiers.contains(selectedTier)) {
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: false,
+      status: 'tier_not_conflicted',
+      detail: 'The selected tier is not quarantined for this identity.',
+    );
+  }
+
+  final evidence = _analyticsRecoveryEvidence(
+    canonicalProvider,
+    account,
+    selectedTier,
+  );
+  if (evidence.failure != null) {
+    final tooLarge = evidence.failure == 'evidence_too_large';
+    final shared = evidence.failure == 'shared_legacy_evidence';
+    return _analyticsRecoveryResult(
+      mode: 'inspect',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: false,
+      status: evidence.failure!,
+      detail: tooLarge
+          ? 'Selected recovery evidence exceeds the 16 MiB safety limit.'
+          : shared
+              ? 'The legacy analytics file is not exclusive to this exact '
+                  'account. No scoped recovery files can be changed safely.'
+              : 'Selected recovery evidence is not a stable regular-file set.',
+    );
+  }
+  final exactMerge = selectedTier == 'history'
+      ? _exactAnalyticsHistoryMergePlan(
+          canonicalProvider,
+          account,
+          evidence.evidence,
+        )
+      : _exactAnalyticsBucketMergePlan(
+          canonicalProvider,
+          account,
+          evidence.evidence,
+        );
+  return _analyticsRecoveryResult(
+    mode: 'inspect',
+    provider: canonicalProvider,
+    account: account,
+    tier: selectedTier,
+    activeTiers: activeTiers,
+    ready: true,
+    recovered: false,
+    exactMergeAvailable: exactMerge != null,
+    status: 'ready',
+    detail: exactMerge != null
+        ? selectedTier == 'history'
+            ? 'Ready to archive both raw-history generations and install '
+                'their exact checkpoint-proven merge. Every listed preserved '
+                'surface remains unchanged.'
+            : 'Ready to archive both aggregate-bucket generations and install '
+                'their exact checkpoint-proven merge. Every listed preserved '
+                'surface remains unchanged.'
+        : 'Ready to archive this exact tier and restart it empty. Exact merge '
+            'is not provable for this evidence; every listed preserved surface '
+            'remains unchanged.',
+  );
+}
+
+Directory _createAnalyticsRecoveryBundle(
+  String provider,
+  String account,
+  String tier,
+) {
+  final root = quotabotDir('analytics-recovery');
+  if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+      FileSystemEntityType.directory) {
+    throw const FileSystemException('unsafe recovery root');
+  }
+  enforceOwnerOnlyDirectory(root);
+  final digest = accountIdentityDigest(account).substring(0, 16);
+  final micros = DateTime.now().toUtc().microsecondsSinceEpoch;
+  for (var attempt = 0; attempt < 100; attempt++) {
+    final suffix = attempt == 0 ? '' : '_$attempt';
+    final bundle = Directory(
+      '${root.path}/${_safeProviderStem(provider)}_${digest}_${tier}_${micros}_$pid$suffix',
+    );
+    if (bundle.existsSync()) continue;
+    bundle.createSync();
+    enforceOwnerOnlyDirectory(bundle);
+    return bundle;
+  }
+  throw const FileSystemException('could not allocate recovery bundle');
+}
+
+void _writeAnalyticsRecoveryManifest(
+  Directory bundle, {
+  required String provider,
+  required String account,
+  required String tier,
+  required String state,
+  required List<_AnalyticsRecoveryEvidence> evidence,
+  required Set<String> archivedRoles,
+  _AnalyticsRecoveryMergePlan? exactMerge,
+  bool exactMergeInstalled = false,
+  bool exactMergePerformed = false,
+  String? failure,
+}) {
+  final manifest = File('${bundle.path}/manifest.json');
+  _atomicWrite(
+    manifest,
+    jsonEncode({
+      'schema': _analyticsRecoveryEvidenceSchema,
+      'state': state,
+      'provider': provider,
+      'account_digest': accountIdentityDigest(account),
+      'tier': tier,
+      'observed_at': nowEpoch(),
+      'exact_merge_performed': exactMergePerformed,
+      'selected_tier_action': exactMergePerformed
+          ? 'archived_then_exactly_merged'
+          : exactMerge != null
+              ? 'archive_then_exact_merge_planned'
+              : 'archived_then_restarted_empty',
+      if (exactMergeInstalled && exactMerge != null) ...{
+        'exact_merge_installed': true,
+        if (exactMerge.tier == 'history')
+          'merged_rows': exactMerge.itemCount
+        else
+          'merged_buckets': exactMerge.itemCount,
+        'merged_bytes': exactMerge.bytes.length,
+        'merged_sha256': exactMerge.digest,
+      },
+      'files': [
+        for (final item in evidence)
+          {
+            'role': item.role,
+            'bytes': item.precheckBytes.length,
+            'sha256': item.precheckDigest,
+            'archived': archivedRoles.contains(item.role),
+            'moved_original':
+                item.moveOriginal && archivedRoles.contains(item.role),
+          },
+      ],
+      if (failure != null) 'failure': failure,
+    }),
+  );
+  enforceOwnerOnlyFile(manifest);
+}
+
+String _analyticsRecoveryReceiptKey(String tier) => '${tier}_recovery';
+
+void _copyAnalyticsRecoveryReceipts(
+  Map<String, dynamic> target,
+  Map<String, dynamic>? source,
+) {
+  for (final tier in _analyticsRecoveryTiers) {
+    final receipt = source?[_analyticsRecoveryReceiptKey(tier)];
+    if (receipt is! Map ||
+        receipt['bundle_id'] is! String ||
+        receipt['observed_at'] is! int) {
+      continue;
+    }
+    final bundleId = receipt['bundle_id'] as String;
+    if (!RegExp(r'^[a-zA-Z0-9._-]{1,220}$').hasMatch(bundleId)) continue;
+    target[_analyticsRecoveryReceiptKey(tier)] = {
+      'bundle_id': bundleId,
+      'observed_at': receipt['observed_at'],
+    };
+  }
+}
+
+Map<String, dynamic> _analyticsMigrationRecordAfterRecovery(
+  String provider,
+  String account,
+  String selectedTier,
+  Set<String> unresolvedTiers,
+  Map<String, dynamic>? previous,
+) {
+  final record = _newAnalyticsMigrationRecord(provider, account);
+  _copyAnalyticsRecoveryReceipts(record, previous);
+  if (unresolvedTiers.isNotEmpty) {
+    _copyAnalyticsIncidentMetadata(record, previous);
+  }
+  final ownerDigest = previous?[_analyticsLegacyBucketOwnerDigestKey];
+  if (ownerDigest == accountIdentityDigest(account)) {
+    record[_analyticsLegacyBucketOwnerDigestKey] = ownerDigest;
+  }
+  for (final tier in _analyticsRecoveryTiers) {
+    if (tier == selectedTier) {
+      record[tier] = tier == 'history'
+          ? _emptyHistoryCheckpoint()
+          : _emptyBucketCheckpoint();
+      continue;
+    }
+    if (unresolvedTiers.contains(tier)) {
+      final previousCheckpoint = previous?[tier];
+      if (previousCheckpoint is Map) {
+        record[tier] = Map<String, dynamic>.from(previousCheckpoint);
+      }
+      final previousReason = previous?['${tier}_reason'];
+      _markAnalyticsConflict(
+        record,
+        tier,
+        previousReason is String
+            ? previousReason
+            : 'unresolved during scoped analytics recovery',
+      );
+      continue;
+    }
+
+    if (tier == 'history') {
+      record[tier] = _historyCheckpoint(provider, account);
+      continue;
+    }
+    final legacy = _legacyBucketsFile(provider, account: account);
+    final owned = !legacy.existsSync() ||
+        _legacyBucketOwnerAllows(provider, account, claim: false);
+    if (!owned) continue;
+    final checkpoint = _bucketCheckpoint(legacy);
+    if (checkpoint != null) {
+      record[tier] = checkpoint;
+    } else {
+      _markAnalyticsConflict(
+        record,
+        tier,
+        tier == selectedTier
+            ? 'selected tier did not restart from an empty baseline'
+            : 'hourly analytics checkpoint remains invalid',
+      );
+    }
+  }
+  return record;
+}
+
+Map<String, dynamic> _analyticsMigrationRecoveryGuard(
+  String provider,
+  String account,
+  String selectedTier,
+  Set<String> activeTiers,
+  Map<String, dynamic>? previous,
+) {
+  final record = _newAnalyticsMigrationRecord(provider, account);
+  _copyAnalyticsRecoveryReceipts(record, previous);
+  _copyAnalyticsIncidentMetadata(record, previous);
+  final accountDigest = accountIdentityDigest(account);
+  final previousOwner = previous?[_analyticsLegacyBucketOwnerDigestKey];
+  final legacyBuckets = _legacyBucketsFile(provider, account: account);
+  if (previousOwner == accountDigest ||
+      (legacyBuckets.existsSync() &&
+          _legacyBucketOwnerAllows(provider, account, claim: false))) {
+    record[_analyticsLegacyBucketOwnerDigestKey] = accountDigest;
+  }
+  for (final tier in _analyticsRecoveryTiers) {
+    final previousCheckpoint = previous?[tier];
+    if (previousCheckpoint is Map) {
+      record[tier] = Map<String, dynamic>.from(previousCheckpoint);
+    } else if (!activeTiers.contains(tier)) {
+      if (tier == 'history') {
+        record[tier] = _historyCheckpoint(provider, account);
+      } else {
+        final legacy = _legacyBucketsFile(provider, account: account);
+        final owned = !legacy.existsSync() ||
+            _legacyBucketOwnerAllows(provider, account, claim: false);
+        final checkpoint = owned ? _bucketCheckpoint(legacy) : null;
+        if (checkpoint != null) record[tier] = checkpoint;
+      }
+    }
+    if (!activeTiers.contains(tier)) continue;
+    final previousReason = previous?['${tier}_reason'];
+    _markAnalyticsConflict(
+      record,
+      tier,
+      previousReason is String
+          ? previousReason
+          : tier == selectedTier
+              ? 'scoped analytics recovery in progress'
+              : 'unresolved during scoped analytics recovery',
+    );
+  }
+  return record;
+}
+
+AnalyticsStorageRecoveryResult? _completedAnalyticsStorageRecovery(
+  String provider,
+  String account,
+  String tier, {
+  List<String> activeTiers = const [],
+}) {
+  try {
+    final record = _readAnalyticsMigrationRecord(provider, account);
+    final receipt = record?[_analyticsRecoveryReceiptKey(tier)];
+    if (receipt is! Map || receipt['bundle_id'] is! String) return null;
+    final bundleId = receipt['bundle_id'] as String;
+    if (!RegExp(r'^[a-zA-Z0-9._-]{1,220}$').hasMatch(bundleId)) return null;
+    final root = Directory('${cacheDir().parent.path}/analytics-recovery');
+    if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      return null;
+    }
+    final bundle = Directory('${root.path}/$bundleId');
+    if (FileSystemEntity.typeSync(bundle.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      return null;
+    }
+    final manifest = File('${bundle.path}/manifest.json');
+    if (FileSystemEntity.typeSync(manifest.path, followLinks: false) !=
+            FileSystemEntityType.file ||
+        manifest.lengthSync() > _maxDriftBytes) {
+      return null;
+    }
+    final decoded = jsonDecode(manifest.readAsStringSync());
+    if (decoded is! Map ||
+        decoded['schema'] != _analyticsRecoveryEvidenceSchema ||
+        (decoded['state'] != 'complete' &&
+            decoded['state'] != 'checkpoint_admitted' &&
+            decoded['state'] != 'checkpoint_pending' &&
+            decoded['state'] != 'archiving') ||
+        decoded['provider'] != provider ||
+        decoded['account_digest'] != accountIdentityDigest(account) ||
+        decoded['tier'] != tier ||
+        decoded['files'] is! List) {
+      return null;
+    }
+    final roles = <String>[];
+    for (final entry in decoded['files'] as List) {
+      if (entry is Map &&
+          entry['archived'] == true &&
+          entry['role'] is String) {
+        roles.add(entry['role'] as String);
+      }
+    }
+    final complete = decoded['state'] == 'complete';
+    // A retained recovery receipt is written only with the admitted checkpoint.
+    // If final manifest writing stopped after the verified merge was installed,
+    // the receipt plus exact_merge_installed still proves the admitted outcome.
+    final exactMergePerformed = decoded['exact_merge_performed'] == true ||
+        decoded['exact_merge_installed'] == true;
+    return _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: provider,
+      account: account,
+      tier: tier,
+      activeTiers: activeTiers,
+      ready: false,
+      recovered: true,
+      exactMergeAvailable: exactMergePerformed,
+      exactMergePerformed: exactMergePerformed,
+      status: complete ? 'already_recovered' : 'recovered_receipt_incomplete',
+      detail: complete
+          ? exactMergePerformed
+              ? 'A prior completed scoped recovery already archived and '
+                  'exactly merged the selected $tier.'
+              : 'A prior completed scoped recovery already archived this tier.'
+          : exactMergePerformed
+              ? 'The selected analytics were exactly merged, but the evidence '
+                  'manifest was interrupted before finalization.'
+              : 'The selected tier restarted empty, but its evidence manifest '
+                  'was interrupted before finalization.',
+      evidenceBundle: bundle.path,
+      archivedRoles: roles,
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+AnalyticsStorageRecoveryResult _recoveryFailureFromInspection(
+  AnalyticsStorageRecoveryResult inspection,
+) =>
+    _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: inspection.provider,
+      account: inspection.account,
+      tier: inspection.tier,
+      activeTiers: inspection.activeTiers,
+      ready: false,
+      recovered: false,
+      status: inspection.status,
+      detail: inspection.detail,
+    );
+
+/// Archives and recovers one exact quarantined analytics tier.
+///
+/// Every selected canonical and legacy regular file is moved into an owner-only
+/// evidence bundle before any replacement is admitted. Raw history is exactly
+/// merged only when the ordered checkpoint proves one unique retained baseline
+/// overlap for each valid branch. Aggregate buckets are exactly merged only
+/// when strict invariants prove both additive branches and their retained
+/// checkpoint suffixes. Every unprovable case restarts empty. An explicit
+/// recovery guard replaces the old marker before selected files move, so
+/// interruption fails closed.
+AnalyticsStorageRecoveryResult recoverAnalyticsStorage(
+  String provider,
+  String account,
+  String tier,
+) {
+  final canonicalProvider =
+      canonicalizeProviderId(provider.trim().toLowerCase());
+  final selectedTier = tier.trim().toLowerCase();
+  try {
+    final preliminary = inspectAnalyticsStorageRecovery(
+      canonicalProvider,
+      account,
+      selectedTier,
+    );
+    if (!preliminary.ready) {
+      if (preliminary.status == 'no_active_conflict' ||
+          preliminary.status == 'tier_not_conflicted') {
+        final completed = _completedAnalyticsStorageRecovery(
+          canonicalProvider,
+          account,
+          selectedTier,
+          activeTiers: preliminary.activeTiers,
+        );
+        if (completed != null) return completed;
+      }
+      return _recoveryFailureFromInspection(preliminary);
+    }
+  } catch (_) {
+    return _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'recovery_unavailable',
+      detail: 'The exact analytics recovery target could not be inspected.',
+    );
+  }
+  try {
+    return _withEvidenceLock(canonicalProvider, account, () {
+      final inspection = inspectAnalyticsStorageRecovery(
+        canonicalProvider,
+        account,
+        selectedTier,
+      );
+      if (!inspection.ready) return _recoveryFailureFromInspection(inspection);
+
+      final scanned = _analyticsRecoveryEvidence(
+        canonicalProvider,
+        account,
+        selectedTier,
+      );
+      if (scanned.failure != null) {
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: inspection.activeTiers,
+          ready: false,
+          recovered: false,
+          status: scanned.failure!,
+          detail: scanned.failure == 'evidence_too_large'
+              ? 'Selected recovery evidence exceeds the 16 MiB safety limit.'
+              : scanned.failure == 'shared_legacy_evidence'
+                  ? 'The legacy analytics file is not exclusive to this exact '
+                      'account. No scoped recovery files were changed.'
+                  : 'Recovery evidence changed after confirmation. Stop every '
+                      'older quotabot process and inspect again.',
+        );
+      }
+      final evidence = scanned.evidence;
+      final exactMerge = selectedTier == 'history'
+          ? _exactAnalyticsHistoryMergePlan(
+              canonicalProvider,
+              account,
+              evidence,
+            )
+          : _exactAnalyticsBucketMergePlan(
+              canonicalProvider,
+              account,
+              evidence,
+            );
+      final previous = _readAnalyticsMigrationRecord(
+        canonicalProvider,
+        account,
+      );
+      final unresolvedTiers = inspection.activeTiers.toSet()
+        ..remove(selectedTier);
+      Directory bundle;
+      try {
+        bundle = _createAnalyticsRecoveryBundle(
+          canonicalProvider,
+          account,
+          selectedTier,
+        );
+      } catch (_) {
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: inspection.activeTiers,
+          ready: false,
+          recovered: false,
+          status: 'archive_failed',
+          detail: 'The evidence bundle could not be created. No recovery '
+              'files were changed.',
+        );
+      }
+
+      final archivedRoles = <String>{};
+      var exactMergeInstalled = false;
+      var exactMergeAdmitted = false;
+      void finishManifest(String state, [String? failure]) {
+        _writeAnalyticsRecoveryManifest(
+          bundle,
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          state: state,
+          evidence: evidence,
+          archivedRoles: archivedRoles,
+          exactMerge: exactMerge,
+          exactMergeInstalled: exactMergeInstalled,
+          exactMergePerformed: exactMergeAdmitted,
+          failure: failure,
+        );
+      }
+
+      try {
+        finishManifest('archiving');
+        for (final item in evidence) {
+          if (FileSystemEntity.typeSync(
+                item.source.path,
+                followLinks: false,
+              ) !=
+              FileSystemEntityType.file) {
+            finishManifest('failed', 'evidence_changed');
+            return _analyticsRecoveryResult(
+              mode: 'recover',
+              provider: canonicalProvider,
+              account: account,
+              tier: selectedTier,
+              activeTiers: inspection.activeTiers,
+              ready: false,
+              recovered: false,
+              status: 'evidence_changed',
+              detail: 'Recovery evidence changed after inspection. Stop every '
+                  'older quotabot process and inspect again.',
+              evidenceBundle: bundle.path,
+              archivedRoles: archivedRoles.toList(),
+            );
+          }
+          final currentBytes = item.source.readAsBytesSync();
+          if (sha256.convert(currentBytes).toString() != item.precheckDigest) {
+            finishManifest('failed', 'evidence_changed');
+            return _analyticsRecoveryResult(
+              mode: 'recover',
+              provider: canonicalProvider,
+              account: account,
+              tier: selectedTier,
+              activeTiers: inspection.activeTiers,
+              ready: false,
+              recovered: false,
+              status: 'evidence_changed',
+              detail: 'Recovery evidence changed after inspection. Stop every '
+                  'older quotabot process and inspect again.',
+              evidenceBundle: bundle.path,
+              archivedRoles: archivedRoles.toList(),
+            );
+          }
+        }
+
+        bool archiveEvidence(_AnalyticsRecoveryEvidence item) {
+          final archived = File(
+            '${bundle.path}/${item.role}${item.extension}',
+          );
+          if (item.moveOriginal) {
+            item.source.renameSync(archived.path);
+          } else {
+            _atomicWriteBytes(archived, item.precheckBytes);
+          }
+          archivedRoles.add(item.role);
+          enforceOwnerOnlyFile(archived);
+          return sha256.convert(archived.readAsBytesSync()).toString() ==
+              item.precheckDigest;
+        }
+
+        for (final item in evidence.where((item) => !item.moveOriginal)) {
+          if (archiveEvidence(item)) continue;
+          finishManifest('failed', 'archive_verification_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'archive_failed',
+            detail: 'Archived evidence failed its integrity check. No '
+                'selected analytics files were moved.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        final guard = _analyticsMigrationRecoveryGuard(
+          canonicalProvider,
+          account,
+          selectedTier,
+          inspection.activeTiers.toSet(),
+          previous,
+        );
+        if (!_writeAnalyticsMigrationRecord(
+          canonicalProvider,
+          account,
+          guard,
+        )) {
+          finishManifest('failed', 'recovery_guard_write_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'marker_write_failed',
+            detail: 'The fail-closed recovery guard could not be stored. No '
+                'selected analytics files were moved.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+        final marker = _analyticsMigrationFile(canonicalProvider, account);
+        final guardDigest = sha256.convert(marker.readAsBytesSync()).toString();
+
+        for (final item in evidence.where((item) => item.moveOriginal)) {
+          if (archiveEvidence(item)) continue;
+          finishManifest('failed', 'archive_verification_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'archive_failed',
+            detail: 'Archived evidence failed its integrity check. The '
+                'recovery guard keeps the quarantine active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        final selectedSources = _analyticsRecoveryTierFiles(
+          canonicalProvider,
+          account,
+          selectedTier,
+        );
+        if (selectedSources.any(
+          (file) =>
+              FileSystemEntity.typeSync(file.path, followLinks: false) !=
+              FileSystemEntityType.notFound,
+        )) {
+          finishManifest('failed', 'evidence_recreated');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'evidence_changed',
+            detail: 'An older process recreated selected analytics during '
+                'recovery. The recovery guard keeps the quarantine active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+        final guardUnchanged = marker.existsSync() &&
+            sha256.convert(marker.readAsBytesSync()).toString() == guardDigest;
+        if (!guardUnchanged) {
+          finishManifest('failed', 'recovery_guard_changed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            status: 'evidence_changed',
+            detail: 'The fail-closed recovery guard changed during archive. '
+                'Stop every older quotabot process before retrying.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        if (exactMerge != null) {
+          try {
+            final mergedFile = selectedTier == 'history'
+                ? _historyFile(canonicalProvider, account: account)
+                : _bucketsFile(canonicalProvider, account: account);
+            _atomicWriteBytes(mergedFile, exactMerge.bytes);
+            enforceOwnerOnlyFile(mergedFile);
+            final installed = mergedFile.readAsBytesSync();
+            if (installed.length != exactMerge.bytes.length ||
+                sha256.convert(installed).toString() != exactMerge.digest) {
+              throw const FileSystemException(
+                'installed analytics merge verification failed',
+              );
+            }
+            exactMergeInstalled = true;
+          } catch (_) {
+            finishManifest('failed', 'merge_install_failed');
+            return _analyticsRecoveryResult(
+              mode: 'recover',
+              provider: canonicalProvider,
+              account: account,
+              tier: selectedTier,
+              activeTiers: inspection.activeTiers,
+              ready: false,
+              recovered: false,
+              exactMergeAvailable: true,
+              status: 'merge_install_failed',
+              detail: 'The exact $selectedTier merge could not be installed '
+                  'and verified. The recovery guard keeps quarantine active.',
+              evidenceBundle: bundle.path,
+              archivedRoles: archivedRoles.toList(),
+            );
+          }
+        }
+
+        finishManifest('checkpoint_pending');
+
+        final replacement = _analyticsMigrationRecordAfterRecovery(
+          canonicalProvider,
+          account,
+          selectedTier,
+          unresolvedTiers,
+          guard,
+        );
+        replacement[_analyticsRecoveryReceiptKey(selectedTier)] = {
+          'bundle_id': bundle.uri.pathSegments
+              .where((segment) => segment.isNotEmpty)
+              .last,
+          'observed_at': nowEpoch(),
+        };
+        if (!_writeAnalyticsMigrationRecord(
+          canonicalProvider,
+          account,
+          replacement,
+        )) {
+          finishManifest('failed', 'migration_marker_write_failed');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: inspection.activeTiers,
+            ready: false,
+            recovered: false,
+            exactMergeAvailable: exactMerge != null,
+            exactMergePerformed: false,
+            status: 'marker_write_failed',
+            detail: exactMergeInstalled
+                ? 'The exact $selectedTier merge was installed, but its '
+                    'checkpoint could not be stored. Quarantine remains active.'
+                : 'The empty analytics checkpoint could not be stored. The '
+                    'quarantine remains active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        final remaining = analyticsStorageNotice(
+          canonicalProvider,
+          account: account,
+        );
+        if (remaining?.tiers.contains(selectedTier) == true) {
+          finishManifest('failed', 'selected_tier_rediverged');
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: remaining?.tiers ?? const [],
+            ready: false,
+            recovered: false,
+            exactMergeAvailable: exactMerge != null,
+            exactMergePerformed: false,
+            status: 'rediverged',
+            detail: 'The selected tier changed again before verification. '
+                'Its quarantine remains active.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+
+        exactMergeAdmitted = exactMergeInstalled;
+        try {
+          finishManifest('checkpoint_admitted');
+          finishManifest('complete');
+        } catch (_) {
+          return _analyticsRecoveryResult(
+            mode: 'recover',
+            provider: canonicalProvider,
+            account: account,
+            tier: selectedTier,
+            activeTiers: remaining?.tiers ?? const [],
+            ready: false,
+            recovered: true,
+            exactMergeAvailable: exactMerge != null,
+            exactMergePerformed: exactMergeAdmitted,
+            status: 'recovered_receipt_incomplete',
+            detail: exactMergeInstalled
+                ? 'The selected analytics were exactly merged, but the '
+                    'evidence manifest could not be finalized.'
+                : 'The selected tier restarted empty, but its evidence '
+                    'manifest could not be finalized.',
+            evidenceBundle: bundle.path,
+            archivedRoles: archivedRoles.toList(),
+          );
+        }
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: remaining?.tiers ?? const [],
+          ready: false,
+          recovered: true,
+          exactMergeAvailable: exactMerge != null,
+          exactMergePerformed: exactMergeAdmitted,
+          status: 'recovered',
+          detail: exactMergeInstalled
+              ? selectedTier == 'history'
+                  ? 'Selected raw-history generations were archived and '
+                      'exactly merged.'
+                  : 'Selected aggregate-bucket generations were archived and '
+                      'exactly merged.'
+              : 'Selected analytics were archived and restarted empty. Exact '
+                  'merge was not provable for this evidence.',
+          evidenceBundle: bundle.path,
+          archivedRoles: archivedRoles.toList(),
+        );
+      } catch (_) {
+        try {
+          finishManifest('failed', 'archive_failed');
+        } catch (_) {}
+        return _analyticsRecoveryResult(
+          mode: 'recover',
+          provider: canonicalProvider,
+          account: account,
+          tier: selectedTier,
+          activeTiers: inspection.activeTiers,
+          ready: false,
+          recovered: false,
+          exactMergeAvailable: exactMerge != null,
+          exactMergePerformed: false,
+          status: 'archive_failed',
+          detail: exactMergeInstalled
+              ? 'Recovery stopped after the exact $selectedTier merge was '
+                  'installed but before its checkpoint was admitted. '
+                  'Quarantine remains active.'
+              : 'Recovery stopped before an empty checkpoint was admitted. '
+                  'The quarantine remains active.',
+          evidenceBundle: bundle.path,
+          archivedRoles: archivedRoles.toList(),
+        );
+      }
+    }, includeLegacy: true);
+  } catch (_) {
+    return _analyticsRecoveryResult(
+      mode: 'recover',
+      provider: canonicalProvider,
+      account: account,
+      tier: selectedTier,
+      activeTiers: const [],
+      ready: false,
+      recovered: false,
+      status: 'recovery_unavailable',
+      detail: 'The exact analytics recovery lock could not be acquired.',
+    );
+  }
+}
+
+List<AnalyticsStorageNotice> analyticsStorageNoticesForQuotas(
+  Iterable<ProviderQuota> quotas,
+) {
+  final notices = <AnalyticsStorageNotice>[];
+  final seen = <String>{};
+  for (final quota in quotas) {
+    final key = quotaIdentityKeyFor(quota);
+    if (!seen.add(key)) continue;
+    final notice = analyticsStorageNotice(
+      quota.provider,
+      account: quota.account,
+    );
+    if (notice != null) notices.add(notice);
+  }
+  return notices;
+}
+
+String _analyticsIncidentKey(String provider, String accountDigest) =>
+    '$provider\u0000$accountDigest';
+
+_AnalyticsIncidentEntry? _analyticsIncidentEntry(
+  Map<String, dynamic> record,
+  String provider,
+  String accountDigest, {
+  required int? providerRowIndex,
+}) {
+  final tiers = <String>[
+    for (final tier in _analyticsRecoveryTiers)
+      if (record['${tier}_conflict'] == true) tier,
+  ];
+  if (tiers.isEmpty) return null;
+  final incidentId = record['incident_id'];
+  final recordedAt = record['incident_observed_at'];
+  final fallbackRecordedAt = record['observed_at'];
+  return _AnalyticsIncidentEntry(
+    AnalyticsStorageIncident(
+      provider: provider,
+      tiers: List.unmodifiable(tiers),
+      recordedAt: _validAnalyticsIncidentTimestamp(recordedAt)
+          ? recordedAt as int
+          : fallbackRecordedAt as int,
+      providerRowIndex: providerRowIndex,
+      incidentId:
+          _validAnalyticsIncidentId(incidentId) ? incidentId as String : null,
+    ),
+    accountDigest,
+  );
+}
+
+bool _validAnalyticsIncidentMarkerRecord(
+  File marker,
+  Map<String, dynamic> record,
+  int now,
+) {
+  final provider = record['provider'];
+  final digest = record['account_digest'];
+  final observedAt = record['observed_at'];
+  return record['schema'] == _analyticsMigrationSchema &&
+      provider is String &&
+      provider == canonicalizeProviderId(provider) &&
+      providerAdapterById(provider) != null &&
+      digest is String &&
+      RegExp(r'^[a-f0-9]{64}$').hasMatch(digest) &&
+      observedAt is int &&
+      observedAt > 0 &&
+      observedAt <= now + kQuotaEvidenceClockSkewSeconds &&
+      marker.uri.pathSegments.last ==
+          _analyticsMigrationFileNameForDigest(provider, digest);
+}
+
+Map<String, dynamic>? _readAnalyticsIncidentMarkerSync(
+  File marker,
+  int now,
+) {
+  try {
+    if (FileSystemEntity.typeSync(marker.path, followLinks: false) !=
+            FileSystemEntityType.file ||
+        marker.lengthSync() > _maxAnalyticsMigrationBytes) {
+      return null;
+    }
+    final decoded = jsonDecode(marker.readAsStringSync());
+    if (decoded is! Map) return null;
+    final record = decoded.cast<String, dynamic>();
+    return _validAnalyticsIncidentMarkerRecord(marker, record, now)
+        ? record
+        : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+File _analyticsDigestLockFile(String provider, String accountDigest) => File(
+      '${quotabotDir('cache').path}/evidence_${_safeProviderStem(provider)}_account_$accountDigest.lock',
+    );
+
+bool _analyticsDigestLockPathIsUnsafe(File lockFile) {
+  if (Directory(lockFile.path).existsSync() ||
+      Link(lockFile.path).existsSync()) {
+    return true;
+  }
+  final existingType = FileSystemEntity.typeSync(
+    lockFile.path,
+    followLinks: false,
+  );
+  return existingType != FileSystemEntityType.notFound &&
+      existingType != FileSystemEntityType.file;
+}
+
+T? _tryWithAnalyticsDigestLock<T>(
+  String provider,
+  String accountDigest,
+  T Function() run,
+) {
+  RandomAccessFile? lock;
+  var locked = false;
+  try {
+    final lockFile = _analyticsDigestLockFile(provider, accountDigest);
+    if (_analyticsDigestLockPathIsUnsafe(lockFile)) return null;
+    restrictOwnerOnlyDirectory(lockFile.parent);
+    if (!lockFile.existsSync()) lockFile.createSync(recursive: true);
+    restrictOwnerOnlyFile(lockFile);
+    lock = lockFile.openSync(mode: FileMode.write);
+    lock.lockSync(FileLock.exclusive);
+    locked = true;
+    return run();
+  } catch (_) {
+    return null;
+  } finally {
+    if (locked) {
+      try {
+        lock?.unlockSync();
+      } catch (_) {}
+    }
+    try {
+      lock?.closeSync();
+    } catch (_) {}
+  }
+}
+
+_AnalyticsIncidentResolution _upgradeAnalyticsIncidentMarker(
+  File marker,
+  String provider,
+  String accountDigest,
+  int now, {
+  required int? providerRowIndex,
+}) =>
+    _tryWithAnalyticsDigestLock(provider, accountDigest, () {
+      final record = _readAnalyticsIncidentMarkerSync(marker, now);
+      if (record == null) {
+        return const _AnalyticsIncidentResolution(null, complete: false);
+      }
+      final before = jsonEncode(record);
+      if (!_validAnalyticsIncidentId(record['incident_id'])) {
+        record['incident_id'] = _newAnalyticsIncidentId();
+        if (!_validAnalyticsIncidentTimestamp(
+          record['incident_observed_at'],
+        )) {
+          record['incident_observed_at'] = record['observed_at'];
+        }
+      }
+      if (jsonEncode(record) != before) {
+        try {
+          _atomicWrite(marker, jsonEncode(record));
+        } catch (_) {
+          final original = jsonDecode(before) as Map<String, dynamic>;
+          return _AnalyticsIncidentResolution(
+            _analyticsIncidentEntry(
+              original,
+              provider,
+              accountDigest,
+              providerRowIndex: providerRowIndex,
+            ),
+            complete: false,
+          );
+        }
+      }
+      return _AnalyticsIncidentResolution(
+        _analyticsIncidentEntry(
+          record,
+          provider,
+          accountDigest,
+          providerRowIndex: providerRowIndex,
+        ),
+        complete: true,
+      );
+    }) ??
+    const _AnalyticsIncidentResolution(null, complete: false);
+
+_AnalyticsIncidentResolution _persistAnalyticsIncidentForExactAccount(
+  String provider,
+  String account, {
+  required int? providerRowIndex,
+}) {
+  final digest = accountIdentityDigest(account);
+  try {
+    if (_analyticsDigestLockPathIsUnsafe(
+      _analyticsDigestLockFile(provider, digest),
+    )) {
+      final marker = File(
+        '${quotabotDir('cache').path}/${_analyticsMigrationFileNameForDigest(provider, digest)}',
+      );
+      final record = _readAnalyticsIncidentMarkerSync(marker, nowEpoch());
+      return _AnalyticsIncidentResolution(
+        record == null
+            ? null
+            : _analyticsIncidentEntry(
+                record,
+                provider,
+                digest,
+                providerRowIndex: providerRowIndex,
+              ),
+        complete: false,
+      );
+    }
+  } catch (_) {
+    return const _AnalyticsIncidentResolution(null, complete: false);
+  }
+  AnalyticsStorageNotice? initialNotice;
+  Map<String, dynamic>? initialRecord;
+  try {
+    initialRecord = _readAnalyticsMigrationRecord(provider, account);
+    initialNotice = analyticsStorageNotice(provider, account: account);
+  } catch (_) {
+    return const _AnalyticsIncidentResolution(null, complete: false);
+  }
+  if (initialNotice == null) {
+    return const _AnalyticsIncidentResolution(null, complete: true);
+  }
+  final resolved = _tryWithAnalyticsDigestLock(provider, digest, () {
+    final record = _readAnalyticsMigrationRecord(provider, account);
+    final markerChanged = (initialRecord == null) != (record == null) ||
+        (initialRecord != null &&
+            record != null &&
+            jsonEncode(record) != jsonEncode(initialRecord));
+    final notice = markerChanged
+        ? analyticsStorageNotice(provider, account: account)
+        : initialNotice;
+    if (notice == null) {
+      return const _AnalyticsIncidentResolution(null, complete: true);
+    }
+    if (record == null) {
+      return _AnalyticsIncidentResolution(
+        _AnalyticsIncidentEntry(
+          AnalyticsStorageIncident(
+            provider: provider,
+            tiers: notice.tiers,
+            recordedAt: notice.observedAt,
+            providerRowIndex: providerRowIndex,
+          ),
+          digest,
+        ),
+        complete: false,
+      );
+    }
+    final before = jsonEncode(record);
+    for (final tier in notice.tiers) {
+      final reason = record['${tier}_reason'];
+      _markAnalyticsConflict(
+        record,
+        tier,
+        reason is String
+            ? reason
+            : tier == 'history'
+                ? 'legacy history differs from its migration checkpoint'
+                : 'legacy hourly analytics differ from their migration checkpoint',
+      );
+    }
+    var complete = true;
+    if (jsonEncode(record) != before &&
+        !_writeAnalyticsMigrationRecord(provider, account, record)) {
+      complete = false;
+    }
+    final persisted =
+        complete ? record : jsonDecode(before) as Map<String, dynamic>;
+    final entry = _analyticsIncidentEntry(
+      persisted,
+      provider,
+      digest,
+      providerRowIndex: providerRowIndex,
+    );
+    if (entry != null) {
+      return _AnalyticsIncidentResolution(entry, complete: complete);
+    }
+    return _AnalyticsIncidentResolution(
+      _AnalyticsIncidentEntry(
+        AnalyticsStorageIncident(
+          provider: provider,
+          tiers: notice.tiers,
+          recordedAt: notice.observedAt,
+          providerRowIndex: providerRowIndex,
+        ),
+        digest,
+      ),
+      complete: false,
+    );
+  });
+  if (resolved != null) return resolved;
+  return _AnalyticsIncidentResolution(
+    _AnalyticsIncidentEntry(
+      AnalyticsStorageIncident(
+        provider: provider,
+        tiers: initialNotice.tiers,
+        recordedAt: initialNotice.observedAt,
+        providerRowIndex: providerRowIndex,
+      ),
+      digest,
+    ),
+    complete: false,
+  );
+}
+
+String? _analyticsIncidentAccountFromCache(
+  String provider,
+  String accountDigest,
+  int now,
+) {
+  final file = File(
+    '${cacheDir().path}/${_safeProviderStem(provider)}_account_$accountDigest.json',
+  );
+  try {
+    if (FileSystemEntity.typeSync(file.path, followLinks: false) !=
+            FileSystemEntityType.file ||
+        file.lengthSync() > _maxAnalyticsIdentityBytes) {
+      return null;
+    }
+    final quota = _readSnapshotEvidence(file);
+    if (quota == null ||
+        quota.provider != provider ||
+        !_hasAccount(quota.account) ||
+        accountIdentityDigest(quota.account) != accountDigest ||
+        !_isRegisteredCacheEvidence(quota) ||
+        quota.asOf <= 0 ||
+        quota.asOf > now + kQuotaEvidenceClockSkewSeconds) {
+      return null;
+    }
+    return quota.account;
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Returns a resource-bounded local inventory of mixed-version analytics
+/// incidents. When [includeUnavailable] is false, only exact identities already
+/// visible in [quotas] are inspected, so profiles and exclusions cannot reveal
+/// out-of-scope local metadata.
+///
+/// Full scans validate canonical regular markers, cap directory entries,
+/// candidate markers, and total bytes, and report partial evidence explicitly.
+/// No incident contains a raw account, digest, path, or recovery authority.
+Future<AnalyticsIncidentInventory> analyticsStorageIncidentInventory(
+  Iterable<ProviderQuota> quotas, {
+  bool includeUnavailable = true,
+  int? now,
+}) async {
+  final quotaList = quotas.toList(growable: false);
+  final detectedAt = now ?? nowEpoch();
+  final scanClock = Stopwatch()..start();
+  final visibleRows = <String, int>{};
+  for (var index = 0; index < quotaList.length; index++) {
+    final quota = quotaList[index];
+    if (!_hasAccount(quota.account)) continue;
+    visibleRows[_analyticsIncidentKey(
+      quota.provider,
+      accountIdentityDigest(quota.account),
+    )] = index;
+  }
+  final entries = <String, _AnalyticsIncidentEntry>{};
+  var partial = false;
+  var scannedMarkers = 0;
+  var unverifiableMarkers = 0;
+  var invalidMarkers = 0;
+  var truncated = false;
+  final uncertainProviders = <String>{};
+  var globalUncertainty = false;
+
+  for (var index = 0; index < quotaList.length; index++) {
+    if (index >= _maxAnalyticsIncidents ||
+        scanClock.elapsed >= _maxAnalyticsIncidentScanDuration) {
+      truncated = true;
+      partial = true;
+      globalUncertainty = true;
+      break;
+    }
+    final quota = quotaList[index];
+    if (!_hasAccount(quota.account)) continue;
+    final resolution = _persistAnalyticsIncidentForExactAccount(
+      quota.provider,
+      quota.account,
+      providerRowIndex: index,
+    );
+    if (!resolution.complete) {
+      partial = true;
+      uncertainProviders.add(quota.provider);
+    }
+    final entry = resolution.entry;
+    if (entry != null) {
+      entries[_analyticsIncidentKey(quota.provider, entry.accountDigest)] =
+          entry;
+    }
+  }
+
+  if (includeUnavailable && !truncated) {
+    var directoryEntries = 0;
+    var scannedBytes = 0;
+    try {
+      await for (final entity in cacheDir().list(followLinks: false)) {
+        if (scanClock.elapsed >= _maxAnalyticsIncidentScanDuration) {
+          truncated = true;
+          globalUncertainty = true;
+          break;
+        }
+        directoryEntries++;
+        if (directoryEntries > _maxAnalyticsIncidentDirectoryEntries) {
+          truncated = true;
+          globalUncertainty = true;
+          break;
+        }
+        final name = entity.uri.pathSegments.last;
+        if (!name.startsWith('analytics_migration_') ||
+            !name.endsWith('.json')) {
+          continue;
+        }
+        if (scannedMarkers >= _maxAnalyticsIncidents) {
+          truncated = true;
+          break;
+        }
+        scannedMarkers++;
+        final marker = File(entity.path);
+        int length;
+        try {
+          if (await FileSystemEntity.type(
+                marker.path,
+                followLinks: false,
+              ).timeout(_maxAnalyticsIncidentScanDuration) !=
+              FileSystemEntityType.file) {
+            invalidMarkers++;
+            partial = true;
+            globalUncertainty = true;
+            continue;
+          }
+          length = await marker.length().timeout(
+                _maxAnalyticsIncidentScanDuration,
+              );
+        } catch (_) {
+          invalidMarkers++;
+          partial = true;
+          globalUncertainty = true;
+          continue;
+        }
+        if (length > _maxAnalyticsMigrationBytes) {
+          invalidMarkers++;
+          partial = true;
+          globalUncertainty = true;
+          continue;
+        }
+        if (scannedBytes + length > _maxAnalyticsIncidentScanBytes) {
+          truncated = true;
+          globalUncertainty = true;
+          break;
+        }
+        scannedBytes += length;
+        final record = _readAnalyticsIncidentMarkerSync(marker, detectedAt);
+        if (record == null) {
+          invalidMarkers++;
+          partial = true;
+          globalUncertainty = true;
+          continue;
+        }
+        final provider = record['provider'] as String;
+        final digest = record['account_digest'] as String;
+        final key = _analyticsIncidentKey(provider, digest);
+        if (entries.containsKey(key)) continue;
+        final rowIndex = visibleRows[key];
+        final explicitEntry = _analyticsIncidentEntry(
+          record,
+          provider,
+          digest,
+          providerRowIndex: rowIndex,
+        );
+        var resolution = explicitEntry == null
+            ? const _AnalyticsIncidentResolution(null, complete: true)
+            : _validAnalyticsIncidentId(record['incident_id'])
+                ? _AnalyticsIncidentResolution(explicitEntry, complete: true)
+                : _upgradeAnalyticsIncidentMarker(
+                    marker,
+                    provider,
+                    digest,
+                    detectedAt,
+                    providerRowIndex: rowIndex,
+                  );
+        if (explicitEntry != null && resolution.entry == null) {
+          resolution = _AnalyticsIncidentResolution(
+            explicitEntry,
+            complete: false,
+          );
+        }
+        if (resolution.entry == null) {
+          final account = _analyticsIncidentAccountFromCache(
+            provider,
+            digest,
+            detectedAt,
+          );
+          if (account == null) {
+            unverifiableMarkers++;
+            partial = true;
+            uncertainProviders.add(provider);
+            continue;
+          }
+          resolution = _persistAnalyticsIncidentForExactAccount(
+            provider,
+            account,
+            providerRowIndex: rowIndex,
+          );
+        }
+        if (!resolution.complete) {
+          partial = true;
+          uncertainProviders.add(provider);
+        }
+        final entry = resolution.entry;
+        if (entry != null) entries[key] = entry;
+      }
+    } catch (_) {
+      partial = true;
+      globalUncertainty = true;
+    }
+  }
+
+  final result = entries.values.toList()
+    ..sort((left, right) {
+      if (left.incident.exactAccountInSnapshot !=
+          right.incident.exactAccountInSnapshot) {
+        return left.incident.exactAccountInSnapshot ? -1 : 1;
+      }
+      final provider =
+          left.incident.provider.compareTo(right.incident.provider);
+      if (provider != 0) return provider;
+      return left.accountDigest.compareTo(right.accountDigest);
+    });
+  if (result.length > _maxAnalyticsIncidents) truncated = true;
+  if (truncated) {
+    partial = true;
+    globalUncertainty = true;
+  }
+  return AnalyticsIncidentInventory(
+    incidents: List.unmodifiable(
+      result.take(_maxAnalyticsIncidents).map((entry) => entry.incident),
+    ),
+    state: partial ? 'partial' : 'complete',
+    scope: includeUnavailable ? 'all_local' : 'visible_snapshot',
+    scannedMarkers: scannedMarkers,
+    unverifiableMarkers: unverifiableMarkers,
+    invalidMarkers: invalidMarkers,
+    truncated: truncated,
+    uncertainProviders: Set.unmodifiable(uncertainProviders),
+    globalUncertainty: globalUncertainty,
+  );
+}
+
 File _legacyBucketOwnerFile(String provider, String account) => File(
     '${cacheDir().path}/legacy_bucket_owner_${_safeProviderStem(provider)}_${accountStorageStem(_safeProviderStem(account))}.json');
 
@@ -1227,6 +4384,13 @@ bool _legacyBucketOwnerAllows(
   return true;
 }
 
+bool _legacyBucketRecoveryOwned(String provider, String account) {
+  if (_legacyBucketOwnerAllows(provider, account, claim: false)) return true;
+  final record = _readAnalyticsMigrationRecord(provider, account);
+  return record?[_analyticsLegacyBucketOwnerDigestKey] ==
+      accountIdentityDigest(account);
+}
+
 /// Folds one headroom reading into the provider/account current hour bucket,
 /// pruning anything older than the retention window. Best-effort and bounded.
 void recordHeadroomSample(
@@ -1243,6 +4407,16 @@ void recordHeadroomSample(
     // first's sample (or a concurrent prune would drop a re-added bucket) - a
     // lost update on the most expensive local data to lose.
     _withEvidenceLock(provider, account ?? '', () {
+      final target = _bucketsFile(provider, account: account);
+      if (account != null &&
+          _hasAccount(account) &&
+          !_ensureBucketMigrationBaseline(
+            provider,
+            account,
+            canonicalExisted: target.existsSync(),
+          )) {
+        return;
+      }
       final buckets = _loadBuckets(
         provider,
         account: account,
@@ -1309,20 +4483,72 @@ Map<String, BurnStat> recentBurnStatsByQuota(
     measuredCounts[q.provider] = (measuredCounts[q.provider] ?? 0) + 1;
   }
   final out = <String, BurnStat>{};
+  final conflictCandidates =
+      <String, ({BurnStat onBoundary, BurnStat afterBoundary})>{};
   for (final q in list) {
     if (q.isManual || !q.hasWindows) continue;
     final key = quotaIdentityKeyFor(q);
-    var buckets = hasSpecificQuotaAccount(q.account)
-        ? loadBuckets(q.provider, account: q.account, fallbackToProvider: false)
-        : loadBuckets(q.provider);
+    final accountScoped = hasSpecificQuotaAccount(q.account);
+    final accountBucketsConflicted =
+        accountScoped && _bucketMigrationConflict(q.provider, q.account);
+    var buckets = accountBucketsConflicted
+        ? _trustedBucketsDuringConflict(q.provider, q.account)
+        : accountScoped
+            ? loadBuckets(
+                q.provider,
+                account: q.account,
+                fallbackToProvider: false,
+              )
+            : loadBuckets(q.provider);
     if (buckets.isEmpty && (measuredCounts[q.provider] ?? 0) == 1) {
       buckets = loadBuckets(q.provider);
     }
-    out[key] = lookbackHours == null
-        ? burnRateWithError(buckets, now)
-        : burnRateWithError(buckets, now, lookbackHours: lookbackHours);
+    if (accountBucketsConflicted) {
+      final candidates = _conflictBurnCandidates(
+        buckets,
+        lookbackHours: lookbackHours,
+      );
+      conflictCandidates[key] = candidates;
+      out[key] = _conservativeBurnStat(
+        candidates.onBoundary,
+        candidates.afterBoundary,
+      );
+    } else {
+      out[key] = lookbackHours == null
+          ? burnRateWithError(buckets, now)
+          : burnRateWithError(
+              buckets,
+              now,
+              lookbackHours: lookbackHours,
+            );
+    }
   }
-  return shrinkBurnStats(out);
+  if (conflictCandidates.isEmpty) return shrinkBurnStats(out);
+
+  // All hourly buckets share the same clock boundaries, so the unknown healthy
+  // sub-hour offset has exactly two global cases: on the boundary or after it.
+  // Shrink both complete maps. Healthy identities use the result matching the
+  // actual current offset, while conflicted identities take the envelope. This
+  // prevents conflict uncertainty from weakening its burn or penalizing a
+  // healthy route competitor through the shared pool.
+  final onBoundary = Map<String, BurnStat>.of(out);
+  final afterBoundary = Map<String, BurnStat>.of(out);
+  for (final entry in conflictCandidates.entries) {
+    onBoundary[entry.key] = entry.value.onBoundary;
+    afterBoundary[entry.key] = entry.value.afterBoundary;
+  }
+  final shrunkOnBoundary = shrinkBurnStats(onBoundary);
+  final shrunkAfterBoundary = shrinkBurnStats(afterBoundary);
+  final result = Map<String, BurnStat>.of(
+    bucketStart(now) == now ? shrunkOnBoundary : shrunkAfterBoundary,
+  );
+  for (final key in conflictCandidates.keys) {
+    result[key] = _conservativeBurnStat(
+      shrunkOnBoundary[key]!,
+      shrunkAfterBoundary[key]!,
+    );
+  }
+  return result;
 }
 
 /// Loads a provider/account hourly bucket series, oldest first. Empty when
@@ -1349,6 +4575,10 @@ List<HeadroomBucket> _loadBuckets(
   try {
     final exactAccount =
         account != null && _hasAccount(account) ? account : null;
+    if (exactAccount != null &&
+        _bucketMigrationConflict(provider, exactAccount)) {
+      return [];
+    }
     var f = _bucketsFile(provider, account: exactAccount);
     if (!f.existsSync() && exactAccount != null) {
       final legacy = _legacyBucketsFile(provider, account: exactAccount);
@@ -1363,32 +4593,18 @@ List<HeadroomBucket> _loadBuckets(
         f = _bucketsFile(provider);
       }
     }
-    if (!f.existsSync()) return [];
-    if (f.lengthSync() > _maxJsonBytes) return [];
-    final list = jsonDecode(f.readAsStringSync()) as List;
-    // Drop only a malformed element, not the whole history: up to 90 days of
-    // buckets is the most expensive local data to lose, and the lease and
-    // manual stores are already per-entry resilient the same way.
-    final buckets = <HeadroomBucket>[];
-    for (final e in list) {
-      if (e is! Map) continue;
-      try {
-        buckets.add(HeadroomBucket.fromJson(e.cast<String, dynamic>()));
-      } catch (_) {}
-    }
-    buckets.sort((a, b) => a.start.compareTo(b.start));
-    return buckets;
+    return List<HeadroomBucket>.of(_readBucketFile(f).buckets);
   } catch (_) {
     return [];
   }
 }
 
-List<String> _legacyHistoryLinesForIdentity(
+List<String> _historyLinesForIdentity(
+  File file,
   String provider,
   String account,
 ) {
   if (!_hasAccount(account)) return [];
-  final file = _legacyHistoryFile(provider, account: account);
   if (!file.existsSync() || file.lengthSync() > _maxHistoryBytes) return [];
   final lines = <String>[];
   try {
@@ -1408,6 +4624,16 @@ List<String> _legacyHistoryLinesForIdentity(
   } catch (_) {}
   return lines;
 }
+
+List<String> _legacyHistoryLinesForIdentity(
+  String provider,
+  String account,
+) =>
+    _historyLinesForIdentity(
+      _legacyHistoryFile(provider, account: account),
+      provider,
+      account,
+    );
 
 List<ProviderQuota> _loadHistoryFile(
   File file,
@@ -1440,6 +4666,10 @@ List<ProviderQuota> _loadHistoryFile(
 
 List<ProviderQuota> loadHistory(String provider, {String? account}) {
   final exactAccount = account != null && _hasAccount(account) ? account : null;
+  if (exactAccount != null &&
+      _historyMigrationConflict(provider, exactAccount)) {
+    return [];
+  }
   final canonical = _historyFile(provider, account: exactAccount);
   if (canonical.existsSync()) {
     return _loadHistoryFile(

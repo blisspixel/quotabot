@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -17,7 +20,13 @@ from typing import Any
 
 
 SCHEMA = "quotabot.desktop-readiness.v1"
+REPORT_SCHEMA = "quotabot.desktop-readiness-report.v3"
+BUNDLE_SCHEMA = "quotabot.desktop-bundle.v1"
 READINESS_ENV = "QUOTABOT_DESKTOP_READINESS_FILE"
+MAX_BUNDLE_ENTRIES = 4096
+MAX_BUNDLE_BYTES = 512 * 1024 * 1024
+MAX_LINK_TARGET_BYTES = 4096
+HASH_CHUNK_BYTES = 1024 * 1024
 
 
 def host_platform() -> str:
@@ -56,9 +65,287 @@ def launch_command(
             f"{READINESS_ENV}={readiness_file}",
             "--env",
             "QUOTABOT_DEMO=1",
+            "--env",
+            f"XDG_CONFIG_HOME={readiness_file.parent / 'config'}",
             str(app_bundle),
         ]
     return [str(executable)]
+
+
+def isolated_config_environment(platform: str, config_root: Path) -> dict[str, str]:
+    root = str(config_root)
+    environment = {"XDG_CONFIG_HOME": root}
+    if platform == "windows":
+        environment.update({"LOCALAPPDATA": root, "APPDATA": root})
+    return environment
+
+
+def executable_sha256(executable: Path) -> str:
+    digest = hashlib.sha256()
+    with executable.open("rb") as source:
+        for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def desktop_bundle_root(executable: Path, platform: str) -> Path:
+    if platform == "macos":
+        app_bundle = executable.parent.parent.parent
+        if app_bundle.suffix != ".app":
+            raise RuntimeError(
+                f"macOS desktop executable is not inside an app bundle: {executable}"
+            )
+        return app_bundle
+    if platform in {"windows", "linux"}:
+        return executable.parent
+    raise RuntimeError(f"Unsupported desktop bundle platform: {platform}")
+
+
+def _bundle_entries(
+    root: Path,
+    *,
+    max_entries: int,
+) -> list[tuple[str, str, Path]]:
+    if max_entries <= 0:
+        raise RuntimeError("Desktop bundle entry limit must be positive")
+    pending = [root]
+    entries: list[tuple[str, str, Path]] = []
+    observed_entries = 0
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as iterator:
+                for child in iterator:
+                    observed_entries += 1
+                    if observed_entries > max_entries:
+                        raise RuntimeError(
+                            f"Desktop bundle exceeds the {max_entries} entry limit"
+                        )
+                    path = Path(child.path)
+                    relative = path.relative_to(root).as_posix()
+                    if child.is_symlink():
+                        entries.append(("link", relative, path))
+                    elif child.is_dir(follow_symlinks=False):
+                        pending.append(path)
+                    elif child.is_file(follow_symlinks=False):
+                        entries.append(("file", relative, path))
+                    else:
+                        raise RuntimeError(
+                            f"Desktop bundle contains an unsupported entry: {relative}"
+                        )
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle directory cannot be read: {directory.name}"
+            ) from error
+    return sorted(entries, key=lambda entry: os.fsencode(entry[1]))
+
+
+def _hash_framed_bytes(digest: Any, value: bytes, *, width: int) -> None:
+    digest.update(len(value).to_bytes(width, "big"))
+    digest.update(value)
+
+
+def _same_regular_file(first: os.stat_result, second: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(first.st_mode)
+        and stat.S_ISREG(second.st_mode)
+        and first.st_dev == second.st_dev
+        and first.st_ino == second.st_ino
+        and first.st_size == second.st_size
+        and first.st_mtime_ns == second.st_mtime_ns
+    )
+
+
+def desktop_bundle_identity(
+    executable: Path,
+    platform: str,
+    *,
+    max_entries: int = MAX_BUNDLE_ENTRIES,
+    max_bytes: int = MAX_BUNDLE_BYTES,
+) -> dict[str, Any]:
+    if max_bytes <= 0:
+        raise RuntimeError("Desktop bundle byte limit must be positive")
+    root = desktop_bundle_root(executable, platform)
+    if not root.is_dir():
+        raise RuntimeError(f"Desktop bundle root not found: {root}")
+
+    digest = hashlib.sha256()
+    digest.update(BUNDLE_SCHEMA.encode("ascii") + b"\0")
+    total_bytes = 0
+    entries = _bundle_entries(root, max_entries=max_entries)
+    for kind, relative, path in entries:
+        relative_bytes = os.fsencode(relative)
+        if kind == "link":
+            try:
+                target = os.fsencode(os.readlink(path))
+            except OSError as error:
+                raise RuntimeError(
+                    f"Desktop bundle link cannot be read: {relative}"
+                ) from error
+            if len(target) > MAX_LINK_TARGET_BYTES:
+                raise RuntimeError(
+                    f"Desktop bundle link target is too long: {relative}"
+                )
+            digest.update(b"L")
+            _hash_framed_bytes(digest, relative_bytes, width=4)
+            _hash_framed_bytes(digest, target, width=4)
+            continue
+
+        try:
+            before = path.stat(follow_symlinks=False)
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle file cannot be inspected: {relative}"
+            ) from error
+        if not stat.S_ISREG(before.st_mode):
+            raise RuntimeError(f"Desktop bundle file changed type: {relative}")
+        total_bytes += before.st_size
+        if total_bytes > max_bytes:
+            raise RuntimeError(f"Desktop bundle exceeds the {max_bytes} byte limit")
+
+        digest.update(b"F")
+        _hash_framed_bytes(digest, relative_bytes, width=4)
+        digest.update(before.st_size.to_bytes(8, "big"))
+        try:
+            with path.open("rb") as source:
+                opened = os.fstat(source.fileno())
+                if not _same_regular_file(before, opened):
+                    raise RuntimeError(
+                        f"Desktop bundle file changed while hashing: {relative}"
+                    )
+                bytes_read = 0
+                for chunk in iter(lambda: source.read(HASH_CHUNK_BYTES), b""):
+                    bytes_read += len(chunk)
+                    digest.update(chunk)
+                closed = os.fstat(source.fileno())
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle file cannot be read: {relative}"
+            ) from error
+        if bytes_read != before.st_size or not _same_regular_file(before, closed):
+            raise RuntimeError(f"Desktop bundle file changed while hashing: {relative}")
+        try:
+            after = path.stat(follow_symlinks=False)
+        except OSError as error:
+            raise RuntimeError(
+                f"Desktop bundle file cannot be rechecked: {relative}"
+            ) from error
+        if not _same_regular_file(before, after):
+            raise RuntimeError(f"Desktop bundle file changed while hashing: {relative}")
+
+    return {
+        "bundle_schema": BUNDLE_SCHEMA,
+        "bundle_sha256": digest.hexdigest(),
+        "bundle_entry_count": len(entries),
+        "bundle_bytes": total_bytes,
+    }
+
+
+def assert_bundle_unchanged(
+    expected: dict[str, Any],
+    observed: dict[str, Any],
+) -> None:
+    if observed != expected:
+        raise RuntimeError("Desktop bundle changed during readiness")
+
+
+def validate_report_destination(path: Path, bundle_root: Path) -> None:
+    destination = path.resolve()
+    root = bundle_root.resolve()
+    if destination == root or root in destination.parents:
+        raise RuntimeError("Desktop readiness report must be outside the bundle")
+
+
+def build_readiness_report(
+    platform: str,
+    launch_pid: int,
+    executable: Path,
+    bundle_identity: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": REPORT_SCHEMA,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "status": "passed",
+        "stage": "complete",
+        "failure_reason": None,
+        "platform": platform,
+        "launch_pid": launch_pid,
+        "launch_process_stopped": True,
+        "executable_name": executable.name,
+        "executable_sha256": executable_sha256(executable),
+        **bundle_identity,
+        "bundle_unchanged": True,
+        "isolated_config": True,
+        "window_ready": True,
+        "tray_ready": True,
+    }
+
+
+def build_readiness_failure_report(
+    *,
+    platform: str,
+    stage: str,
+    launch_pid: int | None,
+    launch_process_stopped: bool,
+    executable_name: str,
+    executable_digest: str | None,
+    bundle_identity: dict[str, Any] | None,
+    bundle_unchanged: bool | None,
+    isolated_config: bool,
+    window_ready: bool,
+    tray_ready: bool,
+) -> dict[str, Any]:
+    """Build bounded failure evidence without paths, logs, or exceptions."""
+
+    identity = bundle_identity or {}
+    return {
+        "schema": REPORT_SCHEMA,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "status": "failed",
+        "stage": stage,
+        "failure_reason": f"{stage}_failed",
+        "platform": platform,
+        "launch_pid": launch_pid,
+        "launch_process_stopped": launch_process_stopped,
+        "executable_name": executable_name,
+        "executable_sha256": executable_digest,
+        "bundle_schema": identity.get("bundle_schema"),
+        "bundle_sha256": identity.get("bundle_sha256"),
+        "bundle_entry_count": identity.get("bundle_entry_count"),
+        "bundle_bytes": identity.get("bundle_bytes"),
+        "bundle_unchanged": bundle_unchanged,
+        "isolated_config": isolated_config,
+        "window_ready": window_ready,
+        "tray_ready": tray_ready,
+    }
+
+
+def write_report(path: Path, payload: dict[str, Any]) -> None:
+    parent = path.resolve().parent
+    if not parent.is_dir():
+        raise RuntimeError(f"Desktop readiness report directory not found: {parent}")
+    temporary = parent / f".{path.name}.{os.getpid()}.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            # Best-effort hardening only. This report carries no secret, and the
+            # mode is not honored on every platform this gate runs on, so a
+            # failure to narrow permissions must not discard the report itself.
+            pass
+        temporary.replace(path)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            # Cleanup of a leftover temporary file. On the success path replace()
+            # already renamed it away, so this only runs when the write failed,
+            # and it must never mask that original failure.
+            pass
 
 
 def validate_payload(payload: Any, expected_platform: str) -> bool:
@@ -299,63 +586,169 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=45.0)
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="write a machine-readable readiness evidence report",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     executable = args.executable.resolve()
-    if not executable.is_file():
-        raise RuntimeError(f"Desktop executable not found: {executable}")
-    if args.timeout <= 0:
-        raise RuntimeError("Desktop readiness timeout must be positive")
+    platform = "unknown"
+    stage = "validate_executable"
+    failure_stage: str | None = None
+    launch_pid: int | None = None
+    process: subprocess.Popen[bytes] | None = None
+    launch_process_stopped = False
+    executable_digest: str | None = None
+    bundle_before: dict[str, Any] | None = None
+    bundle_unchanged: bool | None = None
+    isolated_config = False
+    window_ready = False
+    tray_ready = False
+    report_destination_safe = args.report is not None
 
-    platform = host_platform()
-    with tempfile.TemporaryDirectory(prefix="quotabot-desktop-readiness-") as raw_temp:
-        temporary_directory = Path(raw_temp)
-        readiness_file = temporary_directory / "readiness.json"
-        log_file = temporary_directory / "desktop.log"
-        command = launch_command(executable, platform, readiness_file)
-        environment = os.environ.copy()
-        environment[READINESS_ENV] = str(readiness_file)
-        environment["QUOTABOT_DEMO"] = "1"
+    try:
+        if not executable.is_file():
+            raise RuntimeError(f"Desktop executable not found: {executable}")
+        executable_digest = executable_sha256(executable)
 
-        with log_file.open("wb") as output:
-            process = subprocess.Popen(
-                command,
-                cwd=executable.parent,
-                env=environment,
-                stdout=output,
-                stderr=subprocess.STDOUT,
-                start_new_session=os.name != "nt",
-            )
+        stage = "validate_timeout"
+        if args.timeout <= 0:
+            raise RuntimeError("Desktop readiness timeout must be positive")
+
+        stage = "resolve_platform"
+        platform = host_platform()
+        stage = "resolve_bundle"
+        bundle_root = desktop_bundle_root(executable, platform)
+        if args.report is not None:
+            stage = "validate_report_destination"
             try:
-                await_readiness(
-                    process,
-                    readiness_file,
-                    platform,
-                    args.timeout,
-                )
-                if platform == "windows":
-                    await_windows_tray(process)
-            except RuntimeError as error:
-                output.flush()
-                log_tail = log_file.read_text(encoding="utf-8", errors="replace")[
-                    -4000:
-                ]
-                if log_tail.strip():
-                    raise RuntimeError(
-                        f"{error}\nDesktop log tail:\n{log_tail}"
-                    ) from error
+                validate_report_destination(args.report, bundle_root)
+            except Exception:
+                report_destination_safe = False
                 raise
-            finally:
+
+        stage = "bundle_identity"
+        bundle_before = desktop_bundle_identity(executable, platform)
+        with tempfile.TemporaryDirectory(
+            prefix="quotabot-desktop-readiness-"
+        ) as raw_temp:
+            temporary_directory = Path(raw_temp)
+            readiness_file = temporary_directory / "readiness.json"
+            log_file = temporary_directory / "desktop.log"
+            command = launch_command(executable, platform, readiness_file)
+            environment = os.environ.copy()
+            environment[READINESS_ENV] = str(readiness_file)
+            environment["QUOTABOT_DEMO"] = "1"
+            environment.update(
+                isolated_config_environment(
+                    platform,
+                    temporary_directory / "config",
+                )
+            )
+            isolated_config = True
+
+            stage = "launch"
+            with log_file.open("wb") as output:
+                process = subprocess.Popen(
+                    command,
+                    cwd=executable.parent,
+                    env=environment,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=os.name != "nt",
+                )
+                launch_pid = process.pid
                 try:
-                    if platform == "macos":
-                        stop_macos_app(executable)
+                    stage = "readiness"
+                    await_readiness(
+                        process,
+                        readiness_file,
+                        platform,
+                        args.timeout,
+                    )
+                    window_ready = True
+                    tray_ready = True
+                    if platform == "windows":
+                        stage = "native_tray"
+                        await_windows_tray(process)
+                except RuntimeError as error:
+                    failure_stage = stage
+                    output.flush()
+                    log_tail = log_file.read_text(
+                        encoding="utf-8",
+                        errors="replace",
+                    )[-4000:]
+                    if log_tail.strip():
+                        raise RuntimeError(
+                            f"{error}\nDesktop log tail:\n{log_tail}"
+                        ) from error
+                    raise
                 finally:
-                    stop_process(process)
+                    try:
+                        if platform == "macos":
+                            stop_macos_app(executable)
+                        stop_process(process)
+                    except Exception:
+                        failure_stage = "cleanup"
+                        raise
+                    finally:
+                        launch_process_stopped = process.poll() is not None
+
+            if launch_pid is None:
+                failure_stage = "readiness"
+                raise RuntimeError("Desktop readiness evidence was not produced")
+            if process.poll() is None:
+                failure_stage = "cleanup"
+                raise RuntimeError(
+                    "Desktop launch process did not stop after readiness"
+                )
+            stage = "bundle_verification"
+            bundle_after = desktop_bundle_identity(executable, platform)
+            bundle_unchanged = False
+            assert_bundle_unchanged(bundle_before, bundle_after)
+            bundle_unchanged = True
+            report = build_readiness_report(
+                platform,
+                launch_pid,
+                executable,
+                bundle_before,
+            )
+
+        if args.report is not None:
+            stage = "report_write"
+            write_report(args.report, report)
+    except Exception:
+        failed_report = build_readiness_failure_report(
+            platform=platform,
+            stage=failure_stage or stage,
+            launch_pid=launch_pid,
+            launch_process_stopped=launch_process_stopped,
+            executable_name=executable.name,
+            executable_digest=executable_digest,
+            bundle_identity=bundle_before,
+            bundle_unchanged=bundle_unchanged,
+            isolated_config=isolated_config,
+            window_ready=window_ready,
+            tray_ready=tray_ready,
+        )
+        if args.report is not None and report_destination_safe:
+            try:
+                write_report(args.report, failed_report)
+            except Exception:
+                print(
+                    "Desktop readiness failed and its evidence report "
+                    "could not be written.",
+                    file=sys.stderr,
+                )
+        raise
 
     print(f"Desktop window and tray readiness passed on {platform}.")
+    print(json.dumps(report, sort_keys=True))
     return 0
 
 

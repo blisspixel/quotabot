@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from quotabot_mcp_common import (
     as_pretty_json,
+    require_mcp_bearer_token,
     require_routing_tools,
     require_loopback_mcp_url,
     routing_summary,
@@ -95,6 +96,15 @@ class McpClientSnippetTest(unittest.TestCase):
 
 
 class McpClientCommonTest(unittest.TestCase):
+    def test_python_http_bearer_token_is_required_and_bounded(self) -> None:
+        for invalid in (None, "", "short", " " * 40):
+            with self.subTest(value=invalid):
+                with self.assertRaisesRegex(ValueError, "at least 32"):
+                    require_mcp_bearer_token(invalid)
+
+        token = "a" * 32
+        self.assertEqual(require_mcp_bearer_token(f"  {token}  "), token)
+
     def test_python_loopback_url_policy_uses_shared_cases(self) -> None:
         for case in LOOPBACK_URL_CASES:
             with self.subTest(url=case["url"]):

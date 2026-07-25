@@ -201,15 +201,11 @@ void main() {
       'c@example.com:false',
     ]);
     expect(loadTokens, ['default-token', 'grant-b', 'ide-c']);
-    expect(onboardCalls, [
-      'default-token:PRO',
-      'grant-b:PRO',
-      'ide-c:PRO',
-    ]);
+    expect(onboardCalls, isEmpty);
     expect(fetchCalls, [
-      'default-token:onboard-default-token',
-      'grant-b:onboard-grant-b',
-      'ide-c:onboard-ide-c',
+      'default-token:load-default-token',
+      'grant-b:load-grant-b',
+      'ide-c:load-ide-c',
     ]);
   });
 
@@ -511,6 +507,136 @@ void main() {
     expect(q.single.windows.single.usedPercent, 60);
   });
 
+  test('Cloud Code request timeout stays bounded and visible', () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('slow@example.com')],
+      tokenResolver: (_, __) async => 'slow-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient((_) async {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        return http.Response(jsonEncode(load(project: 'project')), 200);
+      }),
+      requestTimeout: const Duration(milliseconds: 1),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'Antigravity loadCodeAssist request timed out');
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
+  });
+
+  test('Cloud Code transport failure preserves stage without raw detail',
+      () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('offline@example.com')],
+      tokenResolver: (_, __) async => 'offline-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient(
+        (_) async => throw http.ClientException('private network detail'),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'Antigravity loadCodeAssist request failed');
+    expect(q.single.error, isNot(contains('private network detail')));
+    expect(q.single.pipeHealth, isNull);
+    expect(q.single.httpStatus, isNull);
+  });
+
+  test('Cloud Code rate limit preserves stage status and retry delay',
+      () async {
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('limited@example.com')],
+      tokenResolver: (_, __) async => 'limited-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient(
+        (_) async => http.Response(
+          'private provider response',
+          429,
+          headers: {'retry-after': '120'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(
+      q.single.error,
+      'Antigravity loadCodeAssist request returned HTTP 429',
+    );
+    expect(q.single.error, isNot(contains('private provider response')));
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
+    expect(q.single.httpStatus, 429);
+    expect(q.single.retryAfterSeconds, 120);
+
+    final decoded = ProviderQuota.fromJson(q.single.toJson());
+    expect(decoded.httpStatus, 429);
+    expect(decoded.retryAfterSeconds, 120);
+  });
+
+  test('Cloud Code server failure preserves the model-fetch stage', () async {
+    final methods = <String>[];
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('busy@example.com')],
+      tokenResolver: (_, __) async => 'busy-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient((request) async {
+        final method = request.url.toString().split(':').last;
+        methods.add(method);
+        if (method == 'loadCodeAssist') {
+          return http.Response(jsonEncode(load(project: 'existing')), 200);
+        }
+        return http.Response(
+          'internal deployment detail',
+          503,
+          headers: {'retry-after': '45'},
+        );
+      }),
+    ).collectAccounts();
+
+    expect(methods, ['loadCodeAssist', 'fetchAvailableModels']);
+    expect(q.single.ok, isFalse);
+    expect(
+      q.single.error,
+      'Antigravity fetchAvailableModels request returned HTTP 503',
+    );
+    expect(q.single.error, isNot(contains('internal deployment detail')));
+    expect(q.single.pipeHealth, providerPipeHealthDegraded);
+    expect(q.single.httpStatus, 503);
+    expect(q.single.retryAfterSeconds, 45);
+  });
+
+  test('Cloud Code onboarding failure preserves the onboarding stage',
+      () async {
+    final methods = <String>[];
+    final q = await AntigravityAdapter(
+      accountSource: () => [candidate('onboarding@example.com')],
+      tokenResolver: (_, __) async => 'onboarding-token',
+      emailResolver: (_, __, ___) async => null,
+      client: MockClient((request) async {
+        final method = request.url.toString().split(':').last;
+        methods.add(method);
+        if (method == 'loadCodeAssist') {
+          return http.Response(jsonEncode(load()), 200);
+        }
+        return http.Response(
+          'private onboarding response',
+          429,
+          headers: {'retry-after': '30'},
+        );
+      }),
+    ).collectAccounts();
+
+    expect(methods, ['loadCodeAssist', 'onboardUser']);
+    expect(q.single.ok, isFalse);
+    expect(
+      q.single.error,
+      'Antigravity onboardUser request returned HTTP 429',
+    );
+    expect(q.single.error, isNot(contains('private onboarding response')));
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
+    expect(q.single.httpStatus, 429);
+    expect(q.single.retryAfterSeconds, 30);
+  });
+
   test('onboarding picks the first tier when none is marked default', () async {
     final tiers = <String?>[];
 
@@ -535,7 +661,8 @@ void main() {
     expect(q.single.windows.single.usedPercent, closeTo(20, 0.001));
   });
 
-  test('default Cloud Code flow fails soft on non-200 load', () async {
+  test('Cloud Code auth failure keeps local fallback and bounded evidence',
+      () async {
     final q = await AntigravityAdapter(
       accountSource: () => [candidate('api-fail@example.com')],
       tokenResolver: (_, __) async => 'api-token',
@@ -546,7 +673,14 @@ void main() {
     expect(q.single.account, 'api-fail@example.com');
     expect(q.single.ok, isTrue);
     expect(q.single.windows, isEmpty);
+    expect(
+      q.single.error,
+      startsWith('Antigravity loadCodeAssist request returned HTTP 403'),
+    );
     expect(q.single.error, contains('quotabot login antigravity'));
+    expect(q.single.error, isNot(contains('denied')));
+    expect(q.single.httpStatus, 403);
+    expect(q.single.pipeHealth, isNull);
   });
 
   test('connected account with no model quota gets an honest note', () async {

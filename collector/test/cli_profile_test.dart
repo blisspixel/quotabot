@@ -58,20 +58,22 @@ void main() {
       dir: Directory('${temp.path}/quotabot/profiles'),
     );
 
-    final doctor = await runCli([
-      'doctor',
-      '--no-color',
-      '--profile=prefer-codex',
-    ]);
-    final top = await runCli([
-      'top',
-      '--no-color',
-      '--profile=prefer-codex',
-    ]);
-    final report = await runCli([
-      'report',
-      '--json',
-      '--profile=prefer-codex',
+    final [doctor, top, report] = await Future.wait([
+      runCli([
+        'doctor',
+        '--no-color',
+        '--profile=prefer-codex',
+      ]),
+      runCli([
+        'top',
+        '--no-color',
+        '--profile=prefer-codex',
+      ]),
+      runCli([
+        'report',
+        '--json',
+        '--profile=prefer-codex',
+      ]),
     ]);
 
     expectExitCode(doctor, 0);
@@ -90,7 +92,7 @@ void main() {
       reportJson['recommendation_reason'],
       contains('first by your preference'),
     );
-  });
+  }, timeout: const Timeout(Duration(minutes: 1)));
 
   test('human output warns when a Codex profile uses a legacy account label',
       () async {
@@ -104,12 +106,14 @@ void main() {
       dir: Directory('${temp.path}/quotabot/profiles'),
     );
 
-    final human = await runCli([
-      'doctor',
-      '--no-color',
-      '--profile=legacy-codex',
+    final [human, machine] = await Future.wait([
+      runCli([
+        'doctor',
+        '--no-color',
+        '--profile=legacy-codex',
+      ]),
+      runCli(['--json', '--profile=legacy-codex']),
     ]);
-    final machine = await runCli(['--json', '--profile=legacy-codex']);
 
     expectExitCode(human, 0);
     expect(
@@ -123,12 +127,37 @@ void main() {
       machine.stderr as String,
       isNot(contains('older Codex account filter')),
     );
-  });
+  }, timeout: const Timeout(Duration(minutes: 1)));
 
   test('missing profile is a usage error', () async {
     final result = await runCli(['--json', '--profile=missing']);
 
     expectExitCode(result, 64);
     expect(result.stderr as String, contains('no profile named "missing"'));
+  });
+
+  test('check describes a known provider outside profile scope as hidden',
+      () async {
+    saveProfile(
+      const QuotaProfile(name: 'codex-only', providers: {'codex'}),
+      dir: Directory('${temp.path}/quotabot/profiles'),
+    );
+    saveProfile(
+      const QuotaProfile(name: 'quiet', hiddenProviders: {'claude'}),
+      dir: Directory('${temp.path}/quotabot/profiles'),
+    );
+
+    for (final profile in const ['codex-only', 'quiet']) {
+      final result = await runCli([
+        'check',
+        'claude',
+        '--no-color',
+        '--profile=$profile',
+      ]);
+
+      expectExitCode(result, 64);
+      expect(result.stderr as String, contains('hidden by the current'));
+      expect(result.stderr as String, isNot(contains('no provider named')));
+    }
   });
 }

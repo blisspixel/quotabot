@@ -137,12 +137,52 @@ void main() {
     }
 
     final checked = await runCli(['check', 'custom-check', '--json']);
+    final exact = await runCli([
+      'check',
+      'custom-check',
+      '--json',
+      '--account=spent',
+    ]);
+    final human = await runCli([
+      'check',
+      'custom-check',
+      '--no-color',
+    ]);
+    final missing = await runCli([
+      'check',
+      'custom-check',
+      '--json',
+      '--account=missing',
+    ]);
 
     expectExitCode(checked, 0);
     final json = jsonDecode(checked.stdout as String) as Map<String, dynamic>;
     expect(json['account'], 'live');
+    expect(json['matched_account_count'], 2);
+    expect(json['selection_mode'], 'best_available');
+    expect(json['live_read_succeeded'], isFalse);
     expect(json['available'], isTrue);
     expect(json['headroom_percent'], 80);
+
+    expectExitCode(exact, 69);
+    final exactJson =
+        jsonDecode(exact.stdout as String) as Map<String, dynamic>;
+    expect(exactJson['account'], 'spent');
+    expect(exactJson['matched_account_count'], 2);
+    expect(exactJson['selection_mode'], 'exact');
+    expect(exactJson['available'], isFalse);
+    expect(exactJson['headroom_percent'], 0);
+
+    expectExitCode(human, 0);
+    expect(human.stdout as String, contains('(live): available'));
+
+    expectExitCode(missing, 64);
+    final missingJson =
+        jsonDecode(missing.stdout as String) as Map<String, dynamic>;
+    expect(missingJson['found'], isFalse);
+    expect(missingJson['provider'], 'custom-check');
+    expect(missingJson['account'], 'missing');
+    expect(missingJson['reason'], 'account_not_found');
   }, timeout: Timeout.factor(2));
 
   test('check resolves equal manual accounts by stable account key', () async {
@@ -170,6 +210,41 @@ void main() {
     expect(json['account'], 'alpha');
     expect(json['available'], isTrue);
     expect(json['headroom_percent'], 80);
+  }, timeout: Timeout.factor(2));
+
+  test('check identifies a filtered manual provider as hidden', () async {
+    final saved = await runCli([
+      'manual',
+      'set',
+      'custom-filter',
+      '--used=1',
+      '--limit=10',
+      '--reset=${_futureReset()}',
+    ]);
+    expectExitCode(saved, 0);
+
+    final machine = await runCli([
+      'check',
+      'custom-filter',
+      '--json',
+      '--exclude=custom-filter',
+    ]);
+    final human = await runCli([
+      'check',
+      'custom-filter',
+      '--no-color',
+      '--exclude=custom-filter',
+    ]);
+
+    expectExitCode(machine, 64);
+    final json = jsonDecode(machine.stdout as String) as Map<String, dynamic>;
+    expect(json['provider'], 'custom-filter');
+    expect(json['found'], isFalse);
+    expect(json['reason'], 'filtered');
+
+    expectExitCode(human, 64);
+    expect(human.stderr as String, contains('hidden by the current'));
+    expect(human.stderr as String, isNot(contains('no provider named')));
   }, timeout: Timeout.factor(2));
 
   test('watch preserves safe non-email manual account provenance', () async {

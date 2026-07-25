@@ -2,14 +2,18 @@
   "data": [
     {
       "id": "llama-3.1-8b",
+      "type": "llm",
       "state": "loaded",
       "arch": "llama",
       "quantization": "Q4_K_M",
-      "loaded_context_length": 16384
+      "loaded_context_length": 16384,
+      "capabilities": ["tool_use"]
     },
     {
       "id": "mistral-7b",
-      "state": "not-loaded"
+      "type": "vlm",
+      "state": "not-loaded",
+      "capabilities": []
     }
   ]
 }

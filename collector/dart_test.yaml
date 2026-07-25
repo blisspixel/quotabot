@@ -4,3 +4,9 @@ on_os:
     # tests. High-core Windows hosts otherwise start enough suites at once to
     # make bounded operating-system checks contend with the test runner itself.
     concurrency: 2
+    # Several tests drive the CLI as a real subprocess. Process startup is far
+    # slower on Windows, and slower again on a shared hosted runner, so the
+    # default budget expires while the work is still progressing rather than
+    # stuck. Scale the default so relative per-test factors scale with it,
+    # instead of raising one test's limit each time a different one runs long.
+    timeout: 3x

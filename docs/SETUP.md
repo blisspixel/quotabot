@@ -25,6 +25,15 @@ command here costs zero usage tokens.
 `doctor` is both the first quota view and the setup diagnostic. You do not need
 to configure every provider before running it: working providers show their
 current state, and missing or signed-out providers show a reason and next step.
+Credential-related failures for Claude, Codex, Grok, and Antigravity name the
+exact `quotabot login PROVIDER` command. Temporary provider timeouts, rate
+limits, and service failures remain retry states and do not recommend login.
+Its exit code confirms that the status rendered truthfully, not that every row
+is a fresh live adapter read. Automation that requires fresh evidence should use
+`quotabot verify --require-live`; an unfiltered strict run covers the whole
+built-in fleet, so use `--profile=NAME` or `--exclude=PROVIDER,...` to select the
+intended adapter contact and verdict scope. A strict run that selects no adapter
+fails with exit 65 instead of passing vacuously.
 The one-line release installers install the CLI only. Tagged releases built by
 the current workflow also attach verified portable desktop bundles; follow
 [Desktop release bundles](DESKTOP-DISTRIBUTION.md) for checksum and provenance
@@ -226,7 +235,7 @@ only while that app runs on the machine, its account-wide read can become stale
 on an idle host. An optional quotabot login creates a separate refreshable grant
 designed to keep the read live there. Refresh and expired-host fall-through have
 deterministic automated coverage, but dated real-account evidence after an idle
-interval remains a tracked 1.0 acceptance item. Always confirm the actual machine
+interval remains a tracked 1.0 acceptance item. Always inspect the actual machine
 with `quotabot doctor`. Grok and Antigravity account pinning still relies on
 locally discovered account identity, so run that provider app on this machine
 first and retain its local account state.
@@ -236,7 +245,8 @@ quotabot login claude        # opens a browser; paste back the code it shows
 quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow; confirm in the browser
 quotabot login antigravity   # opens a browser; sign in with the account you want
-quotabot doctor              # confirm they now read "live"
+quotabot doctor              # inspect status and repair guidance
+quotabot verify --require-live --profile=NAME  # strict automation gate
 quotabot logout claude       # or: codex | grok | antigravity
 ```
 
@@ -310,32 +320,16 @@ Then run `quotabot --version` and `quotabot doctor`.
 macOS and Linux:
 
 ```bash
-rm -f "$HOME/.local/bin/quotabot"
-rm -rf "$HOME/.local/share/quotabot"
-rm -rf "$HOME/.local/share/.quotabot-versions"
+curl -fsSL https://raw.githubusercontent.com/blisspixel/quotabot/main/uninstall.sh | bash
 ```
 
-Windows PowerShell removes only the installed bundle and its user PATH entry,
-leaving other `%LOCALAPPDATA%\quotabot` metadata intact:
+Windows (PowerShell) removes the installed bundle and its user PATH entry:
 
 ```powershell
-$installDir = Join-Path $env:LOCALAPPDATA 'quotabot\bin'
-$installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
-$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$kept = @($userPath -split ';' | Where-Object { $_ -and $_ -ne $installDir })
-[Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
-foreach ($name in @('bin', 'lib')) {
-  $path = Join-Path $installRoot $name
-  $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-  if (-not $item) { continue }
-  if ($item.LinkType) {
-    Remove-Item -LiteralPath $path -Force
-  } else {
-    Remove-Item -LiteralPath $path -Recurse -Force
-  }
-}
-Remove-Item -LiteralPath (Join-Path $installRoot 'cli-versions') -Recurse -Force -ErrorAction SilentlyContinue
+irm https://raw.githubusercontent.com/blisspixel/quotabot/main/uninstall.ps1 | iex
 ```
+
+By default, the uninstall scripts preserve your local configuration and history. To perform a complete removal including all local metadata, add the `--purge` or `-Purge` flag when executing the scripts locally, or append it to the remote execution (e.g. `| bash -s -- --purge`).
 
 Open a new terminal after uninstalling. Desktop release bundles and source-setup
 desktop installs are separate from the release CLI. The source setup locations
@@ -373,7 +367,69 @@ Remove-Item -LiteralPath $shortcut -Force -ErrorAction SilentlyContinue
 Stop running quotabot processes, then run the current installer with the exact
 previous release tag. The installer downloads that version, verifies its
 `.sha256` sidecar, and uses the same staged replacement and failure rollback as
-an update. Keep the local metadata directory.
+an update. For a compatible rollback, keep the local metadata directory. If the
+target release may predate an analytics-storage migration, first stop every
+quotabot process and make a restorable copy of that directory.
+
+Do not let a release from before the opaque account-key migration collect
+against the only copy of current metadata, even if the two releases never run
+at the same time. It can write recent history and hourly analytics to legacy
+filenames while the current release uses canonical filenames. Before returning
+to the current release, stop every older `top`, desktop, MCP, and server process,
+then either restore the backup made before rollback or accept that the current
+release will quarantine any affected history. Its migration checkpoint fails
+closed when legacy and canonical generations diverge: both are preserved, but
+the affected tier is excluded from displayed analytics, and ambiguous legacy
+data cannot influence burn-aware routing. A frozen canonical account baseline
+or validated pre-divergence checkpoint remains eligible for burn estimation. If
+neither exists, the existing provider-only compatibility series remains eligible
+only for an unambiguous single-account snapshot. Conflict evaluation uses the
+more conservative post-pooling result from both possible hourly cutoff sets.
+Healthy providers keep the pooled result matching the current hour offset, so
+the conflict cannot penalize a route competitor. Analytics and `doctor` show a
+warning, while `stats` reports bucket-tier conflicts on the rows that consume
+those buckets. The default unfiltered JSON snapshot keeps a bounded incident
+inventory even when an affected account is no longer current. A partial
+inventory is not proof of a clean cache, and filtered views never reintroduce
+out-of-scope incidents. Closing the older process stops further divergence but
+does not restore quarantined history. Current quota snapshots, provider
+credentials, and the **Now** view remain available. quotabot does not guess at
+an ambiguous analytics delta.
+
+To recover without deleting unrelated local state, obtain the exact account
+value from the matching current provider row in `quotabot --json`, then inspect
+each affected tier named by `doctor`:
+
+```bash
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=history
+quotabot verify --recover-analytics=PROVIDER --account=EXACT_ACCOUNT --tier=buckets
+```
+
+If the incident says the exact account is not in the snapshot, reconnect that
+account and rerun `doctor` first. The inventory deliberately omits unavailable
+account identities and its random incident reference is not recovery authority.
+For a provider with several current accounts, use the inventory's
+`provider_row_index` to select the exact row instead of guessing.
+
+Inspection is read-only and makes no provider call. After stopping every older
+process and reviewing the reported impact, rerun the selected command with
+`--yes`. quotabot moves only that exact tier's canonical and legacy files into
+an owner-only evidence bundle under the local `analytics-recovery` directory,
+and verifies SHA-256 digests. When strict row checks and one unique ordered
+checkpoint overlap prove both raw-history deltas, it installs and verifies their
+capped chronological merge. For aggregate buckets, it requires unique aligned
+starts, a complete retained checkpoint suffix, and valid bounded count,
+histogram, moment, exhausted-count, and extrema fields before installing
+canonical plus legacy minus the shared checkpoint once. Unprovable evidence
+restarts the selected tier empty. It preserves current quota, credentials, profiles,
+preferences, manual entries, leases, alerts, other provider accounts,
+provider-only compatibility analytics, and the unselected tier. If both tiers
+are quarantined, recover them separately. It refuses a legacy file shared by
+colliding account identities, and a retry after success returns the retained
+bundle receipt. Portable
+desktop bundles do not perform this recovery; install the CLI first if only the
+desktop is present. Use the full local-data reset below only when deleting all
+local state is actually intended.
 
 macOS or Linux:
 
@@ -447,8 +503,9 @@ procedures above.
 - **"no live data" for a provider you use:** open that provider's app once so it
   writes or refreshes local state, then re-run `quotabot doctor`. On an idle
   machine, use `quotabot login claude` or `quotabot login codex` to establish a
-  separately refreshable path, then confirm the account-wide read with
-  `quotabot doctor`.
+  separately refreshable path, inspect the account-wide row with
+  `quotabot doctor`, and use scoped `quotabot verify --require-live` when a
+  script must enforce freshness.
 - **NVIDIA NIM stays missing:** make sure `NVIDIA_API_KEY` or `nvapi` is visible
   in the same shell that starts quotabot. A valid key shows availability with
   unknown numeric quota, not a percentage window.
@@ -474,6 +531,13 @@ procedures above.
   changes. If the provider-owned view
   changed shape or semantics, retain the verification output and report the
   mismatch rather than deleting the cache.
+- **Analytics says its incident inventory is incomplete:** current quota and
+  routing remain available, but an empty incident list is not a clean result.
+  Stop older quotabot processes, rerun an unfiltered `quotabot doctor`, and
+  inspect its invalid, unverifiable, or truncation evidence. Reconnect an
+  unavailable affected account before using the exact scoped recovery command.
+  Do not delete the cache merely to silence the warning; retained generations
+  are the recovery evidence.
 - **`quotabot` not found after install:** restart your terminal so the new PATH
   entry is picked up. On Windows, open a fresh PowerShell window.
 - **Windows blocks the downloaded exe:** it is unsigned for now. Verify the

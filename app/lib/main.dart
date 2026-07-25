@@ -11,9 +11,11 @@ import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as cli_demo;
 import 'package:quotabot_collector/drift.dart';
+import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
@@ -58,12 +60,68 @@ String _joinedCredentialProviderNames(List<String> providers) {
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
-const Size _compactMinimumWindowSize = Size(120, 40);
+const Size _compactMinimumWindowSize = Size(200, 40);
 const Size _expandedMinimumWindowSize = Size(320, 120);
 
 @visibleForTesting
 Size desktopMinimumWindowSize({required bool compact}) =>
     compact ? _compactMinimumWindowSize : _expandedMinimumWindowSize;
+
+@visibleForTesting
+List<AnalyticsStorageIncident> analyticsIncidentsForView(
+  Iterable<AnalyticsStorageIncident> incidents,
+  QuotaProfile profile,
+  Set<String> hidden,
+) {
+  final effectiveProfile = profileWithoutUiPrefs(profile);
+  final hiddenTargets = {
+    ...effectiveProfile.hiddenProviders,
+    ...hidden,
+  }.map(normalizeHiddenTarget).nonNulls.toSet();
+  bool hasExactAccountScope(String provider) =>
+      effectiveProfile.accounts.entries.any(
+        (entry) =>
+            normalizeProviderId(entry.key) == provider &&
+            entry.value.isNotEmpty,
+      );
+  return [
+    for (final incident in incidents)
+      if (effectiveProfile.allowsProviderAdapter(
+            incident.provider,
+            isLocal: false,
+          ) &&
+          !hasExactAccountScope(incident.provider) &&
+          !hiddenTargets.any(
+            (target) =>
+                target == incident.provider ||
+                target.startsWith('${incident.provider}|'),
+          ))
+        incident,
+  ];
+}
+
+@visibleForTesting
+bool analyticsIncidentPartialForView(
+  bool inventoryPartial,
+  Set<String> uncertainProviders,
+  bool globalUncertainty,
+  QuotaProfile profile,
+  Set<String> hidden,
+) {
+  if (!inventoryPartial) return false;
+  if (globalUncertainty || uncertainProviders.isEmpty) return true;
+  final effectiveProfile = profileWithoutUiPrefs(profile);
+  final hiddenProviders = {...effectiveProfile.hiddenProviders, ...hidden}
+      .map(normalizeHiddenTarget)
+      .nonNulls
+      .where((target) => !target.contains('|'))
+      .toSet();
+  return uncertainProviders.any(
+    (provider) =>
+        effectiveProfile.allowsProviderAdapter(provider, isLocal: false) &&
+        !hiddenProviders.contains(provider),
+  );
+}
 
 const Color _quotaGreen = Color(0xFF3FB950);
 const String _windowsAppUserModelId = 'io.quotabot.app';
@@ -80,6 +138,7 @@ final bool _demoMode =
     _shotsMode || Platform.environment['QUOTABOT_DEMO'] == '1';
 final DesktopReadinessProbe _desktopReadiness =
     DesktopReadinessProbe.fromEnvironment();
+final Completer<void> _nativeWindowReady = Completer<void>();
 
 /// Boundary around the live route, captured for screenshots.
 final GlobalKey _shotBoundaryKey = GlobalKey();
@@ -133,7 +192,13 @@ bool hasSuccessfulRefreshEvidence(Iterable<ProviderQuota> providers, int now) =>
           !status.startsWith('not configured');
     });
 
-final SingleInstanceGuard _singleInstance = SingleInstanceGuard();
+final SingleInstanceGuard _singleInstance =
+    isolateSingleInstanceForAutomation(
+      screenshotCapture: _shotsMode,
+      readinessProbe: _desktopReadiness.enabled,
+    )
+    ? SingleInstanceGuard.ephemeral()
+    : SingleInstanceGuard();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -227,6 +292,9 @@ Future<void> main() async {
       await windowManager.setAlwaysOnTop(prefs.alwaysOnTop);
       await windowManager.focus();
       _desktopReadiness.recordWindowReady();
+      if (!_nativeWindowReady.isCompleted) {
+        _nativeWindowReady.complete();
+      }
     }),
   );
 
@@ -378,11 +446,17 @@ typedef ProfileDeleter = void Function(String name);
 
 typedef ProfileSaver = void Function(QuotaProfile profile);
 
+typedef TrayInitializer = Future<void> Function();
+
+const String trayUnavailableMessage = 'Tray unavailable; Close exits the app.';
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   final String? startupStorageWarning;
   final bool _hostIntegration;
   final bool? _demoModeOverride;
+  @visibleForTesting
+  final bool initialAnalytics;
   @visibleForTesting
   final Future<List<ProviderQuota>> Function()? collector;
   @visibleForTesting
@@ -397,11 +471,14 @@ class Dashboard extends StatefulWidget {
   final ProfileDeleter? profileDeleter;
   @visibleForTesting
   final ProfileSaver? profileSaver;
+  @visibleForTesting
+  final TrayInitializer? trayInitializer;
   final RouteLeaseStore leaseStore;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
     : _hostIntegration = true,
       _demoModeOverride = null,
+      initialAnalytics = false,
       collector = null,
       testProfiles = null,
       alertPoster = null,
@@ -409,6 +486,7 @@ class Dashboard extends StatefulWidget {
       providerConnector = null,
       profileDeleter = null,
       profileSaver = null,
+      trayInitializer = null,
       leaseStore = const FileRouteLeaseStore();
 
   /// Builds a deterministic dashboard without desktop plugin or preference
@@ -419,6 +497,7 @@ class Dashboard extends StatefulWidget {
     super.key,
     required this.prefs,
     bool demoMode = true,
+    this.initialAnalytics = false,
     this.collector,
     this.testProfiles,
     this.alertPoster,
@@ -426,6 +505,7 @@ class Dashboard extends StatefulWidget {
     this.providerConnector,
     this.profileDeleter,
     this.profileSaver,
+    this.trayInitializer,
     this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
   }) : _hostIntegration = false,
@@ -470,6 +550,10 @@ class _DashboardState extends State<Dashboard>
   bool _alertCheckPending = false;
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
+  bool _firstRunReviewOpen = false;
+  final FocusNode _routeExplanationFocusNode = FocusNode(
+    debugLabel: 'Route explanation',
+  );
   int _failStreak = 0; // consecutive refreshes with no live data at all
   int _throttleStreak = 0; // consecutive refreshes with a throttled provider
   late Set<String> _hidden;
@@ -479,11 +563,17 @@ class _DashboardState extends State<Dashboard>
   Map<String, List<List<double?>>> _heatmaps = {};
   Map<String, List<HeadroomBucket>> _buckets = {};
   Map<String, BurnStat> _burnStats = {};
+  List<AnalyticsStorageNotice> _analyticsStorageNotices = const [];
+  List<AnalyticsStorageIncident> _analyticsStorageIncidents = const [];
+  bool _analyticsIncidentInventoryPartial = false;
+  Set<String> _analyticsIncidentUncertainProviders = const {};
+  bool _analyticsIncidentGlobalUncertainty = false;
   RoutedRequestSummary _routeSummary = emptyRoutedRequestSummary;
   String? _lastRefreshError;
   String? _lastWebhookDeliveryStatus;
   bool? _lastWebhookDeliveryFailed;
   bool _notificationDeliveryFailed = false;
+  bool _trayUnavailable = false;
   late String? _settingsStorageWarning = widget.startupStorageWarning;
   String? _profileStorageWarning;
   String? get _preferenceStorageWarning =>
@@ -492,7 +582,7 @@ class _DashboardState extends State<Dashboard>
   bool _overflowing = false; // content taller than the capped window (scrolls)
   // Analytics renders as a body inside this dashboard (same header, same
   // menu), never as a separate route, so the chrome stays consistent.
-  bool _showingAnalytics = false;
+  late bool _showingAnalytics = widget.initialAnalytics;
   FleetRange _analyticsRange = FleetRange.now;
   final Map<String, DateTime> _lastNotified =
       {}; // debounce key -> time for notif spam reduction
@@ -506,6 +596,8 @@ class _DashboardState extends State<Dashboard>
   Timer? _tick;
   Timer? _windowMovePersistTimer;
   int _windowMoveRevision = 0;
+  int _windowGeometryRevision = 0;
+  bool _windowVisible = true;
   final GlobalKey _contentKey = GlobalKey();
   final ScrollController _scroll = ScrollController();
 
@@ -514,6 +606,22 @@ class _DashboardState extends State<Dashboard>
 
   List<ProviderQuota> get _visible =>
       _profiledData.where((q) => !hiddenTargetsQuota(_hidden, q)).toList();
+
+  List<AnalyticsStorageIncident> get _visibleAnalyticsStorageIncidents {
+    return analyticsIncidentsForView(
+      _analyticsStorageIncidents,
+      _activeProfile,
+      _hidden,
+    );
+  }
+
+  bool get _analyticsIncidentPartialVisible => analyticsIncidentPartialForView(
+    _analyticsIncidentInventoryPartial,
+    _analyticsIncidentUncertainProviders,
+    _analyticsIncidentGlobalUncertainty,
+    _activeProfile,
+    _hidden,
+  );
 
   /// Display order, respecting user sort preference. Used for both compact
   /// icons and expanded cards. Computed fresh so headroom sorts stay current.
@@ -686,7 +794,6 @@ class _DashboardState extends State<Dashboard>
       windowManager.addListener(this);
       trayManager.addListener(this);
       screenRetriever.addListener(this);
-      unawaited(_initTray());
       unawaited(windowManager.setAlwaysOnTop(_alwaysOnTop));
       unawaited(windowManager.setSkipTaskbar(!_showInTaskbar));
       unawaited(
@@ -694,6 +801,14 @@ class _DashboardState extends State<Dashboard>
           desktopMinimumWindowSize(compact: _compact),
         ),
       );
+      unawaited(
+        _nativeWindowReady.future.then((_) {
+          if (mounted) _applySize();
+        }),
+      );
+    }
+    if (widget._hostIntegration || widget.trayInitializer != null) {
+      unawaited(_initTray());
     }
     _refresh();
     if (_shotsMode) unawaited(_exportShots());
@@ -701,7 +816,7 @@ class _DashboardState extends State<Dashboard>
     // Thirty seconds is plenty when the labels are in minutes, and avoids the
     // distraction of a per-second ticking clock.
     _tick = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {});
+      if (mounted && _windowVisible) setState(() {});
     });
   }
 
@@ -723,8 +838,18 @@ class _DashboardState extends State<Dashboard>
   Future<void> _setShotCompact(bool value) async {
     if (_compact != value) {
       setState(() => _compact = value);
-      _applySize();
     }
+    if (widget._hostIntegration) {
+      try {
+        await windowManager.setMinimumSize(
+          desktopMinimumWindowSize(compact: value),
+        );
+      } catch (_) {}
+    }
+    // Reconcile the first expanded capture too. Screenshot mode starts expanded,
+    // so limiting this call to state changes captured the estimate-sized frame
+    // before rendered content could establish the final window height.
+    _applySize();
     await Future<void>.delayed(const Duration(milliseconds: 650));
     await WidgetsBinding.instance.endOfFrame;
   }
@@ -815,6 +940,7 @@ class _DashboardState extends State<Dashboard>
 
   @override
   void dispose() {
+    _windowGeometryRevision++;
     if (widget._hostIntegration) {
       windowManager.removeListener(this);
       trayManager.removeListener(this);
@@ -824,6 +950,7 @@ class _DashboardState extends State<Dashboard>
     _tick?.cancel();
     _windowMovePersistTimer?.cancel();
     _scroll.dispose();
+    _routeExplanationFocusNode.dispose();
     super.dispose();
   }
 
@@ -875,44 +1002,59 @@ class _DashboardState extends State<Dashboard>
   // menu is the way back and the only place that truly quits.
   Future<void> _initTray() async {
     try {
-      await trayManager.setIcon(
-        Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
-      );
-      // tray_manager 0.5.3 does not implement setToolTip on Linux. Calling the
-      // unsupported method aborts the rest of tray initialization there.
-      if (!Platform.isLinux) {
-        await trayManager.setToolTip('quotabot');
-      }
-      await trayManager.setContextMenu(
-        Menu(
-          items: [
-            MenuItem(key: 'show', label: 'Show quotabot'),
-            MenuItem(key: 'refresh', label: 'Refresh now'),
-            MenuItem(key: 'analytics', label: 'Quota analytics'),
-            MenuItem.separator(),
-            MenuItem(key: 'quit', label: 'Quit'),
-          ],
-        ),
-      );
-      if (_desktopReadiness.enabled && Platform.isMacOS) {
-        final bounds = await trayManager.getBounds();
-        if (bounds == null || bounds.isEmpty) {
-          throw StateError('Native tray bounds are unavailable.');
+      final injectedInitializer = widget.trayInitializer;
+      if (injectedInitializer != null) {
+        await injectedInitializer();
+      } else {
+        await trayManager.setIcon(
+          Platform.isWindows ? 'assets/tray_icon.ico' : 'assets/tray_icon.png',
+        );
+        // tray_manager 0.5.3 does not implement setToolTip on Linux. Calling
+        // the unsupported method aborts the rest of tray initialization there.
+        if (!Platform.isLinux) {
+          await trayManager.setToolTip('quotabot');
         }
+        await trayManager.setContextMenu(
+          Menu(
+            items: [
+              MenuItem(key: 'show', label: 'Show quotabot'),
+              MenuItem(key: 'refresh', label: 'Refresh now'),
+              MenuItem(key: 'analytics', label: 'Quota analytics'),
+              MenuItem.separator(),
+              MenuItem(key: 'quit', label: 'Quit'),
+            ],
+          ),
+        );
+        if (_desktopReadiness.enabled && Platform.isMacOS) {
+          final bounds = await trayManager.getBounds();
+          if (bounds == null || bounds.isEmpty) {
+            throw StateError('Native tray bounds are unavailable.');
+          }
+        }
+        // Only now that the tray exists do we redirect close to hide:
+        // otherwise a platform without a tray would have no way to reopen a
+        // hidden window.
+        await windowManager.setPreventClose(true);
       }
-      // Only now that the tray exists do we redirect close to hide: otherwise a
-      // platform without a tray would have no way to reopen a hidden window.
-      await windowManager.setPreventClose(true);
       _desktopReadiness.recordTrayReady(true);
     } catch (_) {
       // No tray on this platform/session; the window keeps normal close-to-quit.
       _desktopReadiness.recordTrayReady(false);
+      if (widget._hostIntegration) {
+        stderr.writeln('quotabot: $trayUnavailableMessage');
+      }
+      if (mounted && !_trayUnavailable) {
+        setState(() => _trayUnavailable = true);
+        _applySize();
+      }
     }
   }
 
   Future<void> _showWindow() async {
+    _windowVisible = true;
     await windowManager.show();
     await windowManager.focus();
+    if (mounted) setState(() {});
   }
 
   Future<void> _quit() async {
@@ -950,7 +1092,37 @@ class _DashboardState extends State<Dashboard>
   @override
   void onWindowClose() {
     // Closing hides to the tray (see [_initTray]); Quit lives in the tray menu.
+    _windowVisible = false;
     unawaited(windowManager.hide());
+  }
+
+  @override
+  void onWindowMinimize() {
+    _windowVisible = false;
+  }
+
+  @override
+  void onWindowRestore() {
+    _windowVisible = true;
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void onWindowEvent(String eventName) {
+    // Track visibility from the events the platform actually emits rather than
+    // only from the paths this class controls. Showing a hidden window - the
+    // single-instance doorbell calls windowManager.show() directly - emits
+    // 'show', never 'restore', so relying on onWindowRestore alone left the flag
+    // stuck false on a fully visible window and suppressed the periodic tick
+    // that refreshes capture ages and reset countdowns.
+    final visible = switch (eventName) {
+      'show' || 'restore' || 'maximize' || 'focus' => true,
+      'hide' || 'minimize' => false,
+      _ => null,
+    };
+    if (visible == null || visible == _windowVisible) return;
+    _windowVisible = visible;
+    if (visible && mounted) setState(() {});
   }
 
   Future<bool> _persistPrefs({bool saveProfileUiState = false}) async {
@@ -994,7 +1166,7 @@ class _DashboardState extends State<Dashboard>
         'unavailable',
       );
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   void _setProfileStorageWarning(String? warning) {
@@ -1006,7 +1178,7 @@ class _DashboardState extends State<Dashboard>
         'unavailable',
       );
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   /// Collects provider quota, off the UI isolate in production so the
@@ -1023,6 +1195,46 @@ class _DashboardState extends State<Dashboard>
       return await Isolate.run(collectAll);
     } catch (_) {
       return collectAll();
+    }
+  }
+
+  /// Analytics storage notices for [active], computed off the UI isolate when
+  /// that is possible. Advisory data must not be able to fail a refresh that has
+  /// already collected quota, so an isolate that cannot spawn falls back to this
+  /// isolate, and a failure there degrades to no notices rather than throwing.
+  Future<
+    ({
+      List<AnalyticsStorageNotice> notices,
+      AnalyticsIncidentInventory inventory,
+    })
+  >
+  _collectAnalyticsStorage(List<ProviderQuota> active) async {
+    Future<
+      ({
+        List<AnalyticsStorageNotice> notices,
+        AnalyticsIncidentInventory inventory,
+      })
+    >
+    compute() async => (
+      notices: analyticsStorageNoticesForQuotas(active),
+      inventory: await analyticsStorageIncidentInventory(active),
+    );
+    // Bounded: this runs after quota is already in hand, and a stalled
+    // directory scan on a redirected or roaming profile would otherwise
+    // hold the refresh open forever, leaving _refreshInFlight set so every
+    // later refresh returns the same dead future and auto-polling stops.
+    const budget = Duration(seconds: 30);
+    try {
+      return await Isolate.run(compute).timeout(budget);
+    } catch (_) {
+      try {
+        return await compute().timeout(budget);
+      } catch (_) {
+        return (
+          notices: const <AnalyticsStorageNotice>[],
+          inventory: const AnalyticsIncidentInventory.suppressed(),
+        );
+      }
     }
   }
 
@@ -1050,8 +1262,18 @@ class _DashboardState extends State<Dashboard>
       // A hard deadline over the whole collect: adapters carry their own
       // per-provider deadlines, but if anything ever hangs past them, the
       // refresh loop must recover rather than freeze all future refreshes.
+      //
+      // It must stay above a realistic slow fleet read, not just a healthy one.
+      // Adapters run concurrently but their owner-only file hardening shells out
+      // synchronously on Windows, which serializes the fleet: a full read of a
+      // large fleet there is measured in tens of seconds, well past the 45s this
+      // once allowed. A deadline under the real worst case is worse than no
+      // deadline, because a cold start has no previous snapshot to fall back on,
+      // so every retry times out and the dashboard stays permanently empty
+      // instead of merely stale. Keep this comfortably above one adapter
+      // deadline (30s) plus that serialized write cost.
       final results = await _collectProviders().timeout(
-        const Duration(seconds: 45),
+        const Duration(seconds: 180),
       );
       final routeSummary = widget._hostIntegration
           ? loadRoutedRequestSummary()
@@ -1064,12 +1286,39 @@ class _DashboardState extends State<Dashboard>
       final profiles = _loadProfiles();
       final selectedProfile = _activeProfile.name;
       final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      // Analytics notices are advisory: they annotate quota that has already
+      // been collected successfully. So this must never be able to fail the
+      // refresh that produced it. An isolate can fail to spawn on some machines
+      // - the collect above guards for exactly that - and letting the throw
+      // escape here would discard a good fleet read, retain nothing on a cold
+      // start, and leave the dashboard permanently empty while reporting a
+      // failed refresh. Fall back to the main isolate, then to no notices.
+      final analyticsStorage = widget._hostIntegration
+          ? await _collectAnalyticsStorage(active)
+          : (
+              notices: const <AnalyticsStorageNotice>[],
+              inventory: const AnalyticsIncidentInventory.suppressed(),
+            );
+      final analyticsStorageNotices = analyticsStorage.notices;
+      final analyticsIncidentInventory = analyticsStorage.inventory;
+      final analyticsStorageIncidents = [
+        for (final incident in analyticsIncidentInventory.incidents)
+          if (!incident.exactAccountInSnapshot) incident,
+      ];
       final burnStats = widget._hostIntegration
           ? recentBurnStatsByQuota(active, nowSec)
           : <String, BurnStat>{};
       // Track systemic failure...
       final anyLive = hasSuccessfulRefreshEvidence(active, nowSec);
-      _failStreak = anyLive ? 0 : _failStreak + 1;
+      // Back off only for genuine read failures. A fresh install where
+      // nothing is connected yet has no live evidence either, and treating
+      // that as a failure pushed the poll interval straight to hours, so a
+      // provider connected outside the app stayed invisible until a manual
+      // refresh. Nothing configured is a setup state, not a failure.
+      final anyConfigured = active.any(
+        (quota) => quota.windows.isNotEmpty || quota.stale || quota.isLocal,
+      );
+      _failStreak = anyLive || !anyConfigured ? 0 : _failStreak + 1;
       // Track throttling separately from a full failure: a provider can push
       // back (a timeout or a 429) while others read fine, so the refresh cadence
       // can escalate its back-off from that provider without waiting for the
@@ -1080,7 +1329,85 @@ class _DashboardState extends State<Dashboard>
             q.pipeHealth == providerPipeHealthDegraded,
       );
       _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
-      setState(() {
+
+      // Load per-provider history and analytics BEFORE touching state. This is
+      // real file I/O, and doing it inside a setState callback means a throw
+      // mutates the fields already assigned above it and then never schedules a
+      // rebuild, because setState only marks the element dirty after its
+      // callback returns. One provider's unreadable analytics must also not
+      // discard a whole successful fleet read, so each is guarded on its own and
+      // simply contributes no history.
+      final tz = DateTime.now().timeZoneOffset;
+      final loadedHistory = <String, List<ProviderQuota>>{};
+      final loadedBuckets = <String, List<HeadroomBucket>>{};
+      final loadedHeatmaps = <String, List<List<double?>>>{};
+      final rawInsights = <String, Insights>{};
+      if (widget._hostIntegration) {
+        for (final q in active) {
+          final key = quotaDisplayKey(q);
+          try {
+            loadedHistory[key] = loadHistory(q.provider, account: q.account);
+            if (!q.isLocal) {
+              final providerBuckets = loadBuckets(
+                q.provider,
+                account: q.account,
+              );
+              loadedBuckets[key] = providerBuckets;
+              rawInsights[key] = Insights.from(
+                providerBuckets,
+                nowSec,
+                tzOffset: tz,
+              );
+              loadedHeatmaps[key] = smoothedWeekHourHeatmap(
+                providerBuckets,
+                tzOffset: tz,
+              );
+            }
+          } catch (_) {
+            // Advisory analytics only; quota for this provider still renders.
+          }
+        }
+      }
+      final loadedInsights = shrinkInsightsReliability(rawInsights);
+      // Apply a completed refresh with setState whenever this widget is alive.
+      // Gating the rebuild on tracked window visibility instead is unsafe: if
+      // that flag ever desyncs from the real window - a minimize event that
+      // arrives without its matching restore, or a window shown by the platform
+      // rather than through _showWindow - then every refresh assigns new data
+      // without ever rebuilding, so the dashboard stays frozen on its first
+      // frame (an empty loading state on a cold start) and cannot recover,
+      // because each later refresh takes the same branch. Rebuilding while
+      // hidden costs one frame; not rebuilding while visible costs the product.
+      // The periodic clock tick is still skipped while hidden, which is where
+      // the churn actually came from.
+      if (mounted) {
+        setState(() {
+          _profiles = profiles;
+          _activeProfile = _profileByName(selectedProfile);
+          _applyProfileUiState(_activeProfile);
+          _data = active;
+          _setupData = setupRows;
+          _loading = false;
+          _updated = DateTime.now();
+          _history = loadedHistory;
+          _heatmaps = loadedHeatmaps;
+          _buckets = loadedBuckets;
+          _burnStats = burnStats;
+          _analyticsStorageNotices = analyticsStorageNotices;
+          _analyticsStorageIncidents = analyticsStorageIncidents;
+          _analyticsIncidentInventoryPartial =
+              analyticsIncidentInventory.state == 'partial';
+          _analyticsIncidentUncertainProviders =
+              analyticsIncidentInventory.uncertainProviders;
+          _analyticsIncidentGlobalUncertainty =
+              analyticsIncidentInventory.globalUncertainty;
+          _routeSummary = routeSummary;
+          _lastRefreshError = anyLive
+              ? null
+              : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
+          _insights = loadedInsights;
+        });
+      } else {
         _profiles = profiles;
         _activeProfile = _profileByName(selectedProfile);
         _applyProfileUiState(_activeProfile);
@@ -1088,37 +1415,31 @@ class _DashboardState extends State<Dashboard>
         _setupData = setupRows;
         _loading = false;
         _updated = DateTime.now();
-        _history = {};
-        _heatmaps = {};
-        _buckets = {};
+        _history = loadedHistory;
+        _heatmaps = loadedHeatmaps;
+        _buckets = loadedBuckets;
         _burnStats = burnStats;
+        _analyticsStorageNotices = analyticsStorageNotices;
+        _analyticsStorageIncidents = analyticsStorageIncidents;
+        _analyticsIncidentInventoryPartial =
+            analyticsIncidentInventory.state == 'partial';
+        _analyticsIncidentUncertainProviders =
+            analyticsIncidentInventory.uncertainProviders;
+        _analyticsIncidentGlobalUncertainty =
+            analyticsIncidentInventory.globalUncertainty;
         _routeSummary = routeSummary;
         _lastRefreshError = anyLive
             ? null
             : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
-        final tz = DateTime.now().timeZoneOffset;
-        final rawInsights = <String, Insights>{};
-        if (widget._hostIntegration) {
-          for (final q in active) {
-            final key = quotaDisplayKey(q);
-            _history[key] = loadHistory(q.provider, account: q.account);
-            if (!q.isLocal) {
-              final buckets = loadBuckets(q.provider, account: q.account);
-              _buckets[key] = buckets;
-              rawInsights[key] = Insights.from(buckets, nowSec, tzOffset: tz);
-              _heatmaps[key] = smoothedWeekHourHeatmap(buckets, tzOffset: tz);
-            }
-          }
-        }
-        _insights = shrinkInsightsReliability(rawInsights);
-      });
+        _insights = loadedInsights;
+      }
       if (widget._hostIntegration || widget.alertPoster != null) {
         // Fire-and-forget: notification and webhook posting must not delay the
         // refresh completing or the post-frame resize; _checkAndNotify swallows
         // its own errors, so an unawaited failure cannot escape.
         unawaited(_checkAndNotify());
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+      _applySize();
     } catch (error) {
       // Catch Error as well as Exception: a latent adapter fault (a bad cast,
       // .first on empty) surfaces as an Error, and the isolate-failure fallback
@@ -1176,6 +1497,11 @@ class _DashboardState extends State<Dashboard>
       _heatmaps = {};
       _buckets = {};
       _burnStats = cli_demo.demoBurnStats();
+      _analyticsStorageNotices = const [];
+      _analyticsStorageIncidents = const [];
+      _analyticsIncidentInventoryPartial = false;
+      _analyticsIncidentUncertainProviders = const {};
+      _analyticsIncidentGlobalUncertainty = false;
       _routeSummary = demoRoutedRequestSummary();
       final rawInsights = <String, Insights>{};
       for (final q in demo) {
@@ -1188,7 +1514,7 @@ class _DashboardState extends State<Dashboard>
       }
       _insights = shrinkInsightsReliability(rawInsights);
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
     _scheduleNext(); // keep the "as of" label current even in demo mode
     if (Platform.environment['QUOTABOT_SHOT'] == '1') {
       Future.delayed(const Duration(milliseconds: 1500), () {
@@ -1220,37 +1546,111 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  /// Resize the window to hug the content. Live measurement of the rendered
-  /// content proved unreliable here (the content is clamped to the window when
-  /// it overflows, and window_manager's pixel units don't match Flutter's
-  /// logical pixels under display scaling), so the height is derived
-  /// deterministically from the provider and window counts instead. It is
-  /// slightly generous so nothing is clipped, and the body is scrollable as a
-  /// safety net. Capped at the screen height (see [_maxWindowHeight]).
+  /// Resize the window to hug the rendered content. A deterministic provider
+  /// estimate covers the first frame; after layout, the scroll child's real
+  /// height wins so wrapped diagnostics and recovery rows cannot be clipped.
+  /// Content beyond the current display work area receives a bounded scrolling
+  /// viewport instead.
   void _applySize() {
     if (!widget._hostIntegration) return;
+    final revision = ++_windowGeometryRevision;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      // Analytics keeps whatever size the window has (its body scrolls); the
-      // quota view's content-hugging resize resumes when it closes.
-      if (_showingAnalytics) return;
+      if (!mounted || revision != _windowGeometryRevision) return;
       final maxH = _maxWindowHeight();
-      double w;
-      double h;
-      if (_compact) {
+      if (_showingAnalytics) {
+        Rect? currentBounds;
+        try {
+          currentBounds = await windowManager.getBounds();
+        } catch (_) {}
+        if (!mounted ||
+            revision != _windowGeometryRevision ||
+            !_showingAnalytics) {
+          return;
+        }
+        final workAreas = await desktopWorkAreas();
+        if (!mounted ||
+            revision != _windowGeometryRevision ||
+            !_showingAnalytics) {
+          return;
+        }
+        final geometry = analyticsWindowGeometry(
+          currentSize: currentBounds?.size ?? _expandedMinimumWindowSize,
+          currentPosition: currentBounds?.topLeft ?? _windowPos,
+          workAreas: workAreas,
+          fallbackMaximumHeight: maxH,
+        );
+        try {
+          final position = geometry.position;
+          if (position == null) {
+            await windowManager.setSize(geometry.size);
+          } else {
+            await windowManager.setBounds(position & geometry.size);
+          }
+          if (!mounted ||
+              revision != _windowGeometryRevision ||
+              !_showingAnalytics) {
+            return;
+          }
+          if (position != null && position != _windowPos) {
+            _windowPos = position;
+            unawaited(_persistPrefs());
+          }
+        } catch (_) {}
+        return;
+      } else if (_compact) {
         final n = _displayed.length.clamp(1, _shotsMode ? 16 : 8);
-        final maxCompactWidth = _shotsMode ? 680.0 : 400.0;
-        w = (n * 46 + 96).clamp(140.0, maxCompactWidth).toDouble();
-        h = 50;
+        final counts = _providerCounts(_displayed);
+        final needsAccountIdentity =
+            _showAccounts && counts.values.any((count) => count > 1);
+        final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+        final desiredWidth = compactDesiredWindowWidth(
+          providerCount: n,
+          needsAccountIdentity: needsAccountIdentity,
+          largeText: largeText,
+          shotsMode: _shotsMode,
+        );
+        Rect? currentBounds;
+        try {
+          currentBounds = await windowManager.getBounds();
+        } catch (_) {}
+        if (!mounted || revision != _windowGeometryRevision || !_compact) {
+          return;
+        }
+        final workAreas = await desktopWorkAreas();
+        if (!mounted || revision != _windowGeometryRevision || !_compact) {
+          return;
+        }
+        final geometry = compactWindowGeometry(
+          desiredSize: Size(desiredWidth, largeText ? 68 : 50),
+          currentSize: currentBounds?.size ?? _compactMinimumWindowSize,
+          currentPosition: currentBounds?.topLeft ?? _windowPos,
+          workAreas: workAreas,
+        );
+        try {
+          final position = geometry.position;
+          if (position == null) {
+            await windowManager.setSize(geometry.size);
+          } else {
+            await windowManager.setBounds(position & geometry.size);
+          }
+          if (!mounted || revision != _windowGeometryRevision || !_compact) {
+            return;
+          }
+          if (position != null && position != _windowPos) {
+            _windowPos = position;
+            unawaited(_persistPrefs());
+          }
+        } catch (_) {}
+        return;
       } else {
         final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-        w = 340;
+        const w = 340.0;
         // Estimates tuned to the real rendered heights so the frameless window
         // hugs the content (no translucent dead space below it). The body
         // scrolls, so a small undershoot is caught rather than clipped.
-        h = _showFirstRunPrompt
-            ? 112
-            : 62; // header row, onboarding, and outer paddings
+        var h = _showFirstRunPrompt
+            ? 112.0
+            : 62.0; // header row, onboarding, and outer paddings
         if (_displayed.isEmpty) {
           h +=
               _activeProfileLegacyCredentialFilterProviders.isNotEmpty ||
@@ -1291,34 +1691,61 @@ class _DashboardState extends State<Dashboard>
           h += card;
         }
         h += (_displayed.length - 1).clamp(0, 20) * 8; // inter-card gaps
-        // Prefer the real measured content height when available: the content
-        // box lives inside a scroll view so its render box reports the full
-        // intrinsic height, which the estimate above cannot do for wrapped
-        // text (long "no live data" notes). The estimate is the fallback.
-        final measured = _measuredContentHeight();
-        final content = (measured != null && measured > 80) ? measured : h;
-        h = content.clamp(120.0, maxH).toDouble();
-        // Content taller than the capped window: it scrolls, so show the bar.
-        final overflow = content > maxH + 1;
-        if (mounted && overflow != _overflowing) {
-          setState(() => _overflowing = overflow);
+        final renderedHeight = _measuredContentHeight();
+        Rect? currentBounds;
+        try {
+          currentBounds = await windowManager.getBounds();
+        } catch (_) {}
+        if (!mounted || revision != _windowGeometryRevision) return;
+        final workAreas = await desktopWorkAreas();
+        if (!mounted || revision != _windowGeometryRevision) return;
+        final geometry = quotaWindowGeometry(
+          width: w,
+          estimatedContentHeight: h,
+          renderedContentHeight: renderedHeight,
+          currentSize: currentBounds?.size ?? _expandedMinimumWindowSize,
+          currentPosition: currentBounds?.topLeft ?? _windowPos,
+          workAreas: workAreas,
+          fallbackMaximumHeight: maxH,
+        );
+        if (geometry.overflowing != _overflowing) {
+          setState(() => _overflowing = geometry.overflowing);
         }
+        try {
+          final position = geometry.position;
+          if (position == null) {
+            await windowManager.setSize(geometry.size);
+          } else {
+            await windowManager.setBounds(position & geometry.size);
+          }
+          if (!mounted || revision != _windowGeometryRevision) return;
+          if (position != null && position != _windowPos) {
+            _windowPos = position;
+            unawaited(_persistPrefs());
+          }
+        } catch (_) {}
+        return;
       }
-      try {
-        await windowManager.setSize(Size(w, h));
-      } catch (_) {}
     });
   }
 
-  /// True total content height (viewport + any overflow), read from the scroll
-  /// position. This reflects wrapped text exactly and, unlike measuring the
-  /// content render box, never collapses to the viewport height. Null until the
-  /// scroll view is laid out.
+  /// True content height in Flutter logical pixels. The child of the vertical
+  /// scroll view receives unbounded height, so its render box includes every
+  /// provider even when the native window is shorter. Scroll metrics remain a
+  /// fallback while the keyed render box is attaching.
   double? _measuredContentHeight() {
+    final renderObject = _contentKey.currentContext?.findRenderObject();
+    if (renderObject is RenderBox && renderObject.hasSize) {
+      final height = renderObject.size.height;
+      if (height.isFinite && height > 0) return height;
+    }
     if (!_scroll.hasClients) return null;
     final pos = _scroll.position;
     if (!pos.hasViewportDimension) return null;
-    return pos.viewportDimension + pos.maxScrollExtent;
+    return measuredOverflowContentHeight(
+      viewportHeight: pos.viewportDimension,
+      maxScrollExtent: pos.maxScrollExtent,
+    );
   }
 
   /// Largest height we will give the window: the screen height (of the display
@@ -1337,10 +1764,12 @@ class _DashboardState extends State<Dashboard>
 
   void _toggleCompact() {
     setState(() {
-      _compact = !_compact;
-      // The compact strip is the quota view; leaving analytics keeps the
-      // header's collapse button honest in both directions.
-      if (_compact) _showingAnalytics = false;
+      if (_showingAnalytics) {
+        _showingAnalytics = false;
+        _compact = true;
+      } else {
+        _compact = !_compact;
+      }
     });
     if (widget._hostIntegration) {
       unawaited(
@@ -1462,7 +1891,7 @@ class _DashboardState extends State<Dashboard>
   Widget build(BuildContext context) {
     final chrome = AppChromeTheme.of(context);
 
-    if (_showingAnalytics && !_compact && !_loading) {
+    if (_showingAnalytics && !_loading) {
       // Analytics fills the window under the same header as the quota view
       // and scrolls internally, so the chrome never changes between views.
       return Scaffold(
@@ -1486,6 +1915,10 @@ class _DashboardState extends State<Dashboard>
                   dark: Theme.of(context).brightness == Brightness.dark,
                   showAccounts: _showAccounts,
                   routedRequests: _routeSummary,
+                  analyticsNotices: _analyticsStorageNotices,
+                  analyticsIncidents: _visibleAnalyticsStorageIncidents,
+                  analyticsIncidentInventoryPartial:
+                      _analyticsIncidentPartialVisible,
                   initialRange: _analyticsRange,
                 ),
               ),
@@ -1504,10 +1937,20 @@ class _DashboardState extends State<Dashboard>
       body: Scrollbar(
         controller: _scroll,
         thumbVisibility: _overflowing,
-        child: SingleChildScrollView(
-          controller: _scroll,
-          physics: const ClampingScrollPhysics(),
-          child: _contentBox(chrome, _contentKey),
+        child: NotificationListener<SizeChangedLayoutNotification>(
+          onNotification: (notification) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _applySize();
+            });
+            return true;
+          },
+          child: SingleChildScrollView(
+            controller: _scroll,
+            physics: const ClampingScrollPhysics(),
+            child: SizeChangedLayoutNotifier(
+              child: _contentBox(chrome, _contentKey),
+            ),
+          ),
         ),
       ),
     );
@@ -1677,7 +2120,7 @@ class _DashboardState extends State<Dashboard>
               ),
             ),
             TextButton(
-              onPressed: () => _finishFirstRunSetup(openProviders: true),
+              onPressed: () => unawaited(_reviewFirstRunSetup()),
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 7),
                 minimumSize: const Size(0, 30),
@@ -1697,12 +2140,22 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  void _finishFirstRunSetup({bool openProviders = false}) {
+  Future<void> _reviewFirstRunSetup() async {
+    if (_setupDone || _firstRunReviewOpen) return;
+    _firstRunReviewOpen = true;
+    try {
+      await _showSetup();
+      if (mounted && !_setupDone) _finishFirstRunSetup();
+    } finally {
+      _firstRunReviewOpen = false;
+    }
+  }
+
+  void _finishFirstRunSetup() {
     if (_setupDone) return;
     setState(() => _setupDone = true);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
     unawaited(_persistPrefs());
-    if (openProviders) _showSetup();
   }
 
   Widget _providerTile(ProviderQuota q, Color card, Map<String, int> counts) {
@@ -1717,7 +2170,7 @@ class _DashboardState extends State<Dashboard>
       expanded: _expanded.contains(key),
       onToggle: () => setState(() {
         if (!_expanded.remove(key)) _expanded.add(key);
-        WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+        _applySize();
       }),
       onContextMenu: (pos) => _showCardMenu(q, pos),
       onConnect: widget._hostIntegration && _canConnectProvider(q.provider)
@@ -1735,87 +2188,236 @@ class _DashboardState extends State<Dashboard>
     final fg = chrome.foreground;
     final displayed = _displayed;
     final counts = _providerCounts(displayed);
-    return SizedBox(
-      height: 46,
+    final suggestion = _routeSuggestion(now);
+    final routeLine = desktopRouteSignalLine(
+      suggestion,
+      _visible,
+      now,
+      showAccounts: _showAccounts,
+    );
+    final routeDetail = desktopRouteDetailLine(
+      suggestion,
+      _visible,
+      now,
+      showAccounts: _showAccounts,
+    );
+    final compactWidth = MediaQuery.sizeOf(context).width;
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final showRouteProviderName = compactWidth >= (largeText ? 520 : 360);
+    final routeIconOnly = largeText && compactWidth < 240;
+    return Container(
+      constraints: BoxConstraints(minHeight: largeText ? 64 : 46),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 6, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.translucent,
-                onPanStart: widget._hostIntegration
-                    ? (_) => windowManager.startDragging()
-                    : null,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  physics: _shotsMode
-                      ? const NeverScrollableScrollPhysics()
-                      : const ClampingScrollPhysics(),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (displayed.isEmpty)
-                        Text(
-                          'No providers',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.caption,
-                            color: muted,
-                          ),
-                        )
-                      else
-                        for (int i = 0; i < displayed.length; i++)
-                          Padding(
-                            padding: EdgeInsets.only(
-                              right: i == displayed.length - 1 ? 0 : 10,
-                            ),
-                            child: _FocusableCompactProviderChip(
-                              key: ValueKey(
-                                'compact-provider-${quotaDisplayKey(displayed[i])}',
-                              ),
-                              message: _compactTooltip(
-                                displayed[i],
-                                counts,
-                                now,
-                              ),
-                              child: _compactChip(displayed[i], now, fg),
-                            ),
-                          ),
-                    ],
-                  ),
-                ),
+        child: FocusTraversalGroup(
+          policy: WidgetOrderTraversalPolicy(),
+          child: Row(
+            children: [
+              _compactRouteButton(
+                suggestion,
+                routeLine,
+                routeDetail,
+                fg,
+                providerCounts: counts,
+                showProviderName: showRouteProviderName,
+                iconOnly: routeIconOnly,
               ),
-            ),
-            if (_preferenceStorageWarning != null)
-              Tooltip(
-                message: _preferenceStorageWarning!,
-                child: Semantics(
-                  label: _preferenceStorageWarning,
-                  liveRegion: true,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(
-                      Icons.warning_amber_rounded,
-                      size: 16,
-                      color: Color(0xFFD29922),
+              const SizedBox(width: 5),
+              Container(width: 1, height: 24, color: chrome.tileBorder),
+              const SizedBox(width: 5),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onPanStart: widget._hostIntegration
+                      ? (_) => windowManager.startDragging()
+                      : null,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: _shotsMode
+                        ? const NeverScrollableScrollPhysics()
+                        : const ClampingScrollPhysics(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (displayed.isEmpty)
+                          Text(
+                            'No providers',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: AppType.caption,
+                              color: muted,
+                            ),
+                          )
+                        else
+                          for (int i = 0; i < displayed.length; i++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                right: i == displayed.length - 1 ? 0 : 10,
+                              ),
+                              child: _FocusableCompactProviderChip(
+                                key: ValueKey(
+                                  'compact-provider-${quotaDisplayKey(displayed[i])}',
+                                ),
+                                message: _compactTooltip(
+                                  displayed[i],
+                                  counts,
+                                  now,
+                                ),
+                                child: _compactChip(displayed[i], now, fg),
+                              ),
+                            ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            _iconButton(
-              Icons.open_in_full_rounded,
-              muted,
-              _toggleCompact,
-              tooltip: 'Expand',
+              if (_preferenceStorageWarning != null)
+                Tooltip(
+                  message: _preferenceStorageWarning!,
+                  child: Semantics(
+                    label: _preferenceStorageWarning,
+                    liveRegion: true,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Color(0xFFD29922),
+                      ),
+                    ),
+                  ),
+                ),
+              if (_trayUnavailable)
+                Tooltip(
+                  message: trayUnavailableMessage,
+                  child: Semantics(
+                    label: trayUnavailableMessage,
+                    liveRegion: true,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Color(0xFFD29922),
+                      ),
+                    ),
+                  ),
+                ),
+              _iconButton(
+                Icons.open_in_full_rounded,
+                muted,
+                _toggleCompact,
+                tooltip: 'Expand',
+              ),
+              _iconButton(
+                Icons.close_rounded,
+                muted,
+                widget._hostIntegration ? windowManager.close : null,
+                tooltip: 'Close',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _compactRouteButton(
+    RouteSuggestion suggestion,
+    String routeLine,
+    String routeDetail,
+    Color fg, {
+    required Map<String, int> providerCounts,
+    required bool showProviderName,
+    required bool iconOnly,
+  }) {
+    final chrome = AppChromeTheme.of(context);
+    final candidate = suggestion.recommended;
+    final noRoute = candidate == null;
+    final routedQuota = candidate == null
+        ? null
+        : _visible
+              .where(
+                (quota) =>
+                    quota.provider == candidate.provider &&
+                    quota.account == candidate.account,
+              )
+              .firstOrNull;
+    final providerName = candidate == null || !showProviderName
+        ? null
+        : routedQuota == null
+        ? candidate.provider
+        : _shouldShowAccount(routedQuota, providerCounts)
+        ? '${routedQuota.displayName} '
+              '(${quotaAccountDisplayLabel(routedQuota.account)})'
+        : routedQuota.displayName;
+    final tone = noRoute ? const Color(0xFFD29922) : chrome.accent;
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    const radius = BorderRadius.all(Radius.circular(6));
+    void showExplanation() => _showRouteExplanation(suggestion, routeLine);
+    return Semantics(
+      label: '$routeLine. Open decision details.',
+      button: true,
+      onTap: showExplanation,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: routeDetail,
+        child: InkWell(
+          key: const ValueKey('compact-route-decision'),
+          focusNode: _routeExplanationFocusNode,
+          onTap: showExplanation,
+          borderRadius: radius,
+          child: Container(
+            constraints: BoxConstraints(
+              minHeight: 30,
+              maxWidth: iconOnly
+                  ? 28
+                  : providerName == null
+                  ? 100
+                  : largeText
+                  ? 360
+                  : 240,
             ),
-            _iconButton(
-              Icons.close_rounded,
-              muted,
-              widget._hostIntegration ? windowManager.close : null,
-              tooltip: 'Close',
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            decoration: BoxDecoration(
+              color: tone.withValues(alpha: 0.10),
+              borderRadius: radius,
+              border: Border.all(color: tone.withValues(alpha: 0.55)),
             ),
-          ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  noRoute ? Icons.block_rounded : Icons.alt_route_rounded,
+                  size: 13,
+                  color: tone,
+                ),
+                if (!iconOnly) ...[
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      noRoute
+                          ? 'No route'
+                          : providerName == null
+                          ? 'Next'
+                          : 'Next $providerName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppType.small,
+                        fontWeight: FontWeight.w700,
+                        color: noRoute ? tone : fg,
+                      ),
+                    ),
+                  ),
+                ],
+                if (candidate != null && !iconOnly) ...[
+                  const SizedBox(width: 5),
+                  ProviderLogo(candidate.provider, size: 14, color: fg),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1890,6 +2492,9 @@ class _DashboardState extends State<Dashboard>
       showAccounts: _showAccounts,
     );
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final stackHeaderActions =
+        largeText ||
+        (_showingAnalytics && MediaQuery.sizeOf(context).width < 360);
     final titleCluster = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1987,7 +2592,7 @@ class _DashboardState extends State<Dashboard>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (largeText) ...[
+            if (stackHeaderActions) ...[
               titleCluster,
               Align(
                 alignment: Alignment.centerRight,
@@ -2000,33 +2605,42 @@ class _DashboardState extends State<Dashboard>
                   ...actions,
                 ],
               ),
-            if (routeLine != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, right: 4),
-                child: Row(
-                  children: [
-                    Icon(Icons.alt_route_rounded, size: 12, color: muted),
-                    const SizedBox(width: 5),
-                    Expanded(
-                      child: Tooltip(
-                        message: routeDetail ?? routeLine,
-                        child: Text(
-                          routeLine,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.caption,
-                            fontWeight: FontWeight.w500,
-                            color: muted,
-                          ),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Row(
+                children: [
+                  Icon(Icons.alt_route_rounded, size: 12, color: muted),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Tooltip(
+                      message: routeDetail,
+                      child: Text(
+                        routeLine,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppType.caption,
+                          fontWeight: FontWeight.w500,
+                          color: muted,
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  _iconButton(
+                    Icons.info_outline_rounded,
+                    muted,
+                    () => _showRouteExplanation(suggestion, routeLine),
+                    tooltip: suggestion.recommended == null
+                        ? 'Explain why no route is safe'
+                        : 'Explain recommendation',
+                    focusNode: _routeExplanationFocusNode,
+                  ),
+                ],
               ),
+            ),
             if (_preferenceStorageWarning != null)
               _warningLine(_preferenceStorageWarning!, warning),
+            if (_trayUnavailable) _warningLine(trayUnavailableMessage, warning),
             if (_lastRefreshError != null)
               _warningLine(_lastRefreshError!, warning),
           ],
@@ -2062,6 +2676,50 @@ class _DashboardState extends State<Dashboard>
       ],
     ),
   );
+
+  void _showRouteExplanation(RouteSuggestion suggestion, String routeLine) {
+    final noRoute = suggestion.recommended == null;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            noRoute ? 'Why no route is safe' : 'Why this recommendation?',
+          ),
+          content: SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    routeLine,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(suggestion.explanation),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Decision id',
+                    style: Theme.of(ctx).textTheme.labelMedium,
+                  ),
+                  const SizedBox(height: 3),
+                  SelectableText(suggestion.receipt.decisionId),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _menuButton(Color muted) {
     final counts = _providerCounts(_profiledData);
@@ -2432,7 +3090,7 @@ class _DashboardState extends State<Dashboard>
     setState(() => _textSize = t);
     textScale.value = t.scale; // applied app-wide by the MaterialApp builder
     unawaited(_persistPrefs());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   void _setCadence(Cadence c) {
@@ -2702,32 +3360,33 @@ class _DashboardState extends State<Dashboard>
     unawaited(_persistPrefs());
   }
 
-  void _showHelp() => _showSetup();
+  void _showHelp() => unawaited(_showSetup());
 
-  /// Shows the analytics body in this window, under the same header and menu
-  /// as the quota view. No resize, no move, no route push: only the body under
-  /// the header changes, and it scrolls to fit whatever size the window has.
+  /// Shows the analytics body in this window, under the same header and menu.
+  /// Short content-hugged quota windows grow to a useful display-bounded
+  /// viewport; Analytics still scrolls when the host grants less space.
   void _showFleet({FleetRange initialRange = FleetRange.now}) {
     setState(() {
       _showingAnalytics = true;
       _analyticsRange = initialRange;
     });
+    _applySize();
   }
 
   void _closeFleet() {
     setState(() => _showingAnalytics = false);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _applySize());
+    _applySize();
   }
 
   /// Compact setup/help panel: a short intro, then every provider account from
   /// the latest snapshot with its live status and an inline Connect for
   /// Grok/Antigravity. Reachable from the help button; never pops up on its own.
   /// All path/state reads are portable, so it works the same on every OS.
-  void _showSetup() {
+  Future<void> _showSetup() async {
     // Mid-connect providers; declared outside the builder so it survives the
     // StatefulBuilder rebuilds.
     final connecting = <String>{};
-    showDialog<void>(
+    await showDialog<void>(
       context: context,
       builder: (ctx) {
         final dark = Theme.of(ctx).brightness == Brightness.dark;
@@ -3147,11 +3806,13 @@ class _DashboardState extends State<Dashboard>
     Color color,
     VoidCallback? onTap, {
     required String tooltip,
+    FocusNode? focusNode,
   }) => AppChromeIconButton(
     icon: icon,
     color: color,
     onTap: onTap,
     tooltip: tooltip,
+    focusNode: focusNode,
   );
 }
 
@@ -3384,7 +4045,9 @@ class _FocusableProviderCardState extends State<_FocusableProviderCard> {
           if (_hover != hover) setState(() => _hover = hover);
         },
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 130),
+          duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
+              ? Duration.zero
+              : const Duration(milliseconds: 130),
           curve: Curves.easeOut,
           foregroundDecoration: BoxDecoration(
             borderRadius: BorderRadius.circular(11),
@@ -3614,7 +4277,8 @@ class ProviderTile extends StatelessWidget {
                     _Dot(statusColor),
                   if (planLabel != null) ...[
                     const SizedBox(width: 6),
-                    Flexible(
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 104),
                       child: Semantics(
                         label: planDetail,
                         excludeSemantics: true,
@@ -3652,7 +4316,11 @@ class ProviderTile extends StatelessWidget {
                       // One chevron that rotates, so expand and collapse read as
                       // the same control moving rather than two different icons.
                       turns: expanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 160),
+                      duration:
+                          MediaQuery.maybeOf(context)?.disableAnimations ??
+                              false
+                          ? Duration.zero
+                          : const Duration(milliseconds: 160),
                       curve: Curves.easeOut,
                       child: Icon(
                         Icons.expand_more_rounded,
@@ -3724,18 +4392,13 @@ class ProviderTile extends StatelessWidget {
                   quota.stale &&
                   quota.driftReason == null &&
                   quota.error?.isNotEmpty == true)
-                _providerStaleFailureRow(
-                  quota.error!,
-                  driftColor,
-                  throttled:
-                      quota.pipeHealth == providerPipeHealthThrottled ||
-                      quota.pipeHealth == providerPipeHealthDegraded,
-                ),
+                _providerStaleFailureRow(quota, driftColor),
               // Surface the in-app login right where the failure shows, so a
               // provider that supports quotabot's own grant (Grok, Antigravity)
               // can be reconnected without a terminal. Kept out of the tight/
               // expanded gate because a failed login is always actionable.
               if (onConnect != null &&
+                  providerRetrySummary(quota) == null &&
                   !quota.isLocal &&
                   (quota.stale || !trustedEvidence))
                 Padding(
@@ -3773,7 +4436,11 @@ class ProviderTile extends StatelessWidget {
               else if (quota.windows.isEmpty)
                 ((quota.status ?? '').isNotEmpty
                     ? _statusOnlyRow(quota, muted, fg)
-                    : _noData(quota.error, muted))
+                    : _noData(
+                        providerFailureSummary(quota),
+                        muted,
+                        detail: quota.error,
+                      ))
               else if (!completeWindowEvidence)
                 _noData(
                   'quota balance unavailable - not used for routing',
@@ -4066,21 +4733,18 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _providerStaleFailureRow(
-    String reason,
-    Color color, {
-    bool throttled = false,
-  }) {
-    // A throttled or slow pipe is temporary and self-recovering, so it reads as
-    // "throttled - retrying" in amber rather than a red "live read failed" that
-    // implies a broken login or a bad response.
+  Widget _providerStaleFailureRow(ProviderQuota quota, Color color) {
+    final retryLabel = providerRetrySummary(quota, showingLastKnown: true);
+    final retrying = retryLabel != null;
+    // Temporary provider pushback stays amber and self-recovering, while the
+    // label preserves whether the evidence is throttling or service degradation.
     const throttleColor = Color(0xFFD29922);
-    final rowColor = throttled ? throttleColor : color;
-    final detail = throttled
-        ? 'The provider is responding slowly (throttled). Showing last-known '
-              'quota and backing off; it retries automatically. Reason: $reason'
+    final rowColor = retrying ? throttleColor : color;
+    final detail = retrying
+        ? 'Automatic recovery: $retryLabel. Diagnostic: ${quota.error}'
         : 'The latest live quota read failed. Showing last-known quota; routing '
-              'is disabled until a clean read succeeds. Reason: $reason';
+              'is disabled until a clean read succeeds. Reason: ${quota.error}';
+    final label = retryLabel ?? 'live read failed - showing last known';
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Semantics(
@@ -4094,7 +4758,7 @@ class ProviderTile extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                throttled
+                retrying
                     ? Icons.hourglass_top_rounded
                     : Icons.cloud_off_rounded,
                 size: 13,
@@ -4103,9 +4767,7 @@ class ProviderTile extends StatelessWidget {
               const SizedBox(width: 5),
               Expanded(
                 child: Text(
-                  throttled
-                      ? 'throttled - retrying, showing last known'
-                      : 'live read failed - showing last known',
+                  label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -4267,14 +4929,19 @@ class ProviderTile extends StatelessWidget {
     );
   }
 
-  Widget _noData(String? err, Color muted) {
+  Widget _noData(String? err, Color muted, {String? detail}) {
     final trimmed = err?.trim();
     final msg = trimmed == null || trimmed.isEmpty ? 'no live data' : trimmed;
+    final diagnostic = detail?.trim();
+    final fullMessage =
+        diagnostic == null || diagnostic.isEmpty || diagnostic == msg
+        ? msg
+        : '$msg. Diagnostic: $diagnostic';
     return Tooltip(
-      message: msg,
+      message: fullMessage,
       excludeFromSemantics: true,
       child: Semantics(
-        label: msg,
+        label: fullMessage,
         excludeSemantics: true,
         child: Row(
           children: [
@@ -4327,6 +4994,15 @@ class ProviderTile extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: AppType.small, color: muted),
+            ),
+          ),
+        if (quota.error?.trim().isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 19),
+            child: _noData(
+              providerFailureSummary(quota),
+              muted,
+              detail: quota.error,
             ),
           ),
       ],
@@ -4529,59 +5205,89 @@ class WindowBar extends StatelessWidget {
     final color = evidenceLabel == null ? _availColor(remaining) : muted;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final chrome = AppChromeTheme.of(context);
+    final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
+    final showsReset =
+        evidenceLabel == null && !view.rolledOver && view.resetsAt != null;
     final value = evidenceLabel != null
         ? view.rolledOver
               ? 'reset passed ($evidenceLabel)'
               : '${remaining.round()}% $evidenceLabel'
         : view.rolledOver
         ? 'ready'
-        : view.resetsAt != null
-        ? '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
+        : showsReset
+        ? largeText
+              ? '${remaining.round()}% free\n${resetLabel(view.resetsAt, now)}'
+              : '${remaining.round()}% free  ${resetLabel(view.resetsAt, now)}'
         : '${remaining.round()}% free';
+
+    final label = _WindowBarText(
+      text: view.label,
+      maxLines: 2,
+      softWrap: true,
+      style: TextStyle(
+        fontSize: AppType.label,
+        fontWeight: FontWeight.w600,
+        color: muted,
+      ),
+    );
+    final meter = TweenAnimationBuilder<double>(
+      // Ease the fill to its new level on refresh so a jump reads as motion,
+      // not a flicker.
+      tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
+      duration: MediaQuery.maybeOf(context)?.disableAnimations ?? false
+          ? Duration.zero
+          : const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) =>
+          QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
+    );
+    final valueText = _WindowBarText(
+      text: value,
+      maxLines: showsReset
+          ? largeText
+                ? 4
+                : 3
+          : largeText
+          ? 2
+          : 1,
+      softWrap: showsReset || largeText,
+      textAlign: TextAlign.end,
+      style: TextStyle(
+        fontSize: AppType.small,
+        fontWeight: FontWeight.w600,
+        color: evidenceLabel != null
+            ? muted
+            : view.rolledOver
+            ? const Color(0xFF3FB950)
+            : fg,
+      ),
+    );
+
+    if (largeText) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: label),
+              const SizedBox(width: 8),
+              Expanded(flex: 2, child: valueText),
+            ],
+          ),
+          const SizedBox(height: 4),
+          meter,
+        ],
+      );
+    }
 
     return Row(
       children: [
-        Expanded(
-          flex: 2,
-          child: _WindowBarText(
-            text: view.label,
-            style: TextStyle(
-              fontSize: AppType.label,
-              fontWeight: FontWeight.w600,
-              color: muted,
-            ),
-          ),
-        ),
+        Expanded(flex: 5, child: label),
         const SizedBox(width: 6),
-        Expanded(
-          flex: 7,
-          child: TweenAnimationBuilder<double>(
-            // Ease the fill to its new level on refresh so a jump reads as
-            // motion, not a flicker.
-            tween: Tween(begin: 0, end: (remaining / 100.0).clamp(0.0, 1.0)),
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-            builder: (context, v, _) =>
-                QuotaMeter(value: v, color: color, track: chrome.gaugeTrack),
-          ),
-        ),
+        Expanded(flex: 5, child: meter),
         const SizedBox(width: 8),
-        Expanded(
-          flex: 5,
-          child: _WindowBarText(
-            text: value,
-            textAlign: TextAlign.end,
-            style: TextStyle(
-              fontSize: AppType.small,
-              fontWeight: FontWeight.w600,
-              color: evidenceLabel != null
-                  ? muted
-                  : view.rolledOver
-                  ? const Color(0xFF3FB950)
-                  : fg,
-            ),
-          ),
-        ),
+        Expanded(flex: 8, child: valueText),
       ],
     );
   }
@@ -4591,11 +5297,15 @@ class _WindowBarText extends StatelessWidget {
   final String text;
   final TextStyle style;
   final TextAlign textAlign;
+  final int maxLines;
+  final bool softWrap;
 
   const _WindowBarText({
     required this.text,
     required this.style,
     this.textAlign = TextAlign.start,
+    this.maxLines = 1,
+    this.softWrap = false,
   });
 
   @override
@@ -4607,8 +5317,8 @@ class _WindowBarText extends StatelessWidget {
       excludeFromSemantics: true,
       child: Text(
         text,
-        maxLines: 1,
-        softWrap: false,
+        maxLines: maxLines,
+        softWrap: softWrap,
         overflow: TextOverflow.ellipsis,
         textAlign: textAlign,
         style: style,

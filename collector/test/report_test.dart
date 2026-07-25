@@ -66,7 +66,14 @@ void main() {
 
     final line = report.providers.single;
     expect(line.state, 'provider drift');
-    expect(line.toJson()['state'], 'provider drift');
+    final json = line.toJson();
+    expect(json['state'], 'provider drift');
+    expect(json['ok'], isTrue);
+    expect(json['as_of'], _now);
+    expect(json['staleness_seconds'], 0);
+    expect(json['stale'], isTrue);
+    expect(json['per_machine'], isFalse);
+    expect(json['drift_reason'], drifted.driftReason);
     // The trust context (State + Trust columns in the markdown) names the drift
     // rather than reading 'live' or a bare 'cached'.
     expect(report.toMarkdown(), contains('provider drift'));
@@ -123,13 +130,24 @@ void main() {
     final json = report.toJson();
     expect(json['schema'], quotaHealthReportSchema);
     expect(json['recommended_provider'], 'claude');
+    expect(json['recommended_account'], 'work');
+    expect(json['decision_code'], isA<String>());
+    expect(json['decision_id'], startsWith('qb-'));
+    final receipt = json['receipt'] as Map<String, dynamic>;
+    expect(receipt['schema'], 'quotabot.receipt.v1');
+    expect(receipt['decision_id'], json['decision_id']);
+    expect((receipt['winner'] as Map)['account'], 'work');
     expect(json['providers'], hasLength(2));
     final claude = (json['providers'] as List).first as Map<String, dynamic>;
     expect(claude['source_class'], 'authoritative_live');
     // spend_class is machine-readable parity with the markdown Trust column.
     expect(claude['spend_class'], 'quota plan');
     expect(claude.containsKey('trust'), isFalse);
-    expect(claude.containsKey('as_of'), isFalse);
+    expect(claude['ok'], isTrue);
+    expect(claude['as_of'], _now);
+    expect(claude['staleness_seconds'], 0);
+    expect(claude['stale'], isFalse);
+    expect(claude['per_machine'], isFalse);
     expect(claude['weekly_sampled_days'], 3);
     expect(claude['weekly_usable_day_streak'], 3);
     final calendar = claude['weekly_contribution_calendar'] as List;
@@ -146,7 +164,7 @@ void main() {
     expect(schedule['window'], isA<Map<String, dynamic>>());
   });
 
-  test('report keeps raw credential identity in JSON and abbreviates markdown',
+  test('report keeps raw identity in JSON and anonymizes markdown by default',
       () {
     final identity = opaqueCredentialIdentity('claude', 'report-grant');
     final provider = ProviderQuota(
@@ -171,8 +189,75 @@ void main() {
     final jsonProvider =
         (report.toJson()['providers'] as List).single as Map<String, dynamic>;
     expect(jsonProvider['account'], identity);
-    expect(report.toMarkdown(), contains(quotaAccountDisplayLabel(identity)));
+    expect(report.toMarkdown(), contains('| Claude | account |'));
+    expect(
+      report.toMarkdown(),
+      isNot(contains(quotaAccountDisplayLabel(identity))),
+    );
     expect(report.toMarkdown(), isNot(contains(identity)));
+    expect(
+      report.toMarkdown(includeAccounts: true),
+      contains(quotaAccountDisplayLabel(identity)),
+    );
+  });
+
+  test('report correlates a multi-account recommendation without disclosure',
+      () {
+    ProviderQuota quota(String account, double used) => ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: account,
+          asOf: _now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: used)],
+        );
+    final providers = [
+      quota('work@example.com', 10),
+      quota('home@example.com', 70),
+    ];
+    final report = buildQuotaHealthReport(
+      providers,
+      _now,
+      suggestRoute(providers, _now),
+    );
+
+    final json = report.toJson();
+    expect(json['recommended_provider'], 'claude');
+    expect(json['recommended_account'], 'work@example.com');
+    expect((json['receipt'] as Map)['decision_id'], json['decision_id']);
+    final markdown = report.toMarkdown();
+    expect(markdown, contains('Recommendation: claude (account 1)'));
+    expect(markdown, contains('| Claude | account 1 |'));
+    expect(markdown, contains('| Claude | account 2 |'));
+    expect(markdown, isNot(contains('work@example.com')));
+    expect(markdown, isNot(contains('home@example.com')));
+    final included = report.toMarkdown(includeAccounts: true);
+    expect(included, contains('Recommendation: claude (work@example.com)'));
+    expect(included, contains('home@example.com'));
+  });
+
+  test('report JSON preserves failed provider diagnostics', () {
+    final failed = ProviderQuota(
+      provider: 'codex',
+      displayName: 'Codex',
+      account: 'work@example.com',
+      asOf: _now - 120,
+      ok: false,
+      error: 'read timed out',
+      pipeHealth: providerPipeHealthThrottled,
+    );
+    final report = buildQuotaHealthReport(
+      [failed],
+      _now,
+      suggestRoute([failed], _now),
+    );
+    final row = (report.toJson()['providers'] as List).single as Map;
+
+    expect(row['ok'], isFalse);
+    expect(row['as_of'], _now - 120);
+    expect(row['staleness_seconds'], 120);
+    expect(row['stale'], isFalse);
+    expect(row['error'], 'read timed out');
+    expect(row['pipe_health'], providerPipeHealthThrottled);
   });
 
   test('markdown report includes recommendation, metrics, and local note', () {
@@ -194,17 +279,17 @@ void main() {
     expect(
       markdown,
       contains(
-        '| claude | work | available | live, authoritative, quota plan, captured 0s ago | 80.0% |',
+        '| claude | account | available | live, authoritative, quota plan, captured just now | 80.0% |',
       ),
     );
-    expect(markdown, contains('live, manual, captured 0s ago'));
-    expect(
-        markdown, contains('available, local runtime, cold, captured 0s ago'));
+    expect(markdown, contains('live, manual, captured just now'));
+    expect(markdown,
+        contains('available, local runtime, cold, captured just now'));
     expect(markdown, contains('| 3d usable |'));
     expect(markdown, contains('Manual entries are self-reported'));
     expect(markdown, contains('Local runtimes are fallback capacity'));
     expect(markdown, contains('## Weekly calendar'));
-    expect(markdown, contains('claude (work):'));
+    expect(markdown, contains('claude (account):'));
     expect(markdown, contains('## Best sampled windows'));
     expect(markdown, contains('raw '));
     expect(markdown, contains('support='));
@@ -229,7 +314,10 @@ void main() {
     );
 
     expect(report.toMarkdown(), contains('custom\\|ai'));
-    expect(report.toMarkdown(), contains('team\\|alpha'));
+    expect(
+      report.toMarkdown(includeAccounts: true),
+      contains('team\\|alpha'),
+    );
   });
 
   test('markdown labels failed quota-plan providers by spend class', () {
@@ -252,7 +340,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Codex | unknown | unavailable | error, authoritative, quota plan, captured 0s ago |'),
+          '| Codex | unknown | unavailable | error, authoritative, quota plan, captured just now |'),
     );
   });
 
@@ -275,7 +363,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-        '| Codex | unknown | unknown | metadata, authoritative, captured 0s ago |',
+        '| Codex | unknown | unknown | metadata, authoritative, captured just now |',
       ),
     );
   });
@@ -300,7 +388,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Cursor | work@example.com | available | live, passive local, metered plan, captured 0s ago |'),
+          '| Cursor | account | available | live, passive local, metered plan, captured just now |'),
     );
   });
 
@@ -325,7 +413,7 @@ void main() {
     expect(
       report.toMarkdown(),
       contains(
-          '| Ollama | installed | unavailable | error, local runtime, cold, captured 0s ago |'),
+          '| Ollama | installed | unavailable | error, local runtime, cold, captured just now |'),
     );
   });
 }

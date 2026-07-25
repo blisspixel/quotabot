@@ -77,6 +77,9 @@ void main() {
 
       expect(find.byTooltip('Expand'), findsOneWidget);
       expect(find.bySemanticsLabel('Expand'), findsOneWidget);
+      final enabledSize = tester.getSize(find.byTooltip('Expand'));
+      expect(enabledSize.width, greaterThanOrEqualTo(28));
+      expect(enabledSize.height, greaterThanOrEqualTo(28));
       var node = tester.getSemantics(find.bySemanticsLabel('Expand'));
       expect(
         node.getSemanticsData().flagsCollection.isEnabled,
@@ -98,6 +101,9 @@ void main() {
           ),
         ),
       );
+      final disabledSize = tester.getSize(find.byTooltip('Refreshing quotas'));
+      expect(disabledSize.width, greaterThanOrEqualTo(28));
+      expect(disabledSize.height, greaterThanOrEqualTo(28));
       node = tester.getSemantics(find.bySemanticsLabel('Refreshing quotas'));
       expect(
         node.getSemanticsData().flagsCollection.isEnabled,
@@ -778,7 +784,7 @@ void main() {
           leaseDiscountFor: (_, _) => lease,
           pipePenaltyByProvider: pipe > 0 ? {'claude': pipe} : const {},
         );
-        return desktopRouteDetailLine(suggestion, [claude], now)!;
+        return desktopRouteDetailLine(suggestion, [claude], now);
       }
 
       final burnOnly = detail(burn: 20);
@@ -893,6 +899,69 @@ void main() {
       expect(detail, startsWith('Next: Ollama | local runtime | fallback'));
       expect(detail, isNot(contains('local runtime | local fallback')));
     });
+
+    test('keeps the soonest-reset fallback visible without a safe route', () {
+      const now = 1782046566;
+      final claude = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: now + 3600),
+        ],
+      );
+      final codex = ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 100, resetsAt: now + 7200),
+        ],
+      );
+
+      final suggestion = suggestRoute([codex, claude], now);
+
+      expect(suggestion.recommended, isNull);
+      expect(
+        desktopRouteSignalLine(suggestion, [codex, claude], now),
+        'No safe route - wait for Claude',
+      );
+      final detail = desktopRouteDetailLine(suggestion, [codex, claude], now);
+      expect(detail, startsWith('No safe route | Receipt: qb-$now-'));
+      expect(detail, contains('Everything is spent.'));
+      expect(
+        detail,
+        contains('Fallback: claude resets soonest - wait for it.'),
+      );
+    });
+
+    test('keeps the passthrough fallback visible without quota evidence', () {
+      const now = 1782046566;
+      final grok = ProviderQuota(
+        provider: 'grok',
+        displayName: 'Grok',
+        account: 'default',
+        asOf: now,
+      );
+
+      final suggestion = suggestRoute([grok], now);
+
+      expect(suggestion.recommended, isNull);
+      expect(
+        desktopRouteSignalLine(suggestion, [grok], now),
+        'No quota data - use your usual model',
+      );
+      expect(
+        desktopRouteDetailLine(suggestion, [grok], now),
+        allOf(
+          startsWith('No quota data |'),
+          contains('No live quota data.'),
+          contains('Fallback: No quota signal - use the model you requested.'),
+        ),
+      );
+    });
   });
 
   group('desktop provider trust line', () {
@@ -903,7 +972,7 @@ void main() {
         now,
       );
 
-      expect(line, 'live | account-wide | quota plan | captured 0s ago');
+      expect(line, 'live | account-wide | quota plan | captured just now');
     });
 
     test('labels cached manual quota without plan identity noise', () {
@@ -937,7 +1006,7 @@ void main() {
 
       expect(
         line,
-        'provider drift | account-wide | quota plan | captured 0s ago',
+        'provider drift | account-wide | quota plan | captured just now',
       );
     });
 
@@ -957,7 +1026,7 @@ void main() {
         now,
       );
 
-      expect(line, 'in use | local runtime | captured 0s ago');
+      expect(line, 'in use | local runtime | captured just now');
     });
 
     test('labels an idle local runtime without claiming it is active', () {
@@ -975,7 +1044,7 @@ void main() {
         now,
       );
 
-      expect(line, 'available | local runtime | captured 0s ago');
+      expect(line, 'available | local runtime | captured just now');
     });
 
     test('labels a rejected local configuration as an error', () {
@@ -994,7 +1063,7 @@ void main() {
         now,
       );
 
-      expect(line, 'error | local runtime | captured 0s ago');
+      expect(line, 'error | local runtime | captured just now');
     });
 
     test('labels status-only metadata without claiming live quota', () {
@@ -1010,7 +1079,7 @@ void main() {
         now,
       );
 
-      expect(line, 'metadata | status only | captured 0s ago');
+      expect(line, 'metadata | status only | captured just now');
     });
 
     test('labels this-machine fallback without repeated scope', () {
@@ -1027,7 +1096,7 @@ void main() {
         now,
       );
 
-      expect(line, 'metadata | this-machine fallback | captured 0s ago');
+      expect(line, 'metadata | this-machine fallback | captured just now');
     });
 
     test('labels passive local evidence without repeating machine scope', () {
@@ -1044,7 +1113,7 @@ void main() {
         now,
       );
 
-      expect(line, 'live | passive local | metered plan | captured 0s ago');
+      expect(line, 'live | passive local | metered plan | captured just now');
     });
 
     test('states when passive evidence has no capture provenance', () {
@@ -1090,6 +1159,27 @@ void main() {
         desktopProviderTrustDetail(localFallback, now),
         contains('this machine only; other devices may not be included'),
       );
+    });
+
+    test('degraded trust detail never calls a service error throttling', () {
+      const now = 1782046566;
+      final degraded = ProviderQuota(
+        provider: 'antigravity',
+        displayName: 'Antigravity',
+        account: 'user@example.com',
+        asOf: now - 60,
+        ok: false,
+        stale: true,
+        error: 'Antigravity fetchAvailableModels request returned HTTP 503',
+        pipeHealth: providerPipeHealthDegraded,
+        httpStatus: 503,
+        retryAfterSeconds: 45,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      );
+      final detail = desktopProviderTrustDetail(degraded, now);
+
+      expect(detail, contains('provider error - retrying in 45s'));
+      expect(detail, isNot(contains('throttled')));
     });
 
     test('never calls questionable or clock-invalid evidence live', () {

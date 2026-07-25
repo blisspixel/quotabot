@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
+import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/webhook.dart';
 
 import 'profile_ui.dart';
@@ -94,16 +95,47 @@ List<ProviderDisplayGroup> groupProvidersForDisplay(List<ProviderQuota> data) {
 }
 
 /// The compact glance line: just the route and how much is free (or that it is a
-/// local fallback), so it never truncates mid-word. The provenance, burn, and
-/// confidence detail lives in [desktopRouteDetailLine], shown on hover.
-String? desktopRouteSignalLine(
+/// local fallback), so it never truncates mid-word. A decision without a safe
+/// winner keeps its fail-soft fallback visible instead of removing the entire
+/// route row. The provenance, burn, and confidence detail lives in
+/// [desktopRouteDetailLine].
+String desktopRouteSignalLine(
   RouteSuggestion suggestion,
   List<ProviderQuota> snapshot,
   int now, {
   bool showAccounts = false,
 }) {
   final candidate = suggestion.recommended;
-  if (candidate == null) return null;
+  if (candidate == null) {
+    // A null recommendation does not always mean every route is spent. When the
+    // live read failed or the only evidence is stale, quotabot has no fresh
+    // quota to route on - the cards still show last-known numbers. Say that
+    // plainly instead of "No safe route", which reads as "you are out of quota
+    // everywhere" and alarms a user who in fact has quota that just could not be
+    // read this cycle.
+    final noEvidence = switch (suggestion.decisionCode) {
+      RouteDecisionCode.noData => 'No quota data - use your usual model',
+      RouteDecisionCode.staleEvidence =>
+        'Quota data is stale - use your usual model',
+      _ => null,
+    };
+    if (noEvidence != null) return noEvidence;
+    final fallback = suggestion.fallback;
+    final provider = fallback.provider;
+    final display = provider == null
+        ? null
+        : snapshot
+              .where((quota) => quota.provider == provider)
+              .map((quota) => quota.displayName)
+              .firstOrNull;
+    return switch (fallback.kind) {
+      RouteFallbackKind.local =>
+        'No safe route - use ${display ?? provider ?? 'local runtime'} locally',
+      RouteFallbackKind.soonestReset =>
+        'No safe route - wait for ${display ?? provider ?? 'the next reset'}',
+      RouteFallbackKind.passthrough => 'No safe route - use requested model',
+    };
+  }
   final (_, display, accountLabel) = _routeDisplay(
     candidate,
     snapshot,
@@ -120,16 +152,27 @@ String? desktopRouteSignalLine(
 }
 
 /// The full route detail (provenance, burn-adjusted headroom, confidence, age),
-/// kept off the compact glance line so it never overflows. Shown on hover and
-/// carried into machine-readable surfaces.
-String? desktopRouteDetailLine(
+/// kept off the compact glance line so it never overflows. A null winner still
+/// exposes the decision reason, guaranteed fallback, and receipt.
+String desktopRouteDetailLine(
   RouteSuggestion suggestion,
   List<ProviderQuota> snapshot,
   int now, {
   bool showAccounts = false,
 }) {
   final candidate = suggestion.recommended;
-  if (candidate == null) return null;
+  if (candidate == null) {
+    final headline = switch (suggestion.decisionCode) {
+      RouteDecisionCode.noData => 'No quota data',
+      RouteDecisionCode.staleEvidence => 'Quota data is stale',
+      _ => 'No safe route',
+    };
+    return <String>[
+      headline,
+      'Receipt: ${suggestion.receipt.decisionId}',
+      'Decision: ${suggestion.explanation}',
+    ].join(' | ');
+  }
   final (_, display, accountLabel) = _routeDisplay(
     candidate,
     snapshot,
@@ -257,14 +300,12 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
   if (quota.stale &&
       quota.driftReason == null &&
       quota.error?.isNotEmpty == true) {
-    final throttled =
-        quota.pipeHealth == providerPipeHealthThrottled ||
-        quota.pipeHealth == providerPipeHealthDegraded;
-    if (throttled) {
-      detail.add(
-        'Provider is responding slowly (throttled): ${quota.error}. Showing '
-        'last-known quota and backing off; it retries automatically.',
-      );
+    final retry = providerRetrySummary(
+      quota,
+      showingLastKnown: quota.hasWindows,
+    );
+    if (retry != null) {
+      detail.add('Recovery: $retry. Diagnostic: ${quota.error}.');
     } else {
       detail.add(
         quota.hasWindows
@@ -275,11 +316,13 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
     }
   }
   if (quota.asOf > 0) {
-    detail.add(
-      quota.asOf > now
-          ? 'Capture time is ahead of this machine clock.'
-          : 'Captured ${ageLabel(quota.asOf, now)} ago.',
-    );
+    if (quota.asOf > now) {
+      detail.add('Capture time is ahead of this machine clock.');
+    } else if (quota.asOf == now) {
+      detail.add('Captured just now.');
+    } else {
+      detail.add('Captured ${ageLabel(quota.asOf, now)} ago.');
+    }
   } else {
     detail.add('Capture time is unavailable.');
   }
@@ -298,6 +341,7 @@ String? _desktopProviderSpendClass(ProviderQuota quota) {
 String _desktopCaptureAgeLabel(int asOf, int now) {
   if (asOf <= 0) return 'capture time unknown';
   if (asOf > now) return 'captured in the future';
+  if (asOf == now) return 'captured just now';
   return 'captured ${ageLabel(asOf, now)} ago';
 }
 

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quotabot/fleet.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 
@@ -173,6 +174,228 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.text('7d'));
     await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('analytics storage conflicts are clear only on history ranges', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = _q('codex', 'Codex', 30, asOf: now);
+    final notice = AnalyticsStorageNotice(
+      provider: 'codex',
+      account: 'codex@example.com',
+      tiers: const ['buckets'],
+      observedAt: now,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [quota],
+          buckets: const {},
+          dark: true,
+          analyticsNotices: [notice],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('History incomplete'), findsNothing);
+    await tester.tap(find.text('7d'));
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.textContaining('quotabot doctor'), findsOneWidget);
+    expect(find.textContaining('desktop cannot perform'), findsOneWidget);
+    expect(find.text('affected history is unavailable'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('History incomplete.*desktop cannot perform'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Now'));
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsNothing);
+
+    final historyOnly = AnalyticsStorageNotice(
+      provider: 'codex',
+      account: 'codex@example.com',
+      tiers: const ['history'],
+      observedAt: now,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          key: const ValueKey('history-only-conflict'),
+          data: [quota],
+          buckets: const {},
+          dark: true,
+          analyticsNotices: [historyOnly],
+          initialRange: FleetRange.week,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsOneWidget);
+
+    final combined = AnalyticsStorageNotice(
+      provider: 'codex',
+      account: 'codex@example.com',
+      tiers: const ['history', 'buckets'],
+      observedAt: now,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          key: const ValueKey('combined-conflict'),
+          data: [quota],
+          buckets: const {},
+          dark: true,
+          analyticsNotices: [combined],
+          initialRange: FleetRange.quarter,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsOneWidget);
+    expect(find.text('affected history is unavailable'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('unavailable analytics incidents remain visible without a card', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.binding.setSurfaceSize(const Size(520, 820));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const incident = AnalyticsStorageIncident(
+      provider: 'codex',
+      tiers: ['buckets'],
+      recordedAt: 1782000100,
+      incidentId: '0123456789abcdef0123456789abcdef',
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('claude', 'Claude', 30)],
+          buckets: const {},
+          dark: true,
+          analyticsIncidents: const [incident],
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('History incomplete'), findsNothing);
+    expect(find.textContaining('Codex'), findsNothing);
+
+    await tester.tap(find.text('7d'));
+    await tester.pump();
+    expect(find.textContaining('not currently available'), findsOneWidget);
+    expect(
+      find.textContaining('Current quota and routing are unaffected'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('reconnect'), findsOneWidget);
+    expect(find.textContaining('Install the CLI from Setup'), findsOneWidget);
+    expect(find.text('affected history is unavailable'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsNothing);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('History incomplete.*not currently available.*reconnect'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Now'));
+    await tester.pump();
+    expect(find.textContaining('History incomplete'), findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets('partial analytics incident scans never look clean', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: [_q('claude', 'Claude', 30)],
+          buckets: const {},
+          dark: true,
+          analyticsIncidentInventoryPartial: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('History status incomplete'), findsNothing);
+    await tester.tap(find.text('7d'));
+    await tester.pump();
+    expect(find.textContaining('History status incomplete'), findsOneWidget);
+    expect(find.textContaining('does not prove'), findsOneWidget);
+    expect(find.text('history status is unavailable'), findsOneWidget);
+    expect(find.text('history is still warming up'), findsNothing);
+    expect(
+      find.textContaining('Current quota and routing are unaffected'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Install the CLI from Setup'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('History status incomplete.*does not prove.*quotabot doctor'),
+      ),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('constrained analytics keeps a visible scroll affordance', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 220));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final data = [
+      _q('codex', 'Codex', 20, asOf: now, resetsAt: now + 3600),
+      _q('claude', 'Claude', 45, asOf: now, resetsAt: now + 7200),
+    ];
+
+    await tester.pumpWidget(
+      _wrap(
+        FleetScreen(
+          data: data,
+          buckets: {'codex': _buckets(45), 'claude': _buckets(65)},
+          dark: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+    final scrollView = tester.widget<SingleChildScrollView>(
+      find.byType(SingleChildScrollView),
+    );
+    expect(scrollbar.thumbVisibility, isTrue);
+    expect(scrollbar.controller, same(scrollView.controller));
+    expect(scrollView.controller!.hasClients, isTrue);
+    expect(scrollView.controller!.position.maxScrollExtent, greaterThan(0));
+
+    await tester.drag(
+      find.byType(SingleChildScrollView),
+      const Offset(0, -120),
+    );
+    await tester.pump();
+    expect(scrollView.controller!.offset, greaterThan(0));
     expect(tester.takeException(), isNull);
   });
 

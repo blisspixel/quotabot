@@ -111,7 +111,44 @@ setup plus every supported tray-registration call to complete. Windows verifies
 the native `Shell_NotifyIconGetRect` result and rectangle independently of the
 tray plugin. The app exposes that integration-only signal when
 `QUOTABOT_DESKTOP_READINESS_FILE` names an output path; normal application runs
-do not write a readiness file.
+do not write a readiness file. Readiness launches use isolated quotabot
+configuration and an ephemeral single-instance guard, so they do not read the
+user's quotabot settings or ring, replace, hide, or stop an installed tray
+instance.
+
+Keep the machine-readable readiness report with the release evidence:
+
+```powershell
+python tools/desktop_readiness_smoke.py `
+  --executable app/build/windows/x64/runner/Release/quotabot.exe `
+  --report .agent/windows-readiness.json
+```
+
+The v3 report includes pass or failure status, the completed stage, a UTC
+timestamp, launch PID, narrow runner executable SHA-256, isolated-config state,
+app-authored window and tray readiness, and confirmed launch-process cleanup.
+Unreached checks remain null. Failure evidence is intentionally bounded and
+contains no raw error, log, or filesystem path. It also records a
+domain-separated SHA-256, entry count,
+and regular-file byte count for the complete platform bundle. Relative paths,
+regular-file contents, and link targets are hashed in deterministic order;
+links are never followed, traversal is bounded, and the before-launch identity
+must match the after-cleanup identity. These fields use the
+`quotabot.desktop-bundle.v1` identity schema. Write the report outside the
+candidate bundle. On Windows, the tray result is independently backed by the
+native Shell rectangle check.
+
+CI and release workflows upload the Windows and Linux report on both success and
+failure, so a failed readiness gate retains diagnostic evidence without exposing
+host details.
+
+This bundle identity proves which extracted product payload passed readiness. It
+does not replace the archive checksum and provenance checks, application
+signing, or native accessibility evidence. The Flutter widget suite enforces
+labeled controls, 28 by 28 desktop targets, and text contrast across expanded,
+compact, and Analytics surfaces in light, dark, and Hacker themes. A release
+candidate still requires keyboard-only focus-order and visible-focus review plus
+a basic Narrator workflow on a native interactive Windows session.
 
 GitHub-hosted macOS runners build the app, but direct and LaunchServices bundle
 launches did not publish an app-authored window or status-item readiness
@@ -150,9 +187,11 @@ maintainer will consume it:
 5. Commit the release metadata on `main`, push it, and wait for hosted Windows,
    macOS, and Ubuntu CI plus CodeQL and secret scanning to pass before tagging.
 6. Before tagging, repeat the package and execution smoke on each claimed native
-   host and complete the interactive launcher, tray, and accessibility checks
-   that hosted automation cannot prove. Record an unavailable cell explicitly
-   rather than treating a shared-code test as native evidence.
+   host. Retain the bounded readiness report, then complete the Narrator,
+   keyboard-only focus-order, visible-focus, launcher, and tray checks that it
+   does not prove. Complete equivalent native interactive checks on macOS and
+   Linux. Record an unavailable cell explicitly rather than treating a
+   shared-code test as native evidence.
 7. Verify the official repository still has the active `v*` tag ruleset that
    blocks updates and deletion, plus GitHub release immutability. Immutability
    applies only to releases published after the setting was enabled on July 18,

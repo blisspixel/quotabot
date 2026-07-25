@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { requireLoopbackMcpUrl } from "./quotabot_mcp_common.js";
+import {
+  mcpBearerHeaders,
+  requireLoopbackMcpUrl,
+} from "./quotabot_mcp_common.js";
 
 type LoopbackUrlCase = {
   url: string;
@@ -22,5 +25,23 @@ for (const testCase of cases) {
       /exact loopback host/,
       testCase.url,
     );
+  }
+}
+
+const previousToken = process.env.QUOTABOT_MCP_TOKEN;
+try {
+  delete process.env.QUOTABOT_MCP_TOKEN;
+  assert.throws(() => mcpBearerHeaders(), /at least 32/);
+  process.env.QUOTABOT_MCP_TOKEN = "short";
+  assert.throws(() => mcpBearerHeaders(), /at least 32/);
+  process.env.QUOTABOT_MCP_TOKEN = "a".repeat(32);
+  assert.deepEqual(mcpBearerHeaders(), {
+    Authorization: `Bearer ${"a".repeat(32)}`,
+  });
+} finally {
+  if (previousToken === undefined) {
+    delete process.env.QUOTABOT_MCP_TOKEN;
+  } else {
+    process.env.QUOTABOT_MCP_TOKEN = previousToken;
   }
 }

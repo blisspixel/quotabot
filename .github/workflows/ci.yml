@@ -170,9 +170,12 @@ jobs:
           ./tools/package-windows.ps1
           python tools/verify_desktop_archive.py release/quotabot-windows-x64-desktop.zip
 
-      - name: Verify Windows desktop window and tray readiness
+      - name: Verify Windows desktop candidate readiness
         if: runner.os == 'Windows'
-        run: python tools/desktop_readiness_smoke.py --executable app/build/windows/x64/runner/Release/quotabot.exe
+        run: >-
+          python tools/desktop_readiness_smoke.py
+          --executable app/build/windows/x64/runner/Release/quotabot.exe
+          --report "${{ runner.temp }}\quotabot-windows-readiness.json"
 
       - name: Linux desktop build prerequisites
         if: runner.os == 'Linux'
@@ -188,7 +191,19 @@ jobs:
 
       - name: Verify Linux desktop window and tray readiness
         if: runner.os == 'Linux'
-        run: python tools/desktop_readiness_smoke.py --executable app/build/linux/x64/release/bundle/quotabot
+        run: >-
+          python tools/desktop_readiness_smoke.py
+          --executable app/build/linux/x64/release/bundle/quotabot
+          --report "${{ runner.temp }}/quotabot-linux-readiness.json"
+
+      - name: Preserve desktop readiness evidence
+        if: always() && (runner.os == 'Windows' || runner.os == 'Linux')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-readiness-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/quotabot-*-readiness.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Verify macOS desktop package build
         if: runner.os == 'macOS'

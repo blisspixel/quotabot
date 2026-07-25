@@ -1,28 +1,40 @@
 import 'dart:async';
-import 'dart:ui' show Tristate;
+import 'dart:ui' show SemanticsAction, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:quotabot/chrome_controls.dart';
 import 'package:quotabot/fleet.dart';
 import 'package:quotabot/main.dart';
 import 'package:quotabot/prefs.dart';
 import 'package:quotabot/provider_display.dart';
 import 'package:quotabot/quota_loading_indicator.dart';
 import 'package:quotabot/theme_spec.dart';
+import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/webhook.dart';
 
-Widget _wrap(Widget child, {bool disableAnimations = false}) {
+Widget _wrap(
+  Widget child, {
+  bool disableAnimations = false,
+  TextScaler? textScaler,
+}) {
   final chrome = AppChromeTheme.forSpec(Brightness.dark, appThemeDark);
   return MaterialApp(
     theme: ThemeData.dark().copyWith(extensions: [chrome]),
-    builder: disableAnimations
-        ? (context, built) => MediaQuery(
-            data: MediaQuery.of(context).copyWith(disableAnimations: true),
-            child: built!,
-          )
+    builder: disableAnimations || textScaler != null
+        ? (context, built) {
+            final media = MediaQuery.of(context);
+            return MediaQuery(
+              data: media.copyWith(
+                disableAnimations: disableAnimations,
+                textScaler: textScaler ?? media.textScaler,
+              ),
+              child: built!,
+            );
+          }
         : null,
     home: child,
   );
@@ -120,8 +132,108 @@ void main() {
     textScale.value = 1;
   });
 
+  test('analytics incident inventory follows the active desktop view', () {
+    const incidents = [
+      AnalyticsStorageIncident(
+        provider: 'codex',
+        tiers: ['history'],
+        recordedAt: 1782000000,
+      ),
+      AnalyticsStorageIncident(
+        provider: 'claude',
+        tiers: ['buckets'],
+        recordedAt: 1782000000,
+      ),
+    ];
+    const defaultProfile = QuotaProfile(name: 'default');
+    const claudeProfile = QuotaProfile(
+      name: 'claude-only',
+      providers: {'claude'},
+    );
+    const exactAccountProfile = QuotaProfile(
+      name: 'exact',
+      providers: {'claude'},
+      accounts: {
+        'claude': {'credential:opaque'},
+      },
+    );
+
+    expect(
+      analyticsIncidentsForView(incidents, defaultProfile, const {}),
+      hasLength(2),
+    );
+    expect(
+      analyticsIncidentsForView(
+        incidents,
+        claudeProfile,
+        const {},
+      ).single.provider,
+      'claude',
+    );
+    expect(
+      analyticsIncidentsForView(incidents, exactAccountProfile, const {}),
+      isEmpty,
+    );
+    expect(
+      analyticsIncidentsForView(incidents, defaultProfile, const {
+        'claude|credential:opaque',
+      }).map((incident) => incident.provider),
+      ['codex'],
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'claude'},
+        false,
+        defaultProfile,
+        const {},
+      ),
+      isTrue,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'claude'},
+        false,
+        claudeProfile,
+        const {},
+      ),
+      isTrue,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'codex'},
+        false,
+        claudeProfile,
+        const {},
+      ),
+      isFalse,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {'claude'},
+        false,
+        defaultProfile,
+        const {'claude'},
+      ),
+      isFalse,
+    );
+    expect(
+      analyticsIncidentPartialForView(
+        true,
+        const {},
+        true,
+        claudeProfile,
+        const {'claude'},
+      ),
+      isTrue,
+    );
+  });
+
   test('expanded mode keeps a viable desktop minimum width', () {
-    expect(desktopMinimumWindowSize(compact: true), const Size(120, 40));
+    expect(desktopMinimumWindowSize(compact: true), const Size(200, 40));
     expect(desktopMinimumWindowSize(compact: false), const Size(320, 120));
   });
 
@@ -234,6 +346,32 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Next: Codex'), findsOneWidget);
+    final details = find.byTooltip('Explain recommendation');
+    expect(details, findsOneWidget);
+
+    final detailsButton = tester
+        .widgetList<AppChromeIconButton>(find.byType(AppChromeIconButton))
+        .singleWhere((button) => button.tooltip == 'Explain recommendation');
+    expect(detailsButton.focusNode, isNotNull);
+    detailsButton.focusNode!.requestFocus();
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(detailsButton.focusNode));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Why this recommendation?'), findsOneWidget);
+    expect(find.textContaining('Use codex'), findsOneWidget);
+    expect(find.textContaining('Evidence: live authoritative'), findsOneWidget);
+    expect(
+      find.textContaining('Spend: measured quota-plan budget.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Fallback:'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    expect(find.textContaining('qb-'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Close'));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('empty profile explains a legacy Codex credential filter', (
@@ -945,6 +1083,324 @@ void main() {
     expect(find.bySemanticsLabel(warning), findsOneWidget);
   });
 
+  testWidgets('tray initialization failure explains close behavior', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          trayInitializer: () async => throw StateError('private details'),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text(trayUnavailableMessage), findsOneWidget);
+    expect(find.textContaining('private details'), findsNothing);
+    expect(find.bySemanticsLabel(trayUnavailableMessage), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Collapse'));
+    await tester.pump();
+    expect(find.byTooltip(trayUnavailableMessage), findsOneWidget);
+    expect(find.textContaining('private details'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact mode pins recommendation details at minimum width', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            _routeQuota('antigravity', 'Antigravity', now),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final decision = find.byKey(const ValueKey('compact-route-decision'));
+    final decisionSemantics = find.bySemanticsLabel(
+      RegExp(r'Next: Antigravity.*Open decision details'),
+    );
+    final decisionSemanticsNode = find.semantics.byLabel(
+      RegExp(r'Next: Antigravity.*Open decision details'),
+    );
+    expect(decision, findsOneWidget);
+    expect(find.text('Next'), findsOneWidget);
+    expect(decisionSemantics, findsOneWidget);
+    expect(
+      tester
+          .getSemantics(decisionSemantics)
+          .getSemanticsData()
+          .hasAction(SemanticsAction.tap),
+      isTrue,
+    );
+    expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(find.byTooltip('Close'), findsOneWidget);
+
+    final decisionButton = tester.widget<InkWell>(decision);
+    expect(decisionButton.focusNode, isNotNull);
+    decisionButton.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Why this recommendation?'), findsOneWidget);
+    expect(find.textContaining('Use antigravity'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Close'));
+    await tester.pumpAndSettle();
+    expect(decisionButton.focusNode!.hasFocus, isTrue);
+
+    tester.semantics.performAction(decisionSemanticsNode, SemanticsAction.tap);
+    await tester.pumpAndSettle();
+    expect(find.text('Why this recommendation?'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('compact route preserves selected account identity', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            showAccounts: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => _multiAccountClaude(now),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Next Claude (personal@example.com)'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp(
+          r'Next: Claude \(personal@example\.com\).*Open decision details',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('compact-route-decision')));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Next: Claude (personal@example.com)'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
+  testWidgets('compact auto width keeps a visible route at 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(286, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            _routeQuota('antigravity', 'Antigravity', now),
+          ],
+        ),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Next'), findsOneWidget);
+    for (final tooltip in ['Expand', 'Close']) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(286), reason: tooltip);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact no-route auto width stays visible at 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(286, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('No route'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact no-route decision stays explicit at minimum width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final decision = find.byKey(const ValueKey('compact-route-decision'));
+    expect(decision, findsOneWidget);
+    expect(find.text('No route'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      findsOneWidget,
+    );
+
+    await tester.tap(decision);
+    await tester.pumpAndSettle();
+    expect(find.text('Why no route is safe'), findsOneWidget);
+    expect(find.textContaining('No live quota data.'), findsOneWidget);
+    expect(find.textContaining('Fallback:'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact warning and no-route controls fit at 2x text', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    const warning = 'Settings not loaded (storage unavailable)';
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          startupStorageWarning: warning,
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    for (final tooltip in ['Expand', 'Close']) {
+      final control = find.byTooltip(tooltip);
+      expect(control, findsOneWidget);
+      final rect = tester.getRect(control);
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+      expect(rect.width, greaterThanOrEqualTo(28), reason: tooltip);
+      expect(rect.height, greaterThanOrEqualTo(28), reason: tooltip);
+    }
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
+
   testWidgets(
     'compact provider chips focus and reveal overflow from keyboard',
     (tester) async {
@@ -994,12 +1450,30 @@ void main() {
         greaterThan(tester.getRect(horizontalScroll).right),
       );
 
-      for (var i = 0; i < providers.length; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      final decision = tester.widget<InkWell>(
+        find.byKey(const ValueKey('compact-route-decision')),
+      );
+      expect(decision.focusNode?.hasFocus, isTrue);
+
+      var reachedLastProvider = false;
+      for (var i = 0; i < providers.length + 3; i++) {
         await tester.sendKeyEvent(LogicalKeyboardKey.tab);
         await tester.pumpAndSettle();
+        if (tester
+                .getSemantics(lastChip)
+                .getSemanticsData()
+                .flagsCollection
+                .isFocused ==
+            Tristate.isTrue) {
+          reachedLastProvider = true;
+          break;
+        }
       }
 
       final focused = tester.getSemantics(lastChip).getSemanticsData();
+      expect(reachedLastProvider, isTrue);
       expect(focused.flagsCollection.isFocused, Tristate.isTrue);
       expect(
         tester.getRect(lastChip).left,
@@ -1082,6 +1556,7 @@ void main() {
     await tester.tap(find.byTooltip('Collapse'));
     await tester.pump();
     expect(find.byTooltip('Expand'), findsOneWidget);
+    expect(find.text('Next Antigravity'), findsOneWidget);
     expect(find.byType(ProviderTile), findsNothing);
 
     await tester.tap(find.byTooltip('Expand'));
@@ -1091,6 +1566,71 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('analytics header remains usable at the target window width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(340, 760);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      _wrap(
+        const Dashboard.test(prefs: Prefs(showAccounts: true)),
+        textScaler: const TextScaler.linear(2),
+      ),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Quota analytics'));
+    await tester.pump();
+
+    for (final tooltip in [
+      'Refresh now',
+      'Back to quotas',
+      'Collapse',
+      'Setup and help',
+      'Close',
+    ]) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(340), reason: tooltip);
+    }
+    final analyticsLayoutError = tester.takeException();
+    expect(
+      analyticsLayoutError,
+      isNull,
+      reason: analyticsLayoutError is FlutterError
+          ? analyticsLayoutError.toStringDeep()
+          : analyticsLayoutError?.toString(),
+    );
+  });
+
+  testWidgets(
+    'analytics renders over compact mode and Back restores the strip',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      await tester.pumpWidget(
+        _wrap(
+          const Dashboard.test(
+            prefs: Prefs(compact: true, showAccounts: true),
+            initialAnalytics: true,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(FleetScreen), findsOneWidget);
+      expect(find.byTooltip('Back to quotas'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Back to quotas'));
+      await tester.pump();
+      expect(find.byType(FleetScreen), findsNothing);
+      expect(find.byTooltip('Expand'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('app applies theme and text-scale changes to the full subtree', (
     tester,
@@ -1361,6 +1901,11 @@ void main() {
     expect(find.text('80% last known'), findsOneWidget);
     expect(find.textContaining('80% free'), findsNothing);
     expect(find.textContaining('Next: Claude'), findsNothing);
+    expect(
+      find.text('Quota data is stale - use your usual model'),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Explain why no route is safe'), findsOneWidget);
     expect(find.text('live read failed - showing last known'), findsOneWidget);
     expect(
       find.bySemanticsLabel('Trusted quota headroom unavailable'),
@@ -1372,6 +1917,16 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.textContaining('cached | account-wide'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Explain why no route is safe'));
+    await tester.pumpAndSettle();
+    expect(find.text('Why no route is safe'), findsOneWidget);
+    expect(
+      find.textContaining('Only cached quota evidence is present'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Fallback:'), findsOneWidget);
+    expect(find.text('Decision id'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -1414,11 +1969,49 @@ void main() {
     await tester.pump();
 
     expect(find.text('Providers'), findsOneWidget);
-    expect(find.text('Start here: review provider connections'), findsNothing);
-    expect(saved?.setupDone, isTrue);
+    expect(
+      find.text('Start here: review provider connections'),
+      findsOneWidget,
+    );
+    expect(saved, isNull);
 
     tester.state<NavigatorState>(find.byType(Navigator).first).pop();
     await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(saved?.setupDone, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('first run Dismiss persists completion immediately', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    Prefs? saved;
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          demoMode: false,
+          collector: () async => [_routeQuota('claude', 'Claude', now)],
+          prefsSaver: (prefs) async => saved = prefs,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Dismiss getting started'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(saved?.setupDone, isTrue);
+
     await tester.pumpWidget(const SizedBox());
   });
 

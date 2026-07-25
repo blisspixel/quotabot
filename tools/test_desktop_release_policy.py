@@ -362,6 +362,12 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn('tar -xzf "$archive" -C "$previous"', verify_job)
         self.assertNotIn('ditto -x -k "$archive" "$previous"', verify_job)
         self.assertIn("Portable uninstall removed", verify_job)
+        self.assertIn("quotabot-windows-current-readiness.json", verify_job)
+        self.assertIn("quotabot-windows-previous-readiness.json", verify_job)
+        self.assertIn("quotabot-linux-current-readiness.json", verify_job)
+        self.assertIn("quotabot-linux-previous-readiness.json", verify_job)
+        self.assertIn("if: always() &&", verify_job)
+        self.assertIn("actions/upload-artifact@043fb46d1a93c77", verify_job)
 
     def test_each_packager_writes_the_matching_checksum_sidecar(self) -> None:
         windows = (ROOT / "tools" / "package-windows.ps1").read_text(encoding="utf-8")
@@ -389,6 +395,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("package-windows.ps1 -NoArchive", workflow)
         self.assertNotIn("package-linux.sh --no-archive", workflow)
         self.assertNotIn("package-macos.sh --no-archive", workflow)
+        self.assertIn("quotabot-windows-readiness.json", workflow)
+        self.assertIn("quotabot-linux-readiness.json", workflow)
+        self.assertIn("if: always() &&", workflow)
+        self.assertIn("actions/upload-artifact@043fb46d1a93c77", workflow)
 
     def test_normal_ci_builds_and_verifies_native_cli_archives(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(

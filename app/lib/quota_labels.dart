@@ -31,13 +31,12 @@ String resetLabel(int? resetsAt, int now) {
   final dt = DateTime.fromMillisecondsSinceEpoch(resetsAt * 1000);
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   final wd = days[dt.weekday - 1];
-  // Join the day and clock time with a non-breaking space so the whole reset
-  // renders as one unit in a narrow right-hand column. When the row runs out of
-  // width it then breaks cleanly after the label ("37% free" over "Fri 11:14
-  // PM") instead of dropping a lone "PM" onto the next line.
+  // Keep the clock and AM/PM together, but leave safe breaks before the day,
+  // date, and clock. The window row can then put headroom first and wrap a full
+  // far reset below it instead of replacing the actionable time with ellipsis.
   const nb = ' ';
   final time = formatClockTime(dt).replaceAll(' ', nb);
-  return s < 7 * 86400 ? '$wd$nb$time' : '$wd$nb${dt.month}/${dt.day}$nb$time';
+  return s < 7 * 86400 ? '$wd $time' : '$wd ${dt.month}/${dt.day} $time';
 }
 
 /// When a spent window becomes usable again, phrased for a spent card: a
