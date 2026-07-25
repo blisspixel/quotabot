@@ -1204,8 +1204,18 @@ class _DashboardState extends State<Dashboard>
       // A hard deadline over the whole collect: adapters carry their own
       // per-provider deadlines, but if anything ever hangs past them, the
       // refresh loop must recover rather than freeze all future refreshes.
+      //
+      // It must stay above a realistic slow fleet read, not just a healthy one.
+      // Adapters run concurrently but their owner-only file hardening shells out
+      // synchronously on Windows, which serializes the fleet: a full read of a
+      // large fleet there is measured in tens of seconds, well past the 45s this
+      // once allowed. A deadline under the real worst case is worse than no
+      // deadline, because a cold start has no previous snapshot to fall back on,
+      // so every retry times out and the dashboard stays permanently empty
+      // instead of merely stale. Keep this comfortably above one adapter
+      // deadline (30s) plus that serialized write cost.
       final results = await _collectProviders().timeout(
-        const Duration(seconds: 45),
+        const Duration(seconds: 180),
       );
       final routeSummary = widget._hostIntegration
           ? loadRoutedRequestSummary()
@@ -1250,7 +1260,18 @@ class _DashboardState extends State<Dashboard>
             q.pipeHealth == providerPipeHealthDegraded,
       );
       _throttleStreak = anyThrottled ? _throttleStreak + 1 : 0;
-      if (_windowVisible) {
+      // Apply a completed refresh with setState whenever this widget is alive.
+      // Gating the rebuild on tracked window visibility instead is unsafe: if
+      // that flag ever desyncs from the real window - a minimize event that
+      // arrives without its matching restore, or a window shown by the platform
+      // rather than through _showWindow - then every refresh assigns new data
+      // without ever rebuilding, so the dashboard stays frozen on its first
+      // frame (an empty loading state on a cold start) and cannot recover,
+      // because each later refresh takes the same branch. Rebuilding while
+      // hidden costs one frame; not rebuilding while visible costs the product.
+      // The periodic clock tick is still skipped while hidden, which is where
+      // the churn actually came from.
+      if (mounted) {
         setState(() {
           _profiles = profiles;
           _activeProfile = _profileByName(selectedProfile);

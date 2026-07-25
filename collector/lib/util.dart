@@ -419,12 +419,34 @@ class _PermissionHardeningFailed implements Exception {
 
 typedef WindowsIdentityLookup = ProcessResult Function();
 
+/// The account SID for this process, cached after the first successful lookup.
+///
+/// The value cannot change while the process runs, but resolving it shells out
+/// to `whoami`, and every owner-only hardening call needs it. A fleet read
+/// hardens dozens of files, so one synchronous spawn per call blocked the event
+/// loop and serialized adapter work that is otherwise concurrent.
+///
+/// Only a successful production lookup is cached: a transient failure stays
+/// retryable rather than disabling hardening for the rest of the run, and an
+/// injected lookup is never cached so tests stay deterministic and independent
+/// of each other's ordering.
+String? _cachedWindowsAclPrincipal;
+
+/// Clears the cached account SID, for tests that exercise the lookup itself.
+void resetWindowsAclPrincipalCacheForTest() =>
+    _cachedWindowsAclPrincipal = null;
+
 String? windowsAclPrincipal({WindowsIdentityLookup? lookup}) {
+  if (lookup == null && _cachedWindowsAclPrincipal != null) {
+    return _cachedWindowsAclPrincipal;
+  }
   try {
     final result = lookup?.call() ??
         Process.runSync('whoami', const ['/user', '/fo', 'csv']);
     if (result.exitCode != 0) return null;
-    return parseWhoamiUserSid(result.stdout.toString());
+    final sid = parseWhoamiUserSid(result.stdout.toString());
+    if (lookup == null && sid != null) _cachedWindowsAclPrincipal = sid;
+    return sid;
   } catch (_) {
     return null;
   }

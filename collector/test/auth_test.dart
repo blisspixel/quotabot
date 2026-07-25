@@ -1251,11 +1251,20 @@ void main() {
 
   group('OpenAiAuth', () {
     test('login reports a busy callback port before showing the URL', () async {
-      final server = await HttpServer.bind(
-        InternetAddress.loopbackIPv4,
-        1455,
-      );
-      addTearDown(() => server.close(force: true));
+      // This suite repeatedly opens and closes the fixed provider callback port,
+      // so claiming it can lose a race with a socket that is still being
+      // released. Poll rather than fail the run on the first attempt; the test
+      // only needs the port occupied before login runs.
+      HttpServer? server;
+      for (var attempt = 0; attempt < 25 && server == null; attempt++) {
+        try {
+          server = await HttpServer.bind(InternetAddress.loopbackIPv4, 1455);
+        } on SocketException {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+      }
+      expect(server, isNotNull, reason: 'could not occupy callback port 1455');
+      addTearDown(() => server!.close(force: true));
       var showedUrl = false;
 
       await expectLater(
