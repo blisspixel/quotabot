@@ -482,11 +482,30 @@ terminal the bars use a smooth gradient; it degrades to 256/16/no color.
 Windows Terminal and common truecolor terminals are detected automatically;
 `--truecolor` forces it where detection cannot.
 
-Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`): `default`, `green`
-(phosphor CRT), `dark`, `light`, or `synthwave`. Roll your own in one line with
+Pick a palette with `--theme=<name>` (or `QUOTABOT_THEME`). A dashboard meant to
+stay open all day should match the terminal around it, so the built-ins include
+the schemes people already theme with:
+
+| Palette | Look |
+|---|---|
+| `default` | the shipped green-to-red headroom scale |
+| `green` | phosphor CRT |
+| `matrix` | monochrome phosphor, where the meter reads as glow intensity rather than hue |
+| `dark`, `light` | muted, for dark and light terminals |
+| `synthwave`, `rainbow` | high-saturation, full-spectrum |
+| `gruvbox`, `nord`, `dracula`, `catppuccin`, `tokyonight` | match a riced terminal |
+
+`quotabot top --help` lists whatever the build actually ships, which is the
+authoritative set. Roll your own in one line with
 `--theme=custom:HEALTHY-TIGHT-LOW-SPENT[-ACCENT]`, each a 6-digit hex color from
-most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`. Palettes
-apply on truecolor terminals; elsewhere the standard headroom colors are used.
+most free to least, e.g. `--theme=custom:39ff14-00cc5a-009946-005a32`.
+
+Palettes need 24-bit color. quotabot assumes a Windows console can do it, since
+any Windows build that renders these escape sequences at all also supports
+truecolor even though `cmd.exe` advertises neither `COLORTERM` nor `TERM`. On a
+terminal that genuinely cannot, the standard headroom colors are used and every
+palette looks the same, which is the signal that the gradient is unavailable
+rather than the theme being ignored.
 
 ## Named profiles
 
