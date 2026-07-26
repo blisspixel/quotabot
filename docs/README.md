@@ -2,6 +2,16 @@
 
 Start with the shortest path for what you need.
 
+## Project status
+
+The current verified stable release is 0.9.4. The single immediate code
+priority is an opt-in quota-stretch routing policy for conserving low included
+cloud quota with suitable on-device capacity. It is next because it is the only
+repository-unblocked 0.9 item; most remaining 1.0 gates require native hardware,
+real accounts, accessibility sessions, or signing authority. The canonical
+behavior, safety boundaries, acceptance matrix, and execution order live only in
+[the roadmap Next section](../ROADMAP.md#next).
+
 ## Install and first success
 
 - [SETUP.md](SETUP.md): install, run `doctor`, connect providers, and recover
@@ -32,8 +42,9 @@ Start with the shortest path for what you need.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): code boundaries and data flow.
 - [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md): product choices and current
-  external evidence.
-- [../ROADMAP.md](../ROADMAP.md): ordered work and release gates.
+  external evidence, including the reason behind the roadmap order.
+- [../ROADMAP.md](../ROADMAP.md): the sole immediate priority, ordered work, and
+  release gates.
 - [../CONTRIBUTING.md](../CONTRIBUTING.md): contribution and validation rules.
 - [../SECURITY.md](../SECURITY.md): trust boundaries and private vulnerability
   reporting.

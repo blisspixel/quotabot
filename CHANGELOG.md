@@ -4,6 +4,19 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Documentation
+- Synchronized the README, agent guidance, setup, building, desktop
+  distribution, architecture, security, product strategy, documentation index,
+  and roadmap with the published v0.9.4 release audit and three-OS install
+  smoke. The docs now distinguish the current immutable release evidence from
+  the signing, notarization, native accessibility, provider, and exact-candidate
+  evidence still required for 1.0.
+- Defined the single next code item as an opt-in quota-stretch routing policy,
+  including why it comes next, what existing behavior it must preserve, its
+  no-surprise-spend boundaries, and the deterministic acceptance matrix. The
+  roadmap now owns the only immediate-priority claim so supporting docs cannot
+  drift into competing queues.
+
 ## 0.9.4 - 2026-07-25
 
 ### Added

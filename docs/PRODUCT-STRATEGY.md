@@ -1,8 +1,10 @@
 # Product strategy
 
-Updated 2026-07-18. Revisit this document when provider quota models, the MCP
+Updated 2026-07-25. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
-execution order lives in [ROADMAP.md](../ROADMAP.md).
+execution order and single immediate priority live in
+[ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
+and does not maintain a second work queue.
 
 ## Decision summary
 
@@ -16,10 +18,11 @@ content-blind capacity decision system that combines subscription windows,
 local-runtime readiness, source provenance, fail-soft behavior, and concurrent
 agent reservations without becoming a proxy.
 
-The immediate constraint is not feature depth. It is proving the existing
-surface across native hosts, making the recommendation easy to understand,
-closing current provider and runtime drift, and making desktop acquisition as
-credible as the visual product promise.
+The immediate code constraint is not feature depth. It is closing the policy
+gap between balanced cloud-first routing and always-local routing so a user can
+explicitly conserve low included quota without pretending that a cloud-offloaded
+model is local or weakening the no-surprise-spend boundary. Most work after that
+is native-host, account, accessibility, and signing evidence for 1.0.
 
 ## User jobs
 
@@ -96,14 +99,18 @@ truer because the deeper layer exists, not harder to read.
 
 ### Boring acquisition and recovery
 
-The CLI has a low-friction release path, and the desktop now has a native
+The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. Clean native runners now exercise install, update, rollback, and data
-preservation before publication. That mechanism still has to pass on each exact
-release candidate before it becomes published evidence. The remaining 1.0
-acquisition work is operating-system signing and notarization. Update,
-uninstall, data preservation, destructive reset, and rollback remain separate
-documented operations.
+barrier. The [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4)
+completed the exact tag and 14-asset audit in the
+[native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420).
+The separate [install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567)
+passed clean install, upgrade from the actual prior stable v0.9.2,
+persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. That is
+published evidence that the mechanism works for 0.9.4, not a substitute for
+rerunning it on the exact 1.0 candidate. The remaining 1.0 acquisition work is
+operating-system signing and notarization. Update, uninstall, data preservation,
+destructive reset, and rollback remain separate documented operations.
 
 ### Content-blind auditability
 
@@ -131,6 +138,8 @@ turns into paid API spend.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
 - The core is deterministic and heavily tested, with dedicated verification,
   schema, security, drift, and release gates.
+- v0.9.4 completed the exact release and three-OS published-installer rehearsal,
+  so release mechanics now have current evidence rather than only a future plan.
 - The advisor-not-proxy and zero-inference boundaries are meaningful product
   differences, not only marketing language.
 
@@ -147,8 +156,9 @@ turns into paid API spend.
   accounts. Claude credential generations now fail closed and cannot share
   cache or drift evidence, but the usage endpoint still provides no
   provider-backed identity for durable account labels or deduplication.
-- The canonical roadmap had accumulated shipped history and speculative
-  provider detail, obscuring the few remaining release gates.
+- The current routing policies jump from balanced subscription-first behavior to
+  an explicit always-local preference. There is not yet an opt-in middle policy
+  that conserves low included quota while still using healthy cloud headroom.
 
 ### Too much relative to current need
 
@@ -227,9 +237,10 @@ quotabot now combines that runtime size/readiness evidence with a passive,
 bounded host-memory read. Loaded state remains direct evidence; cold models get
 an advisory comfortable, tight, constrained, or unknown fit against system RAM
 and the largest supported GPU pool. This improves local-first ordering without
-entering the request path or making a throughput claim. The remaining local
-quality gap is capability propagation and native evidence across diverse GPU and
-unified-memory hosts, not another synthetic benchmark.
+entering the request path or making a throughput claim. Capability propagation
+shipped in v0.9.4. The remaining local policy gap is quota stretch, followed by
+native evidence across diverse GPU and unified-memory hosts, not another
+synthetic benchmark.
 
 Source: [LM Studio model-list API, accessed 2026-07-10](https://lmstudio.ai/docs/developer/rest/list).
 
@@ -257,31 +268,42 @@ The implication is an inference from the landscape: quotabot should compete on
 decision quality, subscription semantics, local-runtime truth, reservations,
 and content-blind integration contracts.
 
-## Strategic sequence
+## Strategy behind the roadmap order
 
-### Now: earn 1.0
+The [roadmap Next section](../ROADMAP.md#next) owns the exact execution order.
+The rationale for that order is:
 
-1. Close current source, provider-drift, local-runtime, and integration trust
-   gaps.
-2. Complete native verification and end-user acquisition evidence.
-3. Make the default recommendation self-explanatory and complete accessibility
-   smoke checks.
-4. Rehearse the exact tag and cut only after clean-host artifact verification.
+### Immediate code priority: conserve quota without forcing local
 
-### Next: prove decision quality
+The balanced policy is right while included cloud quota is healthy, and
+`local_first` is right when a caller always prefers on-device capacity. They do
+not express the middle intent: keep using healthy included quota, then move to a
+suitable local runtime early enough to preserve a low cloud reserve. An opt-in,
+inspectable quota-stretch policy closes that gap without silently changing either
+existing policy.
 
-1. Grow deterministic conformance, replay, and calibration evaluation around
-   the now-shared decision receipt.
-2. Adopt the next final MCP revision through a dual-version test matrix.
-3. Harden multi-agent leases under concurrent and corrupt-state stress.
+This is the highest-value work that the repository can close now. It uses the
+local readiness, execution-location, hardware-fit, capability, and decision
+receipt foundations already shipped. It also has a bounded deterministic test
+matrix and does not require a provider account, a native host the project does
+not control, or signing authority.
 
-### Later: expand only through evidence
+### After quota stretch: close the 1.0 evidence gates
 
-1. Add typed shared-pool semantics through an ADR.
-2. Admit one high-fit provider, likely GLM, only after the rubric passes.
-3. Expand package-manager distribution after direct artifacts are boring.
-4. Add analytics or operator exports only when they change a decision or reduce
-   support cost.
+The remaining 1.0 gates are native macOS and Linux provider records, dated
+Claude and Codex idle-machine grant validation, native accessibility smoke,
+desktop signing and notarization, and a final exact-candidate rehearsal. The
+0.9.4 release proves the tag and artifact machinery, but evidence must be
+repeated against the frozen, signed 1.0 candidate.
+
+### After 1.0 stabilization: improve decision evidence
+
+Grow deterministic conformance, replay, and calibration evaluation around the
+shared decision receipt; adopt the next final MCP revision through a dual-version
+test matrix; and harden multi-agent leases under concurrent and corrupt-state
+stress. Typed shared-pool semantics, admission-gated providers, package-manager
+distribution, and additional exports remain later work and enter only when they
+pass the decision filter below.
 
 ## Decision filter
 

@@ -37,6 +37,16 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
   branch. If that automation fails, close the pull request and delete the bot
   branch manually.
 
+## Project status and execution order
+
+The current verified stable release is 0.9.4. The next code item is an opt-in
+quota-stretch routing policy for conserving low included cloud quota with
+suitable on-device capacity. It is planned behavior, so agents must continue to
+use only the documented `balanced` and `local_first` policies until it ships.
+[ROADMAP.md](ROADMAP.md#next) is the sole source for the immediate priority, its
+safety boundaries, acceptance matrix, and why it precedes the remaining 1.0
+evidence gates.
+
 ## Set it up from source (humans or agents)
 
 From a fresh clone, one idempotent command builds and installs everything (the
