@@ -4,13 +4,12 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.9.4. The single immediate code
-priority is an opt-in quota-stretch routing policy for conserving low included
-cloud quota with suitable on-device capacity. It is next because it is the only
-repository-unblocked 0.9 item; most remaining 1.0 gates require native hardware,
-real accounts, accessibility sessions, or signing authority. The canonical
-behavior, safety boundaries, acceptance matrix, and execution order live only in
-[the roadmap Next section](../ROADMAP.md#next).
+The current verified stable release is 0.9.4. The planned next code item is an
+opt-in quota-stretch policy for conserving low included subscription quota with
+a suitable on-device runtime. The
+[roadmap Next section](../ROADMAP.md#next) owns its behavior, guardrails,
+completion criteria, rationale, and place ahead of the external 1.0 evidence
+gates.
 
 ## Install and first success
 

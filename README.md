@@ -10,12 +10,10 @@ one place, and route the next request to whichever one has budget, so you can
 reduce quota-related stalls and avoid leaving included quota unused.
 
 > **Current stable:** 0.9.4. quotabot remains under active 0.x development, so
-> expect changes on the road to 1.0. **Next:** define and implement an opt-in
-> quota-stretch policy that moves from low included cloud quota to suitable
-> on-device capacity without forcing always-local routing. That policy is not in
-> 0.9.4; current `balanced` and `local_first` behavior remains as documented.
-> [ROADMAP.md](ROADMAP.md#next) owns the exact priority, safety boundaries, and
-> reason it comes before the remaining 1.0 evidence work.
+> expect changes on the road to 1.0. **Next:** implement an opt-in quota-stretch
+> policy that conserves low included subscription quota with a suitable
+> on-device runtime. It is planned, not shipped; `balanced` and `local_first`
+> remain unchanged. See [why it is next and what done means](ROADMAP.md#next).
 
 quotabot does two things:
 
@@ -389,12 +387,8 @@ its native architecture, verifies its checksum and restricted provenance, and
 requires both the tagged version and demo-mode `doctor --json` to run. The
 scheduled install smoke separately exercises the published one-line installer
 and prior-version upgrade on Windows, macOS, and Linux.
-The [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4)
-completed that exact 14-asset audit in the
-[native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420).
-Its [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567)
-then passed clean install, upgrade from the actual prior stable v0.9.2,
-persistent-state, and source-setup checks on Windows, macOS, and Ubuntu.
+v0.9.4 completed that exact audit and the three-OS published install matrix; see
+the [current release evidence](docs/BUILDING.md#current-release-evidence).
 The official repository also blocks updates and deletion of `v*` tags. GitHub
 [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
 is enabled prospectively, so releases published after it was enabled on July

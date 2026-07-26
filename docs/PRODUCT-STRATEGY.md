@@ -19,7 +19,7 @@ local-runtime readiness, source provenance, fail-soft behavior, and concurrent
 agent reservations without becoming a proxy.
 
 The immediate code constraint is not feature depth. It is closing the policy
-gap between balanced cloud-first routing and always-local routing so a user can
+gap between subscription-first routing and always-local routing so a user can
 explicitly conserve low included quota without pretending that a cloud-offloaded
 model is local or weakening the no-surprise-spend boundary. Most work after that
 is native-host, account, accessibility, and signing evidence for 1.0.
@@ -101,16 +101,12 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. The [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4)
-completed the exact tag and 14-asset audit in the
-[native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420).
-The separate [install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567)
-passed clean install, upgrade from the actual prior stable v0.9.2,
-persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. That is
-published evidence that the mechanism works for 0.9.4, not a substitute for
-rerunning it on the exact 1.0 candidate. The remaining 1.0 acquisition work is
-operating-system signing and notarization. Update, uninstall, data preservation,
-destructive reset, and rollback remain separate documented operations.
+barrier. v0.9.4 completed the exact release and three-OS install path; the
+[current release evidence](BUILDING.md#current-release-evidence) records what it
+proved. That evidence is not a substitute for rerunning the path on the exact
+1.0 candidate. The remaining acquisition work is operating-system signing and
+notarization. Update, uninstall, data preservation, destructive reset, and
+rollback remain separate documented operations.
 
 ### Content-blind auditability
 
@@ -158,7 +154,8 @@ turns into paid API spend.
   provider-backed identity for durable account labels or deduplication.
 - The current routing policies jump from balanced subscription-first behavior to
   an explicit always-local preference. There is not yet an opt-in middle policy
-  that conserves low included quota while still using healthy cloud headroom.
+  that conserves low included quota while still using healthy subscription
+  headroom.
 
 ### Too much relative to current need
 
@@ -238,9 +235,9 @@ bounded host-memory read. Loaded state remains direct evidence; cold models get
 an advisory comfortable, tight, constrained, or unknown fit against system RAM
 and the largest supported GPU pool. This improves local-first ordering without
 entering the request path or making a throughput claim. Capability propagation
-shipped in v0.9.4. The remaining local policy gap is quota stretch, followed by
-native evidence across diverse GPU and unified-memory hosts, not another
-synthetic benchmark.
+shipped in v0.9.4. The remaining local policy gap is quota-stretch behavior.
+Native evidence across diverse GPU and unified-memory hosts follows; another
+synthetic benchmark does not.
 
 Source: [LM Studio model-list API, accessed 2026-07-10](https://lmstudio.ai/docs/developer/rest/list).
 
@@ -275,12 +272,12 @@ The rationale for that order is:
 
 ### Immediate code priority: conserve quota without forcing local
 
-The balanced policy is right while included cloud quota is healthy, and
-`local_first` is right when a caller always prefers on-device capacity. They do
-not express the middle intent: keep using healthy included quota, then move to a
-suitable local runtime early enough to preserve a low cloud reserve. An opt-in,
-inspectable quota-stretch policy closes that gap without silently changing either
-existing policy.
+The balanced policy is right while included subscription quota is healthy, and
+`local_first` is right when a caller always prefers an on-device runtime. They
+do not express the middle intent: keep using healthy included quota, then move
+local early enough to preserve a low subscription reserve. An opt-in,
+inspectable quota-stretch policy closes that gap without silently changing
+either existing policy.
 
 This is the highest-value work that the repository can close now. It uses the
 local readiness, execution-location, hardware-fit, capability, and decision
@@ -288,7 +285,7 @@ receipt foundations already shipped. It also has a bounded deterministic test
 matrix and does not require a provider account, a native host the project does
 not control, or signing authority.
 
-### After quota stretch: close the 1.0 evidence gates
+### After the quota-stretch policy: close the 1.0 evidence gates
 
 The remaining 1.0 gates are native macOS and Linux provider records, dated
 Claude and Codex idle-machine grant validation, native accessibility smoke,

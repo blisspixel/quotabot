@@ -87,41 +87,53 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-**Define and implement an opt-in quota-stretch routing policy.** This is planned
-behavior, not a capability in 0.9.4. It fills the gap between the current
-`balanced` policy, which uses a comfortable included-quota route before local
-fallback, and `local_first`, which uses suitable local capacity immediately.
+**Implement an opt-in quota-stretch routing policy.** This is planned behavior,
+not a capability in 0.9.4. It fills the gap between `balanced`, which prefers a
+comfortable included subscription route, and `local_first`, which prefers a
+suitable on-device runtime immediately.
 
-With quota stretch enabled, high included-quota headroom still wins. Once every
-safe included-quota candidate falls below a documented, bounded stretch
-threshold, a reachable on-device runtime may win before those subscriptions
-reach the existing comfort floor. The policy must be explicit on every surface
-that exposes it and in the decision receipt. It must preserve the current
-`balanced` and `local_first` behavior, the binding-window rule, profile and
-one-request filters, and fail-soft fallback. It must never treat an Ollama
-cloud-offloaded model as local, revive stale or drifted evidence, or admit manual
-or paid API capacity into an included-quota policy.
+**Behavior**
 
-Acceptance is deterministic coverage above, at, and below both thresholds;
-local available and unavailable cases; binding-window exhaustion; loaded and
-cold local candidates; cloud-offload exclusion; account, profile, and exclude
-filters; and matching policy, reason, and receipt fields across CLI, MCP,
-loopback HTTP, and the desktop consumer. The selected threshold and any user
-override must be bounded, named, and visible rather than hidden tuning.
+- Keep using included subscription quota while any safe candidate is at or above
+  a documented, bounded stretch threshold.
+- Below that threshold, allow a reachable on-device runtime to win before
+  subscriptions reach the existing comfort floor.
+- Name the active policy and reason in every surface that exposes it and in the
+  decision receipt.
 
-This is next because 0.9.4 closed the accumulated release gap and this is the
-one open, repository-unblocked code item in the 0.9 advisor milestone. It makes
-the local-runtime truth already shipped useful for conserving scarce included
-quota without forcing an always-local choice. After it closes, the remaining
-1.0 work is evidence: native macOS and Linux provider records, desktop signing
-and notarization, an accessibility smoke on native hosts, and dated idle-machine
-validation of the Claude and Codex grants. Those require hardware, real
-accounts, or signing authority rather than another general development patch.
+**Guardrails**
+
+- Preserve the current `balanced` and `local_first` behavior, the binding-window
+  rule, profile and one-request filters, and fail-soft fallback.
+- Never treat an Ollama cloud-offloaded model as local.
+- Never revive stale or drifted evidence or admit manual or paid API capacity
+  into a policy for included subscriptions.
+
+**Done when**
+
+- Deterministic tests cover both threshold boundaries, local availability,
+  binding-window exhaustion, loaded and cold local candidates, cloud-offloaded
+  models, and account, profile, and exclude filters.
+- CLI, MCP, loopback HTTP, and the desktop consumer expose matching policy,
+  reason, and receipt fields.
+- The selected threshold is named and visible. Any caller override is bounded.
+
+**Why now:** 0.9.4 closed the release gap, leaving this as the only open,
+repository-unblocked code item in the 0.9 advisor milestone. It turns the local
+readiness and execution-location evidence already shipped into a practical way
+to conserve scarce included subscription quota without forcing an always-local
+choice.
+
+After it closes, the remaining 1.0 work is evidence: native macOS and Linux
+provider records, desktop signing and notarization, native accessibility smoke,
+and dated idle-machine validation of the Claude and Codex grants. Those require
+hardware, real accounts, or signing authority rather than another general
+development patch.
 
 ## Current state
 
-The current line, **0.9.4**, is also the annotated tag, published stable release,
-and installer version. It contains the implemented core of the first three
+The current line, **0.9.4**, is also the tagged stable release and installer
+version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
 implementation milestones are not the same as closing every 1.0 evidence gate.
@@ -130,18 +142,19 @@ HTTP, model registry, profiles, alerts, reports, leases, LiteLLM integration,
 verification commands, release automation, and cross-platform CI. New breadth
 is frozen until the remaining field validation, migration hardening,
 accessibility, signing, and native release evidence below are complete.
-The default installer currently resolves that same 0.9.4 stable release.
+The table is a status index; detailed scope and acceptance criteria live in the
+milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
-| Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; MCP Streamable HTTP requires a bearer token and rejects indeterminate or larger-than-256-KiB POST bodies before upstream buffering; plain HTTP writes are authenticated lease-only metadata; LiteLLM atomically reserves remote routes and requires its own client bearer key on an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, exact-account recovery, provider-backed Claude/Codex pool identities, source docs, cache provenance, grant implementations, stage-scoped Antigravity HTTP and Retry-After evidence, and expired-host fall-through fixtures exist; the Claude and Antigravity live parsers tolerate additive provider response-shape changes (new codenamed windows, usage-credit blocks, non-metered helper models) without discarding the account windows | Validate connected Claude/Codex grants on idle real-account machines; capture post-July-20 Fable entitlement evidence; link dated Windows evidence; close remaining response-shape fixtures and local-runtime compatibility gaps |
-| Native provider evidence | Partial | Windows validation has been reported; WSL covers truthful Linux failure behavior | Link dated Windows evidence and confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
-| Installation and update | Rehearsed on 0.9.4 | CLI and desktop archives have required checksums, restricted attestations, exact-asset barriers, and clean-runner lifecycle gates. Packaged readiness isolates quotabot config; Windows candidates also isolate singleton state so an installed tray app remains untouched. The bounded v3 report records pass or failure status and stage, a UTC timestamp, launch PID, runner digest, deterministic complete-bundle digest with entry and byte counts, prelaunch/post-cleanup stability, native window/tray results, and cleanup without retaining raw errors, logs, or filesystem paths. CI and release workflows preserve it on failed readiness. The [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4) published the exact 14 expected assets after the [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420) passed. Its [install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567) then passed clean install, upgrade from the actual prior stable v0.9.2, persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. The release is immutable and official `v*` tags cannot be moved or deleted | Sign and notarize desktop apps, then repeat every gate and the complete lifecycle on the frozen 1.0 candidate |
-| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation backed by the content-blind decision receipt. Expanded and compact desktop modes keep the next route or explicit no-safe-route fallback visible and open the same details and selectable decision id from a keyboard-accessible control. First-run provider review completes only after the dialog closes, and `doctor` gives credential-related errors an exact supported login command | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
-| Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, rendered-content quota sizing that is reconciled after native startup and stays inside the active work area, account-aware compact and responsive Analytics sizing, visible scroll fallbacks, compact widget-order and assistive-action coverage, reduced-motion provider interactions, usable chrome targets, common quota-window and reset-time reflow at 200 percent text, and automated label, 28 by 28 desktop target, and contrast checks across expanded, compact, and Analytics surfaces in every shipped theme exist. Explicit tray degradation, observable watch failure/recovery, structured errors, provider-scoped `check`, contact-scoped strict `verify`, fail-closed empty live scope, `explain`, deterministic host-isolated simulation, and provenance-complete privacy-safe weekly reports also exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.4 completed the tag, exact-asset, checksum, restricted-provenance, clean native install, v0.9.2 upgrade, source-setup, persistent-state, and immutable-publication rehearsal across all claimed runner operating systems | Repeat the rehearsal on the frozen, signed 1.0 candidate, add the outstanding interactive provider and accessibility evidence, then cut 1.0 |
+| Core contracts and automated quality | Ready for final rerun | Analysis, coverage, schema, security, and release-policy gates are automated | Run every gate on the exact 1.0 candidate and tag |
+| Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
+| Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
+| Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
+| Installation and update | Rehearsed on 0.9.4 | The immutable [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567), including upgrade from v0.9.2 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
+| Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.4 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as

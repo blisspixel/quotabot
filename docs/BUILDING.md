@@ -233,6 +233,8 @@ runs weekly and can be dispatched with explicit tags for repeatable published
 release regression evidence. A pre-publication candidate dry run and interactive
 tray-readiness check remain separate release-candidate requirements.
 
+### Current release evidence
+
 The 0.9.4 rehearsal completed the current automated path. Its
 [release workflow](https://github.com/blisspixel/quotabot/actions/runs/30180394420)
 passed the native quality, build, execution, checksum, restricted-provenance,
