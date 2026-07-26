@@ -4,6 +4,20 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.5 - 2026-07-26
+
+### Changed
+- Release-version consistency now covers the current-stable statements in the
+  README, agent guidance, documentation index, and setup guide, including the
+  setup guide's release link. A patch cannot pass CI while those public markers
+  still name an older installer.
+
+### Fixed
+- LiteLLM success and failure callbacks now emit bounded warnings when local
+  metrics or lease cleanup fails instead of suppressing all evidence. The
+  callbacks remain fail-soft and never log exception text, account identifiers,
+  prompts, code, or paths; lease cleanup still falls back to bounded TTL expiry.
+
 ### Documentation
 - Synchronized the README, agent guidance, setup, building, desktop
   distribution, architecture, security, product strategy, documentation index,

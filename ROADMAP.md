@@ -88,7 +88,7 @@ by being correct, quiet, and predictable, not by being large.
 ## Next
 
 **Implement an opt-in quota-stretch routing policy.** This is planned behavior,
-not a capability in 0.9.4. It fills the gap between `balanced`, which prefers a
+not a capability in 0.9.5. It fills the gap between `balanced`, which prefers a
 comfortable included subscription route, and `local_first`, which prefers a
 suitable on-device runtime immediately.
 
@@ -132,7 +132,7 @@ development patch.
 
 ## Current state
 
-The current line, **0.9.4**, is also the tagged stable release and installer
+The current line, **0.9.5**, is also the tagged stable release and installer
 version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those

@@ -24,6 +24,21 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ):
                 check_release_versions(root)
 
+    def test_stale_readme_release_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root)
+            (root / "README.md").write_text(
+                "> **Current stable:** 1.2.2. Release notes.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"expected 1\.2\.3; mismatched README current stable=1\.2\.2",
+            ):
+                check_release_versions(root)
+
     def test_matching_release_tag_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -60,6 +75,17 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 "  test:\n"
                 "    dependency: transitive\n"
                 '    version: "1.0.0"\n'
+            ),
+            "README.md": "> **Current stable:** 1.2.3. Release notes.\n",
+            "AGENTS.md": (
+                "The current verified stable release is 1.2.3. Next steps.\n"
+            ),
+            "docs/README.md": (
+                "The current verified stable release is 1.2.3. Next steps.\n"
+            ),
+            "docs/SETUP.md": (
+                "The current stable release is\n"
+                "[v1.2.3](https://github.com/blisspixel/quotabot/releases/tag/v1.2.3).\n"
             ),
             "ROADMAP.md": (
                 "The current line, **1.2.3**, contains the release candidate.\n"

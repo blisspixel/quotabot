@@ -50,6 +50,29 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             "Flutter pubspec",
         ),
         "Flutter collector lock": _locked_collector_version(app / "pubspec.lock"),
+        "README current stable": _required_match(
+            root / "README.md",
+            rf"^> \*\*Current stable:\*\* ({VERSION})\.",
+            "README current stable",
+        ),
+        "AGENTS current stable": _required_match(
+            root / "AGENTS.md",
+            rf"^The current verified stable release is ({VERSION})\.",
+            "AGENTS current stable",
+        ),
+        "docs index current stable": _required_match(
+            root / "docs" / "README.md",
+            rf"^The current verified stable release is ({VERSION})\.",
+            "docs index current stable",
+        ),
+        "setup current stable": _required_match(
+            root / "docs" / "SETUP.md",
+            (
+                rf"^The current stable release is\n\[v({VERSION})\]"
+                r"\(https://github\.com/blisspixel/quotabot/releases/tag/v\1\)\."
+            ),
+            "setup current stable",
+        ),
         "ROADMAP current line": _required_match(
             root / "ROADMAP.md",
             rf"^The current line, \*\*({VERSION})\*\*,",
