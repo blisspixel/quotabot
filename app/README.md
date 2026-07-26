@@ -16,7 +16,9 @@ claims live in:
 - [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md): app-to-collector
   boundaries;
 - [../docs/DATA_SOURCES.md](../docs/DATA_SOURCES.md): provider evidence and
-  limitations.
+  limitations;
+- [../ROADMAP.md](../ROADMAP.md#next): the single immediate project priority
+  and its acceptance criteria.
 
 Run from the repository root with the platform target documented in
 [../docs/BUILDING.md](../docs/BUILDING.md). Keep platform-specific shell and

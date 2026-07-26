@@ -2,6 +2,15 @@
 
 Start with the shortest path for what you need.
 
+## Project status
+
+The current verified stable release is 0.9.4. The planned next code item is an
+opt-in quota-stretch policy for conserving low included subscription quota with
+a suitable on-device runtime. The
+[roadmap Next section](../ROADMAP.md#next) owns its behavior, guardrails,
+completion criteria, rationale, and place ahead of the external 1.0 evidence
+gates.
+
 ## Install and first success
 
 - [SETUP.md](SETUP.md): install, run `doctor`, connect providers, and recover
@@ -32,8 +41,9 @@ Start with the shortest path for what you need.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): code boundaries and data flow.
 - [PRODUCT-STRATEGY.md](PRODUCT-STRATEGY.md): product choices and current
-  external evidence.
-- [../ROADMAP.md](../ROADMAP.md): ordered work and release gates.
+  external evidence, including the reason behind the roadmap order.
+- [../ROADMAP.md](../ROADMAP.md): the sole immediate priority, ordered work, and
+  release gates.
 - [../CONTRIBUTING.md](../CONTRIBUTING.md): contribution and validation rules.
 - [../SECURITY.md](../SECURITY.md): trust boundaries and private vulnerability
   reporting.

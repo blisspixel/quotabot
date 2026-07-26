@@ -56,4 +56,5 @@ fails, close the pull request and delete the bot branch manually.
 
 Consumer-facing "how to drive quotabot from an agent" docs live in
 [AGENTS.md](AGENTS.md); the rules above also apply to any agent editing this
-codebase.
+codebase. The single immediate project priority and its rationale live in
+[ROADMAP.md](ROADMAP.md#next).

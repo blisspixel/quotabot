@@ -37,6 +37,15 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
   branch. If that automation fails, close the pull request and delete the bot
   branch manually.
 
+## Project status and execution order
+
+The current verified stable release is 0.9.4. The planned next code item is an
+opt-in quota-stretch policy that conserves low included subscription quota with
+a suitable on-device runtime. Agents must continue to use only the documented
+`balanced` and `local_first` policies until it ships. The
+[roadmap Next section](ROADMAP.md#next) is the sole source for its behavior,
+guardrails, completion criteria, and rationale.
+
 ## Set it up from source (humans or agents)
 
 From a fresh clone, one idempotent command builds and installs everything (the
