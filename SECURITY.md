@@ -29,9 +29,12 @@ reads and writes helps scope any report:
   catalog maintenance is limited to model-list endpoints.
 - Official release artifacts carry checksum sidecars and restricted workflow
   provenance. Repository rules block updates and deletion of `v*` tags, and
-  GitHub release immutability locks a future release's tag and assets when the
-  audited draft is published. Immutability is prospective from July 18, 2026;
-  it is not a retroactive property of earlier releases.
+  GitHub release immutability locks an audited release's tag and assets when the
+  draft is published. The v0.9.4 tag and its exact 14-asset set are locked and
+  passed the native
+  [release audit](https://github.com/blisspixel/quotabot/actions/runs/30180394420).
+  Immutability is prospective from July 18, 2026; v0.9.2 and earlier releases
+  were not changed retroactively.
 - Any OAuth grant you create with `quotabot login` is stored separately from the
   host application credentials under your per-user config directory. New or
   rotated grants are written only after checked owner-only permission hardening

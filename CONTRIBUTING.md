@@ -106,9 +106,14 @@ Use this checklist for every provider adapter:
 6. Wire collection through `collectAll()` only after the pure parser and registry
    tests are green.
 7. Update `docs/DATA_SOURCES.md`, `docs/ARCHITECTURE.md`, `docs/SCHEMA.md` if
-   the public contract changes, README when user setup changes, ROADMAP when a
-   planned item closes, and CHANGELOG for behavior changes.
-8. Run the collector, app, integration, coverage, and build gates described in
+   the public contract changes, README when user setup changes, and CHANGELOG
+   under `Unreleased` for notable behavior, release, or documentation
+   corrections.
+8. Treat [the roadmap Next section](ROADMAP.md#next) as the sole immediate-priority
+   claim. Update it when that item closes or the evidence changes. Other docs may
+   explain the same reasoning or link to it, but must not create a competing
+   "now" or "next" queue.
+9. Run the collector, app, integration, coverage, and build gates described in
    this file before opening a pull request.
 
 ## License

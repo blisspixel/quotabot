@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-25. This file is the forward plan. It records brief shipped
+Updated 2026-07-26. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -87,19 +87,53 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-One item, so there is never a question of what to pick up:
+**Implement an opt-in quota-stretch routing policy.** This is planned behavior,
+not a capability in 0.9.4. It fills the gap between `balanced`, which prefers a
+comfortable included subscription route, and `local_first`, which prefers a
+suitable on-device runtime immediately.
 
-**Finish local-first stretch behavior when cloud quota is low.** 0.9.4 closes
-the accumulated release gap, leaving this as the one open code item in the 0.9
-section. After it is closed, the remaining 1.0 work is evidence: native macOS
-and Linux provider records, desktop signing and notarization, an accessibility
-smoke on native hosts, and dated idle-machine validation of the Claude and
-Codex grants. Those need hardware, an account, or a signing authority rather
-than a patch, so they cannot be closed from a development machine alone.
+**Behavior**
+
+- Keep using included subscription quota while any safe candidate is at or above
+  a documented, bounded stretch threshold.
+- Below that threshold, allow a reachable on-device runtime to win before
+  subscriptions reach the existing comfort floor.
+- Name the active policy and reason in every surface that exposes it and in the
+  decision receipt.
+
+**Guardrails**
+
+- Preserve the current `balanced` and `local_first` behavior, the binding-window
+  rule, profile and one-request filters, and fail-soft fallback.
+- Never treat an Ollama cloud-offloaded model as local.
+- Never revive stale or drifted evidence or admit manual or paid API capacity
+  into a policy for included subscriptions.
+
+**Done when**
+
+- Deterministic tests cover both threshold boundaries, local availability,
+  binding-window exhaustion, loaded and cold local candidates, cloud-offloaded
+  models, and account, profile, and exclude filters.
+- CLI, MCP, loopback HTTP, and the desktop consumer expose matching policy,
+  reason, and receipt fields.
+- The selected threshold is named and visible. Any caller override is bounded.
+
+**Why now:** 0.9.4 closed the release gap, leaving this as the only open,
+repository-unblocked code item in the 0.9 advisor milestone. It turns the local
+readiness and execution-location evidence already shipped into a practical way
+to conserve scarce included subscription quota without forcing an always-local
+choice.
+
+After it closes, the remaining 1.0 work is evidence: native macOS and Linux
+provider records, desktop signing and notarization, native accessibility smoke,
+and dated idle-machine validation of the Claude and Codex grants. Those require
+hardware, real accounts, or signing authority rather than another general
+development patch.
 
 ## Current state
 
-The current line, **0.9.4**, contains the implemented core of the first three
+The current line, **0.9.4**, is also the tagged stable release and installer
+version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
 implementation milestones are not the same as closing every 1.0 evidence gate.
@@ -108,20 +142,19 @@ HTTP, model registry, profiles, alerts, reports, leases, LiteLLM integration,
 verification commands, release automation, and cross-platform CI. New breadth
 is frozen until the remaining field validation, migration hardening,
 accessibility, signing, and native release evidence below are complete.
-Here, "current line" means the version prepared in source. The default
-installer continues to resolve GitHub's latest published stable release, which
-can remain the preceding version until this line's tag workflow completes.
+The table is a status index; detailed scope and acceptance criteria live in the
+milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Ready for final rerun | Strict analysis, collector and desktop coverage floors, schema checks, CodeQL, secret scan, dependency review, and release policy are automated | Run the complete gate on the exact 1.0 candidate and tag |
-| Integration trust boundary | Ready for CI | MCP and quotabot HTTP enforce loopback; MCP Streamable HTTP requires a bearer token and rejects indeterminate or larger-than-256-KiB POST bodies before upstream buffering; plain HTTP writes are authenticated lease-only metadata; LiteLLM atomically reserves remote routes and requires its own client bearer key on an explicit loopback host | Keep the launch regression test green and verify the packaged guidance |
-| Provider truth and drift handling | Partial | Deterministic fail-closed drift admission, exact-account recovery, provider-backed Claude/Codex pool identities, source docs, cache provenance, grant implementations, stage-scoped Antigravity HTTP and Retry-After evidence, and expired-host fall-through fixtures exist; the Claude and Antigravity live parsers tolerate additive provider response-shape changes (new codenamed windows, usage-credit blocks, non-metered helper models) without discarding the account windows | Validate connected Claude/Codex grants on idle real-account machines; capture post-July-20 Fable entitlement evidence; link dated Windows evidence; close remaining response-shape fixtures and local-runtime compatibility gaps |
-| Native provider evidence | Partial | Windows validation has been reported; WSL covers truthful Linux failure behavior | Link dated Windows evidence and confirm naturally available states on native macOS and Linux, plus remaining human provider cross-checks |
-| Installation and update | Ready for candidate rerun | CLI and desktop archives have required checksums, restricted attestations, exact-asset barriers, and clean-runner lifecycle gates. Packaged readiness isolates quotabot config; Windows candidates also isolate singleton state so an installed tray app remains untouched. The bounded v3 report records pass or failure status and stage, a UTC timestamp, launch PID, runner digest, deterministic complete-bundle digest with entry and byte counts, prelaunch/post-cleanup stability, native window/tray results, and cleanup without retaining raw errors, logs, or filesystem paths. CI and release workflows preserve it on failed readiness. The v0.9.2 published CLI passed clean install and prior-version upgrade smoke on Windows, macOS, and Linux. Official `v*` tags cannot be moved or deleted, and releases published after the July 18 immutability activation are locked | Run every gate on the exact candidate, then sign and notarize desktop apps and repeat the complete lifecycle on the frozen 1.0 candidate |
-| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one complete explanation backed by the content-blind decision receipt. Expanded and compact desktop modes keep the next route or explicit no-safe-route fallback visible and open the same details and selectable decision id from a keyboard-accessible control. First-run provider review completes only after the dialog closes, and `doctor` gives credential-related errors an exact supported login command | Prove on native hosts that a new user can identify the next route, why it won, source freshness, spend class, and fallback without decoding internal math |
-| Accessibility and operator diagnostics | Partial | Desktop text scaling, keyboard and theme coverage, rendered-content quota sizing that is reconciled after native startup and stays inside the active work area, account-aware compact and responsive Analytics sizing, visible scroll fallbacks, compact widget-order and assistive-action coverage, reduced-motion provider interactions, usable chrome targets, common quota-window and reset-time reflow at 200 percent text, and automated label, 28 by 28 desktop target, and contrast checks across expanded, compact, and Analytics surfaces in every shipped theme exist. Explicit tray degradation, observable watch failure/recovery, structured errors, provider-scoped `check`, contact-scoped strict `verify`, fail-closed empty live scope, `explain`, deterministic host-isolated simulation, and provenance-complete privacy-safe weekly reports also exist | Run the final native keyboard/screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | In progress | v0.9.2 passed the exact-asset and provenance audit plus clean native install, upgrade, source-setup, and persistent-state smoke | Run the same complete rehearsal on the frozen 1.0 candidate, including interactive desktop checks, then cut 1.0 |
+| Core contracts and automated quality | Ready for final rerun | Analysis, coverage, schema, security, and release-policy gates are automated | Run every gate on the exact 1.0 candidate and tag |
+| Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
+| Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
+| Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
+| Installation and update | Rehearsed on 0.9.4 | The immutable [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567), including upgrade from v0.9.2 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
+| Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.4 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -408,8 +441,8 @@ happened, and it improves on the user's own data.
   overfitting a thin history. It is advisory by default; `quotabot suggest
   --tuned-burn` opts in to applying the fitted lookback to the burn feeding the
   decision. The other free parameters (comfort threshold, risk z, lead time) are
-  routing-policy values tuned by realized regret (the oracle-benchmark corpus, a
-  1.x piece), not calibration; see `.agent/DECISIONS.md`.
+  routing-policy values tuned by realized regret, not calibration; that evidence
+  belongs to the post-1.0 [routing-evaluation corpus](#p1-grow-the-routing-evaluation-corpus).
 - The plain-language layer generates every casual sentence from the calibrated
   number underneath, so "about an hour left" is always backed and inspectable one
   layer down.
@@ -477,8 +510,10 @@ recommendation is aligned to what the user actually wants.
   candidate, because it cannot serve a generation request. An undeclared kind
   stays routable, since requiring a capability must fail closed while excluding
   a model must fail open.
-- Remaining local-first QOL: local-first stretch behavior when cloud quota is
-  low.
+- **Next (quota-stretch policy):** implement the explicit behavior, safety
+  boundaries, and acceptance matrix in [Next](#next). Until it ships, every
+  public surface must continue to describe only the existing `balanced` and
+  `local_first` policies.
 - **Done (multi-account):** provider accounts discovered on one machine can be
   shown together in one dashboard. Account-scoped profiles, cache, drift,
   history, and expansion state prevent work and personal evidence from being
@@ -520,8 +555,9 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. Application signing, notarization, and a green tagged acquisition
-  record remain required before this gate is closed.
+  mechanics. v0.9.4 supplies a green tagged acquisition record; application
+  signing, notarization, and the same record on the exact 1.0 candidate remain
+  required before this gate is closed.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce
@@ -532,6 +568,9 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   attestation, persistent-state, and source-setup matrix; exercise the
   inspect-before-run, update, data-preserving uninstall, destructive reset, and
   rollback paths, automating what can run safely on hosted clean machines.
+  **Done for the 0.9.4 rehearsal:** the published-release matrix passed on
+  Windows, macOS, and Ubuntu, including upgrade from the actual preceding stable
+  release, v0.9.2. Repeat it on the exact 1.0 candidate.
 - Rehearse and cut: freeze the exact candidate from a clean main worktree; run all
   local and hosted gates; build the tag artifacts and verify checksums and
   attestations; install and smoke on clean native Windows, macOS, and Linux; repeat

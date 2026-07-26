@@ -195,7 +195,8 @@ maintainer will consume it:
 7. Verify the official repository still has the active `v*` tag ruleset that
    blocks updates and deletion, plus GitHub release immutability. Immutability
    applies only to releases published after the setting was enabled on July 18,
-   2026; it does not retroactively change v0.9.2 or earlier releases.
+   2026. v0.9.4 is locked under that policy; v0.9.2 and earlier releases were
+   not changed retroactively.
 8. Push an annotated `vX.Y.Z` tag. Wait for every `Release` workflow job,
    including its reusable CI quality gate, four CLI builds, four clean CLI
    execution legs, three desktop builds, and three clean desktop
@@ -231,6 +232,20 @@ schema, Windows shortcut target, macOS app bundle, and Linux desktop entry. It
 runs weekly and can be dispatched with explicit tags for repeatable published
 release regression evidence. A pre-publication candidate dry run and interactive
 tray-readiness check remain separate release-candidate requirements.
+
+### Current release evidence
+
+The 0.9.4 rehearsal completed the current automated path. Its
+[release workflow](https://github.com/blisspixel/quotabot/actions/runs/30180394420)
+passed the native quality, build, execution, checksum, restricted-provenance,
+and exact 14-asset gates before publishing the immutable
+[v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4).
+The immediately dispatched
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567)
+then passed clean install, upgrade from the actual prior stable v0.9.2,
+persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. This is
+the rehearsal baseline; the complete checklist, signing, notarization, and
+interactive evidence must run again on the exact 1.0 candidate.
 
 ## Icon and dev launcher
 
