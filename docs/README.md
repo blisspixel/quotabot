@@ -4,7 +4,7 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.9.4. The planned next code item is an
+The current verified stable release is 0.9.5. The planned next code item is an
 opt-in quota-stretch policy for conserving low included subscription quota with
 a suitable on-device runtime. The
 [roadmap Next section](../ROADMAP.md#next) owns its behavior, guardrails,

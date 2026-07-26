@@ -102,7 +102,7 @@ truer because the deeper layer exists, not harder to read.
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
 barrier. v0.9.4 completed the exact release and three-OS install path; the
-[current release evidence](BUILDING.md#current-release-evidence) records what it
+[baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
 proved. That evidence is not a substitute for rerunning the path on the exact
 1.0 candidate. The remaining acquisition work is operating-system signing and
 notarization. Update, uninstall, data preservation, destructive reset, and
