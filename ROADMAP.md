@@ -441,8 +441,8 @@ happened, and it improves on the user's own data.
   overfitting a thin history. It is advisory by default; `quotabot suggest
   --tuned-burn` opts in to applying the fitted lookback to the burn feeding the
   decision. The other free parameters (comfort threshold, risk z, lead time) are
-  routing-policy values tuned by realized regret (the oracle-benchmark corpus, a
-  1.x piece), not calibration; see `.agent/DECISIONS.md`.
+  routing-policy values tuned by realized regret, not calibration; that evidence
+  belongs to the post-1.0 [routing-evaluation corpus](#p1-grow-the-routing-evaluation-corpus).
 - The plain-language layer generates every casual sentence from the calibrated
   number underneath, so "about an hour left" is always backed and inspectable one
   layer down.
