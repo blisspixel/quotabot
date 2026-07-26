@@ -33,7 +33,8 @@ at publication. Immutability applies prospectively to releases published after
 it was enabled on July 18, 2026. v0.9.4 is locked under that policy; v0.9.2 and
 earlier releases were not changed retroactively.
 
-The current [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4)
+The verified
+[v0.9.4 rehearsal release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
 The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/30180394420)
 verified native bundle shape, checksums, restricted provenance, lifecycle, and

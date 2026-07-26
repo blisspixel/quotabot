@@ -39,7 +39,7 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.9.4. The planned next code item is an
+The current verified stable release is 0.9.5. The planned next code item is an
 opt-in quota-stretch policy that conserves low included subscription quota with
 a suitable on-device runtime. Agents must continue to use only the documented
 `balanced` and `local_first` policies until it ships. The

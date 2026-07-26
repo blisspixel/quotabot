@@ -9,7 +9,7 @@ See how much quota you have left across your agentic AI coding subscriptions, in
 one place, and route the next request to whichever one has budget, so you can
 reduce quota-related stalls and avoid leaving included quota unused.
 
-> **Current stable:** 0.9.4. quotabot remains under active 0.x development, so
+> **Current stable:** 0.9.5. quotabot remains under active 0.x development, so
 > expect changes on the road to 1.0. **Next:** implement an opt-in quota-stretch
 > policy that conserves low included subscription quota with a suitable
 > on-device runtime. It is planned, not shipped; `balanced` and `local_first`
@@ -388,7 +388,7 @@ requires both the tagged version and demo-mode `doctor --json` to run. The
 scheduled install smoke separately exercises the published one-line installer
 and prior-version upgrade on Windows, macOS, and Linux.
 v0.9.4 completed that exact audit and the three-OS published install matrix; see
-the [current release evidence](docs/BUILDING.md#current-release-evidence).
+the [baseline release evidence](docs/BUILDING.md#baseline-release-evidence).
 The official repository also blocks updates and deletion of `v*` tags. GitHub
 [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
 is enabled prospectively, so releases published after it was enabled on July

@@ -38,6 +38,7 @@ import datetime
 import email.utils
 import ipaddress
 import json
+import logging
 import math
 import os
 import re
@@ -56,6 +57,9 @@ except Exception:  # pragma: no cover - allows importing/testing without litellm
 
     class CustomLogger:  # type: ignore
         """Minimal stand-in so the module imports without LiteLLM installed."""
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _expand(path: str) -> Path:
@@ -1031,12 +1035,14 @@ class QuotabotRouter(CustomLogger):
                 }
                 await asyncio.to_thread(self._append_metric, record)
         except Exception:
-            pass
+            _LOGGER.warning("quotabot metrics write failed; routing callback continued")
         finally:
             try:
                 await self._release_route_lease(route_meta)
             except Exception:
-                pass
+                _LOGGER.warning(
+                    "quotabot lease release failed; lease will expire by TTL"
+                )
 
     async def async_log_failure_event(
         self, kwargs: dict, response_obj: Any, start_time: Any, end_time: Any
@@ -1076,12 +1082,14 @@ class QuotabotRouter(CustomLogger):
                 }
                 await asyncio.to_thread(self._append_metric, record)
         except Exception:
-            pass
+            _LOGGER.warning("quotabot metrics write failed; routing callback continued")
         finally:
             try:
                 await self._release_route_lease(route_meta)
             except Exception:
-                pass
+                _LOGGER.warning(
+                    "quotabot lease release failed; lease will expire by TTL"
+                )
 
     @staticmethod
     def _route_metadata(kwargs: dict[str, Any]) -> dict[str, Any]:

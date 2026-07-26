@@ -1280,6 +1280,94 @@ models:
         self.assertEqual(record["cost"], 0.03)
         self.assertNotIn("do not log", json.dumps(record))
 
+    def test_callback_metrics_fail_soft_with_bounded_warning_and_release(self):
+        route_metadata = {
+            "quotabot_routed": True,
+            "quotabot_lease_id": "test-lease-0001",
+        }
+        kwargs = {
+            "model": "claude-sonnet",
+            "litellm_params": {"metadata": route_metadata},
+        }
+
+        for callback_name in (
+            "async_log_success_event",
+            "async_log_failure_event",
+        ):
+            with self.subTest(callback=callback_name):
+                router = QuotabotRouter()
+                router.policy = Policy()
+                router.policy.metrics_path = "unused-routing-metrics.jsonl"
+                release = unittest.mock.AsyncMock()
+                with (
+                    unittest.mock.patch.object(
+                        router,
+                        "_append_metric",
+                        side_effect=RuntimeError("private metrics path"),
+                    ),
+                    unittest.mock.patch.object(
+                        router,
+                        "_release_route_lease",
+                        release,
+                    ),
+                    self.assertLogs("quotabot_router", level="WARNING") as captured,
+                ):
+                    asyncio.run(
+                        getattr(router, callback_name)(kwargs, None, None, None)
+                    )
+
+                release.assert_awaited_once_with(route_metadata)
+                self.assertEqual(
+                    captured.output,
+                    [
+                        "WARNING:quotabot_router:quotabot metrics write failed; "
+                        "routing callback continued"
+                    ],
+                )
+                self.assertNotIn("private metrics path", captured.output[0])
+
+    def test_callback_release_failure_is_bounded_and_fail_soft(self):
+        route_metadata = {
+            "quotabot_routed": True,
+            "quotabot_lease_id": "test-lease-0002",
+        }
+        kwargs = {
+            "model": "claude-sonnet",
+            "litellm_params": {"metadata": route_metadata},
+        }
+
+        for callback_name in (
+            "async_log_success_event",
+            "async_log_failure_event",
+        ):
+            with self.subTest(callback=callback_name):
+                router = QuotabotRouter()
+                router.policy = Policy()
+                release = unittest.mock.AsyncMock(
+                    side_effect=RuntimeError("private lease detail")
+                )
+                with (
+                    unittest.mock.patch.object(
+                        router,
+                        "_release_route_lease",
+                        release,
+                    ),
+                    self.assertLogs("quotabot_router", level="WARNING") as captured,
+                ):
+                    asyncio.run(
+                        getattr(router, callback_name)(kwargs, None, None, None)
+                    )
+
+                release.assert_awaited_once_with(route_metadata)
+                self.assertEqual(
+                    captured.output,
+                    [
+                        "WARNING:quotabot_router:quotabot lease release failed; "
+                        "lease will expire by TTL"
+                    ],
+                )
+                self.assertNotIn("private lease detail", captured.output[0])
+
 
 class LeaseHttpTests(unittest.TestCase):
     def test_malformed_reserved_candidate_is_released_and_rejected(self):
