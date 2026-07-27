@@ -141,8 +141,8 @@ account id enters quota output.
   (Developer tab, or `lms server start`); Lemonade desktop packages start their
   service automatically, default to port 13305, and honor `LEMONADE_HOST` and
   `LEMONADE_PORT`. Use `lemonade status` to check it; headless installations run
-  `lemond`. Ollama cloud models are offloaded despite the loopback daemon and
-  must not be assumed to satisfy a local-only budget.
+  `lemond`. Cloud routes exposed by Ollama or Lemonade are offloaded despite the
+  loopback daemon and do not satisfy a local-only budget.
   `OLLAMA_HOST`, `LMSTUDIO_HOST`, and `LEMONADE_HOST` qualify as local capacity
   only for exact loopback destinations. quotabot does not contact
   credential-bearing, LAN, or public values supplied through those overrides.

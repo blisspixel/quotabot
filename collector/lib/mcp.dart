@@ -37,7 +37,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.9.6';
+const quotabotMcpVersion = '0.9.7';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -2459,9 +2459,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'models are omitted; known entries may remain with available=false. '
         'Local-runtime inventory is read live and cloud capability hints come '
         'from a refreshable catalog. budget=local limits results to on-device '
-        'local-runtime models; a cloud-offloaded local model (e.g. an Ollama '
-        '`-cloud` model, flagged cloud_offloaded) is excluded because it runs in '
-        'the provider cloud, not on this machine. budget=quota allows measured '
+        'local-runtime models; a cloud-offloaded local model (flagged '
+        'cloud_offloaded by Ollama or Lemonade) is excluded because it runs '
+        'remotely, not on this machine. budget=quota allows measured '
         'quota plans plus on-device local-runtime models.',
     inputSchema: _modelFilterInputSchema,
     outputSchema: listModelsOutputSchema,

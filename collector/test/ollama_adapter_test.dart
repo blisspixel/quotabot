@@ -421,5 +421,46 @@ void main() {
           hasLength(OllamaAdapter.maxCapabilityProbes));
       expect(q.models.where((m) => m.tools == null), hasLength(5));
     });
+
+    test('failed early probes do not starve later models on refresh', () async {
+      final cache = OllamaCapabilityCache();
+      final installed = [
+        for (var i = 0; i < OllamaAdapter.maxCapabilityProbes + 2; i++)
+          {'name': 'model:$i', 'digest': 'sha256:$i'},
+      ];
+      final probed = <String>[];
+      final client = runtime(
+        installed,
+        {
+          for (var i = OllamaAdapter.maxCapabilityProbes;
+              i < installed.length;
+              i++)
+            'model:$i': {
+              'capabilities': ['completion', 'tools'],
+            },
+        },
+        onShow: probed.add,
+      );
+
+      final first = await OllamaAdapter(
+        capabilityCache: cache,
+        client: client,
+      ).collect();
+      final second = await OllamaAdapter(
+        capabilityCache: cache,
+        client: client,
+      ).collect();
+
+      expect(first.models.where((m) => m.tools == true), isEmpty);
+      expect(
+        second.models.skip(OllamaAdapter.maxCapabilityProbes),
+        everyElement(
+          isA<ModelInfo>().having((m) => m.tools, 'tools', isTrue),
+        ),
+      );
+      expect(probed, contains('model:${OllamaAdapter.maxCapabilityProbes}'));
+      expect(
+          probed, contains('model:${OllamaAdapter.maxCapabilityProbes + 1}'));
+    });
   });
 }

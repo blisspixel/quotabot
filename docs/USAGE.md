@@ -231,7 +231,7 @@ metadata. Add `--json` to any read command for machine output.
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
 | `top`                  | Live dashboard that redraws in place (q quit, r now, s sort). |
 | `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
-| `calibration`          | How often quotabot's predictions come true (history). |
+| `calibration`          | Forecast reliability from recorded history.          |
 | `manual`               | List, set, or remove self-reported quota entries.     |
 | `check <provider>`     | Collect and check one provider; optional exact `--account`. |
 | `suggest`              | Which subscription to use next, ranked.               |
@@ -720,11 +720,12 @@ GPT-5.3-Codex-Spark is preserved as model quota evidence. When the matching mode
 is represented in the catalog, it must have current scoped evidence and is gated
 by the tighter of that pool and the shared Codex window; ordinary unmatched
 Codex models keep using the shared account budget.
-Ollama can expose cloud-offloaded models through its local daemon (a `-cloud` tag
-suffix, e.g. `qwen3-coder:480b-cloud`) that execute on ollama.com, not on-device.
-quotabot flags these `cloud_offloaded` and excludes them from `--budget=local` and
-free budgets, so an Ollama cloud model is never treated as local-only or free; it
-stays listed only under `--budget=any`.
+Ollama can expose cloud-offloaded models through its local daemon with a `-cloud`
+tag suffix, such as `qwen3-coder:480b-cloud`. Lemonade can expose configured
+cloud-provider routes with `recipe: "cloud"`. quotabot flags both forms
+`cloud_offloaded` and excludes them from `--budget=local` and free budgets. They
+stay listed only under `--budget=any` and never prove local-only or free
+execution.
 For a task-profiled `suggest`, add `--use-expiring-quota` when you explicitly
 want soon-resetting included quota to beat a local model. The signal is bounded:
 it uses only local burn analytics, only measured quota-backed providers, and only
@@ -798,14 +799,14 @@ request-metered paid API routes.
 | Intent | CLI trigger | Output | Default ordering | Spend envelope |
 |---|---|---|---|---|
 | Choose a provider | `suggest` | provider recommendation and ranked alternatives | measured subscription runway, then reachable local fallback | does not enable catalogued paid API routes |
-| Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; cloud-offloaded Ollama and Lemonade models stay out of local and free budgets |
 | Preserve a low included-quota reserve | `suggest --quota-stretch` | provider recommendation and ranked alternatives | fresh measured included quota at or above 25 percent effective headroom, then loaded and cold on-device runtimes | threshold override is bounded from 20 through 50; manual, paid, stale, drifted, and cloud-offloaded candidates cannot satisfy the policy |
 | Inspect model candidates | `models` | matching entries represented by the current snapshot and catalog | most routable first; known unavailable entries remain explicit within represented providers | defaults to unrestricted `any` for inspection; `quota_backed` stays explicit |
 | Choose one model | `suggest --task=PROFILE` or capability flags | concrete model recommendation | available first; on-device local runtime, loaded, lighter provider tier, then headroom | defaults to safe `quota`; `--use-expiring-quota` may let measured included quota beat local |
-| Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud, manual, and cloud-offloaded Ollama (`-cloud`) entries |
-| Restrict a listing to quota-plan and runtime classes | add `--budget=quota` to `models` | filtered list | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud, manual, and cloud-offloaded Ollama or Lemonade entries |
+| Restrict a listing to quota-plan and runtime classes | add `--budget=quota` to `models` | filtered list | local-runtime entries plus measured included quota | excludes catalogued manual, status-only, credit-backed, and paid API classes; cloud-offloaded local-daemon models stay out of local and free budgets |
 | Opt into unrestricted model selection | add `--budget=any` to a model suggestion | concrete model recommendation | normal model ranking across all represented spend classes | may include credit-backed or paid catalog entries; the reason warns when included quota is not proven |
-| Keep model requirements but return a provider | add `--provider-route` | `quotabot.suggest.v1` provider result | provider ranking after the caller-supplied capability gate | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Keep model requirements but return a provider | add `--provider-route` | `quotabot.suggest.v1` provider result | provider ranking after the caller-supplied capability gate | does not enable catalogued paid API routes; cloud-offloaded local-daemon models stay out of local and free budgets |
 
 MCP `suggest_provider`, `list_models`, and `suggest_model` expose the same
 policies through explicit arguments. The plain loopback HTTP surface exposes the
@@ -832,9 +833,12 @@ continue to skip without making a network call. Hosted runs use `--summary` so
 logs expose counts and status without publishing account-scoped model ids.
 
 `quotabot calibration` grades quotabot's own strand predictions against your
-recorded history and reports how often they come true, as a calibration
-percentage, a Brier score, and a reliability diagram. It fills in over time, once
-predictions' horizons have elapsed, and says plainly when there is not enough yet.
+recorded history and reports a Brier score, expected calibration error, and a
+reliability diagram. Its calibration-agreement percentage is `1 - ECE`, not the
+fraction of individual forecasts that were right, and the text headline waits
+for 40 resolved forecasts. JSON retains provisional scores with exact sample
+counts. Burn-lookback self-tuning fits on earlier history, leaves a forecast
+horizon gap, and must improve on a later 25 percent holdout before it is accepted.
 
 `quotabot report` prints a privacy-safe weekly quota-health Markdown report with
 the current recommendation, decision id, evidence source, provider headroom,

@@ -15,7 +15,7 @@ are a stable additive contract:
 | Authoritative | `authoritative_live` | Claude; live Codex; live Grok; live Antigravity | Eligible while fresh and its binding quota is usable | The provider registry permits the class; `quotabot verify` checks its account-wide shape, time, bounds, resets, drift, and provider-owned cross-check target | Preserve the last trusted snapshot as stale evidence; reject implausible changes and never call stale cloud quota available |
 | This-machine fallback | `this_machine_fallback` | Antigravity local state | Eligible only under normal freshness and binding rules; routing confidence is multiplied by `0.7`, and machine scope stays visible | The registry permits the fallback path; a successful measured window must carry `per_machine: true`, then passes the normal time, bounds, reset, and drift checks | State that another device can make the value incomplete |
 | Passive local | `passive_local_evidence` | Cursor; Windsurf/Devin; Kiro | A measured normalized window can participate with routing confidence multiplied by `0.7` only while its source row carries a current provider-owned timestamp; detection-only, unproven-time, or stale state cannot | The registry and sanitized parser fixture pin the source; a successful measured window must carry `per_machine: true`, preserve row-owned capture time, and pass normal age and shape checks | Show unverified or stale local evidence instead of inventing freshness; ask the user to refresh the provider usage view |
-| Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Admits reachable runtime-classified entries; an Ollama `-cloud` model is flagged `cloud_offloaded` and excluded from local-only and free budgets | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; keep a cloud-offloaded local model out of any local-only or free budget promise |
+| Local runtime | `local_runtime` | Ollama; LM Studio; Lemonade | Admits reachable runtime-classified entries; runtime-declared cloud routes are flagged `cloud_offloaded` and excluded from local-only and free budgets | The registry requires `kind: "local"`, no quota windows, live loopback reachability, and no cached availability | Never cache availability; keep a cloud-offloaded local model out of any local-only or free budget promise |
 | Status only | `status_only` | NVIDIA NIM model-list access check | Visible for access diagnostics, never a model-budget route without measured quota | The registry requires a subscription observation with no quota windows; `verify` rejects quota or provider-drift claims on this class | Show access state with numeric quota unknown |
 | Manual | `manual` | User-defined entries | Visible with the existing `0.35` self-reported confidence factor; excluded by `budget=quota` | The entry must carry both `source_class: "manual"` and the legacy `source: "manual"` marker; it cannot claim local-runtime, machine-scoped, or drift evidence | Never refresh or reinterpret what the user entered |
 
@@ -517,39 +517,49 @@ format overhead can differ from the estimate.
   never loads or invokes a model. The v0 shape carries `arch` (architecture), not
   a parameter count, so quotabot does not fill the parameter-size slot from it.
 - Lemonade: the AMD/lemonade-sdk OpenAI-compatible server. `GET /api/v1/models`
-  (falling back to `/v1/models`). Honors `LEMONADE_HOST` and `LEMONADE_PORT`;
-  the default is `http://127.0.0.1:13305`.
+  (falling back to `/v1/models`) lists downloaded local models by default and
+  can also list configured cloud-provider routes. quotabot reads
+  `max_context_window` and the `tool-calling`, `vision`, and `embeddings` labels,
+  omits an explicitly non-downloaded local catalog row, and marks
+  `recipe: "cloud"` or `cloud_provider` entries `cloud_offloaded`. The optional
+  matching `GET /api/v1/health` or `/v1/health` read supplies loaded model names
+  and each running `ctx_size`; failure leaves the inventory cold but intact. A
+  valid empty list proves that the server is reachable but supplies no local
+  capacity. Honors `LEMONADE_HOST` and `LEMONADE_PORT`; the default is
+  `http://127.0.0.1:13305`.
 
 A runtime also states each model's kind, and quotabot uses it in the opposite
 direction from a capability. Ollama declares `completion` for every model that
-can generate text, and LM Studio types a model `embedding`; a model declared
-that way stays listed for inspection but is never recommended as a route,
-because it cannot serve a generation request. Here an absent statement is never
-read as a denial: a runtime that says nothing about kind keeps its models
-routable, so a listing that publishes only names loses nothing. That asymmetry
-is deliberate. Requiring a capability must fail closed, because acting on an
-unproven capability breaks the request; excluding a model must fail open,
+can generate text, LM Studio types a model `embedding`, and Lemonade labels
+embedding-only entries `embeddings`. A model declared that way stays listed for
+inspection but is never recommended as a generation route. Here an absent
+statement is never read as a denial: a runtime that says nothing about kind keeps
+its models routable, so a listing that publishes only names loses nothing. That
+asymmetry is deliberate. Requiring a capability must fail closed, because acting
+on unproven capability breaks the request; excluding a model must fail open,
 because acting on unproven absence removes a route that works.
 
 Declared capabilities are what let a local model satisfy `--require-tools`,
 `--require-vision`, or `--min-context`. quotabot never infers one from a model
 name: a capability the runtime did not declare fails a requirement for it, so a
-runtime that lists only names (any OpenAI-compatible endpoint, including
-Lemonade's) can never satisfy a capability filter. Where a runtime states an
-exhaustive list, an entry missing from it is real evidence of absence and is
-recorded as such. For a model that is not loaded, the reported context window is
-the maximum the model supports, not a promise about the context the runtime will
-choose when it loads it; a loaded model reports its actual running context
-instead, and that always wins.
+generic compatibility endpoint that lists only names cannot satisfy a capability
+filter. Lemonade's extended OpenAI-compatible fields are an explicit exception:
+its labels and `max_context_window` are provider-declared metadata. Where a
+runtime states an exhaustive list, an entry missing from it is real evidence of
+absence and is recorded as such. For a model that is not loaded, the reported
+context window is the maximum the model supports, not a promise about the context
+the runtime will choose when it loads it; a loaded model reports its actual
+running context instead, and that always wins.
 
 Ollama's per-model capability read is bounded on purpose. Results are cached for
 the process by the runtime's own content digest, so a refresh loop re-probes
 nothing and a model re-pulled under the same tag is probed again under its new
 digest. At most 48 models are probed per read with at most 4 requests in flight,
 and no further batch starts once the pass budget is spent; anything unresolved
-keeps undeclared capabilities rather than a guess. A library larger than the cap
-is worked through across reads, because each read starts from what is already
-cached. `/api/show` returns the model's manifest and
+keeps undeclared capabilities rather than a guess. A library larger than the
+cap is worked through across reads. The bounded probe window rotates across
+unresolved entries, so repeated failures or missing digests at the front do
+not starve later models. `/api/show` returns the model's manifest and
 never loads or runs it, so the read remains metadata-only and zero-token like
 every other quotabot read.
 
@@ -569,6 +579,10 @@ Current compatibility limits:
   excludes it from `--budget=local` and free budgets, so a cloud model reached
   through the local daemon is never treated as local-only or free. It stays
   listed (reachable via the local runtime) but only under `--budget=any`.
+- Lemonade can expose configured cloud-provider models through its loopback
+  daemon. `recipe: "cloud"` or a non-empty `cloud_provider` is preserved as
+  `cloud_offloaded`, with the same local and free budget exclusions as Ollama.
+  Explicitly non-downloaded local catalog rows are omitted.
 - LM Studio's native `GET /api/v1/models` (0.4.0+) is now the preferred read,
   with `/api/v0/models` and the OpenAI-compatible `/v1/models` as fallbacks. The
   v1 shape is pinned by a fixture captured from a real 0.4.0+ server. Both

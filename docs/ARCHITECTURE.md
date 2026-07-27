@@ -183,7 +183,8 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   loopback daemon acts as a routing fallback only when it represents at least
   one on-device model; cloud-offloaded-only and empty runtimes do not. Any
   OpenAI-compatible runtime can be added with the shared `localRuntimeQuota`
-  helper.
+  helper. Lemonade's optional health read enriches inventory with loaded state
+  and running context, but fails soft without hiding a successful model list.
 
 An adapter that cannot produce live windows still returns a `ProviderQuota` with
 account and plan and an explanatory `error` note, rather than throwing. The UI
@@ -510,12 +511,12 @@ loads or invokes a model.
 Recommendations also echo available local size, context, and fit evidence so
 callers can see why a model is loaded versus merely installed without forcing a
 model call.
-Ollama exposes cloud-offloaded models through the local daemon (a `-cloud` tag
-suffix); quotabot detects the suffix, flags the model `cloud_offloaded`, and
-excludes it from `budget=local` and free budgets, so a cloud-offloaded model
-reached through the local daemon is never counted as on-device or free. Detection
-is by the documented naming convention, so it is the practical boundary rather
-than a proof of every model's execution location.
+Ollama exposes cloud-offloaded models through the local daemon with a `-cloud`
+tag suffix. Lemonade exposes configured cloud routes with `recipe: "cloud"` and
+`cloud_provider`. quotabot preserves either as `cloud_offloaded` and excludes it
+from `budget=local` and free budgets, so a remote model reached through a local
+daemon is never counted as on-device or free. Detection uses each runtime's
+documented execution-location evidence.
 Concrete-model suggestions can opt into `use_expiring_quota`, which computes a
 pure `ExpiringQuotaSignal` from existing headroom, reset, and local burn
 statistics. The signal is intentionally narrow: measured quota-backed providers
@@ -746,11 +747,11 @@ attestations, clean-runner lifecycle checks, and a draft-release publication
 barrier. Source setup remains available when a launcher or shortcut is wanted.
 The official repository also blocks `v*` tag updates and deletion. GitHub
 release immutability locks the tag and assets when a draft is published after
-the setting activation. The v0.9.5 pipeline published and locked the exact 14
+the setting activation. The v0.9.6 pipeline published and locked the exact 14
 expected assets after its
-[native release audit](https://github.com/blisspixel/quotabot/actions/runs/30207371760),
+[native release audit](https://github.com/blisspixel/quotabot/actions/runs/30290535142),
 then passed the three-OS
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30208371908).
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
 Application signing, notarization, and interactive native evidence remain 1.0

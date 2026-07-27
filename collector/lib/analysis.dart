@@ -220,8 +220,9 @@ ProviderQuota? bestProviderAccountForCheck(
 }
 
 /// Whether a local-runtime observation proves that its daemon is reachable now.
-/// This says nothing about where a represented model executes: an Ollama
-/// `-cloud` model is reachable through the daemon but is not on-device capacity.
+/// This says nothing about where a represented model executes: a model marked
+/// cloud-offloaded by Ollama or Lemonade is reachable through the daemon but is
+/// not on-device capacity.
 bool isLocalRuntimeReachableAt(ProviderQuota quota, int now) =>
     quota.isLocal &&
     quota.ok &&

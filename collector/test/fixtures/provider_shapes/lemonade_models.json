@@ -3,11 +3,25 @@
   "data": [
     {
       "id": "llama-3.2-3b-instruct",
-      "object": "model"
+      "object": "model",
+      "recipe": "llamacpp",
+      "downloaded": true,
+      "max_context_window": 32768,
+      "labels": ["coding", "tool-calling"]
     },
     {
       "id": "qwen2.5-coder-7b",
-      "object": "model"
+      "object": "model",
+      "recipe": "llamacpp",
+      "downloaded": true,
+      "labels": ["coding", "vision"]
+    },
+    {
+      "id": "fireworks.kimi-k2p5",
+      "object": "model",
+      "recipe": "cloud",
+      "cloud_provider": "fireworks",
+      "downloaded": false
     }
   ]
 }
