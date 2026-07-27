@@ -25,12 +25,14 @@ double _zeroLease(String provider, String account) => 0;
 /// replayed, and simulated as a single object. Defaults match [suggestRoute].
 class DecisionContext {
   final double comfortThreshold;
+  final double quotaStretchThreshold;
   final Map<String, double?> burnByProvider;
   final double leadHours;
   final Map<String, BurnStat> burnStatsByProvider;
   final double riskZ;
   final LeaseDiscountProvider leaseDiscountFor;
   final bool preferLocal;
+  final bool quotaStretch;
   final double wasteWeight;
   final double wasteThresholdPercent;
   final int wasteMaxHours;
@@ -50,13 +52,15 @@ class DecisionContext {
   final List<String> preferenceOrder;
 
   const DecisionContext({
-    this.comfortThreshold = 15,
+    this.comfortThreshold = kDefaultComfortThreshold,
+    this.quotaStretchThreshold = kDefaultQuotaStretchThreshold,
     this.burnByProvider = const {},
     this.leadHours = 1.0,
     this.burnStatsByProvider = const {},
     this.riskZ = 0,
     this.leaseDiscountFor = _zeroLease,
     this.preferLocal = false,
+    this.quotaStretch = false,
     this.wasteWeight = kDefaultRoutingWasteWeight,
     this.wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
     this.wasteMaxHours = kDefaultExpiringQuotaMaxHours,
@@ -128,12 +132,14 @@ Decision decide(
         observations,
         now,
         comfortThreshold: context.comfortThreshold,
+        quotaStretchThreshold: context.quotaStretchThreshold,
         burnByProvider: context.burnByProvider,
         leadHours: context.leadHours,
         burnStatsByProvider: context.burnStatsByProvider,
         riskZ: context.riskZ,
         leaseDiscountFor: context.leaseDiscountFor,
         preferLocal: context.preferLocal,
+        quotaStretch: context.quotaStretch,
         wasteWeight: context.wasteWeight,
         wasteThresholdPercent: context.wasteThresholdPercent,
         wasteMaxHours: context.wasteMaxHours,

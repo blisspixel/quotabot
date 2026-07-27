@@ -374,6 +374,57 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('desktop routing exposes the active quota-stretch policy', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final snapshot = [
+      _routeQuota('claude', 'Claude', now, usedPercent: 80),
+      ProviderQuota(
+        provider: 'ollama',
+        displayName: 'Ollama',
+        account: 'local',
+        asOf: now,
+        kind: ProviderQuotaKind.local,
+        models: const [ModelInfo(id: 'qwen:7b', local: true, loaded: true)],
+      ),
+    ];
+    const stretch = QuotaProfile(
+      name: 'stretch',
+      routingPolicy: ProfileRoutingPolicy.quotaStretch,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            activeProfile: 'stretch',
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => snapshot,
+          testProfiles: const [
+            QuotaProfile(name: defaultProfileName),
+            stretch,
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Next: Ollama'), findsOneWidget);
+    await tester.tap(find.byTooltip('Explain recommendation'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Quota-stretch policy:'), findsOneWidget);
+    expect(
+      find.text('Routing policy: Quota stretch at 25% reserve'),
+      findsOneWidget,
+    );
+    expect(find.text('Decision id'), findsOneWidget);
+  });
+
   testWidgets('empty profile explains a legacy Codex credential filter', (
     tester,
   ) async {

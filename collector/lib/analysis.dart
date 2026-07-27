@@ -433,6 +433,11 @@ class RouteCandidate {
   /// not available.
   final bool available;
 
+  /// Local-runtime readiness used by quota-stretch routing. Null for cloud
+  /// candidates, `loaded` when at least one on-device model is resident, and
+  /// `cold` when the runtime can load an on-device model on demand.
+  final String? localReadiness;
+
   const RouteCandidate({
     required this.provider,
     required this.account,
@@ -447,6 +452,7 @@ class RouteCandidate {
     required this.resetsAt,
     required this.stale,
     required this.available,
+    this.localReadiness,
     this.bindingPool,
     this.driftReason,
     this.driftObservedAt,
@@ -499,6 +505,7 @@ class RouteCandidate {
         if (driftReason != null) 'drift_reason': driftReason,
         if (driftObservedAt != null) 'drift_observed_at': driftObservedAt,
         'available': available,
+        if (localReadiness != null) 'local_readiness': localReadiness,
       };
 
   bool get isManual => source == providerQuotaManualSource;
@@ -512,6 +519,12 @@ class RouteCandidate {
               : 'metered plan';
 
   String get spendClassWire => spendClass.replaceAll(' ', '_');
+
+  /// True only for measured included-subscription capacity. Manual entries and
+  /// providers catalogued outside the included-quota envelope never satisfy a
+  /// quota-stretch threshold.
+  bool get isMeasuredQuotaPlan =>
+      !isLocal && !isManual && spendClassWire == 'quota_plan';
 
   String get spendRisk => switch (spendClassWire) {
         'local' => 'runtime_unverified',
@@ -593,9 +606,15 @@ class RouteSuggestion {
   final double riskZ;
 
   /// The routing policy used for this decision. `balanced` preserves the normal
-  /// paid-headroom-first behavior; `local_first` is an explicit caller request
-  /// to use a local runtime before spending subscription quota.
+  /// paid-headroom-first behavior, `local_first` uses local capacity whenever
+  /// possible, and `quota_stretch` keeps measured included quota above its
+  /// reserve threshold before moving to an on-device runtime.
   final String routingPolicy;
+
+  /// Effective-headroom reserve used by the opt-in quota-stretch policy. The
+  /// value is echoed even when another policy is active so callers can inspect
+  /// the complete bounded policy configuration.
+  final double quotaStretchThreshold;
 
   /// Weight applied to the projected-waste multiplier in the routing score.
   final double wasteWeight;
@@ -630,6 +649,7 @@ class RouteSuggestion {
     required this.asOf,
     required this.riskZ,
     this.routingPolicy = 'balanced',
+    this.quotaStretchThreshold = kDefaultQuotaStretchThreshold,
     this.wasteWeight = kDefaultRoutingWasteWeight,
     this.wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
     this.wasteMaxHours = kDefaultExpiringQuotaMaxHours,
@@ -685,6 +705,7 @@ class RouteSuggestion {
         'decision_code': decisionCode.wireName,
         'risk_z': riskZ,
         'routing_policy': routingPolicy,
+        'quota_stretch_threshold_percent': quotaStretchThreshold,
         'waste_weight': wasteWeight,
         'waste_threshold_percent': wasteThresholdPercent,
         'waste_max_hours': wasteMaxHours,
@@ -809,10 +830,17 @@ RouteDecisionReceipt _decisionReceiptFor(RouteSuggestion suggestion) {
     ),
     policy: RoutePolicyReceipt(
       routing: suggestion.routingPolicy,
-      spendOrder: suggestion.routingPolicy == 'local_first'
-          ? const ['local', 'subscription']
-          : const ['subscription', 'local_fallback'],
+      spendOrder: switch (suggestion.routingPolicy) {
+        'local_first' => const ['local', 'subscription'],
+        'quota_stretch' => const [
+            'included_subscription_above_stretch_threshold',
+            'local',
+            'included_subscription_below_stretch_threshold',
+          ],
+        _ => const ['subscription', 'local_fallback'],
+      },
       comfortThresholdPercent: suggestion.comfortThreshold,
+      quotaStretchThresholdPercent: suggestion.quotaStretchThreshold,
       leadHours: suggestion.leadHours,
       riskZ: suggestion.riskZ,
     ),
@@ -853,6 +881,16 @@ RouteCandidateVerdict _receiptVerdict(
       (candidate.headroom ?? 0) > kSpentHeadroomFloor &&
       (candidate.effectiveHeadroom ?? 0) <= kSpentHeadroomFloor) {
     return RouteCandidateVerdict.adjustedHeadroomDepleted;
+  }
+  if (suggestion.routingPolicy == 'quota_stretch' &&
+      !candidate.isLocal &&
+      !candidate.isMeasuredQuotaPlan) {
+    return RouteCandidateVerdict.outsideIncludedQuota;
+  }
+  if (suggestion.routingPolicy == 'quota_stretch' &&
+      candidate.isMeasuredQuotaPlan &&
+      (candidate.effectiveHeadroom ?? 0) < suggestion.quotaStretchThreshold) {
+    return RouteCandidateVerdict.belowStretch;
   }
   if (candidate.isLocal && suggestion.recommended?.isLocal != true) {
     return RouteCandidateVerdict.localFallbackOnly;
@@ -956,6 +994,27 @@ const double kDefaultRoutingCostWeight = 0.0;
 
 /// Maximum accepted caller-supplied cost penalty weight.
 const double kMaxRoutingCostWeight = 10.0;
+
+/// Existing balanced-policy reserve. A subscription below this effective
+/// headroom is low enough that balanced routing prefers local capacity.
+const double kDefaultComfortThreshold = 15.0;
+
+/// Default quota-stretch reserve. This matches the shipped amber headroom
+/// boundary: included quota at or above 25% remains usable, while a lower value
+/// allows an on-device runtime to preserve the remaining subscription reserve.
+const double kDefaultQuotaStretchThreshold = 25.0;
+
+/// Caller overrides retain at least a five-point reserve above the comfort
+/// floor and never abandon subscription quota while it is still green.
+const double kMinQuotaStretchThreshold = 20.0;
+const double kMaxQuotaStretchThreshold = 50.0;
+
+double boundedQuotaStretchThreshold(double value) {
+  if (!value.isFinite) return kDefaultQuotaStretchThreshold;
+  return value
+      .clamp(kMinQuotaStretchThreshold, kMaxQuotaStretchThreshold)
+      .toDouble();
+}
 
 /// The optimizer provenance behind a metered subscription's route score.
 class RoutingScoreBreakdown {
@@ -1325,13 +1384,15 @@ RouteCandidate? preferredViableCandidate(
 RouteSuggestion suggestRoute(
   List<ProviderQuota> quotas,
   int now, {
-  double comfortThreshold = 15,
+  double comfortThreshold = kDefaultComfortThreshold,
   Map<String, double?> burnByProvider = const {},
   double leadHours = 1.0,
   Map<String, BurnStat> burnStatsByProvider = const {},
   double riskZ = 0,
   LeaseDiscountProvider leaseDiscountFor = _noLeaseDiscount,
   bool preferLocal = false,
+  bool quotaStretch = false,
+  double quotaStretchThreshold = kDefaultQuotaStretchThreshold,
   double wasteWeight = kDefaultRoutingWasteWeight,
   double wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
   int wasteMaxHours = kDefaultExpiringQuotaMaxHours,
@@ -1347,6 +1408,16 @@ RouteSuggestion suggestRoute(
   int? snapshotAsOf,
   bool? snapshotStale,
 }) {
+  // Local-first is the stronger explicit policy when internal callers supply
+  // both switches. User-facing surfaces reject that ambiguous combination.
+  final useQuotaStretch = quotaStretch && !preferLocal;
+  final boundedStretchThreshold =
+      boundedQuotaStretchThreshold(quotaStretchThreshold);
+  final activePolicy = preferLocal
+      ? 'local_first'
+      : useQuotaStretch
+          ? 'quota_stretch'
+          : 'balanced';
   final measuredProviderCounts = <String, int>{};
   for (final q in quotas) {
     if (q.isLocal || q.isManual || !isTrustedQuotaEvidenceAt(q, now)) {
@@ -1505,6 +1576,11 @@ RouteSuggestion suggestRoute(
       available: q.isLocal
           ? isLocalRuntimeAvailableAt(q, now)
           : routeAvailable && !capabilityBlocked,
+      localReadiness: q.isLocal
+          ? q.models.any((model) => !model.cloudOffloaded && model.loaded)
+              ? 'loaded'
+              : 'cold'
+          : null,
       leaseDiscount: leaseDiscount,
       pipeDiscount: pipeDiscount,
       capabilityLimited: capabilityLimited,
@@ -1533,15 +1609,29 @@ RouteSuggestion suggestRoute(
   final subs = usable.where((c) => !c.isLocal).toList()
     ..sort(_compareSubscriptionCandidates);
   final locals = usable.where((c) => c.isLocal).toList();
+  final policyLocals = useQuotaStretch
+      ? (List<RouteCandidate>.of(locals)
+        ..sort((a, b) {
+          final readiness = (a.localReadiness == 'loaded' ? 0 : 1)
+              .compareTo(b.localReadiness == 'loaded' ? 0 : 1);
+          if (readiness != 0) return readiness;
+          final provider = a.provider.compareTo(b.provider);
+          return provider != 0 ? provider : a.account.compareTo(b.account);
+        }))
+      : locals;
 
   // Ranked view: normal mode leads with subscriptions. Local-first mode is an
   // explicit cost-safety request, so locals lead when present.
-  final ranked = preferLocal ? [...locals, ...subs] : [...subs, ...locals];
+  final ranked =
+      preferLocal ? [...locals, ...subs] : [...subs, ...policyLocals];
 
   // The fail-soft fallback is always present, so a caller that skips the pick
   // (or gets a null recommendation) still has an actionable next step. The
   // closure threads the shared [ranked] and [fallback] into every branch.
-  final fallback = _fallbackFor(subs, locals);
+  final policyEvidenceSubs = useQuotaStretch
+      ? subs.where((candidate) => candidate.isMeasuredQuotaPlan).toList()
+      : subs;
+  final fallback = _fallbackFor(policyEvidenceSubs, policyLocals);
   RouteSuggestion result(
     RouteCandidate? recommended,
     String reason, {
@@ -1557,7 +1647,8 @@ RouteSuggestion suggestRoute(
         fallback: fallback,
         asOf: now,
         riskZ: riskZ,
-        routingPolicy: preferLocal ? 'local_first' : 'balanced',
+        routingPolicy: activePolicy,
+        quotaStretchThreshold: boundedStretchThreshold,
         wasteWeight: wasteWeight,
         wasteThresholdPercent:
             wasteThresholdPercent.clamp(0.0, 100.0).toDouble(),
@@ -1603,9 +1694,14 @@ RouteSuggestion suggestRoute(
   }
 
   final liveSubs = subs.where((c) => !c.stale).toList();
-  final comfy = liveSubs
+  final routingSubs = useQuotaStretch
+      ? liveSubs.where((candidate) => candidate.isMeasuredQuotaPlan).toList()
+      : liveSubs;
+  final activeThreshold =
+      useQuotaStretch ? boundedStretchThreshold : comfortThreshold;
+  final comfy = routingSubs
       .where(
-        (c) => c.available && (c.effectiveHeadroom ?? 0) >= comfortThreshold,
+        (c) => c.available && (c.effectiveHeadroom ?? 0) >= activeThreshold,
       )
       .toList();
   if (comfy.isNotEmpty) {
@@ -1626,9 +1722,13 @@ RouteSuggestion suggestRoute(
     final lead = byPreference
         ? 'Use ${best.provider}$note - first by your preference'
         : 'Use ${best.provider}$note - best risk-adjusted runway';
+    final policyLead = useQuotaStretch
+        ? 'Quota-stretch policy: $lead; effective headroom meets the '
+            '${boundedStretchThreshold.round()}% stretch threshold'
+        : lead;
     return result(
       best,
-      '$lead (${best.headroom!.round()}% free$burnNote).',
+      '$policyLead (${best.headroom!.round()}% free$burnNote).',
       decisionCode: byPreference
           ? RouteDecisionCode.preferredProvider
           : RouteDecisionCode.bestRunway,
@@ -1636,21 +1736,39 @@ RouteSuggestion suggestRoute(
   }
 
   // No subscription is comfortable. Prefer a free local runtime if present.
-  if (locals.isNotEmpty) {
-    final best = locals.first;
-    final tightest = subs.isNotEmpty ? subs.first : null;
+  if (policyLocals.isNotEmpty) {
+    final best = policyLocals.first;
+    final tightest =
+        policyEvidenceSubs.isNotEmpty ? policyEvidenceSubs.first : null;
     final subNote = _localFallbackSubscriptionNote(tightest);
     return result(
       best,
-      'Subscriptions are low - fall back to local ${best.provider}$subNote.',
-      decisionCode: RouteDecisionCode.localFallback,
+      useQuotaStretch
+          ? 'Quota-stretch policy: preserve the last '
+              '${boundedStretchThreshold.round()}% of included subscription '
+              'quota - use ${best.localReadiness ?? 'reachable'} local '
+              '${best.provider}$subNote.'
+          : 'Subscriptions are low - fall back to local ${best.provider}$subNote.',
+      decisionCode: useQuotaStretch
+          ? RouteDecisionCode.quotaStretch
+          : RouteDecisionCode.localFallback,
       usingLocalFallback: true,
+    );
+  }
+
+  if (useQuotaStretch && routingSubs.isEmpty) {
+    return result(
+      null,
+      'Quota-stretch policy found no fresh measured included-subscription '
+      'capacity and no reachable on-device runtime. Manual, metered, stale, '
+      'and drifted evidence cannot satisfy this policy.',
+      decisionCode: RouteDecisionCode.noData,
     );
   }
 
   // No local fallback. Recommend the best subscription whose effective
   // headroom remains above the spent floor after burn, leases, and pipe health.
-  final withAny = liveSubs
+  final withAny = routingSubs
       .where(
         (c) => c.available && (c.effectiveHeadroom ?? 0) > kSpentHeadroomFloor,
       )
@@ -1660,13 +1778,18 @@ RouteSuggestion suggestRoute(
     final adjustmentNote = _effectiveHeadroomNote(best);
     return result(
       best,
-      'All subscriptions are low; ${best.provider} has the best runway '
-      '(${best.headroom!.round()}% free$adjustmentNote).',
+      useQuotaStretch
+          ? 'Quota-stretch policy: no on-device runtime is available, so use '
+              '${best.provider} below the ${boundedStretchThreshold.round()}% '
+              'stretch threshold (${best.headroom!.round()}% free'
+              '$adjustmentNote).'
+          : 'All subscriptions are low; ${best.provider} has the best runway '
+              '(${best.headroom!.round()}% free$adjustmentNote).',
       decisionCode: RouteDecisionCode.lowQuota,
     );
   }
 
-  final adjustedDepleted = liveSubs
+  final adjustedDepleted = routingSubs
       .where(
         (c) =>
             c.available &&
@@ -1688,7 +1811,7 @@ RouteSuggestion suggestRoute(
     );
   }
 
-  final capabilityBlocked = liveSubs
+  final capabilityBlocked = routingSubs
       .where((c) =>
           (c.capabilityLimited || c.capabilityBudgetLimited) &&
           (c.headroom ?? 0) > kSpentHeadroomFloor)

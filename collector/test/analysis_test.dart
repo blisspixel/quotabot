@@ -597,6 +597,174 @@ void main() {
       expect(s.routingPolicy, 'local_first');
     });
 
+    test('quota-stretch keeps included quota at the exact 25% boundary', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 75),
+          ]),
+          _local('ollama'),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.routingPolicy, 'quota_stretch');
+      expect(s.quotaStretchThreshold, 25);
+      expect(s.reason, contains('meets the 25% stretch threshold'));
+      expect(s.toJson()['quota_stretch_threshold_percent'], 25);
+    });
+
+    test('quota-stretch moves local immediately below the 25% boundary', () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 75.01),
+          ]),
+          _local('ollama'),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'ollama');
+      expect(s.decisionCode, RouteDecisionCode.quotaStretch);
+      expect(s.usingLocalFallback, isTrue);
+      expect(s.reason, contains('preserve the last 25%'));
+      final alternatives = (s.receipt.toJson()['alternatives'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(alternatives.single['verdict'], 'below_stretch');
+    });
+
+    test('quota-stretch threshold is defensively bounded from 20% to 50%', () {
+      expect(boundedQuotaStretchThreshold(double.nan), 25);
+      expect(boundedQuotaStretchThreshold(5), 20);
+      expect(boundedQuotaStretchThreshold(80), 50);
+      expect(
+        suggestRoute(const [], _now,
+                quotaStretch: true, quotaStretchThreshold: 5)
+            .quotaStretchThreshold,
+        20,
+      );
+    });
+
+    test('quota-stretch fails soft to included quota when local is unavailable',
+        () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 80),
+          ]),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.decisionCode, RouteDecisionCode.lowQuota);
+      expect(s.reason, contains('no on-device runtime is available'));
+    });
+
+    test('quota-stretch honors binding exhaustion over a healthy short window',
+        () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(label: '5h', usedPercent: 10),
+            QuotaWindow(label: 'weekly', usedPercent: 100),
+          ]),
+          _local('ollama'),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'ollama');
+      expect(s.ranked.first.available, isFalse);
+      expect(s.ranked.first.bindingPool, 'weekly');
+    });
+
+    test('quota-stretch prefers a loaded local runtime over a cold runtime',
+        () {
+      final s = suggestRoute(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 80),
+          ]),
+          _local('lemonade'),
+          _local(
+            'ollama',
+            models: const [
+              ModelInfo(id: 'loaded-model', local: true, loaded: true),
+            ],
+          ),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'ollama');
+      expect(s.recommended?.localReadiness, 'loaded');
+      expect(s.toJson()['recommended']['local_readiness'], 'loaded');
+      expect(
+        s.ranked.where((candidate) => candidate.isLocal).last.localReadiness,
+        'cold',
+      );
+    });
+
+    test('quota-stretch rejects manual and non-quota metered capacity', () {
+      final manual = _q(
+        'custom',
+        [QuotaWindow(label: 'monthly', usedPercent: 1)],
+        source: providerQuotaManualSource,
+      );
+      final metered = _q(
+        'cursor',
+        [QuotaWindow(label: 'monthly', usedPercent: 1)],
+      );
+      final s = suggestRoute(
+        [manual, metered, _local('ollama')],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'ollama');
+      final alternatives = (s.receipt.toJson()['alternatives'] as List)
+          .cast<Map<String, dynamic>>();
+      expect(
+        alternatives.map((candidate) => candidate['verdict']),
+        everyElement('outside_included_quota'),
+      );
+    });
+
+    test('quota-stretch cannot revive stale or drifted quota evidence', () {
+      final s = suggestRoute(
+        [
+          _q(
+            'claude',
+            [QuotaWindow(label: 'weekly', usedPercent: 1)],
+            stale: true,
+          ),
+          _q(
+            'codex',
+            [QuotaWindow(label: 'weekly', usedPercent: 1)],
+            driftReason: 'provider schema changed',
+            driftObservedAt: _now,
+          ),
+          _local('ollama'),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended?.provider, 'ollama');
+      expect(
+          s.ranked.where((candidate) => !candidate.isLocal),
+          everyElement(predicate<RouteCandidate>((candidate) =>
+              candidate.stale || candidate.driftReason != null)));
+    });
+
     test('cloud-only local daemon is never an on-device provider fallback', () {
       final cloudOnly = _local(
         'ollama',

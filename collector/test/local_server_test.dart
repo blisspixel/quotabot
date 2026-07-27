@@ -1339,6 +1339,40 @@ void main() {
     }
   });
 
+  test('local /suggest exposes quota-stretch boundary and receipt', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 70),
+        _local('ollama'),
+      ],
+      now: () => _now,
+    );
+    try {
+      final atBoundary = await _getJson(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/suggest?quota_stretch=true&quota_stretch_threshold_percent=30',
+        ),
+      );
+      final belowBoundary = await _getJson(
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/suggest?quota-stretch=true&quota-stretch-threshold-percent=31',
+        ),
+      );
+
+      expect(atBoundary['routing_policy'], 'quota_stretch');
+      expect(atBoundary['quota_stretch_threshold_percent'], 30.0);
+      expect((atBoundary['recommended'] as Map)['provider'], 'claude');
+      expect((belowBoundary['recommended'] as Map)['provider'], 'ollama');
+      expect(
+        (belowBoundary['receipt'] as Map)['policy']['routing'],
+        'quota_stretch',
+      );
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('local /suggest honors active cross-process routing leases', () async {
     final leases = InMemoryRouteLeaseStore();
     final reservation = leases.reserve(
@@ -1427,6 +1461,13 @@ void main() {
         'require_tools=perhaps': 'require_tools',
         'budget=': 'budget policy',
         'local_first=perhaps': 'local_first',
+        'quota_stretch=perhaps': 'quota_stretch',
+        'local_first=true&quota_stretch=true': 'mutually exclusive',
+        'quota_stretch_threshold_percent=25': 'requires quota_stretch=true',
+        'quota_stretch=true&quota_stretch_threshold_percent=19':
+            'between 20 and 50',
+        'quota_stretch=true&quota_stretch_threshold_percent=51':
+            'between 20 and 50',
         'local_frist=true': 'unknown query parameter: local_frist',
       };
       for (final entry in cases.entries) {

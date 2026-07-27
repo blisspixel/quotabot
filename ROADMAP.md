@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-26. This file is the forward plan. It records brief shipped
+Updated 2026-07-27. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -87,52 +87,71 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
-**Implement an opt-in quota-stretch routing policy.** This is planned behavior,
-not a capability in 0.9.5. It fills the gap between `balanced`, which prefers a
-comfortable included subscription route, and `local_first`, which prefers a
-suitable on-device runtime immediately.
+**Provision release signing and make signed-artifact verification a fail-closed
+release gate.** The quota-stretch policy shipped in 0.9.6, so the largest
+remaining acquisition gap is now the unsigned Windows and macOS distribution
+path. Final clean-install, accessibility, and provider evidence should be
+collected against the signed artifacts users will actually receive.
 
 **Behavior**
 
-- Keep using included subscription quota while any safe candidate is at or above
-  a documented, bounded stretch threshold.
-- Below that threshold, allow a reachable on-device runtime to win before
-  subscriptions reach the existing comfort floor.
-- Name the active policy and reason in every surface that exposes it and in the
-  decision receipt.
+- Authenticode-sign and RFC 3161 timestamp every distributed Windows executable
+  with SHA-256, then verify every signature before packaging and publication.
+- Developer ID-sign the macOS app and bundled executables with hardened runtime,
+  submit the archive with `notarytool`, staple the accepted ticket, and verify
+  both the code signature and Gatekeeper assessment before publication.
+- Preserve the native build, archive-shape, checksum, GitHub provenance,
+  lifecycle, and immutable-publication gates around the signed artifacts.
 
 **Guardrails**
 
-- Preserve the current `balanced` and `local_first` behavior, the binding-window
-  rule, profile and one-request filters, and fail-soft fallback.
-- Never treat an Ollama cloud-offloaded model as local.
-- Never revive stale or drifted evidence or admit manual or paid API capacity
-  into a policy for included subscriptions.
+- Signing credentials live only in protected release environments. Pull requests,
+  forks, and ordinary branch builds remain unsigned and cannot read them.
+- A release tag fails closed and remains unpublished when a required credential,
+  signature, timestamp, notarization result, staple, or verification step is
+  missing.
+- Never print, upload as an artifact, or commit a certificate, private key,
+  password, notary credential, or unredacted signing diagnostic.
+- Keep checksum and GitHub provenance verification. Application signing proves
+  platform identity and integrity; it does not replace repository provenance.
+- Do not add instructions that bypass SmartScreen, Gatekeeper, or quarantine.
 
 **Done when**
 
-- Deterministic tests cover both threshold boundaries, local availability,
-  binding-window exhaustion, loaded and cold local candidates, cloud-offloaded
-  models, and account, profile, and exclude filters.
-- CLI, MCP, loopback HTTP, and the desktop consumer expose matching policy,
-  reason, and receipt fields.
-- The selected threshold is named and visible. Any caller override is bounded.
+- The release workflow signs in the correct order, verifies before packaging,
+  and fails closed under deterministic missing-secret and bad-signature tests.
+- Windows release assets pass `signtool verify /pa /all`; macOS assets pass
+  `codesign --verify --deep --strict`, `spctl --assess`, and stapler validation
+  after a fresh download of the exact draft assets.
+- A signed 0.9.x rehearsal passes clean install, launch, tray, update, rollback,
+  data-preserving uninstall, checksum, provenance, and immutable publication on
+  native Windows and macOS runners.
+- The setup and distribution docs describe the signed state without asking users
+  to weaken platform protections.
 
-**Why now:** 0.9.4 closed the release gap, leaving this as the only open,
-repository-unblocked code item in the 0.9 advisor milestone. It turns the local
-readiness and execution-location evidence already shipped into a practical way
-to conserve scarce included subscription quota without forcing an always-local
-choice.
+**Why now:** unsigned apps are the largest remaining first-install trust and
+acquisition gap, and signing is a dependency of the final native evidence pass.
+Apple requires Developer ID signing before notarization and recommends hardened
+runtime, a secure timestamp, notarization, and ticket stapling for direct
+distribution. Microsoft documents Authenticode signing and RFC 3161 SHA-256
+timestamping as the authenticity and integrity path for downloaded executables.
+Testing installation and accessibility first would validate artifacts that must
+still change.
 
-After it closes, the remaining 1.0 work is evidence: native macOS and Linux
-provider records, desktop signing and notarization, native accessibility smoke,
-and dated idle-machine validation of the Claude and Codex grants. Those require
-hardware, real accounts, or signing authority rather than another general
-development patch.
+Sources: [Apple notarization guidance, accessed 2026-07-27](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
+[Microsoft Authenticode timestamping guidance, accessed 2026-07-27](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
+[GitHub artifact attestation guidance, accessed 2026-07-27](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+
+The workflow and verification work can be prepared in the repository, but final
+closure requires the project owner to provision a Windows code-signing identity,
+Apple Developer Program membership, a Developer ID identity, and protected
+release credentials. After it closes, proceed through native macOS and Linux
+provider records, native accessibility smoke, dated idle-machine validation of
+the Claude and Codex grants, then the frozen 1.0 rehearsal.
 
 ## Current state
 
-The current line, **0.9.5**, is also the tagged stable release and installer
+The current line, **0.9.6**, is also the tagged stable release and installer
 version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
@@ -151,10 +170,10 @@ milestone sections below.
 | Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
 | Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.4 | The immutable [v0.9.4 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.4) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30180394420) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567), including upgrade from v0.9.2 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.5 | The immutable [v0.9.5 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.5) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30207371760) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30208371908), including upgrade from v0.9.4 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.4 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.5 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -510,10 +529,13 @@ recommendation is aligned to what the user actually wants.
   candidate, because it cannot serve a generation request. An undeclared kind
   stays routable, since requiring a capability must fail closed while excluding
   a model must fail open.
-- **Next (quota-stretch policy):** implement the explicit behavior, safety
-  boundaries, and acceptance matrix in [Next](#next). Until it ships, every
-  public surface must continue to describe only the existing `balanced` and
-  `local_first` policies.
+- **Done (quota-stretch policy):** opt-in `quota_stretch` keeps fresh measured
+  included quota while effective headroom is at or above a visible 25 percent
+  reserve, then prefers a reachable on-device runtime. Callers can bound the
+  reserve from 20 through 50 percent. The policy is shared by CLI, MCP, loopback
+  HTTP, desktop profiles, and decision receipts; preserves `balanced` and
+  `local_first`; rejects stale, drifted, manual, paid, and cloud-offloaded
+  evidence; and prefers loaded local capacity before cold local capacity.
 - **Done (multi-account):** provider accounts discovered on one machine can be
   shown together in one dashboard. Account-scoped profiles, cache, drift,
   history, and expansion state prevent work and personal evidence from being
@@ -555,7 +577,7 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. v0.9.4 supplies a green tagged acquisition record; application
+  mechanics. v0.9.5 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
   required before this gate is closed.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,

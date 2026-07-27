@@ -10,6 +10,7 @@ const defaultProfileName = 'default';
 
 enum ProfileRoutingPolicy {
   balanced,
+  quotaStretch,
 
   /// Deprecated wire alias for [balanced]. Kept so older profile files remain
   /// readable; new writes always serialize the canonical policy.

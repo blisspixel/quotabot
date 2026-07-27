@@ -406,13 +406,22 @@ same claim-backed native guard, while tests use an in-memory store. Lease
 generations are flushed through unique exclusive temporary files before rename.
 Leases are advisory local metadata with TTLs and idempotency keys; they never
 contact providers and never sit in the prompt or inference data path.
-`suggestRoute` also accepts an explicit local-first policy. The default remains
-balanced, where a comfortable metered subscription wins and local runtimes are
-fallbacks. Local-first mode recommends an available local runtime before
-subscription quota and records `routing_policy: "local_first"` in the JSON
-response. It can also accept explicit caller-supplied cost penalties; these are
-relative policy inputs, not prices inferred by quotabot, and they only discount
-the shared routing score when the caller provides them.
+`suggestRoute` accepts two explicit alternatives to the default balanced policy,
+where a comfortable metered subscription wins and local runtimes are fallbacks.
+Local-first mode recommends an available local runtime before subscription quota
+and records `routing_policy: "local_first"`. Quota-stretch mode keeps fresh
+measured included quota while effective headroom is at or above a default 25
+percent reserve, then prefers a reachable on-device runtime and records
+`routing_policy: "quota_stretch"`. Its caller override is bounded from 20 through
+50 percent. Manual, non-quota metered, stale, drifted, and cloud-offloaded
+candidates cannot satisfy the policy. Loaded local runtimes sort before cold
+ones for this choice; if no local runtime exists, the decision fails soft to the
+best usable included-quota route. Public adapters reject simultaneous
+local-first and quota-stretch requests. The core resolves an internal conflict to
+local-first defensively. `suggestRoute` can also accept explicit caller-supplied
+cost penalties; these are relative policy inputs, not prices inferred by
+quotabot, and they only discount the shared routing score when the caller
+provides them.
 
 `mcp.dart` builds one MCP server definition: tools, resources, output schemas,
 behavior annotations, capability scope, and standard MCP resource subscription
@@ -430,8 +439,10 @@ explicit `snapshot` scope, and never forces a live collect. Envelope age or an
 unsafe provider can set that flag. Winner and alternative
 records retain their own provider-level stale flags. It can still compact expired records while reading the local lease
 ledger, so it is not annotated read-only or idempotent. `suggest_provider` and
-`decide_now` both accept `local_first` for cost-sensitive dispatch plus explicit
-`cost_penalties` for caller-owned cost policy. `reserve_provider` and
+`decide_now` both accept `local_first` for always-local dispatch or
+`quota_stretch` with an optional bounded `quota_stretch_threshold_percent` for a
+low included-quota reserve, plus explicit `cost_penalties` for caller-owned cost
+policy. `reserve_provider` and
 `release_provider` explicitly mutate the local lease ledger; release is local
 and idempotent, while reserve also collects live metadata.
 `quotas://current` remains the unfiltered live snapshot resource.
@@ -451,9 +462,12 @@ routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
 `bin/local_server.dart` provides a plain HTTP JSON alternative for non-MCP
 consumers, including `GET /suggest?local_first=true` for the same opt-in local
-first routing policy and `GET /suggest?cost_penalty=codex:2` for explicit
-caller-owned cost discounting. Its read endpoints are unauthenticated loopback
-metadata. The only write endpoints are authenticated, bounded lease reserve and
+first routing policy, `GET /suggest?quota_stretch=true` for the default reserve,
+and `GET /suggest?cost_penalty=codex:2` for explicit caller-owned cost
+discounting. The server accepts a quota-stretch threshold from 20 through 50 and
+rejects malformed, out-of-range, or mutually exclusive policy inputs before
+collection. Its read endpoints are unauthenticated loopback metadata. The only
+write endpoints are authenticated, bounded lease reserve and
 release operations. Server startup creates and permission-checks a stable
 per-user bearer token without printing it. First-start token creation uses the
 same process-and-isolate guard plus an owner-only flushed temporary file, so
@@ -732,11 +746,11 @@ attestations, clean-runner lifecycle checks, and a draft-release publication
 barrier. Source setup remains available when a launcher or shortcut is wanted.
 The official repository also blocks `v*` tag updates and deletion. GitHub
 release immutability locks the tag and assets when a draft is published after
-the setting activation. The v0.9.4 pipeline published and locked the exact 14
+the setting activation. The v0.9.5 pipeline published and locked the exact 14
 expected assets after its
-[native release audit](https://github.com/blisspixel/quotabot/actions/runs/30180394420),
+[native release audit](https://github.com/blisspixel/quotabot/actions/runs/30207371760),
 then passed the three-OS
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567).
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30208371908).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
 Application signing, notarization, and interactive native evidence remain 1.0

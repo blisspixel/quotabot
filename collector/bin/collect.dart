@@ -28,7 +28,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.9.5';
+const _version = '0.9.6';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -363,6 +363,15 @@ Future<void> _runMain(List<String> rawArgs) async {
     case 'suggest':
       final providerRoute = flags.contains('--provider-route');
       if (_hasModelProfile(flags) && !providerRoute) {
+        if (flags.contains('--quota-stretch') ||
+            _stringOption(flags, 'stretch-threshold', null) != null) {
+          stderr.writeln(
+            'quotabot: --quota-stretch and --stretch-threshold apply to '
+            'provider suggestions only; add --provider-route or remove them',
+          );
+          exitCode = _exitUsage;
+          return;
+        }
         if (_hasRouteCostPolicy(flags)) {
           stderr.writeln(
             'quotabot: --cost-penalty and --cost-weight apply to provider '
@@ -425,6 +434,15 @@ Future<void> _runMain(List<String> rawArgs) async {
           exitCode = _exitUsage;
           return;
         }
+        final stretchPolicy = _quotaStretchPolicy(
+          flags,
+          profileEnabled: profile?.routingPolicy.canonical ==
+              ProfileRoutingPolicy.quotaStretch,
+        );
+        if (!stretchPolicy.ok) {
+          exitCode = _exitUsage;
+          return;
+        }
         // An explicit --prefer overrides the active profile's saved preference;
         // otherwise the profile's preference (if any) applies.
         final flagPreference = _preferenceOrderFrom(flags);
@@ -439,6 +457,8 @@ Future<void> _runMain(List<String> rawArgs) async {
           riskZ: risk.value,
           tunedBurn: flags.contains('--tuned-burn'),
           preferLocal: flags.contains('--local-first'),
+          quotaStretch: stretchPolicy.enabled,
+          quotaStretchThreshold: stretchPolicy.threshold,
           costPenaltyByProvider: costPolicy.penalties,
           costWeight: costPolicy.weight,
           routeRequirements: routeReqs.requirements,
@@ -644,11 +664,68 @@ List<String> _preferenceOrderFrom(Set<String> flags) {
   ];
 }
 
+({bool enabled, double threshold, bool ok}) _quotaStretchPolicy(
+  Set<String> flags, {
+  bool profileEnabled = false,
+}) {
+  final localFirst = flags.contains('--local-first');
+  final explicitStretch = flags.contains('--quota-stretch');
+  final rawThreshold = _stringOption(flags, 'stretch-threshold', null);
+  if (localFirst && explicitStretch) {
+    stderr.writeln(
+      'quotabot: --local-first and --quota-stretch are mutually exclusive',
+    );
+    return (
+      enabled: false,
+      threshold: kDefaultQuotaStretchThreshold,
+      ok: false,
+    );
+  }
+  final enabled = !localFirst && (explicitStretch || profileEnabled);
+  if (rawThreshold != null && !enabled) {
+    stderr.writeln(
+      'quotabot: --stretch-threshold requires --quota-stretch or a '
+      'quota-stretch profile',
+    );
+    return (
+      enabled: false,
+      threshold: kDefaultQuotaStretchThreshold,
+      ok: false,
+    );
+  }
+  if (rawThreshold == null) {
+    return (
+      enabled: enabled,
+      threshold: kDefaultQuotaStretchThreshold,
+      ok: true,
+    );
+  }
+  final parsed = double.tryParse(rawThreshold.trim());
+  if (parsed == null ||
+      !parsed.isFinite ||
+      parsed < kMinQuotaStretchThreshold ||
+      parsed > kMaxQuotaStretchThreshold) {
+    stderr.writeln(
+      'quotabot: --stretch-threshold must be between '
+      '${kMinQuotaStretchThreshold.round()} and '
+      '${kMaxQuotaStretchThreshold.round()}',
+    );
+    return (
+      enabled: false,
+      threshold: kDefaultQuotaStretchThreshold,
+      ok: false,
+    );
+  }
+  return (enabled: enabled, threshold: parsed, ok: true);
+}
+
 RouteSuggestion _suggestFor(
   List<ProviderQuota> results,
   int now, {
   double riskZ = 0,
   bool preferLocal = false,
+  bool quotaStretch = false,
+  double quotaStretchThreshold = kDefaultQuotaStretchThreshold,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   ModelRequirements? routeRequirements,
@@ -670,6 +747,8 @@ RouteSuggestion _suggestFor(
           riskZ: riskZ,
           activeLeases: activeLeases,
           preferLocal: preferLocal,
+          quotaStretch: quotaStretch,
+          quotaStretchThreshold: quotaStretchThreshold,
           costPenaltyByProvider: costPenaltyByProvider,
           costWeight: costWeight,
           pipePenaltyByProvider: _pipePenaltyFor(results, now),
@@ -1236,6 +1315,7 @@ const _valueOptions = {
   'risk',
   'sort',
   'state',
+  'stretch-threshold',
   'task',
   'theme',
   'tier',
@@ -1261,6 +1341,7 @@ const _switchOptions = {
   '--no-color',
   '--once',
   '--provider-route',
+  '--quota-stretch',
   '--reads',
   '--require-live',
   '--require-reasoning',
@@ -1349,10 +1430,12 @@ String? _commandOptionError(String command, Set<String> flags) {
         'min-context',
         'prefer',
         'provider-route',
+        'quota-stretch',
         'require-reasoning',
         'require-tools',
         'require-vision',
         'risk',
+        'stretch-threshold',
         'task',
         'tier-ceiling',
         'tier-floor',
@@ -2113,6 +2196,12 @@ void _printHelp() {
   );
   stdout.writeln(
     '  --local-first       suggest: prefer local runtime before subscription quota',
+  );
+  stdout.writeln(
+    '  --quota-stretch     suggest: keep 25% quota in reserve, then prefer local',
+  );
+  stdout.writeln(
+    '  --stretch-threshold=N  quota-stretch reserve, 20..50 (default 25)',
   );
   stdout.writeln(
     '  --prefer=A,B        suggest: provider preference among viable options '
