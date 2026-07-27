@@ -151,11 +151,15 @@ inside `quotabot.v1`; incompatible changes require a new schema id.
 emit `quotabot.suggest.v1` with:
 
 - `schema`, `as_of`, `risk_z`, `waste_weight`,
-  `waste_threshold_percent`, `waste_max_hours`, and `cost_weight`.
-- `routing_policy`: `balanced` by default, or `local_first` when the caller
-  explicitly requested local capacity before subscription quota.
+  `waste_threshold_percent`, `waste_max_hours`, `cost_weight`, and
+  `quota_stretch_threshold_percent`. The stretch threshold is 25 by default and
+  is bounded from 20 through 50 when a caller overrides it.
+- `routing_policy`: `balanced` by default, `local_first` when the caller
+  explicitly requested local capacity before subscription quota, or
+  `quota_stretch` when the caller requested fresh measured included quota down
+  to the stretch threshold before local capacity.
 - `decision_code`: the low-cardinality policy outcome, such as `best_runway`,
-  `preferred_provider`, `local_fallback`, or `spent_wait`.
+  `preferred_provider`, `quota_stretch`, `local_fallback`, or `spent_wait`.
 - `recommended`: the picked provider candidate, or an explicit `null` when
   nothing is usable.
 - `reason`, the complete plain-language `explanation`,
@@ -163,8 +167,8 @@ emit `quotabot.suggest.v1` with:
 - `receipt`: a nested `quotabot.receipt.v1` decision receipt. Its deterministic
   `decision_id` is stable for identical decision inputs and policy. `snapshot`
   records source, age, staleness, and `stale_scope: "snapshot"`; `policy`
-  records routing order, comfort
-  threshold, planning horizon, and risk setting; `winner` records binding pool,
+  records routing order, comfort threshold, quota-stretch threshold, planning
+  horizon, and risk setting; `winner` records binding pool,
   source and spend classes, raw and effective headroom, confidence reasons, and
   every applied adjustment; `alternatives` assigns each rejected candidate a
   low-cardinality `verdict` plus a plain reason; `fallback` is the same
@@ -181,6 +185,7 @@ emit `quotabot.suggest.v1` with:
   `burn_se_percent_per_hour`, `strand_probability`, `confidence`,
   `runway_hours`, optional `projected_waste_percent`, optional `waste_boost`,
   optional `cost_penalty`, optional `cost_discount`,
+  optional `local_readiness` (`loaded` or `cold`) for local-runtime candidates,
   optional `capability_limited`, optional `capability_budget_limited`,
   optional `binding_pool`,
   optional `drift_reason`, optional `drift_observed_at`, `routing_score`,
@@ -193,14 +198,19 @@ emit `quotabot.suggest.v1` with:
   additive runway score after confidence, any waste boost, and any explicit
   caller-supplied cost discount. `cost_penalty` is never inferred by quotabot;
   it appears only when a caller provided a cost policy. Local runtimes may omit
-  these score fields because their placement is governed by the explicit fallback
-  or local-first policy. For measured machine-scoped classes, the displayed
+  these score fields because their placement is governed by the explicit
+  fallback, local-first, or quota-stretch policy. For measured machine-scoped
+  classes, the displayed
   confidence is the normal freshness and sample-adequacy confidence multiplied
   by `0.7`; raw and effective headroom keep their documented meanings.
   `pipe_discount_percent` is a recent local LiteLLM or native metadata
   pipe-health discount applied to `effective_headroom_percent` for ranking. It
   does not change `headroom_percent` or `available`; those remain quota
-  availability evidence.
+  availability evidence. A quota-stretch decision can be held by only fresh
+  measured included quota. Manual, non-quota metered, stale, and drifted
+  candidates remain inspectable but cannot satisfy the policy, and local
+  candidates must represent on-device execution rather than a cloud-offloaded
+  runtime model.
   Provider-route surfaces apply a default agentic-coding capability floor using
   the model catalog, or a caller-supplied provider-route task/capability filter
   when one is present. `capability_limited` means no catalog model meets that

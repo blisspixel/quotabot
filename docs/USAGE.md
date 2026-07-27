@@ -533,6 +533,12 @@ view. Hiding providers and choosing sort order are scoped to the active
 non-default profile; the default profile keeps the app's legacy global
 preferences.
 
+The profile editor exposes `Cloud first, local fallback`, `Stretch quota, then
+local`, and `Local only`. They serialize as `balanced`, `quotaStretch`, and
+`localOnly` in `quotabot.profile.v1`. A quota-stretch profile uses the same
+default 25 percent reserve; a CLI `--stretch-threshold=N` can override it for one
+provider suggestion.
+
 ## Proactive alerts (quotabot watch)
 
 `quotabot watch` polls quota on the same adaptive cadence as `top` and raises a
@@ -754,6 +760,18 @@ provider ranking visible but recommends a local runtime before subscription quot
 when one is available. MCP `suggest_provider` and `decide_now` accept
 `local_first: true`; the loopback HTTP equivalent is
 `GET /suggest?local_first=true`.
+To preserve a low included-quota reserve without forcing local execution from the
+start, use `quotabot suggest --quota-stretch`. Fresh measured included quota stays
+ahead of local capacity at or above 25 percent effective headroom; immediately
+below that boundary a reachable on-device runtime can win. A loaded runtime wins
+before an otherwise equivalent cold runtime. `--stretch-threshold=N` accepts an
+explicit reserve from 20 through 50. MCP uses `quota_stretch: true` plus optional
+`quota_stretch_threshold_percent`; loopback HTTP uses
+`GET /suggest?quota_stretch=true` plus the same optional threshold query field.
+`local_first` and `quota_stretch` are mutually exclusive on public transports.
+Manual, non-quota metered, stale, drifted, and cloud-offloaded candidates cannot
+satisfy quota stretch. If no on-device runtime is available, the policy fails
+soft to the best usable measured included-quota route below the reserve.
 Provider-route suggestions use an agentic-coding floor by default. When a caller
 still wants a provider-level answer for a different task, pass explicit route
 context: `quotabot suggest --provider-route --task=simple`, MCP
@@ -781,6 +799,7 @@ request-metered paid API routes.
 |---|---|---|---|---|
 | Choose a provider | `suggest` | provider recommendation and ranked alternatives | measured subscription runway, then reachable local fallback | does not enable catalogued paid API routes |
 | Prefer local execution | `suggest --local-first` | provider recommendation and ranked alternatives | reachable local runtime before subscriptions | does not enable catalogued paid API routes; cloud-offloaded Ollama models (a `-cloud` tag) stay out of local and free budgets |
+| Preserve a low included-quota reserve | `suggest --quota-stretch` | provider recommendation and ranked alternatives | fresh measured included quota at or above 25 percent effective headroom, then loaded and cold on-device runtimes | threshold override is bounded from 20 through 50; manual, paid, stale, drifted, and cloud-offloaded candidates cannot satisfy the policy |
 | Inspect model candidates | `models` | matching entries represented by the current snapshot and catalog | most routable first; known unavailable entries remain explicit within represented providers | defaults to unrestricted `any` for inspection; `quota_backed` stays explicit |
 | Choose one model | `suggest --task=PROFILE` or capability flags | concrete model recommendation | available first; on-device local runtime, loaded, lighter provider tier, then headroom | defaults to safe `quota`; `--use-expiring-quota` may let measured included quota beat local |
 | Require local-runtime classification | add `--budget=local` to a model command | filtered list or concrete model | local readiness, loaded before cold when otherwise equivalent | excludes catalogued cloud, manual, and cloud-offloaded Ollama (`-cloud`) entries |
@@ -874,8 +893,8 @@ The suggestion JSON carries, per candidate, `effective_headroom_percent`,
   only, or null when a migrated legacy quarantine has no trusted baseline. For a
   `capability_budget_limited` candidate, `resets_at` is the earliest known reset
   of a matching model gate. Top-level provenance includes
-  `routing_policy`
-(`balanced` or `local_first`), `waste_weight`, `waste_threshold_percent`,
+  `routing_policy` (`balanced`, `local_first`, or `quota_stretch`),
+`quota_stretch_threshold_percent`, `waste_weight`, `waste_threshold_percent`,
 `waste_max_hours`, and `cost_weight`. The score is a
 confidence-weighted runway index with a modest use-it-or-lose-it multiplier and
 an opt-in caller cost discount, so a slower-burning provider can rank ahead of
@@ -924,12 +943,15 @@ and exposes nine tools plus two resources:
 - `suggest_provider` - the provider to route the next request to, with ranked
   alternatives and a local fallback when subscriptions are low. Pass
   `local_first: true` to prefer a local runtime before subscription quota. Pass
-  `cost_penalties` only when the caller already has an explicit cost policy.
+  `quota_stretch: true` to preserve the default 25 percent included-quota
+  reserve, and optionally set `quota_stretch_threshold_percent` from 20 through
+  50. Pass `cost_penalties` only when the caller already has an explicit cost
+  policy.
 - `decide_now` - the same routing decision from the latest cached snapshot,
   with explicit snapshot source, age, and whole-snapshot staleness scope after
   any profile, account, and exclude filters. It never forces a live collect and
-  accepts the same `local_first` and explicit cost policies. Ranked candidates
-  carry their own provider-level stale flags.
+  accepts the same `local_first`, `quota_stretch`, threshold, and explicit cost
+  policies. Ranked candidates carry their own provider-level stale flags.
 - `reserve_provider` - create a short local quota lease for a cloud provider
   before dispatching parallel work, reducing later effective headroom.
 - `release_provider` - idempotently release a local routing lease when the
@@ -964,8 +986,10 @@ live metadata collection, which may contact provider quota endpoints, refresh
 local cache or OAuth state, and perform Antigravity onboarding; the resulting
 lease write is local. `release_provider` only updates the local lease ledger.
 Neither operation calls a model, reads prompts, or enters the request data path.
-Both routing responses include `routing_policy`, so clients can verify whether a
-decision used the default `balanced` mode or the opt-in `local_first` mode.
+Both routing responses include `routing_policy` and
+`quota_stretch_threshold_percent`, so clients can verify whether a decision used
+the default `balanced` mode, opt-in `local_first`, or opt-in `quota_stretch` and
+its exact reserve.
 
 MCP clients can subscribe to `quotas://alerts` with standard
 `resources/subscribe`. The server runs the same edge-triggered alert scan as
@@ -1016,8 +1040,12 @@ dart run bin/local_server.dart [port]   # defaults to 8721
 
 `GET /` returns the full snapshot as JSON; `GET /suggest` returns the routing
 recommendation, `GET /suggest?exclude=codex,grok` ignores those providers for
-that recommendation, `GET /suggest?local_first=true` prefers local capacity, and
-`GET /suggest?cost_penalty=codex:2` applies an explicit caller cost penalty.
+that recommendation, `GET /suggest?local_first=true` prefers local capacity,
+`GET /suggest?quota_stretch=true` preserves the default 25 percent
+included-quota reserve, and
+`GET /suggest?quota_stretch=true&quota_stretch_threshold_percent=30` selects an
+explicit bounded reserve. `GET /suggest?cost_penalty=codex:2` applies an
+explicit caller cost penalty.
 The server also exposes authenticated `POST /leases/reserve` and
 `POST /leases/release` for the bundled LiteLLM router. Startup creates a stable
 owner-only bearer token under the local quotabot HTTP directory; the token is

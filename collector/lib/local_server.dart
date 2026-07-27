@@ -407,6 +407,39 @@ Future<HttpServer> startLocalQuotabotServer({
     return (weight: weight, error: null);
   }
 
+  ({double threshold, String? error}) queryQuotaStretchThreshold(
+    Uri uri,
+    bool enabled,
+  ) {
+    final values = queryValues(
+      uri,
+      'quota_stretch_threshold_percent',
+      'quota-stretch-threshold-percent',
+    );
+    if (values == null) {
+      return (threshold: kDefaultQuotaStretchThreshold, error: null);
+    }
+    if (!enabled) {
+      return (
+        threshold: kDefaultQuotaStretchThreshold,
+        error: 'quota_stretch_threshold_percent requires quota_stretch=true',
+      );
+    }
+    final threshold = double.tryParse(values.last.trim());
+    if (threshold == null ||
+        !threshold.isFinite ||
+        threshold < kMinQuotaStretchThreshold ||
+        threshold > kMaxQuotaStretchThreshold) {
+      return (
+        threshold: kDefaultQuotaStretchThreshold,
+        error: 'quota_stretch_threshold_percent must be between '
+            '${kMinQuotaStretchThreshold.round()} and '
+            '${kMaxQuotaStretchThreshold.round()}',
+      );
+    }
+    return (threshold: threshold, error: null);
+  }
+
   ({ModelRequirements? requirements, String? error}) queryRouteRequirements(
     Uri uri,
   ) {
@@ -731,6 +764,10 @@ Future<HttpServer> startLocalQuotabotServer({
       'budget',
       'local_first',
       'local-first',
+      'quota_stretch',
+      'quota-stretch',
+      'quota_stretch_threshold_percent',
+      'quota-stretch-threshold-percent',
     };
     final unknownParameters = request.uri.queryParametersAll.keys
         .where((name) => !allowedQueryParameters.contains(name))
@@ -790,6 +827,39 @@ Future<HttpServer> startLocalQuotabotServer({
       );
       return;
     }
+    final quotaStretch = queryBoolean(
+      request.uri,
+      'quota_stretch',
+      'quota-stretch',
+    );
+    if (quotaStretch.error != null) {
+      writeJson(
+        request,
+        {'error': quotaStretch.error},
+        HttpStatus.badRequest,
+      );
+      return;
+    }
+    if (localFirst.value && quotaStretch.value) {
+      writeJson(
+        request,
+        {'error': 'local_first and quota_stretch are mutually exclusive'},
+        HttpStatus.badRequest,
+      );
+      return;
+    }
+    final stretchThreshold = queryQuotaStretchThreshold(
+      request.uri,
+      quotaStretch.value,
+    );
+    if (stretchThreshold.error != null) {
+      writeJson(
+        request,
+        {'error': stretchThreshold.error},
+        HttpStatus.badRequest,
+      );
+      return;
+    }
     final snap =
         filterExcludedProviders(await snapshot(), exclusions.providers);
     final current = now();
@@ -805,6 +875,8 @@ Future<HttpServer> startLocalQuotabotServer({
           burnStatsByProvider: recentBurnStatsByQuota(snap, current),
           activeLeases: activeLeases,
           preferLocal: localFirst.value,
+          quotaStretch: quotaStretch.value,
+          quotaStretchThreshold: stretchThreshold.threshold,
           costPenaltyByProvider: costPenalties.penalties,
           costWeight: costWeight.weight,
           pipePenaltyByProvider: routeSummaryProvider().pipePenaltyByProvider(

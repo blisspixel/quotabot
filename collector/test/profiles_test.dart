@@ -130,6 +130,28 @@ void main() {
     expect(back.accounts, profile.accounts);
   });
 
+  test('quota-stretch profile round-trips without filtering cloud providers',
+      () {
+    final fleet = [
+      q('claude'),
+      q('ollama', kind: ProviderQuotaKind.local),
+    ];
+    const profile = QuotaProfile(
+      name: 'reserve',
+      providers: {'claude', 'ollama'},
+      routingPolicy: ProfileRoutingPolicy.quotaStretch,
+    );
+
+    final json = profile.toJson();
+    final loaded = QuotaProfile.fromJson(json);
+    expect(json['routing_policy'], 'quotaStretch');
+    expect(loaded.routingPolicy, ProfileRoutingPolicy.quotaStretch);
+    expect(
+      applyProfile(fleet, loaded).map((quota) => quota.provider),
+      containsAll(<String>['claude', 'ollama']),
+    );
+  });
+
   test('legacy Claude account filters are detected but remain fail-closed', () {
     final opaque = 'credential:${List.filled(64, 'a').join()}';
     expect(isLegacyClaudeProfileAccountFilter('claude', 'max'), isTrue);

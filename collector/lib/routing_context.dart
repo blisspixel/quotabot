@@ -16,13 +16,15 @@ import 'registry.dart';
 DecisionContext providerRouteDecisionContext(
   List<ProviderQuota> providers,
   int now, {
-  double comfortThreshold = 15,
+  double comfortThreshold = kDefaultComfortThreshold,
+  double quotaStretchThreshold = kDefaultQuotaStretchThreshold,
   Map<String, double?> burnByProvider = const {},
   double leadHours = 1.0,
   Map<String, BurnStat> burnStatsByProvider = const {},
   double riskZ = 0,
   Iterable<RouteLease> activeLeases = const <RouteLease>[],
   bool preferLocal = false,
+  bool quotaStretch = false,
   double wasteWeight = kDefaultRoutingWasteWeight,
   double wasteThresholdPercent = kDefaultExpiringQuotaWasteThreshold,
   int wasteMaxHours = kDefaultExpiringQuotaMaxHours,
@@ -45,6 +47,7 @@ DecisionContext providerRouteDecisionContext(
   final leases = List<RouteLease>.unmodifiable(activeLeases);
   return DecisionContext(
     comfortThreshold: comfortThreshold,
+    quotaStretchThreshold: quotaStretchThreshold,
     burnByProvider: burnByProvider,
     leadHours: leadHours,
     burnStatsByProvider: burnStatsByProvider,
@@ -52,6 +55,7 @@ DecisionContext providerRouteDecisionContext(
     leaseDiscountFor: (provider, account) =>
         leaseDiscountFor(leases, provider, account),
     preferLocal: preferLocal,
+    quotaStretch: quotaStretch,
     wasteWeight: wasteWeight,
     wasteThresholdPercent: wasteThresholdPercent,
     wasteMaxHours: wasteMaxHours,

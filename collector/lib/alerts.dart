@@ -7,7 +7,7 @@ import 'models.dart';
 /// alert severity. A window with less free than [kAlertRedBelow] is effectively
 /// spent; below [kAlertAmberBelow] it is low. These mirror the scale the UI
 /// colors use, so the words match the bars.
-const double kAlertAmberBelow = 25.0;
+const double kAlertAmberBelow = kDefaultQuotaStretchThreshold;
 const double kAlertRedBelow = 10.0;
 
 /// How urgent a low-quota condition is, by remaining free headroom.

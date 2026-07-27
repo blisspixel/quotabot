@@ -60,6 +60,31 @@ void main() {
       expect(withLocal.recommended?.provider, direct.recommended?.provider);
       expect(withLocal.recommended?.provider, 'ollama');
     });
+
+    test('the DecisionContext forwards quota-stretch policy and threshold', () {
+      final quotas = [
+        _q('claude', [_win('weekly', 72)]),
+        _local('ollama'),
+      ];
+      final viaDecision = decide(
+        quotas,
+        _now,
+        context: const DecisionContext(
+          quotaStretch: true,
+          quotaStretchThreshold: 30,
+        ),
+      ).route;
+      final direct = suggestRoute(
+        quotas,
+        _now,
+        quotaStretch: true,
+        quotaStretchThreshold: 30,
+      );
+
+      expect(viaDecision.toJson(), direct.toJson());
+      expect(viaDecision.recommended?.provider, 'ollama');
+      expect(viaDecision.routingPolicy, 'quota_stretch');
+    });
   });
 
   group('SEE, ROUTE, and ALERT are views of one Decision', () {
