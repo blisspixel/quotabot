@@ -301,6 +301,25 @@ void main() {
     expect(saved?.sort, ProviderSort.alphabetical.name);
   });
 
+  testWidgets('profile editor saves the quota-stretch routing policy', (
+    tester,
+  ) async {
+    final result = await _openEditor(tester, activeProfile: _workProfile.name);
+
+    await _choose(
+      tester,
+      'Cloud first, local fallback',
+      'Stretch quota, then local',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(
+      result.value?.profile?.routingPolicy,
+      ProfileRoutingPolicy.quotaStretch,
+    );
+  });
+
   testWidgets('editing a profile preserves its routing preference order', (
     tester,
   ) async {

@@ -59,6 +59,45 @@ void main() {
     expect(json['using_local_fallback'], isTrue);
   });
 
+  test('suggest quota-stretch exposes policy, threshold, and receipt',
+      () async {
+    final result = await runCli([
+      'suggest',
+      '--json',
+      '--quota-stretch',
+      '--stretch-threshold=30',
+      '--exclude=claude,codex,antigravity,grok',
+    ]);
+
+    expectExitCode(result, 0);
+    final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+    expect(json['routing_policy'], 'quota_stretch');
+    expect(json['quota_stretch_threshold_percent'], 30.0);
+    expect((json['recommended'] as Map)['local'], isTrue);
+    final policy = (json['receipt'] as Map)['policy'] as Map;
+    expect(policy['routing'], 'quota_stretch');
+    expect(policy['quota_stretch_threshold_percent'], 30.0);
+  });
+
+  test('suggest rejects ambiguous or out-of-range quota-stretch policy',
+      () async {
+    final ambiguous = await runCli([
+      'suggest',
+      '--local-first',
+      '--quota-stretch',
+    ]);
+    final tooLow = await runCli([
+      'suggest',
+      '--quota-stretch',
+      '--stretch-threshold=19',
+    ]);
+
+    expectExitCode(ambiguous, 64);
+    expect(ambiguous.stderr as String, contains('mutually exclusive'));
+    expectExitCode(tooLow, 64);
+    expect(tooLow.stderr as String, contains('between 20 and 50'));
+  });
+
   test('suggest exposes explicit provider cost policy', () async {
     final result = await runCli([
       'suggest',

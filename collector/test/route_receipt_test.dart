@@ -90,6 +90,7 @@ void main() {
       expect(policy['routing'], 'balanced');
       expect(policy['spend_order'], ['subscription', 'local_fallback']);
       expect(policy['comfort_threshold_percent'], 15.0);
+      expect(policy['quota_stretch_threshold_percent'], 25.0);
 
       final winner = receipt['winner'] as Map<String, dynamic>;
       expect(winner['provider'], 'codex');
@@ -251,6 +252,31 @@ void main() {
         _now,
       );
       expect(_receipt(localFallback)['outcome'], 'local_fallback');
+    });
+
+    test('records quota-stretch threshold, spend order, and local outcome', () {
+      final suggestion = suggestRoute(
+        [_quota('claude', 80), _local('ollama')],
+        _now,
+        quotaStretch: true,
+        quotaStretchThreshold: 30,
+      );
+      final receipt = _receipt(suggestion);
+      final policy = receipt['policy'] as Map<String, dynamic>;
+
+      expect(receipt['outcome'], 'quota_stretch');
+      expect(policy['routing'], 'quota_stretch');
+      expect(policy['quota_stretch_threshold_percent'], 30.0);
+      expect(policy['spend_order'], [
+        'included_subscription_above_stretch_threshold',
+        'local',
+        'included_subscription_below_stretch_threshold',
+      ]);
+      expect((receipt['winner'] as Map)['provider'], 'ollama');
+      expect(
+        (receipt['alternatives'] as List).single['verdict'],
+        'below_stretch',
+      );
     });
 
     test('records manual and machine-scoped confidence reasons', () {

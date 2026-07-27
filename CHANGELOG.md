@@ -4,6 +4,39 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.6 - 2026-07-27
+
+### Added
+- An opt-in `quota_stretch` provider-routing policy now keeps fresh measured
+  included quota while effective headroom is at or above a 25 percent reserve,
+  then prefers a reachable on-device runtime. The existing `balanced` and
+  `local_first` policies remain unchanged.
+- CLI `--quota-stretch`, MCP `quota_stretch`, loopback HTTP `quota_stretch=true`,
+  and the desktop profile editor expose the same policy. CLI
+  `--stretch-threshold=N` and the matching MCP and HTTP fields accept an explicit
+  reserve from 20 through 50 percent.
+- Provider suggestions and decision receipts now expose
+  `quota_stretch_threshold_percent`; local route candidates expose
+  `local_readiness` so a loaded runtime can win before an otherwise equivalent
+  cold runtime.
+
+### Safety
+- Quota stretch can be satisfied only by fresh measured included quota. Stale,
+  drifted, manual, and non-quota metered candidates remain inspectable but cannot
+  hold the subscription side of the policy. Ollama cloud-offloaded models remain
+  outside local and free budgets.
+- User-facing transports reject ambiguous `local_first` plus `quota_stretch`
+  inputs and out-of-range thresholds. When no on-device runtime exists, routing
+  fails soft to the best usable included-quota candidate below the reserve.
+
+### Documentation
+- Updated the README, agent guide, usage, schema, architecture, setup, product
+  strategy, documentation index, changelog, and roadmap for the shipped policy
+  and 0.9.6 release contract.
+- Made release signing the sole next action because the unsigned Windows and
+  macOS artifacts are the largest acquisition gap and final native install,
+  accessibility, and provider evidence should run against signed artifacts.
+
 ## 0.9.5 - 2026-07-26
 
 ### Changed

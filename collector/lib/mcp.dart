@@ -37,7 +37,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.9.5';
+const quotabotMcpVersion = '0.9.6';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -102,6 +102,8 @@ Map<String, dynamic> suggestResponse(
   bool leaseStoreAvailable = true,
   String? leaseStoreReason,
   bool preferLocal = false,
+  bool quotaStretch = false,
+  double quotaStretchThreshold = kDefaultQuotaStretchThreshold,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
@@ -118,6 +120,8 @@ Map<String, dynamic> suggestResponse(
       burnStatsByProvider: burnStatsByProvider,
       activeLeases: activeLeases,
       preferLocal: preferLocal,
+      quotaStretch: quotaStretch,
+      quotaStretchThreshold: quotaStretchThreshold,
       costPenaltyByProvider: costPenaltyByProvider,
       costWeight: costWeight,
       pipePenaltyByProvider: pipePenaltyByProvider,
@@ -179,6 +183,8 @@ Map<String, dynamic> decideNowResponse(
   bool leaseStoreAvailable = true,
   String? leaseStoreReason,
   bool preferLocal = false,
+  bool quotaStretch = false,
+  double quotaStretchThreshold = kDefaultQuotaStretchThreshold,
   Map<String, double> costPenaltyByProvider = const {},
   double costWeight = kDefaultRoutingCostWeight,
   Map<String, double> pipePenaltyByProvider = const {},
@@ -214,6 +220,8 @@ Map<String, dynamic> decideNowResponse(
       burnStatsByProvider: burnStatsByProvider,
       activeLeases: activeLeases,
       preferLocal: preferLocal,
+      quotaStretch: quotaStretch,
+      quotaStretchThreshold: quotaStretchThreshold,
       costPenaltyByProvider: costPenaltyByProvider,
       costWeight: costWeight,
       pipePenaltyByProvider: pipePenaltyByProvider,
@@ -231,6 +239,8 @@ Map<String, dynamic> decideNowResponse(
     'decision_code': suggestion['decision_code'],
     'risk_z': suggestion['risk_z'],
     'routing_policy': suggestion['routing_policy'],
+    'quota_stretch_threshold_percent':
+        suggestion['quota_stretch_threshold_percent'],
     'waste_weight': suggestion['waste_weight'],
     'waste_threshold_percent': suggestion['waste_threshold_percent'],
     'waste_max_hours': suggestion['waste_max_hours'],
@@ -707,6 +717,9 @@ final _candidateSchema = JsonSchema.object(
       description: 'Epoch seconds when provider drift was detected.',
     ),
     'available': JsonSchema.boolean(),
+    'local_readiness': JsonSchema.string(
+      description: 'For local runtimes, "loaded" or "cold".',
+    ),
   },
   required: [
     'provider',
@@ -852,6 +865,7 @@ final _decisionReceiptSchema = JsonSchema.object(
         'routing': JsonSchema.string(),
         'spend_order': JsonSchema.array(items: JsonSchema.string()),
         'comfort_threshold_percent': JsonSchema.number(),
+        'quota_stretch_threshold_percent': JsonSchema.number(),
         'lead_hours': JsonSchema.number(),
         'risk_z': JsonSchema.number(),
       },
@@ -859,6 +873,7 @@ final _decisionReceiptSchema = JsonSchema.object(
         'routing',
         'spend_order',
         'comfort_threshold_percent',
+        'quota_stretch_threshold_percent',
         'lead_hours',
         'risk_z',
       ],
@@ -893,7 +908,11 @@ final suggestOutputSchema = JsonSchema.object(
     'decision_code': JsonSchema.string(),
     'risk_z': JsonSchema.number(description: 'Risk aversion used (0 = mean).'),
     'routing_policy': JsonSchema.string(
-      description: '"balanced" or "local_first".',
+      description: '"balanced", "local_first", or "quota_stretch".',
+    ),
+    'quota_stretch_threshold_percent': JsonSchema.number(
+      description:
+          'Bounded effective-headroom reserve used by quota_stretch (20..50).',
     ),
     'waste_weight': JsonSchema.number(
       description: 'Projected-waste multiplier weight used for ranking.',
@@ -943,6 +962,7 @@ final decideNowOutputSchema = JsonSchema.object(
     'decision_code': JsonSchema.string(),
     'risk_z': JsonSchema.number(),
     'routing_policy': JsonSchema.string(),
+    'quota_stretch_threshold_percent': JsonSchema.number(),
     'waste_weight': JsonSchema.number(),
     'waste_threshold_percent': JsonSchema.number(),
     'waste_max_hours': JsonSchema.integer(),
@@ -1224,6 +1244,13 @@ final _routingInputSchema = JsonSchema.object(
       description:
           'Prefer a local runtime before spending subscription quota when one is available.',
     ),
+    'quota_stretch': JsonSchema.boolean(
+      description:
+          'Use measured included quota at or above the stretch threshold, then prefer an on-device runtime.',
+    ),
+    'quota_stretch_threshold_percent': JsonSchema.number(
+      description: 'Quota-stretch reserve from 20 through 50; defaults to 25.',
+    ),
     'task': JsonSchema.string(
       description:
           'Optional provider-route capability profile: simple, standard, hard, complex, or reasoning.',
@@ -1416,6 +1443,7 @@ class _ProfiledSnapshot {
   /// Provider preference from the loaded profile, most-preferred first.
   /// Empty when no profile was applied or the profile has no preference.
   final List<String> preferenceOrder;
+  final ProfileRoutingPolicy routingPolicy;
 
   const _ProfiledSnapshot({
     required this.providers,
@@ -1423,6 +1451,7 @@ class _ProfiledSnapshot {
     this.accountFilter,
     this.error,
     this.preferenceOrder = const [],
+    this.routingPolicy = ProfileRoutingPolicy.balanced,
   });
 }
 
@@ -1456,6 +1485,62 @@ String? _accountFilter(Object? value) {
     weight = parsedWeight;
   }
   return (penalties: parsed.penalties, weight: weight, error: null);
+}
+
+({bool enabled, double threshold, String? error}) _quotaStretchPolicy(
+  Map<String, dynamic> args, {
+  ProfileRoutingPolicy profilePolicy = ProfileRoutingPolicy.balanced,
+}) {
+  final localFirst = args['local_first'] == true;
+  final explicitStretch = args['quota_stretch'] == true;
+  if (localFirst && explicitStretch) {
+    return (
+      enabled: false,
+      threshold: kDefaultQuotaStretchThreshold,
+      error: 'local_first and quota_stretch are mutually exclusive',
+    );
+  }
+  final profileStretch =
+      profilePolicy.canonical == ProfileRoutingPolicy.quotaStretch;
+  final enabled = !localFirst && (explicitStretch || profileStretch);
+  final rawThreshold = args['quota_stretch_threshold_percent'];
+  if (rawThreshold != null && !enabled) {
+    return (
+      enabled: false,
+      threshold: kDefaultQuotaStretchThreshold,
+      error: 'quota_stretch_threshold_percent requires quota_stretch=true or '
+          'a quota-stretch profile',
+    );
+  }
+  final threshold = rawThreshold is num
+      ? rawThreshold.toDouble()
+      : kDefaultQuotaStretchThreshold;
+  if (rawThreshold != null &&
+      (rawThreshold is! num ||
+          !threshold.isFinite ||
+          threshold < kMinQuotaStretchThreshold ||
+          threshold > kMaxQuotaStretchThreshold)) {
+    return (
+      enabled: false,
+      threshold: kDefaultQuotaStretchThreshold,
+      error: 'quota_stretch_threshold_percent must be between '
+          '${kMinQuotaStretchThreshold.round()} and '
+          '${kMaxQuotaStretchThreshold.round()}',
+    );
+  }
+  return (enabled: enabled, threshold: threshold, error: null);
+}
+
+ProfileRoutingPolicy _requestedProfilePolicy(
+  Map<String, dynamic> args,
+  ProfileLoader profileLoader,
+) {
+  final raw = args['profile'];
+  if (raw is! String || raw.trim().isEmpty) {
+    return ProfileRoutingPolicy.balanced;
+  }
+  return profileLoader(raw.trim())?.routingPolicy.canonical ??
+      ProfileRoutingPolicy.balanced;
 }
 
 List<ProviderQuota> _filterAccount(
@@ -1511,6 +1596,7 @@ Future<_ProfiledSnapshot> _profiledSnapshot(
     accountFilter: account,
     // Same preference the CLI applies for a named profile on suggest.
     preferenceOrder: profile.preferenceOrder,
+    routingPolicy: profile.routingPolicy.canonical,
   );
 }
 
@@ -1912,12 +1998,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'threshold, after discounting recent burn and active local leases), and '
         'falls back to a local runtime (e.g. Ollama) when every subscription is '
         'low. Pass local_first=true to choose a local runtime before spending '
-        'subscription quota when one is available. Pass cost_penalties only '
+        'subscription quota when one is available. Pass quota_stretch=true to '
+        'use measured included quota down to a bounded 25% reserve, then prefer '
+        'an on-device runtime. Pass cost_penalties only '
         'when the caller has an explicit relative cost policy; quotabot never '
         'infers prices from provider names. Returns the recommended provider, '
         'a human reason, a using_local_fallback flag, a guaranteed fallback, '
         'and the full ranked candidate list. Local runtimes never win on '
-        'headroom unless local_first is explicitly set.',
+        'headroom unless a local-preferring policy is explicitly set.',
     inputSchema: _routingInputSchema,
     outputSchema: suggestOutputSchema,
     annotations: _liveCollection,
@@ -1925,14 +2013,21 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final n = now();
       final costPolicy = _routingCostPolicy(args);
       final routeRequirements = _routeRequirementsFromArgs(args);
-      if (routeRequirements.error != null || costPolicy.error != null) {
+      final stretchPolicy = _quotaStretchPolicy(
+        args,
+        profilePolicy: _requestedProfilePolicy(args, profileLoader),
+      );
+      if (routeRequirements.error != null ||
+          costPolicy.error != null ||
+          stretchPolicy.error != null) {
         final profiled = await _profiledSnapshot(
           args,
           () async => const <ProviderQuota>[],
           profileLoader,
         );
         final response = decide(const [], n).route.toJson();
-        response['error'] = routeRequirements.error ?? costPolicy.error;
+        response['error'] =
+            routeRequirements.error ?? costPolicy.error ?? stretchPolicy.error;
         // This validation error returns before any lease read, so the empty
         // active_leases is a complete view, matching the schema's required flag.
         response['lease_store_available'] = true;
@@ -1953,6 +2048,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             leaseStoreAvailable: leaseState.available,
             leaseStoreReason: leaseState.reason,
             preferLocal: args['local_first'] == true,
+            quotaStretch: stretchPolicy.enabled,
+            quotaStretchThreshold: stretchPolicy.threshold,
             costPenaltyByProvider: costPolicy.penalties,
             costWeight: costPolicy.weight,
             pipePenaltyByProvider:
@@ -1979,8 +2076,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'provider-level staleness. This lets a router decide whether the answer '
         'is fresh enough for a per-request path. Active temporary leases are applied to effective '
         'headroom; reading them may compact expired records in the local lease '
-        'ledger. Accepts the same local_first and explicit cost_penalties routing '
-        'policy as suggest_provider.',
+        'ledger. Accepts the same local_first, quota_stretch, and explicit '
+        'cost_penalties routing policy as suggest_provider.',
     inputSchema: JsonSchema.object(
       properties: {
         'profile': JsonSchema.string(
@@ -2003,6 +2100,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'local_first': JsonSchema.boolean(
           description:
               'Prefer a local runtime before spending subscription quota when one is available.',
+        ),
+        'quota_stretch': JsonSchema.boolean(
+          description:
+              'Use measured included quota at or above the stretch threshold, then prefer an on-device runtime.',
+        ),
+        'quota_stretch_threshold_percent': JsonSchema.number(
+          description:
+              'Quota-stretch reserve from 20 through 50; defaults to 25.',
         ),
         'task': JsonSchema.string(
           description:
@@ -2050,6 +2155,10 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
       final costPolicy = _routingCostPolicy(args);
       final routeRequirements = _routeRequirementsFromArgs(args);
+      final stretchPolicy = _quotaStretchPolicy(
+        args,
+        profilePolicy: profiled.routingPolicy,
+      );
       if (routeRequirements.error != null) {
         final response = decideNowResponse(
           const CachedQuotaSnapshot.empty(),
@@ -2074,6 +2183,18 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           _withProfileMeta(response, profiled),
         );
       }
+      if (stretchPolicy.error != null) {
+        final response = decideNowResponse(
+          const CachedQuotaSnapshot.empty(),
+          n,
+          maxAgeSeconds: boundedMaxAge,
+          catalog: catalog,
+        );
+        response['error'] = stretchPolicy.error;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           decideNowResponse(
@@ -2089,6 +2210,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             leaseStoreAvailable: leaseState.available,
             leaseStoreReason: leaseState.reason,
             preferLocal: args['local_first'] == true,
+            quotaStretch: stretchPolicy.enabled,
+            quotaStretchThreshold: stretchPolicy.threshold,
             costPenaltyByProvider: costPolicy.penalties,
             costWeight: costPolicy.weight,
             pipePenaltyByProvider:

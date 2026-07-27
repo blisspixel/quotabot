@@ -260,6 +260,13 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                     ),
                   ),
                   DropdownMenuItem(
+                    value: ProfileRoutingPolicy.quotaStretch,
+                    child: Text(
+                      'Stretch quota, then local',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  DropdownMenuItem(
                     value: ProfileRoutingPolicy.localOnly,
                     child: Text('Local only'),
                   ),

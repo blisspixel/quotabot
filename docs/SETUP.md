@@ -131,10 +131,10 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` selects one exact tag for a
 reproducible rollback.
 
 The current stable release is
-[v0.9.5](https://github.com/blisspixel/quotabot/releases/tag/v0.9.5). The
-verified v0.9.4 rehearsal
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30181248567)
-passed the one-line install, upgrade from its actual prior stable v0.9.2,
+[v0.9.6](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6). The
+verified v0.9.5 rehearsal
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30208371908)
+passed the one-line install, upgrade from its actual prior stable v0.9.4,
 persistent-state, and source-setup matrix on Windows, macOS, and Ubuntu. Every
 patch release follows the same published-artifact path.
 

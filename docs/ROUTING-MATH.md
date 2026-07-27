@@ -187,6 +187,23 @@ collapses to "most headroom that clears the comfort floor" - today's `suggestRou
 So the shipped policy is the corner of this objective where only stalls are priced;
 turning on the other weights is a smooth generalization.
 
+The shipped `quota_stretch` option does not secretly change `U_i` or invent a
+price. It adds one explicit winner-qualification boundary after normal candidate
+scoring:
+
+```text
+tau = clamp(caller reserve or 25, 20, 50)
+if best fresh measured included-quota h_effective >= tau: choose it
+else if an on-device runtime is reachable: choose loaded, then cold
+else: fail soft to the best usable included-quota candidate
+```
+
+The exact boundary is inclusive. The default 25 percent reserve is the same as
+the shipped amber threshold and remains at least five points above the balanced
+15 percent comfort floor. Stale, drifted, manual, non-quota metered, and
+cloud-offloaded evidence cannot qualify. This keeps the policy inspectable and
+leaves both balanced scoring and always-local ordering unchanged.
+
 ---
 
 ## 6. Allocation across providers: shipped heuristic and research analogies
@@ -452,6 +469,7 @@ realized outcomes.
 | score component provenance | `analysis.dart` `RoutingScoreBreakdown` -> `runway_hours` | first optimizer hook shipped |
 | projected-waste route boost | `analysis.dart` `RoutingScoreBreakdown` -> `waste_boost` | first waste-weight hook shipped |
 | explicit cost discount | `analysis.dart` `RoutingScoreBreakdown` -> `cost_discount` | opt-in caller policy shipped |
+| quota-stretch winner qualification | `analysis.dart` `kDefaultQuotaStretchThreshold`, `suggestRoute` | opt-in bounded policy shipped |
 | burn shrinkage | `insights.dart` `shrinkBurnStats` -> cache boundary | first hook shipped |
 | reliability shrinkage | `insights.dart` `shrinkInsightsReliability` -> stats/report/app analytics | shipped |
 | heatmap beta-binomial shrinkage | `insights.dart` `WeekHourWindow` usable rates -> scheduling score | shipped |

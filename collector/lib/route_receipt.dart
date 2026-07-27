@@ -12,6 +12,7 @@ import 'package:crypto/crypto.dart';
 enum RouteDecisionCode {
   noData('no_data'),
   localFirst('local_first'),
+  quotaStretch('quota_stretch'),
   preferredProvider('preferred_provider'),
   bestRunway('best_runway'),
   localFallback('local_fallback'),
@@ -43,6 +44,14 @@ enum RouteCandidateVerdict {
   belowComfort(
     'below_comfort',
     'effective headroom is below the comfort threshold',
+  ),
+  belowStretch(
+    'below_stretch',
+    'effective headroom is below the quota-stretch threshold',
+  ),
+  outsideIncludedQuota(
+    'outside_included_quota',
+    'manual or metered capacity is outside the included-quota policy',
   ),
   adjustedHeadroomDepleted(
     'adjusted_headroom_depleted',
@@ -191,6 +200,7 @@ class RoutePolicyReceipt {
   final String routing;
   final List<String> spendOrder;
   final double comfortThresholdPercent;
+  final double quotaStretchThresholdPercent;
   final double leadHours;
   final double riskZ;
 
@@ -198,6 +208,7 @@ class RoutePolicyReceipt {
     required this.routing,
     required this.spendOrder,
     required this.comfortThresholdPercent,
+    required this.quotaStretchThresholdPercent,
     required this.leadHours,
     required this.riskZ,
   });
@@ -206,6 +217,8 @@ class RoutePolicyReceipt {
         'routing': routing,
         'spend_order': spendOrder,
         'comfort_threshold_percent': _receiptNumber(comfortThresholdPercent),
+        'quota_stretch_threshold_percent':
+            _receiptNumber(quotaStretchThresholdPercent),
         'lead_hours': _receiptNumber(leadHours),
         'risk_z': _receiptNumber(riskZ),
       };

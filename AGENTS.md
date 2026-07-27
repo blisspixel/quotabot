@@ -39,12 +39,10 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.9.5. The planned next code item is an
-opt-in quota-stretch policy that conserves low included subscription quota with
-a suitable on-device runtime. Agents must continue to use only the documented
-`balanced` and `local_first` policies until it ships. The
-[roadmap Next section](ROADMAP.md#next) is the sole source for its behavior,
-guardrails, completion criteria, and rationale.
+The current verified stable release is 0.9.6. The shipped routing policies are
+`balanced`, `local_first`, and opt-in `quota_stretch`. The next work is release
+signing for Windows and macOS. The [roadmap Next section](ROADMAP.md#next) is the
+sole source for its behavior, guardrails, completion criteria, and rationale.
 
 ## Set it up from source (humans or agents)
 
@@ -76,11 +74,15 @@ for that surface.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low. Pass `local_first: true` to
     prefer a local runtime before spending subscription quota when one is
-    available. Pass `profile` to apply that profile's provider filters and its
+    available. Pass `quota_stretch: true` to keep fresh measured included quota
+    while effective headroom is at or above 25 percent, then prefer an on-device
+    runtime; `quota_stretch_threshold_percent` can override that reserve from 20
+    through 50. Pass `profile` to apply that profile's provider filters and its
     saved `preference_order` among viable candidates (same rule as the CLI).
   - `decide_now` - the same routing decision from the latest cached snapshot,
     with explicit `as_of`, age, and staleness so per-request routers do not force
-    live collection. It accepts the same `local_first` routing policy.
+    live collection. It accepts the same `local_first` and `quota_stretch`
+    routing policies.
   - `reserve_provider` - create a short local quota lease for a cloud provider
     before dispatching parallel work, reducing later effective headroom. Auto
     target selection honors the same profile `preference_order` as
@@ -129,9 +131,11 @@ for that surface.
 - **CLI.** `quotabot suggest --json` for the routing decision, `quotabot --json`
   for the full snapshot, `quotabot models --json` for per-model budget, and
   `quotabot stats --json` for analytics. Add `--local-first` to `suggest` when
-  you prefer local capacity before spending subscription quota. Concrete model
-  suggestions default to `--budget=quota`, while model listings default to
-  `--budget=any`; use `--budget=any` explicitly on a suggestion to admit
+  you prefer local capacity before spending subscription quota. Add
+  `--quota-stretch` to preserve a 25 percent included-quota reserve before
+  preferring local, with an optional `--stretch-threshold=N` from 20 through 50.
+  Concrete model suggestions default to `--budget=quota`, while model listings
+  default to `--budget=any`; use `--budget=any` explicitly on a suggestion to admit
   credit-backed or paid catalog entries. `--budget=local` and `--budget=quota`
   both exclude Ollama cloud-offloaded
   (`-cloud`) models, which run in the provider cloud rather than on-device. Add
@@ -148,7 +152,9 @@ for that surface.
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`). Add `?exclude=codex,grok` to ignore
   providers for one recommendation, or `?local_first=true` to prefer local
-  capacity. The bundled LiteLLM router also uses authenticated
+  capacity. Add `?quota_stretch=true` to preserve the default 25 percent reserve,
+  with `&quota_stretch_threshold_percent=N` for a value from 20 through 50. The
+  bundled LiteLLM router also uses authenticated
   `POST /leases/reserve` and `POST /leases/release`. Server startup creates a
   stable owner-only mutation token that is never printed or returned; mutation
   bodies contain bounded quota target metadata only, never prompts or code.
@@ -159,10 +165,14 @@ for that surface.
    it is above a comfort threshold.
 2. If every subscription is low, fall back to a reachable runtime known to
    execute locally (local capacity is a safety net, not the default winner).
-3. **Binding-window rule:** a spent longer window overrides a healthy shorter
+3. With explicit `quota_stretch`, keep only fresh measured included quota at or
+   above its 25 percent reserve ahead of local capacity. `local_first` still
+   prefers local immediately. Manual, paid, stale, drifted, and cloud-offloaded
+   evidence cannot satisfy the stretch policy.
+4. **Binding-window rule:** a spent longer window overrides a healthy shorter
    one. If the weekly cap is gone, ignore a green 5-hour bar; that provider is
    not usable.
-4. **Fail soft.** If quotabot is unreachable or returns nothing, proceed with the
+5. **Fail soft.** If quotabot is unreachable or returns nothing, proceed with the
    model the user originally asked for. Routing is an optimization, never a hard
    dependency.
 
@@ -209,12 +219,15 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   window list and `ok: false`.
 - `suggest` is `quotabot.suggest.v1`: `recommended`, `ranked`, `reason`, a
   complete plain-language `explanation`, a guaranteed `fallback`,
-  `routing_policy`, `decision_code`, and `as_of`/`risk_z` provenance. Each
+  `routing_policy`, `quota_stretch_threshold_percent`, `decision_code`, and
+  `as_of`/`risk_z` provenance. The three policy values are `balanced`,
+  `local_first`, and `quota_stretch`. Each
   candidate carries
   `headroom_percent`, `effective_headroom_percent` (headroom after discounting
   recent burn and active local leases), optional `lease_discount_percent`, and,
   when estimable, `burn_se_percent_per_hour`, `strand_probability` (0..1), and
-  `confidence` (0..1). Drift candidates also carry `drift_reason` and
+  `confidence` (0..1). Local candidates can carry `local_readiness` (`loaded` or
+  `cold`). Drift candidates also carry `drift_reason` and
   `drift_observed_at`, and are never available. Rank on
   `effective_headroom_percent`; treat low
   `confidence` or high `strand_probability` with appropriate caution.
@@ -226,8 +239,9 @@ remaining-percent value (0..100); higher means more budget left. The shapes:
   model responses, credentials, or exceptions.
 - `decide_now` is `quotabot.decision.v1`: a cache-only routing decision with
   `source`, `snapshot_as_of`, `snapshot_age_seconds`, `snapshot_stale`, and
-  `snapshot_stale_scope: "snapshot"`, plus `routing_policy`, the same nested decision receipt, ranked candidates,
-  fallback, and active local leases. It never forces a live collect.
+  `snapshot_stale_scope: "snapshot"`, plus `routing_policy`,
+  `quota_stretch_threshold_percent`, the same nested decision receipt, ranked
+  candidates, fallback, and active local leases. It never forces a live collect.
 - `reserve_provider` is `quotabot.reserve.v1`: a local lease write returning
   `reserved`, `lease`, and the chosen candidate when a cloud provider can be
   reserved. Target selection performs live metadata collection and may contact

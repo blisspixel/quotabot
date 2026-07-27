@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-07-25. Revisit this document when provider quota models, the MCP
+Updated 2026-07-27. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order and single immediate priority live in
 [ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
@@ -101,7 +101,7 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. v0.9.4 completed the exact release and three-OS install path; the
+barrier. v0.9.5 completed the exact release and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
 proved. That evidence is not a substitute for rerunning the path on the exact
 1.0 candidate. The remaining acquisition work is operating-system signing and
@@ -134,7 +134,7 @@ turns into paid API spend.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
 - The core is deterministic and heavily tested, with dedicated verification,
   schema, security, drift, and release gates.
-- v0.9.4 completed the exact release and three-OS published-installer rehearsal,
+- v0.9.5 completed the exact release and three-OS published-installer rehearsal,
   so release mechanics now have current evidence rather than only a future plan.
 - The advisor-not-proxy and zero-inference boundaries are meaningful product
   differences, not only marketing language.
@@ -235,7 +235,7 @@ bounded host-memory read. Loaded state remains direct evidence; cold models get
 an advisory comfortable, tight, constrained, or unknown fit against system RAM
 and the largest supported GPU pool. This improves local-first ordering without
 entering the request path or making a throughput claim. Capability propagation
-shipped in v0.9.4. The remaining local policy gap is quota-stretch behavior.
+shipped in v0.9.4, and the explicit quota-stretch policy shipped in v0.9.6.
 Native evidence across diverse GPU and unified-memory hosts follows; another
 synthetic benchmark does not.
 
@@ -270,28 +270,42 @@ and content-blind integration contracts.
 The [roadmap Next section](../ROADMAP.md#next) owns the exact execution order.
 The rationale for that order is:
 
-### Immediate code priority: conserve quota without forcing local
+### Immediate acquisition priority: sign the release artifacts
 
-The balanced policy is right while included subscription quota is healthy, and
-`local_first` is right when a caller always prefers an on-device runtime. They
-do not express the middle intent: keep using healthy included quota, then move
-local early enough to preserve a low subscription reserve. An opt-in,
-inspectable quota-stretch policy closes that gap without silently changing
-either existing policy.
+Quota stretch closed the remaining repository-unblocked routing-policy gap in
+v0.9.6. The largest remaining acquisition defect is now outside the advisor
+core: Windows executables are not Authenticode-signed, and the macOS app is not
+Developer ID-signed or notarized. A correct recommendation engine still fails
+its first-run promise if platform trust controls warn about or refuse its
+download.
 
-This is the highest-value work that the repository can close now. It uses the
-local readiness, execution-location, hardware-fit, capability, and decision
-receipt foundations already shipped. It also has a bounded deterministic test
-matrix and does not require a provider account, a native host the project does
-not control, or signing authority.
+Apple's current direct-distribution guidance makes Developer ID signing a
+prerequisite for notarization and calls for hardened runtime, a secure
+timestamp, notarization, and ticket stapling. Microsoft's current Authenticode
+guidance identifies signing and timestamping as the authenticity and integrity
+path for downloaded executables and recommends RFC 3161 with SHA-256 for new
+signatures. These platform signatures complement the checksums and restricted
+GitHub build-provenance attestations already shipped; they do not replace them.
 
-### After the quota-stretch policy: close the 1.0 evidence gates
+Sources: [Apple notarization guidance, accessed 2026-07-27](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
+[Microsoft Authenticode timestamping guidance, accessed 2026-07-27](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
+[GitHub artifact attestation guidance, accessed 2026-07-27](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-The remaining 1.0 gates are native macOS and Linux provider records, dated
-Claude and Codex idle-machine grant validation, native accessibility smoke,
-desktop signing and notarization, and a final exact-candidate rehearsal. The
-0.9.4 release proves the tag and artifact machinery, but evidence must be
-repeated against the frozen, signed 1.0 candidate.
+Signing comes before the remaining native evidence because it changes the exact
+artifacts and platform launch path under test. Clean-install, accessibility,
+provider, and lifecycle evidence collected first would need to be repeated after
+signing. Repository work can establish the fail-closed workflow and verification
+tests, but a Windows signing identity, Apple Developer Program membership,
+Developer ID identity, and protected release credentials require project-owner
+authority.
+
+### After signed-artifact rehearsal: close the remaining 1.0 evidence gates
+
+The remaining gates are native macOS and Linux provider records, dated Claude
+and Codex idle-machine grant validation, native accessibility smoke, and the
+final exact-candidate rehearsal. The 0.9.x releases prove the tag, artifact,
+checksum, provenance, and lifecycle machinery, but all evidence must be repeated
+against the frozen, signed 1.0 candidate.
 
 ### After 1.0 stabilization: improve decision evidence
 

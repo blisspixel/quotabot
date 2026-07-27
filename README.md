@@ -9,11 +9,11 @@ See how much quota you have left across your agentic AI coding subscriptions, in
 one place, and route the next request to whichever one has budget, so you can
 reduce quota-related stalls and avoid leaving included quota unused.
 
-> **Current stable:** 0.9.5. quotabot remains under active 0.x development, so
-> expect changes on the road to 1.0. **Next:** implement an opt-in quota-stretch
-> policy that conserves low included subscription quota with a suitable
-> on-device runtime. It is planned, not shipped; `balanced` and `local_first`
-> remain unchanged. See [why it is next and what done means](ROADMAP.md#next).
+> **Current stable:** 0.9.6. quotabot remains under active 0.x development, so
+> expect changes on the road to 1.0. **Next:** sign Windows release binaries and
+> Developer ID-sign, notarize, and staple the macOS bundle. This closes the
+> largest first-install trust gap before final native 1.0 evidence is collected.
+> See [why it is next and what done means](ROADMAP.md#next).
 
 quotabot does two things:
 
@@ -387,14 +387,14 @@ its native architecture, verifies its checksum and restricted provenance, and
 requires both the tagged version and demo-mode `doctor --json` to run. The
 scheduled install smoke separately exercises the published one-line installer
 and prior-version upgrade on Windows, macOS, and Linux.
-v0.9.4 completed that exact audit and the three-OS published install matrix; see
+v0.9.5 completed that exact audit and the three-OS published install matrix; see
 the [baseline release evidence](docs/BUILDING.md#baseline-release-evidence).
 The official repository also blocks updates and deletion of `v*` tags. GitHub
 [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
 is enabled prospectively, so releases published after it was enabled on July
-18, 2026 lock their tag and attached assets at publication. v0.9.4 is locked;
-v0.9.2 and earlier releases predate activation and were not changed
-retroactively.
+18, 2026 lock their tag and attached assets at publication. v0.9.4 and later
+releases are locked; v0.9.2 and earlier releases predate activation and were not
+changed retroactively.
 
 Restart your terminal, then run `quotabot doctor`. Claude and Codex should read
 live immediately when their host apps have current credentials. Full
@@ -466,6 +466,7 @@ quotabot suggest              # balanced provider recommendation
 quotabot check claude         # collect and evaluate only Claude
 quotabot check claude --account=EXACT_ACCOUNT  # select one returned account
 quotabot suggest --local-first  # prefer a reachable local runtime
+quotabot suggest --quota-stretch  # keep 25% included quota in reserve, then prefer local
 quotabot suggest --task=hard  # one model, included quota/local by default
 quotabot models               # current registry entries, availability, budget, capabilities
 quotabot watch                # alert on a low binding window and name the next route
@@ -488,10 +489,17 @@ The defaults are deliberate:
 |---|---|---|
 | Pick a provider | `quotabot suggest` | measured subscriptions first, reachable local fallback |
 | Prefer local execution | `quotabot suggest --local-first` | reachable local runtime before subscriptions |
+| Preserve a low quota reserve | `quotabot suggest --quota-stretch` | measured included quota at or above 25%, then a reachable on-device runtime; override with `--stretch-threshold=N` from 20 to 50 |
 | Pick a model | `quotabot suggest --task=hard` | safe `quota` budget by default: measured included quota plus on-device local runtime; then loaded, lighter provider tier, and headroom |
 | Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; excludes Ollama cloud-offloaded (`-cloud`) models |
 | Opt into unrestricted model spend | `quotabot suggest --task=hard --budget=any` | may recommend credit-backed or paid catalog entries; output states when included quota is not proven |
 | Inspect candidates | `quotabot models` | unrestricted `any` listing for inspection; entries remain explicit about availability and `quota_backed` |
+
+Quota stretch uses only fresh measured included quota. Manual, paid, stale,
+drifted, and Ollama cloud-offloaded candidates cannot hold its subscription side.
+`--local-first` and `--quota-stretch` are mutually exclusive. If no on-device
+runtime is available, quota stretch fails soft to the best usable included-quota
+route below the reserve instead of returning no route.
 
 `suggest_model` and task-profiled CLI suggestions default to `budget=quota`.
 `list_models` and `quotabot models` default to `budget=any` because listing is

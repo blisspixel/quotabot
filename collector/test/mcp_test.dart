@@ -301,6 +301,27 @@ void main() {
       expect(r['using_local_fallback'], isTrue);
     });
 
+    test('suggestResponse exposes quota-stretch policy and receipt', () {
+      final r = suggestResponse(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 80),
+          ]),
+          _local('ollama'),
+        ],
+        _now,
+        quotaStretch: true,
+        quotaStretchThreshold: 30,
+      );
+
+      expect(r['routing_policy'], 'quota_stretch');
+      expect(r['quota_stretch_threshold_percent'], 30.0);
+      expect((r['recommended'] as Map)['provider'], 'ollama');
+      final policy = (r['receipt'] as Map)['policy'] as Map;
+      expect(policy['routing'], 'quota_stretch');
+      expect(policy['quota_stretch_threshold_percent'], 30.0);
+    });
+
     test('suggestResponse applies pipe-health discounts', () {
       final r = suggestResponse(
         [
@@ -696,6 +717,8 @@ void main() {
         containsAll([
           'cost_penalties',
           'cost_weight',
+          'quota_stretch',
+          'quota_stretch_threshold_percent',
           'task',
           'min_context',
           'require_reasoning',
@@ -705,7 +728,10 @@ void main() {
       final suggestProviderOutput = byName['suggest_provider']!
           .outputSchema!
           .toJson()['properties'] as Map<String, dynamic>;
-      expect(suggestProviderOutput.keys, contains('cost_weight'));
+      expect(
+        suggestProviderOutput.keys,
+        containsAll(['cost_weight', 'quota_stretch_threshold_percent']),
+      );
       final candidateProperties = (((suggestProviderOutput['ranked']
           as Map)['items'] as Map)['properties'] as Map);
       expect(
@@ -764,6 +790,27 @@ void main() {
       expect(localFirst.structuredContent?['routing_policy'], 'local_first');
       expect(
         (localFirst.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+
+      final quotaStretch = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {
+            'quota_stretch': true,
+            'quota_stretch_threshold_percent': 30,
+            'exclude': ['claude'],
+          },
+        ),
+      );
+      expect(
+          quotaStretch.structuredContent?['routing_policy'], 'quota_stretch');
+      expect(
+        quotaStretch.structuredContent?['quota_stretch_threshold_percent'],
+        30.0,
+      );
+      expect(
+        (quotaStretch.structuredContent?['recommended'] as Map)['provider'],
         'ollama',
       );
 
@@ -1008,6 +1055,33 @@ void main() {
       );
       expect(invalidCost.isError, isFalse);
       expect(invalidCost.structuredContent?['error'], contains('cost_weight'));
+
+      final ambiguousPolicy = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'local_first': true, 'quota_stretch': true},
+        ),
+      );
+      expect(ambiguousPolicy.isError, isFalse);
+      expect(
+        ambiguousPolicy.structuredContent?['error'],
+        contains('mutually exclusive'),
+      );
+
+      final invalidThreshold = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {
+            'quota_stretch': true,
+            'quota_stretch_threshold_percent': 51,
+          },
+        ),
+      );
+      expect(invalidThreshold.isError, isFalse);
+      expect(
+        invalidThreshold.structuredContent?['error'],
+        contains('between 20 and 50'),
+      );
       expect(liveCalls, 0);
     });
 
@@ -1161,12 +1235,18 @@ void main() {
         () async {
       await connect(
         _fixture(),
-        profileLoader: (name) => name == 'local'
-            ? const QuotaProfile(
-                name: 'local',
-                routingPolicy: ProfileRoutingPolicy.localOnly,
-              )
-            : null,
+        profileLoader: (name) => switch (name) {
+          'local' => const QuotaProfile(
+              name: 'local',
+              routingPolicy: ProfileRoutingPolicy.localOnly,
+            ),
+          'stretch' => const QuotaProfile(
+              name: 'stretch',
+              providers: {'codex', 'ollama'},
+              routingPolicy: ProfileRoutingPolicy.quotaStretch,
+            ),
+          _ => null,
+        },
       );
 
       final all = await client.callTool(
@@ -1197,6 +1277,58 @@ void main() {
       expect(suggestion.structuredContent?['using_local_fallback'], isTrue);
       expect(
         (suggestion.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+
+      final stretch = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'profile': 'stretch'},
+        ),
+      );
+      expect(stretch.structuredContent?['profile'], 'stretch');
+      expect(stretch.structuredContent?['routing_policy'], 'quota_stretch');
+      expect(
+        (stretch.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+    });
+
+    test('quota-stretch honors an exact account filter before routing',
+        () async {
+      await connect([
+        _accountQ('claude', 'personal', 10),
+        _accountQ('claude', 'work', 80),
+        ProviderQuota(
+          provider: 'ollama',
+          displayName: 'ollama',
+          account: 'work',
+          asOf: _now,
+          kind: ProviderQuotaKind.local,
+          models: const [ModelInfo(id: 'local-test', local: true)],
+        ),
+      ]);
+
+      final unfiltered = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'quota_stretch': true},
+        ),
+      );
+      final work = await client.callTool(
+        const CallToolRequest(
+          name: 'suggest_provider',
+          arguments: {'quota_stretch': true, 'account': 'work'},
+        ),
+      );
+
+      expect(
+        (unfiltered.structuredContent?['recommended'] as Map)['account'],
+        'personal',
+      );
+      expect(work.structuredContent?['account_filter'], 'work');
+      expect(
+        (work.structuredContent?['recommended'] as Map)['provider'],
         'ollama',
       );
     });
@@ -1878,6 +2010,44 @@ void main() {
         'ollama',
       );
       expect(liveCalls, 0);
+    });
+
+    test('decide_now exposes quota-stretch policy from the same cache core',
+        () async {
+      await connect(
+        const [],
+        snapshotProvider: () async => throw StateError('live collection'),
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: _fixture(),
+          asOf: _now - 10,
+          source: 'disk',
+        ),
+      );
+
+      final decision = await client.callTool(
+        const CallToolRequest(
+          name: 'decide_now',
+          arguments: {
+            'quota_stretch': true,
+            'quota_stretch_threshold_percent': 30,
+            'exclude': ['claude'],
+          },
+        ),
+      );
+
+      expect(decision.structuredContent?['routing_policy'], 'quota_stretch');
+      expect(
+        decision.structuredContent?['quota_stretch_threshold_percent'],
+        30.0,
+      );
+      expect(
+        (decision.structuredContent?['recommended'] as Map)['provider'],
+        'ollama',
+      );
+      expect(
+        (decision.structuredContent?['receipt'] as Map)['policy']['routing'],
+        'quota_stretch',
+      );
     });
 
     test('decide_now rejects an old provider in a mixed-age cache', () async {

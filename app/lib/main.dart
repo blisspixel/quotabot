@@ -2462,6 +2462,8 @@ class _DashboardState extends State<Dashboard>
       pipePenaltyByProvider: _routeSummary.pipePenaltyByProvider(now: now),
       catalog: kModelCatalog,
       preferenceOrder: _activeProfile.preferenceOrder,
+      quotaStretch:
+          _activeProfile.routingPolicy == ProfileRoutingPolicy.quotaStretch,
     ),
   ).route;
 
@@ -2699,6 +2701,15 @@ class _DashboardState extends State<Dashboard>
                   ),
                   const SizedBox(height: 12),
                   Text(suggestion.explanation),
+                  const SizedBox(height: 12),
+                  Text(
+                    suggestion.routingPolicy == 'quota_stretch'
+                        ? 'Routing policy: Quota stretch at '
+                              '${suggestion.quotaStretchThreshold.round()}% reserve'
+                        : suggestion.routingPolicy == 'local_first'
+                        ? 'Routing policy: Local first'
+                        : 'Routing policy: Balanced',
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     'Decision id',
