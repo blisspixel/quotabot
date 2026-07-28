@@ -9,7 +9,7 @@ See how much quota you have left across your agentic AI coding subscriptions, in
 one place, and route the next request to whichever one has budget, so you can
 reduce quota-related stalls and avoid leaving included quota unused.
 
-> **Current stable:** 0.9.6. quotabot remains under active 0.x development, so
+> **Current stable:** 0.9.7. quotabot remains under active 0.x development, so
 > expect changes on the road to 1.0. **Next:** sign Windows release binaries and
 > Developer ID-sign, notarize, and staple the macOS bundle. This closes the
 > largest first-install trust gap before final native 1.0 evidence is collected.
@@ -387,7 +387,7 @@ its native architecture, verifies its checksum and restricted provenance, and
 requires both the tagged version and demo-mode `doctor --json` to run. The
 scheduled install smoke separately exercises the published one-line installer
 and prior-version upgrade on Windows, macOS, and Linux.
-v0.9.5 completed that exact audit and the three-OS published install matrix; see
+v0.9.6 completed that exact audit and the three-OS published install matrix; see
 the [baseline release evidence](docs/BUILDING.md#baseline-release-evidence).
 The official repository also blocks updates and deletion of `v*` tags. GitHub
 [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
@@ -491,12 +491,12 @@ The defaults are deliberate:
 | Prefer local execution | `quotabot suggest --local-first` | reachable local runtime before subscriptions |
 | Preserve a low quota reserve | `quotabot suggest --quota-stretch` | measured included quota at or above 25%, then a reachable on-device runtime; override with `--stretch-threshold=N` from 20 to 50 |
 | Pick a model | `quotabot suggest --task=hard` | safe `quota` budget by default: measured included quota plus on-device local runtime; then loaded, lighter provider tier, and headroom |
-| Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; excludes Ollama cloud-offloaded (`-cloud`) models |
+| Filter to local-runtime classification | `quotabot suggest --task=hard --budget=local` | entries reported by supported local-runtime adapters; excludes cloud-offloaded models reported by Ollama or Lemonade |
 | Opt into unrestricted model spend | `quotabot suggest --task=hard --budget=any` | may recommend credit-backed or paid catalog entries; output states when included quota is not proven |
 | Inspect candidates | `quotabot models` | unrestricted `any` listing for inspection; entries remain explicit about availability and `quota_backed` |
 
 Quota stretch uses only fresh measured included quota. Manual, paid, stale,
-drifted, and Ollama cloud-offloaded candidates cannot hold its subscription side.
+drifted, and cloud-offloaded candidates cannot hold its subscription side.
 `--local-first` and `--quota-stretch` are mutually exclusive. If no on-device
 runtime is available, quota stretch fails soft to the best usable included-quota
 route below the reserve instead of returning no route.
@@ -506,11 +506,12 @@ route below the reserve instead of returning no route.
 inspection, not permission to spend. Choosing one model from credit-backed or
 paid catalog entries therefore requires an explicit `budget=any` opt-in.
 
-Ollama can offload cloud models through its local daemon (a `-cloud` tag suffix,
-e.g. `qwen3-coder:480b-cloud`) that run on ollama.com, not on-device. quotabot
-detects the suffix, flags the model `cloud_offloaded`, and excludes it from
-`--budget=local` and free budgets, so an Ollama cloud model never satisfies a
-local-only or free policy; it stays listed only under `--budget=any`.
+Ollama can expose models that run on ollama.com through a local daemon, using a
+`-cloud` tag suffix such as `qwen3-coder:480b-cloud`. Lemonade can expose
+configured cloud-provider routes in the same local model list with
+`recipe: "cloud"`. quotabot flags both forms `cloud_offloaded` and excludes them
+from `--budget=local` and free budgets. They stay inspectable under
+`--budget=any` but never prove local-only or free execution.
 
 The `OLLAMA_HOST`, `LMSTUDIO_HOST`, and `LEMONADE_HOST` overrides must target
 `localhost`, an IPv4 loopback address, or `::1` to qualify as local capacity.

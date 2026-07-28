@@ -446,8 +446,9 @@ Two paid providers and a local runtime, `L = 1h`, `z = 1.28` (10th-pctile cautio
 - Claude: `h_risk = 0.25 - 0.20*1 - 1.28*s ~= 0.02`; `p_strand ~ Phi((0.20*3 -
   0.25)/s_T)` is high -> low runway, high strand risk.
 - Codex: `h_risk ~= 0.60 - 0.05 - 1.28*small ~= 0.53`; runway `~10.6h` -> clear winner.
-- A reachable, locally executed Ollama model can be the fallback; cloud-offloaded
-  Ollama models require separate classification and cannot be assumed free.
+- A reachable, locally executed runtime model can be the fallback. Models that
+  Ollama or Lemonade marks cloud-offloaded require separate classification and
+  cannot be assumed free.
 
 Mean-only (`z=0`) would still pick Codex here, but near a boundary (Claude at
 0.35 instead of 0.25) the risk term can flip the pick. This illustrates an
@@ -499,6 +500,9 @@ one-knob, reduces-to-previous change with its own tests.
 - Classical models motivate hypotheses, not guarantees. A policy earns a product
   claim through declared assumptions, invariant tests, and replay or outcome
   evaluation.
+- Calibration agreement is `1 - ECE`, not forecast accuracy. Casual output waits
+  for 40 resolved forecasts, and parameter tuning selects on earlier history only
+  when the candidate also improves on a later temporal holdout.
 - No optimality or competitive-ratio claim is made for the shipped routing score.
 - The shipped heuristic is recovered as an explicit limit, so each deepening is
   non-regressive.

@@ -1002,7 +1002,7 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           quant: m.quant == null ? null : t(m.quant!),
           // Must be carried: sanitize runs on every collected snapshot, and
           // dropping this would reset a cloud-offloaded model to on-device,
-          // letting a billable `-cloud` model satisfy --budget=local and free.
+          // letting a remotely executed daemon route satisfy local/free budgets.
           cloudOffloaded: m.cloudOffloaded,
         ),
     ],
@@ -1119,10 +1119,11 @@ class ModelInfo {
   final bool local;
 
   /// True when a model reached through a local runtime actually executes in the
-  /// provider's cloud rather than on this machine (e.g. an Ollama `-cloud`
-  /// model). It is still [local] in the sense of being reached via the local
-  /// daemon, but it is not on-device and not free, so budget policies that
-  /// promise local-only or free execution must exclude it.
+  /// provider's cloud rather than on this machine, such as an Ollama `-cloud`
+  /// model or Lemonade cloud-provider route. It is still [local] in the sense of
+  /// being reached via the local daemon, but it is not on-device and not free,
+  /// so budget policies that promise local-only or free execution must exclude
+  /// it.
   final bool cloudOffloaded;
 
   /// Local only: currently loaded into memory.

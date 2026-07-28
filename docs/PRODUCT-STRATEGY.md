@@ -18,11 +18,11 @@ content-blind capacity decision system that combines subscription windows,
 local-runtime readiness, source provenance, fail-soft behavior, and concurrent
 agent reservations without becoming a proxy.
 
-The immediate code constraint is not feature depth. It is closing the policy
-gap between subscription-first routing and always-local routing so a user can
-explicitly conserve low included quota without pretending that a cloud-offloaded
-model is local or weakening the no-surprise-spend boundary. Most work after that
-is native-host, account, accessibility, and signing evidence for 1.0.
+The immediate product constraint is acquisition, not feature depth. Quota
+stretch shipped in 0.9.6, closing the policy gap between subscription-first and
+always-local routing without weakening the no-surprise-spend boundary. Release
+signing and notarization now come next, followed by native-host, account, and
+accessibility evidence on the signed 1.0 candidate.
 
 ## User jobs
 
@@ -101,7 +101,7 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. v0.9.5 completed the exact release and three-OS install path; the
+barrier. v0.9.6 completed the exact release and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
 proved. That evidence is not a substitute for rerunning the path on the exact
 1.0 candidate. The remaining acquisition work is operating-system signing and
@@ -134,7 +134,7 @@ turns into paid API spend.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
 - The core is deterministic and heavily tested, with dedicated verification,
   schema, security, drift, and release gates.
-- v0.9.5 completed the exact release and three-OS published-installer rehearsal,
+- v0.9.6 completed the exact release and three-OS published-installer rehearsal,
   so release mechanics now have current evidence rather than only a future plan.
 - The advisor-not-proxy and zero-inference boundaries are meaningful product
   differences, not only marketing language.
@@ -152,10 +152,10 @@ turns into paid API spend.
   accounts. Claude credential generations now fail closed and cannot share
   cache or drift evidence, but the usage endpoint still provides no
   provider-backed identity for durable account labels or deduplication.
-- The current routing policies jump from balanced subscription-first behavior to
-  an explicit always-local preference. There is not yet an opt-in middle policy
-  that conserves low included quota while still using healthy subscription
-  headroom.
+- Calibration now withholds thin-sample headlines and validates a fitted
+  lookback on later history, but it still needs rolling-origin evaluation,
+  block-aware uncertainty, and a broader sanitized replay corpus before any
+  optimality claim would be defensible.
 
 ### Too much relative to current need
 
@@ -218,12 +218,13 @@ Source: [MCP tool annotations guidance, published 2026-03-16](https://blog.model
 ### Local-runtime metadata is richer, but local is no longer synonymous with free
 
 Ollama's passive `GET /api/ps` response includes loaded models, VRAM, context
-length, and expiry. Ollama also offers cloud models that are invoked through the
-local daemon but executed by Ollama's cloud service. A `budget=local` promise
-therefore needs execution-location evidence, not only a loopback URL.
+length, and expiry. Ollama and Lemonade can also expose cloud models through a
+local daemon while executing remotely. A `budget=local` promise therefore needs
+execution-location evidence, not only a loopback URL.
 
 Sources: [Ollama running-model API, accessed 2026-07-10](https://docs.ollama.com/api/ps),
-[Ollama cloud models, accessed 2026-07-10](https://docs.ollama.com/cloud).
+[Ollama cloud models, accessed 2026-07-10](https://docs.ollama.com/cloud),
+[Lemonade model-list API, accessed 2026-07-27](https://lemonade-server.ai/docs/api/openai/#get-v1models).
 
 LM Studio's current native `GET /api/v1/models` response exposes installed
 models, loaded instances, context, parallel capacity, size, quantization, and
@@ -309,12 +310,13 @@ against the frozen, signed 1.0 candidate.
 
 ### After 1.0 stabilization: improve decision evidence
 
-Grow deterministic conformance, replay, and calibration evaluation around the
-shared decision receipt; adopt the next final MCP revision through a dual-version
-test matrix; and harden multi-agent leases under concurrent and corrupt-state
-stress. Typed shared-pool semantics, admission-gated providers, package-manager
-distribution, and additional exports remain later work and enter only when they
-pass the decision filter below.
+Grow deterministic conformance, rolling-origin replay, calibration uncertainty,
+and mutation evaluation around the shared decision receipt; adopt the next final
+MCP revision through a dual-version test matrix; and harden multi-agent leases
+under an explicit state model plus concurrent and corrupt-state stress. Typed
+shared-pool semantics, admission-gated providers, package-manager distribution,
+and additional exports remain later work and enter only when they pass the
+decision filter below.
 
 ## Decision filter
 

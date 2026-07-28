@@ -28,7 +28,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.9.6';
+const _version = '0.9.7';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -768,9 +768,9 @@ Map<String, BurnStat> _burnStatsFor(
 }) {
   if (Platform.environment['QUOTABOT_DEMO'] == '1') return demo.demoBurnStats();
   if (_usingSimulation) return const <String, BurnStat>{};
-  // Opt-in: fit the burn lookback to this user's own recorded history (the value
-  // best calibrated to how their quota actually behaves) instead of the shipped
-  // default. Falls back to the default when the history is too thin to fit.
+  // Opt-in: select the burn lookback on earlier recorded history and accept it
+  // only when it improves on a later temporal holdout. Thin or non-improving
+  // evidence keeps the shipped default.
   int? lookback;
   if (tuned) {
     final byProvider = <String, List<HeadroomBucket>>{
@@ -2103,7 +2103,7 @@ void _printHelp() {
     '  models              known model candidates, with budget + capabilities',
   );
   stdout.writeln(
-    '  calibration         how often quotabot\'s predictions come true (history)',
+    '  calibration         forecast reliability from recorded history',
   );
   stdout.writeln(
     '  manual              list, set, or remove self-reported quota entries',
@@ -2191,7 +2191,7 @@ void _printHelp() {
     'uncertain caps)',
   );
   stdout.writeln(
-    '  --tuned-burn        suggest: fit the burn lookback to your own history '
+    '  --tuned-burn        suggest: use a holdout-validated burn lookback '
     '(see quotabot calibration)',
   );
   stdout.writeln(
@@ -3302,10 +3302,9 @@ void _printDoctor(
   print('\nSuggested: ${suggestion.explanation}');
   print('  (run "quotabot suggest" for the full ranked list)');
 
-  // Surface the calibration headline here so a skeptic sees how often quotabot's
-  // predictions come true without a separate command. Shown only once enough
-  // predictions have resolved; a thin history prints nothing rather than a
-  // number it cannot stand behind.
+  // Surface a precisely named agreement score once enough forecasts have
+  // resolved. A thin history prints nothing rather than a percentage it cannot
+  // stand behind.
   final calBuckets = <String, List<HeadroomBucket>>{};
   for (final q in results.where((q) => !q.isLocal)) {
     final b = _historyBuckets(q.provider);
@@ -3880,8 +3879,8 @@ String _verificationProvenanceState(ProviderQuota q, String state) =>
 
 /// A compact "Ns/Nm/Nh ago" age label.
 
-/// `calibration`: grade quotabot's own strand predictions against the user's
-/// recorded history, so "how often is it right" is a measured number, not a claim.
+/// `calibration`: grade quotabot's strand probabilities against recorded
+/// outcomes and report reliability without presenting agreement as accuracy.
 Future<void> _runCalibration(
   bool wantsJson,
   QuotaProfile? profile,
@@ -3912,8 +3911,8 @@ Future<void> _runCalibration(
   }
 }
 
-/// Prints the calibration report: the headline accuracy, a reliability diagram
-/// (predicted probability versus what actually happened), and a per-provider line.
+/// Prints the calibration agreement, a reliability diagram (predicted
+/// probability versus what actually happened), and a per-provider line.
 void _printCalibration(
   CalibrationReport overall,
   Map<String, List<HeadroomBucket>> byProvider,
@@ -3921,7 +3920,7 @@ void _printCalibration(
   TunedParameters tuning,
 ) {
   print(
-    'quotabot calibration  (how often quotabot\'s strand calls come true, '
+    'quotabot calibration  (forecast reliability from recorded history, '
     '0 usage tokens)\n',
   );
   if (overall.samples == 0) {
@@ -3931,15 +3930,33 @@ void _printCalibration(
     print('  has fully elapsed, so this fills in over time.');
     return;
   }
-  final pct = (overall.calibration! * 100).round();
-  print(
-    '  ${style.bold('$pct% calibrated')} over ${overall.samples} predictions, '
-    '${overall.spanDays}d of history',
-  );
+  if (overall.headlineReady) {
+    print(
+      '  ${style.bold(overall.headline!)}  ${overall.spanDays}d of history',
+    );
+  } else {
+    print(
+      '  ${style.bold('${overall.samples} resolved forecasts')} over '
+      '${overall.spanDays}d of history',
+    );
+    print(
+      style.dim(
+        '  agreement headline withheld until '
+        '$kMinCalibrationHeadlineSamples resolved forecasts; scores below are '
+        'provisional',
+      ),
+    );
+  }
   print(
     style.dim(
       '  Brier ${overall.brier!.toStringAsFixed(3)} (0 = perfect), '
-      '${overall.horizonHours}h horizon\n',
+      'ECE ${overall.ece!.toStringAsFixed(3)}, '
+      '${overall.horizonHours}h horizon',
+    ),
+  );
+  print(
+    style.dim(
+      '  calibration agreement is 1 - ECE; it is not forecast accuracy\n',
     ),
   );
   print(style.dim('  predicted -> actually spent   (predictions)'));
@@ -3952,20 +3969,29 @@ void _printCalibration(
   for (final e in byProvider.entries) {
     final r = calibrationFromHistory(e.value, now);
     if (r.samples == 0) continue;
-    print(
-      '  ${e.key.padRight(12)} ${(r.calibration! * 100).round()}% '
-      'calibrated  ${style.dim('(${r.samples})')}',
-    );
+    final evidence = r.headlineReady
+        ? '${(r.calibration! * 100).round()}% agreement'
+        : 'collecting evidence';
+    print('  ${e.key.padRight(12)} $evidence  '
+        '${style.dim('(${r.samples}/$kMinCalibrationHeadlineSamples)')}');
   }
-  if (tuning.tuned) {
+  if (tuning.temporalValidation) {
     final improve = ((tuning.brierImprovement ?? 0) * 1000).round() / 1000;
     print('');
-    print(style.dim(
-      '  self-tuned: your history predicts best with a '
-      '${tuning.burnLookbackHours}h burn lookback '
-      '(Brier -$improve vs the ${kDefaultBurnLookbackHours}h default). '
-      'Advisory; not yet applied to routing.',
-    ));
+    if (tuning.tuned) {
+      print(style.dim(
+        '  self-tuned: a ${tuning.burnLookbackHours}h burn lookback improved '
+        'Brier by $improve vs the ${kDefaultBurnLookbackHours}h default on '
+        '${tuning.validationSamples} later held-out forecasts. Advisory; not '
+        'yet applied to routing.',
+      ));
+    } else {
+      print(style.dim(
+        '  self-tuning: retained the ${kDefaultBurnLookbackHours}h default; '
+        'no fitted candidate demonstrated improvement under the temporal '
+        'holdout gate (${tuning.validationSamples} later forecasts).',
+      ));
+    }
   }
 }
 

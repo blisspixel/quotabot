@@ -157,6 +157,10 @@ void main() {
       ),
       isTrue,
     );
+    expect(
+      lemonadeNetwork.map((record) => record['path']),
+      containsAll(['/api/v1/health', '/v1/health']),
+    );
   });
 
   test('runtime access report honors profile and exclusions', () {

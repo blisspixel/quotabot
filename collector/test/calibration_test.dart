@@ -80,11 +80,27 @@ void main() {
     expect(pooled.samples, single.samples * 2);
   });
 
-  test('the headline reads only once predictions have resolved', () {
+  test('the headline waits for enough evidence and names its exact score', () {
     final rich =
         calibrationFromHistory(_sawtooth(cycles: 6), _t0 + (6 * 12 + 6) * 3600);
     expect(rich.samples, greaterThan(0));
-    expect(rich.headline, contains('calibrated over ${rich.samples}'));
+    expect(rich.headline, contains('calibration agreement'));
+    expect(rich.headline, contains('${rich.samples} resolved forecasts'));
+    expect(rich.headline, isNot(contains('% calibrated')));
+    final thin = calibrationFromHistory(
+      _sawtooth(cycles: 1),
+      _t0 + (12 + 6) * 3600,
+    );
+    expect(thin.samples, lessThan(kMinCalibrationHeadlineSamples));
+    expect(thin.headline, isNull);
+    expect(thin.toJson(), containsPair('headline_ready', false));
+    expect(
+      thin.toJson(),
+      containsPair(
+        'minimum_headline_samples',
+        kMinCalibrationHeadlineSamples,
+      ),
+    );
     expect(calibrationFromHistory(const [], _t0).headline, isNull);
   });
 
@@ -97,14 +113,18 @@ void main() {
       expect(t.samples, lessThan(40));
     });
 
-    test('a rich history fits a candidate and never scores worse', () {
+    test('a rich history validates any fitted candidate on a later tail', () {
       final rich = _sawtooth(cycles: 15); // plenty of resolved predictions
       final now = rich.last.start + 6 * 3600;
       final t = tuneBurnLookback({'p': rich}, now);
       expect(t.samples, greaterThanOrEqualTo(40));
       expect(const [3, 6, 12, 24], contains(t.burnLookbackHours));
-      // The fit is a minimum over candidates that includes the default, so it
-      // can only match or beat the default's Brier - never regress it.
+      expect(t.temporalValidation, isTrue);
+      expect(t.fitSamples, greaterThanOrEqualTo(kMinCalibrationFitSamples));
+      expect(
+        t.validationSamples,
+        greaterThanOrEqualTo(kMinCalibrationValidationSamples),
+      );
       expect(t.brierTuned, lessThanOrEqualTo(t.brierAtDefault!));
       if (t.tuned) {
         expect(t.brierImprovement, greaterThan(0));
@@ -119,6 +139,9 @@ void main() {
       expect(j['burn_lookback_hours'], isA<int>());
       expect(j['tuned'], isA<bool>());
       expect(j.containsKey('samples'), isTrue);
+      expect(j['fit_samples'], isA<int>());
+      expect(j['validation_samples'], isA<int>());
+      expect(j['temporal_validation'], isTrue);
     });
   });
 }

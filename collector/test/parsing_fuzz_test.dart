@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:quotabot_collector/adapters/lemonade.dart';
 import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/adapters/ollama.dart';
 import 'package:quotabot_collector/models.dart';
@@ -33,6 +34,12 @@ void main() {
 
       lmStudioNativeFromJson(input);
       lmStudioCompatFromJson(input);
+      for (final model in lemonadeModelsFromJson(input) ?? const []) {
+        expect(model.name.trim(), isNotEmpty);
+      }
+      for (final model in lemonadeLoadedModelsFromJson(input) ?? const []) {
+        expect(model.name.trim(), isNotEmpty);
+      }
       for (final model in ollamaModelsFromJson(input)) {
         expect(model.name.trim(), isNotEmpty);
       }

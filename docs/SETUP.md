@@ -103,7 +103,8 @@ error so the setting can be repaired.
 - **Lemonade:** desktop packages start the service automatically; confirm it
   with `lemonade status`. Headless installations run `lemond`. The server
   listens on port 13305 by default and honors `LEMONADE_HOST` and
-  `LEMONADE_PORT`.
+  `LEMONADE_PORT`. Configured cloud-provider models remain visible for
+  inspection but carry `cloud_offloaded` and stay out of local and free budgets.
 
 Additional OpenAI-compatible runtimes can use the same normalized adapter shape,
 but they must have a supported discovery adapter before quotabot will list them.
@@ -131,10 +132,10 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` selects one exact tag for a
 reproducible rollback.
 
 The current stable release is
-[v0.9.6](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6). The
-verified v0.9.5 rehearsal
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30208371908)
-passed the one-line install, upgrade from its actual prior stable v0.9.4,
+[v0.9.7](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7). The
+verified v0.9.6 rehearsal
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406)
+passed the one-line install, upgrade from its actual prior stable v0.9.5,
 persistent-state, and source-setup matrix on Windows, macOS, and Ubuntu. Every
 patch release follows the same published-artifact path.
 

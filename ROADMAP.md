@@ -151,7 +151,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 
 ## Current state
 
-The current line, **0.9.6**, is also the tagged stable release and installer
+The current line, **0.9.7**, is also the tagged stable release and installer
 version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
@@ -170,10 +170,10 @@ milestone sections below.
 | Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
 | Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.5 | The immutable [v0.9.5 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.5) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30207371760) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30208371908), including upgrade from v0.9.4 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.6 | The immutable [v0.9.6 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30290535142) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406), including upgrade from v0.9.5 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.5 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.6 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -211,11 +211,12 @@ which is why calibration lands before 1.0 rather than after it.
 - **0.7 - One forecast, one engine, shipped.** The decision and windowing spine
   is one pure, replayable core that every routing surface consumes, with a
   deterministic replay and simulation harness. Mostly invisible by design.
-- **0.8 - The moat: a forecast that grades itself, shipped.** On the forecast core, add the
-  calibration ledger - log every prediction with the outcome later snapshots
-  reveal, score it (Brier, reliability), and tune the free parameters on the user's
-  own history - and surface it at the hood as "~94% calibrated over your last 30
-  days". A predictor that publishes its own calibration cannot bluff. The only
+- **0.8 - The moat: a forecast that grades itself, shipped.** On the forecast
+  core, add the calibration ledger - log every prediction with the outcome later
+  snapshots reveal, score it (Brier, ECE, reliability), and tune free parameters
+  on earlier history only when they improve on later held-out history. Surface a
+  precisely named calibration-agreement score only after enough forecasts have
+  resolved. A predictor that publishes its evidence cannot bluff. The only
   durable moat and the deepest honesty; it silently makes the glance truer.
 - **0.9 - The self-explanatory, opinionated advisor.** With routing resting on a
   calibrated forecast, make it legible and aligned to the user: one plain-language
@@ -449,15 +450,17 @@ happened, and it improves on the user's own data.
 - **Shipped:** graded with proper scoring rules - Brier score, expected
   calibration error, and a reliability diagram (predicted probability versus
   observed frequency).
-- **Shipped:** surfaced at the hood via `quotabot calibration` ("N% calibrated
-  over M predictions, Kd of history", the reliability diagram, and per-provider
-  lines), with an honest empty state when the history is too thin to grade, and
-  the headline also appears in `quotabot doctor`.
-- **Shipped (first parameter):** self-tuning fits the burn lookback that makes
-  the predictor best-calibrated on the user's own history (minimum Brier over
-  candidates), degrading to the shipped default unless enough predictions have
-  resolved and a candidate beats it on a comparable sample size - never
-  overfitting a thin history. It is advisory by default; `quotabot suggest
+- **Shipped:** surfaced at the hood via `quotabot calibration` as "N%
+  calibration agreement across M resolved forecasts", the reliability diagram,
+  and per-provider lines. The agreement score is `1 - ECE`, not the percentage
+  of individual forecasts that were correct. Casual percentage headlines are
+  withheld until 40 forecasts resolve; machine output retains provisional scores
+  with the exact sample count. The headline also appears in `quotabot doctor`.
+- **Shipped (first parameter):** self-tuning selects the burn-lookback candidate
+  on earlier history, leaves a forecast-horizon gap, and accepts it only when it
+  improves Brier on the later 25 percent holdout using the same provider and
+  timestamp pairs. Thin or non-improving evidence keeps the shipped default. It
+  is advisory by default; `quotabot suggest
   --tuned-burn` opts in to applying the fitted lookback to the burn feeding the
   decision. The other free parameters (comfort threshold, risk z, lead time) are
   routing-policy values tuned by realized regret, not calibration; that evidence
@@ -518,7 +521,9 @@ recommendation is aligned to what the user actually wants.
 - **Done (local capability gates):** local models now carry the capabilities
   their runtime declares, so a capability filter can select one. Ollama declares
   tool use, vision, and the model's maximum context per model; LM Studio
-  declares them in both native model-list shapes. Previously no local model
+  declares them in both native model-list shapes; Lemonade declares context,
+  labels, loaded state, and running context in its extended list and health
+  shapes. Previously no local model
   declared anything, so every capability filter silently rejected all of them,
   including under `--budget=local`. An undeclared capability is still never
   assumed, so an OpenAI-compatible listing satisfies no capability filter. The
@@ -577,7 +582,7 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. v0.9.5 supplies a green tagged acquisition record; application
+  mechanics. v0.9.6 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
   required before this gate is closed.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
@@ -634,6 +639,16 @@ more recorded histories and provider shapes. Do not claim optimality. A
 routing-math change must beat the current policy on a declared metric without
 breaking a safety invariant.
 
+The shipped minimum sample threshold and later holdout correct the immediate
+presentation and in-sample selection defects. The next evaluation layer uses
+rolling-origin validation so training always precedes evaluation, block-aware
+uncertainty for overlapping horizons, and a versioned sanitized replay corpus.
+Before changing the public score, compare the fixed-width ECE estimator with
+equal-mass or debiased alternatives because common calibration-error estimators
+can be biased. Relevant methods are summarized in
+[Forecasting: Principles and Practice](https://otexts.com/fpp3/tscv.html) and
+[Mitigating Bias in Calibration Error Estimation](https://proceedings.mlr.press/v151/roelofs22a.html).
+
 ### P1. Adopt the next final MCP revision deliberately
 
 The [release candidate for the planned `2026-07-28` MCP specification](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
@@ -656,7 +671,39 @@ windowing spine.
 Stress atomic cross-process reserve/release, idempotency, bounded TTL expiry,
 crash cleanup, corrupt-ledger recovery, and decision visibility. Any reservation
 weight is an explicit bounded caller policy because quotabot does not read the
-task.
+task. Write an explicit state model for lease ownership, expiry, file replacement,
+and recovery, then model-check its safety and liveness invariants before adding
+more concurrency. High-level state specifications are useful here because they
+test behaviors across implementations rather than restating one code path. See
+[Specifying and Verifying Systems with TLA+](https://lamport.org/pubs/spec-and-verifying.pdf)
+for the method, not as a claim that the current implementation has been verified.
+
+### P1. Make failure boundaries observable and mutation-tested
+
+Replace broad silent catches at authentication, filesystem, process, and provider
+boundaries with a small typed failure taxonomy and bounded content-free
+diagnostics. Preserve intentional fail-soft behavior, but make timeout, drift,
+malformed evidence, cancellation, and unavailable dependencies distinguishable
+in tests and support output. Add per-module coverage floors for critical boundary
+packages so a high aggregate cannot hide thin adapters, then mutation-test the
+pure decision, parsing, and recovery cores. Large-scale evidence suggests
+mutation testing exposes test-suite holes that ordinary coverage misses; see
+[Long-term Effects of Mutation Testing](https://research.google/pubs/long-term-effects-of-mutation-testing/).
+
+### P1. Make local verification reproducible and bounded
+
+Provide one documented local gate entry point that discovers or clearly rejects
+the wrong Flutter, Dart, and Python versions, mirrors CI coverage and integration
+commands, and emits a concise evidence summary. Split slow platform and
+process-level tests into balanced shards with declared time budgets while keeping
+the full three-OS matrix authoritative.
+
+### P2. Decompose oversized modules behind stable seams
+
+After behavior locks and boundary tests are in place, extract the desktop entry
+point, cache and migration store, and MCP transport into bounded modules with
+explicit ports. Move one seam per pull request and require contract-equivalent
+tests, rather than attempting a high-risk rewrite or changing public schemas.
 
 ### P2. Expand distribution
 

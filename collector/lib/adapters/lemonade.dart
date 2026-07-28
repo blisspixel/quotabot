@@ -7,7 +7,6 @@ import '../local_runtime_config.dart';
 import '../models.dart';
 import '../provider_ids.dart';
 import '../util.dart';
-import 'lmstudio.dart' show lmStudioCompatFromJson;
 import 'ollama.dart' show LocalModel, localRuntimeQuota;
 
 /// Detects a local Lemonade Server (the AMD/lemonade-sdk OpenAI-compatible
@@ -49,12 +48,19 @@ class LemonadeAdapter {
       for (final path in const ['/api/v1/models', '/v1/models']) {
         final models = await _models(path, client);
         if (models != null) {
+          final healthPath =
+              path.startsWith('/api/') ? '/api/v1/health' : '/v1/health';
+          final loaded = await _loadedModels(healthPath, client) ?? const [];
+          final installedNames = {for (final model in models) model.name};
           return localRuntimeQuota(
             id: id,
             name: name,
             asOf: asOf,
             installed: models,
-            loaded: const [],
+            loaded: [
+              for (final model in loaded)
+                if (installedNames.contains(model.name)) model,
+            ],
           );
         }
       }
@@ -72,8 +78,22 @@ class LemonadeAdapter {
           .get(Uri.parse('${baseUrl(environment: _environment)}$path'))
           .timeout(const Duration(seconds: 2));
       if (resp.statusCode != 200) return null;
-      final models = lmStudioCompatFromJson(jsonDecode(resp.body));
-      return (models == null || models.isEmpty) ? null : models;
+      return lemonadeModelsFromJson(jsonDecode(resp.body));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<LocalModel>?> _loadedModels(
+    String path,
+    http.Client client,
+  ) async {
+    try {
+      final resp = await client
+          .get(Uri.parse('${baseUrl(environment: _environment)}$path'))
+          .timeout(const Duration(seconds: 2));
+      if (resp.statusCode != 200) return null;
+      return lemonadeLoadedModelsFromJson(jsonDecode(resp.body));
     } catch (_) {
       return null;
     }
@@ -102,3 +122,122 @@ class LemonadeAdapter {
         error: 'non-loopback runtime host is not eligible as local capacity',
       );
 }
+
+/// Parses Lemonade's extended OpenAI-compatible model list. The default list
+/// contains downloaded local models, but configured cloud providers also add
+/// remotely executed entries with `recipe: "cloud"`. Keep those visible for
+/// inspection while marking them cloud-offloaded so they can never prove free
+/// on-device capacity. An explicit non-downloaded local catalog entry is not an
+/// installed model and is therefore omitted.
+List<LocalModel>? lemonadeModelsFromJson(dynamic data) {
+  final list = data is Map ? data['data'] : null;
+  if (list is! List) return null;
+  final models = <LocalModel>[];
+  for (final raw in list) {
+    if (raw is! Map || raw['id'] is! String) continue;
+    final id = (raw['id'] as String).trim();
+    if (id.isEmpty) continue;
+    if (raw.containsKey('recipe') &&
+        raw['recipe'] != null &&
+        raw['recipe'] is! String) {
+      continue;
+    }
+    if (raw.containsKey('cloud_provider') &&
+        raw['cloud_provider'] != null &&
+        raw['cloud_provider'] is! String) {
+      continue;
+    }
+    final recipe = raw['recipe'] is String
+        ? (raw['recipe'] as String).trim().toLowerCase()
+        : null;
+    final cloudProvider = raw['cloud_provider'] is String
+        ? (raw['cloud_provider'] as String).trim()
+        : '';
+    final cloud = recipe == 'cloud' || cloudProvider.isNotEmpty;
+    if (!cloud && raw.containsKey('downloaded') && raw['downloaded'] is! bool) {
+      continue;
+    }
+    if (raw['downloaded'] == false && !cloud) continue;
+
+    final rawLabels = raw['labels'];
+    final labels = rawLabels is List
+        ? <String>{
+            for (final label in rawLabels)
+              if (label is String) label.trim().toLowerCase(),
+          }
+        : null;
+    models.add((
+      name: id,
+      bytes: null,
+      param: null,
+      quant: null,
+      vramBytes: null,
+      expiresAt: null,
+      context: boundedIntFromWire(
+        raw['max_context_window'],
+        min: 1,
+        max: 100000000,
+      ),
+      cloud: cloud,
+      tools: labels?.contains('tool-calling'),
+      vision: labels?.contains('vision'),
+      embedding: labels?.contains('embeddings') == true ? true : null,
+      digest: null,
+    ));
+  }
+  return models;
+}
+
+/// Parses Lemonade's health response into the models currently loaded by its
+/// backend processes. Optional health metadata fails soft and never determines
+/// whether the inventory endpoint itself is reachable.
+List<LocalModel>? lemonadeLoadedModelsFromJson(dynamic data) {
+  if (data is! Map) return null;
+  final rawLoaded = data['all_models_loaded'];
+  if (rawLoaded is List) {
+    final loaded = <LocalModel>[];
+    for (final raw in rawLoaded) {
+      if (raw is! Map) continue;
+      final model = _lemonadeLoadedModel(raw);
+      if (model != null) loaded.add(model);
+    }
+    return loaded;
+  }
+  if (data.containsKey('all_models_loaded')) return null;
+
+  // Older servers exposed only the most recently loaded model name.
+  final legacy = data['model_loaded'];
+  if (legacy is! String || legacy.trim().isEmpty) return null;
+  return [_localModel(name: legacy.trim())];
+}
+
+LocalModel? _lemonadeLoadedModel(Map<dynamic, dynamic> raw) {
+  final rawName = raw['model_name'];
+  if (rawName is! String || rawName.trim().isEmpty) return null;
+  final options = raw['recipe_options'];
+  return _localModel(
+    name: rawName.trim(),
+    context: options is Map
+        ? boundedIntFromWire(
+            options['ctx_size'],
+            min: 1,
+            max: 100000000,
+          )
+        : null,
+  );
+}
+
+LocalModel _localModel({required String name, int? context}) => (
+      name: name,
+      bytes: null,
+      param: null,
+      quant: null,
+      vramBytes: null,
+      expiresAt: null,
+      context: context,
+      cloud: false,
+      tools: null,
+      vision: null,
+      embedding: null,
+      digest: null,
+    );

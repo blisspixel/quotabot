@@ -336,10 +336,12 @@ underlying `local_hardware` object with `as_of`, system-memory total/available
 bytes, largest-single-GPU total/available bytes, and `gpu_count`. Separate GPU
 pools are not summed. Capacity evidence is absent on subscription providers.
 `budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
-runtime executes in its cloud rather than on-device (an Ollama `-cloud` model)
-carries `cloud_offloaded: true` and is excluded from `--budget=local` and free
-budgets, though it stays listed under `--budget=any`; it remains `local: true`
-because it is reached through the local daemon.
+runtime executes in a cloud rather than on-device carries
+`cloud_offloaded: true`. Current evidence is an Ollama `-cloud` tag or a
+Lemonade `recipe: "cloud"` or `cloud_provider` field. Such a model is excluded
+from `--budget=local` and free budgets, though it stays listed under
+`--budget=any`; it remains `local: true` because it is reached through the local
+daemon.
 Model registry listing defaults to `any` for inspection. Concrete CLI and MCP
 model suggestions default to `quota`; `any` must be explicit before a suggestion
 can select credit-backed or paid catalog entries.
@@ -395,14 +397,16 @@ Schedule hints include `scheduled_at`, `wait_seconds`, `resets_at`, `label`,
 `quotabot calibration --json` emits `schema`, `generated_at`, `overall`,
 `tuning`, and `by_provider`. Each calibration report carries `samples`,
 `brier_score`, `expected_calibration_error`, `calibration`, `span_days`,
-`horizon_hours`, and `bins` (each bin: `mean_predicted`, `observed_frequency`,
-`count`). `tuning` reports fitting the strand predictor's burn lookback on the
-user's own history: `burn_lookback_hours` (the fitted value, the shipped default
-when not tuned), `tuned` (false when the history is too thin to fit responsibly),
-`samples`, and, when gradable, `brier_at_default`, `brier_tuned`, and
-`brier_improvement`. Advisory only - the fitted value is not applied to routing.
-Computed entirely from local history; empty history yields zero samples, never an
-invented score.
+`horizon_hours`, `headline_ready`, `minimum_headline_samples`, and `bins` (each
+bin: `mean_predicted`, `observed_frequency`, `count`). `calibration` is the
+agreement score `1 - expected_calibration_error`, not individual-forecast
+accuracy. `tuning` reports fitting the strand predictor's burn lookback on the
+user's earlier history and validating it on a later temporal holdout:
+`burn_lookback_hours` (the accepted value, or shipped default), `tuned`,
+`samples`, `fit_samples`, `validation_samples`, `temporal_validation`, and, when
+gradable, `brier_at_default`, `brier_tuned`, and `brier_improvement`. Advisory
+only - the fitted value is not applied to routing by default. Computed entirely
+from local history; empty history yields zero samples, never an invented score.
 
 ## `quotabot.catalog_audit.v1`
 

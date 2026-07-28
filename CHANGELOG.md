@@ -4,6 +4,45 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.7 - 2026-07-27
+
+### Fixed
+- Ollama capability enrichment now rotates its bounded probe window across
+  unresolved models. Failed or digest-less entries at the front of a library can
+  no longer starve every model after the 48-model per-read cap forever.
+- Lemonade cloud routes are no longer labeled as free on-device capacity. The
+  extended `recipe: "cloud"` and `cloud_provider` evidence now produces
+  `cloud_offloaded: true`, which keeps those models visible under `budget=any`
+  while excluding them from local, quota, local-first, and quota-stretch routes.
+- A reachable Lemonade server with an empty downloaded-model list now reports
+  `0 installed, idle` instead of `not running`.
+- Calibration output no longer presents `1 - ECE` as individual-forecast
+  accuracy. Casual percentage headlines wait for 40 resolved forecasts and name
+  the value as calibration agreement; provisional JSON remains available with
+  its exact sample count.
+- Burn-lookback self-tuning no longer selects and evaluates a candidate on the
+  same history. It fits on earlier resolved forecasts, leaves a horizon gap, and
+  requires improvement on a later 25 percent holdout using matched provider and
+  timestamp pairs.
+- Malformed Lemonade execution-location and download-state fields now fail
+  closed instead of allowing an ambiguous entry to prove local capacity.
+
+### Changed
+- Lemonade model reads now carry the server's declared maximum context, tool,
+  vision, and embedding labels, plus loaded state and running context from the
+  optional health read. They omit entries explicitly marked as not downloaded
+  unless those entries are declared cloud routes.
+- `quotabot.calibration.v1` adds headline readiness and minimum-sample evidence,
+  plus fit, temporal-validation, and holdout sample counts for tuning.
+
+### Documentation
+- Updated the README, agent guide, source inventory, schema, usage, setup,
+  architecture, routing math, provider guide, and product strategy for Lemonade
+  execution-location evidence, fair Ollama refresh behavior, statistically honest
+  calibration language, and the completed v0.9.6 release and install evidence.
+  Removed the stale product-strategy statement that quota stretch was still the
+  next code item after it shipped in 0.9.6.
+
 ## 0.9.6 - 2026-07-27
 
 ### Added

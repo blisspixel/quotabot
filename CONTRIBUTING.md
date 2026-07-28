@@ -19,8 +19,11 @@ For security issues, do not open a public issue; see [SECURITY.md](SECURITY.md).
 
 ## Development setup
 
-You need the Flutter SDK (it includes Dart). See
-[Building from source](docs/BUILDING.md).
+Use Flutter 3.44.6 with Dart 3.12.2, matching CI and release builds. Python
+integration tests support Python 3.10 through 3.13 and CI uses 3.13; Python 3.14
+is intentionally outside the LiteLLM integration's declared range. Confirm that
+`flutter`, `dart`, and a supported `python` resolve in the current shell before
+running gates. See [Building from source](docs/BUILDING.md).
 
 ```bash
 # Collector (CLI, MCP, HTTP, adapters)
@@ -36,18 +39,50 @@ flutter test
 
 ## Before you open a pull request
 
-CI runs the same checks for both Dart packages and the LiteLLM router; run them
-locally first:
+CI runs static policy, both Dart packages, the MCP clients, the LiteLLM router,
+coverage floors, and native packaging. Run the portable gates locally first.
+The exact platform package and readiness commands are in
+[Building from source](docs/BUILDING.md#build-a-release-binary).
+The command block below uses Bash syntax; on Windows, use Git Bash or translate
+environment assignment and line continuation to PowerShell.
 
 ```bash
-# collector
-cd collector && dart format . && dart analyze && dart test
+# repository policy and release consistency
+ruff check .
+ruff format --check .
+python -m unittest discover -s tools -p "test_*.py"
+python tools/check_release_version.py
 
-# app
-cd app && dart format lib test && flutter analyze && flutter test
+# collector, including the 90 percent line-coverage floor
+cd collector
+dart pub get --enforce-lockfile
+dart format --set-exit-if-changed .
+dart analyze
+dart test --coverage=coverage
+dart run coverage:format_coverage --lcov --check-ignore --in=coverage \
+  --out=coverage/lcov.info --packages=.dart_tool/package_config.json \
+  --report-on=lib
+python ../tools/check_lcov.py coverage/lcov.info 90
 
-# litellm router
-cd integrations/litellm && python -m unittest test_quotabot_router.py
+# app, including the 80 percent line-coverage floor
+cd ../app
+flutter pub get --enforce-lockfile
+dart format --set-exit-if-changed lib test
+flutter analyze --no-pub
+flutter test --no-pub --coverage
+python ../tools/check_lcov.py coverage/lcov.info 80
+
+# MCP client snippets
+cd ../integrations/mcp_clients
+npm ci
+npm run typecheck
+python -m unittest test_mcp_client_snippets.py
+
+# LiteLLM router, with Python 3.10 through 3.13
+cd ../litellm
+python -m pip install --require-hashes -r requirements.txt
+QUOTABOT_RUN_LITELLM_PROXY_TEST=1 python -m unittest \
+  test_quotabot_router.py test_quotabot_proxy_integration.py
 ```
 
 Guidelines:
