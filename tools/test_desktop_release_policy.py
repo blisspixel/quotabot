@@ -678,6 +678,27 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "Terminal fallback JSON appears only when the receipt itself cannot be published",
             normalized_building,
         )
+        self.assertIn("`receipt_body_sha256`", building)
+        self.assertIn("all other receipt fields", normalized_building)
+        self.assertIn("remove `receipt_body_sha256`", normalized_building)
+        self.assertIn(
+            "not a signature, MAC, attestation, or proof of origin",
+            normalized_building,
+        )
+        self.assertIn("exit status", normalized_building)
+        self.assertIn("independent workflow provenance", normalized_building)
+        self.assertIn(
+            "On success, use the candidate and inventory digests",
+            normalized_building,
+        )
+        self.assertIn("canonical candidate tree", normalized_building)
+        self.assertIn("archive checksum", normalized_building)
+        self.assertIn("`receipt_output_invalid`", building)
+        self.assertIn("must not be treated as current", normalized_building)
+        self.assertIn("may contain prior evidence", normalized_building)
+        self.assertIn("or may not exist", normalized_building)
+        self.assertIn("capture the terminal fallback", normalized_building)
+        self.assertIn("SignTool and PowerShell hashes", normalized_building)
         self.assertIn("40-hex SHA-1 thumbprint", normalized_building)
         self.assertIn("stop publication", normalized_building)
         self.assertIn("allowlisted failure stage", normalized_building)

@@ -24,12 +24,15 @@ Notable changes to quotabot. Newest first.
   post-signing inventory has one valid embedded Authenticode signature from the
   owner-supplied publisher identity, a SHA-256 file digest, and an RFC 3161
   timestamp whose TSTInfo message imprint uses SHA-256 and binds the publisher
-  signature. Its deterministic receipt binds candidate, inventory, native tool,
+  signature. Its deterministic receipt covers candidate, inventory, native tool,
   signer, timestamp, and per-file evidence without exposing absolute candidate
   paths or raw native diagnostics. A first-class receipt path atomically retains
   canonical success or bounded failure evidence, preserves prior complete
   evidence when publication fails, and identifies the surface, architecture,
-  and allowlisted failure stage. Output validation rejects candidate paths,
+  and allowlisted failure stage. Success and failure receipts expose an exact
+  comparison-only body digest, clearly separated from artifact identity,
+  authenticity, attestation, and independent workflow provenance. Output
+  validation rejects candidate paths,
   manifest aliases, alternate streams, and non-regular targets. It remains
   outside release publication until the signing identity and credential-bearing
   workflow are owner-approved.

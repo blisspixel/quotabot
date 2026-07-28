@@ -160,7 +160,7 @@ python tools/verify_windows_signatures.py `
   --expected-signer-thumbprint $thumbprint `
   --receipt $receipt $candidate
 if ($LASTEXITCODE -ne 0) {
-  throw "Verification failed; inspect $receipt or the bounded terminal fallback"
+  throw "Verification failed; receipt_output_invalid means $receipt is not current, may contain prior evidence, or may not exist; capture the terminal fallback and stop"
 }
 ```
 
@@ -234,7 +234,7 @@ signature-unbound timestamp evidence that another signing retry may not repair.
 
 The final full-tree inventory must still equal the supplied post-signing
 manifest. The deterministic `quotabot.windows-signature-verification.v1` receipt
-binds the candidate and inventory digests, relative PE paths and digests, signer
+covers the candidate and inventory digests, relative PE paths and digests, signer
 and timestamp identities, each timestamp message-imprint algorithm and value,
 and stable hashes of SignTool and PowerShell. It emits no generated timestamp,
 absolute candidate root, or raw native diagnostic.
@@ -243,6 +243,27 @@ With `--json`, a failure emits the bounded
 code, surface, architecture, allowlisted failure stage, and, when applicable,
 one relative PE path. Use `--receipt PATH` instead of `--json` to atomically
 retain that same canonical success or handled-failure JSON.
+
+Every success and bounded failure object includes `receipt_body_sha256`, a
+comparison-only SHA-256 over all other receipt fields. To recompute it, parse the
+object, remove `receipt_body_sha256`, serialize the remaining object with sorted
+keys, compact separators, and ASCII escaping, encode those ASCII-compatible JSON
+bytes as UTF-8, then hash those bytes. The digest detects a different canonical
+evidence body, but it is not a signature, MAC, attestation, or proof of origin.
+Anyone who replaces the receipt can recompute it. On success, use the candidate
+and inventory digests to correlate the receipt with the supplied post-signing
+manifest and canonical candidate tree. The archive checksum and independent
+workflow provenance separately establish the packaged release asset. The
+receipt-body hash also covers the SignTool and PowerShell hashes, so it can
+differ across verifier environments even when the candidate is identical.
+
+A consumer must check the verifier exit status before treating a retained
+receipt as evidence. A `receipt_output_invalid` fallback means the receipt file
+must not be treated as current: capture the terminal fallback, retain the
+candidate and manifest with the trusted workflow record, and stop publication.
+A prior complete receipt remains on disk when publication of a newer receipt
+fails. Other failure receipts likewise require their nonzero exit status,
+retained candidate and manifest, and trusted workflow record for correlation.
 
 The before and after inventories prove snapshot equality, not continuous
 filesystem immutability. This verifier shares the isolated-runner assumption

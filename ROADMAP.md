@@ -589,14 +589,16 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   mechanics. v0.9.6 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
   required before this gate is closed. The credential-free Windows verifier is
-  now ready to bind an exact post-signing inventory, every shipped PE module,
+  now ready to cover an exact post-signing inventory, every shipped PE module,
   the owner-supplied publisher identity, SHA-256 file digests, RFC 3161
   timestamps, each token's SHA-256 message imprint and signature binding, and
   stable native verifier hashes. Its first-class receipt output atomically
   retains canonical success or bounded failure evidence with surface,
-  architecture, and allowlisted-stage context. The signing identity, credential
-  custody, timestamp service, and release-workflow activation remain owner
-  decisions.
+  architecture, allowlisted-stage context, and a comparison-only digest of all
+  other receipt fields. That digest is not artifact identity, authentication,
+  attestation, or independent workflow provenance. The signing identity,
+  credential custody, timestamp service, and release-workflow activation remain
+  owner decisions.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce

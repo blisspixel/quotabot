@@ -38,6 +38,18 @@ RFC3161_ATTRIBUTE_OID = bytes.fromhex("2b060104018237030301")
 STANDARD_TIMESTAMP_ATTRIBUTE_OID = bytes.fromhex("2a864886f70d010910020e")
 TST_INFO_OID = bytes.fromhex("2a864886f70d0109100104")
 SHA256_OID = bytes.fromhex("608648016503040201")
+
+
+def _receipt_body_sha256(body: dict[str, object]) -> str:
+    canonical = json.dumps(
+        body,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 SHA1_OID = bytes.fromhex("2b0e03021a")
 RSA_OID = bytes.fromhex("2a864886f70d010101")
 SPC_INDIRECT_DATA_OID = bytes.fromhex("2b060104018237020104")
@@ -250,6 +262,7 @@ class SignaturePolicyTests(unittest.TestCase):
 
     def test_cli_help_explains_inputs_and_output_contracts(self) -> None:
         help_text = verify_windows_signatures._parser().format_help()
+        normalized_help = " ".join(help_text.split())
         for phrase in (
             "post-signing native inventory",
             "cli or desktop candidate",
@@ -258,11 +271,15 @@ class SignaturePolicyTests(unittest.TestCase):
             "40-hex certificate thumbprint",
             "canonical JSON to standard output",
             "atomically write canonical JSON",
+            "comparison-only receipt-body SHA-256",
+            "not proof of origin",
+            "leaves any prior receipt untouched",
+            "prints fallback JSON",
             "outside the candidate tree",
             "Windows SDK SignTool",
         ):
             with self.subTest(phrase=phrase):
-                self.assertIn(phrase.casefold(), help_text.casefold())
+                self.assertIn(phrase.casefold(), normalized_help.casefold())
 
         required = [
             "--manifest",
@@ -313,21 +330,59 @@ class SignaturePolicyTests(unittest.TestCase):
             surface="cli",
             architecture="x64",
         )
+        body = {
+            "schema": "quotabot.windows-signature-verification-error.v1",
+            "verified": False,
+            "surface": "cli",
+            "architecture": "x64",
+            "stage": "timestamp_policy",
+            "error_code": "timestamp_policy_unproven",
+            "message": (
+                "RFC 3161 timestamp message-imprint SHA-256 policy could not be proven"
+            ),
+            "path": "bin/quotabot.exe",
+        }
         self.assertEqual(
             payload,
             {
-                "schema": "quotabot.windows-signature-verification-error.v1",
-                "verified": False,
-                "surface": "cli",
-                "architecture": "x64",
-                "stage": "timestamp_policy",
-                "error_code": "timestamp_policy_unproven",
-                "message": (
-                    "RFC 3161 timestamp message-imprint SHA-256 policy "
-                    "could not be proven"
-                ),
-                "path": "bin/quotabot.exe",
+                **body,
+                "receipt_body_sha256": _receipt_body_sha256(body),
             },
+        )
+
+    def test_success_receipt_digest_covers_the_canonical_body(self) -> None:
+        signature = verify_windows_signatures.VerifiedPeSignature(
+            path="bin/quotabot.exe",
+            sha256="1" * 64,
+            signer_subject="CN=Expected",
+            signer_thumbprint="A" * 40,
+            timestamp_subject="CN=Timestamp",
+            timestamp_thumbprint="B" * 40,
+            timestamp_message_imprint_algorithm="sha256",
+            timestamp_message_imprint="2" * 64,
+        )
+        receipt = verify_windows_signatures.WindowsSignatureReceipt(
+            schema="quotabot.windows-signature-verification.v1",
+            surface="cli",
+            architecture="x64",
+            candidate_sha256="3" * 64,
+            inventory_sha256="4" * 64,
+            signtool_sha256="5" * 64,
+            powershell_sha256="6" * 64,
+            expected_signer_subject="CN=Expected",
+            expected_signer_thumbprint="A" * 40,
+            signatures=(signature,),
+        )
+
+        payload = receipt.to_dict()
+        receipt_body_sha256 = payload.pop("receipt_body_sha256")
+        self.assertEqual(receipt_body_sha256, _receipt_body_sha256(payload))
+        self.assertEqual(receipt.receipt_body_sha256, receipt_body_sha256)
+        changed_body = json.loads(json.dumps(payload))
+        changed_body["signatures"][0]["sha256"] = "7" * 64
+        self.assertNotEqual(
+            receipt_body_sha256,
+            _receipt_body_sha256(changed_body),
         )
 
     def test_receipt_path_must_be_external_and_distinct_from_manifest(self) -> None:
@@ -453,6 +508,16 @@ class SignaturePolicyTests(unittest.TestCase):
         }
         success_receipt = mock.Mock()
         success_receipt.to_dict.return_value = success_payload
+        failure_body = {
+            "schema": "quotabot.windows-signature-verification-error.v1",
+            "verified": False,
+            "surface": "cli",
+            "architecture": "x64",
+            "stage": "authenticode",
+            "error_code": "signature_missing",
+            "message": "an inventoried PE has no embedded Authenticode signature",
+            "path": "bin/quotabot.exe",
+        }
         cases = (
             (success_receipt, None, 0, success_payload),
             (
@@ -463,16 +528,8 @@ class SignaturePolicyTests(unittest.TestCase):
                 ),
                 1,
                 {
-                    "schema": "quotabot.windows-signature-verification-error.v1",
-                    "verified": False,
-                    "surface": "cli",
-                    "architecture": "x64",
-                    "stage": "authenticode",
-                    "error_code": "signature_missing",
-                    "message": (
-                        "an inventoried PE has no embedded Authenticode signature"
-                    ),
-                    "path": "bin/quotabot.exe",
+                    **failure_body,
+                    "receipt_body_sha256": _receipt_body_sha256(failure_body),
                 },
             ),
         )
@@ -581,6 +638,8 @@ class SignaturePolicyTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(payload["error_code"], "receipt_output_invalid")
             self.assertEqual(payload["stage"], "receipt_output")
+            receipt_body_sha256 = payload.pop("receipt_body_sha256")
+            self.assertEqual(receipt_body_sha256, _receipt_body_sha256(payload))
             self.assertNotIn(str(base), stdout.getvalue())
 
     def test_valid_sha256_message_imprint_is_extracted(self) -> None:
@@ -1146,16 +1205,20 @@ class SignaturePolicyTests(unittest.TestCase):
             )
         self.assertEqual(result, 1)
         payload = json.loads(stdout.getvalue())
+        body = {
+            "schema": "quotabot.windows-signature-verification-error.v1",
+            "verified": False,
+            "surface": "cli",
+            "architecture": "x64",
+            "stage": "native_verification",
+            "error_code": "native_tool_failed",
+            "message": "native signature verification could not run",
+        }
         self.assertEqual(
             payload,
             {
-                "schema": "quotabot.windows-signature-verification-error.v1",
-                "verified": False,
-                "surface": "cli",
-                "architecture": "x64",
-                "stage": "native_verification",
-                "error_code": "native_tool_failed",
-                "message": "native signature verification could not run",
+                **body,
+                "receipt_body_sha256": _receipt_body_sha256(body),
             },
         )
         self.assertEqual(stderr.getvalue(), "")
@@ -1236,7 +1299,17 @@ class NativeWindowsSignatureTests(unittest.TestCase):
             self.assertEqual(first.to_dict(), repeated.to_dict())
             self.assertEqual(first.native_code_count, 2)
             self.assertTrue(first.to_dict()["candidate_stable"])
-            self.assertRegex(first.verification_sha256, r"^[0-9a-f]{64}$")
+            payload = first.to_dict()
+            receipt_body_sha256 = payload.pop("receipt_body_sha256")
+            self.assertRegex(receipt_body_sha256, r"^[0-9a-f]{64}$")
+            self.assertEqual(receipt_body_sha256, _receipt_body_sha256(payload))
+            changed_body = dict(payload)
+            changed_body["architecture"] = "arm64"
+            self.assertNotEqual(
+                receipt_body_sha256,
+                _receipt_body_sha256(changed_body),
+            )
+            self.assertNotIn("verification_sha256", first.to_dict())
             self.assertRegex(first.signtool_sha256, r"^[0-9a-f]{64}$")
             self.assertRegex(first.powershell_sha256, r"^[0-9a-f]{64}$")
             for signature in first.signatures:
@@ -1477,6 +1550,11 @@ class NativeWindowsSignatureTests(unittest.TestCase):
                 "timestamp-message-imprint-sha256=",
                 human_stdout.getvalue(),
             )
+            self.assertIn(
+                "receipt body sha256 (comparison only): ",
+                human_stdout.getvalue(),
+            )
+            self.assertNotIn("verification sha256:", human_stdout.getvalue())
             self.assertNotIn(str(base), human_stdout.getvalue())
 
 

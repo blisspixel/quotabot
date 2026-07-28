@@ -117,6 +117,12 @@ class WindowsSignatureVerificationError(ValueError):
         return message
 
 
+def _with_receipt_body_sha256(body: dict[str, object]) -> dict[str, object]:
+    payload = dict(body)
+    payload["receipt_body_sha256"] = canonical_sha256(body)
+    return payload
+
+
 def _failure_payload(
     error: WindowsSignatureVerificationError,
     *,
@@ -134,7 +140,7 @@ def _failure_payload(
     }
     if error.relative_path is not None:
         payload["path"] = error.relative_path
-    return payload
+    return _with_receipt_body_sha256(payload)
 
 
 def _canonical_json(payload: dict[str, object]) -> str:
@@ -199,13 +205,12 @@ class WindowsSignatureReceipt:
     expected_signer_subject: str
     expected_signer_thumbprint: str
     signatures: tuple[VerifiedPeSignature, ...]
-    verification_sha256: str
 
     @property
     def native_code_count(self) -> int:
         return len(self.signatures)
 
-    def to_dict(self) -> dict[str, object]:
+    def _body_dict(self) -> dict[str, object]:
         return {
             "schema": self.schema,
             "surface": self.surface,
@@ -220,8 +225,14 @@ class WindowsSignatureReceipt:
             "signatures": [item.to_dict() for item in self.signatures],
             "candidate_stable": True,
             "verified": True,
-            "verification_sha256": self.verification_sha256,
         }
+
+    @property
+    def receipt_body_sha256(self) -> str:
+        return canonical_sha256(self._body_dict())
+
+    def to_dict(self) -> dict[str, object]:
+        return _with_receipt_body_sha256(self._body_dict())
 
 
 def _normalize_thumbprint(value: str) -> str:
@@ -830,22 +841,6 @@ def verify_windows_signatures(
     ):
         raise WindowsSignatureVerificationError("native_tool_failed")
 
-    signatures = tuple(verified)
-    body = {
-        "schema": SCHEMA,
-        "surface": surface,
-        "architecture": architecture,
-        "candidate_sha256": after.candidate_sha256,
-        "inventory_sha256": after.inventory_sha256,
-        "signtool_sha256": signtool_sha256,
-        "powershell_sha256": powershell_sha256,
-        "expected_signer_subject": subject,
-        "expected_signer_thumbprint": thumbprint,
-        "native_code_count": len(signatures),
-        "signatures": [item.to_dict() for item in signatures],
-        "candidate_stable": True,
-        "verified": True,
-    }
     return WindowsSignatureReceipt(
         schema=SCHEMA,
         surface=surface,
@@ -856,8 +851,7 @@ def verify_windows_signatures(
         powershell_sha256=powershell_sha256,
         expected_signer_subject=subject,
         expected_signer_thumbprint=thumbprint,
-        signatures=signatures,
-        verification_sha256=canonical_sha256(body),
+        signatures=tuple(verified),
     )
 
 
@@ -866,7 +860,10 @@ def _parser() -> argparse.ArgumentParser:
         description="Verify every PE in an exact post-signing Windows inventory.",
         epilog=(
             "Requires Windows, a registered Windows SDK SignTool, and system "
-            "PowerShell. Receipt files must stay outside the candidate tree."
+            "PowerShell. Receipt files must stay outside the candidate tree. "
+            "The comparison-only receipt-body SHA-256 detects body changes; it "
+            "is not proof of origin. A publication failure leaves any prior "
+            "receipt untouched, exits nonzero, and prints fallback JSON."
         ),
     )
     parser.add_argument(
@@ -1016,7 +1013,7 @@ def main(argv: list[str] | None = None) -> int:
             "timestamp-message-imprint-sha256="
             f"{signature.timestamp_message_imprint} {signature.path}"
         )
-    print(f"verification sha256: {receipt.verification_sha256}")
+    print(f"receipt body sha256 (comparison only): {receipt.receipt_body_sha256}")
     return 0
 
 
