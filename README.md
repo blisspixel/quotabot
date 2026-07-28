@@ -43,7 +43,7 @@ login.
 
 ## Quick start
 
-Install the latest verified CLI release:
+Install the latest checksum-verified CLI release:
 
 **macOS / Linux**
 ```bash

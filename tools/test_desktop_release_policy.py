@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import shutil
+import subprocess
+import tarfile
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -382,6 +389,208 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("quotabot-darwin-$arch-desktop.zip", macos)
         self.assertIn('> "$temporary_sidecar"', macos)
         self.assertIn("publish_package_pair", macos)
+
+    def test_cli_packagers_expose_a_build_sign_package_boundary(self) -> None:
+        windows = (ROOT / "tools" / "package-cli.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "tools" / "package-cli.sh").read_text(encoding="utf-8")
+
+        for option in ("[switch]$NoArchive", "[switch]$PackageOnly"):
+            self.assertIn(option, windows)
+        self.assertIn("if ($NoArchive -and $PackageOnly)", windows)
+        self.assertIn("if (-not $PackageOnly)", windows)
+        self.assertIn("if ($NoArchive)", windows)
+        self.assertLess(
+            windows.index("if ($NoArchive -and $PackageOnly)"),
+            windows.index("Get-Command dart"),
+        )
+        package_only = windows.split("if (-not $PackageOnly)", 1)[1]
+        self.assertIn("dart build cli", package_only)
+        self.assertIn("CLI bundle ready", windows)
+        self.assertIn("Package-only mode requires", windows)
+
+        for option in ("--no-archive", "--package-only"):
+            self.assertIn(option, posix)
+        self.assertIn('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]', posix)
+        self.assertIn('if [ "$package_only" -eq 0 ]', posix)
+        self.assertIn('if [ "$archive" -eq 0 ]', posix)
+        self.assertLess(
+            posix.index('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]'),
+            posix.index("command -v dart"),
+        )
+        self.assertIn("CLI bundle ready", posix)
+        self.assertIn("Package-only mode requires", posix)
+
+    def test_desktop_packagers_can_archive_without_rebuilding(self) -> None:
+        windows = (ROOT / "tools" / "package-windows.ps1").read_text(encoding="utf-8")
+        macos = (ROOT / "tools" / "package-macos.sh").read_text(encoding="utf-8")
+
+        self.assertIn("[switch]$PackageOnly", windows)
+        self.assertIn("if ($NoArchive -and $PackageOnly)", windows)
+        self.assertIn("if (-not $PackageOnly)", windows)
+        self.assertLess(
+            windows.index("if ($NoArchive -and $PackageOnly)"),
+            windows.index("Get-Command flutter"),
+        )
+        self.assertIn("Using existing Windows release bundle", windows)
+        self.assertIn("Package-only mode requires", windows)
+
+        self.assertIn("--package-only", macos)
+        self.assertIn('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]', macos)
+        self.assertIn('if [ "$package_only" -eq 0 ]', macos)
+        self.assertLess(
+            macos.index('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]'),
+            macos.index("command -v flutter"),
+        )
+        self.assertIn("Using existing macOS release bundle", macos)
+        self.assertIn("Package-only mode requires", macos)
+
+    @unittest.skipUnless(os.name == "nt", "Windows packaging requires Windows")
+    def test_windows_package_only_preserves_existing_candidate_bytes(self) -> None:
+        powershell = shutil.which("pwsh")
+        if powershell is None:
+            self.skipTest("PowerShell 7 is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            for name in (
+                "package-cli.ps1",
+                "package-windows.ps1",
+                "package-pair.ps1",
+                "windows-architecture.ps1",
+                "windows-build-prereqs.ps1",
+            ):
+                shutil.copy2(ROOT / "tools" / name, tools / name)
+
+            cli_bytes = b"exact normalized CLI candidate\n"
+            desktop_bytes = b"exact desktop candidate\n"
+            cli = (
+                root
+                / "collector"
+                / "build"
+                / "quotabot_cli_release"
+                / "bundle"
+                / "bin"
+                / "quotabot.exe"
+            )
+            desktop = (
+                root
+                / "app"
+                / "build"
+                / "windows"
+                / "x64"
+                / "runner"
+                / "Release"
+                / "quotabot.exe"
+            )
+            cli.parent.mkdir(parents=True)
+            desktop.parent.mkdir(parents=True)
+            cli.write_bytes(cli_bytes)
+            desktop.write_bytes(desktop_bytes)
+
+            environment = os.environ.copy()
+            environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+            for script in ("package-cli.ps1", "package-windows.ps1"):
+                completed = subprocess.run(
+                    [powershell, "-NoProfile", "-File", tools / script, "-PackageOnly"],
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                self.assertEqual(
+                    completed.returncode,
+                    0,
+                    completed.stdout + completed.stderr,
+                )
+
+            cli_archive = root / "release" / "quotabot-windows-x64.zip"
+            desktop_archive = root / "release" / "quotabot-windows-x64-desktop.zip"
+            with zipfile.ZipFile(cli_archive) as archive:
+                self.assertEqual(archive.read("bin/quotabot.exe"), cli_bytes)
+            with zipfile.ZipFile(desktop_archive) as archive:
+                self.assertEqual(archive.read("quotabot.exe"), desktop_bytes)
+
+            for archive in (cli_archive, desktop_archive):
+                expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+                sidecar = Path(f"{archive}.sha256").read_text(encoding="utf-8")
+                self.assertEqual(sidecar, f"{expected}  {archive.name}")
+
+    @unittest.skipIf(os.name == "nt", "POSIX packaging requires macOS or Linux")
+    def test_posix_cli_package_only_preserves_existing_candidate_bytes(self) -> None:
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Bash is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            for name in ("package-cli.sh", "package-pair.sh"):
+                shutil.copy2(ROOT / "tools" / name, tools / name)
+
+            cli_bytes = b"exact normalized POSIX CLI candidate\n"
+            cli = (
+                root
+                / "collector"
+                / "build"
+                / "quotabot_cli_release"
+                / "bundle"
+                / "bin"
+                / "quotabot"
+            )
+            cli.parent.mkdir(parents=True)
+            cli.write_bytes(cli_bytes)
+            cli.chmod(0o755)
+
+            completed = subprocess.run(
+                [bash, tools / "package-cli.sh", "--package-only"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+
+            archives = list((root / "release").glob("quotabot-*.tar.gz"))
+            self.assertEqual(len(archives), 1)
+            archive = archives[0]
+            with tarfile.open(archive, "r:gz") as package:
+                member = package.extractfile("./bin/quotabot")
+                self.assertIsNotNone(member)
+                self.assertEqual(
+                    member.read() if member is not None else None, cli_bytes
+                )
+            expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+            sidecar = Path(f"{archive}.sha256").read_text(encoding="utf-8")
+            self.assertEqual(sidecar, f"{expected}  {archive.name}")
+
+    def test_unsigned_launch_guidance_never_authorizes_protection_bypass(
+        self,
+    ) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        distribution = (ROOT / "docs" / "DESKTOP-DISTRIBUTION.md").read_text(
+            encoding="utf-8"
+        )
+        normalized_distribution = " ".join(distribution.split())
+
+        self.assertIn("checksum-verified CLI release", readme)
+        self.assertIn("For GitHub build provenance", normalized_distribution)
+        self.assertIn("Do not bypass SmartScreen.", normalized_distribution)
+        self.assertIn(
+            "Checksums and GitHub provenance do not establish Windows publisher identity.",
+            normalized_distribution,
+        )
+        self.assertNotIn("Do not bypass a warning until", normalized_distribution)
+        self.assertIn("Do not remove quarantine metadata", normalized_distribution)
 
     def test_normal_ci_builds_and_verifies_native_desktop_archives(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(

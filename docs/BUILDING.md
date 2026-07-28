@@ -78,12 +78,17 @@ Notes:
   different native build as that x64 asset. Add `-NoArchive` for a build-only
   check. The desktop notification plugin uses Visual Studio ATL headers; if a
   build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
-  ATL support for your installed MSVC toolset.
+  ATL support for your installed MSVC toolset. `-PackageOnly` archives that exact
+  existing bundle without resolving Flutter or rebuilding it. `-NoArchive` and
+  `-PackageOnly` are mutually exclusive.
 - **macOS:** `bash tools/package-macos.sh` verifies the committed lockfile, then
   runs `flutter build macos --release --no-pub`
   on a macOS host, verifies the `.app` bundle, and writes a portable desktop ZIP
-  plus its checksum sidecar. Production distribution still needs Developer ID
-  signing, notarization, and stapling.
+  plus its checksum sidecar. `--no-archive` leaves the built app available for a
+  later signing step, while `--package-only` archives that exact existing app
+  without resolving Flutter or rebuilding it. The two options are mutually
+  exclusive. Production distribution still needs Developer ID signing,
+  notarization, and stapling.
 - **Linux:** `bash tools/package-linux.sh` verifies the committed lockfile, then
   runs `flutter build linux --release --no-pub`
   on a Linux host, verifies the executable bundle plus `.desktop` and icon
@@ -91,7 +96,13 @@ Notes:
   repackage that bundle as an AppImage (`appimagetool`) or deb/rpm.
 - **CLI release archives** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
-  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. The
+  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. PowerShell
+  `-NoArchive` and shell `--no-archive` stop after producing the normalized
+  `bin/quotabot` bundle. `-PackageOnly` and `--package-only` archive that existing
+  bundle without resolving Dart or rebuilding it. Build-only and package-only
+  are mutually exclusive, and package-only fails when the normalized executable
+  is missing. These phase controls create a stable local signing seam; they do
+  not sign or verify the candidate themselves. The
   GitHub `Release` workflow runs the CLI and desktop helpers on `v*` tags,
   validates every CLI and desktop archive, and attests each exact archive path.
   Clean native runners then redownload all four draft CLI archives, reverify
@@ -104,8 +115,8 @@ Notes:
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners and validates each resulting archive plus checksum, so
 every change exercises the same portable bundle shape without publishing release
-assets. The build-only `-NoArchive` and `--no-archive` flags remain available for
-local iteration.
+assets. Build-only and package-only flags remain available for local release
+work; normal CI continues to exercise the default build-and-package path.
 It then launches the packaged Windows and Linux apps and requires native window
 setup plus every supported tray-registration call to complete. Windows verifies
 the native `Shell_NotifyIconGetRect` result and rectangle independently of the

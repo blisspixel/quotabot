@@ -91,7 +91,7 @@ $actual = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvar
 if ($actual -ne $expected) { throw 'Desktop archive checksum mismatch.' }
 ```
 
-For signed build provenance, install the GitHub CLI and verify the same archive
+For GitHub build provenance, install the GitHub CLI and verify the same archive
 against the repository and tag workflow:
 
 ```bash
@@ -128,7 +128,9 @@ Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
 Windows packages are not Authenticode-signed yet, so SmartScreen may warn. Do
-not bypass a warning until both checksum and attestation verification succeed.
+not bypass SmartScreen. Checksums and GitHub provenance do not establish Windows
+publisher identity. If Windows declines a normal launch, build from source or
+wait for a signed release.
 
 ### macOS
 

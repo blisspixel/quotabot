@@ -9,6 +9,11 @@ Notable changes to quotabot. Newest first.
   and `quotabot help models` now show focused, side-effect-free references for
   routing modes, budget defaults, valid policy combinations, metadata-read
   boundaries, and examples instead of the full unrelated option list.
+- CLI and Windows/macOS desktop packagers now expose mutually exclusive
+  build-only and package-only phases. A signing workflow can build once, modify
+  and verify the native candidate, then create the existing atomic archive and
+  checksum pair without an intervening rebuild. Default CI packaging is
+  unchanged.
 
 ### Fixed
 - Concrete-model suggestions now reject provider-only `--local-first`,
@@ -18,11 +23,16 @@ Notable changes to quotabot. Newest first.
 - Local-runtime fallback explanations now state the action directly while
   retaining the warning that adapter reachability does not independently prove
   execution location or cost.
+- Unsigned Windows launch guidance no longer implies that checksum or GitHub
+  provenance verification authorizes bypassing SmartScreen.
 
 ### Documentation
 - Updated the security policy to bind its immutable-release evidence to the
   current v0.9.7 release and added that marker to the release-version consistency
   gate.
+- Acquisition guidance now names checksum verification and GitHub build
+  provenance at first mention instead of using language that could be mistaken
+  for Authenticode or Developer ID signing.
 
 ## 0.9.7 - 2026-07-27
 

@@ -1,7 +1,16 @@
 # Builds the quotabot CLI release asset for the current Windows machine.
 # Produces release/quotabot-windows-<arch>.zip and a matching .sha256 sidecar.
 
+param(
+  [switch]$NoArchive,
+  [switch]$PackageOnly
+)
+
 $ErrorActionPreference = 'Stop'
+
+if ($NoArchive -and $PackageOnly) {
+  throw '-NoArchive and -PackageOnly cannot be combined.'
+}
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
@@ -11,52 +20,65 @@ $buildDir = Join-Path $collectorDir 'build\quotabot_cli_release'
 . (Join-Path $scriptDir 'windows-architecture.ps1')
 . (Join-Path $scriptDir 'package-pair.ps1')
 
-$dart = (Get-Command dart -ErrorAction SilentlyContinue).Source
-if (-not $dart) {
-  $flutter = (Get-Command flutter -ErrorAction SilentlyContinue).Source
-  if ($flutter) {
-    $candidate = Join-Path (Split-Path -Parent $flutter) 'dart.exe'
-    if (Test-Path -LiteralPath $candidate) {
-      $dart = $candidate
-    }
-  }
-}
-if (-not $dart) {
-  throw "dart not found on PATH. Install Flutter or Dart and add it to PATH."
-}
-
 $arch = Get-QuotabotWindowsArchitecture
-
-New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 $asset = "quotabot-windows-$arch.zip"
 $out = Join-Path $releaseDir $asset
 $sidecar = "$out.sha256"
-
-Push-Location $collectorDir
-try {
-  & $dart pub get --enforce-lockfile
-  if ($LASTEXITCODE -ne 0) {
-    throw "dart pub get failed with exit code $LASTEXITCODE"
-  }
-  if (Test-Path -LiteralPath $buildDir) {
-    Remove-Item -LiteralPath $buildDir -Recurse -Force
-  }
-  & $dart build cli --target=bin\collect.dart --output=$buildDir
-  if ($LASTEXITCODE -ne 0) {
-    throw "dart build cli failed with exit code $LASTEXITCODE"
-  }
-} finally {
-  Pop-Location
-}
-
 $bundle = Join-Path $buildDir 'bundle'
-$builtExe = Join-Path $bundle 'bin\collect.exe'
 $packagedExe = Join-Path $bundle 'bin\quotabot.exe'
-if (-not (Test-Path -LiteralPath $builtExe)) {
-  throw "CLI build did not produce $builtExe"
-}
-Move-Item -LiteralPath $builtExe -Destination $packagedExe -Force
 
+if (-not $PackageOnly) {
+  $dart = (Get-Command dart -ErrorAction SilentlyContinue).Source
+  if (-not $dart) {
+    $flutter = (Get-Command flutter -ErrorAction SilentlyContinue).Source
+    if ($flutter) {
+      $candidate = Join-Path (Split-Path -Parent $flutter) 'dart.exe'
+      if (Test-Path -LiteralPath $candidate) {
+        $dart = $candidate
+      }
+    }
+  }
+  if (-not $dart) {
+    throw "dart not found on PATH. Install Flutter or Dart and add it to PATH."
+  }
+
+  Push-Location $collectorDir
+  try {
+    & $dart pub get --enforce-lockfile
+    if ($LASTEXITCODE -ne 0) {
+      throw "dart pub get failed with exit code $LASTEXITCODE"
+    }
+    if (Test-Path -LiteralPath $buildDir) {
+      Remove-Item -LiteralPath $buildDir -Recurse -Force
+    }
+    & $dart build cli --target=bin\collect.dart --output=$buildDir
+    if ($LASTEXITCODE -ne 0) {
+      throw "dart build cli failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Pop-Location
+  }
+
+  $builtExe = Join-Path $bundle 'bin\collect.exe'
+  if (-not (Test-Path -LiteralPath $builtExe -PathType Leaf)) {
+    throw "CLI build did not produce $builtExe"
+  }
+  Move-Item -LiteralPath $builtExe -Destination $packagedExe -Force
+}
+
+if (-not (Test-Path -LiteralPath $packagedExe -PathType Leaf)) {
+  if ($PackageOnly) {
+    throw "Package-only mode requires the existing normalized CLI executable: $packagedExe"
+  }
+  throw "CLI build did not produce $packagedExe"
+}
+
+if ($NoArchive) {
+  Write-Host "CLI bundle ready: $bundle"
+  return
+}
+
+New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 $packageWorkspace = Join-Path $releaseDir ".quotabot-package-$([guid]::NewGuid())"
 $temporaryOut = Join-Path $packageWorkspace $asset
 $temporarySidecar = "$temporaryOut.sha256"
