@@ -137,6 +137,79 @@ archive shape and checksum, extract the archive, and require `--expect-manifest`
 to match before attestation or publication. The manifest is retained with the
 workflow evidence.
 
+Authenticode changes PE bytes, so a signed candidate needs a new post-signing
+inventory. For a future release candidate, set the two non-secret environment
+values below to the exact owner-approved publisher identity, then verify that
+inventory with the credential-free policy checker:
+
+```powershell
+$subject = $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT
+$thumbprint = $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT
+$candidate = 'collector/build/quotabot_cli_release/bundle'
+$manifest = '.agent/windows-cli-post-sign-inventory.json'
+python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate | Set-Content -Encoding utf8NoBOM $manifest
+python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $subject --expected-signer-thumbprint $thumbprint --json $candidate
+```
+
+Keep the manifest and receipt outside the candidate tree. Adding either file to
+the tree correctly invalidates the inventory comparison.
+Before a quotabot signing identity exists, exercise the same native adapter with
+the repository's real embedded-signed Windows fixture test:
+
+```powershell
+python -m unittest tools.test_verify_windows_signatures.NativeWindowsSignatureTests.test_real_embedded_signature_produces_deterministic_bounded_receipt
+```
+
+That readiness test copies the installed, Microsoft-signed `pwsh.exe` into a
+temporary candidate and supplies its observed public identity to the verifier.
+It proves the local adapter can accept a real policy-valid embedded signature;
+it does not establish or substitute for the future quotabot publisher identity.
+
+Use `desktop` and `app/build/windows/x64/runner/Release` for the desktop bundle.
+The verifier does not accept native-tool overrides. It finds SignTool only from
+registered Windows SDK roots and uses the fixed Windows system PowerShell. It
+requires every inventoried PE module to have exactly one valid embedded
+Authenticode signature from the exact expected subject and certificate
+thumbprint. SignTool runs with `/pa /all /tw /sha1`, and its policy table must
+prove a SHA-256 file digest and RFC 3161 timestamp. A structured
+`Get-AuthenticodeSignature` read independently confirms the embedded signature
+type, OS trust result, signer identity, and timestamp certificate. Native
+verifier processes have bounded time and live-captured output, receive a minimal
+environment, and run from their own directories rather than the candidate
+directory.
+
+The policy follows Microsoft's current
+[SignTool verification contract](https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe)
+and
+[`Get-AuthenticodeSignature` contract](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature),
+checked 2026-07-28. The policy table proves the PE file digest and RFC 3161
+timestamp protocol, not the timestamp token's message-imprint digest. The future
+credential-bearing signing command must therefore set `/fd SHA256` and `/tr`
+followed by `/td SHA256`, retain that bounded policy evidence, and then pass this
+independent verifier.
+
+The final full-tree inventory must still equal the supplied post-signing
+manifest. The deterministic `quotabot.windows-signature-verification.v1` receipt
+binds the candidate and inventory digests, relative PE paths and digests, signer
+and timestamp identities, and stable hashes of SignTool and PowerShell. It emits
+no generated timestamp, absolute candidate root, or raw native diagnostic.
+With `--json`, a failure emits the bounded
+`quotabot.windows-signature-verification-error.v1` object with a stable reason
+code and, when applicable, one relative PE path.
+
+The before and after inventories prove snapshot equality, not continuous
+filesystem immutability. This verifier shares the isolated-runner assumption
+stated above; no untrusted local process may race candidate-path replacement.
+
+This checker does not sign code, select a certificate, handle credentials, or
+authorize publication. It is deliberately not called by the current release
+workflow, and current release artifacts remain unsigned. Activation still needs
+the owner-approved publisher identity, certificate custody, timestamp service,
+release environment, cost, and channel decisions. The intended Windows order is
+build, capture the unsigned sign set, sign every inventoried PE, capture a new
+post-signing inventory, verify it, package without rebuilding, then require the
+extracted archive to match that post-signing inventory.
+
 The current scanner is intentionally Windows-only. The roadmap still requires
 the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be
 inventoried and verified using native macOS evidence before Developer ID signing

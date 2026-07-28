@@ -588,7 +588,12 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   and exercise side-by-side update, rollback, and data-preserving uninstall
   mechanics. v0.9.6 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
-  required before this gate is closed.
+  required before this gate is closed. The credential-free Windows verifier is
+  now ready to bind an exact post-signing inventory, every shipped PE module,
+  the owner-supplied publisher identity, SHA-256 file digests, RFC 3161
+  timestamps, and stable native verifier hashes. The signing identity,
+  credential custody, timestamp service, and release-workflow activation remain
+  owner decisions.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce

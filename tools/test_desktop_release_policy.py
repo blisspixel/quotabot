@@ -647,6 +647,32 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("tools.test_native_code_inventory", ci)
 
+    def test_windows_signature_verifier_is_tested_but_not_a_release_gate(
+        self,
+    ) -> None:
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")
+        normalized_building = " ".join(building.split())
+
+        self.assertIn("tools.test_verify_windows_signatures", ci)
+        self.assertNotIn("verify_windows_signatures.py", release)
+        self.assertIn("new post-signing inventory", normalized_building)
+        self.assertIn("real embedded-signed Windows fixture test", normalized_building)
+        self.assertIn(
+            "exactly one valid embedded Authenticode signature", normalized_building
+        )
+        self.assertIn("does not accept native-tool overrides", normalized_building)
+        self.assertIn(
+            "not the timestamp token's message-imprint digest", normalized_building
+        )
+        self.assertIn(
+            "deliberately not called by the current release", normalized_building
+        )
+        self.assertIn("current release artifacts remain unsigned", normalized_building)
+
     def test_signing_scope_names_pe_modules_and_the_standalone_macos_cli(
         self,
     ) -> None:

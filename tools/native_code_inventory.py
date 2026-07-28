@@ -97,7 +97,7 @@ class _FileSnapshot:
     inode: int
 
 
-def _canonical_sha256(value: object) -> str:
+def canonical_sha256(value: object) -> str:
     encoded = json.dumps(
         value,
         ensure_ascii=True,
@@ -412,7 +412,7 @@ def inventory_native_code(
 
     _verify_stable_snapshot(resolved, snapshots)
     candidate_records.sort(key=lambda record: str(record["path"]))
-    candidate_sha256 = _canonical_sha256(candidate_records)
+    candidate_sha256 = canonical_sha256(candidate_records)
     body = {
         "schema": SCHEMA,
         "platform": platform,
@@ -433,7 +433,7 @@ def inventory_native_code(
         candidate_bytes=candidate_bytes,
         candidate_sha256=candidate_sha256,
         native_code=native_code,
-        inventory_sha256=_canonical_sha256(body),
+        inventory_sha256=canonical_sha256(body),
     )
 
 
@@ -474,7 +474,7 @@ def _read_manifest_bytes(path: Path) -> bytes:
     return bytes(payload)
 
 
-def _expected_manifest(path: Path) -> dict[str, object]:
+def load_inventory_manifest(path: Path) -> dict[str, object]:
     try:
         value = json.loads(_read_manifest_bytes(path).decode("utf-8"))
     except NativeInventoryError:
@@ -510,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
             architecture=args.architecture,
         )
         if args.expect_manifest is not None:
-            expected = _expected_manifest(args.expect_manifest)
+            expected = load_inventory_manifest(args.expect_manifest)
             if expected != inventory.to_dict():
                 raise NativeInventoryError(
                     "candidate changed after inventory: expected candidate or "

@@ -351,7 +351,7 @@ class NativeCodeInventoryTests(unittest.TestCase):
                     NativeInventoryError,
                     "expected inventory manifest is invalid",
                 ):
-                    native_code_inventory._expected_manifest(manifest)
+                    native_code_inventory.load_inventory_manifest(manifest)
 
             if os.name != "nt":
                 target = root / "target.json"
@@ -365,7 +365,7 @@ class NativeCodeInventoryTests(unittest.TestCase):
                     NativeInventoryError,
                     "expected inventory manifest is invalid",
                 ):
-                    native_code_inventory._expected_manifest(manifest)
+                    native_code_inventory.load_inventory_manifest(manifest)
 
 
 if __name__ == "__main__":
