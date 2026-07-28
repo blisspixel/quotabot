@@ -62,6 +62,11 @@ quotabot doctor
 quotabot suggest
 ```
 
+Use `quotabot suggest --help` for the provider-versus-model mode switch and
+routing-policy rules, or `quotabot models --help` for model filters and budget
+defaults. Both focused help paths return before reading provider metadata or
+writing local state.
+
 If a provider is not current, `doctor` shows its evidence state and repair hint.
 Credential-related failures for Claude, Codex, Grok, and Antigravity name the
 exact `quotabot login PROVIDER` recovery command; temporary timeouts, rate

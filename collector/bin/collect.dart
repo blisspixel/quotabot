@@ -267,7 +267,28 @@ Future<void> _runMain(List<String> rawArgs) async {
   style = AnsiStyle(_useColor(flags));
 
   if (cmd == 'help' || flags.contains('--help') || flags.contains('-h')) {
-    _printHelp();
+    final String? helpTopic;
+    if (cmd == 'help') {
+      if (pos.length > 2) {
+        stderr.writeln(
+          'quotabot: unexpected argument "${pos[2]}" for help',
+        );
+        exitCode = _exitUsage;
+        return;
+      }
+      helpTopic = pos.length == 2 ? pos[1] : null;
+    } else {
+      helpTopic = cmd.isEmpty ? null : cmd;
+    }
+    if (helpTopic != null &&
+        helpTopic != 'help' &&
+        helpTopic != 'version' &&
+        !_knownCommands.contains(helpTopic)) {
+      stderr.writeln('quotabot: unknown help topic "$helpTopic"');
+      exitCode = _exitUsage;
+      return;
+    }
+    _printHelp(helpTopic);
     return;
   }
   if (cmd == 'version' || flags.contains('--version') || flags.contains('-v')) {
@@ -363,6 +384,21 @@ Future<void> _runMain(List<String> rawArgs) async {
     case 'suggest':
       final providerRoute = flags.contains('--provider-route');
       if (_hasModelProfile(flags) && !providerRoute) {
+        final providerOnlyOptions = <String>[
+          if (flags.contains('--local-first')) '--local-first',
+          if (flags.any((flag) => flag.startsWith('--risk='))) '--risk',
+          if (flags.contains('--tuned-burn')) '--tuned-burn',
+          if (flags.any((flag) => flag.startsWith('--prefer='))) '--prefer',
+        ];
+        if (providerOnlyOptions.isNotEmpty) {
+          stderr.writeln(
+            'quotabot: provider-only options '
+            '(${providerOnlyOptions.join(', ')}) apply to provider '
+            'suggestions only; add --provider-route or remove model filters',
+          );
+          exitCode = _exitUsage;
+          return;
+        }
         if (flags.contains('--quota-stretch') ||
             _stringOption(flags, 'stretch-threshold', null) != null) {
           stderr.writeln(
@@ -2076,7 +2112,16 @@ Future<void> _runTop(
   stdout.write('\x1B[?25h\x1B[?1049l'); // show cursor + leave alternate screen
 }
 
-void _printHelp() {
+void _printHelp([String? command]) {
+  switch (command) {
+    case 'suggest':
+      _printSuggestHelp();
+      return;
+    case 'models':
+      _printModelsHelp();
+      return;
+  }
+
   String head(String s) => style.bold(s);
   stdout.writeln(
     '${style.bold('quotabot')} $_version  -  your AI subscription quota, in one place',
@@ -2268,6 +2313,176 @@ void _printHelp() {
     style.dim(
         '  Agents: see AGENTS.md. MCP server: dart run bin/mcp_server.dart.'),
   );
+}
+
+void _printSuggestHelp() {
+  String head(String value) => style.bold(value);
+  stdout.writeln(
+    '${style.bold('quotabot')} suggest  -  choose a provider or concrete model',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('USAGE'));
+  stdout.writeln('  quotabot suggest [provider options]');
+  stdout.writeln('  quotabot suggest [model filters]');
+  stdout.writeln('  quotabot suggest --provider-route [model filters]');
+  stdout.writeln('');
+  stdout.writeln(head('ROUTING MODES'));
+  stdout.writeln(
+    '  With no model filters: quotabot.suggest.v1 provider ranking.',
+  );
+  stdout.writeln(
+    '  With any --task, --budget, --min-context, --require-*, or --tier-*',
+  );
+  stdout.writeln(
+    '  filter: quotabot.suggest_model.v1 concrete-model ranking.',
+  );
+  stdout.writeln(
+    '  Add --provider-route to apply model requirements while keeping the',
+  );
+  stdout.writeln(
+    '  provider schema.',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('PROVIDER OPTIONS'));
+  stdout.writeln(
+    '  --local-first              prefer a reachable local runtime now',
+  );
+  stdout.writeln(
+    '  --quota-stretch            keep 25% included quota, then prefer local',
+  );
+  stdout.writeln(
+    '  --stretch-threshold=N      reserve from 20 through 50 percent',
+  );
+  stdout.writeln(
+    '  --risk=Z --tuned-burn      adjust for uncertainty and validated burn',
+  );
+  stdout.writeln(
+    '  --prefer=A,B               order already-viable providers',
+  );
+  stdout.writeln(
+    '  --cost-penalty=A:N         caller-supplied relative provider penalty',
+  );
+  stdout.writeln(
+    '  --cost-weight=N            scale penalties from 0 through 10',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('MODEL OPTIONS'));
+  stdout.writeln('  --task=simple|standard|hard');
+  stdout.writeln(
+    '  --budget=any|quota|local   model suggestions default to quota',
+  );
+  stdout.writeln(
+    '  --min-context=N --require-tools --require-vision --require-reasoning',
+  );
+  stdout.writeln('  --tier-floor=T --tier-ceiling=T');
+  stdout.writeln(
+    '  --use-expiring-quota       let qualifying expiring quota beat local',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('SHARED OPTIONS'));
+  stdout.writeln(
+    '  --json --profile=NAME --exclude=A,B --color --no-color',
+  );
+  stdout.writeln(
+    '  --mock-provider=NAME --state=STATE   deterministic simulation',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('RULES'));
+  stdout.writeln(
+    '  --local-first and --quota-stretch cannot be combined.',
+  );
+  stdout.writeln(
+    '  Provider options apply only to provider suggestions; add',
+  );
+  stdout.writeln(
+    '  --provider-route to combine them with model requirements.',
+  );
+  stdout.writeln(
+    '  --use-expiring-quota applies only to concrete-model suggestions.',
+  );
+  stdout.writeln(
+    '  Paid catalog entries require explicit --budget=any model selection.',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('READ BOUNDARY'));
+  stdout.writeln(
+    '  Reads quota and model metadata and may refresh quotabot-owned grants,',
+  );
+  stdout.writeln(
+    '  cache, and history. It makes no model call and reads no prompts or code.',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('EXAMPLES'));
+  stdout.writeln('  quotabot suggest');
+  stdout.writeln('  quotabot suggest --quota-stretch');
+  stdout.writeln('  quotabot suggest --task=hard');
+  stdout.writeln(
+    '  quotabot suggest --provider-route --require-tools --budget=quota',
+  );
+  stdout.writeln('');
+  stdout.writeln('Full command list: quotabot help. Details: docs/USAGE.md.');
+}
+
+void _printModelsHelp() {
+  String head(String value) => style.bold(value);
+  stdout.writeln(
+    '${style.bold('quotabot')} models  -  inspect represented model candidates',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('USAGE'));
+  stdout.writeln('  quotabot models [model filters]');
+  stdout.writeln('');
+  stdout.writeln(head('OUTPUT'));
+  stdout.writeln(
+    '  Lists represented candidates as quotabot.models.v1, ordered by current',
+  );
+  stdout.writeln(
+    '  routability with availability, budget gate, capabilities, and tier.',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('FILTERS'));
+  stdout.writeln('  --task=simple|standard|hard');
+  stdout.writeln(
+    '  --budget=any|quota|local   defaults to any for inspection',
+  );
+  stdout.writeln(
+    '  --min-context=N --require-tools --require-vision --require-reasoning',
+  );
+  stdout.writeln('  --tier-floor=T --tier-ceiling=T');
+  stdout.writeln('');
+  stdout.writeln(head('SHARED OPTIONS'));
+  stdout.writeln(
+    '  --json --profile=NAME --exclude=A,B --color --no-color',
+  );
+  stdout.writeln(
+    '  --mock-provider=NAME --state=STATE   deterministic simulation',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('BUDGET RULES'));
+  stdout.writeln(
+    '  any may include credit-backed or paid catalog entries for inspection.',
+  );
+  stdout.writeln(
+    '  quota admits measured included quota and local-runtime entries.',
+  );
+  stdout.writeln(
+    '  local excludes cloud-offloaded models exposed by a local daemon.',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('READ BOUNDARY'));
+  stdout.writeln(
+    '  Reads quota and model-list metadata and may refresh quotabot-owned',
+  );
+  stdout.writeln(
+    '  grants, cache, and history. It never loads or invokes a model.',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('EXAMPLES'));
+  stdout.writeln('  quotabot models');
+  stdout.writeln('  quotabot models --budget=quota --require-tools');
+  stdout.writeln('  quotabot models --budget=local --min-context=32768');
+  stdout.writeln('');
+  stdout.writeln('Full command list: quotabot help. Details: docs/USAGE.md.');
 }
 
 /// `quotabot watch`: poll quota on the adaptive cadence and emit a low-quota

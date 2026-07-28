@@ -4,6 +4,26 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- `quotabot suggest --help`, `quotabot help suggest`, `quotabot models --help`,
+  and `quotabot help models` now show focused, side-effect-free references for
+  routing modes, budget defaults, valid policy combinations, metadata-read
+  boundaries, and examples instead of the full unrelated option list.
+
+### Fixed
+- Concrete-model suggestions now reject provider-only `--local-first`,
+  `--risk`, `--tuned-burn`, and `--prefer` policies instead of silently ignoring
+  them. Add `--provider-route` when those provider policies must accompany model
+  requirements.
+- Local-runtime fallback explanations now state the action directly while
+  retaining the warning that adapter reachability does not independently prove
+  execution location or cost.
+
+### Documentation
+- Updated the security policy to bind its immutable-release evidence to the
+  current v0.9.7 release and added that marker to the release-version consistency
+  gate.
+
 ## 0.9.7 - 2026-07-27
 
 ### Fixed
