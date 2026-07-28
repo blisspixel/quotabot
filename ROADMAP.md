@@ -96,8 +96,8 @@ collected against the signed artifacts users will actually receive.
 **Behavior**
 
 - Inventory, Authenticode-sign, and RFC 3161 timestamp every shipped PE module,
-  including EXE and DLL files, with SHA-256, then verify every signature before
-  packaging and publication.
+  including EXE and DLL files, with SHA-256 for both the PE digest and timestamp
+  message imprint, then verify every signature before packaging and publication.
 - Inventory and Developer ID-sign the standalone macOS CLI, the app, every
   nested Mach-O file, and each native code bundle with hardened runtime. Submit
   eligible distribution containers with `notarytool`, staple the accepted app
@@ -123,10 +123,10 @@ collected against the signed artifacts users will actually receive.
 
 - The release workflow signs in the correct order, verifies before packaging,
   and fails closed under deterministic missing-secret and bad-signature tests.
-- Windows release assets pass `signtool verify /pa /all`; macOS native code and
-  the app pass `codesign --verify --deep --strict` and `spctl --assess`, while
-  the app also passes stapler validation, after a fresh download of the exact
-  draft assets.
+- Windows release assets pass `signtool verify /pa /all` plus the bounded
+  timestamp message-imprint verifier; macOS native code and the app pass
+  `codesign --verify --deep --strict` and `spctl --assess`, while the app also
+  passes stapler validation, after a fresh download of the exact draft assets.
 - A signed 0.9.x rehearsal passes clean install, launch, tray, update, rollback,
   data-preserving uninstall, checksum, provenance, and immutable publication on
   native Windows and macOS runners.
@@ -591,9 +591,9 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   required before this gate is closed. The credential-free Windows verifier is
   now ready to bind an exact post-signing inventory, every shipped PE module,
   the owner-supplied publisher identity, SHA-256 file digests, RFC 3161
-  timestamps, and stable native verifier hashes. The signing identity,
-  credential custody, timestamp service, and release-workflow activation remain
-  owner decisions.
+  timestamps, each token's SHA-256 message imprint and signature binding, and
+  stable native verifier hashes. The signing identity, credential custody,
+  timestamp service, and release-workflow activation remain owner decisions.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce

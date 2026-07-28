@@ -147,8 +147,10 @@ $subject = $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT
 $thumbprint = $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT
 $candidate = 'collector/build/quotabot_cli_release/bundle'
 $manifest = '.agent/windows-cli-post-sign-inventory.json'
+$receipt = '.agent/windows-cli-signature-verification.json'
 python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate | Set-Content -Encoding utf8NoBOM $manifest
-python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $subject --expected-signer-thumbprint $thumbprint --json $candidate
+python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $subject --expected-signer-thumbprint $thumbprint --json $candidate > $receipt
+if ($LASTEXITCODE -ne 0) { throw "Windows signature verification failed; inspect the bounded receipt at $receipt" }
 ```
 
 Keep the manifest and receipt outside the candidate tree. Adding either file to
@@ -178,21 +180,36 @@ verifier processes have bounded time and live-captured output, receive a minimal
 environment, and run from their own directories rather than the candidate
 directory.
 
+After those Windows checks succeed, a separate standard-library parser reads
+only the bounded PE certificate table. It requires one current PKCS SignedData
+`WIN_CERTIFICATE`, one publisher signer, one Microsoft RFC 3161 timestamp
+attribute and value, and one timestamp signer. Along the exact signed TSTInfo
+path, DER lengths, depth, element count, offsets, table size, trailing data, and
+cardinality fail closed. The TSTInfo `messageImprint` must use the SHA-256 OID
+and contain 32 bytes. The verifier also hashes the outer Authenticode signature
+with SHA-256 and requires that value to equal the message imprint. Windows
+remains the authority for certificate and signature trust; the local parser
+proves the timestamp algorithm and binding that the native summary does not
+expose.
+
 The policy follows Microsoft's current
 [SignTool verification contract](https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe)
 and
 [`Get-AuthenticodeSignature` contract](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature),
-checked 2026-07-28. The policy table proves the PE file digest and RFC 3161
-timestamp protocol, not the timestamp token's message-imprint digest. The future
-credential-bearing signing command must therefore set `/fd SHA256` and `/tr`
-followed by `/td SHA256`, retain that bounded policy evidence, and then pass this
-independent verifier.
+[Microsoft Authenticode timestamping guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
+and [RFC 3161](https://www.rfc-editor.org/rfc/rfc3161), checked 2026-07-28.
+The future credential-bearing signing command must set `/fd SHA256` and `/tr`
+followed by `/td SHA256`, retain the bounded receipt, and pass this independent
+verifier. A `timestamp_policy_unproven` result means the candidate must be signed
+again with that exact policy, re-inventoried because signing changes PE bytes,
+and re-verified. Do not reuse the prior post-signing inventory.
 
 The final full-tree inventory must still equal the supplied post-signing
 manifest. The deterministic `quotabot.windows-signature-verification.v1` receipt
 binds the candidate and inventory digests, relative PE paths and digests, signer
-and timestamp identities, and stable hashes of SignTool and PowerShell. It emits
-no generated timestamp, absolute candidate root, or raw native diagnostic.
+and timestamp identities, each timestamp message-imprint algorithm and value,
+and stable hashes of SignTool and PowerShell. It emits no generated timestamp,
+absolute candidate root, or raw native diagnostic.
 With `--json`, a failure emits the bounded
 `quotabot.windows-signature-verification-error.v1` object with a stable reason
 code and, when applicable, one relative PE path.

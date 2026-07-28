@@ -665,9 +665,9 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "exactly one valid embedded Authenticode signature", normalized_building
         )
         self.assertIn("does not accept native-tool overrides", normalized_building)
-        self.assertIn(
-            "not the timestamp token's message-imprint digest", normalized_building
-        )
+        self.assertIn("TSTInfo `messageImprint` must use the SHA-256 OID", building)
+        self.assertIn("timestamp_policy_unproven", building)
+        self.assertIn("windows-cli-signature-verification.json", building)
         self.assertIn(
             "deliberately not called by the current release", normalized_building
         )

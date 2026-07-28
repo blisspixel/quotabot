@@ -23,7 +23,8 @@ Notable changes to quotabot. Newest first.
 - A credential-free Windows verifier can now prove that every PE in an exact
   post-signing inventory has one valid embedded Authenticode signature from the
   owner-supplied publisher identity, a SHA-256 file digest, and an RFC 3161
-  timestamp. Its deterministic receipt binds candidate, inventory, native tool,
+  timestamp whose TSTInfo message imprint uses SHA-256 and binds the publisher
+  signature. Its deterministic receipt binds candidate, inventory, native tool,
   signer, timestamp, and per-file evidence without exposing absolute candidate
   paths or raw native diagnostics. It remains outside release publication until
   the signing identity and credential-bearing workflow are owner-approved.

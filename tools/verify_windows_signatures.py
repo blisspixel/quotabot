@@ -27,6 +27,11 @@ from tools.native_code_inventory import (  # noqa: E402
     inventory_native_code,
     load_inventory_manifest,
 )
+from tools.windows_timestamp_policy import (  # noqa: E402
+    TimestampMessageImprint,
+    TimestampPolicyError,
+    read_timestamp_message_imprint,
+)
 
 
 SCHEMA = "quotabot.windows-signature-verification.v1"
@@ -62,6 +67,9 @@ _ERROR_MESSAGES = {
     "signer_mismatch": "signature does not match the expected publisher identity",
     "timestamp_missing": "signature has no trusted timestamp",
     "signature_policy_unproven": "SHA-256 and RFC 3161 policy could not be proven",
+    "timestamp_policy_unproven": (
+        "RFC 3161 timestamp message-imprint SHA-256 policy could not be proven"
+    ),
     "candidate_changed": "candidate changed during signature verification",
 }
 
@@ -101,6 +109,8 @@ class VerifiedPeSignature:
     signer_thumbprint: str
     timestamp_subject: str
     timestamp_thumbprint: str
+    timestamp_message_imprint_algorithm: str
+    timestamp_message_imprint: str
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -111,6 +121,10 @@ class VerifiedPeSignature:
             "file_digest_algorithm": "sha256",
             "timestamp_present": True,
             "timestamp_protocol": "rfc3161",
+            "timestamp_message_imprint_algorithm": (
+                self.timestamp_message_imprint_algorithm
+            ),
+            "timestamp_message_imprint": self.timestamp_message_imprint,
             "signer_subject": self.signer_subject,
             "signer_thumbprint": self.signer_thumbprint,
             "timestamp_subject": self.timestamp_subject,
@@ -482,6 +496,13 @@ def parse_signtool_policy(output: bytes) -> tuple[str, str]:
     return algorithm, timestamp
 
 
+def _read_timestamp_message_imprint(target: Path) -> TimestampMessageImprint:
+    try:
+        return read_timestamp_message_imprint(target)
+    except TimestampPolicyError as error:
+        raise WindowsSignatureVerificationError("timestamp_policy_unproven") from error
+
+
 def _bounded_certificate_field(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -555,6 +576,10 @@ def _verify_pe(
     if signtool.returncode != 0:
         raise WindowsSignatureVerificationError("signature_invalid", relative_path)
     parse_signtool_policy(signtool.stdout + b"\n" + signtool.stderr)
+    try:
+        timestamp_message_imprint = _read_timestamp_message_imprint(target)
+    except WindowsSignatureVerificationError as error:
+        raise WindowsSignatureVerificationError(error.code, relative_path) from error
     return VerifiedPeSignature(
         path=relative_path,
         sha256=sha256,
@@ -562,6 +587,8 @@ def _verify_pe(
         signer_thumbprint=signer_thumbprint,
         timestamp_subject=timestamp_subject,
         timestamp_thumbprint=timestamp_thumbprint,
+        timestamp_message_imprint_algorithm=timestamp_message_imprint.algorithm,
+        timestamp_message_imprint=timestamp_message_imprint.digest,
     )
 
 
@@ -770,7 +797,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"expected signer: {receipt.expected_signer_subject}")
     print(f"expected signer thumbprint: {receipt.expected_signer_thumbprint}")
     for signature in receipt.signatures:
-        print(f"authenticode sha256 rfc3161 {signature.sha256} {signature.path}")
+        print(
+            f"authenticode file-sha256={signature.sha256} "
+            "timestamp-protocol=rfc3161 "
+            "timestamp-message-imprint-sha256="
+            f"{signature.timestamp_message_imprint} {signature.path}"
+        )
     print(f"verification sha256: {receipt.verification_sha256}")
     return 0
 
