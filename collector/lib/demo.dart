@@ -109,10 +109,10 @@ List<ProviderQuota> demoProviders(int now) {
       name: 'Ollama',
       asOf: now,
       now: now,
-      // Capabilities mirror what these runtimes actually declare: Ollama and
-      // LM Studio publish them per model, while an OpenAI-compatible listing
-      // like Lemonade's declares nothing and stays unfiltered-out only under a
-      // profile that asks for no capability.
+      // Capabilities mirror what these runtimes actually declare: Ollama, LM
+      // Studio, and Lemonade publish extended per-model metadata, while a
+      // generic OpenAI-compatible listing declares nothing and stays
+      // unfiltered-out only under a profile that asks for no capability.
       installed: [
         m('qwen2.5-coder:7b',
             bytes: 4 * gb, tools: true, vision: false, embedding: false),

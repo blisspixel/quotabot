@@ -39,7 +39,7 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.9.6. The shipped routing policies are
+The current verified stable release is 0.9.7. The shipped routing policies are
 `balanced`, `local_first`, and opt-in `quota_stretch`. The next work is release
 signing for Windows and macOS. The [roadmap Next section](ROADMAP.md#next) is the
 sole source for its behavior, guardrails, completion criteria, and rationale.
@@ -106,10 +106,10 @@ for that surface.
     on-device entries also carry an advisory metadata-only `hardware_fit`
     (`loaded`, `comfortable`, `tight`, `constrained`, or `unknown`) with the
     selected RAM/GPU capacity evidence. Prefer loaded, then comfortably fitting
-    local models when equivalent candidates are available. An
-    Ollama cloud-offloaded model (a `-cloud` tag) carries `cloud_offloaded: true`
-    and is excluded from local and free budgets, so it is never evidence of
-    local-only or free execution.
+    local models when equivalent candidates are available. Cloud routes exposed
+    through Ollama (`-cloud`) or Lemonade (`recipe: "cloud"`) carry
+    `cloud_offloaded: true` and are excluded from local and free budgets, so they
+    are never evidence of local-only or free execution.
   - `suggest_model` - one concrete model for a task profile (same filter as
     `list_models`): available first, then local-runtime readiness, provider tier,
     and headroom. It defaults to `budget: "quota"`; pass `budget: "any"`
@@ -137,8 +137,8 @@ for that surface.
   Concrete model suggestions default to `--budget=quota`, while model listings
   default to `--budget=any`; use `--budget=any` explicitly on a suggestion to admit
   credit-backed or paid catalog entries. `--budget=local` and `--budget=quota`
-  both exclude Ollama cloud-offloaded
-  (`-cloud`) models, which run in the provider cloud rather than on-device. Add
+  both exclude cloud-offloaded models exposed through Ollama (`-cloud`) or
+  Lemonade (`recipe: "cloud"`), which run remotely rather than on-device. Add
   `--exclude=A,B` to quota-reading commands after `--profile` when one request
   should avoid specific providers. Add `--use-expiring-quota` to a profiled
   `suggest` call only when you want soon-resetting included quota to outrank

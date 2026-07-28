@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:quotabot_collector/adapters/lemonade.dart';
 import 'package:quotabot_collector/adapters/lmstudio.dart';
 import 'package:quotabot_collector/adapters/ollama.dart';
 import 'package:quotabot_collector/parsing.dart';
@@ -81,9 +82,12 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       expect(models.single.tools, isNull);
       expect(models.single.vision, isNull);
     case ProviderFixtureKind.lemonadeModels:
-      final models = lmStudioCompatFromJson(_fixtureMap(entry.fixtureFile));
-      expect(models, hasLength(2));
+      final models = lemonadeModelsFromJson(_fixtureMap(entry.fixtureFile));
+      expect(models, hasLength(3));
       expect(models!.first.name, 'llama-3.2-3b-instruct');
+      expect(models.first.context, 32768);
+      expect(models.first.tools, isTrue);
+      expect(models.last.cloud, isTrue);
     case ProviderFixtureKind.nvidiaModels:
       final fixture = _fixtureMap(entry.fixtureFile);
       expect(fixture['object'], 'list');

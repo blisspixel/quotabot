@@ -156,10 +156,12 @@ class OllamaAdapter {
   /// is deliberately bounded: results are cached by content digest so a refresh
   /// loop re-probes nothing, at most [maxCapabilityProbes] models are probed per
   /// read, at most [capabilityProbeConcurrency] requests are in flight, and no
-  /// new batch starts past [capabilityPassDeadline]. Anything unresolved keeps
-  /// undeclared capabilities, so a slow or drifted daemon degrades to today's
-  /// behavior instead of guessing. Metadata only: `/api/show` reads the model's
-  /// manifest and never loads or runs it.
+  /// new batch starts past [capabilityPassDeadline]. The bounded selection
+  /// rotates across unresolved models so failed or uncacheable early entries do
+  /// not permanently starve the rest of a large library. Anything unresolved
+  /// keeps undeclared capabilities, so a slow or drifted daemon degrades to
+  /// today's behavior instead of guessing. Metadata only: `/api/show` reads the
+  /// model's manifest and never loads or runs it.
   Future<List<LocalModel>> _withDeclaredCapabilities(
     List<LocalModel> installed,
   ) async {
@@ -170,15 +172,19 @@ class OllamaAdapter {
       final cached = digest == null ? null : _capabilities.lookup(digest);
       if (cached != null) {
         resolved[m.name] = cached;
-      } else if (pending.length < maxCapabilityProbes) {
+      } else {
         pending.add(m);
       }
     }
 
+    final selected = _capabilities._nextProbes(
+      pending,
+      limit: maxCapabilityProbes,
+    );
     final elapsed = Stopwatch()..start();
-    for (var i = 0; i < pending.length; i += capabilityProbeConcurrency) {
+    for (var i = 0; i < selected.length; i += capabilityProbeConcurrency) {
       if (elapsed.elapsed >= capabilityPassDeadline) break;
-      final chunk = pending.skip(i).take(capabilityProbeConcurrency);
+      final chunk = selected.skip(i).take(capabilityProbeConcurrency);
       final probed = await Future.wait([
         for (final m in chunk) _declaredCapabilities(m).then((c) => (m, c)),
       ]);
@@ -256,17 +262,42 @@ class OllamaCapabilityCache {
   final int maxEntries;
 
   final _byDigest = <String, DeclaredModelCapabilities>{};
+  var _nextProbeOffset = 0;
 
   int get length => _byDigest.length;
 
   DeclaredModelCapabilities? lookup(String digest) => _byDigest[digest];
+
+  /// Returns a bounded rotating slice of unresolved models. The cursor lives
+  /// with the shared cache because collectors create a fresh adapter per read.
+  List<LocalModel> _nextProbes(
+    List<LocalModel> unresolved, {
+    required int limit,
+  }) {
+    if (unresolved.isEmpty || limit <= 0) return const [];
+    if (unresolved.length <= limit) {
+      _nextProbeOffset = 0;
+      return List.unmodifiable(unresolved);
+    }
+
+    final start = _nextProbeOffset % unresolved.length;
+    final selected = <LocalModel>[
+      for (var i = 0; i < limit; i++)
+        unresolved[(start + i) % unresolved.length],
+    ];
+    _nextProbeOffset = (start + limit) % unresolved.length;
+    return List.unmodifiable(selected);
+  }
 
   void store(String digest, DeclaredModelCapabilities capabilities) {
     if (_byDigest.length >= maxEntries) _byDigest.clear();
     _byDigest[digest] = capabilities;
   }
 
-  void clear() => _byDigest.clear();
+  void clear() {
+    _byDigest.clear();
+    _nextProbeOffset = 0;
+  }
 }
 
 /// The process-wide capability cache used when no cache is injected.
