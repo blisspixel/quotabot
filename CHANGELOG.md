@@ -12,8 +12,14 @@ Notable changes to quotabot. Newest first.
 - CLI and Windows/macOS desktop packagers now expose mutually exclusive
   build-only and package-only phases. A signing workflow can build once, modify
   and verify the native candidate, then create the existing atomic archive and
-  checksum pair without an intervening rebuild. Default CI packaging is
-  unchanged.
+  checksum pair without an intervening rebuild. Windows CI now exercises that
+  phased seam; other native CI packaging remains unchanged.
+- Windows CLI and desktop builds now capture a bounded PE inventory after the
+  build-only phase, package without rebuilding, verify and extract the archive,
+  and require an exact manifest match before attestation or publication. The
+  deterministic manifest binds every regular file, rejects links, malformed PE
+  files, and architecture mismatches, exposes no absolute build path, and is
+  retained with workflow evidence.
 
 ### Fixed
 - Concrete-model suggestions now reject provider-only `--local-first`,
@@ -33,6 +39,9 @@ Notable changes to quotabot. Newest first.
 - Acquisition guidance now names checksum verification and GitHub build
   provenance at first mention instead of using language that could be mistaken
   for Authenticode or Developer ID signing.
+- Release-signing scope now explicitly includes every shipped Windows PE module,
+  the standalone macOS CLI, the app, nested Mach-O code, and native code bundles
+  without claiming that current artifacts are signed or notarized.
 
 ## 0.9.7 - 2026-07-27
 

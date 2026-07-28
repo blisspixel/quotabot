@@ -98,7 +98,7 @@ jobs:
         run: bash tools/test-write-desktop-entry.sh
 
       - name: Coverage checker and policy tests
-        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_verify_cli_archive tools.test_verify_desktop_archive
+        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_native_code_inventory tools.test_verify_cli_archive tools.test_verify_desktop_archive
 
       - name: Release version consistency
         run: python tools/check_release_version.py
@@ -132,8 +132,16 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          ./tools/package-cli.ps1
+          ./tools/package-cli.ps1 -NoArchive
+          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-inventory.json'
+          $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json collector/build/quotabot_cli_release/bundle
+          if ($LASTEXITCODE -ne 0) { throw "Native signing inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          ./tools/package-cli.ps1 -PackageOnly
           python tools/verify_cli_archive.py release/quotabot-windows-x64.zip
+          $extract = Join-Path $env:RUNNER_TEMP "quotabot-windows-cli-$([Guid]::NewGuid().ToString('N'))"
+          Expand-Archive -LiteralPath release/quotabot-windows-x64.zip -DestinationPath $extract
+          python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --expect-manifest $manifest $extract
 
       - name: Verify macOS or Linux CLI package build
         if: runner.os != 'Windows'
@@ -167,8 +175,25 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          ./tools/package-windows.ps1
+          ./tools/package-windows.ps1 -NoArchive
+          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-inventory.json'
+          $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json app/build/windows/x64/runner/Release
+          if ($LASTEXITCODE -ne 0) { throw "Native signing inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          ./tools/package-windows.ps1 -PackageOnly
           python tools/verify_desktop_archive.py release/quotabot-windows-x64-desktop.zip
+          $extract = Join-Path $env:RUNNER_TEMP "quotabot-windows-desktop-$([Guid]::NewGuid().ToString('N'))"
+          Expand-Archive -LiteralPath release/quotabot-windows-x64-desktop.zip -DestinationPath $extract
+          python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --expect-manifest $manifest $extract
+
+      - name: Preserve Windows native signing inventories
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-signing-inventory-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/quotabot-windows-*-inventory.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Verify Windows desktop candidate readiness
         if: runner.os == 'Windows'

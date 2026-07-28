@@ -112,11 +112,43 @@ Notes:
   allows publication. The separate `Install smoke` workflow tests the published
   one-line installer, a versioned upgrade, persistent data, and source setup.
 
+Before Windows platform signing, inventory the native candidate with the
+read-only, standard-library-only scanner. It covers every shipped PE module,
+including EXE and DLL files. The command validates PE headers by
+content, requires the expected x64 or arm64 architecture, rejects links and
+malformed expected code, and emits normalized relative paths plus candidate and
+inventory SHA-256 digests. It does not sign or verify a platform identity.
+The gate runs on an isolated release runner and assumes no other local process
+is concurrently replacing candidate paths. It rejects links present during each
+scan and detects ordinary candidate mutations, but it is not a sandbox against a
+concurrent local attacker racing Windows reparse-point changes.
+
+```powershell
+python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 collector/build/quotabot_cli_release/bundle
+python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 app/build/windows/x64/runner/Release
+```
+
+Add `--json` for the deterministic `quotabot.signing-inventory.v1` object. It
+contains no generated timestamp or absolute candidate root. The complete
+candidate digest covers every regular file, while the native inventory lists the
+bounded executable-code subset. Windows CI and release builds capture that
+manifest after the build-only phase, package without rebuilding, verify the
+archive shape and checksum, extract the archive, and require `--expect-manifest`
+to match before attestation or publication. The manifest is retained with the
+workflow evidence.
+
+The current scanner is intentionally Windows-only. The roadmap still requires
+the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be
+inventoried and verified using native macOS evidence before Developer ID signing
+and notarization are enabled. Linux remains outside the current platform-signing
+scope.
+
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners and validates each resulting archive plus checksum, so
 every change exercises the same portable bundle shape without publishing release
-assets. Build-only and package-only flags remain available for local release
-work; normal CI continues to exercise the default build-and-package path.
+assets. Build-only and package-only flags bind Windows archives to the exact
+inventoried build tree. The other native CI legs continue to exercise the
+default build-and-package path.
 It then launches the packaged Windows and Linux apps and requires native window
 setup plus every supported tray-registration call to complete. Windows verifies
 the native `Shell_NotifyIconGetRect` result and rectangle independently of the

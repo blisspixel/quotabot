@@ -592,6 +592,72 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("Do not bypass a warning until", normalized_distribution)
         self.assertIn("Do not remove quarantine metadata", normalized_distribution)
 
+    def test_windows_native_signing_inventory_binds_archives(
+        self,
+    ) -> None:
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        for workflow in (ci, release):
+            self.assertEqual(workflow.count("native_code_inventory.py"), 4)
+            self.assertEqual(
+                workflow.count("--platform windows --surface cli --architecture x64"),
+                2,
+            )
+            self.assertEqual(
+                workflow.count(
+                    "--platform windows --surface desktop --architecture x64"
+                ),
+                2,
+            )
+            self.assertEqual(workflow.count("--expect-manifest"), 2)
+            self.assertNotIn("--platform macos", workflow)
+
+        release_cli = release.split("  build:\n", 1)[1].split(
+            "  verify-cli-release:\n", 1
+        )[0]
+        release_desktop = release.split("  build-desktop:\n", 1)[1].split(
+            "  verify-desktop-release:\n", 1
+        )[0]
+        for job, verifier in (
+            (release_cli, "verify_cli_archive.py"),
+            (release_desktop, "verify_desktop_archive.py"),
+        ):
+            build_at = job.index("-NoArchive")
+            inventory_at = job.index("native_code_inventory.py")
+            package_at = job.index("-PackageOnly")
+            verify_at = job.index(verifier)
+            archive_inventory_at = job.rindex("native_code_inventory.py")
+            preserve_at = job.index("actions/upload-artifact@")
+            attest_at = job.index("actions/attest-build-provenance@")
+            upload_at = job.index("gh release upload")
+            self.assertLess(build_at, inventory_at)
+            self.assertLess(inventory_at, package_at)
+            self.assertLess(package_at, verify_at)
+            self.assertLess(verify_at, archive_inventory_at)
+            self.assertLess(archive_inventory_at, preserve_at)
+            self.assertLess(preserve_at, attest_at)
+            self.assertLess(inventory_at, verify_at)
+            self.assertLess(attest_at, upload_at)
+            preserve_context = job[max(0, preserve_at - 400) : preserve_at + 500]
+            self.assertIn("if: always() && runner.os == 'Windows'", preserve_context)
+            self.assertIn("if-no-files-found: warn", preserve_context)
+
+        self.assertIn("tools.test_native_code_inventory", ci)
+
+    def test_signing_scope_names_pe_modules_and_the_standalone_macos_cli(
+        self,
+    ) -> None:
+        roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+        building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")
+
+        for text in (roadmap, building):
+            self.assertIn("every shipped PE module", text)
+            self.assertIn("standalone macOS CLI", text)
+            self.assertIn("nested Mach-O", text)
+
     def test_normal_ci_builds_and_verifies_native_desktop_archives(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
@@ -601,7 +667,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("tools/package-linux.sh", workflow)
         self.assertIn("tools/package-macos.sh", workflow)
         self.assertEqual(workflow.count("tools/verify_desktop_archive.py"), 3)
-        self.assertNotIn("package-windows.ps1 -NoArchive", workflow)
+        self.assertIn("package-windows.ps1 -NoArchive", workflow)
+        self.assertIn("package-windows.ps1 -PackageOnly", workflow)
         self.assertNotIn("package-linux.sh --no-archive", workflow)
         self.assertNotIn("package-macos.sh --no-archive", workflow)
         self.assertIn("quotabot-windows-readiness.json", workflow)
@@ -616,6 +683,9 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("tools/package-cli.ps1", workflow)
         self.assertIn("tools/package-cli.sh", workflow)
+        self.assertIn("package-cli.ps1 -NoArchive", workflow)
+        self.assertIn("package-cli.ps1 -PackageOnly", workflow)
+        self.assertNotIn("package-cli.sh --no-archive", workflow)
         self.assertEqual(workflow.count("tools/verify_cli_archive.py"), 2)
 
 

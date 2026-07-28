@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-27. This file is the forward plan. It records brief shipped
+Updated 2026-07-28. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -95,11 +95,14 @@ collected against the signed artifacts users will actually receive.
 
 **Behavior**
 
-- Authenticode-sign and RFC 3161 timestamp every distributed Windows executable
-  with SHA-256, then verify every signature before packaging and publication.
-- Developer ID-sign the macOS app and bundled executables with hardened runtime,
-  submit the archive with `notarytool`, staple the accepted ticket, and verify
-  both the code signature and Gatekeeper assessment before publication.
+- Inventory, Authenticode-sign, and RFC 3161 timestamp every shipped PE module,
+  including EXE and DLL files, with SHA-256, then verify every signature before
+  packaging and publication.
+- Inventory and Developer ID-sign the standalone macOS CLI, the app, every
+  nested Mach-O file, and each native code bundle with hardened runtime. Submit
+  eligible distribution containers with `notarytool`, staple the accepted app
+  ticket, and verify code signatures plus Gatekeeper assessment before
+  publication.
 - Preserve the native build, archive-shape, checksum, GitHub provenance,
   lifecycle, and immutable-publication gates around the signed artifacts.
 
@@ -120,9 +123,10 @@ collected against the signed artifacts users will actually receive.
 
 - The release workflow signs in the correct order, verifies before packaging,
   and fails closed under deterministic missing-secret and bad-signature tests.
-- Windows release assets pass `signtool verify /pa /all`; macOS assets pass
-  `codesign --verify --deep --strict`, `spctl --assess`, and stapler validation
-  after a fresh download of the exact draft assets.
+- Windows release assets pass `signtool verify /pa /all`; macOS native code and
+  the app pass `codesign --verify --deep --strict` and `spctl --assess`, while
+  the app also passes stapler validation, after a fresh download of the exact
+  draft assets.
 - A signed 0.9.x rehearsal passes clean install, launch, tray, update, rollback,
   data-preserving uninstall, checksum, provenance, and immutable publication on
   native Windows and macOS runners.
@@ -138,9 +142,9 @@ timestamping as the authenticity and integrity path for downloaded executables.
 Testing installation and accessibility first would validate artifacts that must
 still change.
 
-Sources: [Apple notarization guidance, accessed 2026-07-27](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
-[Microsoft Authenticode timestamping guidance, accessed 2026-07-27](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
-[GitHub artifact attestation guidance, accessed 2026-07-27](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+Sources: [Apple notarization guidance, accessed 2026-07-28](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
+[Microsoft Authenticode timestamping guidance, accessed 2026-07-28](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
+[GitHub artifact attestation guidance, accessed 2026-07-28](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
 The workflow and verification work can be prepared in the repository, but final
 closure requires the project owner to provision a Windows code-signing identity,
