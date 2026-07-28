@@ -248,6 +248,341 @@ class SignaturePolicyTests(unittest.TestCase):
         self.assertNotIn("--signtool", help_text)
         self.assertNotIn("--powershell", help_text)
 
+    def test_cli_help_explains_inputs_and_output_contracts(self) -> None:
+        help_text = verify_windows_signatures._parser().format_help()
+        for phrase in (
+            "post-signing native inventory",
+            "cli or desktop candidate",
+            "x64 or arm64 candidate",
+            "exact certificate subject",
+            "40-hex certificate thumbprint",
+            "canonical JSON to standard output",
+            "atomically write canonical JSON",
+            "outside the candidate tree",
+            "Windows SDK SignTool",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase.casefold(), help_text.casefold())
+
+        required = [
+            "--manifest",
+            "manifest.json",
+            "--surface",
+            "cli",
+            "--architecture",
+            "x64",
+            "--expected-signer-subject",
+            "CN=Expected",
+            "--expected-signer-thumbprint",
+            "A" * 40,
+            "candidate",
+        ]
+        stderr = io.StringIO()
+        with redirect_stderr(stderr), self.assertRaises(SystemExit):
+            verify_windows_signatures._parser().parse_args(
+                [*required[:-1], "--json", "--receipt", "receipt.json", required[-1]]
+            )
+        self.assertIn("not allowed with argument --json", stderr.getvalue())
+
+    def test_failure_stage_mapping_and_payload_are_bounded(self) -> None:
+        self.assertEqual(
+            set(verify_windows_signatures._ERROR_MESSAGES),
+            set(verify_windows_signatures._ERROR_STAGES),
+        )
+        allowed_stages = {
+            "preflight",
+            "inventory",
+            "native_tool_resolution",
+            "native_verification",
+            "authenticode",
+            "timestamp",
+            "signature_policy",
+            "timestamp_policy",
+            "stability",
+            "receipt_output",
+        }
+        self.assertLessEqual(
+            set(verify_windows_signatures._ERROR_STAGES.values()),
+            allowed_stages,
+        )
+        payload = verify_windows_signatures._failure_payload(
+            WindowsSignatureVerificationError(
+                "timestamp_policy_unproven",
+                "bin/quotabot.exe",
+            ),
+            surface="cli",
+            architecture="x64",
+        )
+        self.assertEqual(
+            payload,
+            {
+                "schema": "quotabot.windows-signature-verification-error.v1",
+                "verified": False,
+                "surface": "cli",
+                "architecture": "x64",
+                "stage": "timestamp_policy",
+                "error_code": "timestamp_policy_unproven",
+                "message": (
+                    "RFC 3161 timestamp message-imprint SHA-256 policy "
+                    "could not be proven"
+                ),
+                "path": "bin/quotabot.exe",
+            },
+        )
+
+    def test_receipt_path_must_be_external_and_distinct_from_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            candidate = base / "candidate"
+            candidate.mkdir()
+            manifest = base / "manifest.json"
+            manifest.write_text("{}", encoding="utf-8")
+            evidence = base / "evidence"
+            evidence.mkdir()
+            hardlink = evidence / "manifest-link.json"
+            os.link(manifest, hardlink)
+            valid = evidence / "receipt.json"
+            self.assertEqual(
+                verify_windows_signatures._validated_receipt_path(
+                    valid,
+                    candidate_root=candidate,
+                    manifest_path=manifest,
+                ),
+                valid.resolve(),
+            )
+
+            invalid = (
+                candidate / "receipt.json",
+                manifest,
+                base / "missing" / "receipt.json",
+                evidence,
+                Path(f"{manifest}."),
+                Path(f"{manifest} "),
+                Path(f"{manifest}:receipt"),
+                hardlink,
+            )
+            for path in invalid:
+                with self.subTest(path=path):
+                    with self.assertRaises(WindowsSignatureVerificationError) as caught:
+                        verify_windows_signatures._validated_receipt_path(
+                            path,
+                            candidate_root=candidate,
+                            manifest_path=manifest,
+                        )
+                    self.assertEqual(caught.exception.code, "receipt_output_invalid")
+                    self.assertNotIn(str(base), str(caught.exception))
+
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(
+                    verify_windows_signatures,
+                    "verify_windows_signatures",
+                ) as verifier,
+                redirect_stdout(stdout),
+            ):
+                result = verify_windows_signatures.main(
+                    [
+                        "--manifest",
+                        str(manifest),
+                        "--surface",
+                        "cli",
+                        "--architecture",
+                        "x64",
+                        "--expected-signer-subject",
+                        "CN=Expected",
+                        "--expected-signer-thumbprint",
+                        "A" * 40,
+                        "--receipt",
+                        str(Path(f"{manifest}.")),
+                        str(candidate),
+                    ]
+                )
+            self.assertEqual(result, 1)
+            verifier.assert_not_called()
+            fallback = json.loads(stdout.getvalue())
+            self.assertEqual(fallback["error_code"], "receipt_output_invalid")
+            self.assertEqual(fallback["stage"], "receipt_output")
+            self.assertNotIn(str(base), stdout.getvalue())
+
+    def test_atomic_receipt_preserves_prior_evidence_on_replace_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            receipt = parent / "receipt.json"
+            receipt.write_text('{"prior":true}\n', encoding="utf-8")
+            payload = {"schema": "example.v1", "verified": True}
+            with mock.patch.object(
+                verify_windows_signatures.os,
+                "replace",
+                side_effect=OSError("private replacement failure"),
+            ):
+                with self.assertRaises(WindowsSignatureVerificationError) as caught:
+                    verify_windows_signatures._write_json_receipt(receipt, payload)
+            self.assertEqual(caught.exception.code, "receipt_output_invalid")
+            self.assertEqual(receipt.read_text(encoding="utf-8"), '{"prior":true}\n')
+            self.assertEqual(
+                [path for path in parent.iterdir() if path.name != receipt.name],
+                [],
+            )
+
+            with mock.patch.object(
+                verify_windows_signatures.os,
+                "fsync",
+                side_effect=OSError("private sync failure"),
+            ):
+                with self.assertRaises(WindowsSignatureVerificationError) as caught:
+                    verify_windows_signatures._write_json_receipt(receipt, payload)
+            self.assertEqual(caught.exception.code, "receipt_output_invalid")
+            self.assertEqual(receipt.read_text(encoding="utf-8"), '{"prior":true}\n')
+            self.assertEqual(
+                [path for path in parent.iterdir() if path.name != receipt.name],
+                [],
+            )
+
+            with self.assertRaises(WindowsSignatureVerificationError) as caught:
+                verify_windows_signatures._write_json_receipt(
+                    receipt,
+                    {"evidence": "x" * verify_windows_signatures.MAX_RECEIPT_BYTES},
+                )
+            self.assertEqual(caught.exception.code, "receipt_output_invalid")
+            self.assertEqual(receipt.read_text(encoding="utf-8"), '{"prior":true}\n')
+
+    def test_receipt_mode_writes_success_and_failure_without_stdout(self) -> None:
+        success_payload = {
+            "schema": "quotabot.windows-signature-verification.v1",
+            "verified": True,
+        }
+        success_receipt = mock.Mock()
+        success_receipt.to_dict.return_value = success_payload
+        cases = (
+            (success_receipt, None, 0, success_payload),
+            (
+                None,
+                WindowsSignatureVerificationError(
+                    "signature_missing",
+                    "bin/quotabot.exe",
+                ),
+                1,
+                {
+                    "schema": "quotabot.windows-signature-verification-error.v1",
+                    "verified": False,
+                    "surface": "cli",
+                    "architecture": "x64",
+                    "stage": "authenticode",
+                    "error_code": "signature_missing",
+                    "message": (
+                        "an inventoried PE has no embedded Authenticode signature"
+                    ),
+                    "path": "bin/quotabot.exe",
+                },
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            candidate = base / "candidate"
+            candidate.mkdir()
+            manifest = base / "manifest.json"
+            manifest.write_text("{}", encoding="utf-8")
+            for index, (result, error, exit_code, expected) in enumerate(cases):
+                with self.subTest(exit_code=exit_code):
+                    receipt = base / f"receipt-{index}.json"
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    patcher = (
+                        mock.patch.object(
+                            verify_windows_signatures,
+                            "verify_windows_signatures",
+                            side_effect=error,
+                        )
+                        if error is not None
+                        else mock.patch.object(
+                            verify_windows_signatures,
+                            "verify_windows_signatures",
+                            return_value=result,
+                        )
+                    )
+                    with (
+                        patcher,
+                        redirect_stdout(stdout),
+                        redirect_stderr(stderr),
+                    ):
+                        actual = verify_windows_signatures.main(
+                            [
+                                "--manifest",
+                                str(manifest),
+                                "--surface",
+                                "cli",
+                                "--architecture",
+                                "x64",
+                                "--expected-signer-subject",
+                                "CN=Expected",
+                                "--expected-signer-thumbprint",
+                                "A" * 40,
+                                "--receipt",
+                                str(receipt),
+                                str(candidate),
+                            ]
+                        )
+                    self.assertEqual(actual, exit_code)
+                    self.assertEqual(json.loads(receipt.read_text()), expected)
+                    self.assertEqual(stdout.getvalue(), "")
+                    self.assertEqual(stderr.getvalue(), "")
+
+    def test_receipt_publication_failure_is_bounded_and_preserves_prior(
+        self,
+    ) -> None:
+        success_receipt = mock.Mock()
+        success_receipt.to_dict.return_value = {
+            "schema": "quotabot.windows-signature-verification.v1",
+            "verified": True,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            candidate = base / "candidate"
+            candidate.mkdir()
+            manifest = base / "manifest.json"
+            manifest.write_text("{}", encoding="utf-8")
+            receipt = base / "receipt.json"
+            receipt.write_text('{"prior":true}\n', encoding="utf-8")
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(
+                    verify_windows_signatures,
+                    "verify_windows_signatures",
+                    return_value=success_receipt,
+                ),
+                mock.patch.object(
+                    verify_windows_signatures,
+                    "_write_json_receipt",
+                    side_effect=WindowsSignatureVerificationError(
+                        "receipt_output_invalid"
+                    ),
+                ),
+                redirect_stdout(stdout),
+            ):
+                result = verify_windows_signatures.main(
+                    [
+                        "--manifest",
+                        str(manifest),
+                        "--surface",
+                        "cli",
+                        "--architecture",
+                        "x64",
+                        "--expected-signer-subject",
+                        "CN=Expected",
+                        "--expected-signer-thumbprint",
+                        "A" * 40,
+                        "--receipt",
+                        str(receipt),
+                        str(candidate),
+                    ]
+                )
+            self.assertEqual(result, 1)
+            self.assertEqual(receipt.read_text(encoding="utf-8"), '{"prior":true}\n')
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["error_code"], "receipt_output_invalid")
+            self.assertEqual(payload["stage"], "receipt_output")
+            self.assertNotIn(str(base), stdout.getvalue())
+
     def test_valid_sha256_message_imprint_is_extracted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = _write_signed_pe(Path(directory), _authenticode_pkcs7())
@@ -816,6 +1151,9 @@ class SignaturePolicyTests(unittest.TestCase):
             {
                 "schema": "quotabot.windows-signature-verification-error.v1",
                 "verified": False,
+                "surface": "cli",
+                "architecture": "x64",
+                "stage": "native_verification",
                 "error_code": "native_tool_failed",
                 "message": "native signature verification could not run",
             },
@@ -1085,6 +1423,32 @@ class NativeWindowsSignatureTests(unittest.TestCase):
             )
             self.assertTrue(payload["verified"])
             self.assertNotIn(str(base), stdout.getvalue())
+
+            receipt_directory = base / "evidence"
+            receipt_directory.mkdir()
+            receipt_path = receipt_directory / "verification.json"
+            receipt_stdout = io.StringIO()
+            with redirect_stdout(receipt_stdout):
+                receipt_passed = verify_windows_signatures.main(
+                    [
+                        "--manifest",
+                        str(manifest),
+                        "--surface",
+                        "cli",
+                        "--architecture",
+                        "x64",
+                        "--expected-signer-subject",
+                        metadata.signer_subject or "",
+                        "--expected-signer-thumbprint",
+                        metadata.signer_thumbprint or "",
+                        "--receipt",
+                        str(receipt_path),
+                        str(root),
+                    ]
+                )
+            self.assertEqual(receipt_passed, 0)
+            self.assertEqual(json.loads(receipt_path.read_text()), payload)
+            self.assertEqual(receipt_stdout.getvalue(), "")
 
             human_stdout = io.StringIO()
             with redirect_stdout(human_stdout):

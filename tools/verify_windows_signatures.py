@@ -12,6 +12,7 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from contextlib import suppress
@@ -38,6 +39,7 @@ SCHEMA = "quotabot.windows-signature-verification.v1"
 ERROR_SCHEMA = "quotabot.windows-signature-verification-error.v1"
 MAX_NATIVE_OUTPUT_BYTES = 64 * 1024
 MAX_TOOL_BYTES = 100 * 1024 * 1024
+MAX_RECEIPT_BYTES = 16 * 1024 * 1024
 MAX_SIGNER_SUBJECT_CHARS = 512
 NATIVE_COMMAND_TIMEOUT_SECONDS = 30.0
 VERIFICATION_TIMEOUT_SECONDS = 300.0
@@ -71,6 +73,30 @@ _ERROR_MESSAGES = {
         "RFC 3161 timestamp message-imprint SHA-256 policy could not be proven"
     ),
     "candidate_changed": "candidate changed during signature verification",
+    "receipt_output_invalid": "receipt output could not be published safely",
+}
+
+_ERROR_STAGES = {
+    "unsupported_platform": "preflight",
+    "invalid_expected_signer": "preflight",
+    "inventory_invalid": "inventory",
+    "inventory_mismatch": "inventory",
+    "signtool_unavailable": "native_tool_resolution",
+    "powershell_unavailable": "native_tool_resolution",
+    "native_tool_timeout": "native_verification",
+    "native_output_oversized": "native_verification",
+    "native_tool_failed": "native_verification",
+    "native_tool_warning": "authenticode",
+    "signature_missing": "authenticode",
+    "signature_invalid": "authenticode",
+    "signature_type_invalid": "authenticode",
+    "signer_metadata_invalid": "authenticode",
+    "signer_mismatch": "authenticode",
+    "timestamp_missing": "timestamp",
+    "signature_policy_unproven": "signature_policy",
+    "timestamp_policy_unproven": "timestamp_policy",
+    "candidate_changed": "stability",
+    "receipt_output_invalid": "receipt_output",
 }
 
 
@@ -89,6 +115,35 @@ class WindowsSignatureVerificationError(ValueError):
         if self.relative_path is not None:
             return f"{message}: {self.relative_path}"
         return message
+
+
+def _failure_payload(
+    error: WindowsSignatureVerificationError,
+    *,
+    surface: str,
+    architecture: str,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schema": ERROR_SCHEMA,
+        "verified": False,
+        "surface": surface,
+        "architecture": architecture,
+        "stage": _ERROR_STAGES[error.code],
+        "error_code": error.code,
+        "message": _ERROR_MESSAGES[error.code],
+    }
+    if error.relative_path is not None:
+        payload["path"] = error.relative_path
+    return payload
+
+
+def _canonical_json(payload: dict[str, object]) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 @dataclass(frozen=True)
@@ -190,6 +245,107 @@ def _validate_subject(value: str) -> str:
 def _is_junction(path: Path) -> bool:
     predicate = getattr(path, "is_junction", None)
     return bool(predicate is not None and predicate())
+
+
+def _validated_receipt_path(
+    path: Path,
+    *,
+    candidate_root: Path,
+    manifest_path: Path,
+) -> Path:
+    requested = Path(path)
+    try:
+        name = requested.name
+        if (
+            not name
+            or name != name.rstrip(" .")
+            or ":" in name
+            or requested.is_symlink()
+            or _is_junction(requested)
+        ):
+            raise WindowsSignatureVerificationError("receipt_output_invalid")
+        parent = requested.parent.resolve(strict=True)
+        if not parent.is_dir():
+            raise WindowsSignatureVerificationError("receipt_output_invalid")
+        resolved = parent / name
+        if resolved.exists() and not resolved.is_file():
+            raise WindowsSignatureVerificationError("receipt_output_invalid")
+        candidate = Path(candidate_root).resolve(strict=False)
+        manifest = Path(manifest_path).resolve(strict=False)
+        if (
+            resolved.exists()
+            and manifest.exists()
+            and os.path.samefile(resolved, manifest)
+        ):
+            raise WindowsSignatureVerificationError("receipt_output_invalid")
+    except WindowsSignatureVerificationError:
+        raise
+    except (OSError, RuntimeError, ValueError) as error:
+        raise WindowsSignatureVerificationError("receipt_output_invalid") from error
+    if (
+        resolved == manifest
+        or resolved == candidate
+        or resolved.is_relative_to(candidate)
+    ):
+        raise WindowsSignatureVerificationError("receipt_output_invalid")
+    return resolved
+
+
+def _write_json_receipt(path: Path, payload: dict[str, object]) -> None:
+    encoded = (_canonical_json(payload) + "\n").encode("utf-8")
+    if len(encoded) > MAX_RECEIPT_BYTES:
+        raise WindowsSignatureVerificationError("receipt_output_invalid")
+    temporary: Path | None = None
+    descriptor = -1
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        )
+        temporary = Path(temporary_name)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    except (OSError, RuntimeError, ValueError) as error:
+        raise WindowsSignatureVerificationError("receipt_output_invalid") from error
+    finally:
+        if descriptor >= 0:
+            with suppress(OSError):
+                os.close(descriptor)
+        if temporary is not None:
+            with suppress(OSError):
+                temporary.unlink()
+
+
+def _publish_json_payload(
+    payload: dict[str, object],
+    *,
+    receipt_path: Path | None,
+    surface: str,
+    architecture: str,
+) -> bool:
+    if receipt_path is None:
+        print(_canonical_json(payload))
+        return True
+    try:
+        _write_json_receipt(receipt_path, payload)
+    except WindowsSignatureVerificationError as error:
+        print(
+            _canonical_json(
+                _failure_payload(
+                    error,
+                    surface=surface,
+                    architecture=architecture,
+                )
+            )
+        )
+        return False
+    return True
 
 
 def _resolve_tool(path: Path, *, error_code: str) -> Path:
@@ -708,19 +864,87 @@ def verify_windows_signatures(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Verify every PE in an exact post-signing Windows inventory.",
+        epilog=(
+            "Requires Windows, a registered Windows SDK SignTool, and system "
+            "PowerShell. Receipt files must stay outside the candidate tree."
+        ),
     )
-    parser.add_argument("--manifest", required=True, type=Path)
-    parser.add_argument("--surface", required=True, choices=("cli", "desktop"))
-    parser.add_argument("--architecture", required=True, choices=("x64", "arm64"))
-    parser.add_argument("--expected-signer-subject", required=True)
-    parser.add_argument("--expected-signer-thumbprint", required=True)
-    parser.add_argument("--json", action="store_true", dest="as_json")
-    parser.add_argument("root", type=Path)
+    parser.add_argument(
+        "--manifest",
+        required=True,
+        type=Path,
+        help="Exact post-signing native inventory JSON to verify.",
+    )
+    parser.add_argument(
+        "--surface",
+        required=True,
+        choices=("cli", "desktop"),
+        help="Verify a cli or desktop candidate.",
+    )
+    parser.add_argument(
+        "--architecture",
+        required=True,
+        choices=("x64", "arm64"),
+        help="Verify an x64 or arm64 candidate.",
+    )
+    parser.add_argument(
+        "--expected-signer-subject",
+        required=True,
+        help="Exact certificate subject required for every PE.",
+    )
+    parser.add_argument(
+        "--expected-signer-thumbprint",
+        required=True,
+        help=(
+            "Exact 40-hex certificate thumbprint used to select signer identity, "
+            "not a content-digest policy."
+        ),
+    )
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument(
+        "--json",
+        action="store_true",
+        dest="as_json",
+        help="Write canonical JSON to standard output for success or failure.",
+    )
+    output.add_argument(
+        "--receipt",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Atomically write canonical JSON success or handled-failure evidence "
+            "to PATH outside the candidate tree."
+        ),
+    )
+    parser.add_argument(
+        "root",
+        type=Path,
+        help="Candidate bundle root containing the inventoried PE files.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+    receipt_path = None
+    if args.receipt is not None:
+        try:
+            receipt_path = _validated_receipt_path(
+                args.receipt,
+                candidate_root=args.root,
+                manifest_path=args.manifest,
+            )
+        except WindowsSignatureVerificationError as error:
+            print(
+                _canonical_json(
+                    _failure_payload(
+                        error,
+                        surface=args.surface,
+                        architecture=args.architecture,
+                    )
+                )
+            )
+            return 1
     try:
         receipt = verify_windows_signatures(
             args.root,
@@ -731,22 +955,16 @@ def main(argv: list[str] | None = None) -> int:
             expected_signer_thumbprint=args.expected_signer_thumbprint,
         )
     except WindowsSignatureVerificationError as error:
-        if args.as_json:
-            payload: dict[str, object] = {
-                "schema": ERROR_SCHEMA,
-                "verified": False,
-                "error_code": error.code,
-                "message": _ERROR_MESSAGES[error.code],
-            }
-            if error.relative_path is not None:
-                payload["path"] = error.relative_path
-            print(
-                json.dumps(
-                    payload,
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
+        if args.as_json or receipt_path is not None:
+            _publish_json_payload(
+                _failure_payload(
+                    error,
+                    surface=args.surface,
+                    architecture=args.architecture,
+                ),
+                receipt_path=receipt_path,
+                surface=args.surface,
+                architecture=args.architecture,
             )
             return 1
         print(
@@ -755,19 +973,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     except (OSError, RuntimeError):
-        if args.as_json:
-            print(
-                json.dumps(
-                    {
-                        "schema": ERROR_SCHEMA,
-                        "verified": False,
-                        "error_code": "native_tool_failed",
-                        "message": _ERROR_MESSAGES["native_tool_failed"],
-                    },
-                    ensure_ascii=True,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
+        if args.as_json or receipt_path is not None:
+            _publish_json_payload(
+                _failure_payload(
+                    WindowsSignatureVerificationError("native_tool_failed"),
+                    surface=args.surface,
+                    architecture=args.architecture,
+                ),
+                receipt_path=receipt_path,
+                surface=args.surface,
+                architecture=args.architecture,
             )
             return 1
         print(
@@ -776,16 +991,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    if args.as_json:
-        print(
-            json.dumps(
-                receipt.to_dict(),
-                ensure_ascii=True,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
+    if args.as_json or receipt_path is not None:
+        published = _publish_json_payload(
+            receipt.to_dict(),
+            receipt_path=receipt_path,
+            surface=args.surface,
+            architecture=args.architecture,
         )
-        return 0
+        return 0 if published else 1
     print(
         f"Windows signature policy verified {receipt.surface}/"
         f"{receipt.architecture}: {receipt.native_code_count} PE modules"

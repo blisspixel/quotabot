@@ -592,8 +592,11 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   now ready to bind an exact post-signing inventory, every shipped PE module,
   the owner-supplied publisher identity, SHA-256 file digests, RFC 3161
   timestamps, each token's SHA-256 message imprint and signature binding, and
-  stable native verifier hashes. The signing identity, credential custody,
-  timestamp service, and release-workflow activation remain owner decisions.
+  stable native verifier hashes. Its first-class receipt output atomically
+  retains canonical success or bounded failure evidence with surface,
+  architecture, and allowlisted-stage context. The signing identity, credential
+  custody, timestamp service, and release-workflow activation remain owner
+  decisions.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce

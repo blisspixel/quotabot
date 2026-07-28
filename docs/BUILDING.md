@@ -148,18 +148,37 @@ $thumbprint = $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT
 $candidate = 'collector/build/quotabot_cli_release/bundle'
 $manifest = '.agent/windows-cli-post-sign-inventory.json'
 $receipt = '.agent/windows-cli-signature-verification.json'
-python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate | Set-Content -Encoding utf8NoBOM $manifest
-python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $subject --expected-signer-thumbprint $thumbprint --json $candidate > $receipt
-if ($LASTEXITCODE -ne 0) { throw "Windows signature verification failed; inspect the bounded receipt at $receipt" }
+New-Item -ItemType Directory -Force -Path '.agent' | Out-Null
+$inventory = python tools/native_code_inventory.py `
+  --platform windows --surface cli --architecture x64 --json $candidate
+if ($LASTEXITCODE -ne 0) { throw "Post-signing native inventory failed" }
+Set-Content -LiteralPath $manifest -Value $inventory `
+  -Encoding utf8NoBOM -NoNewline
+python tools/verify_windows_signatures.py `
+  --manifest $manifest --surface cli --architecture x64 `
+  --expected-signer-subject $subject `
+  --expected-signer-thumbprint $thumbprint `
+  --receipt $receipt $candidate
+if ($LASTEXITCODE -ne 0) {
+  throw "Verification failed; inspect $receipt or the bounded terminal fallback"
+}
 ```
 
 Keep the manifest and receipt outside the candidate tree. Adding either file to
 the tree correctly invalidates the inventory comparison.
+The receipt path atomically replaces prior evidence only after a complete
+success or handled-failure payload is ready. If publication itself fails, the
+verifier exits nonzero, prints bounded fallback JSON, and leaves any prior
+complete receipt untouched. The receipt path must have an existing parent,
+must differ from the inventory manifest, and must stay outside the candidate.
+Handled verification failures write the named receipt silently. Terminal
+fallback JSON appears only when the receipt itself cannot be published.
 Before a quotabot signing identity exists, exercise the same native adapter with
 the repository's real embedded-signed Windows fixture test:
 
 ```powershell
-python -m unittest tools.test_verify_windows_signatures.NativeWindowsSignatureTests.test_real_embedded_signature_produces_deterministic_bounded_receipt
+python -m unittest `
+  tools.test_verify_windows_signatures.NativeWindowsSignatureTests
 ```
 
 That readiness test copies the installed, Microsoft-signed `pwsh.exe` into a
@@ -179,6 +198,11 @@ type, OS trust result, signer identity, and timestamp certificate. Native
 verifier processes have bounded time and live-captured output, receive a minimal
 environment, and run from their own directories rather than the candidate
 directory.
+
+SignTool's `/sha1` value is the expected certificate's 40-hex SHA-1
+thumbprint, used to select and match publisher identity. It is not an accepted
+file or timestamp content-digest policy. Both content properties must still use
+SHA-256.
 
 After those Windows checks succeed, a separate standard-library parser reads
 only the bounded PE certificate table. It requires one current PKCS SignedData
@@ -200,9 +224,13 @@ and
 and [RFC 3161](https://www.rfc-editor.org/rfc/rfc3161), checked 2026-07-28.
 The future credential-bearing signing command must set `/fd SHA256` and `/tr`
 followed by `/td SHA256`, retain the bounded receipt, and pass this independent
-verifier. A `timestamp_policy_unproven` result means the candidate must be signed
-again with that exact policy, re-inventoried because signing changes PE bytes,
-and re-verified. Do not reuse the prior post-signing inventory.
+verifier. If `timestamp_policy_unproven` follows a wrong or uncertain signing
+policy, sign a fresh candidate with those exact options, re-inventory because
+signing changes PE bytes, and re-verify. Do not reuse the prior post-signing
+inventory. If the result repeats after the expected policy was used, retain the
+candidate, manifest, and failure receipt and stop publication. The same bounded
+code also covers malformed, ambiguous, unsupported, resource-limited, or
+signature-unbound timestamp evidence that another signing retry may not repair.
 
 The final full-tree inventory must still equal the supplied post-signing
 manifest. The deterministic `quotabot.windows-signature-verification.v1` receipt
@@ -212,7 +240,9 @@ and stable hashes of SignTool and PowerShell. It emits no generated timestamp,
 absolute candidate root, or raw native diagnostic.
 With `--json`, a failure emits the bounded
 `quotabot.windows-signature-verification-error.v1` object with a stable reason
-code and, when applicable, one relative PE path.
+code, surface, architecture, allowlisted failure stage, and, when applicable,
+one relative PE path. Use `--receipt PATH` instead of `--json` to atomically
+retain that same canonical success or handled-failure JSON.
 
 The before and after inventories prove snapshot equality, not continuous
 filesystem immutability. This verifier shares the isolated-runner assumption

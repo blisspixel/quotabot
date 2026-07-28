@@ -668,6 +668,19 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("TSTInfo `messageImprint` must use the SHA-256 OID", building)
         self.assertIn("timestamp_policy_unproven", building)
         self.assertIn("windows-cli-signature-verification.json", building)
+        self.assertIn("New-Item -ItemType Directory -Force -Path '.agent'", building)
+        self.assertIn("--receipt $receipt $candidate", building)
+        self.assertNotIn("--json $candidate > $receipt", building)
+        self.assertIn(
+            "leaves any prior complete receipt untouched", normalized_building
+        )
+        self.assertIn(
+            "Terminal fallback JSON appears only when the receipt itself cannot be published",
+            normalized_building,
+        )
+        self.assertIn("40-hex SHA-1 thumbprint", normalized_building)
+        self.assertIn("stop publication", normalized_building)
+        self.assertIn("allowlisted failure stage", normalized_building)
         self.assertIn(
             "deliberately not called by the current release", normalized_building
         )
