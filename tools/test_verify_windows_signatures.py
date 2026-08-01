@@ -13,9 +13,9 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock as mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 from tools.native_code_inventory import inventory_native_code
 from tools import verify_windows_signatures, windows_timestamp_policy

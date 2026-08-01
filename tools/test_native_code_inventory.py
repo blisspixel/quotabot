@@ -9,9 +9,9 @@ import shutil
 import struct
 import tempfile
 import unittest
+import unittest.mock as mock
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 from tools import native_code_inventory
 from tools.native_code_inventory import NativeInventoryError, inventory_native_code
@@ -205,6 +205,13 @@ class NativeCodeInventoryTests(unittest.TestCase):
     def test_case_collisions_fail_for_windows_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            probe = root / "case-sensitivity-probe"
+            probe.write_bytes(b"probe")
+            if (root / "CASE-SENSITIVITY-PROBE").exists():
+                self.skipTest(
+                    "case-distinct fixtures require a case-sensitive filesystem"
+                )
+            probe.unlink()
             _write(root / "bin" / "quotabot.exe", _pe())
             _write(root / "lib" / "Plugin.dll", _pe())
             _write(root / "lib" / "plugin.dll", _pe())
@@ -237,14 +244,15 @@ class NativeCodeInventoryTests(unittest.TestCase):
 
             link.unlink()
             real_open = native_code_inventory.os.open
+            resolved_launcher = launcher.resolve(strict=True)
             replaced = False
 
-            def replace_before_open(path: object, flags: int, mode: int = 0o777):
+            def replace_before_open(path: object, flags: int, mode: int = 0o600):
                 nonlocal replaced
-                if Path(path) == launcher and not replaced:
+                if Path(path) == resolved_launcher and not replaced:
                     replaced = True
-                    launcher.unlink()
-                    launcher.symlink_to(outside)
+                    resolved_launcher.unlink()
+                    resolved_launcher.symlink_to(outside.resolve(strict=True))
                 return real_open(path, flags, mode)
 
             with mock.patch.object(
