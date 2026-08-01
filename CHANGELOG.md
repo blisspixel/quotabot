@@ -4,6 +4,71 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.8 - 2026-08-01
+
+### Changed
+- `quotabot suggest --help`, `quotabot help suggest`, `quotabot models --help`,
+  and `quotabot help models` now show focused, side-effect-free references for
+  routing modes, budget defaults, valid policy combinations, metadata-read
+  boundaries, and examples instead of the full unrelated option list.
+- CLI and Windows/macOS desktop packagers now expose mutually exclusive
+  build-only and package-only phases. A signing workflow can build once, modify
+  and verify the native candidate, then create the existing atomic archive and
+  checksum pair without an intervening rebuild. Windows CI now exercises that
+  phased seam; other native CI packaging remains unchanged.
+- Windows CLI and desktop builds now capture a bounded PE inventory after the
+  build-only phase, package without rebuilding, verify and extract the archive,
+  and require an exact manifest match before attestation or publication. The
+  deterministic manifest binds every regular file, rejects links, malformed PE
+  files, and architecture mismatches, exposes no absolute build path, and is
+  retained with workflow evidence.
+- A credential-free Windows verifier can now prove that every PE in an exact
+  post-signing inventory has one valid embedded Authenticode signature from the
+  owner-supplied publisher identity, a SHA-256 file digest, and an RFC 3161
+  timestamp whose TSTInfo message imprint uses SHA-256 and binds the publisher
+  signature. Its deterministic receipt covers candidate, inventory, native tool,
+  signer, timestamp, and per-file evidence without exposing absolute candidate
+  paths or raw native diagnostics. A first-class receipt path atomically retains
+  canonical success or bounded failure evidence, preserves prior complete
+  evidence when publication fails, and identifies the surface, architecture,
+  and allowlisted failure stage. Success and failure receipts expose an exact
+  comparison-only body digest, clearly separated from artifact identity,
+  authenticity, attestation, and independent workflow provenance. Output
+  validation rejects candidate paths,
+  manifest aliases, alternate streams, and non-regular targets. It remains
+  outside release publication until the signing identity and credential-bearing
+  workflow are owner-approved.
+
+### Fixed
+- Windows signature verification now permits up to 60 seconds for one native
+  tool invocation while retaining the 300-second whole-candidate deadline. This
+  prevents cold PowerShell security-module startup on hosted runners from
+  causing a false timeout without making verification unbounded.
+- Concrete-model suggestions now reject provider-only `--local-first`,
+  `--risk`, `--tuned-burn`, and `--prefer` policies instead of silently ignoring
+  them. Add `--provider-route` when those provider policies must accompany model
+  requirements.
+- Local-runtime fallback explanations now state the action directly while
+  retaining the warning that adapter reachability does not independently prove
+  execution location or cost.
+- Unsigned Windows launch guidance no longer implies that checksum or GitHub
+  provenance verification authorizes bypassing SmartScreen.
+
+### Documentation
+- Advanced every public release marker and the release-version consistency gate
+  to v0.9.8, while retaining v0.9.7 as the completed prior release and install
+  rehearsal evidence.
+- Acquisition guidance now names checksum verification and GitHub build
+  provenance at first mention instead of using language that could be mistaken
+  for Authenticode or Developer ID signing.
+- Release-signing scope now explicitly includes every shipped Windows PE module,
+  the standalone macOS CLI, the app, nested Mach-O code, and native code bundles
+  without claiming that current artifacts are signed or notarized.
+- Added ElevenLabs as a post-1.0, admission-gated quota-source candidate. Any
+  first integration is quota visibility only and remains outside coding routes,
+  model selection, leases, and projected-waste policy until typed shared pools
+  and an explicit audio-domain decision exist.
+
 ## 0.9.7 - 2026-07-27
 
 ### Fixed
