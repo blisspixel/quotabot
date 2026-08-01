@@ -40,6 +40,10 @@ Notable changes to quotabot. Newest first.
   workflow are owner-approved.
 
 ### Fixed
+- Windows signature verification now permits up to 60 seconds for one native
+  tool invocation while retaining the 300-second whole-candidate deadline. This
+  prevents cold PowerShell security-module startup on hosted runners from
+  causing a false timeout without making verification unbounded.
 - Concrete-model suggestions now reject provider-only `--local-first`,
   `--risk`, `--tuned-burn`, and `--prefer` policies instead of silently ignoring
   them. Add `--provider-route` when those provider policies must accompany model

@@ -1265,7 +1265,10 @@ class NativeWindowsSignatureTests(unittest.TestCase):
         metadata = verify_windows_signatures._read_authenticode_metadata(
             launcher,
             powershell_path=self.powershell,
-            deadline=time.monotonic() + 30,
+            deadline=(
+                time.monotonic()
+                + verify_windows_signatures.NATIVE_COMMAND_TIMEOUT_SECONDS
+            ),
         )
         return root, manifest, metadata
 
@@ -1388,7 +1391,10 @@ class NativeWindowsSignatureTests(unittest.TestCase):
             metadata = verify_windows_signatures._read_authenticode_metadata(
                 launcher,
                 powershell_path=self.powershell,
-                deadline=time.monotonic() + 30,
+                deadline=(
+                    time.monotonic()
+                    + verify_windows_signatures.NATIVE_COMMAND_TIMEOUT_SECONDS
+                ),
             )
             real_verify = verify_windows_signatures._verify_pe
 
