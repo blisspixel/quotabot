@@ -611,8 +611,22 @@ jobs:
             --report $previousReadinessReport
           if ($LASTEXITCODE -ne 0) { throw 'Desktop rollback archive did not start.' }
 
-          Remove-Item -LiteralPath $current -Recurse -Force
-          Remove-Item -LiteralPath $previous -Recurse -Force
+          function Remove-PortableTree {
+            param([Parameter(Mandatory = $true)][string]$LiteralPath)
+
+            for ($attempt = 1; $attempt -le 10; $attempt++) {
+              try {
+                Remove-Item -LiteralPath $LiteralPath -Recurse -Force -ErrorAction Stop
+                return
+              } catch {
+                if ($attempt -eq 10) { throw }
+                Start-Sleep -Milliseconds 1000
+              }
+            }
+          }
+
+          Remove-PortableTree -LiteralPath $current
+          Remove-PortableTree -LiteralPath $previous
           if (-not (Test-Path -LiteralPath $sentinel -PathType Leaf)) {
             throw 'Portable uninstall removed the persistent-state sentinel.'
           }

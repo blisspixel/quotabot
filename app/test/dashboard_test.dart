@@ -1658,6 +1658,25 @@ void main() {
     );
   });
 
+  testWidgets('quota header stacks at the target screenshot width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(340, 760);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      _wrap(const Dashboard.test(prefs: Prefs(showAccounts: true))),
+    );
+    await tester.pump();
+
+    final title = tester.getRect(find.text('Quota'));
+    final refresh = tester.getRect(find.byTooltip('Refresh now'));
+    expect(refresh.top, greaterThanOrEqualTo(title.bottom));
+    expect(refresh.right, lessThanOrEqualTo(340));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'analytics renders over compact mode and Back restores the strip',
     (tester) async {

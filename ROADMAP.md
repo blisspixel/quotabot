@@ -174,10 +174,10 @@ milestone sections below.
 | Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
 | Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.7 | The immutable [v0.9.7 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30315998438) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947), including upgrade from v0.9.6 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.8 | The immutable [v0.9.8 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30692524913) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30693794794), including upgrade from v0.9.7 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.7 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.8 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -586,7 +586,7 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. v0.9.7 supplies a green tagged acquisition record; application
+  mechanics. v0.9.8 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
   required before this gate is closed. The credential-free Windows verifier is
   now ready to cover an exact post-signing inventory, every shipped PE module,

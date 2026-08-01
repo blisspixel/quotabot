@@ -2495,8 +2495,7 @@ class _DashboardState extends State<Dashboard>
     );
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final stackHeaderActions =
-        largeText ||
-        (_showingAnalytics && MediaQuery.sizeOf(context).width < 360);
+        largeText || MediaQuery.sizeOf(context).width < 360;
     final titleCluster = Row(
       mainAxisSize: MainAxisSize.min,
       children: [

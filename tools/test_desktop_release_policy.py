@@ -369,6 +369,21 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn('tar -xzf "$archive" -C "$previous"', verify_job)
         self.assertNotIn('ditto -x -k "$archive" "$previous"', verify_job)
         self.assertIn("Portable uninstall removed", verify_job)
+
+        windows_lifecycle = verify_job.split(
+            "      - name: Exercise the Windows portable lifecycle\n", 1
+        )[1].split("      - name:", 1)[0]
+        self.assertIn("function Remove-PortableTree", windows_lifecycle)
+        self.assertIn(
+            "for ($attempt = 1; $attempt -le 10; $attempt++)",
+            windows_lifecycle,
+        )
+        self.assertIn("if ($attempt -eq 10) { throw }", windows_lifecycle)
+        self.assertIn("Start-Sleep -Milliseconds 1000", windows_lifecycle)
+        self.assertEqual(
+            windows_lifecycle.count("Remove-PortableTree -LiteralPath"),
+            2,
+        )
         self.assertIn("quotabot-windows-current-readiness.json", verify_job)
         self.assertIn("quotabot-windows-previous-readiness.json", verify_job)
         self.assertIn("quotabot-linux-current-readiness.json", verify_job)
