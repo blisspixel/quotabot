@@ -15,7 +15,8 @@ Notable changes to quotabot. Newest first.
   narrow window width by stacking its action controls.
 - Windows source setup now runs `quotabot doctor` while the desktop app remains
   stopped, then restarts it, preventing setup from creating a competing local
-  history writer during its own verification pass.
+  history writer during its own verification pass. Provider findings remain
+  non-blocking, while failure to launch the installed CLI now fails setup.
 
 ### Documentation
 - Advanced the immutable release and three-OS install evidence to v0.9.8.

@@ -257,6 +257,14 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("$doctorVerifiedBeforeDesktopRestart = $true", desktop_flow)
         self.assertIn("if (-not $doctorVerifiedBeforeDesktopRestart)", script)
         self.assertIn("if ($doctorExitCode -ne 0)", script)
+        self.assertIn(
+            'throw "Unable to run installed quotabot doctor:',
+            script,
+        )
+        self.assertNotIn(
+            "doctor reported an issue (this is expected if no provider tools have run yet)",
+            script,
+        )
 
     def test_windows_data_reset_preserves_the_active_cli_generation(self) -> None:
         setup = (ROOT / "docs" / "SETUP.md").read_text(encoding="utf-8")

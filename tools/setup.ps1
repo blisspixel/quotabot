@@ -446,7 +446,7 @@ function Invoke-QuotabotDoctor {
       Write-Warn2 "doctor exited with code $doctorExitCode (this is expected if no provider tools have run yet)"
     }
   } catch {
-    Write-Warn2 "doctor reported an issue (this is expected if no provider tools have run yet): $($_.Exception.Message)"
+    throw "Unable to run installed quotabot doctor: $($_.Exception.Message)"
   }
 }
 
