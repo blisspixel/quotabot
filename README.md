@@ -15,10 +15,22 @@ runtimes, so work can fall back locally when subscription caps are low.
 
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
 calls, spend no usage tokens, and never read prompts or source code.
+The complete quota and routing workflow is available from the CLI; the desktop
+app is optional.
+
+## What it looks like
 
 <p align="center">
-  <img src="docs/quotabot-demo.gif" alt="quotabot demo showing the widget, compact strip, analytics, and terminal dashboard" width="620">
+  <a href="docs/screenshot-top.png"><img src="docs/screenshot-top.png" alt="quotabot top CLI terminal dashboard using synthetic demo quota" width="760"></a>
 </p>
+
+<p align="center"><sub>The standalone <code>quotabot top</code> CLI, captured from the real terminal dashboard renderer with built-in synthetic demo data.</sub></p>
+
+<p align="center">
+  <a href="docs/quotabot-demo.gif"><img src="docs/quotabot-demo.gif" alt="quotabot CLI and optional desktop views using synthetic demo quota" width="520"></a>
+</p>
+
+<p align="center"><sub>Five generated demo views at 3 seconds per frame. <a href="docs/screenshot-widget.png">Desktop still</a> | <a href="docs/screenshot-analytics.png">Analytics still</a></sub></p>
 
 ## Quick start
 
@@ -73,64 +85,35 @@ filters, alerts, analytics, drift recovery, routing receipts, and every command.
 
 ## Supported sources
 
-| Source | Evidence |
-|---|---|
-| Claude | Account-wide quota metadata from a current host token or local quotabot grant |
-| Codex | Account-wide ChatGPT quota metadata from a host token or local quotabot grant |
-| Antigravity / Gemini | Live Cloud Code quota metadata, with labeled local fallback evidence |
-| Grok | Live billing metadata from a current local login |
-| Cursor, Windsurf, Kiro | Passive local plan or credit state when available |
-| Ollama, LM Studio, Lemonade | Reachable runtime plus installed or loaded model metadata |
-| NVIDIA NIM | Optional key validation and safe model-list discovery; no invented numeric quota |
-| Manual entries | User-supplied limits, usage, and reset time, always labeled self-reported |
-
-Fresh host credentials usually make Claude and Codex work without another
-login. An idle machine can create a separate local grant with `quotabot login`.
-quotabot never refreshes, rewrites, or deletes a host application's credential
-files. Exact endpoints, evidence classes, and limitations are in
-[Data sources](docs/DATA_SOURCES.md); provider-owned cross-check commands are in
+Cloud sources include Claude, Codex, Antigravity / Gemini, Grok, Cursor,
+Windsurf, Kiro, and optional NVIDIA NIM discovery. Local sources are Ollama, LM
+Studio, and Lemonade. Manual entries remain explicitly self-reported. Exact
+endpoints, evidence classes, credential behavior, and limitations are in
+[Data sources](docs/DATA_SOURCES.md); provider-owned cross-checks are in
 [Provider CLIs](docs/PROVIDER_CLIS.md).
 
 ## Desktop app
 
 Portable desktop bundles are published for Windows, macOS, and Linux alongside
-the CLI. They include checksum sidecars and GitHub build provenance. Windows and
-macOS application signing is still the next release gate, so do not treat a
-checksum or provenance result as permission to bypass an operating-system
-warning.
-
-See [Desktop release bundles](docs/DESKTOP-DISTRIBUTION.md) for asset names,
-verification, launch, update, rollback, and uninstall. To build and install the
-CLI and desktop app from source, use:
-
-- Windows: `pwsh tools/setup.ps1`
-- macOS / Linux: `bash tools/setup.sh`
-
-Add `-CliOnly` or `--cli-only` to skip the desktop build. Build prerequisites
-and packaging details are in [Building from source](docs/BUILDING.md).
+the CLI. The app is optional, and Windows and macOS signing remains the next
+release gate. Verification, launch, update, rollback, and uninstall belong in
+[Desktop release bundles](docs/DESKTOP-DISTRIBUTION.md). Source setup and
+packaging are in [Building from source](docs/BUILDING.md).
 
 ## Agents and integrations
 
-The MCP server exposes live snapshots, cache-only decisions, provider and model
-suggestions, availability checks, alerts, and short local routing leases. It
-supports stdio and authenticated loopback HTTP. The complete agent contract and
-schemas are in [AGENTS.md](AGENTS.md).
-
-The [LiteLLM integration](integrations/litellm/) demonstrates atomic provider
-leases and no-surprise spend classes. Minimal Python and TypeScript clients are
-in [integrations/mcp_clients](integrations/mcp_clients/).
+The MCP server supports stdio and authenticated loopback HTTP. Its complete
+tool and schema contract is in [AGENTS.md](AGENTS.md). See the
+[LiteLLM integration](integrations/litellm/) and
+[minimal MCP clients](integrations/mcp_clients/) for working examples.
 
 ## Privacy and trust boundary
 
 - No quotabot account, hosted service, advertising, or telemetry.
-- No model or inference calls, so quota reads spend zero usage tokens.
-- No prompt, source-code, model-output, or other user-content reads.
-- Local cache, history, preferences, profiles, grants, and leases stay local.
-- Live adapters may present an existing credential only to that provider's
-  quota or model-list metadata endpoint. Antigravity may also perform its
-  provider-required account onboarding request before reading quota.
-- Routing fails soft. If quotabot is unavailable, the caller can continue with
-  its original provider.
+- No model calls or reads of prompts, code, model output, or other user content.
+- Local metadata stays local. Live adapters contact only provider quota or
+  model-list metadata endpoints; Antigravity may perform required onboarding.
+- Routing fails soft, so callers can continue if quotabot is unavailable.
 
 Run `quotabot explain` to inspect files and network destinations used by each
 adapter. The complete promises and verification methods are in
@@ -140,25 +123,13 @@ adapter. The complete promises and verification methods are in
 ## Release and project status
 
 The immutable [v0.9.8 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8)
-passed its exact 14-asset native audit and the Windows, macOS, and Linux install
-and upgrade matrix. The evidence links and release checklist are in
-[Baseline release evidence](docs/BUILDING.md#baseline-release-evidence).
-
-Project direction and completion criteria live in the [roadmap](ROADMAP.md).
-The [documentation index](docs/README.md) links setup, usage, trust, design, and
-maintenance references. Development guidance is in
-[CONTRIBUTING.md](CONTRIBUTING.md), and private vulnerability reporting is in
-[SECURITY.md](SECURITY.md).
+passed its 14-asset audit and cross-platform install and upgrade matrix. See the
+[release evidence](docs/BUILDING.md#baseline-release-evidence),
+[roadmap](ROADMAP.md), [documentation index](docs/README.md),
+[contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).
 
 ## Disclaimer
 
-quotabot is an independent, unofficial tool. It is not affiliated with,
-endorsed by, or sponsored by any provider it reports. Product names and
-trademarks identify the service whose quota is displayed.
-
-Quota metadata is best-effort and may be incomplete, delayed, or wrong. Verify
-billing and compliance information against the provider's official dashboard.
-You are responsible for ensuring that credential reuse, metadata access, and
-automated routing comply with each provider's terms and your account policy.
-
-Provided "AS IS", without warranty, under the [Apache License 2.0](LICENSE).
+quotabot is independent and unofficial. Quota metadata is best-effort; verify
+billing and compliance against each provider. Provided "AS IS", without
+warranty, under the [Apache License 2.0](LICENSE).

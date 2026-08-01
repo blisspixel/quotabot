@@ -377,6 +377,23 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("[Building from source](docs/BUILDING.md)", readme)
         self.assertIn("macOS\ninstalls `~/Applications/quotabot.app`", building)
 
+    def test_readme_demo_refreshes_pinned_flutter_build_state(self) -> None:
+        script = (ROOT / "tools" / "generate_readme_demo.py").read_text(
+            encoding="utf-8"
+        )
+
+        clean_at = script.index('_run([flutter, "clean"]')
+        dependencies_at = script.index(
+            '_run([flutter, "pub", "get", "--enforce-lockfile"]'
+        )
+        build_at = script.index(
+            '_run([flutter, "build", target, "--debug", "--no-pub"]'
+        )
+        self.assertLess(clean_at, dependencies_at)
+        self.assertLess(dependencies_at, build_at)
+        self.assertIn("FRAME_DURATION_MS = 3000", script)
+        self.assertIn("duration=[FRAME_DURATION_MS] * len(paletted)", script)
+
     def test_linux_source_setup_installs_a_stable_desktop_bundle(self) -> None:
         script = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
         building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")

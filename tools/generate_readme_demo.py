@@ -38,6 +38,8 @@ GIF_FRAMES = (
     "demo-05-top.png",
 )
 
+FRAME_DURATION_MS = 3000
+
 
 def _run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command), flush=True)
@@ -72,7 +74,12 @@ def _flutter_target() -> tuple[str, Path]:
 
 def _capture(frame_dir: Path) -> None:
     target, executable = _flutter_target()
-    _run([_tool("flutter"), "build", target, "--debug", "--no-pub"], APP_DIR)
+    flutter = _tool("flutter")
+    # Flutter and CMake cache absolute SDK paths. A prior build from a different
+    # pinned SDK must not make documentation capture depend on a deleted path.
+    _run([flutter, "clean"], APP_DIR)
+    _run([flutter, "pub", "get", "--enforce-lockfile"], APP_DIR)
+    _run([flutter, "build", target, "--debug", "--no-pub"], APP_DIR)
     if not executable.exists():
         raise SystemExit(f"Flutter build did not produce {executable}")
     env = os.environ.copy()
@@ -115,7 +122,7 @@ def _assemble_gif(frame_dir: Path) -> None:
         out,
         save_all=True,
         append_images=paletted[1:],
-        duration=[1000, 650, 900, 1300, 1300],
+        duration=[FRAME_DURATION_MS] * len(paletted),
         loop=0,
         optimize=True,
     )

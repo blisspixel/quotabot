@@ -8,12 +8,20 @@ Notable changes to quotabot. Newest first.
 - Windows draft-release lifecycle verification now retries temporary extraction
   cleanup for up to ten attempts when a stopped desktop process briefly
   retains a filesystem handle. The last failure still blocks publication.
+- README screenshot generation now clears build state containing an obsolete
+  absolute Flutter SDK path and restores dependencies from the committed
+  lockfile before capturing current UI and terminal views.
+- The desktop quota header now keeps its timestamp visible at the documented
+  narrow window width by stacking its action controls.
 
 ### Documentation
 - Advanced the immutable release and three-OS install evidence to v0.9.8.
 - Reduced the README to a concise install, usage, support, and trust overview;
   detailed provider, recovery, routing, packaging, and lifecycle guidance now
   stays in the linked documentation.
+- Regenerated the current widget, analytics, terminal, and animated demo assets
+  from synthetic data with the pinned Flutter SDK, and restored the static
+  terminal dashboard to the README with a three-second slideshow cadence.
 
 ## 0.9.8 - 2026-08-01
 
