@@ -13,6 +13,9 @@ Notable changes to quotabot. Newest first.
   lockfile before capturing current UI and terminal views.
 - The desktop quota header now keeps its timestamp visible at the documented
   narrow window width by stacking its action controls.
+- Windows source setup now runs `quotabot doctor` while the desktop app remains
+  stopped, then restarts it, preventing setup from creating a competing local
+  history writer during its own verification pass.
 
 ### Documentation
 - Advanced the immutable release and three-OS install evidence to v0.9.8.

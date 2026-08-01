@@ -364,6 +364,8 @@ $collector = Join-Path $root 'collector'
 $app = Join-Path $root 'app'
 $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
 $installDir = Join-Path $installRoot 'bin'
+$exe = Join-Path $installDir 'quotabot.exe'
+$doctorVerifiedBeforeDesktopRestart = $false
 . (Join-Path $scriptDir 'windows-build-prereqs.ps1')
 . (Join-Path $scriptDir 'windows-architecture.ps1')
 $windowsArch = Get-QuotabotWindowsArchitecture
@@ -431,6 +433,21 @@ function Restart-QuotabotDesktopAfterSetup {
       -WorkingDirectory (Split-Path -Parent $restartExe) | Out-Null
   }
   return $restartExe
+}
+
+function Invoke-QuotabotDoctor {
+  param([Parameter(Mandatory)][string]$Executable)
+
+  Write-Step 'Verifying with quotabot doctor'
+  try {
+    & $Executable doctor
+    $doctorExitCode = $LASTEXITCODE
+    if ($doctorExitCode -ne 0) {
+      Write-Warn2 "doctor exited with code $doctorExitCode (this is expected if no provider tools have run yet)"
+    }
+  } catch {
+    Write-Warn2 "doctor reported an issue (this is expected if no provider tools have run yet): $($_.Exception.Message)"
+  }
 }
 
 Write-Step 'Locating the Dart toolchain'
@@ -538,6 +555,11 @@ try {
 
       Write-Step 'Creating the Desktop shortcut'
       & (Join-Path $scriptDir 'create-shortcut.ps1') -ExePath $installedAppExe
+
+      # Keep the desktop stopped until doctor finishes so setup never creates a
+      # second quota/history writer during its own verification pass.
+      Invoke-QuotabotDoctor -Executable $exe
+      $doctorVerifiedBeforeDesktopRestart = $true
     } catch {
       $desktopFailure = $_
       throw
@@ -573,7 +595,6 @@ try {
   Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$exe = Join-Path $installDir 'quotabot.exe'
 foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
   $legacyPath = Join-Path $installDir $legacy
   if (Test-Path $legacyPath) {
@@ -596,11 +617,8 @@ if ($userPaths -notcontains $installDir) {
   Write-Ok 'Install dir already on PATH'
 }
 
-Write-Step 'Verifying with quotabot doctor'
-try {
-  & $exe doctor
-} catch {
-  Write-Warn2 "doctor reported an issue (this is expected if no provider tools have run yet): $($_.Exception.Message)"
+if (-not $doctorVerifiedBeforeDesktopRestart) {
+  Invoke-QuotabotDoctor -Executable $exe
 }
 
 Write-Host ''

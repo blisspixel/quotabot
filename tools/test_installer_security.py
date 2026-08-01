@@ -231,7 +231,7 @@ class InstallerSecurityTests(unittest.TestCase):
         )
         self.assertIn("if ($CliOnly -or $NoApp)", script)
 
-    def test_windows_source_setup_builds_before_normal_app_shutdown_and_restarts_in_finally(
+    def test_windows_source_setup_builds_then_verifies_before_normal_app_restart(
         self,
     ) -> None:
         script = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
@@ -250,6 +250,13 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("Start-Process `", script)
         self.assertIn("Restarted the newly installed desktop app after setup", script)
         self.assertIn("Restarted the prior desktop app after setup failed", script)
+        desktop_flow = script.split("if ($CliOnly -or $NoApp)", 1)[1]
+        doctor = desktop_flow.index("Invoke-QuotabotDoctor -Executable $exe")
+        restart = desktop_flow.index("Restart-QuotabotDesktopAfterSetup `")
+        self.assertLess(doctor, restart)
+        self.assertIn("$doctorVerifiedBeforeDesktopRestart = $true", desktop_flow)
+        self.assertIn("if (-not $doctorVerifiedBeforeDesktopRestart)", script)
+        self.assertIn("if ($doctorExitCode -ne 0)", script)
 
     def test_windows_data_reset_preserves_the_active_cli_generation(self) -> None:
         setup = (ROOT / "docs" / "SETUP.md").read_text(encoding="utf-8")
