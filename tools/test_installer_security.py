@@ -374,7 +374,7 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn('ditto "$source" "$staging"', script)
         self.assertIn('desktop_target="$installed_app"', script)
         self.assertIn("install_versioned_pair \\", script)
-        self.assertIn("macOS installs the app\nunder `~/Applications`", readme)
+        self.assertIn("[Building from source](docs/BUILDING.md)", readme)
         self.assertIn("macOS\ninstalls `~/Applications/quotabot.app`", building)
 
     def test_linux_source_setup_installs_a_stable_desktop_bundle(self) -> None:

@@ -11,6 +11,9 @@ Notable changes to quotabot. Newest first.
 
 ### Documentation
 - Advanced the immutable release and three-OS install evidence to v0.9.8.
+- Reduced the README to a concise install, usage, support, and trust overview;
+  detailed provider, recovery, routing, packaging, and lifecycle guidance now
+  stays in the linked documentation.
 
 ## 0.9.8 - 2026-08-01
 
