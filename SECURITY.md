@@ -30,9 +30,12 @@ reads and writes helps scope any report:
 - Official release artifacts carry checksum sidecars and restricted workflow
   provenance. Repository rules block updates and deletion of `v*` tags, and
   GitHub release immutability locks an audited release's tag and assets when the
-  draft is published. The v0.9.4 tag and its exact 14-asset set are locked and
-  passed the native
-  [release audit](https://github.com/blisspixel/quotabot/actions/runs/30180394420).
+  draft is published.
+  The current audited release is [v0.9.8](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8).
+  Publication is fail-closed until its exact 14-asset set passes the native
+  [release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml).
+  The immediately prior v0.9.7 release is locked and passed
+  [release audit 30315998438](https://github.com/blisspixel/quotabot/actions/runs/30315998438).
   Immutability is prospective from July 18, 2026; v0.9.2 and earlier releases
   were not changed retroactively.
 - Any OAuth grant you create with `quotabot login` is stored separately from the

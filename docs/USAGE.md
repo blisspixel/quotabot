@@ -220,11 +220,14 @@ write a spend ledger, or change routing from this advisory.
 
 ## CLI reference
 
-Run `quotabot help` for the live list. Quota and routing reads cost no usage
+Run `quotabot help` for the full live list. `quotabot suggest --help` and
+`quotabot models --help` provide focused, side-effect-free references for the
+provider-versus-model mode switch, policy conflicts, budget defaults, model
+filters, read boundaries, and examples. Quota and routing reads cost no usage
 tokens. Most providers read local files; live providers may call their own
-metadata endpoint with an existing local token or key. Login, logout, manual-
-entry, cache/history, preference, and lease operations can write bounded local
-metadata. Add `--json` to any read command for machine output.
+metadata endpoint with an existing local token or key. Login, logout,
+manual-entry, cache/history, preference, and lease operations can write bounded
+local metadata. Add `--json` to any read command for machine output.
 
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|
@@ -242,7 +245,7 @@ metadata. Add `--json` to any read command for machine output.
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect claude, codex, grok, or antigravity for refreshable reads. |
 | `logout <provider>`    | Disconnect a provider.                                |
-| `help`, `version`      | Usage and version.                                    |
+| `help`, `version`      | Global usage and version; `suggest` and `models` also have focused help. |
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
 Human `doctor` rows include a compact provenance tag with read state, spend

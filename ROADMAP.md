@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-27. This file is the forward plan. It records brief shipped
+Updated 2026-08-01. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -95,11 +95,14 @@ collected against the signed artifacts users will actually receive.
 
 **Behavior**
 
-- Authenticode-sign and RFC 3161 timestamp every distributed Windows executable
-  with SHA-256, then verify every signature before packaging and publication.
-- Developer ID-sign the macOS app and bundled executables with hardened runtime,
-  submit the archive with `notarytool`, staple the accepted ticket, and verify
-  both the code signature and Gatekeeper assessment before publication.
+- Inventory, Authenticode-sign, and RFC 3161 timestamp every shipped PE module,
+  including EXE and DLL files, with SHA-256 for both the PE digest and timestamp
+  message imprint, then verify every signature before packaging and publication.
+- Inventory and Developer ID-sign the standalone macOS CLI, the app, every
+  nested Mach-O file, and each native code bundle with hardened runtime. Submit
+  eligible distribution containers with `notarytool`, staple the accepted app
+  ticket, and verify code signatures plus Gatekeeper assessment before
+  publication.
 - Preserve the native build, archive-shape, checksum, GitHub provenance,
   lifecycle, and immutable-publication gates around the signed artifacts.
 
@@ -120,9 +123,10 @@ collected against the signed artifacts users will actually receive.
 
 - The release workflow signs in the correct order, verifies before packaging,
   and fails closed under deterministic missing-secret and bad-signature tests.
-- Windows release assets pass `signtool verify /pa /all`; macOS assets pass
-  `codesign --verify --deep --strict`, `spctl --assess`, and stapler validation
-  after a fresh download of the exact draft assets.
+- Windows release assets pass `signtool verify /pa /all` plus the bounded
+  timestamp message-imprint verifier; macOS native code and the app pass
+  `codesign --verify --deep --strict` and `spctl --assess`, while the app also
+  passes stapler validation, after a fresh download of the exact draft assets.
 - A signed 0.9.x rehearsal passes clean install, launch, tray, update, rollback,
   data-preserving uninstall, checksum, provenance, and immutable publication on
   native Windows and macOS runners.
@@ -138,9 +142,9 @@ timestamping as the authenticity and integrity path for downloaded executables.
 Testing installation and accessibility first would validate artifacts that must
 still change.
 
-Sources: [Apple notarization guidance, accessed 2026-07-27](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
-[Microsoft Authenticode timestamping guidance, accessed 2026-07-27](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
-[GitHub artifact attestation guidance, accessed 2026-07-27](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+Sources: [Apple notarization guidance, accessed 2026-07-28](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
+[Microsoft Authenticode timestamping guidance, accessed 2026-07-28](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
+[GitHub artifact attestation guidance, accessed 2026-07-28](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
 The workflow and verification work can be prepared in the repository, but final
 closure requires the project owner to provision a Windows code-signing identity,
@@ -151,7 +155,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 
 ## Current state
 
-The current line, **0.9.7**, is also the tagged stable release and installer
+The current line, **0.9.8**, is also the tagged stable release and installer
 version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
@@ -170,10 +174,10 @@ milestone sections below.
 | Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
 | Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.6 | The immutable [v0.9.6 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30290535142) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406), including upgrade from v0.9.5 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.7 | The immutable [v0.9.7 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30315998438) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947), including upgrade from v0.9.6 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.6 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.7 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -582,9 +586,19 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. v0.9.6 supplies a green tagged acquisition record; application
+  mechanics. v0.9.7 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
-  required before this gate is closed.
+  required before this gate is closed. The credential-free Windows verifier is
+  now ready to cover an exact post-signing inventory, every shipped PE module,
+  the owner-supplied publisher identity, SHA-256 file digests, RFC 3161
+  timestamps, each token's SHA-256 message imprint and signature binding, and
+  stable native verifier hashes. Its first-class receipt output atomically
+  retains canonical success or bounded failure evidence with surface,
+  architecture, allowlisted-stage context, and a comparison-only digest of all
+  other receipt fields. That digest is not artifact identity, authentication,
+  attestation, or independent workflow provenance. The signing identity,
+  credential custody, timestamp service, and release-workflow activation remain
+  owner decisions.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce
@@ -740,8 +754,24 @@ added it is a credit-pool provider like Cursor, never an included-quota plan.
 [Amazon Q Developer](https://aws.amazon.com/blogs/devops/amazon-q-developer-end-of-support-announcement/)
 blocks new signups from 2026-05-15 and ends support for IDE plugins and paid
 subscriptions on 2027-04-30 while other AWS experiences continue, so it does not
-justify a separate adapter ahead of Kiro. None of this changes the 1.0 scope;
-these remain post-1.0, admission-gated, and behind the typed shared-pool work.
+justify a separate adapter ahead of Kiro.
+
+ElevenLabs is a separate AI-service candidate, not a coding-route commitment.
+Its official [subscription endpoint](https://elevenlabs.io/docs/api-reference/user/subscription/get)
+exposes plan, credit use and limit, reset time, extension and overage metadata,
+and voice-slot limits through
+[restricted API keys](https://elevenlabs.io/docs/api-reference/authentication).
+[Current pricing](https://elevenlabs.io/pricing) uses one shared credit pool whose
+cost is weighted by product and model, with capped rollover. Its
+[Pay As You Go](https://elevenlabs.io/docs/overview/administration/pay-as-you-go)
+and legacy overage behavior also make exhaustion semantics account-dependent.
+Evaluate it only after typed shared pools and an explicit product-domain
+decision. If first admitted as a quota-only source, it must stay out of coding
+recommendations, model routing, leases, and projected-waste policy until an
+audio routing domain has comparable alternatives and explicit spend guardrails.
+
+None of this changes the 1.0 scope; every candidate remains post-1.0,
+admission-gated, and behind the typed shared-pool work.
 
 ## Product measures
 

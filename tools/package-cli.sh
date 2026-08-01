@@ -4,17 +4,34 @@
 
 set -euo pipefail
 
+archive=1
+package_only=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-archive) archive=0 ;;
+    --package-only) package_only=1 ;;
+    -h | --help)
+      printf '%s\n' \
+        'Usage: bash tools/package-cli.sh [--no-archive | --package-only]' \
+        '  --no-archive  build and normalize the CLI bundle without packaging' \
+        '  --package-only package the existing normalized bundle without building'
+      exit 0
+      ;;
+    *) echo "Unknown option: $arg" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]; then
+  echo "--no-archive and --package-only cannot be combined." >&2
+  exit 2
+fi
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$script_dir/.." && pwd)"
 collector_dir="$root/collector"
 release_dir="$root/release"
 build_dir="$collector_dir/build/quotabot_cli_release"
 . "$script_dir/package-pair.sh"
-
-if ! command -v dart >/dev/null 2>&1; then
-  echo "dart not found on PATH. Install Flutter or Dart and add it to PATH." >&2
-  exit 1
-fi
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
@@ -31,20 +48,43 @@ case "$arch" in
   *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
-mkdir -p "$release_dir"
 asset="quotabot-${os}-${arch}.tar.gz"
 out="$release_dir/$asset"
-
-rm -rf "$build_dir"
-(cd "$collector_dir" && \
-  dart pub get --enforce-lockfile && \
-  dart build cli --target=bin/collect.dart --output="$build_dir")
 bundle="$build_dir/bundle"
-if [ ! -f "$bundle/bin/collect" ]; then
-  echo "CLI build did not produce $bundle/bin/collect" >&2
+packaged_executable="$bundle/bin/quotabot"
+
+if [ "$package_only" -eq 0 ]; then
+  if ! command -v dart >/dev/null 2>&1; then
+    echo "dart not found on PATH. Install Flutter or Dart and add it to PATH." >&2
+    exit 1
+  fi
+
+  rm -rf "$build_dir"
+  (cd "$collector_dir" && \
+    dart pub get --enforce-lockfile && \
+    dart build cli --target=bin/collect.dart --output="$build_dir")
+  if [ ! -f "$bundle/bin/collect" ]; then
+    echo "CLI build did not produce $bundle/bin/collect" >&2
+    exit 1
+  fi
+  mv "$bundle/bin/collect" "$packaged_executable"
+fi
+
+if [ ! -x "$packaged_executable" ]; then
+  if [ "$package_only" -eq 1 ]; then
+    echo "Package-only mode requires the existing normalized CLI executable: $packaged_executable" >&2
+  else
+    echo "CLI build did not produce $packaged_executable" >&2
+  fi
   exit 1
 fi
-mv "$bundle/bin/collect" "$bundle/bin/quotabot"
+
+if [ "$archive" -eq 0 ]; then
+  echo "CLI bundle ready: $bundle"
+  exit 0
+fi
+
+mkdir -p "$release_dir"
 package_workspace="$(mktemp -d "$release_dir/.quotabot-package.XXXXXX")"
 cleanup_package() {
   if [[ -e "$package_workspace/.preserve" ]]; then

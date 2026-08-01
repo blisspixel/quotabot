@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import shutil
+import subprocess
+import tarfile
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -383,6 +390,334 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn('> "$temporary_sidecar"', macos)
         self.assertIn("publish_package_pair", macos)
 
+    def test_cli_packagers_expose_a_build_sign_package_boundary(self) -> None:
+        windows = (ROOT / "tools" / "package-cli.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "tools" / "package-cli.sh").read_text(encoding="utf-8")
+
+        for option in ("[switch]$NoArchive", "[switch]$PackageOnly"):
+            self.assertIn(option, windows)
+        self.assertIn("if ($NoArchive -and $PackageOnly)", windows)
+        self.assertIn("if (-not $PackageOnly)", windows)
+        self.assertIn("if ($NoArchive)", windows)
+        self.assertLess(
+            windows.index("if ($NoArchive -and $PackageOnly)"),
+            windows.index("Get-Command dart"),
+        )
+        package_only = windows.split("if (-not $PackageOnly)", 1)[1]
+        self.assertIn("dart build cli", package_only)
+        self.assertIn("CLI bundle ready", windows)
+        self.assertIn("Package-only mode requires", windows)
+
+        for option in ("--no-archive", "--package-only"):
+            self.assertIn(option, posix)
+        self.assertIn('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]', posix)
+        self.assertIn('if [ "$package_only" -eq 0 ]', posix)
+        self.assertIn('if [ "$archive" -eq 0 ]', posix)
+        self.assertLess(
+            posix.index('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]'),
+            posix.index("command -v dart"),
+        )
+        self.assertIn("CLI bundle ready", posix)
+        self.assertIn("Package-only mode requires", posix)
+
+    def test_desktop_packagers_can_archive_without_rebuilding(self) -> None:
+        windows = (ROOT / "tools" / "package-windows.ps1").read_text(encoding="utf-8")
+        macos = (ROOT / "tools" / "package-macos.sh").read_text(encoding="utf-8")
+
+        self.assertIn("[switch]$PackageOnly", windows)
+        self.assertIn("if ($NoArchive -and $PackageOnly)", windows)
+        self.assertIn("if (-not $PackageOnly)", windows)
+        self.assertLess(
+            windows.index("if ($NoArchive -and $PackageOnly)"),
+            windows.index("Get-Command flutter"),
+        )
+        self.assertIn("Using existing Windows release bundle", windows)
+        self.assertIn("Package-only mode requires", windows)
+
+        self.assertIn("--package-only", macos)
+        self.assertIn('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]', macos)
+        self.assertIn('if [ "$package_only" -eq 0 ]', macos)
+        self.assertLess(
+            macos.index('if [ "$archive" -eq 0 ] && [ "$package_only" -eq 1 ]'),
+            macos.index("command -v flutter"),
+        )
+        self.assertIn("Using existing macOS release bundle", macos)
+        self.assertIn("Package-only mode requires", macos)
+
+    @unittest.skipUnless(os.name == "nt", "Windows packaging requires Windows")
+    def test_windows_package_only_preserves_existing_candidate_bytes(self) -> None:
+        powershell = shutil.which("pwsh")
+        if powershell is None:
+            self.skipTest("PowerShell 7 is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            for name in (
+                "package-cli.ps1",
+                "package-windows.ps1",
+                "package-pair.ps1",
+                "windows-architecture.ps1",
+                "windows-build-prereqs.ps1",
+            ):
+                shutil.copy2(ROOT / "tools" / name, tools / name)
+
+            cli_bytes = b"exact normalized CLI candidate\n"
+            desktop_bytes = b"exact desktop candidate\n"
+            cli = (
+                root
+                / "collector"
+                / "build"
+                / "quotabot_cli_release"
+                / "bundle"
+                / "bin"
+                / "quotabot.exe"
+            )
+            desktop = (
+                root
+                / "app"
+                / "build"
+                / "windows"
+                / "x64"
+                / "runner"
+                / "Release"
+                / "quotabot.exe"
+            )
+            cli.parent.mkdir(parents=True)
+            desktop.parent.mkdir(parents=True)
+            cli.write_bytes(cli_bytes)
+            desktop.write_bytes(desktop_bytes)
+
+            environment = os.environ.copy()
+            environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+            for script in ("package-cli.ps1", "package-windows.ps1"):
+                completed = subprocess.run(
+                    [powershell, "-NoProfile", "-File", tools / script, "-PackageOnly"],
+                    cwd=root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=False,
+                )
+                self.assertEqual(
+                    completed.returncode,
+                    0,
+                    completed.stdout + completed.stderr,
+                )
+
+            cli_archive = root / "release" / "quotabot-windows-x64.zip"
+            desktop_archive = root / "release" / "quotabot-windows-x64-desktop.zip"
+            with zipfile.ZipFile(cli_archive) as archive:
+                self.assertEqual(archive.read("bin/quotabot.exe"), cli_bytes)
+            with zipfile.ZipFile(desktop_archive) as archive:
+                self.assertEqual(archive.read("quotabot.exe"), desktop_bytes)
+
+            for archive in (cli_archive, desktop_archive):
+                expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+                sidecar = Path(f"{archive}.sha256").read_text(encoding="utf-8")
+                self.assertEqual(sidecar, f"{expected}  {archive.name}")
+
+    @unittest.skipIf(os.name == "nt", "POSIX packaging requires macOS or Linux")
+    def test_posix_cli_package_only_preserves_existing_candidate_bytes(self) -> None:
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("Bash is unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tools = root / "tools"
+            tools.mkdir()
+            for name in ("package-cli.sh", "package-pair.sh"):
+                shutil.copy2(ROOT / "tools" / name, tools / name)
+
+            cli_bytes = b"exact normalized POSIX CLI candidate\n"
+            cli = (
+                root
+                / "collector"
+                / "build"
+                / "quotabot_cli_release"
+                / "bundle"
+                / "bin"
+                / "quotabot"
+            )
+            cli.parent.mkdir(parents=True)
+            cli.write_bytes(cli_bytes)
+            cli.chmod(0o755)
+
+            completed = subprocess.run(
+                [bash, tools / "package-cli.sh", "--package-only"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stdout + completed.stderr,
+            )
+
+            archives = list((root / "release").glob("quotabot-*.tar.gz"))
+            self.assertEqual(len(archives), 1)
+            archive = archives[0]
+            with tarfile.open(archive, "r:gz") as package:
+                member = package.extractfile("./bin/quotabot")
+                self.assertIsNotNone(member)
+                self.assertEqual(
+                    member.read() if member is not None else None, cli_bytes
+                )
+            expected = hashlib.sha256(archive.read_bytes()).hexdigest()
+            sidecar = Path(f"{archive}.sha256").read_text(encoding="utf-8")
+            self.assertEqual(sidecar, f"{expected}  {archive.name}")
+
+    def test_unsigned_launch_guidance_never_authorizes_protection_bypass(
+        self,
+    ) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        distribution = (ROOT / "docs" / "DESKTOP-DISTRIBUTION.md").read_text(
+            encoding="utf-8"
+        )
+        normalized_distribution = " ".join(distribution.split())
+
+        self.assertIn("checksum-verified CLI release", readme)
+        self.assertIn("For GitHub build provenance", normalized_distribution)
+        self.assertIn("Do not bypass SmartScreen.", normalized_distribution)
+        self.assertIn(
+            "Checksums and GitHub provenance do not establish Windows publisher identity.",
+            normalized_distribution,
+        )
+        self.assertNotIn("Do not bypass a warning until", normalized_distribution)
+        self.assertIn("Do not remove quarantine metadata", normalized_distribution)
+
+    def test_windows_native_signing_inventory_binds_archives(
+        self,
+    ) -> None:
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        for workflow in (ci, release):
+            self.assertEqual(workflow.count("native_code_inventory.py"), 4)
+            self.assertEqual(
+                workflow.count("--platform windows --surface cli --architecture x64"),
+                2,
+            )
+            self.assertEqual(
+                workflow.count(
+                    "--platform windows --surface desktop --architecture x64"
+                ),
+                2,
+            )
+            self.assertEqual(workflow.count("--expect-manifest"), 2)
+            self.assertNotIn("--platform macos", workflow)
+
+        release_cli = release.split("  build:\n", 1)[1].split(
+            "  verify-cli-release:\n", 1
+        )[0]
+        release_desktop = release.split("  build-desktop:\n", 1)[1].split(
+            "  verify-desktop-release:\n", 1
+        )[0]
+        for job, verifier in (
+            (release_cli, "verify_cli_archive.py"),
+            (release_desktop, "verify_desktop_archive.py"),
+        ):
+            build_at = job.index("-NoArchive")
+            inventory_at = job.index("native_code_inventory.py")
+            package_at = job.index("-PackageOnly")
+            verify_at = job.index(verifier)
+            archive_inventory_at = job.rindex("native_code_inventory.py")
+            preserve_at = job.index("actions/upload-artifact@")
+            attest_at = job.index("actions/attest-build-provenance@")
+            upload_at = job.index("gh release upload")
+            self.assertLess(build_at, inventory_at)
+            self.assertLess(inventory_at, package_at)
+            self.assertLess(package_at, verify_at)
+            self.assertLess(verify_at, archive_inventory_at)
+            self.assertLess(archive_inventory_at, preserve_at)
+            self.assertLess(preserve_at, attest_at)
+            self.assertLess(inventory_at, verify_at)
+            self.assertLess(attest_at, upload_at)
+            preserve_context = job[max(0, preserve_at - 400) : preserve_at + 500]
+            self.assertIn("if: always() && runner.os == 'Windows'", preserve_context)
+            self.assertIn("if-no-files-found: warn", preserve_context)
+
+        self.assertIn("tools.test_native_code_inventory", ci)
+
+    def test_windows_signature_verifier_is_tested_but_not_a_release_gate(
+        self,
+    ) -> None:
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")
+        normalized_building = " ".join(building.split())
+
+        self.assertIn("tools.test_verify_windows_signatures", ci)
+        self.assertNotIn("verify_windows_signatures.py", release)
+        self.assertIn("new post-signing inventory", normalized_building)
+        self.assertIn("real embedded-signed Windows fixture test", normalized_building)
+        self.assertIn(
+            "exactly one valid embedded Authenticode signature", normalized_building
+        )
+        self.assertIn("does not accept native-tool overrides", normalized_building)
+        self.assertIn("TSTInfo `messageImprint` must use the SHA-256 OID", building)
+        self.assertIn("timestamp_policy_unproven", building)
+        self.assertIn("windows-cli-signature-verification.json", building)
+        self.assertIn("New-Item -ItemType Directory -Force -Path '.agent'", building)
+        self.assertIn("--receipt $receipt $candidate", building)
+        self.assertNotIn("--json $candidate > $receipt", building)
+        self.assertIn(
+            "leaves any prior complete receipt untouched", normalized_building
+        )
+        self.assertIn(
+            "Terminal fallback JSON appears only when the receipt itself cannot be published",
+            normalized_building,
+        )
+        self.assertIn("`receipt_body_sha256`", building)
+        self.assertIn("all other receipt fields", normalized_building)
+        self.assertIn("remove `receipt_body_sha256`", normalized_building)
+        self.assertIn(
+            "not a signature, MAC, attestation, or proof of origin",
+            normalized_building,
+        )
+        self.assertIn("exit status", normalized_building)
+        self.assertIn("independent workflow provenance", normalized_building)
+        self.assertIn(
+            "On success, use the candidate and inventory digests",
+            normalized_building,
+        )
+        self.assertIn("canonical candidate tree", normalized_building)
+        self.assertIn("archive checksum", normalized_building)
+        self.assertIn("`receipt_output_invalid`", building)
+        self.assertIn("must not be treated as current", normalized_building)
+        self.assertIn("may contain prior evidence", normalized_building)
+        self.assertIn("or may not exist", normalized_building)
+        self.assertIn("capture the terminal fallback", normalized_building)
+        self.assertIn("SignTool and PowerShell hashes", normalized_building)
+        self.assertIn("40-hex SHA-1 thumbprint", normalized_building)
+        self.assertIn("stop publication", normalized_building)
+        self.assertIn("allowlisted failure stage", normalized_building)
+        self.assertIn(
+            "deliberately not called by the current release", normalized_building
+        )
+        self.assertIn("current release artifacts remain unsigned", normalized_building)
+
+    def test_signing_scope_names_pe_modules_and_the_standalone_macos_cli(
+        self,
+    ) -> None:
+        roadmap = (ROOT / "ROADMAP.md").read_text(encoding="utf-8")
+        building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")
+
+        for text in (roadmap, building):
+            self.assertIn("every shipped PE module", text)
+            self.assertIn("standalone macOS CLI", text)
+            self.assertIn("nested Mach-O", text)
+
     def test_normal_ci_builds_and_verifies_native_desktop_archives(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
@@ -392,7 +727,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("tools/package-linux.sh", workflow)
         self.assertIn("tools/package-macos.sh", workflow)
         self.assertEqual(workflow.count("tools/verify_desktop_archive.py"), 3)
-        self.assertNotIn("package-windows.ps1 -NoArchive", workflow)
+        self.assertIn("package-windows.ps1 -NoArchive", workflow)
+        self.assertIn("package-windows.ps1 -PackageOnly", workflow)
         self.assertNotIn("package-linux.sh --no-archive", workflow)
         self.assertNotIn("package-macos.sh --no-archive", workflow)
         self.assertIn("quotabot-windows-readiness.json", workflow)
@@ -407,6 +743,9 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("tools/package-cli.ps1", workflow)
         self.assertIn("tools/package-cli.sh", workflow)
+        self.assertIn("package-cli.ps1 -NoArchive", workflow)
+        self.assertIn("package-cli.ps1 -PackageOnly", workflow)
+        self.assertNotIn("package-cli.sh --no-archive", workflow)
         self.assertEqual(workflow.count("tools/verify_cli_archive.py"), 2)
 
 

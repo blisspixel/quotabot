@@ -55,6 +55,14 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             rf"^> \*\*Current stable:\*\* ({VERSION})\.",
             "README current stable",
         ),
+        "SECURITY current audited release": _required_match(
+            root / "SECURITY.md",
+            (
+                rf"^  The current audited release is \[v({VERSION})\]"
+                r"\(https://github\.com/blisspixel/quotabot/releases/tag/v\1\)\."
+            ),
+            "SECURITY current audited release",
+        ),
         "AGENTS current stable": _required_match(
             root / "AGENTS.md",
             rf"^The current verified stable release is ({VERSION})\.",

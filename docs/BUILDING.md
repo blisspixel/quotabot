@@ -78,12 +78,17 @@ Notes:
   different native build as that x64 asset. Add `-NoArchive` for a build-only
   check. The desktop notification plugin uses Visual Studio ATL headers; if a
   build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
-  ATL support for your installed MSVC toolset.
+  ATL support for your installed MSVC toolset. `-PackageOnly` archives that exact
+  existing bundle without resolving Flutter or rebuilding it. `-NoArchive` and
+  `-PackageOnly` are mutually exclusive.
 - **macOS:** `bash tools/package-macos.sh` verifies the committed lockfile, then
   runs `flutter build macos --release --no-pub`
   on a macOS host, verifies the `.app` bundle, and writes a portable desktop ZIP
-  plus its checksum sidecar. Production distribution still needs Developer ID
-  signing, notarization, and stapling.
+  plus its checksum sidecar. `--no-archive` leaves the built app available for a
+  later signing step, while `--package-only` archives that exact existing app
+  without resolving Flutter or rebuilding it. The two options are mutually
+  exclusive. Production distribution still needs Developer ID signing,
+  notarization, and stapling.
 - **Linux:** `bash tools/package-linux.sh` verifies the committed lockfile, then
   runs `flutter build linux --release --no-pub`
   on a Linux host, verifies the executable bundle plus `.desktop` and icon
@@ -91,7 +96,13 @@ Notes:
   repackage that bundle as an AppImage (`appimagetool`) or deb/rpm.
 - **CLI release archives** for the one-command installers are built with
   `tools/package-cli.ps1` (Windows) or `tools/package-cli.sh` (macOS/Linux), each
-  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. The
+  writing a `dart build cli` bundle archive plus a `.sha256` sidecar. PowerShell
+  `-NoArchive` and shell `--no-archive` stop after producing the normalized
+  `bin/quotabot` bundle. `-PackageOnly` and `--package-only` archive that existing
+  bundle without resolving Dart or rebuilding it. Build-only and package-only
+  are mutually exclusive, and package-only fails when the normalized executable
+  is missing. These phase controls create a stable local signing seam; they do
+  not sign or verify the candidate themselves. The
   GitHub `Release` workflow runs the CLI and desktop helpers on `v*` tags,
   validates every CLI and desktop archive, and attests each exact archive path.
   Clean native runners then redownload all four draft CLI archives, reverify
@@ -101,11 +112,184 @@ Notes:
   allows publication. The separate `Install smoke` workflow tests the published
   one-line installer, a versioned upgrade, persistent data, and source setup.
 
+Before Windows platform signing, inventory the native candidate with the
+read-only, standard-library-only scanner. It covers every shipped PE module,
+including EXE and DLL files. The command validates PE headers by
+content, requires the expected x64 or arm64 architecture, rejects links and
+malformed expected code, and emits normalized relative paths plus candidate and
+inventory SHA-256 digests. It does not sign or verify a platform identity.
+The gate runs on an isolated release runner and assumes no other local process
+is concurrently replacing candidate paths. It rejects links present during each
+scan and detects ordinary candidate mutations, but it is not a sandbox against a
+concurrent local attacker racing Windows reparse-point changes.
+
+```powershell
+python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 collector/build/quotabot_cli_release/bundle
+python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 app/build/windows/x64/runner/Release
+```
+
+Add `--json` for the deterministic `quotabot.signing-inventory.v1` object. It
+contains no generated timestamp or absolute candidate root. The complete
+candidate digest covers every regular file, while the native inventory lists the
+bounded executable-code subset. Windows CI and release builds capture that
+manifest after the build-only phase, package without rebuilding, verify the
+archive shape and checksum, extract the archive, and require `--expect-manifest`
+to match before attestation or publication. The manifest is retained with the
+workflow evidence.
+
+Authenticode changes PE bytes, so a signed candidate needs a new post-signing
+inventory. For a future release candidate, set the two non-secret environment
+values below to the exact owner-approved publisher identity, then verify that
+inventory with the credential-free policy checker:
+
+```powershell
+$subject = $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT
+$thumbprint = $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT
+$candidate = 'collector/build/quotabot_cli_release/bundle'
+$manifest = '.agent/windows-cli-post-sign-inventory.json'
+$receipt = '.agent/windows-cli-signature-verification.json'
+New-Item -ItemType Directory -Force -Path '.agent' | Out-Null
+$inventory = python tools/native_code_inventory.py `
+  --platform windows --surface cli --architecture x64 --json $candidate
+if ($LASTEXITCODE -ne 0) { throw "Post-signing native inventory failed" }
+Set-Content -LiteralPath $manifest -Value $inventory `
+  -Encoding utf8NoBOM -NoNewline
+python tools/verify_windows_signatures.py `
+  --manifest $manifest --surface cli --architecture x64 `
+  --expected-signer-subject $subject `
+  --expected-signer-thumbprint $thumbprint `
+  --receipt $receipt $candidate
+if ($LASTEXITCODE -ne 0) {
+  throw "Verification failed; receipt_output_invalid means $receipt is not current, may contain prior evidence, or may not exist; capture the terminal fallback and stop"
+}
+```
+
+Keep the manifest and receipt outside the candidate tree. Adding either file to
+the tree correctly invalidates the inventory comparison.
+The receipt path atomically replaces prior evidence only after a complete
+success or handled-failure payload is ready. If publication itself fails, the
+verifier exits nonzero, prints bounded fallback JSON, and leaves any prior
+complete receipt untouched. The receipt path must have an existing parent,
+must differ from the inventory manifest, and must stay outside the candidate.
+Handled verification failures write the named receipt silently. Terminal
+fallback JSON appears only when the receipt itself cannot be published.
+Before a quotabot signing identity exists, exercise the same native adapter with
+the repository's real embedded-signed Windows fixture test:
+
+```powershell
+python -m unittest `
+  tools.test_verify_windows_signatures.NativeWindowsSignatureTests
+```
+
+That readiness test copies the installed, Microsoft-signed `pwsh.exe` into a
+temporary candidate and supplies its observed public identity to the verifier.
+It proves the local adapter can accept a real policy-valid embedded signature;
+it does not establish or substitute for the future quotabot publisher identity.
+
+Use `desktop` and `app/build/windows/x64/runner/Release` for the desktop bundle.
+The verifier does not accept native-tool overrides. It finds SignTool only from
+registered Windows SDK roots and uses the fixed Windows system PowerShell. It
+requires every inventoried PE module to have exactly one valid embedded
+Authenticode signature from the exact expected subject and certificate
+thumbprint. SignTool runs with `/pa /all /tw /sha1`, and its policy table must
+prove a SHA-256 file digest and RFC 3161 timestamp. A structured
+`Get-AuthenticodeSignature` read independently confirms the embedded signature
+type, OS trust result, signer identity, and timestamp certificate. Native
+verifier processes have bounded time and live-captured output, receive a minimal
+environment, and run from their own directories rather than the candidate
+directory.
+
+SignTool's `/sha1` value is the expected certificate's 40-hex SHA-1
+thumbprint, used to select and match publisher identity. It is not an accepted
+file or timestamp content-digest policy. Both content properties must still use
+SHA-256.
+
+After those Windows checks succeed, a separate standard-library parser reads
+only the bounded PE certificate table. It requires one current PKCS SignedData
+`WIN_CERTIFICATE`, one publisher signer, one Microsoft RFC 3161 timestamp
+attribute and value, and one timestamp signer. Along the exact signed TSTInfo
+path, DER lengths, depth, element count, offsets, table size, trailing data, and
+cardinality fail closed. The TSTInfo `messageImprint` must use the SHA-256 OID
+and contain 32 bytes. The verifier also hashes the outer Authenticode signature
+with SHA-256 and requires that value to equal the message imprint. Windows
+remains the authority for certificate and signature trust; the local parser
+proves the timestamp algorithm and binding that the native summary does not
+expose.
+
+The policy follows Microsoft's current
+[SignTool verification contract](https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe)
+and
+[`Get-AuthenticodeSignature` contract](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature),
+[Microsoft Authenticode timestamping guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
+and [RFC 3161](https://www.rfc-editor.org/rfc/rfc3161), checked 2026-07-28.
+The future credential-bearing signing command must set `/fd SHA256` and `/tr`
+followed by `/td SHA256`, retain the bounded receipt, and pass this independent
+verifier. If `timestamp_policy_unproven` follows a wrong or uncertain signing
+policy, sign a fresh candidate with those exact options, re-inventory because
+signing changes PE bytes, and re-verify. Do not reuse the prior post-signing
+inventory. If the result repeats after the expected policy was used, retain the
+candidate, manifest, and failure receipt and stop publication. The same bounded
+code also covers malformed, ambiguous, unsupported, resource-limited, or
+signature-unbound timestamp evidence that another signing retry may not repair.
+
+The final full-tree inventory must still equal the supplied post-signing
+manifest. The deterministic `quotabot.windows-signature-verification.v1` receipt
+covers the candidate and inventory digests, relative PE paths and digests, signer
+and timestamp identities, each timestamp message-imprint algorithm and value,
+and stable hashes of SignTool and PowerShell. It emits no generated timestamp,
+absolute candidate root, or raw native diagnostic.
+With `--json`, a failure emits the bounded
+`quotabot.windows-signature-verification-error.v1` object with a stable reason
+code, surface, architecture, allowlisted failure stage, and, when applicable,
+one relative PE path. Use `--receipt PATH` instead of `--json` to atomically
+retain that same canonical success or handled-failure JSON.
+
+Every success and bounded failure object includes `receipt_body_sha256`, a
+comparison-only SHA-256 over all other receipt fields. To recompute it, parse the
+object, remove `receipt_body_sha256`, serialize the remaining object with sorted
+keys, compact separators, and ASCII escaping, encode those ASCII-compatible JSON
+bytes as UTF-8, then hash those bytes. The digest detects a different canonical
+evidence body, but it is not a signature, MAC, attestation, or proof of origin.
+Anyone who replaces the receipt can recompute it. On success, use the candidate
+and inventory digests to correlate the receipt with the supplied post-signing
+manifest and canonical candidate tree. The archive checksum and independent
+workflow provenance separately establish the packaged release asset. The
+receipt-body hash also covers the SignTool and PowerShell hashes, so it can
+differ across verifier environments even when the candidate is identical.
+
+A consumer must check the verifier exit status before treating a retained
+receipt as evidence. A `receipt_output_invalid` fallback means the receipt file
+must not be treated as current: capture the terminal fallback, retain the
+candidate and manifest with the trusted workflow record, and stop publication.
+A prior complete receipt remains on disk when publication of a newer receipt
+fails. Other failure receipts likewise require their nonzero exit status,
+retained candidate and manifest, and trusted workflow record for correlation.
+
+The before and after inventories prove snapshot equality, not continuous
+filesystem immutability. This verifier shares the isolated-runner assumption
+stated above; no untrusted local process may race candidate-path replacement.
+
+This checker does not sign code, select a certificate, handle credentials, or
+authorize publication. It is deliberately not called by the current release
+workflow, and current release artifacts remain unsigned. Activation still needs
+the owner-approved publisher identity, certificate custody, timestamp service,
+release environment, cost, and channel decisions. The intended Windows order is
+build, capture the unsigned sign set, sign every inventoried PE, capture a new
+post-signing inventory, verify it, package without rebuilding, then require the
+extracted archive to match that post-signing inventory.
+
+The current scanner is intentionally Windows-only. The roadmap still requires
+the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be
+inventoried and verified using native macOS evidence before Developer ID signing
+and notarization are enabled. Linux remains outside the current platform-signing
+scope.
+
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners and validates each resulting archive plus checksum, so
 every change exercises the same portable bundle shape without publishing release
-assets. The build-only `-NoArchive` and `--no-archive` flags remain available for
-local iteration.
+assets. Build-only and package-only flags bind Windows archives to the exact
+inventoried build tree. The other native CI legs continue to exercise the
+default build-and-package path.
 It then launches the packaged Windows and Linux apps and requires native window
 setup plus every supported tray-registration call to complete. Windows verifies
 the native `Shell_NotifyIconGetRect` result and rectangle independently of the
@@ -236,14 +420,14 @@ tray-readiness check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The 0.9.6 rehearsal completed the full automated path. Its
-[release workflow](https://github.com/blisspixel/quotabot/actions/runs/30290535142)
+The 0.9.7 rehearsal completed the full automated path. Its
+[release workflow](https://github.com/blisspixel/quotabot/actions/runs/30315998438)
 passed the native quality, build, execution, checksum, restricted-provenance,
 and exact 14-asset gates before publishing the immutable
-[v0.9.6 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6).
+[v0.9.7 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7).
 The immediately dispatched
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406)
-then passed clean install, upgrade from the actual prior stable v0.9.5,
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947)
+then passed clean install, upgrade from the actual prior stable v0.9.6,
 persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. This is
 the rehearsal baseline; the complete checklist, signing, notarization, and
 interactive evidence must run again on the exact 1.0 candidate.

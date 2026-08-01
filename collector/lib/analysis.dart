@@ -919,9 +919,8 @@ RouteFallback _fallbackFor(
     return RouteFallback(
       kind: RouteFallbackKind.local,
       provider: l.provider,
-      reason: 'Skip the pick? ${l.provider} is reachable through a '
-          'local-runtime adapter; execution location and cost are not '
-          'independently verified.',
+      reason: 'Use ${l.provider} through its reachable local-runtime adapter; '
+          'execution location and cost are not independently verified.',
     );
   }
   final resetting = subs

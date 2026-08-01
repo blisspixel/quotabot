@@ -34,12 +34,12 @@ it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
 The verified
-[v0.9.6 rehearsal release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6)
+[v0.9.7 rehearsal release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/30290535142)
+The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/30315998438)
 verified native bundle shape, checksums, restricted provenance, lifecycle, and
 publication. The separate
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406)
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947)
 passed packaged desktop and source-setup checks on Windows, macOS, and Ubuntu.
 Application signing, notarization, and interactive native accessibility evidence
 remain separate 1.0 gates.
@@ -91,7 +91,7 @@ $actual = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvar
 if ($actual -ne $expected) { throw 'Desktop archive checksum mismatch.' }
 ```
 
-For signed build provenance, install the GitHub CLI and verify the same archive
+For GitHub build provenance, install the GitHub CLI and verify the same archive
 against the repository and tag workflow:
 
 ```bash
@@ -128,7 +128,9 @@ Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
 Windows packages are not Authenticode-signed yet, so SmartScreen may warn. Do
-not bypass a warning until both checksum and attestation verification succeed.
+not bypass SmartScreen. Checksums and GitHub provenance do not establish Windows
+publisher identity. If Windows declines a normal launch, build from source or
+wait for a signed release.
 
 ### macOS
 

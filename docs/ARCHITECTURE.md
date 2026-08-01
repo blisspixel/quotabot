@@ -747,11 +747,11 @@ attestations, clean-runner lifecycle checks, and a draft-release publication
 barrier. Source setup remains available when a launcher or shortcut is wanted.
 The official repository also blocks `v*` tag updates and deletion. GitHub
 release immutability locks the tag and assets when a draft is published after
-the setting activation. The v0.9.6 pipeline published and locked the exact 14
+the setting activation. The v0.9.7 pipeline published and locked the exact 14
 expected assets after its
-[native release audit](https://github.com/blisspixel/quotabot/actions/runs/30290535142),
+[native release audit](https://github.com/blisspixel/quotabot/actions/runs/30315998438),
 then passed the three-OS
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406).
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
 Application signing, notarization, and interactive native evidence remain 1.0

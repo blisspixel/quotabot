@@ -1690,6 +1690,12 @@ void main() {
       );
       expect(s.fallback.kind, RouteFallbackKind.local);
       expect(s.fallback.provider, 'ollama');
+      expect(
+        s.fallback.reason,
+        'Use ollama through its reachable local-runtime adapter; execution '
+        'location and cost are not independently verified.',
+      );
+      expect(s.explanation, isNot(contains('Skip the pick?')));
       expect((s.toJson()['fallback'] as Map)['kind'], 'local');
     });
 

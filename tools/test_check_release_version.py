@@ -39,6 +39,22 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ):
                 check_release_versions(root)
 
+    def test_stale_security_release_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root)
+            (root / "SECURITY.md").write_text(
+                "  The current audited release is "
+                "[v1.2.2](https://github.com/blisspixel/quotabot/releases/tag/v1.2.2).\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"expected 1\.2\.3; mismatched SECURITY current audited release=1\.2\.2",
+            ):
+                check_release_versions(root)
+
     def test_matching_release_tag_passes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -77,6 +93,10 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 '    version: "1.0.0"\n'
             ),
             "README.md": "> **Current stable:** 1.2.3. Release notes.\n",
+            "SECURITY.md": (
+                "  The current audited release is "
+                "[v1.2.3](https://github.com/blisspixel/quotabot/releases/tag/v1.2.3).\n"
+            ),
             "AGENTS.md": (
                 "The current verified stable release is 1.2.3. Next steps.\n"
             ),
