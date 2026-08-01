@@ -34,12 +34,12 @@ it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
 The verified
-[v0.9.7 rehearsal release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7)
+[v0.9.8 rehearsal release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/30315998438)
+The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/30692524913)
 verified native bundle shape, checksums, restricted provenance, lifecycle, and
 publication. The separate
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947)
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30693794794)
 passed packaged desktop and source-setup checks on Windows, macOS, and Ubuntu.
 Application signing, notarization, and interactive native accessibility evidence
 remain separate 1.0 gates.

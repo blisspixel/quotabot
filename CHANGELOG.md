@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- Windows draft-release lifecycle verification now retries temporary extraction
+  cleanup for up to ten attempts when a stopped desktop process briefly
+  retains a filesystem handle. The last failure still blocks publication.
+
+### Documentation
+- Advanced the immutable release and three-OS install evidence to v0.9.8.
+
 ## 0.9.8 - 2026-08-01
 
 ### Changed

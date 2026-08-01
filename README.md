@@ -392,7 +392,7 @@ its native architecture, verifies its checksum and restricted provenance, and
 requires both the tagged version and demo-mode `doctor --json` to run. The
 scheduled install smoke separately exercises the published one-line installer
 and prior-version upgrade on Windows, macOS, and Linux.
-v0.9.7 completed that exact audit and the three-OS published install matrix; see
+v0.9.8 completed that exact audit and the three-OS published install matrix; see
 the [baseline release evidence](docs/BUILDING.md#baseline-release-evidence).
 The official repository also blocks updates and deletion of `v*` tags. GitHub
 [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
