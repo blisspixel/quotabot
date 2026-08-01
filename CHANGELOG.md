@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.8 - 2026-08-01
+
 ### Changed
 - `quotabot suggest --help`, `quotabot help suggest`, `quotabot models --help`,
   and `quotabot help models` now show focused, side-effect-free references for
@@ -49,15 +51,19 @@ Notable changes to quotabot. Newest first.
   provenance verification authorizes bypassing SmartScreen.
 
 ### Documentation
-- Updated the security policy to bind its immutable-release evidence to the
-  current v0.9.7 release and added that marker to the release-version consistency
-  gate.
+- Advanced every public release marker and the release-version consistency gate
+  to v0.9.8, while retaining v0.9.7 as the completed prior release and install
+  rehearsal evidence.
 - Acquisition guidance now names checksum verification and GitHub build
   provenance at first mention instead of using language that could be mistaken
   for Authenticode or Developer ID signing.
 - Release-signing scope now explicitly includes every shipped Windows PE module,
   the standalone macOS CLI, the app, nested Mach-O code, and native code bundles
   without claiming that current artifacts are signed or notarized.
+- Added ElevenLabs as a post-1.0, admission-gated quota-source candidate. Any
+  first integration is quota visibility only and remains outside coding routes,
+  model selection, leases, and projected-waste policy until typed shared pools
+  and an explicit audio-domain decision exist.
 
 ## 0.9.7 - 2026-07-27
 

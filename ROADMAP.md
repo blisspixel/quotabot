@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-07-28. This file is the forward plan. It records brief shipped
+Updated 2026-08-01. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -155,7 +155,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 
 ## Current state
 
-The current line, **0.9.7**, is also the tagged stable release and installer
+The current line, **0.9.8**, is also the tagged stable release and installer
 version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those
@@ -174,10 +174,10 @@ milestone sections below.
 | Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
 | Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.6 | The immutable [v0.9.6 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30290535142) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406), including upgrade from v0.9.5 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.7 | The immutable [v0.9.7 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7) passed its [native release matrix](https://github.com/blisspixel/quotabot/actions/runs/30315998438) and [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947), including upgrade from v0.9.6 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.6 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Ready for 1.0 rerun | v0.9.7 completed the exact tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
 shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
@@ -586,7 +586,7 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   native Windows/Linux readiness checks, build-provenance attestations, and a
   draft-release barrier. Clean native runners also re-download the draft assets
   and exercise side-by-side update, rollback, and data-preserving uninstall
-  mechanics. v0.9.6 supplies a green tagged acquisition record; application
+  mechanics. v0.9.7 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
   required before this gate is closed. The credential-free Windows verifier is
   now ready to cover an exact post-signing inventory, every shipped PE module,
@@ -754,8 +754,24 @@ added it is a credit-pool provider like Cursor, never an included-quota plan.
 [Amazon Q Developer](https://aws.amazon.com/blogs/devops/amazon-q-developer-end-of-support-announcement/)
 blocks new signups from 2026-05-15 and ends support for IDE plugins and paid
 subscriptions on 2027-04-30 while other AWS experiences continue, so it does not
-justify a separate adapter ahead of Kiro. None of this changes the 1.0 scope;
-these remain post-1.0, admission-gated, and behind the typed shared-pool work.
+justify a separate adapter ahead of Kiro.
+
+ElevenLabs is a separate AI-service candidate, not a coding-route commitment.
+Its official [subscription endpoint](https://elevenlabs.io/docs/api-reference/user/subscription/get)
+exposes plan, credit use and limit, reset time, extension and overage metadata,
+and voice-slot limits through
+[restricted API keys](https://elevenlabs.io/docs/api-reference/authentication).
+[Current pricing](https://elevenlabs.io/pricing) uses one shared credit pool whose
+cost is weighted by product and model, with capped rollover. Its
+[Pay As You Go](https://elevenlabs.io/docs/overview/administration/pay-as-you-go)
+and legacy overage behavior also make exhaustion semantics account-dependent.
+Evaluate it only after typed shared pools and an explicit product-domain
+decision. If first admitted as a quota-only source, it must stay out of coding
+recommendations, model routing, leases, and projected-waste policy until an
+audio routing domain has comparable alternatives and explicit spend guardrails.
+
+None of this changes the 1.0 scope; every candidate remains post-1.0,
+admission-gated, and behind the typed shared-pool work.
 
 ## Product measures
 

@@ -420,14 +420,14 @@ tray-readiness check remain separate release-candidate requirements.
 
 ### Baseline release evidence
 
-The 0.9.6 rehearsal completed the full automated path. Its
-[release workflow](https://github.com/blisspixel/quotabot/actions/runs/30290535142)
+The 0.9.7 rehearsal completed the full automated path. Its
+[release workflow](https://github.com/blisspixel/quotabot/actions/runs/30315998438)
 passed the native quality, build, execution, checksum, restricted-provenance,
 and exact 14-asset gates before publishing the immutable
-[v0.9.6 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.6).
+[v0.9.7 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.7).
 The immediately dispatched
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30292905406)
-then passed clean install, upgrade from the actual prior stable v0.9.5,
+[install smoke](https://github.com/blisspixel/quotabot/actions/runs/30317467947)
+then passed clean install, upgrade from the actual prior stable v0.9.6,
 persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. This is
 the rehearsal baseline; the complete checklist, signing, notarization, and
 interactive evidence must run again on the exact 1.0 candidate.

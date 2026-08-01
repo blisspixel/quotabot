@@ -9,7 +9,7 @@ See how much quota you have left across your agentic AI coding subscriptions, in
 one place, and route the next request to whichever one has budget, so you can
 reduce quota-related stalls and avoid leaving included quota unused.
 
-> **Current stable:** 0.9.7. quotabot remains under active 0.x development, so
+> **Current stable:** 0.9.8. quotabot remains under active 0.x development, so
 > expect changes on the road to 1.0. **Next:** sign Windows release binaries and
 > Developer ID-sign, notarize, and staple the macOS bundle. This closes the
 > largest first-install trust gap before final native 1.0 evidence is collected.
@@ -392,7 +392,7 @@ its native architecture, verifies its checksum and restricted provenance, and
 requires both the tagged version and demo-mode `doctor --json` to run. The
 scheduled install smoke separately exercises the published one-line installer
 and prior-version upgrade on Windows, macOS, and Linux.
-v0.9.6 completed that exact audit and the three-OS published install matrix; see
+v0.9.7 completed that exact audit and the three-OS published install matrix; see
 the [baseline release evidence](docs/BUILDING.md#baseline-release-evidence).
 The official repository also blocks updates and deletion of `v*` tags. GitHub
 [release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
