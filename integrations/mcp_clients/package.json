@@ -11,14 +11,14 @@
     "test": "python -m unittest test_mcp_client_snippets.py"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0"
+    "@modelcontextprotocol/sdk": "1.30.0"
   },
   "overrides": {
     "@hono/node-server": "2.0.11"
   },
   "devDependencies": {
-    "@types/node": "26.1.1",
-    "tsx": "4.23.1",
+    "@types/node": "26.2.0",
+    "tsx": "4.23.12",
     "typescript": "7.0.2"
   }
 }
