@@ -136,7 +136,7 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
       ),
     );
   }
-  if (out.isEmpty || !_codexLiveFlagsAreConsistent(raw, out)) {
+  if (out.isEmpty || !_codexLiveFlagsAreConsistent(raw)) {
     return (valid: false, windows: const []);
   }
   return (valid: true, windows: out);
@@ -192,10 +192,7 @@ int? _codexLiveWindowSeconds(dynamic raw) {
   return seconds;
 }
 
-bool _codexLiveFlagsAreConsistent(
-  Map<dynamic, dynamic> raw,
-  List<QuotaWindow> windows,
-) {
+bool _codexLiveFlagsAreConsistent(Map<dynamic, dynamic> raw) {
   bool? allowed;
   bool? limitReached;
   if (raw.containsKey('allowed')) {
@@ -208,21 +205,11 @@ bool _codexLiveFlagsAreConsistent(
     if (value is! bool) return false;
     limitReached = value;
   }
+  // Admission flags say whether ChatGPT will take a new request. They are not
+  // a second encoding of used_percent. Plus currently reports a rounded 100%
+  // weekly window with allowed: true. Fail closed only when both flags are
+  // present and agree with each other.
   if (allowed != null && limitReached != null && allowed == limitReached) {
-    return false;
-  }
-  // Provider status flags describe the provider's hard limit, not quotabot's
-  // earlier routing comfort floor. A valid 99% observation can be unavailable
-  // for new routing while the provider still truthfully reports that its hard
-  // limit has not been reached.
-  final observedLimitReached = windows.any((window) {
-    final percent = window.percent;
-    return percent != null && percent >= 100;
-  });
-  if (allowed != null && allowed == observedLimitReached) {
-    return false;
-  }
-  if (limitReached != null && limitReached != observedLimitReached) {
     return false;
   }
   return true;

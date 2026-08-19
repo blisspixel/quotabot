@@ -476,7 +476,7 @@ void main() {
       );
     });
 
-    test('live allowed flags require booleans and agree with the windows', () {
+    test('live allowed flags require booleans and must not agree', () {
       final malformed = <Map<String, Object?>>[
         {'allowed': 'true', 'limit_reached': false},
         {'allowed': true, 'limit_reached': 0},
@@ -493,26 +493,48 @@ void main() {
         expect(codexLiveUsage(response), isNull, reason: flags.toString());
       }
 
-      final falselyAllowed = _validCodexLiveResponse(usedPercent: 100);
-      (falselyAllowed['rate_limit'] as Map<String, dynamic>)
+      final weeklyFullStillAdmitted = _validCodexLiveResponse(usedPercent: 100);
+      (weeklyFullStillAdmitted['rate_limit'] as Map<String, dynamic>)
         ..['allowed'] = true
         ..['limit_reached'] = false;
-      expect(codexLiveUsage(falselyAllowed), isNull);
+      final full = codexLiveUsage(weeklyFullStillAdmitted);
+      expect(full, isNotNull);
+      expect(full!.windows.single.usedPercent, 100);
 
-      final falselySpent = _validCodexLiveResponse(usedPercent: 50);
-      (falselySpent['rate_limit'] as Map<String, dynamic>)
+      final closedAdmission = _validCodexLiveResponse(usedPercent: 50);
+      (closedAdmission['rate_limit'] as Map<String, dynamic>)
         ..['allowed'] = false
         ..['limit_reached'] = true;
-      expect(codexLiveUsage(falselySpent), isNull);
+      expect(codexLiveUsage(closedAdmission), isNotNull);
 
       final nearLimitAllowed = _validCodexLiveResponse(usedPercent: 99);
       expect(codexLiveUsage(nearLimitAllowed), isNotNull);
+    });
 
-      final falselySpentNearLimit = _validCodexLiveResponse(usedPercent: 99);
-      (falselySpentNearLimit['rate_limit'] as Map<String, dynamic>)
-        ..['allowed'] = false
-        ..['limit_reached'] = true;
-      expect(codexLiveUsage(falselySpentNearLimit), isNull);
+    test('a Plus weekly-full live payload with open admission parses', () {
+      final usage = codexLiveUsage({
+        'plan_type': 'plus',
+        'rate_limit': {
+          'allowed': true,
+          'limit_reached': false,
+          'primary_window': {
+            'used_percent': 100,
+            'limit_window_seconds': 604800,
+            'reset_after_seconds': 189091,
+            'reset_at': 1787228892,
+          },
+          'secondary_window': null,
+        },
+        'code_review_rate_limit': null,
+        'additional_rate_limits': null,
+        'rate_limit_reset_credits': {'available_count': 0},
+      });
+
+      expect(usage, isNotNull);
+      expect(usage!.windows, hasLength(1));
+      expect(usage.windows.single.label, 'weekly');
+      expect(usage.windows.single.usedPercent, 100);
+      expect(usage.windows.single.resetsAt, 1787228892);
     });
 
     test('a scoped boolean contradiction rejects valid shared quota', () {
@@ -522,7 +544,7 @@ void main() {
             'limit_name': 'GPT-5.3-Codex-Spark',
             'rate_limit': {
               'allowed': true,
-              'limit_reached': false,
+              'limit_reached': true,
               'primary_window': _codexLiveWindow(usedPercent: 100),
             },
           },

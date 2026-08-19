@@ -354,14 +354,13 @@ class ClaudeAdapter {
     final knownAccount = _accountForCredential(credential.identity);
     // Profile metadata is a zero-cost provider read using the same credential.
     // Start it alongside usage so stable account-pool identity and current plan
-    // proof add no serial network round trip. _readProfile catches every failure
-    // and resolves to null, so an early usage error cannot leave an unhandled
-    // asynchronous exception behind.
+    // proof add no serial network round trip. Await it on every path so a bad
+    // usage body still keys last-known cache by the same pool as a live read.
     final profileFuture = _readProfile(credential, asOf);
-    http.Response resp;
-    try {
+
+    Future<http.Response> getUsage() {
       final get = _http?.get ?? sharedHttpClient.get;
-      resp = await get(
+      return get(
         Uri.parse(_endpoint),
         headers: {
           'Authorization': 'Bearer ${credential.accessToken}',
@@ -369,38 +368,47 @@ class ClaudeAdapter {
           'anthropic-version': '2023-06-01',
         },
       ).timeout(timeout);
+    }
+
+    Future<_ReadOutcome> fail({
+      required String message,
+      bool unauthorized = false,
+      String? pipeHealth,
+      int? httpStatus,
+      int? retryAfter,
+    }) {
+      return _finishReadError(
+        profileFuture,
+        credential: credential,
+        knownAccount: knownAccount,
+        fallbackPlanEvidence: fallbackPlanEvidence,
+        asOf: asOf,
+        message: message,
+        unauthorized: unauthorized,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfter,
+      );
+    }
+
+    http.Response resp;
+    try {
+      resp = await getUsage();
     } catch (e) {
       final health = providerPipeHealthForReadError(e);
-      return _ReadOutcome.error(
-        ProviderQuota.error(
-          id,
-          name,
-          health == providerPipeHealthThrottled
-              ? 'Claude usage read timed out'
-              : 'unable to read Claude usage',
-          asOf,
-          account: knownAccount,
-          plan: fallbackPlanEvidence?.plan,
-          planEvidenceSource: fallbackPlanEvidence?.source,
-          planEvidenceAsOf: fallbackPlanEvidence?.asOf,
-          pipeHealth: health,
-        ),
+      return fail(
+        message: health == providerPipeHealthThrottled
+            ? 'Claude usage read timed out'
+            : 'unable to read Claude usage',
+        pipeHealth: health,
       );
     }
 
     if (resp.statusCode == 401) {
-      return _ReadOutcome.unauthorized(
-        ProviderQuota.error(
-          id,
-          name,
-          'token expired (re-run claude, or quotabot login claude)',
-          asOf,
-          account: knownAccount,
-          plan: fallbackPlanEvidence?.plan,
-          planEvidenceSource: fallbackPlanEvidence?.source,
-          planEvidenceAsOf: fallbackPlanEvidence?.asOf,
-          httpStatus: resp.statusCode,
-        ),
+      return fail(
+        message: 'token expired (re-run claude, or quotabot login claude)',
+        unauthorized: true,
+        httpStatus: resp.statusCode,
       );
     }
     if (resp.statusCode != 200) {
@@ -410,68 +418,88 @@ class ClaudeAdapter {
           ? '; saved Claude login expired '
               '(re-run claude, or quotabot login claude)'
           : '';
-      return _ReadOutcome.error(
-        ProviderQuota.error(
-          id,
-          name,
-          'HTTP ${resp.statusCode}$recovery',
-          asOf,
-          account: knownAccount,
-          plan: fallbackPlanEvidence?.plan,
-          planEvidenceSource: fallbackPlanEvidence?.source,
-          planEvidenceAsOf: fallbackPlanEvidence?.asOf,
-          pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
-          httpStatus: resp.statusCode,
-          retryAfterSeconds: retryAfter,
-        ),
+      return fail(
+        message: 'HTTP ${resp.statusCode}$recovery',
+        pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
+        httpStatus: resp.statusCode,
+        retryAfter: retryAfter,
       );
     }
 
-    try {
-      final decoded = jsonDecode(resp.body);
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('unexpected usage shape');
-      }
-      final usage = claudeLiveUsage(decoded, observedAt: asOf);
-      if (usage == null) {
-        throw const FormatException('incomplete Claude usage response');
-      }
-      final profile = await profileFuture;
-      final poolIdentity = profile?.poolIdentity ??
-          _poolIdentityForCredential(credential.identity);
-      final account = poolIdentity ?? credential.identity;
-      final planEvidence = decoded.containsKey('subscription_type')
-          ? _providerPlanEvidence(decoded, asOf)
-          : profile?.planEvidence ?? fallbackPlanEvidence;
-      return _ReadOutcome.ok(
-        ProviderQuota(
-          provider: id,
-          displayName: name,
-          account: account,
-          plan: planEvidence?.plan,
-          planEvidenceSource: planEvidence?.source,
-          planEvidenceAsOf: planEvidence?.asOf,
-          asOf: asOf,
-          windows: usage.windows,
-          modelQuotas: usage.modelQuotas,
-          details: claudeUsageDetails(decoded),
-        ),
-        poolIdentity: poolIdentity,
-      );
-    } catch (_) {
-      return _ReadOutcome.error(
-        ProviderQuota.error(
-          id,
-          name,
-          'invalid Claude usage response',
-          asOf,
-          account: knownAccount,
-          plan: fallbackPlanEvidence?.plan,
-          planEvidenceSource: fallbackPlanEvidence?.source,
-          planEvidenceAsOf: fallbackPlanEvidence?.asOf,
-        ),
-      );
+    var decoded = _decodeClaudeUsageMap(resp.body);
+    var usage =
+        decoded == null ? null : claudeLiveUsage(decoded, observedAt: asOf);
+    if (usage == null) {
+      try {
+        final retry = await getUsage();
+        if (retry.statusCode == 200) {
+          decoded = _decodeClaudeUsageMap(retry.body);
+          usage = decoded == null
+              ? null
+              : claudeLiveUsage(decoded, observedAt: asOf);
+        }
+      } catch (_) {}
     }
+    if (decoded == null || usage == null) {
+      return fail(message: 'invalid Claude usage response');
+    }
+
+    final profile = await profileFuture;
+    final poolIdentity = profile?.poolIdentity ??
+        _poolIdentityForCredential(credential.identity);
+    final account = poolIdentity ?? credential.identity;
+    final planEvidence = decoded.containsKey('subscription_type')
+        ? _providerPlanEvidence(decoded, asOf)
+        : profile?.planEvidence ?? fallbackPlanEvidence;
+    return _ReadOutcome.ok(
+      ProviderQuota(
+        provider: id,
+        displayName: name,
+        account: account,
+        plan: planEvidence?.plan,
+        planEvidenceSource: planEvidence?.source,
+        planEvidenceAsOf: planEvidence?.asOf,
+        asOf: asOf,
+        windows: usage.windows,
+        modelQuotas: usage.modelQuotas,
+        details: claudeUsageDetails(decoded),
+      ),
+      poolIdentity: poolIdentity,
+    );
+  }
+
+  Future<_ReadOutcome> _finishReadError(
+    Future<_ProfileEvidence?> profileFuture, {
+    required ClaudeCredential credential,
+    required String knownAccount,
+    required _PlanEvidence? fallbackPlanEvidence,
+    required int asOf,
+    required String message,
+    bool unauthorized = false,
+    String? pipeHealth,
+    int? httpStatus,
+    int? retryAfterSeconds,
+  }) async {
+    final profile = await profileFuture;
+    final poolIdentity = profile?.poolIdentity ??
+        _poolIdentityForCredential(credential.identity);
+    final plan = profile?.planEvidence ?? fallbackPlanEvidence;
+    final error = ProviderQuota.error(
+      id,
+      name,
+      message,
+      asOf,
+      account: poolIdentity ?? knownAccount,
+      plan: plan?.plan,
+      planEvidenceSource: plan?.source,
+      planEvidenceAsOf: plan?.asOf,
+      pipeHealth: pipeHealth,
+      httpStatus: httpStatus,
+      retryAfterSeconds: retryAfterSeconds,
+    );
+    return unauthorized
+        ? _ReadOutcome.unauthorized(error, poolIdentity: poolIdentity)
+        : _ReadOutcome.error(error, poolIdentity: poolIdentity);
   }
 
   Future<_ProfileEvidence?> _readProfile(
@@ -654,6 +682,15 @@ class _ProfileEvidence {
   });
 }
 
+Map<String, dynamic>? _decodeClaudeUsageMap(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 _ProfileEvidence? _profileEvidence(
   Map<String, dynamic> profile,
   int asOf,
@@ -764,8 +801,8 @@ class _ReadOutcome {
     String? poolIdentity,
   }) =>
       _ReadOutcome._(q, null, false, poolIdentity);
-  factory _ReadOutcome.error(ProviderQuota e) =>
-      _ReadOutcome._(null, e, false, null);
-  factory _ReadOutcome.unauthorized(ProviderQuota e) =>
-      _ReadOutcome._(null, e, true, null);
+  factory _ReadOutcome.error(ProviderQuota e, {String? poolIdentity}) =>
+      _ReadOutcome._(null, e, false, poolIdentity);
+  factory _ReadOutcome.unauthorized(ProviderQuota e, {String? poolIdentity}) =>
+      _ReadOutcome._(null, e, true, poolIdentity);
 }

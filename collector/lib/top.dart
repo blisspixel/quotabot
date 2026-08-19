@@ -387,11 +387,11 @@ bool _isCollapsedSpent(ProviderQuota q, int now) {
 /// "read the shape, not the digits" idea: usable-now floats up, has-evidence-but-
 /// not-live sits in the middle, and dead weight collapses to a single line.
 enum TopSection {
-  /// Live, trusted quota with usable headroom - the routes you can take now.
+  /// Live, trusted quota - including a spent live window that is out of quota.
   active,
 
-  /// Has quota evidence but is not a live usable route: spent, stale/cached,
-  /// drifted, or unverified. Rendered as compact one-liners.
+  /// Has quota evidence but is not a live observation: stale/cached, drifted,
+  /// unverified, or a failed fetch. Rendered as compact one-liners.
   cached,
 
   /// No live quota to show at all (no windows, not configured, unreachable
@@ -426,7 +426,6 @@ TopSection topSectionFor(ProviderQuota q, int now) {
       q.driftReason == null &&
       isTrustedQuotaEvidenceAt(q, now);
   if (!liveUsable) return TopSection.cached;
-  if (headroom <= kSpentHeadroomFloor) return TopSection.cached;
   return TopSection.active;
 }
 

@@ -137,7 +137,12 @@ PROV-DM conformance.
   `used_percent`, `reset_at`, and `limit_window_seconds`; the duration, not the
   slot name, determines the normalized label. Current Pro responses can put one
   weekly pool in `primary_window` and explicitly set `secondary_window` to null.
-  That null is an absent pool, not a malformed response. `plan_type` is display
+  That null is an absent pool, not a malformed response. Admission flags
+  (`allowed`, `limit_reached`) say whether ChatGPT will take a new request.
+  They are not a second encoding of `used_percent`. A Plus weekly window at
+  100% used with `allowed: true` is a live spent observation. Internally
+  contradictory flags (`allowed` equal to `limit_reached`) still reject the
+  payload. `plan_type` is display
   metadata only. Response email is ignored for evidence identity. Host reads
   use a full irreversible `credential:<sha256>` identity derived from the
   stable ChatGPT account id, with refresh-token and access-token fallbacks for

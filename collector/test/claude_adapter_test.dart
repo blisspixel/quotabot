@@ -732,6 +732,47 @@ void main() {
     expect(q.windows.map((window) => window.usedPercent), [45, 17]);
   });
 
+  test('an unusable 200 usage body uses the profile pool identity', () async {
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? _profileBody(accountUuid: 'account-host')
+                : '{}',
+            200,
+          )),
+    ).collect();
+
+    expect(q.ok, isFalse);
+    expect(q.error, 'invalid Claude usage response');
+    expect(q.account, profileIdentity('account-host'));
+  });
+
+  test('retries one unusable 200 usage body', () async {
+    var usageCalls = 0;
+    final q = await ClaudeAdapter(
+      credentialsFile: credentials,
+      client: MockClient((request) async {
+        if (_isProfileRequest(request)) {
+          return http.Response(
+            _profileBody(accountUuid: 'account-host'),
+            200,
+          );
+        }
+        usageCalls++;
+        if (usageCalls == 1) {
+          return http.Response('<html>front-end</html>', 200);
+        }
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collect();
+
+    expect(usageCalls, 2);
+    expect(q.ok, isTrue);
+    expect(q.hasWindows, isTrue);
+    expect(q.account, profileIdentity('account-host'));
+  });
+
   test('host identity is opaque and stable across access-token rotation',
       () async {
     writeCreds(

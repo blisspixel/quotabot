@@ -29,6 +29,15 @@ Notable changes to quotabot. Newest first.
 - Claude live `/usage` reads no longer fail the whole observation when a
   leftover `five_hour` / `seven_day` block next to a complete `limits` array is
   unusable. The account 5 hour and weekly windows from `limits` still parse.
+- Codex live usage now admits a weekly window at 100% used when ChatGPT still
+  reports `allowed: true`. Those flags are admission, not a second meter.
+  Internally contradictory flags still reject the payload.
+- A Claude 200 whose usage body does not parse now finishes the companion
+  profile read, keys the error with that pool identity, and retries the usage
+  GET once, so last-known cache can attach instead of a hard ERROR on a
+  different digest.
+- `quotabot top` keeps a spent live observation in the active band. CACHED is
+  only stale, drifted, unverified, or a failed fetch.
 - Antigravity now treats a signed-in `agy` CLI as installed on Windows, macOS,
   and Linux. It reads the OS keyring grant (`gemini` / `antigravity`) without
   writing host credentials, so machines without the IDE `state.vscdb` or
