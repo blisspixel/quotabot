@@ -399,9 +399,10 @@ jobs:
           -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
       - name: Install Linux desktop build prerequisites
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libayatana-appindicator3-dev dbus-x11 xvfb
+        run: >
+          bash tools/install-linux-desktop-prereqs.sh
+          clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+          libayatana-appindicator3-dev dbus-x11 xvfb
       - name: Resolve desktop dependencies
         working-directory: app
         run: flutter pub get --enforce-lockfile
@@ -578,25 +579,9 @@ jobs:
             --deny-self-hosted-runners
       - name: Install Linux desktop runtime prerequisites
         if: runner.os == 'Linux'
-        run: |
-          # Hosted Ubuntu can stall on azure.archive.ubuntu.com. Bound each
-          # apt call so a mirror hang fails this step instead of cancelling
-          # the whole job after timeout-minutes.
-          export DEBIAN_FRONTEND=noninteractive
-          attempt=1
-          while [ "$attempt" -le 3 ]; do
-            if timeout 90s sudo apt-get -o Acquire::Retries=2 update; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo 'apt-get update failed after three bounded attempts.' >&2
-              exit 1
-            fi
-            attempt=$((attempt + 1))
-            sleep 5
-          done
-          timeout 180s sudo apt-get install -y \
-            libgtk-3-dev libayatana-appindicator3-dev dbus-x11 xvfb
+        run: >
+          bash tools/install-linux-desktop-prereqs.sh
+          libgtk-3-dev libayatana-appindicator3-dev dbus-x11 xvfb
       - name: Exercise the Windows portable lifecycle
         if: runner.os == 'Windows'
         shell: pwsh

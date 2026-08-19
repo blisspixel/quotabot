@@ -347,9 +347,19 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertLess(apt_at, readiness_at)
         header = verify_job.split("steps:", 1)[0]
         self.assertIn("timeout-minutes: 45", header)
-        self.assertIn("timeout 90s sudo apt-get", verify_job)
-        self.assertIn("timeout 180s sudo apt-get install", verify_job)
-        self.assertIn("three bounded attempts", verify_job)
+        self.assertIn("tools/install-linux-desktop-prereqs.sh", verify_job)
+        helper = (ROOT / "tools" / "install-linux-desktop-prereqs.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("timeout 90s sudo apt-get", helper)
+        self.assertIn("timeout 180s sudo apt-get install", helper)
+        self.assertIn("three bounded attempts", helper)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("tools/install-linux-desktop-prereqs.sh", ci)
+        desktop_build = workflow.split("  build-desktop:\n", 1)[1].split(
+            "  verify-desktop-release:\n", 1
+        )[0]
+        self.assertIn("tools/install-linux-desktop-prereqs.sh", desktop_build)
         self.assertIn("if: runner.os == 'macOS'", verify_job)
         self.assertIn("plutil -lint", verify_job)
         self.assertIn("contents: write", verify_job)
