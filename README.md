@@ -122,7 +122,7 @@ adapter. The complete promises and verification methods are in
 
 ## Release and project status
 
-The immutable [v0.9.8 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8)
+The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
 passed its 14-asset audit and cross-platform install and upgrade matrix. See the
 [release evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),

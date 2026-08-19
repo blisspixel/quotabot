@@ -4,6 +4,17 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- Linux desktop release verify now downloads, checksums, and attests the
+  draft archive before installing GTK and xvfb. CI and release share a
+  time-bounded apt helper, and the verify job budget is 45 minutes, so a
+  stalled hosted Ubuntu mirror fails that step instead of cancelling the
+  whole job.
+
+### Documentation
+- Recorded the immutable v0.9.9 14-asset lock and three-OS install smoke,
+  including upgrade from v0.9.8.
+
 ## 0.9.9 - 2026-08-19
 
 ### Fixed
