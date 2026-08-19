@@ -26,6 +26,17 @@ void main() {
     // Local runtimes expose models so the registry has something to show.
     expect(locals.any((q) => q.models.isNotEmpty), isTrue);
     expect(locals.any((q) => q.active), isTrue); // at least one loaded
+    final grok = fleet.singleWhere((q) => q.provider == 'grok');
+    expect(
+      grok.details.single,
+      'Category split of this weekly pool: 31%, 19%, 7%',
+    );
+    final ollama = fleet.singleWhere((q) => q.provider == 'ollama');
+    expect(ollama.localHardware?.gpuName, 'GeForce RTX 4070');
+    expect(
+      ollama.details.any((line) => line.contains('GeForce RTX 4070')),
+      isTrue,
+    );
   });
 
   test('demo windows are within 0..100 percent used', () {

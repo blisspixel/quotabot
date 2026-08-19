@@ -37,7 +37,7 @@ import 'schema_contracts.dart';
 import 'util.dart';
 
 const quotabotMcpName = 'quotabot';
-const quotabotMcpVersion = '0.9.8';
+const quotabotMcpVersion = '0.9.9';
 const quotasCurrentResourceUri = 'quotas://current';
 const quotasAlertsResourceUri = 'quotas://alerts';
 
@@ -522,6 +522,9 @@ final _localHardwareSchema = JsonSchema.object(
       description: 'Free memory on that same GPU.',
     ),
     'gpu_count': JsonSchema.integer(),
+    'gpu_name': JsonSchema.string(
+      description: 'Display name of the selected GPU, when reported.',
+    ),
   },
   required: ['as_of'],
 );

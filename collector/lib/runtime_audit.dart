@@ -331,9 +331,19 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _file(_joinPath(h, '.gemini/oauth_creds.json'),
             'Gemini CLI OAuth fallback token',
             dataClass: 'credential'),
+        _file(_joinPath(h, '.gemini/antigravity-cli/oauth_creds.json'),
+            'agy file-fallback OAuth token',
+            dataClass: 'credential'),
+        _file(_joinPath(h, '.gemini/google_accounts.json'),
+            'Gemini CLI account labels',
+            dataClass: 'account_metadata'),
         _file(
             _joinPath(h, '.gemini/accounts.json'), 'Gemini CLI account labels',
             dataClass: 'account_metadata'),
+        _credentialStore(
+          'os-keyring://gemini/antigravity',
+          'agy OS keyring OAuth token (Windows Credential Manager, macOS Keychain, Linux secret-service)',
+        ),
         _file(_joinPath(config, 'quotabot/auth/antigravity*.json'),
             'quotabot stored Antigravity OAuth grant',
             dataClass: 'credential'),
@@ -504,12 +514,16 @@ List<RuntimeAccessRecord> _localHardwareAccess(
             'passive system memory capacity',
           ),
           _process(
-            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\nvidia-smi.exe --query-gpu=memory.total,memory.free',
-            'largest single NVIDIA GPU memory capacity, when installed',
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\nvidia-smi.exe --query-gpu=name,memory.total,memory.free',
+            'largest single NVIDIA GPU name and memory capacity, when installed',
           ),
           _process(
-            '${env['ProgramFiles'] ?? r'C:\Program Files'}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe --query-gpu=memory.total,memory.free',
+            '${env['ProgramFiles'] ?? r'C:\Program Files'}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe --query-gpu=name,memory.total,memory.free',
             'alternate NVIDIA GPU memory utility location, when installed',
+          ),
+          _process(
+            '${env['SystemRoot'] ?? r'C:\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe Get-CimInstance Win32_VideoController',
+            'Windows GPU name and AdapterRAM when nvidia-smi is not present',
           ),
         ],
       'macos' => [
@@ -524,6 +538,17 @@ List<RuntimeAccessRecord> _localHardwareAccess(
         ],
       _ => const <RuntimeAccessRecord>[],
     };
+
+RuntimeAccessRecord _credentialStore(String target, String purpose) =>
+    RuntimeAccessRecord(
+      kind: RuntimeAccessKind.fileRead,
+      target: target,
+      purpose: purpose,
+      dataClass: 'credential',
+      access: 'read',
+      metadataOnly: false,
+      credentialMaterial: true,
+    );
 
 RuntimeAccessRecord _file(
   String target,

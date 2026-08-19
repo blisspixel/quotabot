@@ -4,7 +4,52 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.9.9 - 2026-08-19
+
 ### Fixed
+- Windows `dart build cli` now hardlinks or copies the Dart SDK into a
+  space-free directory before native-asset hooks run, so source setup works when
+  the Flutter install lives under a profile such as `C:\Users\First Last`.
+  Junctions, subst drives, and 8.3 short names are not enough, because Dart
+  reports the long path.
+- Source setup no longer exits when Dart is missing or this checkout cannot
+  compile. It installs the checksum-verified release CLI, then a dart-run shim
+  if a download is also unavailable. Desktop OS build tools that are missing,
+  or a desktop build that fails, still skip the tray app and leave the CLI
+  installed. Flutter desktop targets are enabled before a desktop build.
+- `bash tools/setup.sh` on Windows now launches `pwsh tools/setup.ps1` instead
+  of exiting.
+- Source setup now prints a first-run login checklist from the live snapshot,
+  installs the portable desktop app when a source desktop build was skipped, and
+  opens quotabot (the tray app, or `quotabot top` if no GUI is available).
+- The desktop first-run walkthrough now shows what is already live on this
+  machine, lets the user check the tools they actually use, and only offers
+  setup for those. Unchecked providers stay hidden. A Claude account whose live
+  `/usage` read fails as an invalid response still counts as signed in.
+- Claude live `/usage` reads no longer fail the whole observation when a
+  leftover `five_hour` / `seven_day` block next to a complete `limits` array is
+  unusable. The account 5 hour and weekly windows from `limits` still parse.
+- Antigravity now treats a signed-in `agy` CLI as installed on Windows, macOS,
+  and Linux. It reads the OS keyring grant (`gemini` / `antigravity`) without
+  writing host credentials, so machines without the IDE `state.vscdb` or
+  `~/.gemini/oauth_creds.json` still get a live Cloud Code quota read. An
+  installed but unsigned-in copy says so instead of "not installed".
+- Expanded desktop cards now show extra usage-view details from the same
+  metadata those tools' `/usage` panels already expose: Grok's category split
+  inside the weekly pool, and Claude extra-usage / credit spend when present.
+  Those lines are display-only and never become routing windows. Collection
+  still uses the existing adaptive refresh; host CLI print or prompt commands
+  such as `claude -p /usage` or `grok usage` are never spawned.
+- Claude no longer shows two cards for one Max login when the host token and
+  quotabot grant both fail, or when a second success has no pool identity.
+- Antigravity Connect now discovers the grant it just saved, so a signed-in
+  account is collected even without the IDE `state.vscdb` or `agy` keyring.
+- Ollama local hardware details name the GPU. Windows reads
+  `Win32_VideoController` when `nvidia-smi` is absent, so AMD and Intel
+  adapters appear next to RAM.
+- macOS and Linux source setup and the one-line CLI installer now add
+  `~/.local/bin` to the user's shell profile when it is not already on PATH, so
+  `quotabot` is found in a new terminal.
 - Windows draft-release lifecycle verification now retries temporary extraction
   cleanup for up to ten attempts when a stopped desktop process briefly
   retains a filesystem handle. The last failure still blocks publication.
@@ -19,13 +64,17 @@ Notable changes to quotabot. Newest first.
   non-blocking, while failure to launch the installed CLI now fails setup.
 
 ### Documentation
+- SETUP, BUILDING, and AGENTS now name `tools/setup.ps1` / `tools/setup.sh` as
+  the from-clone path, and document the all-OS desktop skip, PATH persistence,
+  and spaced-profile compile mapping.
 - Advanced the immutable release and three-OS install evidence to v0.9.8.
 - Reduced the README to a concise install, usage, support, and trust overview;
   detailed provider, recovery, routing, packaging, and lifecycle guidance now
   stays in the linked documentation.
-- Regenerated the current widget, analytics, terminal, and animated demo assets
-  from synthetic data with the pinned Flutter SDK, and restored the static
-  terminal dashboard to the README with a three-second slideshow cadence.
+- Regenerated the README terminal dashboard and the closing GIF frame from
+  current synthetic demo data, including Grok's usage-view split and Ollama
+  GPU capacity. Widget and analytics stills keep the previous Flutter desktop
+  capture.
 
 ## 0.9.8 - 2026-08-01
 

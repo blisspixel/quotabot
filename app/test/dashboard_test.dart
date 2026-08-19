@@ -2029,27 +2029,22 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
+    await tester.pump();
 
-    expect(
-      find.text('Start here: review provider connections'),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Review'));
+    expect(find.text('What we found'), findsOneWidget);
+    expect(find.text('live'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Providers'), findsOneWidget);
-    expect(
-      find.text('Start here: review provider connections'),
-      findsOneWidget,
-    );
+    expect(find.text('What do you use?'), findsOneWidget);
     expect(saved, isNull);
 
-    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.tap(find.text('Continue'));
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(find.text('What we found'), findsNothing);
     expect(saved?.setupDone, isTrue);
 
     await tester.pumpWidget(const SizedBox());
@@ -2074,12 +2069,13 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
+    await tester.pump();
 
-    await tester.tap(find.byTooltip('Dismiss getting started'));
+    await tester.tap(find.text('Skip for now'));
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(find.text('What we found'), findsNothing);
     expect(saved?.setupDone, isTrue);
 
     await tester.pumpWidget(const SizedBox());

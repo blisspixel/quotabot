@@ -16,9 +16,10 @@ const _cacheDuration = Duration(seconds: 30);
 
 typedef MemoryPoolSample = ({int totalBytes, int? availableBytes});
 typedef GpuMemorySample = ({
-  int totalBytes,
-  int availableBytes,
+  int? totalBytes,
+  int? availableBytes,
   int count,
+  String? name,
 });
 typedef HardwareMetadataCommand = Future<String?> Function(
   String executable,
@@ -61,6 +62,7 @@ Future<LocalHardwareInfo?> _readLocalHardwareUncached(DateTime captured) async {
           gpuMemoryTotalBytes: gpu?.totalBytes,
           gpuMemoryAvailableBytes: gpu?.availableBytes,
           gpuCount: gpu?.count ?? 0,
+          gpuName: gpu?.name,
         );
   _lastProbeAt = captured;
   _cachedHardware = result;
@@ -145,12 +147,46 @@ Future<MemoryPoolSample?> readWindowsMemoryMetadata(
 
 Future<GpuMemorySample?> _readGpuMemory() async {
   final executable = _nvidiaSmiPath();
-  if (executable == null) return null;
-  final output = await _runBounded(executable, const [
-    '--query-gpu=memory.total,memory.free',
-    '--format=csv,noheader,nounits',
-  ]);
-  return output == null ? null : parseNvidiaSmiMemory(output);
+  if (executable != null) {
+    final output = await _runBounded(executable, const [
+      '--query-gpu=name,memory.total,memory.free',
+      '--format=csv,noheader,nounits',
+    ]);
+    final nvidia = output == null ? null : parseNvidiaSmiMemory(output);
+    if (nvidia != null) return nvidia;
+  }
+  if (Platform.isWindows) return _readWindowsGpu();
+  return null;
+}
+
+Future<GpuMemorySample?> _readWindowsGpu() async {
+  final root = Platform.environment['SystemRoot'];
+  if (root == null || root.isEmpty) return null;
+  final executable = '$root\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  if (!File(executable).existsSync()) return null;
+  const command = r'$ErrorActionPreference="Stop"; '
+      r'$rows=Get-CimInstance -ClassName Win32_VideoController '
+      r'-Property Name,AdapterRAM -ErrorAction Stop; '
+      r'foreach ($g in @($rows)) { '
+      r'$n=[string]$g.Name; '
+      r'if ([string]::IsNullOrWhiteSpace($n)) { continue } '
+      r'if ($n -match "(?i)basic display|microsoft basic") { continue } '
+      r'$ram=0; if ($null -ne $g.AdapterRAM) { $ram=[uint64]$g.AdapterRAM } '
+      r'$culture=[Globalization.CultureInfo]::InvariantCulture; '
+      r'[Console]::Out.WriteLine($n + "`t" + $ram.ToString($culture)) '
+      r'}';
+  try {
+    final output = await _runBounded(executable, const [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      command,
+    ]);
+    return output == null ? null : parseWindowsGpuInfo(output);
+  } catch (_) {
+    return null;
+  }
 }
 
 String? _nvidiaSmiPath() {
@@ -240,15 +276,21 @@ MemoryPoolSample? parseMacMemoryInfo(String totalOutput, String? vmOutput) {
 /// Parses one `total MiB, free MiB` row per NVIDIA GPU and returns the largest
 /// single device. Separate GPU pools are deliberately never summed.
 GpuMemorySample? parseNvidiaSmiMemory(String input) {
-  final pools = <({int total, int available})>[];
+  final pools = <({int total, int available, String? name})>[];
   for (final line in input.split(RegExp(r'[\r\n]+'))) {
     if (line.trim().isEmpty) continue;
     final parts = line.split(',');
-    if (parts.length != 2) continue;
-    final total = _scaledBytes(parts[0], _mib);
-    final available = _scaledBytes(parts[1], _mib, allowZero: true);
+    if (parts.length < 2) continue;
+    final memory = parts.length >= 3
+        ? (total: parts[parts.length - 2], free: parts[parts.length - 1])
+        : (total: parts[0], free: parts[1]);
+    final total = _scaledBytes(memory.total, _mib);
+    final available = _scaledBytes(memory.free, _mib, allowZero: true);
     if (total == null || available == null || available > total) continue;
-    pools.add((total: total, available: available));
+    final name = parts.length >= 3
+        ? _gpuDisplayName(parts.sublist(0, parts.length - 2).join(','))
+        : null;
+    pools.add((total: total, available: available, name: name));
   }
   if (pools.isEmpty) return null;
   pools.sort((a, b) {
@@ -260,7 +302,49 @@ GpuMemorySample? parseNvidiaSmiMemory(String input) {
     totalBytes: largest.total,
     availableBytes: largest.available,
     count: pools.length,
+    name: largest.name,
   );
+}
+
+/// Parses Windows `Win32_VideoController` rows as `Name<TAB>AdapterRAM`.
+/// AdapterRAM is dedicated bytes when the driver reports it; 0 still keeps
+/// the GPU name so an iGPU without a useful carve-out is visible.
+GpuMemorySample? parseWindowsGpuInfo(String input) {
+  final pools = <({int total, String name})>[];
+  for (final line in input.split(RegExp(r'[\r\n]+'))) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) continue;
+    final tab = trimmed.indexOf('\t');
+    if (tab <= 0) continue;
+    final name = _gpuDisplayName(trimmed.substring(0, tab));
+    if (name == null) continue;
+    final ram = int.tryParse(trimmed.substring(tab + 1).trim());
+    if (ram == null || ram < 0 || ram > _maxMemoryBytes) continue;
+    pools.add((total: ram, name: name));
+  }
+  if (pools.isEmpty) return null;
+  pools.sort((a, b) => b.total.compareTo(a.total));
+  final largest = pools.first;
+  return (
+    totalBytes: largest.total > 0 ? largest.total : null,
+    availableBytes: null,
+    count: pools.length,
+    name: largest.name,
+  );
+}
+
+String? _gpuDisplayName(String? raw) {
+  if (raw == null) return null;
+  var name = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+  name = name.replaceAll('(TM)', '').replaceAll('(R)', '').trim();
+  name = name.replaceAll(RegExp(r'\s+'), ' ');
+  if (name.isEmpty) return null;
+  final lower = name.toLowerCase();
+  if (lower.contains('basic display') || lower.contains('microsoft basic')) {
+    return null;
+  }
+  if (name.length > 80) name = name.substring(0, 80);
+  return name;
 }
 
 int? _scaledBytes(String? input, int multiplier, {bool allowZero = false}) {

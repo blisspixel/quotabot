@@ -296,15 +296,13 @@ void main() {
     stopwatch.stop();
 
     expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
-    expect(quotas, hasLength(2));
-    expect(quotas.first.ok, isTrue);
-    expect(quotas.first.account, hostIdentity());
-    expect(quotas.last.ok, isFalse);
-    expect(quotas.last.account, grantIdentity);
-    expect(quotas.last.error, contains('unable to refresh Claude grant'));
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.account, hostIdentity());
   });
 
-  test('collectAccounts keeps distinct success and failure rows', () async {
+  test('collectAccounts keeps the live credential when the other fails',
+      () async {
     writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
     final grantIdentity =
         opaqueCredentialIdentity(ClaudeAdapter.id, 'healthy-grant');
@@ -320,12 +318,10 @@ void main() {
               : http.Response(_usageBody(), 200)),
     ).collectAccounts();
 
-    expect(quotas, hasLength(2));
-    expect(quotas.first.account, hostIdentity());
-    expect(quotas.first.ok, isFalse);
-    expect(quotas.first.httpStatus, 503);
-    expect(quotas.last.account, grantIdentity);
-    expect(quotas.last.ok, isTrue);
+    expect(quotas, hasLength(1));
+    expect(quotas.single.account, grantIdentity);
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.hasWindows, isTrue);
   });
 
   test('collectAccounts represents an indexed grant refresh failure', () async {
@@ -625,12 +621,33 @@ void main() {
           )),
     ).collectAccounts();
 
-    expect(quotas, hasLength(2));
-    expect(quotas.where((quota) => quota.ok), hasLength(1));
-    final excluded = quotas.singleWhere((quota) => !quota.ok);
-    expect(excluded.account, grantIdentity);
-    expect(excluded.hasWindows, isFalse);
-    expect(excluded.error, contains('identity unavailable'));
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.hasWindows, isTrue);
+  });
+
+  test('collectAccounts collapses two failed credentials to one Claude row',
+      () async {
+    writeCreds(expiresAtMs: (nowEpoch() + 3600) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'failed-grant');
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'grant-token',
+        identity: grantIdentity,
+      ),
+      client: MockClient((request) async => http.Response(
+            _isProfileRequest(request)
+                ? _profileBody(accountUuid: 'account-host')
+                : '{}',
+            200,
+          )),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isFalse);
+    expect(quotas.single.error, 'invalid Claude usage response');
   });
 
   test('malformed profile identity never leaks provider identifiers', () async {
@@ -698,7 +715,8 @@ void main() {
     expect(q.modelQuotas, isEmpty);
   });
 
-  test('rejects a present malformed known legacy block', () async {
+  test('keeps canonical windows when a legacy block next to limits is unusable',
+      () async {
     final body = jsonDecode(_currentUsageBody()) as Map<String, dynamic>
       ..['seven_day'] = {
         'utilization': 17,
@@ -709,10 +727,9 @@ void main() {
       client: MockClient((_) async => http.Response(jsonEncode(body), 200)),
     ).collect();
 
-    expect(q.ok, isFalse);
-    expect(q.error, 'invalid Claude usage response');
-    expect(q.windows, isEmpty);
-    expect(q.modelQuotas, isEmpty);
+    expect(q.ok, isTrue);
+    expect(q.windows.map((window) => window.label), ['5h', 'weekly']);
+    expect(q.windows.map((window) => window.usedPercent), [45, 17]);
   });
 
   test('host identity is opaque and stable across access-token rotation',

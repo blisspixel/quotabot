@@ -500,8 +500,10 @@ quotabot cannot verify their overage settings. Local-runtime entries surface
 `local_readiness` (`loaded` or `cold`), and model recommendations rank loaded
 local models ahead of cold installed models when both satisfy the same profile.
 When a reachable runtime has an on-device model, `local_hardware.dart` performs
-one cached, deadline-bounded passive read of system RAM and the largest supported
-GPU memory pool. Cold models with size evidence get an advisory `hardware_fit`
+one cached, deadline-bounded passive read of system RAM and GPU evidence.
+NVIDIA uses `nvidia-smi`; other Windows GPUs use `Win32_VideoController` for
+the adapter name and AdapterRAM. The largest supported GPU memory pool is
+selected; separate devices are never summed. Cold models with size evidence get an advisory `hardware_fit`
 of `comfortable`, `tight`, `constrained`, or `unknown`; loaded models retain the
 direct `loaded` state. The fit evidence is carried in the provider snapshot and
 the selected pool, capacities, estimate, and observation time are repeated on

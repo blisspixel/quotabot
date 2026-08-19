@@ -416,7 +416,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("if ($NoArchive)", windows)
         self.assertLess(
             windows.index("if ($NoArchive -and $PackageOnly)"),
-            windows.index("Get-Command dart"),
+            windows.index("Enable-QuotabotSpaceSafeDart"),
         )
         package_only = windows.split("if (-not $PackageOnly)", 1)[1]
         self.assertIn("dart build cli", package_only)

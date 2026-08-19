@@ -155,7 +155,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 
 ## Current state
 
-The current line, **0.9.8**, is also the tagged stable release and installer
+The current line, **0.9.9**, is also the tagged stable release and installer
 version. It contains the implemented core of the first three
 milestones below: the truthful substrate (0.6), one calibrated forecast behind a
 single decision core (0.7), and the self-tuning calibration moat (0.8). Those

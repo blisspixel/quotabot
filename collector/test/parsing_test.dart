@@ -730,6 +730,28 @@ void main() {
       expect(w.firstWhere((e) => e.label == 'weekly').usedPercent, 56);
       expect(models.map((m) => m.model), contains('Fable'));
       expect(models.firstWhere((m) => m.model == 'Fable').usedPercent, 83);
+      expect(claudeUsageDetails(data), isEmpty);
+    });
+
+    test('claudeUsageDetails reports extra-usage credits without routing them',
+        () {
+      expect(
+        claudeUsageDetails({
+          'extra_usage': {'utilization': 12.4, 'is_enabled': true},
+          'spend': {'percent': 3, 'severity': 'normal', 'enabled': true},
+        }),
+        [
+          'Extra usage 12.4% of credits',
+          'Usage credits 3%',
+        ],
+      );
+      expect(
+        claudeUsageDetails({
+          'extra_usage': {'utilization': null, 'is_enabled': false},
+          'spend': {'percent': 0, 'enabled': false},
+        }),
+        isEmpty,
+      );
     });
 
     test('prefers canonical limits and normalizes scoped families', () {
@@ -1007,6 +1029,47 @@ void main() {
       expect(w.map((e) => e.usedPercent), [45, 17]);
       expect(models.map((e) => e.model), ['Fable']);
       expect(models.single.usedPercent, 26);
+    });
+
+    test('unusable legacy blocks next to a complete limits array are ignored',
+        () {
+      final data = <String, dynamic>{
+        'limits': [
+          {
+            'kind': 'session',
+            'group': 'session',
+            'percent': 9,
+            'resets_at': '2030-01-01T00:00:00Z',
+            'scope': null,
+            'is_active': true,
+          },
+          {
+            'kind': 'weekly_all',
+            'group': 'weekly',
+            'percent': 100,
+            'resets_at': '2030-01-02T00:00:00Z',
+            'scope': null,
+            'is_active': true,
+          },
+        ],
+        'five_hour': {'utilization': null, 'is_active': true},
+        'seven_day': {'resets_at': 'not-a-date'},
+        'seven_day_opus': {'utilization': 'bad'},
+      };
+      final usage = claudeLiveUsage(data);
+      expect(usage, isNotNull);
+      expect(usage!.windows.map((window) => window.label), ['5h', 'weekly']);
+      expect(usage.windows.map((window) => window.usedPercent), [9, 100]);
+    });
+
+    test('malformed known legacy blocks still fail without a limits array', () {
+      expect(
+        claudeLiveUsage({
+          'five_hour': {'utilization': 18},
+          'seven_day': {'utilization': 23, 'resets_at': 'not-a-date'},
+        }),
+        isNull,
+      );
     });
 
     test('malformed canonical rows cannot be backfilled from legacy fields',
@@ -1298,7 +1361,7 @@ void main() {
       }
     });
 
-    test('present malformed legacy blocks reject a complete canonical body',
+    test('present malformed legacy blocks do not drop a complete limits body',
         () {
       final canonical = <String, dynamic>{
         'limits': [
@@ -1325,7 +1388,12 @@ void main() {
       };
       for (final entry in malformed.entries) {
         final data = <String, dynamic>{...canonical, entry.key: entry.value};
-        expect(claudeLiveUsage(data), isNull, reason: entry.key);
+        final usage = claudeLiveUsage(data);
+        expect(usage, isNotNull, reason: entry.key);
+        expect(
+          usage!.windows.map((window) => window.label),
+          ['5h', 'weekly'],
+        );
       }
     });
 
@@ -1788,6 +1856,24 @@ void main() {
       expect(w, isNotNull);
       expect(w!.usedPercent, 73);
       expect(w.resetsAt, now + 4 * 86400);
+    });
+
+    test('grokCategoryDetails reports the usage-tab split, not extra caps', () {
+      const now = 1782000000;
+      final config = <int>[
+        ..._float32Field(1, 73),
+        ..._messageField(7, [..._varintField(1, 5), ..._float32Field(2, 66)]),
+        ..._messageField(7, [..._varintField(1, 4), ..._float32Field(2, 5)]),
+        ..._messageField(7, [..._varintField(1, 2), ..._float32Field(2, 2)]),
+        ..._messageField(5, _varintField(1, now + 4 * 86400)),
+      ];
+      final message = _messageField(1, config);
+      expect(grokWindow(message, now)!.usedPercent, 73);
+      expect(
+        grokCategoryDetails(message),
+        ['Category split of this weekly pool: 66%, 5%, 2%'],
+      );
+      expect(grokCategoryDetails(const []), isEmpty);
     });
 
     test('grokWindow takes the reset from the window end, not the start', () {

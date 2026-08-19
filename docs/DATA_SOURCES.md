@@ -243,9 +243,11 @@ PROV-DM conformance.
   the live scoped row. See Anthropic's
   [July 17 announcement](https://x.com/claudeai/status/2078302415804379218).
 - This live response supplies the current-window bars and reset times shown by
-  the in-CLI `/usage` command. `/usage` can also show a separate approximate
-  contribution breakdown based on local sessions; quotabot does not use that
-  this-machine section as account-wide quota or burn evidence.
+  the in-CLI `/usage` command. Additive extras on that same response (`extra_usage`,
+  usage-credit `spend`) can appear as display-only detail lines; they are not
+  account windows. `/usage` can also show a separate approximate contribution
+  breakdown based on local sessions; quotabot does not use that this-machine
+  section as account-wide quota or burn evidence.
 - The usage response alone does not expose a stable account id. When companion
   profile identity is unavailable, Claude snapshots use a full, irreversible
   `credential:<sha256>` identity derived locally from the credential generation,
@@ -280,8 +282,10 @@ PROV-DM conformance.
   Chat, and Build percentages are category breakdowns inside that shared pool,
   not independent spendable buckets, and while the response matches the known
   shape a breakdown is not mistaken for the total (if the shape ever drifts, a
-  schema-less scan is the best-effort fallback). This is a billing metadata
-  call, not a model call, so it costs no tokens.
+  schema-less scan is the best-effort fallback). Those percents are also
+  surfaced as display-only detail on expanded cards and `top` / `doctor`; they
+  never become extra windows. This is a billing metadata call, not a model
+  call, so it costs no tokens.
 - Not monotonic: xAI can revise the pool percent downward mid-window without a
   reset (observed live: 100 to 73 under the same reset time, consistent with
   re-rated compute charges or a grown allowance). quotabot mirrors the number
@@ -306,11 +310,16 @@ State lives in the Antigravity globalStorage SQLite database at
   wrapping a base64-encoded inner protobuf; `findEmbeddedToken` peels the layers)
   and refreshed via Antigravity's public OAuth client, so a live read works
   whenever the IDE is signed in without any explicit `login antigravity`; then
-  the IDE's short-lived access token; then the Gemini CLI token in
-  `~/.gemini/oauth_creds.json`. The quota endpoint only accepts a token minted by
-  Antigravity's own client, so the Gemini-CLI token returns 403 and is a last
-  resort; the IDE refresh token uses the right client and is the path that makes
-  Antigravity "just work" from a signed-in IDE.
+  the IDE's short-lived access token; then the `agy` CLI OS-keyring grant
+  (`gemini` / `antigravity` in Windows Credential Manager, macOS Keychain, or
+  Linux secret-service), refreshed with Antigravity's public OAuth client; then
+  the Gemini CLI token in `~/.gemini/oauth_creds.json` (and the same filename
+  under `~/.gemini/antigravity-cli/` when present). The quota endpoint only
+  accepts a token minted by Antigravity's own client, so the Gemini-CLI file
+  token returns 403 and is a last resort; the IDE refresh token and the `agy`
+  keyring grant use the right client, so a signed-in IDE or `agy` CLI is enough
+  without `login antigravity`. quotabot never writes those host credential
+  stores.
 - Live usage: the quota endpoint only accepts tokens minted by Antigravity's own
   OAuth client and an onboarded project, so `login antigravity` uses that public
   client and the adapter runs `:onboardUser` (retried) to provision the project,

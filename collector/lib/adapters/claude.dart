@@ -243,7 +243,8 @@ class ClaudeAdapter {
           : _accountForCredential(indexedGrantIdentity);
       if (grantOutcomeFuture == null &&
           isOpaqueCredentialIdentity(indexedGrantIdentity) &&
-          !results.any((quota) => quota.account == indexedGrantAccount)) {
+          !results.any((quota) => quota.account == indexedGrantAccount) &&
+          !results.any((quota) => quota.ok && quota.hasWindows)) {
         results.add(_unavailableGrant(asOf, indexedGrantAccount!));
       }
       if (results.isNotEmpty) return results;
@@ -283,9 +284,23 @@ class ClaudeAdapter {
   ) {
     final successes =
         outcomes.where((outcome) => outcome.quota != null).toList();
-    if (successes.length <= 1) {
+    if (outcomes.isEmpty) return <ProviderQuota>[];
+    if (successes.isEmpty) {
+      // Host and grant can fail together for the same Max account (a leftover
+      // usage shape, an expired token). Two untitled Claude cards is worse than
+      // one honest error. Prefer the host row: that is the CLI the user is in.
+      return [outcomes.first.error!];
+    }
+
+    if (successes.length == 1) {
+      final success = successes.single;
       return [
-        for (final outcome in outcomes) outcome.quota ?? outcome.error!,
+        success.quota!,
+        for (final outcome in outcomes)
+          if (outcome.quota == null &&
+              outcome.poolIdentity != null &&
+              outcome.poolIdentity != success.poolIdentity)
+            outcome.error!,
       ];
     }
 
@@ -306,25 +321,9 @@ class ClaudeAdapter {
       (outcome) => outcome.poolIdentity != null,
       orElse: () => successes.first,
     );
-    return [
-      for (final outcome in outcomes)
-        if (outcome.quota == null)
-          outcome.error!
-        else if (identical(outcome, primary))
-          outcome.quota!
-        else
-          ProviderQuota.error(
-            id,
-            name,
-            'account identity unavailable; quota excluded to prevent '
-            'duplicate routing',
-            asOf,
-            account: outcome.quota!.account,
-            plan: outcome.quota!.plan,
-            planEvidenceSource: outcome.quota!.planEvidenceSource,
-            planEvidenceAsOf: outcome.quota!.planEvidenceAsOf,
-          ),
-    ];
+    // A second success without a pool identity is fail-closed for routing, but
+    // it is not a second Claude the user should see. Keep the one proven row.
+    return [primary.quota!];
   }
 
   Future<ClaudeCredential?> _resolveGrantCredential() async {
@@ -455,6 +454,7 @@ class ClaudeAdapter {
           asOf: asOf,
           windows: usage.windows,
           modelQuotas: usage.modelQuotas,
+          details: claudeUsageDetails(decoded),
         ),
         poolIdentity: poolIdentity,
       );

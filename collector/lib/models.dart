@@ -304,6 +304,9 @@ class LocalHardwareInfo {
   /// Number of GPUs represented by the driver metadata.
   final int gpuCount;
 
+  /// Display name of the selected GPU, when the operating system reports one.
+  final String? gpuName;
+
   const LocalHardwareInfo({
     required this.asOf,
     this.systemMemoryTotalBytes,
@@ -311,6 +314,7 @@ class LocalHardwareInfo {
     this.gpuMemoryTotalBytes,
     this.gpuMemoryAvailableBytes,
     this.gpuCount = 0,
+    this.gpuName,
   });
 
   bool get hasMemoryEvidence =>
@@ -327,6 +331,7 @@ class LocalHardwareInfo {
         if (gpuMemoryAvailableBytes != null)
           'gpu_memory_available_bytes': gpuMemoryAvailableBytes,
         if (gpuCount > 0) 'gpu_count': gpuCount,
+        if (gpuName != null) 'gpu_name': gpuName,
       };
 
   factory LocalHardwareInfo.fromJson(Map<String, dynamic> json) {
@@ -357,15 +362,21 @@ class LocalHardwareInfo {
             min: 0,
             max: gpuTotal,
           );
+    final gpuNameRaw = json['gpu_name'];
+    final gpuName = gpuNameRaw is String && gpuNameRaw.trim().isNotEmpty
+        ? gpuNameRaw.trim()
+        : null;
     return LocalHardwareInfo(
       asOf: boundedIntFromWire(json['as_of'], min: 0) ?? 0,
       systemMemoryTotalBytes: systemTotal,
       systemMemoryAvailableBytes: systemAvailable,
       gpuMemoryTotalBytes: gpuTotal,
       gpuMemoryAvailableBytes: gpuAvailable,
-      gpuCount: gpuTotal == null
+      gpuCount: gpuTotal == null && gpuName == null
           ? 0
-          : boundedIntFromWire(json['gpu_count'], min: 0, max: 64) ?? 0,
+          : boundedIntFromWire(json['gpu_count'], min: 0, max: 64) ??
+              (gpuName == null ? 0 : 1),
+      gpuName: gpuName,
     );
   }
 }
@@ -415,8 +426,10 @@ class ProviderQuota {
   /// for being in use). Always false for metered subscriptions.
   final bool active;
 
-  /// Extra human-readable detail lines for providers without quota windows
-  /// (e.g. a local runtime's loaded model size, quantization, and disk usage).
+  /// Extra human-readable detail lines. Local runtimes use this for loaded
+  /// model size, quantization, and disk usage. Subscriptions may add
+  /// usage-view extras from the same metadata those tools' `/usage` panels
+  /// show (category splits, extra-usage credits) that are not routing windows.
   final List<String> details;
 
   /// The models this provider exposes, when known. Local runtimes fill this live
@@ -1006,7 +1019,20 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
           cloudOffloaded: m.cloudOffloaded,
         ),
     ],
-    localHardware: q.localHardware,
+    localHardware: q.localHardware == null
+        ? null
+        : LocalHardwareInfo(
+            asOf: q.localHardware!.asOf,
+            systemMemoryTotalBytes: q.localHardware!.systemMemoryTotalBytes,
+            systemMemoryAvailableBytes:
+                q.localHardware!.systemMemoryAvailableBytes,
+            gpuMemoryTotalBytes: q.localHardware!.gpuMemoryTotalBytes,
+            gpuMemoryAvailableBytes: q.localHardware!.gpuMemoryAvailableBytes,
+            gpuCount: q.localHardware!.gpuCount,
+            gpuName: q.localHardware!.gpuName == null
+                ? null
+                : t(q.localHardware!.gpuName!),
+          ),
     modelQuotas: [
       for (final m in q.modelQuotas)
         ModelQuota(
