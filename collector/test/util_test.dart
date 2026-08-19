@@ -464,6 +464,30 @@ void main() {
       );
     });
 
+    test('detects the agy CLI data directory', () {
+      expect(
+        detectInstalledAgenticTools(
+          homePath: r'C:\home',
+          appDataPath: r'C:\appdata',
+          xdgDataPath: r'C:\xdg',
+          localAppDataPath: r'C:\local',
+          exists: (path) =>
+              path.replaceAll('/', r'\') == r'C:\home\.gemini\antigravity-cli',
+        ),
+        {'antigravity'},
+      );
+      expect(
+        detectInstalledAgenticTools(
+          homePath: r'C:\home',
+          appDataPath: r'C:\appdata',
+          xdgDataPath: r'C:\xdg',
+          localAppDataPath: r'C:\local',
+          exists: (path) => path.replaceAll('/', r'\') == r'C:\local\agy',
+        ),
+        {'antigravity'},
+      );
+    });
+
     test('returns empty when no supported directories exist', () {
       expect(
         detectInstalledAgenticTools(

@@ -1,6 +1,6 @@
 name: quotabot_collector
 description: Collects AI subscription quota/usage across providers into one normalized JSON feed.
-version: 0.9.8
+version: 0.9.9
 environment:
   sdk: ^3.6.0
 
@@ -9,6 +9,7 @@ dependencies:
   sqlite3: ^3.5.0
   mcp_dart: ^2.2.2
   crypto: ^3.0.7
+  ffi: ^2.1.0
 
 dev_dependencies:
   lints: ^6.0.0

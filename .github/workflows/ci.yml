@@ -93,9 +93,18 @@ jobs:
         shell: pwsh
         run: ./tools/test-windows-architecture.ps1
 
+      - name: Windows space-safe Dart helper tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/test-windows-space-safe-dart.ps1
+
       - name: Linux desktop entry tests
         if: runner.os == 'Linux'
         run: bash tools/test-write-desktop-entry.sh
+
+      - name: POSIX space-safe Dart helper tests
+        if: runner.os != 'Windows'
+        run: bash tools/test-posix-space-safe-dart.sh
 
       - name: Coverage checker and policy tests
         run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_native_code_inventory tools.test_verify_windows_signatures tools.test_verify_cli_archive tools.test_verify_desktop_archive

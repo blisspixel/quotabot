@@ -567,9 +567,19 @@ String _localHardwareDetail(LocalHardwareInfo hardware) {
         : '${formatCompactBytes(systemAvailable)} of '
             '${formatCompactBytes(systemTotal)} RAM available');
   }
+  final gpuName = hardware.gpuName?.trim();
   final gpuTotal = hardware.gpuMemoryTotalBytes;
   final gpuAvailable = hardware.gpuMemoryAvailableBytes;
-  if (gpuTotal != null) {
+  if (gpuName != null && gpuName.isNotEmpty) {
+    if (gpuTotal != null) {
+      parts.add(gpuAvailable == null
+          ? '$gpuName . ${formatCompactBytes(gpuTotal)} GPU'
+          : '$gpuName . ${formatCompactBytes(gpuAvailable)} of '
+              '${formatCompactBytes(gpuTotal)} GPU free');
+    } else {
+      parts.add(gpuName);
+    }
+  } else if (gpuTotal != null) {
     parts.add(gpuAvailable == null
         ? '${formatCompactBytes(gpuTotal)} largest GPU'
         : '${formatCompactBytes(gpuAvailable)} of '

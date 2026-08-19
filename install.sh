@@ -414,16 +414,47 @@ chmod +x "$wrapper_tmp"
 mv -f "$wrapper_tmp" "$INSTALL_DIR/$BINARY_NAME"
 wrapper_tmp=""
 
-# PATH check
+# PATH check. Persist ~/.local/bin so a new terminal can find quotabot.
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-  echo ""
-  echo "NOTE: $INSTALL_DIR is not in your PATH."
-  echo "Add this line to your shell profile (~/.bashrc, ~/.zshrc, ~/.config/fish/config.fish, etc.):"
-  echo ""
-  echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
-  echo ""
-  echo "Then run:"
-  echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+  export PATH="$INSTALL_DIR:$PATH"
+  marker="# quotabot PATH"
+  line="export PATH=\"$INSTALL_DIR:\$PATH\""
+  profile=""
+  case "${SHELL##*/}" in
+    zsh)
+      if [[ -f "$HOME/.zprofile" || ! -f "$HOME/.zshrc" ]]; then
+        profile="$HOME/.zprofile"
+      else
+        profile="$HOME/.zshrc"
+      fi
+      ;;
+    bash)
+      if [[ -f "$HOME/.bashrc" ]]; then
+        profile="$HOME/.bashrc"
+      elif [[ -f "$HOME/.bash_profile" ]]; then
+        profile="$HOME/.bash_profile"
+      else
+        profile="$HOME/.bashrc"
+      fi
+      ;;
+    fish)
+      mkdir -p "$HOME/.config/fish"
+      profile="$HOME/.config/fish/config.fish"
+      line="fish_add_path $INSTALL_DIR"
+      ;;
+    *)
+      profile="$HOME/.profile"
+      ;;
+  esac
+  if [[ -n "$profile" ]] && grep -Fqs "$marker" "$profile" 2>/dev/null; then
+    echo "PATH entry already present in $profile"
+  elif [[ -n "$profile" ]]; then
+    {
+      printf '\n%s\n' "$marker"
+      printf '%s\n' "$line"
+    } >> "$profile"
+    echo "Added $INSTALL_DIR to PATH in $profile (open a new terminal)."
+  fi
 fi
 
 echo ""
@@ -431,7 +462,8 @@ echo "quotabot installed to $INSTALL_ROOT"
 echo ""
 echo "Next steps:"
 echo "  quotabot doctor"
-echo "  quotabot login grok"
-echo "  quotabot login antigravity  # optional, keeps Antigravity live"
+echo "  quotabot top"
+echo "  Host apps already signed in here need no extra login."
+echo "  Optional idle-machine grants: quotabot login claude|codex|grok|antigravity"
 echo ""
 echo "Re-run this script anytime to update."

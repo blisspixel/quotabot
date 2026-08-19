@@ -59,6 +59,12 @@ if [ "$package_only" -eq 0 ]; then
     exit 1
   fi
 
+  # shellcheck source=posix-space-safe-dart.sh
+  . "$script_dir/posix-space-safe-dart.sh"
+  cleanup_space_safe_dart() { quotabot_restore_space_safe_dart; }
+  trap cleanup_space_safe_dart EXIT
+  quotabot_enable_space_safe_dart "$root" >/dev/null
+
   rm -rf "$build_dir"
   (cd "$collector_dir" && \
     dart pub get --enforce-lockfile && \
@@ -68,6 +74,8 @@ if [ "$package_only" -eq 0 ]; then
     exit 1
   fi
   mv "$bundle/bin/collect" "$packaged_executable"
+  trap - EXIT
+  quotabot_restore_space_safe_dart
 fi
 
 if [ ! -x "$packaged_executable" ]; then

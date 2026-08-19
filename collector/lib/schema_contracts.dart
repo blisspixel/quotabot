@@ -219,6 +219,7 @@ const quotabotV1JsonSchema = <String, Object?>{
         'gpu_memory_total_bytes': {'type': 'integer', 'minimum': 1},
         'gpu_memory_available_bytes': {'type': 'integer', 'minimum': 0},
         'gpu_count': {'type': 'integer', 'minimum': 0, 'maximum': 64},
+        'gpu_name': {'type': 'string', 'minLength': 1},
       },
     },
     'quotaWindow': {
@@ -719,6 +720,10 @@ void _validateLocalHardware(
     max: 64,
     required: false,
   );
+  final gpuName = hardware['gpu_name'];
+  if (gpuName != null && (gpuName is! String || gpuName.trim().isEmpty)) {
+    errors.add('$path.gpu_name must be a non-empty string');
+  }
 
   final systemTotal = hardware['system_memory_total_bytes'];
   final systemAvailable = hardware['system_memory_available_bytes'];

@@ -5,7 +5,10 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:sqlite3/sqlite3.dart';
 
+import '../auth/cli_oauth.dart';
 import '../auth/google_auth.dart';
+import '../auth/os_secret_store.dart';
+import '../auth/tokens.dart';
 import '../http_client.dart';
 import '../models.dart';
 import '../parsing.dart';
@@ -83,9 +86,11 @@ class _AntigravityRequestFailure implements Exception {
 /// `antigravityAuthStatus` protobuf and query live model quota from the Cloud
 /// Code API. After `quotabot login antigravity` the adapter uses its own grant
 /// (see [GoogleAuth]); otherwise it falls back to the access token the IDE
-/// currently holds. These quota calls are metadata lookups and cost no tokens.
-/// Primary account from disk; additional accounts come from the cross-platform
-/// profile scan and per-account caches.
+/// currently holds, then the `agy` OS-keyring grant (Windows Credential Manager,
+/// macOS Keychain, Linux secret-service under `gemini` / `antigravity`), then
+/// `~/.gemini/oauth_creds.json`. These quota calls are metadata lookups and
+/// cost no tokens. Primary account from disk; additional accounts come from
+/// the cross-platform profile scan and per-account caches.
 class AntigravityAdapter {
   static const id = antigravityProviderId;
   static const name = antigravityProviderName;
@@ -100,6 +105,8 @@ class AntigravityAdapter {
   final List<String> Function()? _dbPathSource;
   final String? Function()? _activeAccountSource;
   final bool Function()? _hasGeminiCredsSource;
+  final bool Function()? _looksInstalledSource;
+  final List<String> Function()? _storedGrantAccountsSource;
 
   AntigravityAdapter({
     AntigravityAccountSource? accountSource,
@@ -113,6 +120,8 @@ class AntigravityAdapter {
     List<String> Function()? dbPathSource,
     String? Function()? activeAccountSource,
     bool Function()? hasGeminiCreds,
+    bool Function()? looksInstalled,
+    List<String> Function()? storedGrantAccounts,
   })  : _accountSource = accountSource,
         _tokenResolver = tokenResolver,
         _emailResolver = emailResolver,
@@ -123,7 +132,9 @@ class AntigravityAdapter {
         _requestTimeout = requestTimeout,
         _dbPathSource = dbPathSource,
         _activeAccountSource = activeAccountSource,
-        _hasGeminiCredsSource = hasGeminiCreds;
+        _hasGeminiCredsSource = hasGeminiCreds,
+        _looksInstalledSource = looksInstalled,
+        _storedGrantAccountsSource = storedGrantAccounts;
 
   /// Returns the set of emails for currently active Antigravity profiles.
   /// Scans IDE DBs plus the active ~/.gemini account. The "old" account list is
@@ -360,8 +371,43 @@ class AntigravityAdapter {
         useCliToken: true,
       ));
     }
+    if (byAccount.isEmpty) {
+      for (final account in _storedGrantAccounts()) {
+        add((
+          account: account,
+          plan: null,
+          ideAccessToken: null,
+          localModel: null,
+          localNote: null,
+          modelQuotas: const [],
+          useCliToken: false,
+        ));
+      }
+    }
     return order.map((account) => byAccount[account]!).toList();
   }
+
+  List<String> _storedGrantAccounts() {
+    final injected = _storedGrantAccountsSource;
+    if (injected != null) return injected();
+    final discoveryInjected = _accountSource != null ||
+        _dbPathSource != null ||
+        _hasGeminiCredsSource != null ||
+        _activeAccountSource != null;
+    if (discoveryInjected) return const [];
+    return _readStoredGrantAccounts();
+  }
+
+  // coverage:ignore-start
+  static List<String> _readStoredGrantAccounts() {
+    try {
+      final named = TokenStore.accounts(GoogleAuth.provider);
+      if (named.isNotEmpty) return named;
+      if (TokenStore.exists(GoogleAuth.provider)) return const ['default'];
+    } catch (_) {}
+    return const [];
+  }
+  // coverage:ignore-end
 
   static List<AntigravityAccountCandidate> _dedupeAccounts(
     List<AntigravityAccountCandidate> accounts,
@@ -401,10 +447,78 @@ class AntigravityAdapter {
   // Default credential probing reads real per-user files; tests exercise this
   // branch through an injected credential-presence source.
   // coverage:ignore-start
-  static bool _hasGeminiCreds() =>
-      File(_geminiOauthPath()).existsSync() ||
-      File(_geminiAccountsPath()).existsSync();
+  static bool _hasGeminiCreds() {
+    for (final path in _geminiOauthPaths()) {
+      if (File(path).existsSync()) return true;
+    }
+    for (final path in _geminiAccountsPaths()) {
+      if (File(path).existsSync()) return true;
+    }
+    return hasAgyOsKeyringSecret();
+  }
+
+  static bool _antigravityLooksInstalled() {
+    if (_hasGeminiCreds()) return true;
+    for (final path in _findAllDbPaths()) {
+      if (File(path).existsSync()) return true;
+    }
+    final h = home();
+    final appData = Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
+    final local = Platform.environment['LOCALAPPDATA'] ?? '$h/AppData/Local';
+    final xdg = Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
+    for (final dir in [
+      '$h/.gemini/antigravity-cli',
+      '$h/.gemini/antigravity',
+      '$h/.antigravity',
+      '$appData/Antigravity',
+      '$appData/Antigravity IDE',
+      '$h/Library/Application Support/Antigravity',
+      '$h/Library/Application Support/Antigravity IDE',
+      '$xdg/antigravity',
+      '$local/agy',
+    ]) {
+      if (Directory(dir).existsSync()) return true;
+    }
+    return _agyOnPath();
+  }
+
+  static bool _agyOnPath() {
+    final path = Platform.environment['PATH'] ?? '';
+    final sep = Platform.isWindows ? ';' : ':';
+    final names = Platform.isWindows
+        ? const ['agy.exe', 'agy', 'antigravity.exe']
+        : const ['agy', 'antigravity'];
+    for (final dir in path.split(sep)) {
+      if (dir.isEmpty) continue;
+      for (final name in names) {
+        if (File('$dir${Platform.pathSeparator}$name').existsSync()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   // coverage:ignore-end
+
+  static const installedUnsignedInError =
+      'Antigravity is installed - sign in with agy or the Antigravity app, or run: quotabot login antigravity';
+
+  String _emptyDiscoveryError() {
+    final looksInstalled = _looksInstalledSource;
+    if (looksInstalled != null) {
+      return looksInstalled()
+          ? installedUnsignedInError
+          : 'Antigravity not installed';
+    }
+    final injected = _accountSource != null ||
+        _dbPathSource != null ||
+        _hasGeminiCredsSource != null ||
+        _activeAccountSource != null;
+    if (injected) return 'Antigravity not installed';
+    return _antigravityLooksInstalled()
+        ? installedUnsignedInError
+        : 'Antigravity not installed';
+  }
 
   Future<ProviderQuota> collect() async {
     final results = await collectAccounts();
@@ -417,9 +531,7 @@ class AntigravityAdapter {
       final accounts =
           _dedupeAccounts(_accountSource?.call() ?? _discoverAccounts());
       if (accounts.isEmpty) {
-        return [
-          ProviderQuota.error(id, name, 'Antigravity not installed', asOf)
-        ];
+        return [ProviderQuota.error(id, name, _emptyDiscoveryError(), asOf)];
       }
       final out = <ProviderQuota>[];
       for (var i = 0; i < accounts.length; i++) {
@@ -941,6 +1053,18 @@ class AntigravityAdapter {
   static String _geminiOauthPath() => '${_geminiDir()}/oauth_creds.json';
   static String _geminiAccountsPath() => '${_geminiDir()}/google_accounts.json';
 
+  static List<String> _geminiOauthPaths() => [
+        _geminiOauthPath(),
+        '${_geminiDir()}/antigravity-cli/oauth_creds.json',
+        '${_geminiDir()}/antigravity/oauth_creds.json',
+      ];
+
+  static List<String> _geminiAccountsPaths() => [
+        _geminiAccountsPath(),
+        '${_geminiDir()}/antigravity-cli/google_accounts.json',
+        '${_geminiDir()}/antigravity/google_accounts.json',
+      ];
+
   static Future<String?> _getCliAccess() => _getGeminiAccessFresh();
 
   static Future<String?> _getCliEmail(String access) => _getGeminiEmail(access);
@@ -951,54 +1075,75 @@ class AntigravityAdapter {
   /// from the stored refresh token (the CLI's own flow) when needed.
   static Future<String?> _getGeminiAccessFresh() async {
     try {
-      final f = File(_geminiOauthPath());
-      if (!f.existsSync()) return null;
-      final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-      final stored = j['access_token']?.toString();
-      final exp = j['expiry_date'];
-      final nowMs = DateTime.now().millisecondsSinceEpoch;
-
-      // Stored token still valid (60s safety margin).
-      if (stored != null &&
-          stored.isNotEmpty &&
-          exp is int &&
-          nowMs < exp - 60000) {
-        return stored;
+      for (final material in _cliOauthMaterials()) {
+        final tok = await _accessFromCliOauth(material);
+        if (tok != null && tok.isNotEmpty) return tok;
       }
-      final refresh = j['refresh_token']?.toString();
-      // A token we refreshed earlier this session from this same refresh token
-      // is still good. Keying on the refresh token keeps a switched account
-      // from getting the previous account's cached token.
-      if (_cliTokenCache != null &&
-          refresh != null &&
-          _cliTokenCacheKey == refresh &&
-          nowMs < _cliTokenExpMs - 60000) {
-        return _cliTokenCache;
-      }
-      if (refresh == null || refresh.isEmpty) return stored;
-
-      final resp = await sharedHttpClient.post(
-        Uri.parse('https://oauth2.googleapis.com/token'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {
-          'grant_type': 'refresh_token',
-          'refresh_token': refresh,
-          'client_id': _geminiClientId,
-          'client_secret': _geminiClientSecret,
-        },
-      ).timeout(const Duration(seconds: 10));
-      if (resp.statusCode != 200) return stored; // best effort
-      final fresh = jsonDecode(resp.body) as Map<String, dynamic>;
-      final tok = fresh['access_token']?.toString();
-      if (tok == null || tok.isEmpty) return stored;
-      final expiresIn = (fresh['expires_in'] as num?)?.toInt() ?? 3600;
-      _cliTokenCache = tok;
-      _cliTokenCacheKey = refresh;
-      _cliTokenExpMs = nowMs + expiresIn * 1000;
-      return tok;
+      return null;
     } catch (_) {
       return null;
     }
+  }
+
+  static Iterable<CliOauthMaterial> _cliOauthMaterials() sync* {
+    final keyring = readAgyOsKeyringSecret();
+    if (keyring != null) {
+      final parsed = parseCliOauthSecret(keyring);
+      if (parsed != null) yield parsed;
+    }
+    for (final path in _geminiOauthPaths()) {
+      final f = File(path);
+      if (!f.existsSync()) continue;
+      try {
+        final parsed = parseCliOauthSecret(f.readAsStringSync());
+        if (parsed != null) yield parsed;
+      } catch (_) {}
+    }
+  }
+
+  static Future<String?> _accessFromCliOauth(CliOauthMaterial material) async {
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    if (cliOauthAccessIsFresh(material, nowMs: nowMs)) {
+      return material.accessToken;
+    }
+    final refresh = material.refreshToken;
+    if (refresh == null || refresh.isEmpty) return material.accessToken;
+    if (_cliTokenCache != null &&
+        _cliTokenCacheKey == refresh &&
+        nowMs < _cliTokenExpMs - 60000) {
+      return _cliTokenCache;
+    }
+    if (material.antigravityClient) {
+      final refreshed = await GoogleAuth().refresh(refresh);
+      final tok = refreshed?.accessToken;
+      if (tok == null || tok.isEmpty) return material.accessToken;
+      _cliTokenCache = tok;
+      _cliTokenCacheKey = refresh;
+      _cliTokenExpMs = refreshed!.expiresAt == null
+          ? nowMs + 3600 * 1000
+          : refreshed.expiresAt! * 1000;
+      return tok;
+    }
+
+    final resp = await sharedHttpClient.post(
+      Uri.parse('https://oauth2.googleapis.com/token'),
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: {
+        'grant_type': 'refresh_token',
+        'refresh_token': refresh,
+        'client_id': _geminiClientId,
+        'client_secret': _geminiClientSecret,
+      },
+    ).timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) return material.accessToken;
+    final fresh = jsonDecode(resp.body) as Map<String, dynamic>;
+    final tok = fresh['access_token']?.toString();
+    if (tok == null || tok.isEmpty) return material.accessToken;
+    final expiresIn = (fresh['expires_in'] as num?)?.toInt() ?? 3600;
+    _cliTokenCache = tok;
+    _cliTokenCacheKey = refresh;
+    _cliTokenExpMs = nowMs + expiresIn * 1000;
+    return tok;
   }
 
   static Future<String?> _getGeminiEmail(String access) async {
@@ -1008,8 +1153,9 @@ class AntigravityAdapter {
     final fromIdToken = _emailFromGeminiOauthIdToken();
     if (fromIdToken != null) return fromIdToken;
     try {
-      final af = File(_geminiAccountsPath());
-      if (af.existsSync()) {
+      for (final path in _geminiAccountsPaths()) {
+        final af = File(path);
+        if (!af.existsSync()) continue;
         final aj = jsonDecode(af.readAsStringSync()) as Map<String, dynamic>;
         final act = aj['active']?.toString();
         if (act != null && act.isNotEmpty) return act;
@@ -1023,11 +1169,14 @@ class AntigravityAdapter {
     final fromIdToken = _emailFromGeminiOauthIdToken();
     if (fromIdToken != null) return fromIdToken;
     try {
-      final af = File(_geminiAccountsPath());
-      if (!af.existsSync()) return null;
-      final aj = jsonDecode(af.readAsStringSync()) as Map<String, dynamic>;
-      final act = aj['active']?.toString();
-      return act != null && act.isNotEmpty ? act : null;
+      for (final path in _geminiAccountsPaths()) {
+        final af = File(path);
+        if (!af.existsSync()) continue;
+        final aj = jsonDecode(af.readAsStringSync()) as Map<String, dynamic>;
+        final act = aj['active']?.toString();
+        if (act != null && act.isNotEmpty) return act;
+      }
+      return null;
     } catch (_) {
       return null;
     }
@@ -1047,11 +1196,11 @@ class AntigravityAdapter {
 
   static String? _emailFromGeminiOauthIdToken() {
     try {
-      final f = File(_geminiOauthPath());
-      if (!f.existsSync()) return null;
-      final j = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-      final idToken = j['id_token']?.toString();
-      return _emailFromJwt(idToken);
+      for (final material in _cliOauthMaterials()) {
+        final email = _emailFromJwt(material.idToken);
+        if (email != null) return email;
+      }
+      return null;
     } catch (_) {
       return null;
     }

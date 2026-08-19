@@ -59,6 +59,10 @@ void _assertFixtureParses(ProviderAdapterRegistration entry, int now) {
       expect(window, isNotNull);
       expect(window!.usedPercent, 73);
       expect(window.resetsAt, 1783379179);
+      expect(
+        grokCategoryDetails(_fixtureBytes(entry.fixtureFile)),
+        ['Category split of this weekly pool: 66%, 5%, 2%'],
+      );
     case ProviderFixtureKind.lmStudioNativeModels:
       final models = lmStudioNativeFromJson(_fixtureMap(entry.fixtureFile));
       expect(models!.installed, hasLength(2));

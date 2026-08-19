@@ -39,25 +39,28 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 
 ## Project status and execution order
 
-The current verified stable release is 0.9.8. The shipped routing policies are
+The current verified stable release is 0.9.9. The shipped routing policies are
 `balanced`, `local_first`, and opt-in `quota_stretch`. The next work is release
 signing for Windows and macOS. The [roadmap Next section](ROADMAP.md#next) is the
 sole source for its behavior, guardrails, completion criteria, and rationale.
 
 ## Set it up from source (humans or agents)
 
-From a fresh clone, one idempotent command builds and installs everything (the
-CLI, the desktop app, and a Desktop/tray shortcut) and then verifies it with
-`quotabot doctor`. It needs only Flutter/Dart on the machine, and no prompts,
-code, or usage-token-spending requests leave the machine.
+From a fresh clone, one idempotent command builds and installs the CLI, plus the
+desktop app when its OS build tools are present, and then verifies it with
+`quotabot doctor`. If Dart is missing or this checkout cannot compile, the
+same command installs the checksum-verified release CLI instead of failing.
+No prompts, code, or usage-token-spending requests leave the machine.
 
 - Windows: `pwsh tools/setup.ps1`
 - macOS / Linux: `bash tools/setup.sh`
 
 Add `-CliOnly` (PowerShell) or `--cli-only` (bash) to skip the desktop build when
-you only need the routing CLI. For end users who just want the prebuilt CLI, the
-one-line installers in the README download a release binary instead. Build
-details and prerequisites: [docs/BUILDING.md](docs/BUILDING.md).
+you only need the routing CLI. Missing desktop OS build tools on Windows,
+macOS, or Linux skip the tray app automatically and still install the CLI. For
+end users who just want the prebuilt CLI, the one-line installers in the README
+download a release binary instead. Build details and prerequisites:
+[docs/BUILDING.md](docs/BUILDING.md).
 
 ## How to call it
 

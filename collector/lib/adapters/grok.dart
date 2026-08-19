@@ -114,8 +114,24 @@ class GrokAdapter {
           account.cliToken;
       if (token == null) return offline('no token - run: quotabot login grok');
 
-      final window = await (_usageFetcher ?? _fetchUsage)(token, asOf);
-      if (window == null) {
+      final injected = _usageFetcher;
+      if (injected != null) {
+        final window = await injected(token, asOf);
+        if (window == null) {
+          return offline('token expired (open Grok to refresh) - account only');
+        }
+        return ProviderQuota(
+          provider: id,
+          displayName: name,
+          account: account.email,
+          plan: 'SuperGrok',
+          asOf: asOf,
+          windows: [window],
+        );
+      }
+
+      final snapshot = await _fetchUsage(token, asOf);
+      if (snapshot == null) {
         return offline('token expired (open Grok to refresh) - account only');
       }
 
@@ -125,7 +141,8 @@ class GrokAdapter {
         account: account.email,
         plan: 'SuperGrok',
         asOf: asOf,
-        windows: [window],
+        windows: [snapshot.window],
+        details: snapshot.details,
       );
     } catch (_) {
       // Isolate this account: a token-refresh or network throw here must not
@@ -166,7 +183,10 @@ class GrokAdapter {
   }
 
   /// Calls the gRPC-web billing endpoint and parses the credit usage window.
-  Future<QuotaWindow?> _fetchUsage(String token, int asOf) async {
+  Future<({QuotaWindow window, List<String> details})?> _fetchUsage(
+    String token,
+    int asOf,
+  ) async {
     // gRPC-web data frame: flag(0) + length(0) = empty request message.
     final body = Uint8List.fromList([0, 0, 0, 0, 0]);
     final post = _http?.post ?? sharedHttpClient.post;
@@ -185,7 +205,10 @@ class GrokAdapter {
         resp.headers['grpc-status'] != '0') {
       return null;
     }
-    return grokWindow(grpcMessage(resp.bodyBytes), asOf);
+    final message = grpcMessage(resp.bodyBytes);
+    final window = grokWindow(message, asOf);
+    if (window == null) return null;
+    return (window: window, details: grokCategoryDetails(message));
   }
 }
 

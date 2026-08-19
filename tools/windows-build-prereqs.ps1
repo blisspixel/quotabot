@@ -40,30 +40,62 @@ function Get-VisualStudioInstallPath {
   return $null
 }
 
+function Get-WindowsAtlHeaderForInstall {
+  param([string]$InstallPath)
+
+  if (-not $InstallPath) { return $null }
+  $msvcRoot = Join-Path $InstallPath 'VC\Tools\MSVC'
+  if (-not (Test-Path -LiteralPath $msvcRoot)) { return $null }
+  foreach ($toolset in Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction SilentlyContinue) {
+    $candidate = Join-Path $toolset.FullName 'atlmfc\include\atlbase.h'
+    if (Test-Path -LiteralPath $candidate) {
+      return $candidate
+    }
+  }
+  return $null
+}
+
 function Get-WindowsAtlHeader {
   (Get-WindowsDesktopBuildPrereqStatus).AtlHeader
 }
 
 function Get-WindowsDesktopBuildPrereqStatus {
   $installPath = Get-VisualStudioInstallPath
-  $header = $null
-  if ($installPath) {
-    $msvcRoot = Join-Path $installPath 'VC\Tools\MSVC'
-    if (Test-Path -LiteralPath $msvcRoot) {
-      foreach ($toolset in Get-ChildItem -LiteralPath $msvcRoot -Directory -ErrorAction SilentlyContinue) {
-        $candidate = Join-Path $toolset.FullName 'atlmfc\include\atlbase.h'
-        if (Test-Path -LiteralPath $candidate) {
-          $header = $candidate
-          break
-        }
+  [pscustomobject]@{
+    VisualStudioPath = $installPath
+    AtlHeader = Get-WindowsAtlHeaderForInstall -InstallPath $installPath
+  }
+}
+
+function Test-WindowsDesktopAtlAvailable {
+  $paths = @()
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (Test-Path -LiteralPath $vswhere) {
+    $paths += @(& $vswhere -all -products * -property installationPath)
+  }
+  foreach ($root in @(
+      "${env:ProgramFiles(x86)}\Microsoft Visual Studio",
+      "${env:ProgramFiles}\Microsoft Visual Studio")) {
+    if (-not (Test-Path -LiteralPath $root)) { continue }
+    foreach ($editionRoot in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
+      foreach ($instanceRoot in Get-ChildItem -LiteralPath $editionRoot.FullName -Directory -ErrorAction SilentlyContinue) {
+        $paths += $instanceRoot.FullName
       }
     }
   }
 
-  [pscustomobject]@{
-    VisualStudioPath = $installPath
-    AtlHeader = $header
+  $seen = @{}
+  foreach ($path in $paths) {
+    if (-not $path) { continue }
+    $normalized = $path.Trim()
+    $key = $normalized.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    if (Get-WindowsAtlHeaderForInstall -InstallPath $normalized) {
+      return $true
+    }
   }
+  return $false
 }
 
 function Assert-WindowsDesktopBuildPrereqs {

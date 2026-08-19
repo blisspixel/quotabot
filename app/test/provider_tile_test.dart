@@ -55,6 +55,38 @@ double _contrastRatio(Color foreground, Color background) {
 }
 
 void main() {
+  testWidgets('expanded subscription cards show usage-view details', (
+    tester,
+  ) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final quota = ProviderQuota(
+      provider: grokProviderId,
+      displayName: grokProviderName,
+      account: 'default',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 59, resetsAt: now + 86400),
+      ],
+      details: const ['Category split of this weekly pool: 40%, 12%, 7%'],
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ProviderTile(
+          quota: quota,
+          cardColor: const Color(0xFF1A1A1A),
+          expanded: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text('Category split of this weekly pool: 40%, 12%, 7%'),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('renders Claude scoped quota after shared provider windows', (
     tester,
   ) async {

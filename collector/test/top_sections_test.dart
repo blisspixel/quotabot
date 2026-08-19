@@ -42,8 +42,8 @@ void main() {
       expect(topSectionFor(_q('claude', [_w(10)]), _now), TopSection.active);
     });
 
-    test('a spent live window drops to cached', () {
-      expect(topSectionFor(_q('codex', [_w(100)]), _now), TopSection.cached);
+    test('a spent live window stays active', () {
+      expect(topSectionFor(_q('codex', [_w(100)]), _now), TopSection.active);
     });
 
     test('stale last-known quota is cached even with headroom', () {
@@ -117,7 +117,7 @@ void main() {
     test('groups into the three bands and preserves input order', () {
       final claude = _q('claude', [_w(3)]); // active
       final grok = _q('grok', [_w(12)]); // active
-      final codex = _q('codex', [_w(100)]); // cached (spent)
+      final codex = _q('codex', [_w(100)]); // active (spent live)
       final kiro = _q('kiro', [_w(0)], stale: true); // cached (stale)
       final cursor = _q('cursor', const [], status: 'no live data'); // idle
       final nvidia = _q('nvidia', const [], status: 'metadata'); // idle
@@ -127,8 +127,8 @@ void main() {
         _now,
       );
 
-      expect(groups.active.map((q) => q.provider), ['claude', 'grok']);
-      expect(groups.cached.map((q) => q.provider), ['codex', 'kiro']);
+      expect(groups.active.map((q) => q.provider), ['claude', 'grok', 'codex']);
+      expect(groups.cached.map((q) => q.provider), ['kiro']);
       expect(groups.idle.map((q) => q.provider), ['cursor', 'nvidia']);
       // Cursor navigation walks active then cached; idle is not selectable.
       expect(

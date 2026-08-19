@@ -28,35 +28,32 @@ $bundle = Join-Path $buildDir 'bundle'
 $packagedExe = Join-Path $bundle 'bin\quotabot.exe'
 
 if (-not $PackageOnly) {
-  $dart = (Get-Command dart -ErrorAction SilentlyContinue).Source
-  if (-not $dart) {
-    $flutter = (Get-Command flutter -ErrorAction SilentlyContinue).Source
-    if ($flutter) {
-      $candidate = Join-Path (Split-Path -Parent $flutter) 'dart.exe'
-      if (Test-Path -LiteralPath $candidate) {
-        $dart = $candidate
-      }
-    }
-  }
-  if (-not $dart) {
-    throw "dart not found on PATH. Install Flutter or Dart and add it to PATH."
-  }
-
-  Push-Location $collectorDir
+  . (Join-Path $scriptDir 'windows-space-safe-dart.ps1')
+  $spaceSafe = Enable-QuotabotSpaceSafeDart -PreferredRoot $root
   try {
-    & $dart pub get --enforce-lockfile
-    if ($LASTEXITCODE -ne 0) {
-      throw "dart pub get failed with exit code $LASTEXITCODE"
+    $dart = $spaceSafe.DartExecutable
+    if ($spaceSafe.Kind -ne 'verbatim') {
+      Write-Host "Using space-free Dart path $dart ($($spaceSafe.Kind)) because the toolchain path contains spaces."
     }
-    if (Test-Path -LiteralPath $buildDir) {
-      Remove-Item -LiteralPath $buildDir -Recurse -Force
-    }
-    & $dart build cli --target=bin\collect.dart --output=$buildDir
-    if ($LASTEXITCODE -ne 0) {
-      throw "dart build cli failed with exit code $LASTEXITCODE"
+
+    Push-Location $collectorDir
+    try {
+      & $dart pub get --enforce-lockfile
+      if ($LASTEXITCODE -ne 0) {
+        throw "dart pub get failed with exit code $LASTEXITCODE"
+      }
+      if (Test-Path -LiteralPath $buildDir) {
+        Remove-Item -LiteralPath $buildDir -Recurse -Force
+      }
+      & $dart build cli --target=bin\collect.dart --output=$buildDir
+      if ($LASTEXITCODE -ne 0) {
+        throw "dart build cli failed with exit code $LASTEXITCODE"
+      }
+    } finally {
+      Pop-Location
     }
   } finally {
-    Pop-Location
+    Disable-QuotabotSpaceSafeDart -State $spaceSafe
   }
 
   $builtExe = Join-Path $bundle 'bin\collect.exe'

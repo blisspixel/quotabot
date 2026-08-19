@@ -38,8 +38,34 @@ The one-line release installers install the CLI only. Tagged releases built by
 the current workflow also attach verified portable desktop bundles; follow
 [Desktop release bundles](DESKTOP-DISTRIBUTION.md) for checksum and provenance
 verification plus update, rollback, and uninstall behavior. To build and install
-the desktop widget with the platform-specific launcher from source instead, use
-[Building from source](BUILDING.md).
+from a clone, including the optional desktop widget, use
+[Building from source](BUILDING.md) or the one-command source setup below.
+
+### From a source checkout
+
+If you cloned the repository, or you are an agent setting this machine up from
+source, run the idempotent setup script from the repo root. It builds the CLI
+from this checkout, installs it onto your PATH, runs `quotabot doctor`, prints
+what already works without extra login, and opens the app. The desktop tray app
+is built from source when OS build tools are present; otherwise setup installs
+the portable desktop release and launches it.
+
+```powershell
+pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
+```
+
+```bash
+bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
+```
+
+Missing desktop OS build tools skip the tray app and still install the CLI on
+Windows, macOS, and Linux. If Dart is missing or this checkout cannot compile,
+setup installs the checksum-verified release CLI instead of failing. A dart-run
+shim from this checkout is the last resort when a release download is also
+unavailable. The script prints the repair step; re-run the same setup command
+after adding desktop tools to install the tray app. End users who only want a
+release binary should keep using the one-liner in
+[Install the quotabot CLI](#2-install-the-quotabot-cli).
 
 The detailed sections below explain provider preparation, recovery, the optional
 desktop widget, and routing.
@@ -58,7 +84,7 @@ pinning. There is no quotabot account.
 | Claude | Claude Code OAuth token | `quotabot login claude` | live while the host credential is valid; the grant is designed to keep the account-wide read live on an idle machine |
 | Codex | Account-wide Codex OAuth usage metadata | `quotabot login codex` | the grant is designed to keep the account-wide read live on an idle machine; mixed session files are never read |
 | Grok | current Grok CLI token and account file | `quotabot login grok` | own grant refreshes a matching locally discovered account and can pin it |
-| Antigravity | signed-in IDE account and refresh material, then local state fallback | `quotabot login antigravity` | own grant refreshes a matching locally discovered account and can pin it |
+| Antigravity | signed-in `agy` CLI or IDE account and refresh material, then local state fallback | `quotabot login antigravity` | own grant refreshes a matching locally discovered account and can pin it |
 | Cursor, Windsurf/Devin, Kiro | passive local application state | none | opportunistic this-machine evidence |
 | NVIDIA NIM | `NVIDIA_API_KEY` or `nvapi` | set the environment key | status-only; numeric quota remains unknown |
 | Ollama, LM Studio, Lemonade | reachable local server | start the runtime server | live inventory only; never served from cache |
@@ -132,7 +158,7 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` selects one exact tag for a
 reproducible rollback.
 
 The current stable release is
-[v0.9.8](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8). The
+[v0.9.9](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9). The
 verified v0.9.8 rehearsal
 [install smoke](https://github.com/blisspixel/quotabot/actions/runs/30693794794)
 passed the one-line install, upgrade from its actual prior stable v0.9.7,
@@ -551,6 +577,22 @@ procedures above.
   entry is picked up. On Windows, open a fresh PowerShell window.
 - **Windows blocks the downloaded exe:** it is unsigned for now. Verify the
   release `.sha256`, or run from source instead (below).
+- **Source setup skips the desktop app:** the CLI is still installed. On
+  Windows, add Visual Studio C++ ATL support for your MSVC toolset. On macOS,
+  install Xcode command-line tools (`xcode-select --install`). On Linux, install
+  `clang cmake ninja-build pkg-config libgtk-3-dev` and the Ayatana app-indicator
+  headers. Then re-run `pwsh tools/setup.ps1` or `bash tools/setup.sh`. Use
+  `-CliOnly` / `--cli-only` when you only want the routing CLI.
+- **Windows source setup fails with `'C:\Users\First' is not recognized`:**
+  Dart's native-asset hooks break when the Flutter/Dart path contains spaces, as
+  in `C:\Users\First Last\...`. Current setup and CLI packagers hardlink or copy
+  the Dart SDK into a space-free directory for that compile. Junctions, subst
+  drives, and 8.3 short names are not enough, because Dart reports the long
+  path. If an older checkout still fails, install the prebuilt CLI, or install
+  Flutter in a path without spaces.
+- **`quotabot` not found after macOS or Linux install:** setup and the one-line
+  installer add `~/.local/bin` to your shell profile when it is missing from
+  PATH. Open a new terminal, or run `export PATH="$HOME/.local/bin:$PATH"`.
 - **Windows widget build reports `atlbase.h` missing:** modify Visual Studio
   Build Tools and add C++ ATL support for your installed MSVC toolset.
 - **Widget build fails on Windows inside OneDrive:** OneDrive file locks break
@@ -558,7 +600,19 @@ procedures above.
 
 ## Run everything from source
 
-No install step, just the [Flutter SDK](https://docs.flutter.dev/get-started/install):
+From a clone, prefer the one-command setup so the CLI lands on your PATH:
+
+```powershell
+pwsh tools/setup.ps1          # Windows
+```
+
+```bash
+bash tools/setup.sh           # macOS / Linux
+```
+
+That needs the [Flutter SDK](https://docs.flutter.dev/get-started/install) (it
+includes Dart). Desktop OS build tools are required only for the tray app; see
+[Building from source](BUILDING.md). To run without installing:
 
 ```bash
 # CLI (any OS)

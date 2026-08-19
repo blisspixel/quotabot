@@ -210,6 +210,7 @@ void main() {
           gpuMemoryTotalBytes: 12 * gib,
           gpuMemoryAvailableBytes: 8 * gib,
           gpuCount: 1,
+          gpuName: 'AMD Radeon 780M',
         ),
       );
 
@@ -219,7 +220,9 @@ void main() {
       expect(decoded.localHardware?.systemMemoryTotalBytes, 32 * gib);
       expect(decoded.localHardware?.gpuMemoryAvailableBytes, 8 * gib);
       expect(decoded.localHardware?.gpuCount, 1);
+      expect(decoded.localHardware?.gpuName, 'AMD Radeon 780M');
       expect(sanitized.localHardware?.asOf, 999);
+      expect(sanitized.localHardware?.gpuName, 'AMD Radeon 780M');
     });
 
     test('local hardware parsing bounds malformed capacity metadata', () {

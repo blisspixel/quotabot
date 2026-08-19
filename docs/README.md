@@ -4,7 +4,7 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.9.8. The next work is release signing:
+The current verified stable release is 0.9.9. The next work is release signing:
 Authenticode-sign Windows binaries, then Developer ID-sign, notarize, and staple
 the macOS bundle without weakening existing checksums or provenance. The
 [roadmap Next section](../ROADMAP.md#next) owns the exact behavior, guardrails,

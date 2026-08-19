@@ -136,7 +136,7 @@ List<QuotaWindow> codexUsageWindows(Map<String, dynamic>? resp) =>
       ),
     );
   }
-  if (out.isEmpty || !_codexLiveFlagsAreConsistent(raw, out)) {
+  if (out.isEmpty || !_codexLiveFlagsAreConsistent(raw)) {
     return (valid: false, windows: const []);
   }
   return (valid: true, windows: out);
@@ -192,10 +192,7 @@ int? _codexLiveWindowSeconds(dynamic raw) {
   return seconds;
 }
 
-bool _codexLiveFlagsAreConsistent(
-  Map<dynamic, dynamic> raw,
-  List<QuotaWindow> windows,
-) {
+bool _codexLiveFlagsAreConsistent(Map<dynamic, dynamic> raw) {
   bool? allowed;
   bool? limitReached;
   if (raw.containsKey('allowed')) {
@@ -208,21 +205,11 @@ bool _codexLiveFlagsAreConsistent(
     if (value is! bool) return false;
     limitReached = value;
   }
+  // Admission flags say whether ChatGPT will take a new request. They are not
+  // a second encoding of used_percent. Plus currently reports a rounded 100%
+  // weekly window with allowed: true. Fail closed only when both flags are
+  // present and agree with each other.
   if (allowed != null && limitReached != null && allowed == limitReached) {
-    return false;
-  }
-  // Provider status flags describe the provider's hard limit, not quotabot's
-  // earlier routing comfort floor. A valid 99% observation can be unavailable
-  // for new routing while the provider still truthfully reports that its hard
-  // limit has not been reached.
-  final observedLimitReached = windows.any((window) {
-    final percent = window.percent;
-    return percent != null && percent >= 100;
-  });
-  if (allowed != null && allowed == observedLimitReached) {
-    return false;
-  }
-  if (limitReached != null && limitReached != observedLimitReached) {
     return false;
   }
   return true;
@@ -388,7 +375,10 @@ ClaudeLiveUsage? claudeLiveUsage(
   // drop the account's real 5h and weekly windows entirely.
   if (!hasCanonicalLimits && _claudeHasUnknownRootQuotaBlock(data)) return null;
 
-  final legacy = _legacyClaudeUsage(data);
+  final legacy = _legacyClaudeUsage(
+    data,
+    failClosed: !hasCanonicalLimits,
+  );
   if (!legacy.valid) return null;
 
   final windows = _mergeClaudeWindows(canonical.windows, legacy.windows);
@@ -402,6 +392,38 @@ ClaudeLiveUsage? claudeLiveUsage(
       legacy.modelQuotas,
     ),
   );
+}
+
+/// Display-only Claude usage-tab extras from the same `/usage` metadata.
+/// Extra-usage credits and spend are not account windows and never route.
+List<String> claudeUsageDetails(Map<String, dynamic>? data) {
+  if (data == null) return const [];
+  final out = <String>[];
+  final extra = data['extra_usage'];
+  if (extra is Map) {
+    final enabled = extra['is_enabled'] == true;
+    final util = finiteOrNull(extra['utilization']);
+    if (enabled && util != null) {
+      out.add('Extra usage ${_detailPercent(util)}% of credits');
+    } else if (enabled) {
+      out.add('Extra usage is on (credits, not plan windows)');
+    } else if (util != null) {
+      out.add('Extra usage ${_detailPercent(util)}% of credits');
+    }
+  }
+  final spend = data['spend'];
+  if (spend is Map) {
+    final enabled = spend['enabled'] == true;
+    final percent = finiteOrNull(spend['percent']);
+    if (enabled || (percent != null && percent > 0)) {
+      if (percent != null) {
+        out.add('Usage credits ${_detailPercent(percent)}%');
+      } else {
+        out.add('Usage credits are on');
+      }
+    }
+  }
+  return out;
 }
 
 /// Compatibility projection for callers that need only shared windows. Runtime
@@ -723,7 +745,10 @@ double? _strictBoundedPercent(dynamic value) {
   bool valid,
   List<QuotaWindow> windows,
   List<ModelQuota> modelQuotas,
-}) _legacyClaudeUsage(Map<String, dynamic> data) {
+}) _legacyClaudeUsage(
+  Map<String, dynamic> data, {
+  bool failClosed = true,
+}) {
   final out = <QuotaWindow>[];
   for (final spec in const [
     ['five_hour', '5h'],
@@ -732,12 +757,18 @@ double? _strictBoundedPercent(dynamic value) {
     if (!data.containsKey(spec[0])) continue;
     final block = data[spec[0]];
     if (block is! Map) {
-      return (valid: false, windows: const [], modelQuotas: const []);
+      if (failClosed) {
+        return (valid: false, windows: const [], modelQuotas: const []);
+      }
+      continue;
     }
     final util = _strictBoundedPercent(block['utilization']);
     final reset = _legacyClaudeReset(block);
     if (util == null || !reset.valid) {
-      return (valid: false, windows: const [], modelQuotas: const []);
+      if (failClosed) {
+        return (valid: false, windows: const [], modelQuotas: const []);
+      }
+      continue;
     }
     out.add(
       QuotaWindow(
@@ -752,21 +783,27 @@ double? _strictBoundedPercent(dynamic value) {
   if (data.containsKey('seven_day_opus') && data['seven_day_opus'] != null) {
     final block = data['seven_day_opus'];
     if (block is! Map) {
-      return (valid: false, windows: const [], modelQuotas: const []);
+      if (failClosed) {
+        return (valid: false, windows: const [], modelQuotas: const []);
+      }
+    } else {
+      final util = _strictBoundedPercent(block['utilization']);
+      final reset = _legacyClaudeReset(block);
+      if (util == null || !reset.valid) {
+        if (failClosed) {
+          return (valid: false, windows: const [], modelQuotas: const []);
+        }
+      } else {
+        modelQuotas.add(
+          ModelQuota(
+            model: 'Opus',
+            usedPercent: util,
+            resetsAt: reset.value,
+            windowLabel: 'weekly',
+          ),
+        );
+      }
     }
-    final util = _strictBoundedPercent(block['utilization']);
-    final reset = _legacyClaudeReset(block);
-    if (util == null || !reset.valid) {
-      return (valid: false, windows: const [], modelQuotas: const []);
-    }
-    modelQuotas.add(
-      ModelQuota(
-        model: 'Opus',
-        usedPercent: util,
-        resetsAt: reset.value,
-        windowLabel: 'weekly',
-      ),
-    );
   }
 
   return (
@@ -1848,6 +1885,52 @@ QuotaWindow? grokWindow(List<int> message, int now) {
   final anchored = _grokConfigWindow(message, now);
   if (anchored.recognized) return anchored.window;
   return _grokScanWindow(message, now);
+}
+
+/// Per-product percents inside Grok's shared weekly pool (Imagine / Chat /
+/// Build). These are a split of [grokWindow], never extra caps. Empty when the
+/// anchored config is missing or a breakdown row is unusable.
+List<double> grokCategoryPercents(List<int> message) {
+  if (message.isEmpty) return const [];
+  List<int>? config;
+  _forEachProtoField(message, (field, wireType, varint, bytes) {
+    if (field == 1 && wireType == 2) config ??= bytes;
+  });
+  final body = config;
+  if (body == null) return const [];
+  final percents = <double>[];
+  final ok = _forEachProtoField(body, (field, wireType, varint, bytes) {
+    if (field != 7 || wireType != 2) return;
+    double? used;
+    var invalid = false;
+    _forEachProtoField(bytes, (subField, subWire, subVarint, subBytes) {
+      if (subField == 2 && subWire == 5) {
+        final f = _float32(subBytes);
+        if (!f.isFinite || f < 0 || f > 100) {
+          invalid = true;
+        } else {
+          used ??= _percent2(f);
+        }
+      }
+    });
+    final categoryUsed = used;
+    if (!invalid && categoryUsed != null) percents.add(categoryUsed);
+  });
+  if (!ok) return const [];
+  return percents;
+}
+
+/// Display-only Grok usage-tab split. Never becomes a routing window.
+List<String> grokCategoryDetails(List<int> message) {
+  final percents = grokCategoryPercents(message);
+  if (percents.length < 2) return const [];
+  final parts = [for (final p in percents) '${_detailPercent(p)}%'];
+  return ['Category split of this weekly pool: ${parts.join(', ')}'];
+}
+
+String _detailPercent(double p) {
+  if ((p - p.roundToDouble()).abs() < 0.05) return p.round().toString();
+  return p.toStringAsFixed(1);
 }
 
 /// Schema-anchored read of the Grok credits config message.

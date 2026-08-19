@@ -621,6 +621,7 @@ Set<String> detectInstalledAgenticTools({
   String? homePath,
   String? appDataPath,
   String? xdgDataPath,
+  String? localAppDataPath,
   bool Function(String path)? exists,
 }) {
   final detected = <String>{};
@@ -629,7 +630,11 @@ Set<String> detectInstalledAgenticTools({
       appDataPath ?? Platform.environment['APPDATA'] ?? '$h/AppData/Roaming';
   final xdg =
       xdgDataPath ?? Platform.environment['XDG_DATA_HOME'] ?? '$h/.local/share';
-  final pathExists = exists ?? (path) => Directory(path).existsSync();
+  final localAppData = localAppDataPath ??
+      Platform.environment['LOCALAPPDATA'] ??
+      '$h/AppData/Local';
+  final pathExists = exists ??
+      (path) => File(path).existsSync() || Directory(path).existsSync();
 
   // Kiro (CLI + IDE, VSCode fork, credits)
   if (pathExists('$h/.kiro') ||
@@ -659,11 +664,16 @@ Set<String> detectInstalledAgenticTools({
     detected.add('windsurf');
   }
 
-  // Antigravity (Google agentic IDE/CLI)
+  // Antigravity (Google agentic IDE/CLI, including `agy`)
   if (pathExists('$h/.antigravity') ||
+      pathExists('$h/.gemini/antigravity') ||
+      pathExists('$h/.gemini/antigravity-cli') ||
       pathExists('$appData/Antigravity') ||
+      pathExists('$appData/Antigravity IDE') ||
       pathExists('$h/Library/Application Support/Antigravity') ||
-      pathExists('$xdg/antigravity')) {
+      pathExists('$h/Library/Application Support/Antigravity IDE') ||
+      pathExists('$xdg/antigravity') ||
+      pathExists('$localAppData/agy')) {
     detected.add('antigravity');
   }
 

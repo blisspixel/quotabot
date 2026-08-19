@@ -5,20 +5,24 @@
 # runs `quotabot doctor`. Idempotent: safe to re-run after a `git pull`.
 # No quotabot account or telemetry is used. `doctor` reads quota metadata only:
 # no prompts, code, inference requests, or usage-token-spending calls.
+# Missing desktop OS build tools skip the tray app and still install the CLI.
+# If Dart is missing or this checkout cannot compile, setup installs the
+# checksum-verified release CLI instead of failing.
 #
 # An AI agent can run this unattended:  bash tools/setup.sh --cli-only
 #
 # Usage:
-#   bash tools/setup.sh             # CLI + desktop app
+#   bash tools/setup.sh             # CLI + desktop app when tools are present
 #   bash tools/setup.sh --cli-only  # CLI only (no Flutter desktop build)
 
 set -euo pipefail
 
 cli_only=0
+desktop_skipped=0
 for arg in "$@"; do
   case "$arg" in
     --cli-only) cli_only=1 ;;
-    -h | --help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -28,27 +32,30 @@ root="$(cd "$script_dir/.." && pwd)"
 collector="$root/collector"
 app="$root/app"
 install_root="$HOME/.local/share/quotabot"
+install_dir="$HOME/.local/bin"
 
 step() { printf '\033[36m==> %s\033[0m\n' "$1"; }
 ok() { printf '\033[32m    %s\033[0m\n' "$1"; }
 warn() { printf '\033[33m    %s\033[0m\n' "$1"; }
 
-step 'Locating the Dart toolchain'
-if ! command -v dart >/dev/null 2>&1; then
-  echo "Dart/Flutter not found. Install Flutter (https://docs.flutter.dev/get-started/install) and re-run." >&2
-  exit 1
-fi
-ok "$(dart --version 2>&1 | head -n1)"
-
-step 'Building the quotabot CLI'
-(cd "$collector" && \
-  dart pub get --enforce-lockfile >/dev/null && \
-  bash "$script_dir/package-cli.sh")
-
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "$os" in
   darwin*) os=darwin ;;
   linux*) os=linux ;;
+  mingw*|msys*|cygwin*)
+    pwsh_args=()
+    if [ "$cli_only" -eq 1 ]; then
+      pwsh_args+=(-CliOnly)
+    fi
+    if command -v pwsh >/dev/null 2>&1; then
+      exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$script_dir/setup.ps1" "${pwsh_args[@]}"
+    fi
+    if command -v powershell >/dev/null 2>&1; then
+      exec powershell -NoProfile -ExecutionPolicy Bypass -File "$script_dir/setup.ps1" "${pwsh_args[@]}"
+    fi
+    echo "On Windows, run: pwsh tools/setup.ps1" >&2
+    exit 1
+    ;;
   *) echo "Unsupported OS: $os" >&2; exit 1 ;;
 esac
 arch="$(uname -m)"
@@ -57,36 +64,329 @@ case "$arch" in
   arm64 | aarch64) arch=arm64 ;;
   *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
+
+posix_desktop_prereq_reason() {
+  if ! command -v flutter >/dev/null 2>&1; then
+    printf '%s\n' 'flutter was not found on PATH'
+    return 1
+  fi
+  if [ "$os" = darwin ]; then
+    if ! xcode-select -p >/dev/null 2>&1; then
+      printf '%s\n' 'Xcode command-line tools are not selected; run xcode-select --install'
+      return 1
+    fi
+  else
+    missing=()
+    for cmd in clang cmake pkg-config; do
+      command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    done
+    if ! command -v ninja >/dev/null 2>&1 && ! command -v ninja-build >/dev/null 2>&1; then
+      missing+=("ninja")
+    fi
+    if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists gtk+-3.0; then
+      missing+=("gtk+-3.0 (libgtk-3-dev)")
+    fi
+    if [ "${#missing[@]}" -gt 0 ]; then
+      printf '%s\n' "missing Linux desktop build tools: ${missing[*]}"
+      return 1
+    fi
+  fi
+  return 0
+}
+
+build_desktop_app() {
+  (
+    cd "$app" || exit 1
+    flutter pub get --enforce-lockfile || exit 1
+    if [ "$os" = darwin ]; then
+      flutter config --enable-macos-desktop >/dev/null || true
+      flutter build macos --release --no-pub || exit 1
+    else
+      flutter config --enable-linux-desktop >/dev/null || true
+      flutter build linux --release --no-pub || exit 1
+    fi
+  ) || return 1
+  if [ "$os" = darwin ]; then
+    desktop_source="$app/build/macos/Build/Products/Release/quotabot.app"
+    desktop_kind="macos-app"
+    [ -x "$desktop_source/Contents/MacOS/quotabot" ] || return 1
+  else
+    desktop_source="$app/build/linux/$arch/release/bundle"
+    desktop_kind="linux-desktop"
+    [ -x "$desktop_source/quotabot" ] || return 1
+  fi
+  return 0
+}
+
+append_local_bin_to_profile() {
+  local install_dir="$1"
+  local marker="# quotabot PATH"
+  local line="export PATH=\"$install_dir:\$PATH\""
+  local profile=""
+  case "${SHELL##*/}" in
+    zsh)
+      if [[ -f "$HOME/.zprofile" || ! -f "$HOME/.zshrc" ]]; then
+        profile="$HOME/.zprofile"
+      else
+        profile="$HOME/.zshrc"
+      fi
+      ;;
+    bash)
+      if [[ -f "$HOME/.bashrc" ]]; then
+        profile="$HOME/.bashrc"
+      elif [[ -f "$HOME/.bash_profile" ]]; then
+        profile="$HOME/.bash_profile"
+      else
+        profile="$HOME/.bashrc"
+      fi
+      ;;
+    fish)
+      mkdir -p "$HOME/.config/fish"
+      profile="$HOME/.config/fish/config.fish"
+      line="fish_add_path $install_dir"
+      ;;
+    *)
+      profile="$HOME/.profile"
+      ;;
+  esac
+  if grep -Fqs "$marker" "$profile" 2>/dev/null; then
+    ok "PATH entry already present in $profile"
+    return 0
+  fi
+  {
+    printf '\n%s\n' "$marker"
+    printf '%s\n' "$line"
+  } >> "$profile"
+  ok "Added $install_dir to PATH in $profile (open a new terminal)"
+}
+
+install_dart_run_shim() {
+  mkdir -p "$install_dir"
+  cat > "$install_dir/quotabot" <<EOF
+#!/usr/bin/env bash
+cd "$collector" || exit 1
+exec dart run bin/collect.dart "\$@"
+EOF
+  chmod +x "$install_dir/quotabot"
+}
+
+show_first_run() {
+  local python_bin
+  python_bin="$(command -v python3 || command -v python || true)"
+  [ -n "$python_bin" ] || return 0
+  "$install_dir/quotabot" --json 2>/dev/null | "$python_bin" - <<'PY'
+import json, sys
+try:
+    snapshot = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+ready, login, other = [], [], []
+for provider in snapshot.get("providers") or []:
+    name = provider.get("display_name") or provider.get("provider") or "provider"
+    error = provider.get("error") or ""
+    key = provider.get("provider") or ""
+    if provider.get("ok"):
+        ready.append(str(name))
+        continue
+    if "invalid" in error.lower() and "usage" in error.lower():
+        ready.append(f"{name} (signed in)")
+        continue
+    if "quotabot login " in error:
+        login.append(error.split("quotabot login ", 1)[1].split()[0])
+    elif key in {"claude", "codex", "grok", "antigravity"} and any(
+        token in error.lower()
+        for token in ("token", "login", "auth", "credential", "signed out", "unauthorized")
+    ):
+        login.append(key)
+    elif error:
+        other.append(f"{name} - {error}")
+print("")
+print("First run")
+if ready:
+    print("  Already live (no extra login): " + ", ".join(ready))
+unique = []
+for item in login:
+    if item not in unique:
+        unique.append(item)
+if unique:
+    print("  Login only if a row is missing or stale on this machine:")
+    for item in unique:
+        print(f"    quotabot login {item}")
+else:
+    print("  No extra login required. Host apps already signed in on this machine are enough.")
+for line in other:
+    print("  " + line)
+PY
+}
+
+install_portable_desktop() {
+  local repo version asset url work zip sum expected actual dest
+  repo="${QUOTABOT_REPO:-blisspixel/quotabot}"
+  version="${QUOTABOT_VERSION:-latest}"
+  case "$os" in
+    darwin)
+      [ "$arch" = arm64 ] || return 1
+      asset="quotabot-darwin-arm64-desktop.zip"
+      dest="$HOME/Applications/quotabot.app"
+      ;;
+    linux)
+      asset="quotabot-linux-${arch}-desktop.tar.gz"
+      dest="$HOME/.local/share/quotabot-desktop"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+  if [ "$os" = darwin ] && [ -x "$dest/Contents/MacOS/quotabot" ]; then
+    printf '%s\n' "$dest"
+    return 0
+  fi
+  if [ "$os" = linux ] && [ -x "$dest/quotabot" ]; then
+    printf '%s\n' "$dest/quotabot"
+    return 0
+  fi
+  if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    return 1
+  fi
+  if [[ "$version" != "latest" && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    return 1
+  fi
+  if [ "$version" = latest ]; then
+    url="https://github.com/${repo}/releases/latest/download/${asset}"
+  else
+    url="https://github.com/${repo}/releases/download/${version}/${asset}"
+  fi
+  work="$(mktemp -d)"
+  zip="$work/$asset"
+  sum="$work/$asset.sha256"
+  step 'Installing the portable desktop app'
+  if ! curl -fsSL "$url" -o "$zip" || ! curl -fsSL "${url}.sha256" -o "$sum"; then
+    rm -rf "$work"
+    return 1
+  fi
+  expected="$(awk '{print tolower($1)}' "$sum")"
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$zip" | awk '{print tolower($1)}')"
+  else
+    actual="$(shasum -a 256 "$zip" | awk '{print tolower($1)}')"
+  fi
+  if [ "$expected" != "$actual" ]; then
+    rm -rf "$work"
+    return 1
+  fi
+  if [ "$os" = darwin ]; then
+    mkdir -p "$HOME/Applications"
+    tmp="$(mktemp -d)"
+    ditto -x -k "$zip" "$tmp"
+    rm -rf "$dest"
+    ditto "$tmp/quotabot.app" "$dest"
+    rm -rf "$tmp" "$work"
+    printf '%s\n' "$dest"
+    return 0
+  fi
+  mkdir -p "$dest"
+  tar -xzf "$zip" -C "$dest"
+  rm -rf "$work"
+  printf '%s\n' "$dest/quotabot"
+}
+
+open_quotabot_after_setup() {
+  local launched=0
+  if [ "$desktop_skipped" -eq 1 ] || [ "$cli_only" -eq 1 ]; then
+    install_portable_desktop >/dev/null || true
+  fi
+  if [ "$os" = darwin ] && [ -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot" ]; then
+    step 'Opening quotabot'
+    open "$HOME/Applications/quotabot.app"
+    ok 'Opened the desktop app'
+    launched=1
+  elif [ "$os" = linux ] && [ -x "$HOME/.local/share/quotabot-desktop/quotabot" ]; then
+    step 'Opening quotabot'
+    nohup "$HOME/.local/share/quotabot-desktop/quotabot" >/dev/null 2>&1 &
+    ok 'Opened the desktop app'
+    launched=1
+  fi
+  if [ "$launched" -eq 0 ]; then
+    step 'Opening quotabot top'
+    if command -v x-terminal-emulator >/dev/null 2>&1; then
+      x-terminal-emulator -e "$install_dir/quotabot" top >/dev/null 2>&1 &
+    elif command -v osascript >/dev/null 2>&1; then
+      osascript -e "tell application \"Terminal\" to do script \"$install_dir/quotabot top\"" >/dev/null 2>&1 || true
+    fi
+    ok 'Opened quotabot top when a terminal launcher was available'
+  fi
+}
+
+step 'Locating the Dart toolchain'
+if command -v dart >/dev/null 2>&1; then
+  ok "$(dart --version 2>&1 | head -n1)"
+else
+  warn 'Dart/Flutter not found. Using the checksum-verified release CLI instead of compiling this checkout.'
+fi
+
+if [ "$cli_only" -eq 0 ]; then
+  step 'Checking desktop build tools'
+  if desktop_reason="$(posix_desktop_prereq_reason)"; then
+    ok 'Desktop build tools found'
+  else
+    desktop_skipped=1
+    cli_only=1
+    warn "Desktop skipped: $desktop_reason. Installing the CLI only. Re-run bash tools/setup.sh after the desktop toolchain is ready to add the tray app."
+  fi
+fi
+
+source_cli=0
+used_release=0
+used_shim=0
 asset="$root/release/quotabot-${os}-${arch}.tar.gz"
-[ -f "$asset" ] || { echo "CLI build did not produce $asset" >&2; exit 1; }
+
+if command -v dart >/dev/null 2>&1; then
+  step 'Building the quotabot CLI'
+  if (cd "$collector" && \
+      dart pub get --enforce-lockfile >/dev/null && \
+      bash "$script_dir/package-cli.sh") && [ -f "$asset" ]; then
+    source_cli=1
+  else
+    warn 'Source CLI build failed. Falling back to the release CLI.'
+  fi
+fi
+
+if [ "$source_cli" -eq 0 ]; then
+  desktop_skipped=1
+  cli_only=1
+  step 'Installing the checksum-verified release CLI'
+  if bash "$root/install.sh"; then
+    used_release=1
+    ok 'Installed the release CLI'
+  elif command -v dart >/dev/null 2>&1; then
+    warn 'Release CLI download failed. Installing a dart-run shim from this checkout.'
+    install_dart_run_shim
+    used_shim=1
+    ok 'Installed dart-run shim'
+  else
+    echo "Could not compile this checkout and could not download the release CLI." >&2
+    exit 1
+  fi
+fi
 
 desktop_source=""
 desktop_kind=""
 if [ "$cli_only" -eq 0 ]; then
   step 'Building the desktop app (this takes a few minutes)'
-  (cd "$app" && flutter pub get --enforce-lockfile)
-  if [ "$os" = darwin ]; then
-    (cd "$app" && flutter build macos --release --no-pub)
-    desktop_source="$app/build/macos/Build/Products/Release/quotabot.app"
-    desktop_kind="macos-app"
-    [ -x "$desktop_source/Contents/MacOS/quotabot" ] || {
-      echo "Desktop build did not produce $desktop_source" >&2
-      exit 1
-    }
+  if build_desktop_app; then
+    ok 'Built the desktop app'
   else
-    (cd "$app" && flutter build linux --release --no-pub)
-    desktop_source="$app/build/linux/$arch/release/bundle"
-    desktop_kind="linux-desktop"
-    [ -x "$desktop_source/quotabot" ] || {
-      echo "Desktop build did not produce $desktop_source/quotabot" >&2
-      exit 1
-    }
+    desktop_skipped=1
+    cli_only=1
+    desktop_source=""
+    desktop_kind=""
+    warn 'Desktop build failed. Installing the CLI only. Re-run bash tools/setup.sh after the desktop toolchain is repaired.'
   fi
-  ok 'Built the desktop app'
 fi
 
-install_dir="$HOME/.local/bin"
-step "Installing the CLI to $install_root"
+if [ "$source_cli" -eq 1 ]; then
+  step "Installing the CLI to $install_root"
+fi
 mkdir -p "$install_dir"
 tmpdir="$(mktemp -d)"
 pair_in_progress=0
@@ -620,6 +920,7 @@ install_versioned_pair() {
 # END POSIX INSTALL TRANSACTION FUNCTIONS
 trap cleanup_setup EXIT
 
+if [ "$source_cli" -eq 1 ]; then
 tar -xzf "$asset" -C "$tmpdir"
 [ -x "$tmpdir/bin/quotabot" ] || { echo "CLI archive did not contain executable bin/quotabot" >&2; exit 1; }
 [ -d "$tmpdir/lib" ] || { echo "CLI archive did not contain lib/" >&2; exit 1; }
@@ -654,9 +955,13 @@ chmod +x "$wrapper_tmp"
 mv -f "$wrapper_tmp" "$install_dir/quotabot"
 wrapper_tmp=""
 ok 'Installed quotabot'
+fi
 case ":$PATH:" in
   *":$install_dir:"*) ok 'Install dir already on PATH' ;;
-  *) warn "Add $install_dir to your PATH (e.g. in ~/.bashrc or ~/.zshrc): export PATH=\"$install_dir:\$PATH\"" ;;
+  *)
+    export PATH="$install_dir:$PATH"
+    append_local_bin_to_profile "$install_dir"
+    ;;
 esac
 
 if [ "$cli_only" -eq 0 ]; then
@@ -674,8 +979,23 @@ fi
 step 'Verifying with quotabot doctor'
 "$install_dir/quotabot" doctor || warn 'doctor reported an issue (expected if no provider tools have run yet).'
 
+show_first_run
+open_quotabot_after_setup
+
 echo
 printf '\033[32mquotabot is set up.\033[0m\n'
 echo "  CLI:   quotabot --help"
-[ "$cli_only" -eq 0 ] && echo "  App:   launch quotabot from your applications menu"
+if [ "$used_release" -eq 1 ]; then
+  echo "  Note:  release CLI (this checkout did not compile)"
+elif [ "$used_shim" -eq 1 ]; then
+  echo "  Note:  dart-run shim from this checkout"
+fi
+if [ -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot" ] || \
+   [ -x "$HOME/.local/share/quotabot-desktop/quotabot" ]; then
+  echo "  App:   opened"
+elif [ "$cli_only" -eq 0 ]; then
+  echo "  App:   launch quotabot from your applications menu"
+elif [ "$desktop_skipped" -eq 1 ]; then
+  echo "  App:   CLI dashboard is available as quotabot top"
+fi
 echo "  Route: quotabot suggest   (which subscription to use next)"

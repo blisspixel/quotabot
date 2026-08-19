@@ -7,7 +7,9 @@
   Desktop shortcut, then runs `quotabot doctor`. Idempotent: safe to
   re-run after a `git pull`. No quotabot account or telemetry is used.
   `doctor` reads quota metadata only: no prompts, code, inference requests, or
-  usage-token-spending calls.
+  usage-token-spending calls. Missing desktop OS build tools skip the tray app
+  and still install the CLI. If Dart is missing or this checkout cannot compile,
+  setup installs the checksum-verified release CLI instead of failing.
 
   An AI agent can run this unattended:  pwsh tools/setup.ps1 -Yes
 
@@ -18,7 +20,7 @@
   Build and install the CLI; skip building the desktop app, but nothing else.
 
 .PARAMETER Yes
-  Non-interactive: assume yes to prompts (for agents and CI).
+  Accepted for unattended agent and CI invocations. Setup does not prompt.
 
 .EXAMPLE
   pwsh tools/setup.ps1
@@ -366,9 +368,21 @@ $installRoot = Join-Path $env:LOCALAPPDATA 'quotabot'
 $installDir = Join-Path $installRoot 'bin'
 $exe = Join-Path $installDir 'quotabot.exe'
 $doctorVerifiedBeforeDesktopRestart = $false
+$desktopSkipped = $false
 . (Join-Path $scriptDir 'windows-build-prereqs.ps1')
 . (Join-Path $scriptDir 'windows-architecture.ps1')
 $windowsArch = Get-QuotabotWindowsArchitecture
+
+if (-not $CliOnly -and -not $NoApp) {
+  Write-Step 'Checking Windows desktop build tools'
+  if (Test-WindowsDesktopAtlAvailable) {
+    Write-Ok 'Visual Studio C++ ATL headers found'
+  } else {
+    $NoApp = $true
+    $desktopSkipped = $true
+    Write-Warn2 'Desktop skipped: Visual Studio C++ ATL headers (atlbase.h) were not found. Installing the CLI only. In Visual Studio Installer, add C++ ATL support for your MSVC toolset, then re-run pwsh tools/setup.ps1 to add the tray app.'
+  }
+}
 
 # Resolve the Flutter/Dart bin directory from PATH, falling back to common
 # user-owned install locations. The fallbacks are deliberately limited to
@@ -385,7 +399,7 @@ function Resolve-DartBin {
       "$env:LOCALAPPDATA\flutter\bin", "$env:USERPROFILE\flutter\bin")) {
     if (Test-Path (Join-Path $c 'dart.bat')) { return $c }
   }
-  throw "Dart/Flutter not found on PATH. Install Flutter (https://docs.flutter.dev/get-started/install), or add its bin directory to PATH, and re-run."
+  return $null
 }
 
 function Resolve-BuiltAppExe {
@@ -435,6 +449,161 @@ function Restart-QuotabotDesktopAfterSetup {
   return $restartExe
 }
 
+function Install-QuotabotDartRunShim {
+  param(
+    [Parameter(Mandatory)][string]$DartBin,
+    [Parameter(Mandatory)][string]$CollectorDir,
+    [Parameter(Mandatory)][string]$InstallDir
+  )
+
+  $dart = Join-Path $DartBin 'dart.bat'
+  if (-not (Test-Path -LiteralPath $dart -PathType Leaf)) {
+    $dart = Join-Path $DartBin 'dart.exe'
+  }
+  if (-not (Test-Path -LiteralPath $dart -PathType Leaf)) {
+    throw "Dart toolchain is missing dart.bat / dart.exe under $DartBin"
+  }
+  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+  $shim = @"
+@echo off
+cd /d "$CollectorDir"
+"$dart" run bin\collect.dart %*
+"@
+  Set-Content -LiteralPath (Join-Path $InstallDir 'quotabot.cmd') -Value $shim -Encoding ASCII
+  Copy-Item -LiteralPath (Join-Path $InstallDir 'quotabot.cmd') -Destination (Join-Path $InstallDir 'quotabot.bat') -Force
+}
+
+function Show-QuotabotFirstRun {
+  param([Parameter(Mandatory)][string]$Executable)
+
+  $raw = & $Executable --json 2>$null
+  if (-not $raw) { return }
+  try {
+    $snapshot = $raw | ConvertFrom-Json
+  } catch {
+    return
+  }
+  if (-not $snapshot.providers) { return }
+
+  $ready = New-Object System.Collections.Generic.List[string]
+  $login = New-Object System.Collections.Generic.List[string]
+  $other = New-Object System.Collections.Generic.List[string]
+  foreach ($provider in @($snapshot.providers)) {
+    $name = if ($provider.display_name) { [string]$provider.display_name } else { [string]$provider.provider }
+    $error = [string]$provider.error
+    if ($provider.ok) {
+      $ready.Add($name) | Out-Null
+      continue
+    }
+    if ($error -match 'invalid' -and $error -match 'usage') {
+      $ready.Add("$name (signed in)") | Out-Null
+      continue
+    }
+    if ($error -match 'quotabot login (\w+)') {
+      $login.Add($Matches[1]) | Out-Null
+      continue
+    }
+    if (
+      (@('claude', 'codex', 'grok', 'antigravity') -contains [string]$provider.provider) -and
+      ($error -match 'token|login|auth|credential|signed out|unauthorized')
+    ) {
+      $login.Add([string]$provider.provider) | Out-Null
+      continue
+    }
+    if ($error) {
+      $other.Add("$name - $error") | Out-Null
+    }
+  }
+
+  Write-Host ''
+  Write-Host 'First run' -ForegroundColor Cyan
+  if ($ready.Count -gt 0) {
+    Write-Host "  Already live (no extra login): $($ready -join ', ')"
+  }
+  $uniqueLogin = @($login | Select-Object -Unique)
+  if ($uniqueLogin.Count -gt 0) {
+    Write-Host '  Login only if a row is missing or stale on this machine:'
+    foreach ($provider in $uniqueLogin) {
+      Write-Host "    quotabot login $provider"
+    }
+  } else {
+    Write-Host '  No extra login required. Host apps already signed in on this machine are enough.'
+  }
+  foreach ($line in $other) {
+    Write-Host "  $line"
+  }
+}
+
+function Install-QuotabotPortableDesktop {
+  if ($windowsArch -ne 'x64') { return $null }
+  $installed = Join-Path $installRoot 'desktop\quotabot.exe'
+  if (Test-Path -LiteralPath $installed -PathType Leaf) { return $installed }
+
+  $repo = if ($env:QUOTABOT_REPO) { $env:QUOTABOT_REPO } else { 'blisspixel/quotabot' }
+  $version = if ($env:QUOTABOT_VERSION) { $env:QUOTABOT_VERSION } else { 'latest' }
+  if ($repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return $null }
+  if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { return $null }
+
+  $asset = 'quotabot-windows-x64-desktop.zip'
+  $url = if ($version -eq 'latest') {
+    "https://github.com/$repo/releases/latest/download/$asset"
+  } else {
+    "https://github.com/$repo/releases/download/$version/$asset"
+  }
+  $work = Join-Path ([IO.Path]::GetTempPath()) "quotabot-desktop-$([guid]::NewGuid())"
+  try {
+    New-Item -ItemType Directory -Force -Path $work | Out-Null
+    $zip = Join-Path $work $asset
+    $sum = Join-Path $work "$asset.sha256"
+    Write-Step 'Installing the portable desktop app'
+    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+    Invoke-WebRequest -Uri "$url.sha256" -OutFile $sum -UseBasicParsing
+    $expected = ((Get-Content -LiteralPath $sum -Raw) -split '\s+')[0].ToLowerInvariant()
+    if ($expected -notmatch '^[0-9a-f]{64}$') { throw "Invalid checksum file for $asset" }
+    $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) { throw "Checksum mismatch for $asset" }
+    $destination = Join-Path $installRoot 'desktop'
+    if (Test-Path -LiteralPath $destination) {
+      Remove-Item -LiteralPath $destination -Recurse -Force
+    }
+    Expand-Archive -LiteralPath $zip -DestinationPath $destination
+    if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) {
+      throw 'Portable desktop archive did not contain quotabot.exe'
+    }
+    & (Join-Path $scriptDir 'create-shortcut.ps1') -ExePath $installed
+    Write-Ok "Installed the desktop app to $destination"
+    return $installed
+  } catch {
+    Write-Warn2 "Portable desktop install skipped: $($_.Exception.Message)"
+    return $null
+  } finally {
+    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Start-QuotabotAfterSetup {
+  param([Parameter(Mandatory)][string]$CliExecutable)
+
+  $appExe = Join-Path $installRoot 'desktop\quotabot.exe'
+  if (-not (Test-Path -LiteralPath $appExe -PathType Leaf) -and ($desktopSkipped -or $NoApp -or $CliOnly)) {
+    $appExe = Install-QuotabotPortableDesktop
+  }
+  if ($appExe -and (Test-Path -LiteralPath $appExe -PathType Leaf)) {
+    Write-Step 'Opening quotabot'
+    Start-Process -FilePath $appExe -WorkingDirectory (Split-Path -Parent $appExe) | Out-Null
+    Write-Ok 'Opened the desktop app'
+    return
+  }
+  Write-Step 'Opening quotabot top'
+  $target = $CliExecutable
+  Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+    '-NoExit',
+    '-Command',
+    "& '$target' top"
+  ) | Out-Null
+  Write-Ok 'Opened quotabot top in a new window'
+}
+
 function Invoke-QuotabotDoctor {
   param([Parameter(Mandatory)][string]$Executable)
 
@@ -450,25 +619,65 @@ function Invoke-QuotabotDoctor {
   }
 }
 
+$sourceCli = $false
+$usedRelease = $false
+$usedShim = $false
+
 Write-Step 'Locating the Dart toolchain'
 $dartBin = Resolve-DartBin
-$env:Path = "$dartBin;$dartBin\cache\dart-sdk\bin;$env:Path"
-$dartVer = (& dart --version 2>&1 | Select-Object -First 1)
-Write-Ok $dartVer
-
-Write-Step 'Building the quotabot CLI'
-Push-Location $collector
-try {
-  & dart pub get --enforce-lockfile | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "dart pub get failed with exit code $LASTEXITCODE" }
-  & (Join-Path $scriptDir 'package-cli.ps1')
-} finally { Pop-Location }
-
-$asset = Get-QuotabotWindowsReleaseArchive -RepositoryRoot $root -Architecture $windowsArch
-if (-not (Test-Path -LiteralPath $asset)) {
-  throw "CLI build did not produce $(Split-Path -Leaf $asset) in release/"
+if ($dartBin) {
+  $env:Path = "$dartBin;$dartBin\cache\dart-sdk\bin;$env:Path"
+  $dartVer = (& dart --version 2>&1 | Select-Object -First 1)
+  Write-Ok $dartVer
+} else {
+  Write-Warn2 'Dart/Flutter not found. Using the checksum-verified release CLI instead of compiling this checkout.'
 }
 
+if ($dartBin) {
+  Write-Step 'Building the quotabot CLI'
+  try {
+    Push-Location $collector
+    try {
+      & dart pub get --enforce-lockfile | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "dart pub get failed with exit code $LASTEXITCODE" }
+      & (Join-Path $scriptDir 'package-cli.ps1')
+    } finally { Pop-Location }
+    $asset = Get-QuotabotWindowsReleaseArchive -RepositoryRoot $root -Architecture $windowsArch
+    if (-not (Test-Path -LiteralPath $asset)) {
+      throw "CLI build did not produce $(Split-Path -Leaf $asset) in release/"
+    }
+    $sourceCli = $true
+  } catch {
+    Write-Warn2 "Source CLI build failed: $($_.Exception.Message). Falling back to the release CLI."
+  }
+}
+
+if (-not $sourceCli) {
+  if (-not $CliOnly) { $desktopSkipped = $true }
+  $NoApp = $true
+  Write-Step 'Installing the checksum-verified release CLI'
+  try {
+    & (Join-Path $root 'install.ps1')
+    if ($LASTEXITCODE -ne 0) {
+      throw "Release installer exited with code $LASTEXITCODE"
+    }
+    $usedRelease = $true
+    Write-Ok 'Installed the release CLI'
+  } catch {
+    $releaseError = $_.Exception.Message
+    if (-not $dartBin) {
+      throw "Could not compile this checkout and could not download the release CLI. $releaseError"
+    }
+    Write-Warn2 "Release CLI download failed: $releaseError. Installing a dart-run shim from this checkout."
+    Install-QuotabotDartRunShim -DartBin $dartBin -CollectorDir $collector -InstallDir $installDir
+    $usedShim = $true
+    $exe = Join-Path $installDir 'quotabot.cmd'
+    Write-Ok 'Installed dart-run shim'
+  }
+}
+
+$extractPath = $null
+if ($sourceCli) {
 Write-Step "Preparing the CLI for $installRoot"
 New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
 $extractPath = Join-Path ([IO.Path]::GetTempPath()) "quotabot-setup-$([guid]::NewGuid())"
@@ -516,6 +725,7 @@ try {
       if ($windowsBuildPrereqs) {
         Write-Ok "Visual Studio ATL ready: $($windowsBuildPrereqs.VisualStudioPath)"
       }
+      & flutter config --enable-windows-desktop | Out-Null
       Push-Location $app
       try {
         & flutter pub get --enforce-lockfile
@@ -562,7 +772,13 @@ try {
       $doctorVerifiedBeforeDesktopRestart = $true
     } catch {
       $desktopFailure = $_
-      throw
+      if ($desktopActivated) { throw }
+      Write-Warn2 "Desktop skipped: $($_.Exception.Message). Installing the CLI only."
+      $desktopSkipped = $true
+      $NoApp = $true
+      Write-Step "Installing the CLI to $installRoot"
+      Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
+      $desktopFailure = $null
     } finally {
       if ($restartRequested) {
         try {
@@ -578,6 +794,8 @@ try {
             }
           } elseif ($desktopFailure) {
             Write-Warning 'Setup failed after stopping the desktop app, but no runnable prior or installed executable remains.'
+          } elseif ($desktopSkipped) {
+            Write-Warning 'Desktop was skipped after stopping a running app, but no executable remained to restart.'
           } else {
             throw 'Desktop setup stopped a running app but could not find an executable to restart.'
           }
@@ -592,17 +810,28 @@ try {
     }
   }
 } finally {
-  Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
-  $legacyPath = Join-Path $installDir $legacy
-  if (Test-Path $legacyPath) {
-    Remove-Item -LiteralPath $legacyPath -Force
-    Write-Ok "Removed legacy shim $legacy"
+  if ($extractPath) {
+    Remove-Item -LiteralPath $extractPath -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
-Write-Ok 'Installed quotabot.exe'
+}
+
+if (-not $usedShim) {
+  foreach ($legacy in @('quotabot.ps1', 'quotabot.cmd', 'quotabot.bat')) {
+    $legacyPath = Join-Path $installDir $legacy
+    if (Test-Path $legacyPath) {
+      Remove-Item -LiteralPath $legacyPath -Force
+      Write-Ok "Removed legacy shim $legacy"
+    }
+  }
+}
+if ($usedShim) {
+  Write-Ok 'Installed dart-run shim'
+} elseif ($usedRelease) {
+  Write-Ok 'Installed release CLI'
+} else {
+  Write-Ok 'Installed quotabot.exe'
+}
 
 # Add the install dir to the user PATH if it is not already there. Compare exact
 # entries, not a -like substring: a wildcard metacharacter in the path (for
@@ -621,10 +850,22 @@ if (-not $doctorVerifiedBeforeDesktopRestart) {
   Invoke-QuotabotDoctor -Executable $exe
 }
 
+Show-QuotabotFirstRun -Executable $exe
+Start-QuotabotAfterSetup -CliExecutable $exe
+
 Write-Host ''
 Write-Host 'quotabot is set up.' -ForegroundColor Green
 Write-Host '  CLI:   quotabot --help        (new terminal, or run from ' -NoNewline; Write-Host $exe -NoNewline; Write-Host ')'
-if (-not $CliOnly -and -not $NoApp) {
+if ($usedRelease) {
+  Write-Host '  Note:  release CLI (this checkout did not compile)'
+} elseif ($usedShim) {
+  Write-Host '  Note:  dart-run shim from this checkout'
+}
+if (Test-Path -LiteralPath (Join-Path $installRoot 'desktop\quotabot.exe') -PathType Leaf) {
+  Write-Host '  App:   opened; also on your Desktop shortcut and in the system tray'
+} elseif (-not $CliOnly -and -not $NoApp) {
   Write-Host '  App:   launch from the Desktop shortcut, or it lives in your system tray'
+} elseif ($desktopSkipped) {
+  Write-Host '  App:   CLI dashboard is open; add Visual Studio C++ ATL later for a source-built tray app'
 }
 Write-Host '  Route: quotabot suggest        (which subscription to use next)'

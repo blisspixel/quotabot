@@ -9,7 +9,7 @@ quotabot shows how much included quota remains across AI coding subscriptions
 and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
-> **Current stable:** 0.9.8. quotabot remains under active 0.x development.
+> **Current stable:** 0.9.9. quotabot remains under active 0.x development.
 > **Next:** sign Windows release binaries and Developer ID-sign, notarize, and
 > staple the macOS bundle. See the [roadmap criteria](ROADMAP.md#next).
 

@@ -260,6 +260,56 @@ void main() {
     expect(q.single.error, 'Antigravity not installed');
   });
 
+  test('agy CLI discovery is not doubled by a matching Connect grant',
+      () async {
+    final q = await AntigravityAdapter(
+      activeAccountSource: () => null,
+      dbPathSource: () => const [],
+      hasGeminiCreds: () => true,
+      storedGrantAccounts: () => ['agy@example.com'],
+      tokenResolver: (_, allowDefault) async =>
+          allowDefault ? 'cli-or-grant' : null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(email: 'agy@example.com'),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.2),
+    ).collectAccounts();
+
+    expect(q, hasLength(1));
+    expect(q.single.account, 'agy@example.com');
+  });
+
+  test('stored Connect grants are discovered without IDE or agy files',
+      () async {
+    final q = await AntigravityAdapter(
+      activeAccountSource: () => null,
+      dbPathSource: () => const [],
+      hasGeminiCreds: () => false,
+      storedGrantAccounts: () => ['agy@example.com'],
+      tokenResolver: (account, _) async =>
+          account == 'agy@example.com' ? 'grant-token' : null,
+      emailResolver: (_, __, ___) async => null,
+      loadCodeAssist: (_) async => load(email: 'agy@example.com'),
+      onboardUser: (_, __) async => 'project',
+      fetchModels: (_, __) async => models(0.2),
+    ).collectAccounts();
+
+    expect(q.single.account, 'agy@example.com');
+    expect(q.single.windows, isNotEmpty);
+    expect(q.single.error, isNull);
+  });
+
+  test('installed agy without a signed-in account asks to sign in', () async {
+    final q = await AntigravityAdapter(
+      activeAccountSource: () => null,
+      dbPathSource: () => const [],
+      hasGeminiCreds: () => false,
+      looksInstalled: () => true,
+    ).collectAccounts();
+
+    expect(q.single.error, AntigravityAdapter.installedUnsignedInError);
+  });
+
   test('stored Antigravity grants are resolved by account and default scope',
       () async {
     TokenStore.clear(GoogleAuth.provider);

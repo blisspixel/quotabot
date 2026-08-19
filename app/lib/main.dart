@@ -28,6 +28,7 @@ import 'package:window_manager/window_manager.dart';
 import 'chrome_controls.dart';
 import 'demo.dart';
 import 'desktop_readiness.dart';
+import 'first_run.dart';
 import 'fleet.dart';
 import 'headroom_colors.dart';
 import 'logos.dart';
@@ -662,9 +663,6 @@ class _DashboardState extends State<Dashboard>
     // relative order from the sort above. Local has no quota to rank against.
     return [...list.where((q) => !q.isLocal), ...list.where((q) => q.isLocal)];
   }
-
-  bool get _showFirstRunPrompt =>
-      !_setupDone && !(widget._demoModeOverride ?? _demoMode);
 
   List<String> get _activeProfileLegacyCredentialFilterProviders {
     final providers = <String>{};
@@ -1407,6 +1405,7 @@ class _DashboardState extends State<Dashboard>
               : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
           _insights = loadedInsights;
         });
+        _maybeStartFirstRun();
       } else {
         _profiles = profiles;
         _activeProfile = _profileByName(selectedProfile);
@@ -1487,6 +1486,9 @@ class _DashboardState extends State<Dashboard>
         _compact = false;
         _hidden = {};
         _sort = ProviderSort.defaultOrder;
+        _expanded
+          ..clear()
+          ..addAll(demo.map(quotaDisplayKey));
       }
       _showAccounts = true; // show demo account labels in screenshots
       _data = demo;
@@ -1648,9 +1650,7 @@ class _DashboardState extends State<Dashboard>
         // Estimates tuned to the real rendered heights so the frameless window
         // hugs the content (no translucent dead space below it). The body
         // scrolls, so a small undershoot is caught rather than clipped.
-        var h = _showFirstRunPrompt
-            ? 112.0
-            : 62.0; // header row, onboarding, and outer paddings
+        var h = 62.0; // header row and outer paddings
         if (_displayed.isEmpty) {
           h +=
               _activeProfileLegacyCredentialFilterProviders.isNotEmpty ||
@@ -1679,7 +1679,9 @@ class _DashboardState extends State<Dashboard>
               (q.stale || !isTrustedQuotaEvidenceAt(q, now))) {
             card += 28;
           }
-          if (q.isLocal) card += q.details.length * 14; // detail lines
+          if (q.isLocal || isExpanded) {
+            card += q.details.length * 14; // detail lines
+          }
           if (isExpanded && (_history[key] ?? const []).isNotEmpty) {
             card += 20; // "usually ~X% free" line
           }
@@ -1996,7 +1998,6 @@ class _DashboardState extends State<Dashboard>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _header(),
-        if (_showFirstRunPrompt) _firstRunPrompt(),
         const SizedBox(height: 2),
         if (groups.isEmpty)
           _emptyProfileState()
@@ -2088,64 +2089,44 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  Widget _firstRunPrompt() {
-    final chrome = AppChromeTheme.of(context);
-    return Semantics(
-      container: true,
-      label:
-          'Start here. Review provider connections and quota evidence before '
-          'using recommendations.',
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
-        padding: const EdgeInsets.fromLTRB(10, 6, 2, 6),
-        decoration: BoxDecoration(
-          color: chrome.tileBorder.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: chrome.border),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.fact_check_outlined, size: 16, color: chrome.muted),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                'Start here: review provider connections',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: AppType.caption,
-                  fontWeight: FontWeight.w600,
-                  color: chrome.foreground,
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () => unawaited(_reviewFirstRunSetup()),
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 7),
-                minimumSize: const Size(0, 30),
-              ),
-              child: const Text('Review'),
-            ),
-            IconButton(
-              tooltip: 'Dismiss getting started',
-              onPressed: _finishFirstRunSetup,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-              icon: Icon(Icons.close_rounded, size: 15, color: chrome.muted),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _maybeStartFirstRun() {
+    if (_setupDone || _firstRunReviewOpen || _loading) return;
+    if (widget._demoModeOverride ?? _demoMode) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_reviewFirstRunSetup());
+    });
   }
 
   Future<void> _reviewFirstRunSetup() async {
-    if (_setupDone || _firstRunReviewOpen) return;
+    if (_setupDone || _firstRunReviewOpen || !mounted) return;
     _firstRunReviewOpen = true;
     try {
-      await _showSetup();
-      if (mounted && !_setupDone) _finishFirstRunSetup();
+      final result = await showFirstRunWizard(
+        context: context,
+        entries: () => firstRunEntries(
+          _setupData.isEmpty ? _data : _setupData,
+          DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          canConnect: widget._hostIntegration ? _canConnectProvider : null,
+        ),
+        onConnect: widget._hostIntegration
+            ? (id) => _connectAndValidate(id)
+            : null,
+      );
+      if (!mounted) return;
+      if (result == null || result.skipped) {
+        _finishFirstRunSetup();
+        return;
+      }
+      setState(() {
+        _hidden = {
+          ..._hidden.where((id) => !firstRunProviderIds.contains(id)),
+          ...firstRunHiddenProviders(result.selected),
+        };
+        _setupDone = true;
+      });
+      _saveActiveProfileUiState();
+      _applySize();
+      unawaited(_persistPrefs());
     } finally {
       _firstRunReviewOpen = false;
     }
@@ -4486,6 +4467,24 @@ class ProviderTile extends StatelessWidget {
                     ),
                   ),
                 ),
+              if (showDetail &&
+                  !quota.isLocal &&
+                  quota.hasWindows &&
+                  quota.details.isNotEmpty)
+                for (final detail in quota.details)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppType.caption,
+                        fontWeight: FontWeight.w500,
+                        color: muted,
+                      ),
+                    ),
+                  ),
               if (showDetail && scopedModelQuotas.isNotEmpty) ...[
                 _scopedQuotaHeading(quota, muted),
                 ...scopedModelQuotas.map((modelQuota) {
