@@ -328,13 +328,18 @@ class _FirstRunWizardState extends State<FirstRunWizard> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(
-                      context,
-                    ).pop(const FirstRunResult.skipped()),
-                    child: const Text('Skip for now'),
+                  Flexible(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).pop(const FirstRunResult.skipped()),
+                      child: const Text(
+                        'Skip for now',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
-                  const Spacer(),
                   FilledButton(
                     onPressed: _step == 0
                         ? _continueFromFound
@@ -373,14 +378,19 @@ class _FoundRow extends StatelessWidget {
           Expanded(
             child: Text(
               entry.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: AppType.subtitle,
                 color: chrome.foreground,
               ),
             ),
           ),
+          const SizedBox(width: 8),
           Text(
             entry.statusLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: AppType.caption,
               color: live ? const Color(0xFF3FB950) : chrome.muted,
