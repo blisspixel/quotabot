@@ -464,7 +464,7 @@ jobs:
           - os: ubuntu-latest
             archive: quotabot-linux-x64-desktop.tar.gz
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     permissions:
       # GitHub exposes draft releases only to push-capable identities. This job
       # performs reads only, but contents: write is required to see the draft.
@@ -477,11 +477,6 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
-      - name: Install Linux desktop runtime prerequisites
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev dbus-x11 xvfb
       - name: Download the draft desktop asset and checksum
         shell: bash
         env:
@@ -581,6 +576,27 @@ jobs:
             --source-ref "refs/tags/$previous_tag" \
             --source-digest "$previous_digest" \
             --deny-self-hosted-runners
+      - name: Install Linux desktop runtime prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          # Hosted Ubuntu can stall on azure.archive.ubuntu.com. Bound each
+          # apt call so a mirror hang fails this step instead of cancelling
+          # the whole job after timeout-minutes.
+          export DEBIAN_FRONTEND=noninteractive
+          attempt=1
+          while [ "$attempt" -le 3 ]; do
+            if timeout 90s sudo apt-get -o Acquire::Retries=2 update; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo 'apt-get update failed after three bounded attempts.' >&2
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+          timeout 180s sudo apt-get install -y \
+            libgtk-3-dev libayatana-appindicator3-dev dbus-x11 xvfb
       - name: Exercise the Windows portable lifecycle
         if: runner.os == 'Windows'
         shell: pwsh
