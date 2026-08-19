@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -109,10 +110,27 @@ void main() {
     await capture.close();
     await cancelled;
 
-    final rebound = await HttpServer.bind(
-      InternetAddress.loopbackIPv4,
-      capture.port,
+    HttpServer? rebound;
+    Object? lastError;
+    for (final delayMs in const [0, 10, 25, 50, 100, 200, 400]) {
+      if (delayMs > 0) {
+        await Future<void>.delayed(Duration(milliseconds: delayMs));
+      }
+      try {
+        rebound = await HttpServer.bind(
+          InternetAddress.loopbackIPv4,
+          capture.port,
+        );
+        break;
+      } on SocketException catch (error) {
+        lastError = error;
+      }
+    }
+    expect(
+      rebound,
+      isNotNull,
+      reason: 'loopback port ${capture.port} stayed in use: $lastError',
     );
-    await rebound.close(force: true);
+    await rebound!.close(force: true);
   });
 }
