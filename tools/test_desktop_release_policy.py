@@ -339,10 +339,27 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         download_at = verify_job.index("Accept: application/octet-stream")
         checksum_at = verify_job.index("verify_desktop_archive.py")
         attestation_at = verify_job.index("gh attestation verify")
+        apt_at = verify_job.index("Install Linux desktop runtime prerequisites")
         readiness_at = verify_job.index("desktop_readiness_smoke.py")
         self.assertLess(download_at, checksum_at)
         self.assertLess(checksum_at, attestation_at)
-        self.assertLess(attestation_at, readiness_at)
+        self.assertLess(attestation_at, apt_at)
+        self.assertLess(apt_at, readiness_at)
+        header = verify_job.split("steps:", 1)[0]
+        self.assertIn("timeout-minutes: 45", header)
+        self.assertIn("tools/install-linux-desktop-prereqs.sh", verify_job)
+        helper = (ROOT / "tools" / "install-linux-desktop-prereqs.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("timeout 90s sudo apt-get", helper)
+        self.assertIn("timeout 180s sudo apt-get install", helper)
+        self.assertIn("three bounded attempts", helper)
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("tools/install-linux-desktop-prereqs.sh", ci)
+        desktop_build = workflow.split("  build-desktop:\n", 1)[1].split(
+            "  verify-desktop-release:\n", 1
+        )[0]
+        self.assertIn("tools/install-linux-desktop-prereqs.sh", desktop_build)
         self.assertIn("if: runner.os == 'macOS'", verify_job)
         self.assertIn("plutil -lint", verify_job)
         self.assertIn("contents: write", verify_job)

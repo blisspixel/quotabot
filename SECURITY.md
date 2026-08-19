@@ -32,10 +32,12 @@ reads and writes helps scope any report:
   GitHub release immutability locks an audited release's tag and assets when the
   draft is published.
   The current audited release is [v0.9.9](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9).
-  The last completed native 14-asset lock and three-OS install smoke were on
-  [v0.9.8](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8)
-  ([release audit 30692524913](https://github.com/blisspixel/quotabot/actions/runs/30692524913),
-  [install smoke 30693794794](https://github.com/blisspixel/quotabot/actions/runs/30693794794)).
+  Its exact 14-asset set is locked
+  ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121))
+  and passed the three-OS
+  [install smoke 32299292058](https://github.com/blisspixel/quotabot/actions/runs/32299292058)
+  including upgrade from
+  [v0.9.8](https://github.com/blisspixel/quotabot/releases/tag/v0.9.8).
   Immutability is prospective from July 18, 2026; v0.9.2 and earlier releases
   were not changed retroactively.
 - Any OAuth grant you create with `quotabot login` is stored separately from the

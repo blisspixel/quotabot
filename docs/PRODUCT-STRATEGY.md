@@ -101,7 +101,7 @@ truer because the deeper layer exists, not harder to read.
 
 The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
-barrier. v0.9.8 completed the exact release and three-OS install path; the
+barrier. v0.9.9 completed the exact release and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
 proved. That evidence is not a substitute for rerunning the path on the exact
 1.0 candidate. The remaining acquisition work is operating-system signing and
@@ -134,7 +134,7 @@ turns into paid API spend.
 - The desktop and terminal surfaces are visually mature for a 0.x utility.
 - The core is deterministic and heavily tested, with dedicated verification,
   schema, security, drift, and release gates.
-- v0.9.8 completed the exact release and three-OS published-installer rehearsal,
+- v0.9.9 completed the exact release and three-OS published-installer rehearsal,
   so release mechanics now have current evidence rather than only a future plan.
 - The advisor-not-proxy and zero-inference boundaries are meaningful product
   differences, not only marketing language.
