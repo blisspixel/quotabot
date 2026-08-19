@@ -116,6 +116,27 @@ Pages speculative:                        50000.
       expect(parseNvidiaSmiMemory('bad\n100,200'), isNull);
     });
 
+    test('parses NVIDIA GPU names from the three-column query', () {
+      final sample = parseNvidiaSmiMemory(
+        'NVIDIA GeForce RTX 4090, 24576, 18000\n',
+      );
+      expect(sample?.name, 'NVIDIA GeForce RTX 4090');
+      expect(sample?.totalBytes, 24576 * 1024 * 1024);
+      expect(sample?.availableBytes, 18000 * 1024 * 1024);
+    });
+
+    test('parses Windows Win32_VideoController name and AdapterRAM', () {
+      final sample = parseWindowsGpuInfo(
+        'Microsoft Basic Display Adapter\t4294967295\n'
+        'AMD Radeon(TM) 780M\t2147483648\n',
+      );
+      expect(sample?.name, 'AMD Radeon 780M');
+      expect(sample?.totalBytes, 2147483648);
+      expect(sample?.availableBytes, isNull);
+      expect(sample?.count, 1);
+      expect(parseWindowsGpuInfo('Basic Display Adapter\t0'), isNull);
+    });
+
     test('rejects zero, negative, and implausibly large values', () {
       expect(parseWindowsMemoryInfo('0,0'), isNull);
       expect(parseWindowsMemoryInfo('-1,0'), isNull);

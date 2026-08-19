@@ -21,12 +21,27 @@ pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
 bash tools/setup.sh           # macOS / Linux; add --cli-only for just the CLI
 ```
 
+The CLI does not need the desktop OS toolchain. If those tools are missing, or
+the desktop build fails, setup still installs the CLI, skips the tray app, and
+prints the repair step. If Dart is missing or `dart build cli` fails, setup
+downloads the checksum-verified release CLI instead of exiting. If that
+download also fails and Dart is present, it installs a `dart run` shim from
+this checkout. Re-run the same command after adding the tools to
+install the desktop app. On Windows that is Visual Studio C++ ATL; on macOS,
+Xcode command-line tools; on Linux, clang, cmake, ninja, pkg-config, and GTK 3.
+Setup also enables the matching Flutter desktop target before building.
+`dart build cli` native-asset hooks fail when the Dart SDK path contains spaces
+(a typical `C:\Users\First Last\...` or `/Users/First Last/...` profile);
+setup and the CLI packagers hardlink or copy the Dart SDK into a space-free
+directory for that compile. Junctions, subst drives, and 8.3 short names are
+not enough, because Dart reports the long path.
+
 The CLI command is exposed through your per-user bin
 (`%LOCALAPPDATA%\quotabot\bin` on Windows, `~/.local/bin` on macOS and Linux).
 On macOS and Linux, that command shim launches the stable complete payload at
 `~/.local/share/quotabot`. Windows setup adds its bin directory to the user
-PATH. On macOS and Linux, setup reports the exact shell-profile change when
-`~/.local/bin` is not already on PATH. Windows creates a Desktop
+PATH. On macOS and Linux, setup adds `~/.local/bin` to the user's shell profile
+when it is not already on PATH. Windows creates a Desktop
 shortcut to `%LOCALAPPDATA%\quotabot\desktop`, Linux installs the app under
 `~/.local/share/quotabot-desktop` with an application-menu entry, and macOS
 installs `~/Applications/quotabot.app`. These launchers remain valid if the

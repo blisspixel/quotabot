@@ -38,8 +38,9 @@ List<ProviderQuota> demoProviders(int now) {
     String name,
     String account,
     String plan,
-    List<QuotaWindow> windows,
-  ) {
+    List<QuotaWindow> windows, {
+    List<String> details = const [],
+  }) {
     final sourceClass = inferProviderSourceClass(
       provider: id,
       source: null,
@@ -53,6 +54,7 @@ List<ProviderQuota> demoProviders(int now) {
       plan: plan,
       asOf: now,
       windows: windows,
+      details: details,
       sourceClass: sourceClass,
       perMachine: sourceClass.isMachineScoped,
     );
@@ -100,6 +102,8 @@ List<ProviderQuota> demoProviders(int now) {
     ]),
     sub('grok', 'Grok', 'you@example.com', 'supergrok', [
       w('weekly', 57, 540000), // 43% free, resets ~6d6h
+    ], details: const [
+      'Category split of this weekly pool: 31%, 19%, 7%',
     ]),
     sub('cursor', 'Cursor', 'default', 'pro', [
       w('monthly', 38, 745200), // 62% free, resets ~8d15h
@@ -125,6 +129,17 @@ List<ProviderQuota> demoProviders(int now) {
         m('qwen2.5-coder:7b',
             param: '7B', quant: 'Q4_K_M', vram: 4 * gb, ctx: 32768),
       ],
+    ).withLocalHardware(
+      LocalHardwareInfo(
+        asOf: now,
+        systemMemoryTotalBytes: 64 * gb,
+        systemMemoryAvailableBytes: 48 * gb,
+        gpuMemoryTotalBytes: 12 * gb,
+        gpuCount: 1,
+        gpuName: 'GeForce RTX 4070',
+      ),
+      detail:
+          '48.0 GB of 64.0 GB RAM available . GeForce RTX 4070 . 12.0 GB GPU',
     ),
     localRuntimeQuota(
       id: 'lmstudio',

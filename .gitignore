@@ -13,6 +13,9 @@ coverage/
 **/coverage/
 **/coverage_*/
 
+# Temporary space-free Dart SDK mirrors used by Windows source builds
+.setup-cache/
+
 # Dev artifacts, logs, atomic-write temp files
 tools/shot*.png
 tools/icon_preview.png

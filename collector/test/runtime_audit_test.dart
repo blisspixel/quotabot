@@ -130,6 +130,13 @@ void main() {
           r['spends_tokens'] == false),
       isTrue,
     );
+    expect(
+      shared.any((r) =>
+          r['kind'] == 'process' &&
+          (r['target'] as String).contains('Win32_VideoController') &&
+          r['data_class'] == 'hardware_metadata'),
+      isTrue,
+    );
     final grok = providers.firstWhere((p) => p['provider'] == 'grok');
     final grokReads = (grok['reads'] as List).cast<Map<String, dynamic>>();
     expect(
@@ -141,6 +148,14 @@ void main() {
     );
     final antigravity =
         providers.firstWhere((p) => p['provider'] == 'antigravity');
+    final antigravityReads =
+        (antigravity['reads'] as List).cast<Map<String, dynamic>>();
+    expect(
+      antigravityReads.any((r) =>
+          (r['target'] as String).contains('os-keyring://gemini/antigravity') &&
+          r['credential_material'] == true),
+      isTrue,
+    );
     final antigravityNetwork =
         (antigravity['network'] as List).cast<Map<String, dynamic>>();
     expect(

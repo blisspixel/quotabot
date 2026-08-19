@@ -107,6 +107,9 @@ Provider snapshots keep these stable fields:
   have no spendable quota. Status-only cloud providers can also have an empty
   list when quotabot can verify availability but has no measured quota window;
   those providers may carry `status` and `details` instead of budget fields.
+  Subscriptions may also carry `details` for display-only extras from the same
+  usage metadata (a category split inside a shared pool, extra-usage credits).
+  Those lines are not windows and are not used for routing.
 
 Window objects keep:
 
@@ -333,8 +336,9 @@ when known, `estimated_memory_bytes`, `fit_available_bytes`, `fit_total_bytes`,
 and `hardware_observed_at`. Fit is a metadata-only ranking signal, not an
 availability gate or performance claim. A local provider snapshot can carry the
 underlying `local_hardware` object with `as_of`, system-memory total/available
-bytes, largest-single-GPU total/available bytes, and `gpu_count`. Separate GPU
-pools are not summed. Capacity evidence is absent on subscription providers.
+bytes, largest-single-GPU total/available bytes, `gpu_count`, and optional
+`gpu_name`. Separate GPU pools are not summed. On Windows, an AMD or Intel GPU
+is named from `Win32_VideoController` when `nvidia-smi` is not installed. Capacity evidence is absent on subscription providers.
 `budget_policy` is `any`, `quota`, or `local`. A local-runtime model that the
 runtime executes in a cloud rather than on-device carries
 `cloud_offloaded: true`. Current evidence is an Ollama `-cloud` tag or a

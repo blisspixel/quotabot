@@ -104,6 +104,97 @@ class InstallerSecurityTests(unittest.TestCase):
             source.index("if ! activate_pair_item 0"),
         )
 
+    def test_source_setup_falls_back_to_release_cli(self) -> None:
+        windows = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
+
+        self.assertIn("Falling back to the release CLI.", windows)
+        self.assertIn("Join-Path $root 'install.ps1'", windows)
+        self.assertIn("function Install-QuotabotDartRunShim", windows)
+        self.assertIn("return $null", windows)
+        self.assertNotIn(
+            "Dart/Flutter not found on PATH. Install Flutter",
+            windows,
+        )
+        self.assertIn("Falling back to the release CLI.", posix)
+        self.assertIn('bash "$root/install.sh"', posix)
+        self.assertIn("install_dart_run_shim()", posix)
+        self.assertNotIn(
+            "Dart/Flutter not found. Install Flutter",
+            posix,
+        )
+        self.assertIn("exec pwsh -NoProfile -ExecutionPolicy Bypass -File", posix)
+
+    def test_source_setup_opens_quotabot_and_explains_auth(self) -> None:
+        windows = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
+
+        self.assertIn("function Show-QuotabotFirstRun", windows)
+        self.assertIn("function Start-QuotabotAfterSetup", windows)
+        self.assertIn("function Install-QuotabotPortableDesktop", windows)
+        self.assertIn("quotabot-windows-x64-desktop.zip", windows)
+        self.assertIn("Already live (no extra login)", windows)
+        self.assertIn("Start-QuotabotAfterSetup -CliExecutable $exe", windows)
+        self.assertIn("show_first_run", posix)
+        self.assertIn("open_quotabot_after_setup", posix)
+        self.assertIn("install_portable_desktop", posix)
+        self.assertIn("Already live (no extra login)", posix)
+
+    def test_posix_source_setup_installs_cli_when_desktop_is_unavailable(
+        self,
+    ) -> None:
+        script = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
+
+        self.assertIn("posix_desktop_prereq_reason()", script)
+        self.assertIn("build_desktop_app()", script)
+        self.assertIn("desktop_skipped=1", script)
+        self.assertIn("cli_only=1", script)
+        self.assertIn("Installing the CLI only", script)
+        self.assertIn("flutter config --enable-macos-desktop", script)
+        self.assertIn("flutter config --enable-linux-desktop", script)
+        self.assertLess(
+            script.index("posix_desktop_prereq_reason"),
+            script.index("Building the quotabot CLI"),
+        )
+        self.assertLess(
+            script.index("if build_desktop_app; then"),
+            script.index("step 'Activating the CLI and desktop app'"),
+        )
+        self.assertIn(
+            "Re-run bash tools/setup.sh after the desktop toolchain is ready to add the tray app.",
+            script,
+        )
+        self.assertIn(
+            "Re-run bash tools/setup.sh after the desktop toolchain is repaired.",
+            script,
+        )
+        self.assertIn("On Windows, run: pwsh tools/setup.ps1", script)
+
+    def test_posix_cli_packager_maps_spaced_dart_paths(self) -> None:
+        script = (ROOT / "tools" / "package-cli.sh").read_text(encoding="utf-8")
+        helper = (ROOT / "tools" / "posix-space-safe-dart.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("posix-space-safe-dart.sh", script)
+        self.assertIn("quotabot_enable_space_safe_dart", script)
+        self.assertIn("quotabot_restore_space_safe_dart", script)
+        self.assertLess(
+            script.index("quotabot_enable_space_safe_dart"),
+            script.index("dart build cli --target=bin/collect.dart"),
+        )
+        self.assertIn("quotabot_mirror_dart_sdk()", helper)
+        self.assertIn("cp -a --link", helper)
+        self.assertIn("cp -al", helper)
+
+    def test_posix_installers_persist_local_bin_on_path(self) -> None:
+        for path in (ROOT / "install.sh", ROOT / "tools" / "setup.sh"):
+            script = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.name):
+                self.assertIn("# quotabot PATH", script)
+                self.assertIn("fish_add_path", script)
+                self.assertIn('export PATH="$', script)
+
     def test_posix_source_setup_builds_desktop_before_cli_activation(self) -> None:
         script = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
 
@@ -427,6 +518,75 @@ class InstallerSecurityTests(unittest.TestCase):
             smoke,
         )
 
+    def test_windows_cli_packager_maps_spaced_dart_paths(self) -> None:
+        script = (ROOT / "tools" / "package-cli.ps1").read_text(encoding="utf-8")
+        helper = (ROOT / "tools" / "windows-space-safe-dart.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("windows-space-safe-dart.ps1", script)
+        self.assertIn("Enable-QuotabotSpaceSafeDart", script)
+        self.assertIn("Disable-QuotabotSpaceSafeDart -State $spaceSafe", script)
+        self.assertIn("& $dart build cli --target=bin\\collect.dart", script)
+        self.assertLess(
+            script.index("Enable-QuotabotSpaceSafeDart"),
+            script.index("& $dart build cli --target=bin\\collect.dart"),
+        )
+        self.assertIn("is not recognized", helper)
+        self.assertIn("Copy-QuotabotDirectoryAsHardLinks", helper)
+        self.assertIn("New-Item -ItemType HardLink", helper)
+        self.assertIn("Platform.resolvedExecutable", helper)
+
+    def test_windows_source_setup_installs_cli_when_desktop_atl_is_missing(
+        self,
+    ) -> None:
+        script = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+        prereqs = (ROOT / "tools" / "windows-build-prereqs.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("function Test-WindowsDesktopAtlAvailable", prereqs)
+        self.assertIn("function Get-WindowsAtlHeaderForInstall", prereqs)
+        self.assertIn("Test-WindowsDesktopAtlAvailable", script)
+        self.assertIn("$desktopSkipped = $true", script)
+        self.assertIn("$NoApp = $true", script)
+        self.assertIn("Desktop skipped: Visual Studio C++ ATL headers", script)
+        self.assertLess(
+            script.index("Test-WindowsDesktopAtlAvailable"),
+            script.index("Building the quotabot CLI"),
+        )
+        self.assertLess(
+            script.index("Test-WindowsDesktopAtlAvailable"),
+            script.index("& flutter build windows --release --no-pub"),
+        )
+        self.assertIn(
+            "add Visual Studio C++ ATL later for a source-built tray app",
+            script,
+        )
+        self.assertIn("flutter config --enable-windows-desktop", script)
+        self.assertIn(
+            "Desktop skipped: $($_.Exception.Message). Installing the CLI only.",
+            script,
+        )
+        self.assertIn("if ($desktopActivated) { throw }", script)
+
+    def test_setup_docs_name_the_source_setup_scripts(self) -> None:
+        setup = (ROOT / "docs" / "SETUP.md").read_text(encoding="utf-8")
+        building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+        self.assertIn("pwsh tools/setup.ps1", setup)
+        self.assertIn("bash tools/setup.sh", setup)
+        self.assertIn("C++ ATL", setup)
+        self.assertIn("spaces", setup.lower())
+        self.assertIn("still installs the CLI", building)
+        self.assertIn("checksum-verified release CLI", setup)
+        self.assertIn("desktop os build tools", setup.lower())
+        self.assertIn("pwsh tools/setup.ps1", agents)
+        self.assertIn("desktop OS build tools", agents)
+        self.assertIn("macOS", agents)
+        self.assertIn("Linux", agents)
+
     def test_windows_source_setup_installs_a_stable_desktop_bundle(self) -> None:
         script = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
         building = (ROOT / "docs" / "BUILDING.md").read_text(encoding="utf-8")
@@ -441,6 +601,30 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertNotIn("-ExePath $builtAppExe", script)
         self.assertIn(r"%LOCALAPPDATA%\quotabot\desktop", building)
         self.assertIn("quotabot\\desktop\\quotabot.exe", smoke)
+
+    @unittest.skipUnless(os.name == "nt", "PowerShell helper test is Windows-only")
+    def test_windows_space_safe_dart_helper_behavior(self) -> None:
+        completed = subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(ROOT / "tools" / "test-windows-space-safe-dart.ps1"),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
 
     @unittest.skipUnless(os.name == "nt", "PowerShell transaction test is Windows-only")
     def test_windows_install_transaction_behavior(self) -> None:
@@ -495,7 +679,7 @@ class InstallerSecurityTests(unittest.TestCase):
             completed.stdout + completed.stderr,
         )
 
-    def test_posix_install_transaction_behavior(self) -> None:
+    def test_posix_space_safe_dart_helper_behavior(self) -> None:
         bash = shutil.which("bash")
         if os.name == "nt":
             program_files = Path(os.environ.get("ProgramFiles", "C:/Program Files"))
@@ -503,11 +687,33 @@ class InstallerSecurityTests(unittest.TestCase):
             if candidate.is_file():
                 bash = str(candidate)
         if bash is None:
+            self.skipTest("bash is required for the POSIX Dart helper test")
+
+        completed = subprocess.run(
+            [bash, str(ROOT / "tools" / "test-posix-space-safe-dart.sh")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
+    def test_posix_install_transaction_behavior(self) -> None:
+        bash = shutil.which("bash")
+        if os.name == "nt":
+            self.skipTest(
+                "POSIX install transaction harness needs GNU mv -T; "
+                "Linux CI covers the activation rollback"
+            )
+        if bash is None:
             self.skipTest("bash is required for the POSIX installer test")
 
         environment = os.environ.copy()
-        if os.name == "nt":
-            environment["MSYS"] = "winsymlinks:nativestrict"
         completed = subprocess.run(
             [bash, str(ROOT / "tools" / "test-posix-install-transaction.sh")],
             cwd=ROOT,

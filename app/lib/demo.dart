@@ -14,6 +14,7 @@ ProviderQuota _p(
   List<QuotaWindow> windows, {
   bool stale = false,
   String? note,
+  List<String> details = const [],
 }) {
   final sourceClass = inferProviderSourceClass(
     provider: id,
@@ -30,6 +31,7 @@ ProviderQuota _p(
     stale: stale,
     error: note,
     windows: windows,
+    details: details,
     sourceClass: sourceClass,
     perMachine: sourceClass.isMachineScoped,
   );
@@ -83,16 +85,25 @@ List<ProviderQuota> demoData() => [
     _w('5h', 9, 9600),
     _w('weekly', 21, 469800),
   ]),
-  _p('grok', 'Grok', 'SuperGrok', 'you@example.com', [
-    _w('weekly', 57, 540000),
-  ]),
+  _p(
+    'grok',
+    'Grok',
+    'SuperGrok',
+    'you@example.com',
+    [_w('weekly', 57, 540000)],
+    details: const ['Category split of this weekly pool: 31%, 19%, 7%'],
+  ),
   _p('cursor', 'Cursor', 'Pro', 'you@example.com', [_w('monthly', 38, 745200)]),
   _local(
     'ollama',
     'Ollama',
     '3 models',
     'qwen2.5-coder 7B Q4 loaded',
-    const ['4.4 GB VRAM . 32K ctx', '3 installed . 18.6 GB on disk'],
+    const [
+      '4.4 GB VRAM . 32K ctx',
+      '3 installed . 18.6 GB on disk',
+      '48.0 GB of 64.0 GB RAM available . GeForce RTX 4070 . 12.0 GB GPU',
+    ],
     active: true,
     models: const [
       ModelInfo(

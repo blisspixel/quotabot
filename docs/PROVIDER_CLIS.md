@@ -30,6 +30,8 @@ and verification rules are in [DATA_SOURCES.md](DATA_SOURCES.md#source-classes).
   prompt-execution surface, not a stable quota API, and `/quota` is not a
   documented built-in command. quotabot calls the account-wide usage metadata
   endpoint directly so collection remains content-blind and uses zero inference.
+  Extra-usage credits on that same response can appear as display-only card
+  detail; they are not plan windows.
 - Quota shape: a rolling 5-hour window plus a weekly cap, shared across Claude
   Code, Claude.ai, and related products.
 - The live response may also include a model-scoped weekly cap. Beginning July
@@ -96,9 +98,10 @@ account id enters quota output.
   Claude and GPT models), depending on plan (free, AI Pro, Ultra).
 - quotabot reads: the Cloud Code API (`loadCodeAssist`, `onboardUser`,
   `fetchAvailableModels`). It can reuse refresh material from a signed-in
-  Antigravity IDE; `quotabot login antigravity` is optional when a discovered
-  account needs a separate refreshable grant or should be pinned. The IDE must
-  have run on this machine so its account remains discoverable. No manual Google
+  Antigravity IDE or from `agy` (OS keyring target `gemini:antigravity`);
+  `quotabot login antigravity` is optional when a discovered account needs a
+  separate refreshable grant or should be pinned. A signed-in `agy` CLI is
+  enough even when the IDE's VS Code `state.vscdb` is absent. No manual Google
   Cloud project setup is required because the provider-required onboarding
   request is performed automatically. The live read is preferred; local
   Antigravity state is used for account discovery and offline fallback, where
@@ -109,7 +112,11 @@ account id enters quota output.
 - Official docs: https://docs.x.ai and the console at https://console.x.ai .
   Open-source coding CLI: https://github.com/superagent-ai/grok-cli
 - Check usage yourself: `/usage` in the Grok TUI tracks token and credit use.
-  Headless mode is `grok -p "..."`; ACP mode is `grok agent stdio`.
+  Do not automate this as `grok usage` or `grok -p /usage`: a positional
+  argument is an initial prompt and spends usage tokens. Headless mode is
+  `grok -p "..."`; ACP mode is `grok agent stdio`. quotabot reads the billing
+  metadata endpoint instead, including the Imagine / Chat / Build split as
+  display-only detail.
 - Quota shape: paid-plan usage is a shared weekly usage pool. The Usage tab's
   Imagine, Chat, and Build percentages are category breakdowns inside that
   shared pool (SuperGrok / Premium+ raise the limits).

@@ -591,6 +591,7 @@ void main() {
           prefs: const Prefs(
             enableNotifications: false,
             webhookUrl: 'http://127.0.0.1:9000/quota',
+            setupDone: true,
           ),
           demoMode: false,
           collector: () async => [
@@ -749,7 +750,7 @@ void main() {
           MaterialApp(
             theme: theme,
             home: Dashboard.test(
-              prefs: const Prefs(enableNotifications: false),
+              prefs: const Prefs(enableNotifications: false, setupDone: true),
               demoMode: false,
               collector: () async => [legacy],
             ),
@@ -812,7 +813,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(enableNotifications: false),
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
           demoMode: false,
           collector: () async {
             collections++;
@@ -974,7 +975,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(enableNotifications: false, setupDone: false),
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
           demoMode: false,
           collector: () async => [invalid],
           providerConnector: (_) async {},
@@ -1022,7 +1023,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(enableNotifications: false),
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
           demoMode: false,
           collector: () {
             collections++;
@@ -1548,7 +1549,11 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(activeProfile: 'work', enableNotifications: false),
+          prefs: const Prefs(
+            activeProfile: 'work',
+            enableNotifications: false,
+            setupDone: true,
+          ),
           testProfiles: [QuotaProfile.defaultProfile(), work],
           profileDeleter: (_) {
             deleteAttempts++;
@@ -1828,7 +1833,11 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(enableNotifications: false, showAccounts: false),
+          prefs: const Prefs(
+            enableNotifications: false,
+            showAccounts: false,
+            setupDone: true,
+          ),
           demoMode: false,
           collector: () async => _multiAccountClaude(now),
           testProfiles: [QuotaProfile.defaultProfile()],
@@ -1864,7 +1873,11 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(enableNotifications: false, showAccounts: true),
+          prefs: const Prefs(
+            enableNotifications: false,
+            showAccounts: true,
+            setupDone: true,
+          ),
           demoMode: false,
           collector: () async => _multiAccountClaude(now),
           testProfiles: [QuotaProfile.defaultProfile()],
@@ -1898,7 +1911,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         Dashboard.test(
-          prefs: const Prefs(enableNotifications: false),
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
           demoMode: false,
           collector: () => failure.future,
         ),
@@ -2029,27 +2042,22 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
+    await tester.pump();
 
-    expect(
-      find.text('Start here: review provider connections'),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Review'));
+    expect(find.text('What we found'), findsOneWidget);
+    expect(find.text('live'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Providers'), findsOneWidget);
-    expect(
-      find.text('Start here: review provider connections'),
-      findsOneWidget,
-    );
+    expect(find.text('What do you use?'), findsOneWidget);
     expect(saved, isNull);
 
-    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.tap(find.text('Continue'));
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(find.text('What we found'), findsNothing);
     expect(saved?.setupDone, isTrue);
 
     await tester.pumpWidget(const SizedBox());
@@ -2074,12 +2082,13 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
+    await tester.pump();
 
-    await tester.tap(find.byTooltip('Dismiss getting started'));
+    await tester.tap(find.text('Skip for now'));
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Start here: review provider connections'), findsNothing);
+    expect(find.text('What we found'), findsNothing);
     expect(saved?.setupDone, isTrue);
 
     await tester.pumpWidget(const SizedBox());
