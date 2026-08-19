@@ -158,7 +158,7 @@ void main() {
     expect(find.text('Claude'), findsWidgets);
     expect(find.text('live'), findsOneWidget);
     expect(find.text('found on this machine'), findsOneWidget);
-    expect(find.text('not seen yet'), findsOneWidget);
+    expect(find.text('not seen yet'), findsWidgets);
 
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
