@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-19. This file is the forward plan. It records brief shipped
+Updated 2026-08-20. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -87,17 +87,82 @@ by being correct, quiet, and predictable, not by being large.
 
 ## Next
 
+**Run 0.10.x as a focused stabilization train, then finish signed release
+readiness.** Feature breadth is frozen. The audit after 0.9.9 found basic defects
+in a provider login, credential cleanup, OAuth response validation, routing
+explanations, cache scanning, and Windows source tooling. It also found stale
+optional dependency locks and incomplete release-signing assumptions. Those are
+trust defects, even where the impact is a confusing answer or rough setup rather
+than lost data.
+
+0.10.x is not a holding area for new features. It is the deliberate bridge from
+a broad 0.x product to a boring 1.0:
+
+1. Fix [the Claude authorization regression](https://github.com/blisspixel/quotabot/issues/77)
+   first and keep it open until the reporter completes a live authorize POST,
+   token exchange, and quota read with the patch.
+2. Land the confirmed auth-storage, malformed-token, routing-fallback, cache,
+   dependency, and Windows source-path fixes as small reviewed changes with
+   regressions.
+3. Continue adversarial bug hunts across provider lifecycles, stale and corrupt
+   state, multi-account isolation, every transport, packaging, update, rollback,
+   and first-run diagnostics. Record only reproducible findings.
+4. Complete Windows and macOS signing below, then run a signed 0.10.x rehearsal
+   through clean install, update, rollback, and immutable publication.
+5. Use later 0.10.x patches only for field-discovered regressions, release
+   rehearsal corrections, and quality-of-life refinement. Reopen product breadth
+   only after the exit criteria pass.
+
+Release progression is explicit: 0.10.0 carries the confirmed corrective
+inventory and the live-validated Claude recovery. Do not delay those fixes on
+external certificate procurement. If both platform identities are ready, sign
+0.10.0; otherwise retain the existing unsigned disclosure and make the earliest
+following 0.10.x patch the signed rehearsal. Later patches contain only field
+regressions, rehearsal corrections, and small recovery or diagnostic polish.
+The train does not exit until a signed rehearsal satisfies every criterion
+below.
+
+**0.10.x exit criteria**
+
+- No open reproducible correctness or credential-lifecycle defect. Every fixed
+  bug has a regression at the lowest deterministic layer and, when applicable,
+  a serialized CLI, MCP, HTTP, or desktop assertion.
+- The three-OS required CI matrix is green from a clean main worktree. Coverage,
+  static analysis, workflow policy, CodeQL, dependency review, and secret
+  scanning pass, with no unresolved actionable dependency advisory in a shipped
+  or documented optional lock.
+- Real interactive login smoke covers each supported grant flow that automated
+  tests cannot complete. A provider consent page alone is never accepted as
+  evidence of a successful authorization.
+- Windows and macOS artifacts satisfy the signed-release completion criteria
+  below after fresh download of the exact draft assets.
+- README, setup, building, distribution, and troubleshooting guidance describe
+  current behavior and actionable recovery without asking users to weaken a
+  platform protection.
+
+**Why this progression:** quotabot is an evidence and routing tool. A
+contradictory fallback, silently partial cache, incomplete logout, or broken
+login directly weakens the product's trust claim. Correctness and recovery must
+be quiet and predictable before signing freezes the artifacts used for final
+native evidence.
+
+### Signed release readiness
+
 **Provision release signing and make signed-artifact verification a fail-closed
-release gate.** The quota-stretch policy shipped in 0.9.6, so the largest
-remaining acquisition gap is now the unsigned Windows and macOS distribution
-path. Final clean-install, accessibility, and provider evidence should be
-collected against the signed artifacts users will actually receive.
+release gate.** The largest remaining acquisition gap is the unsigned Windows
+and macOS distribution path. Final clean-install, accessibility, and provider
+evidence should be collected against the signed artifacts users will actually
+receive.
 
 **Behavior**
 
 - Inventory, Authenticode-sign, and RFC 3161 timestamp every shipped PE module,
   including EXE and DLL files, with SHA-256 for both the PE digest and timestamp
   message imprint, then verify every signature before packaging and publication.
+- Use an owner-selected hardware-backed Windows signing service. Prefer Azure
+  Artifact Signing Public Trust through GitHub OIDC when the owner is eligible;
+  use a documented cloud HSM alternative otherwise. Sign only the exact
+  validated file catalog and keep private-key material outside GitHub.
 - Inventory and Developer ID-sign the standalone macOS CLI, the app, every
   nested Mach-O file, and each native code bundle with hardened runtime. Submit
   eligible distribution containers with `notarytool`, staple the accepted app
@@ -110,6 +175,11 @@ collected against the signed artifacts users will actually receive.
 
 - Signing credentials live only in protected release environments. Pull requests,
   forks, and ordinary branch builds remain unsigned and cannot read them.
+- Do not provision the current exportable-PFX contract for a new public-trust
+  identity. Environment-bound signer jobs use least-privilege short-lived OIDC
+  access. When a backend rotates leaf certificates, verification binds platform
+  trust and the documented durable subscriber identity rather than a leaf
+  thumbprint or subject.
 - A release tag fails closed and remains unpublished when a required credential,
   signature, timestamp, notarization result, staple, or verification step is
   missing.
@@ -127,7 +197,7 @@ collected against the signed artifacts users will actually receive.
   timestamp message-imprint verifier; macOS native code and the app pass
   `codesign --verify --deep --strict` and `spctl --assess`, while the app also
   passes stapler validation, after a fresh download of the exact draft assets.
-- A signed 0.9.x rehearsal passes clean install, launch, tray, update, rollback,
+- A signed 0.10.x rehearsal passes clean install, launch, tray, update, rollback,
   data-preserving uninstall, checksum, provenance, and immutable publication on
   native Windows and macOS runners.
 - The setup and distribution docs describe the signed state without asking users
@@ -142,9 +212,13 @@ timestamping as the authenticity and integrity path for downloaded executables.
 Testing installation and accessibility first would validate artifacts that must
 still change.
 
-Sources: [Apple notarization guidance, accessed 2026-07-28](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
-[Microsoft Authenticode timestamping guidance, accessed 2026-07-28](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
-[GitHub artifact attestation guidance, accessed 2026-07-28](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
+Sources: [Apple notarization guidance, accessed 2026-08-20](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
+[Microsoft Windows code-signing options, accessed 2026-08-20](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options),
+[Microsoft SignTool guidance, accessed 2026-08-20](https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe),
+[Azure Artifact Signing certificate management, accessed 2026-08-20](https://learn.microsoft.com/en-us/azure/artifact-signing/concept-certificate-management),
+[GitHub deployment environments, accessed 2026-08-20](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments),
+[GitHub OIDC with Azure, accessed 2026-08-20](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-azure),
+[GitHub artifact attestation guidance, accessed 2026-08-20](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
 The workflow and verification work can be prepared in the repository, but final
 closure requires the project owner to provision a Windows code-signing identity,
@@ -170,18 +244,18 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Ready for final rerun | Analysis, coverage, schema, security, and release-policy gates are automated | Run every gate on the exact 1.0 candidate and tag |
-| Integration trust boundary | Ready for final rerun | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Keep the launch regression green and verify packaged guidance |
-| Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
+| Core contracts and automated quality | Corrective work in progress | Analysis, coverage, schema, security, and release-policy gates are automated; the 0.9.9 audit found routing-fallback and partial-cache edge cases | Land their regressions, clear the advisory inventory, and rerun every gate on each 0.10.x candidate |
+| Integration trust boundary | Corrective work in progress | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Update the optional dependency locks, keep the launch regression green, and verify packaged guidance |
+| Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Fix and live-test Claude authorization, harden malformed token and logout behavior, then validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.9 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8 | Sign and notarize desktop apps, then repeat the lifecycle on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.9 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8 | Sign and notarize, repeat the lifecycle on a 0.10.x rehearsal, then rerun it on the frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
-| Release rehearsal | Ready for 1.0 rerun | v0.9.9 completed the tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Repeat on the frozen, signed 1.0 candidate with interactive provider and accessibility evidence |
+| Release rehearsal | Ready for signed rerun | v0.9.9 completed the tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |
 
 Version numbers are not project phases. The logical 0.6 through 0.8 milestones
-shipped together in 0.8.0, and 0.9.0 followed. Continue focused 0.9.x patches as
-needed, then cut 1.0 when the evidence gates pass.
+shipped together in 0.8.0, and 0.9.0 followed. Run focused 0.10.x stabilization
+patches as needed, then cut 1.0 when the evidence gates pass.
 
 ## Version plan
 
@@ -569,6 +643,31 @@ definition-of-done item 4 from the default surface; the receipt is present and
 low-cardinality on every listed surface; preference reorders only viable candidates
 and is always explained; machine detail stays complete.
 
+### 0.10 - Stabilize, polish, and prove recovery
+
+**Outcome:** the existing product behaves predictably under ordinary use,
+provider change, corrupt or stale local state, and clean installation. Users get
+an actionable recovery path instead of a plausible-looking partial success.
+
+- Freeze new provider, transport, analytics, and routing-policy breadth.
+- Resolve the complete confirmed post-0.9.9 defect inventory with focused
+  regressions, starting with Claude authorization and credential lifecycle.
+- Clear actionable dependency advisories from shipped and documented optional
+  locks using reviewed first-party update branches.
+- Make the supported source gates work from Windows paths containing spaces and
+  keep contributor commands identical to the gates CI enforces.
+- Run repeated evidence-driven bug hunts and quality-of-life passes across every
+  existing surface. Prefer fewer, clearer states and bounded recovery guidance
+  over new controls.
+- Complete signed release readiness and use a signed 0.10.x candidate for the
+  native install, update, rollback, provider, and accessibility evidence pass.
+
+Acceptance: every 0.10.x exit criterion in [Next](#next) passes. There is no
+open reproducible correctness or credential-lifecycle defect, no unresolved
+actionable dependency advisory in scope, all required CI is green from clean
+main, and exact downloaded Windows and macOS draft assets pass native signature
+verification.
+
 ### 1.0 - Exceptional and rock-solid, then rehearse and cut
 
 **Outcome:** the whole product is boring to install, verify, and update on every
@@ -588,17 +687,20 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   and exercise side-by-side update, rollback, and data-preserving uninstall
   mechanics. v0.9.9 supplies a green tagged acquisition record; application
   signing, notarization, and the same record on the exact 1.0 candidate remain
-  required before this gate is closed. The credential-free Windows verifier is
-  now ready to cover an exact post-signing inventory, every shipped PE module,
-  the owner-supplied publisher identity, SHA-256 file digests, RFC 3161
-  timestamps, each token's SHA-256 message imprint and signature binding, and
-  stable native verifier hashes. Its first-class receipt output atomically
+  required before this gate is closed. The initial credential-free Windows
+  verifier covers an exact post-signing inventory, every shipped PE module,
+  publisher identity, SHA-256 file digests, RFC 3161 timestamps, each token's
+  SHA-256 message imprint and signature binding, and stable native verifier
+  hashes. Its first-class receipt output atomically
   retains canonical success or bounded failure evidence with surface,
   architecture, allowlisted-stage context, and a comparison-only digest of all
   other receipt fields. That digest is not artifact identity, authentication,
-  attestation, or independent workflow provenance. The signing identity,
-  credential custody, timestamp service, and release-workflow activation remain
-  owner decisions.
+  attestation, or independent workflow provenance. Before relying on this path,
+  repair the SignTool timestamp argument order, verify exact downloaded draft
+  assets, and replace the exportable-PFX assumption with an owner-selected
+  hardware-backed or cloud signing service in a protected release environment.
+  The signing service, identity eligibility, credential custody, timestamp
+  service, and workflow activation remain owner decisions.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce

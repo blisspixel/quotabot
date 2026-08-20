@@ -40,9 +40,11 @@ instruction. Full copy in [CLAUDE.md](CLAUDE.md).
 ## Project status and execution order
 
 The current verified stable release is 0.9.9. The shipped routing policies are
-`balanced`, `local_first`, and opt-in `quota_stretch`. The next work is release
-signing for Windows and macOS. The [roadmap Next section](ROADMAP.md#next) is the
-sole source for its behavior, guardrails, completion criteria, and rationale.
+`balanced`, `local_first`, and opt-in `quota_stretch`. The next work is the
+0.10.x stabilization train: correctness, security, quality-of-life refinement,
+and signed release readiness, with no new product breadth. The [roadmap Next
+section](ROADMAP.md#next) is the sole source for its behavior, guardrails,
+completion criteria, and rationale.
 
 ## Set it up from source (humans or agents)
 
