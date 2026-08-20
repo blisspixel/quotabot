@@ -45,6 +45,9 @@ class AnthropicAuth {
   // CLIENT_ID if Anthropic rotates the public client. The retired
   // console.anthropic.com callback and token hosts reject the current client
   // with "Invalid request format"; platform.claude.com is the live generation.
+  // Claude Code's token POST is JSON (`application/json`). Form-urlencoded
+  // bodies on that host fail or return an unhelpful error, so this grant
+  // path matches that JSON exchange.
   static const _defaultClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
   static const _authEndpoint = 'https://claude.ai/oauth/authorize';
   static const _tokenEndpoint = 'https://platform.claude.com/v1/oauth/token';
@@ -109,8 +112,9 @@ class AnthropicAuth {
 
     final pasted = (await promptCode()).trim();
     if (pasted.isEmpty) throw StateError('no authorization code provided');
-    // The console page presents the value as `code#state`; accept either form
-    // and verify the returned state matches to defeat a swapped-code injection.
+    // The platform callback page presents the value as `code#state`; accept
+    // either form and verify the returned state matches to defeat a
+    // swapped-code injection.
     final hash = pasted.indexOf('#');
     final code = hash >= 0 ? pasted.substring(0, hash) : pasted;
     final returnedState = hash >= 0 ? pasted.substring(hash + 1) : null;
@@ -133,13 +137,20 @@ class AnthropicAuth {
   }
 
   Future<Tokens?> refresh(String refreshToken) async {
-    final json = await _post({
-      'grant_type': 'refresh_token',
-      'refresh_token': refreshToken,
-      'client_id': clientId,
-    });
-    if (json == null) return null;
-    return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    try {
+      final json = await _post({
+        'grant_type': 'refresh_token',
+        'refresh_token': refreshToken,
+        'client_id': clientId,
+        'scope': _scope,
+      });
+      if (json == null) return null;
+      return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    } catch (_) {
+      // Background refresh stays fail-soft. Login is the path that surfaces a
+      // bounded Anthropic error so a rejected grant is diagnosable.
+      return null;
+    }
   }
 
   /// Returns the current default grant identity without exposing its tokens.
@@ -266,18 +277,20 @@ class AnthropicAuth {
     }
   }
 
-  Future<Map<String, dynamic>?> _post(Map<String, String> form) async {
+  Future<Map<String, dynamic>?> _post(Map<String, String> fields) async {
     final url = Uri.parse(_tokenEndpoint);
     const headers = {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'anthropic-beta': 'oauth-2025-04-20',
+      'Content-Type': 'application/json',
     };
+    final body = jsonEncode(fields);
     final client = _client;
     final request = client == null
-        ? http.post(url, headers: headers, body: form)
-        : client.post(url, headers: headers, body: form);
-    final resp = await request.timeout(const Duration(seconds: 15));
-    if (resp.statusCode != 200) return null;
+        ? http.post(url, headers: headers, body: body)
+        : client.post(url, headers: headers, body: body);
+    final resp = await request.timeout(const Duration(seconds: 30));
+    if (resp.statusCode != 200) {
+      throw StateError(_tokenExchangeFailure(resp));
+    }
     // Guard the decode: a malformed 200 body is token material, and a raw
     // FormatException would carry a slice of it into an error string.
     try {
@@ -287,4 +300,46 @@ class AnthropicAuth {
       return null;
     }
   }
+}
+
+const _maxOauthErrorChars = 160;
+
+String _tokenExchangeFailure(http.Response resp) {
+  final detail = _boundedOauthErrorDetail(resp.body);
+  if (detail == null) return 'token exchange failed (HTTP ${resp.statusCode})';
+  return 'token exchange failed (HTTP ${resp.statusCode}: $detail)';
+}
+
+String? _boundedOauthErrorDetail(String body) {
+  if (body.isEmpty || body.length > 8192) return null;
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) return null;
+    final parts = <String>[];
+    for (final key in const ['error', 'error_description', 'type', 'message']) {
+      final value = _boundedOauthErrorField(decoded[key]);
+      if (value == null || parts.contains(value)) continue;
+      parts.add(value);
+    }
+    if (parts.isEmpty) return null;
+    final joined = parts.join(' - ');
+    if (joined.length <= _maxOauthErrorChars) return joined;
+    return joined.substring(0, _maxOauthErrorChars);
+  } catch (_) {
+    return null;
+  }
+}
+
+String? _boundedOauthErrorField(Object? value) {
+  if (value is! String) return null;
+  final stripped = value.trim();
+  if (stripped.isEmpty ||
+      stripped.length > _maxOauthErrorChars ||
+      stripped.runes.any((code) => code < 0x20 || code == 0x7f)) {
+    return null;
+  }
+  if (!RegExp(r'^[A-Za-z0-9][A-Za-z0-9 .,_:;()/%+-]*$').hasMatch(stripped)) {
+    return null;
+  }
+  return stripped;
 }
