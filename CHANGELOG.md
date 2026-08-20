@@ -15,6 +15,12 @@ Notable changes to quotabot. Newest first.
   accepted by Anthropic's authorize POST and encodes the scope separator as an
   unambiguous `%20`. The prior 22-character state could show a valid-looking
   consent page and then fail with "Invalid request format" after authorization.
+- Logout now removes every exact account grant slot, including malformed and
+  legacy records that cannot be discovered by their embedded account marker,
+  without following symbolic links or touching similarly prefixed files.
+- OAuth login now rejects successful HTTP responses that omit a nonempty access
+  token. Background refresh remains fail-soft and preserves the stored grant
+  when Google, xAI, Anthropic, or OpenAI returns an unusable token response.
 - `quotabot login claude` now uses Anthropic's current platform OAuth callback
   and token hosts (`platform.claude.com`). The retired
   `console.anthropic.com` generation rejected the public Claude Code client

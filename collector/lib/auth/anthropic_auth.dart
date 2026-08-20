@@ -231,12 +231,13 @@ class AnthropicAuth {
         if (stored.isFresh) return stored.accessToken;
         if (stored.refreshToken == null) return null;
         final refreshed = await refresh(stored.refreshToken!);
-        if (refreshed?.accessToken == null) return null;
+        final accessToken = refreshed?.accessToken;
+        if (accessToken == null || accessToken.isEmpty) return null;
         // Named compatibility slots have no default ownership marker.
         try {
           if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
         } catch (_) {}
-        return refreshed!.accessToken;
+        return accessToken;
       },
       account: account,
     );

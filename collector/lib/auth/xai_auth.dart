@@ -82,13 +82,17 @@ class XaiAuth {
   /// Exchanges a refresh token for a fresh token set (xAI rotates the refresh
   /// token, so the new one is carried back).
   Future<Tokens?> refresh(String refreshToken) async {
-    final json = await _post(_token, {
-      'grant_type': 'refresh_token',
-      'refresh_token': refreshToken,
-      'client_id': clientId,
-    });
-    if (json == null) return null;
-    return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    try {
+      final json = await _post(_token, {
+        'grant_type': 'refresh_token',
+        'refresh_token': refreshToken,
+        'client_id': clientId,
+      });
+      if (json == null) return null;
+      return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Returns a fresh access token from quotabot's own grant, refreshing and
@@ -117,13 +121,14 @@ class XaiAuth {
         if (stored.isFresh) return stored.accessToken;
         if (stored.refreshToken == null) return null;
         final refreshed = await refresh(stored.refreshToken!);
-        if (refreshed?.accessToken == null) return null;
+        final accessToken = refreshed?.accessToken;
+        if (accessToken == null || accessToken.isEmpty) return null;
         // Persist only to the slot loaded above. Cross-account fallback must
         // never lend a background-refreshed grant to another account.
         try {
           if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
         } catch (_) {}
-        return refreshed!.accessToken;
+        return accessToken;
       },
       account: account,
     );

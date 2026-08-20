@@ -65,17 +65,24 @@ class Tokens {
 
   /// True when the access token is present and not within a 60s expiry margin.
   bool get isFresh =>
-      accessToken != null && expiresAt != null && expiresAt! > nowEpoch() + 60;
+      accessToken != null &&
+      accessToken!.isNotEmpty &&
+      expiresAt != null &&
+      expiresAt! > nowEpoch() + 60;
 
   /// Builds tokens from an OAuth token-endpoint JSON response, carrying the
   /// previous refresh token forward when the response omits a new one.
   factory Tokens.fromOAuth(Map<String, dynamic> json, {String? priorRefresh}) {
+    final access = json['access_token'];
+    if (access is! String || access.isEmpty) {
+      throw StateError('token response returned no usable access token');
+    }
     final expiresIn = (json['expires_in'] as num?)?.toInt();
     // Treat an empty refresh_token as absent so a blank value cannot overwrite
     // a still-valid prior refresh token and leave a dead grant.
     final rotated = json['refresh_token'] as String?;
     return Tokens(
-      accessToken: json['access_token'] as String?,
+      accessToken: access,
       refreshToken:
           (rotated != null && rotated.isNotEmpty) ? rotated : priorRefresh,
       expiresAt: expiresIn == null ? null : nowEpoch() + expiresIn,
@@ -455,8 +462,26 @@ class TokenStore {
   }
 
   static void clearAccounts(String provider) {
-    for (final account in accounts(provider)) {
-      clear(provider, account: account);
+    final providerName = _providerFileName(provider);
+    final pattern = RegExp(
+      '^${RegExp.escape(providerName)}_account_[0-9a-f]{64}\\.json\$',
+    );
+    final dir = quotabotDir('auth');
+    for (final entity in dir.listSync(followLinks: false)) {
+      final name = entity.uri.pathSegments.last;
+      if (!pattern.hasMatch(name)) continue;
+      final slot = File(entity.path);
+      _withFileLock(slot, () {
+        final type = FileSystemEntity.typeSync(
+          slot.path,
+          followLinks: false,
+        );
+        if (type == FileSystemEntityType.file) {
+          slot.deleteSync();
+        } else if (type == FileSystemEntityType.link) {
+          Link(slot.path).deleteSync();
+        }
+      });
     }
   }
 }
