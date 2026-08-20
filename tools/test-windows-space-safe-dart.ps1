@@ -51,8 +51,11 @@ try {
 $spaceSafe = $null
 $originalPath = $env:Path
 $originalDartSdk = $env:DART_SDK
+$originalFlutter = Resolve-QuotabotFlutterTool
 try {
-  $spaceSafe = Enable-QuotabotSpaceSafeDart -PreferredRoot $repoRoot
+  $spaceSafe = Enable-QuotabotSpaceSafeDart `
+    -PreferredRoot $repoRoot `
+    -IncludeFlutter
   if (-not (Test-Path -LiteralPath $spaceSafe.DartExecutable -PathType Leaf)) {
     throw "Enable-QuotabotSpaceSafeDart did not resolve dart.exe: $($spaceSafe.DartExecutable)"
   }
@@ -69,9 +72,26 @@ try {
   if ($spaceSafe.Kind -ne 'verbatim' -and -not $spaceSafe.Mirror) {
     throw 'A mirrored Dart SDK did not record its temporary directory.'
   }
+  if ($originalFlutter -and $originalFlutter.Root -match ' ') {
+    if ($spaceSafe.FlutterRoot -match ' ') {
+      throw "Mapped Flutter root still contains spaces: $($spaceSafe.FlutterRoot)"
+    }
+    $flutterDart = Join-Path $spaceSafe.FlutterRoot 'bin\cache\dart-sdk\bin\dart.exe'
+    if (-not (Test-Path -LiteralPath $flutterDart -PathType Leaf)) {
+      throw "Mapped Flutter root is missing its Dart executable: $flutterDart"
+    }
+  }
   $version = & $spaceSafe.DartExecutable --version 2>&1 | Select-Object -First 1
   if ("$version" -notmatch 'Dart SDK version') {
     throw "Mapped dart.exe did not report a Dart SDK version: $version"
+  }
+  if ($spaceSafe.FlutterSnapshot) {
+    $flutterVersion = @(
+      Invoke-QuotabotFlutter -State $spaceSafe -Arguments @('--version') 2>&1
+    ) -join "`n"
+    if ($flutterVersion -notmatch 'Flutter') {
+      throw "Space-safe Flutter invocation did not report a version: $flutterVersion"
+    }
   }
 } finally {
   $mirror = $null

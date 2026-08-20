@@ -1096,7 +1096,10 @@ List<ProviderQuota> loadAccountSnapshots(String provider) {
 /// touching live providers. This is the cheap routing surface for per-request
 /// routers: it trades freshness for speed, and callers receive explicit age and
 /// stale metadata from the MCP layer.
-List<ProviderQuota> loadCachedSnapshots({int? now}) {
+List<ProviderQuota> loadCachedSnapshots({
+  int? now,
+  int Function(File file)? measureFileBytesForTesting,
+}) {
   final dir = cacheDir();
   if (!dir.existsSync()) return const [];
   final byIdentity = <String, ({ProviderQuota quota, int micros})>{};
@@ -1105,16 +1108,18 @@ List<ProviderQuota> loadCachedSnapshots({int? now}) {
   try {
     for (final entity in dir.listSync()) {
       if (entity is! File) continue;
-      final name = entity.uri.pathSegments.last;
-      if (!name.endsWith('.json') ||
-          name.startsWith('buckets_') ||
-          name.startsWith('drift_') ||
-          name.startsWith('analytics_migration_') ||
-          name.startsWith('legacy_bucket_owner_')) {
-        continue;
-      }
-      if (entity.lengthSync() > _maxJsonBytes) continue;
       try {
+        final name = entity.uri.pathSegments.last;
+        if (!name.endsWith('.json') ||
+            name.startsWith('buckets_') ||
+            name.startsWith('drift_') ||
+            name.startsWith('analytics_migration_') ||
+            name.startsWith('legacy_bucket_owner_')) {
+          continue;
+        }
+        final bytes =
+            measureFileBytesForTesting?.call(entity) ?? entity.lengthSync();
+        if (bytes > _maxJsonBytes) continue;
         final q = ProviderQuota.fromJson(
           jsonDecode(entity.readAsStringSync()) as Map<String, dynamic>,
         );
@@ -1139,7 +1144,11 @@ List<ProviderQuota> loadCachedSnapshots({int? now}) {
             (visible.asOf == existing.quota.asOf && micros > existing.micros)) {
           byIdentity[key] = (quota: visible, micros: micros);
         }
-      } catch (_) {}
+      } catch (_) {
+        // Cache files are independent evidence. One disappearing, unreadable,
+        // or malformed entry must not hide healthy sibling providers.
+        continue;
+      }
     }
   } catch (_) {}
   final out = byIdentity.values

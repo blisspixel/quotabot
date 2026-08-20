@@ -21,6 +21,16 @@ Notable changes to quotabot. Newest first.
 - OAuth login now rejects successful HTTP responses that omit a nonempty access
   token. Background refresh remains fail-soft and preserves the stored grant
   when Google, xAI, Anthropic, or OpenAI returns an unusable token response.
+- Healthy subscriptions with a known reset time now keep the fail-soft
+  passthrough fallback instead of also telling callers to wait for the selected
+  provider. Only an unavailable subscription can produce a wait-for-reset
+  fallback in CLI, MCP, HTTP, receipt, and desktop output.
+- Cache-only routing now skips an individual snapshot whose metadata or contents
+  cannot be read and continues loading healthy sibling providers, rather than
+  silently stopping at the first filesystem error.
+- Windows source setup and the new one-command contributor gate now share the
+  space-safe Dart invocation for collector and Flutter native-asset commands,
+  including Flutter installs located under a user profile containing spaces.
 - `quotabot login claude` now uses Anthropic's current platform OAuth callback
   and token hosts (`platform.claude.com`). The retired
   `console.anthropic.com` generation rejected the public Claude Code client

@@ -312,9 +312,9 @@ class DependencyPolicyTest(unittest.TestCase):
     def test_source_setup_and_packaging_enforce_committed_lockfiles(self) -> None:
         expected = {
             "setup.ps1": (
-                "dart pub get --enforce-lockfile",
-                "flutter pub get --enforce-lockfile",
-                "flutter build windows --release --no-pub",
+                "& (Join-Path $scriptDir 'package-cli.ps1')",
+                "-Arguments @('pub', 'get', '--enforce-lockfile')",
+                "-Arguments @('build', 'windows', '--release', '--no-pub')",
             ),
             "setup.sh": (
                 "dart pub get --enforce-lockfile",

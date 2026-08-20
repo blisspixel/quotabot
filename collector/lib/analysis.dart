@@ -924,7 +924,11 @@ RouteFallback _fallbackFor(
     );
   }
   final resetting = subs
-      .where((c) => !c.stale && !c.capabilityLimited && c.resetsAt != null)
+      .where((c) =>
+          !c.available &&
+          !c.stale &&
+          !c.capabilityLimited &&
+          c.resetsAt != null)
       .toList()
     ..sort((a, b) => a.resetsAt!.compareTo(b.resetsAt!));
   if (resetting.isNotEmpty) {
