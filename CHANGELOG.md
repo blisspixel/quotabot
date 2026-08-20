@@ -37,6 +37,12 @@ Notable changes to quotabot. Newest first.
 - Windows source setup and the new one-command contributor gate now share the
   space-safe Dart invocation for collector and Flutter native-asset commands,
   including Flutter installs located under a user profile containing spaces.
+- Windows release signing now passes the RFC 3161 timestamp URL before the
+  SHA-256 timestamp digest option, as required by SignTool, and refuses to sign
+  when any file in the candidate tree differs from its unsigned inventory.
+- Tagged Windows release jobs now download the exact draft CLI and desktop
+  archives, re-inventory and independently verify every embedded signature,
+  and retain bounded verification receipts before publication can continue.
 - `quotabot login claude` now uses Anthropic's current platform OAuth callback
   and token hosts (`platform.claude.com`). The retired
   `console.anthropic.com` generation rejected the public Claude Code client

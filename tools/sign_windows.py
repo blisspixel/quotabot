@@ -20,6 +20,7 @@ if __package__ in {None, ""}:
 
 from tools.native_code_inventory import (  # noqa: E402
     NativeInventoryError,
+    inventory_native_code,
     load_inventory_manifest,
 )
 from tools.verify_windows_signatures import (  # noqa: E402
@@ -44,6 +45,7 @@ _ERROR_MESSAGES = {
     "invalid_timestamp_url": "Windows timestamp URL is missing or invalid",
     "invalid_pfx": "Windows signing certificate cannot be decoded",
     "inventory_invalid": "unsigned inventory cannot be used for signing",
+    "candidate_changed": "candidate no longer matches the unsigned inventory",
     "native_code_empty": "unsigned inventory contains no PE files to sign",
     "path_outside_candidate": "inventory path is outside the candidate tree",
     "signtool_unavailable": "SignTool is unavailable or untrusted",
@@ -130,10 +132,10 @@ def sign_command(
         "sign",
         "/fd",
         "SHA256",
-        "/td",
-        "SHA256",
         "/tr",
         timestamp_url,
+        "/td",
+        "SHA256",
         "/f",
         str(pfx),
         "/p",
@@ -148,11 +150,15 @@ def _inventory_targets(
     *,
     surface: str,
     architecture: str,
+    inventory: dict[str, object] | None = None,
 ) -> list[tuple[str, Path]]:
-    try:
-        payload = load_inventory_manifest(manifest)
-    except NativeInventoryError as error:
-        raise WindowsSignError("inventory_invalid") from error
+    if inventory is None:
+        try:
+            payload = load_inventory_manifest(manifest)
+        except NativeInventoryError as error:
+            raise WindowsSignError("inventory_invalid") from error
+    else:
+        payload = inventory
     if payload.get("platform") != "windows":
         raise WindowsSignError("inventory_invalid")
     if payload.get("surface") != surface or payload.get("architecture") != architecture:
@@ -189,6 +195,38 @@ def _inventory_targets(
             raise WindowsSignError("path_outside_candidate", relative)
         targets.append((relative, target))
     return targets
+
+
+def _require_current_inventory(
+    manifest: Path,
+    candidate: Path,
+    *,
+    surface: str,
+    architecture: str,
+) -> dict[str, object]:
+    """Require the complete candidate tree to equal its unsigned inventory."""
+    try:
+        expected = load_inventory_manifest(manifest)
+    except NativeInventoryError as error:
+        raise WindowsSignError("inventory_invalid") from error
+    if (
+        expected.get("platform") != "windows"
+        or expected.get("surface") != surface
+        or expected.get("architecture") != architecture
+    ):
+        raise WindowsSignError("inventory_invalid")
+    try:
+        current = inventory_native_code(
+            candidate,
+            platform="windows",
+            surface=surface,
+            architecture=architecture,
+        )
+    except NativeInventoryError as error:
+        raise WindowsSignError("candidate_changed") from error
+    if expected != current.to_dict():
+        raise WindowsSignError("candidate_changed")
+    return expected
 
 
 def _run_signtool(command: list[str], password: str, pfx_b64: str) -> None:
@@ -235,11 +273,18 @@ def sign_windows_candidate(
         signtool = find_signtool()
     except WindowsSignatureVerificationError as error:
         raise WindowsSignError("signtool_unavailable") from error
+    unsigned_inventory = _require_current_inventory(
+        manifest,
+        candidate,
+        surface=surface,
+        architecture=architecture,
+    )
     targets = _inventory_targets(
         manifest,
         candidate,
         surface=surface,
         architecture=architecture,
+        inventory=unsigned_inventory,
     )
     handle, pfx_name = tempfile.mkstemp(prefix="quotabot-sign-", suffix=".pfx")
     pfx_path = Path(pfx_name)

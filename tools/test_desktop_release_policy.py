@@ -633,11 +633,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(ci.count("native_code_inventory.py"), 4)
-        self.assertEqual(release.count("native_code_inventory.py"), 6)
+        self.assertEqual(release.count("native_code_inventory.py"), 8)
         self.assertEqual(ci.count("sign_windows.py"), 0)
         self.assertEqual(release.count("sign_windows.py"), 2)
         self.assertEqual(ci.count("verify_windows_signatures.py"), 0)
-        self.assertEqual(release.count("verify_windows_signatures.py"), 2)
+        self.assertEqual(release.count("verify_windows_signatures.py"), 4)
         for workflow in (ci, release):
             self.assertNotIn("--platform macos", workflow)
 
@@ -652,11 +652,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertEqual(ci.count("--expect-manifest"), 2)
         self.assertEqual(
             release.count("--platform windows --surface cli --architecture x64"),
-            3,
+            4,
         )
         self.assertEqual(
             release.count("--platform windows --surface desktop --architecture x64"),
-            3,
+            4,
         )
         self.assertEqual(release.count("--expect-manifest"), 2)
 
@@ -709,6 +709,51 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("tools.test_native_code_inventory", ci)
         self.assertIn("tools.test_sign_windows", ci)
+
+    def test_downloaded_windows_draft_assets_are_natively_reverified(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        verify_cli = release.split("  verify-cli-release:\n", 1)[1].split(
+            "  build-desktop:\n", 1
+        )[0]
+        verify_desktop = release.split("  verify-desktop-release:\n", 1)[1].split(
+            "  audit-release-assets:\n", 1
+        )[0]
+
+        for job, surface, evidence_name in (
+            (verify_cli, "cli", "windows-cli-draft-signature-verification"),
+            (
+                verify_desktop,
+                "desktop",
+                "windows-desktop-draft-signature-verification",
+            ),
+        ):
+            provenance_at = job.index("gh attestation verify")
+            inventory_at = job.index(
+                f"native_code_inventory.py --platform windows --surface {surface}"
+            )
+            signature_at = job.index(
+                f"verify_windows_signatures.py --manifest $manifest --surface {surface}"
+            )
+            preserve_at = job.index(f"name: {evidence_name}")
+            self.assertLess(provenance_at, inventory_at)
+            self.assertLess(inventory_at, signature_at)
+            self.assertLess(signature_at, preserve_at)
+            self.assertIn("--expected-signer-subject", job)
+            self.assertIn("--expected-signer-thumbprint", job)
+            self.assertIn("--receipt $receipt $expanded", job)
+            preserve_context = job[max(0, preserve_at - 500) : preserve_at + 500]
+            self.assertIn("if: always() && runner.os == 'Windows'", preserve_context)
+            self.assertIn("if-no-files-found: warn", preserve_context)
+
+        audit_job = release.split("  audit-release-assets:\n", 1)[1].split(
+            "  publish-release:\n", 1
+        )[0]
+        self.assertIn(
+            "needs: [create-release, verify-cli-release, verify-desktop-release]",
+            audit_job,
+        )
 
     def test_windows_signature_verifier_is_a_fail_closed_release_gate(
         self,
