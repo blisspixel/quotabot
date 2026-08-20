@@ -30,12 +30,15 @@ void main() {
     return File('${authDir.path}/${provider}_account_$hash.json');
   }
 
-  test('logout removes both the default and account grant slots', () async {
+  test('logout removes default, account, and ownerless grant slots', () async {
     final def = defaultSlot('grok')..writeAsStringSync('{"access_token":"d"}');
     final acct = accountSlot('grok', 'work@example.com')
       ..writeAsStringSync('{"access_token":"a","_account":"work@example.com"}');
+    final ownerless = accountSlot('grok', 'legacy@example.com')
+      ..writeAsStringSync('{"access_token":"legacy"}');
     expect(def.existsSync(), isTrue);
     expect(acct.existsSync(), isTrue);
+    expect(ownerless.existsSync(), isTrue);
 
     final result = await runCollectCli(
       ['logout', 'grok'],
@@ -48,6 +51,11 @@ void main() {
     expectExitCode(result, 0);
     expect(def.existsSync(), isFalse, reason: 'default grant must be cleared');
     expect(acct.existsSync(), isFalse, reason: 'account grant must be cleared');
+    expect(
+      ownerless.existsSync(),
+      isFalse,
+      reason: 'ownerless account grant must be cleared',
+    );
   });
 
   test('logout and login reject an unknown provider with the usage exit code',

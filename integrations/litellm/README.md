@@ -79,6 +79,14 @@ proxy consistent with the desktop widget and MCP server.
    3.13 patch for local version managers. Update both declarations deliberately
    when the supported runtime range advances.
 
+   Regenerate the universal hash lock against the oldest supported interpreter,
+   then verify installation on every supported Python line:
+
+   ```bash
+   uv pip compile --universal --generate-hashes --python-version 3.10 \
+     -o requirements.txt requirements.in
+   ```
+
    Keep `config.yaml` in the same folder as `quotabot_router.py`; current
    LiteLLM proxy releases resolve custom callback modules relative to the config
    file. Edit `config.yaml` so each `model_name` points at a real deployment,

@@ -1389,6 +1389,47 @@ void main() {
     expect(cached.single.windows.single.usedPercent, 25);
   });
 
+  test('loadCachedSnapshots keeps two siblings after metadata failure', () {
+    const now = 1782000000;
+    const providers = [codexProviderId, claudeProviderId, grokProviderId];
+    for (final provider in providers) {
+      saveSnapshot(
+        ProviderQuota(
+          provider: provider,
+          displayName: provider,
+          account: 'acct',
+          asOf: now,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 25)],
+        ),
+      );
+    }
+
+    var measuredFiles = 0;
+    final cached = loadCachedSnapshots(
+      now: now,
+      measureFileBytesForTesting: (file) {
+        measuredFiles++;
+        if (measuredFiles == 1) {
+          throw FileSystemException('simulated metadata failure', file.path);
+        }
+        return file.lengthSync();
+      },
+    );
+
+    expect(measuredFiles, 3);
+    expect(cached, hasLength(2));
+    expect(
+      cached.map((quota) => quota.provider).toSet(),
+      isA<Set<String>>()
+          .having((providers) => providers.length, 'length', 2)
+          .having(
+            (survivors) => survivors.difference(providers.toSet()),
+            'unknown providers',
+            isEmpty,
+          ),
+    );
+  });
+
   test('loadCachedSnapshots rejects noncanonical and future cache entries', () {
     final forged = ProviderQuota(
       provider: 'claude',

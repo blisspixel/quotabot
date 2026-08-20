@@ -10,8 +10,14 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Next:** sign Windows release binaries and Developer ID-sign, notarize, and
-> staple the macOS bundle. See the [roadmap criteria](ROADMAP.md#next).
+> **Next:** a focused 0.10.x stabilization train for correctness, security,
+> quality-of-life refinement, and signed release readiness. No new product
+> breadth enters this train. See the [roadmap criteria](ROADMAP.md#next).
+
+The 0.9.9 Claude login flow has a known authorization failure tracked in
+[issue #77](https://github.com/blisspixel/quotabot/issues/77). Loading the
+consent page does not prove success; the flow is complete only when the callback
+page returns a `code#state` value.
 
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
 calls, spend no usage tokens, and never read prompts or source code.
@@ -95,10 +101,11 @@ endpoints, evidence classes, credential behavior, and limitations are in
 ## Desktop app
 
 Portable desktop bundles are published for Windows, macOS, and Linux alongside
-the CLI. The app is optional, and Windows and macOS signing remains the next
-release gate. Verification, launch, update, rollback, and uninstall belong in
-[Desktop release bundles](docs/DESKTOP-DISTRIBUTION.md). Source setup and
-packaging are in [Building from source](docs/BUILDING.md).
+the CLI. The app is optional. Windows signing and macOS Developer ID signing,
+notarization, and stapling are required 0.10.x release-readiness gates.
+Verification, launch, update, rollback, and uninstall belong in [Desktop
+release bundles](docs/DESKTOP-DISTRIBUTION.md). Source setup and packaging are
+in [Building from source](docs/BUILDING.md).
 
 ## Agents and integrations
 
@@ -123,8 +130,10 @@ adapter. The complete promises and verification methods are in
 ## Release and project status
 
 The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
-passed its 14-asset audit and cross-platform install and upgrade matrix. See the
-[release evidence](docs/BUILDING.md#baseline-release-evidence),
+passed its 14-asset audit and cross-platform install and upgrade matrix. Its
+Windows and macOS artifacts remain unsigned, so 0.10.x must repeat that evidence
+with platform-signed artifacts before 1.0. See the [release
+evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),
 [contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).
 

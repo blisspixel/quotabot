@@ -350,11 +350,20 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
+          QUOTABOT_WINDOWS_SIGNER_SUBJECT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT }}
+          QUOTABOT_WINDOWS_SIGNER_THUMBPRINT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-cli-release\${{ matrix.archive }}'
           $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-cli-expanded'
+          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-draft-inventory.json'
+          $receipt = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-draft-signature-verification.json'
           $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'quotabot-cli-state'
           Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+          $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $expanded
+          if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI native inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT --expected-signer-thumbprint $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT --receipt $receipt $expanded
+          if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI signature verification failed with exit code $LASTEXITCODE" }
           $executable = Join-Path $expanded 'bin\quotabot.exe'
           $expectedVersion = 'quotabot ' + $env:GITHUB_REF_NAME.TrimStart('v')
           $actualVersion = & $executable --version
@@ -365,6 +374,16 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $doctor.schema -ne 'quotabot.v1') {
             throw 'Downloaded CLI doctor check failed.'
           }
+      - name: Preserve downloaded Windows CLI signature evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cli-draft-signature-verification
+          path: |
+            ${{ runner.temp }}/quotabot-windows-cli-draft-inventory.json
+            ${{ runner.temp }}/quotabot-windows-cli-draft-signature-verification.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Exercise the downloaded macOS or Linux CLI
         if: runner.os != 'Windows'
         shell: bash
@@ -567,6 +586,33 @@ jobs:
             --source-ref "refs/tags/$GITHUB_REF_NAME" \
             --source-digest "$source_digest" \
             --deny-self-hosted-runners
+      - name: Verify downloaded Windows desktop signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SIGNER_SUBJECT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT }}
+          QUOTABOT_WINDOWS_SIGNER_THUMBPRINT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT }}
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'quotabot-release\${{ matrix.archive }}'
+          $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-expanded'
+          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-inventory.json'
+          $receipt = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-signature-verification.json'
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded
+          $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json $expanded
+          if ($LASTEXITCODE -ne 0) { throw "Downloaded desktop native inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-signer-subject $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT --expected-signer-thumbprint $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT --receipt $receipt $expanded
+          if ($LASTEXITCODE -ne 0) { throw "Downloaded desktop signature verification failed with exit code $LASTEXITCODE" }
+      - name: Preserve downloaded Windows desktop signature evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-desktop-draft-signature-verification
+          path: |
+            ${{ runner.temp }}/quotabot-windows-desktop-draft-inventory.json
+            ${{ runner.temp }}/quotabot-windows-desktop-draft-signature-verification.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Download and verify the previous stable desktop asset
         shell: bash
         env:

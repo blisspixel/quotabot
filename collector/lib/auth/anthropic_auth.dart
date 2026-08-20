@@ -94,18 +94,23 @@ class AnthropicAuth {
   }) async {
     final pkce = pkcePair();
     final state = randomState();
-    final authUrl = Uri.parse(_authEndpoint).replace(
-      queryParameters: {
-        'code': 'true',
-        'client_id': clientId,
-        'response_type': 'code',
-        'redirect_uri': _redirect,
-        'scope': _scope,
-        'state': state,
-        'code_challenge': pkce.challenge,
-        'code_challenge_method': 'S256',
-      },
-    ).toString();
+    final authUrl = Uri.parse(_authEndpoint)
+        .replace(
+          queryParameters: {
+            'code': 'true',
+            'client_id': clientId,
+            'response_type': 'code',
+            'redirect_uri': _redirect,
+            'scope': _scope,
+            'state': state,
+            'code_challenge': pkce.challenge,
+            'code_challenge_method': 'S256',
+          },
+        )
+        .toString()
+        // Dart renders query-parameter spaces as `+`. Anthropic's authorize
+        // flow is verified with the unambiguous percent-encoded separator.
+        .replaceAll('+', '%20');
 
     showUrl(authUrl);
     await (openBrowser ?? openInBrowser)(authUrl);
@@ -226,12 +231,13 @@ class AnthropicAuth {
         if (stored.isFresh) return stored.accessToken;
         if (stored.refreshToken == null) return null;
         final refreshed = await refresh(stored.refreshToken!);
-        if (refreshed?.accessToken == null) return null;
+        final accessToken = refreshed?.accessToken;
+        if (accessToken == null || accessToken.isEmpty) return null;
         // Named compatibility slots have no default ownership marker.
         try {
           if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
         } catch (_) {}
-        return refreshed!.accessToken;
+        return accessToken;
       },
       account: account,
     );

@@ -316,8 +316,11 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertLess(activate_desktop, activate_cli)
         self.assertIn("Restore-CliPayload -State $cli", transaction)
         self.assertIn("Restore-DesktopPayload -State $desktop", transaction)
+        flutter_build = script.index(
+            "-Arguments @('build', 'windows', '--release', '--no-pub')"
+        )
         self.assertLess(
-            script.index("& flutter build windows --release --no-pub"),
+            flutter_build,
             script.index("Install-QuotabotPayloadPair `"),
         )
         self.assertIn("if ($CliOnly -or $NoApp)", script)
@@ -327,8 +330,11 @@ class InstallerSecurityTests(unittest.TestCase):
     ) -> None:
         script = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
 
+        flutter_build = script.index(
+            "-Arguments @('build', 'windows', '--release', '--no-pub')"
+        )
         self.assertLess(
-            script.index("& flutter build windows --release --no-pub"),
+            flutter_build,
             script.index("Stopping the running desktop app for activation"),
         )
         self.assertIn("$restartRequested = $true", script)
@@ -557,13 +563,16 @@ class InstallerSecurityTests(unittest.TestCase):
         )
         self.assertLess(
             script.index("Test-WindowsDesktopAtlAvailable"),
-            script.index("& flutter build windows --release --no-pub"),
+            script.index("-Arguments @('build', 'windows', '--release', '--no-pub')"),
         )
         self.assertIn(
             "add Visual Studio C++ ATL later for a source-built tray app",
             script,
         )
-        self.assertIn("flutter config --enable-windows-desktop", script)
+        self.assertIn(
+            "-Arguments @('config', '--enable-windows-desktop')",
+            script,
+        )
         self.assertIn(
             "Desktop skipped: $($_.Exception.Message). Installing the CLI only.",
             script,
