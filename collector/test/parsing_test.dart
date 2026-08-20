@@ -2134,7 +2134,7 @@ void main() {
 
   group('cursor', () {
     const now = 1782000000;
-    test('cursorWindows reads the current monthly included-usage pool', () {
+    test('cursorWindows reads a legacy persisted monthly usage pool', () {
       final w = cursorWindows({
         'monthlyUsage': {
           'usedCents': 1250,
@@ -2145,6 +2145,17 @@ void main() {
       expect(w.single.label, 'monthly');
       expect(w.single.usedPercent, closeTo(62.5, 0.1));
       expect(w.single.resetsAt, isNotNull);
+    });
+
+    test('Cursor 3 plan metadata does not invent current quota pools', () {
+      final windows = cursorWindows({
+        'membershipType': 'ultra',
+        'subscriptionStatus': 'active',
+        'cursorModels': {'remaining': 80},
+        'otherModels': {'remaining': 40},
+      }, now);
+
+      expect(windows, isEmpty);
     });
 
     test('cursorWindows reads usageBreakdowns', () {

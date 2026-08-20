@@ -17,6 +17,12 @@ Notable changes to quotabot. Newest first.
   unsigned. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
+- Cursor 3.x now passively detects a recognized current local plan only when its
+  bounded membership owner matches the subject of the existing Cursor access
+  token. The plan remains unroutable diagnostic evidence because Cursor does
+  not persist current Cursor Models and Other Models quota balances in the
+  supported local state, and credentials and owner identifiers are never
+  exposed.
 - `quotabot login claude` now sends a 32-byte, 43-character OAuth state value
   accepted by Anthropic's authorize POST and encodes the scope separator as an
   unambiguous `%20`. The prior 22-character state could show a valid-looking
