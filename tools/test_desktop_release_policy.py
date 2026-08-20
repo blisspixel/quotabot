@@ -632,20 +632,33 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+        self.assertEqual(ci.count("native_code_inventory.py"), 4)
+        self.assertEqual(release.count("native_code_inventory.py"), 6)
+        self.assertEqual(ci.count("sign_windows.py"), 0)
+        self.assertEqual(release.count("sign_windows.py"), 2)
+        self.assertEqual(ci.count("verify_windows_signatures.py"), 0)
+        self.assertEqual(release.count("verify_windows_signatures.py"), 2)
         for workflow in (ci, release):
-            self.assertEqual(workflow.count("native_code_inventory.py"), 4)
-            self.assertEqual(
-                workflow.count("--platform windows --surface cli --architecture x64"),
-                2,
-            )
-            self.assertEqual(
-                workflow.count(
-                    "--platform windows --surface desktop --architecture x64"
-                ),
-                2,
-            )
-            self.assertEqual(workflow.count("--expect-manifest"), 2)
             self.assertNotIn("--platform macos", workflow)
+
+        self.assertEqual(
+            ci.count("--platform windows --surface cli --architecture x64"),
+            2,
+        )
+        self.assertEqual(
+            ci.count("--platform windows --surface desktop --architecture x64"),
+            2,
+        )
+        self.assertEqual(ci.count("--expect-manifest"), 2)
+        self.assertEqual(
+            release.count("--platform windows --surface cli --architecture x64"),
+            3,
+        )
+        self.assertEqual(
+            release.count("--platform windows --surface desktop --architecture x64"),
+            3,
+        )
+        self.assertEqual(release.count("--expect-manifest"), 2)
 
         release_cli = release.split("  build:\n", 1)[1].split(
             "  verify-cli-release:\n", 1
@@ -658,28 +671,46 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             (release_desktop, "verify_desktop_archive.py"),
         ):
             build_at = job.index("-NoArchive")
-            inventory_at = job.index("native_code_inventory.py")
+            unsigned_at = job.index("unsigned-inventory.json")
+            sign_at = job.index("sign_windows.py")
+            post_sign_at = job.index("Post-signing native inventory failed")
+            verify_sig_at = job.index("verify_windows_signatures.py")
             package_at = job.index("-PackageOnly")
             verify_at = job.index(verifier)
             archive_inventory_at = job.rindex("native_code_inventory.py")
             preserve_at = job.index("actions/upload-artifact@")
             attest_at = job.index("actions/attest-build-provenance@")
             upload_at = job.index("gh release upload")
-            self.assertLess(build_at, inventory_at)
-            self.assertLess(inventory_at, package_at)
+            self.assertLess(build_at, unsigned_at)
+            self.assertLess(unsigned_at, sign_at)
+            self.assertLess(sign_at, post_sign_at)
+            self.assertLess(post_sign_at, verify_sig_at)
+            self.assertLess(verify_sig_at, package_at)
+            unsigned_step = job[build_at : job.index("Sign, verify, and package")]
+            self.assertNotIn("PFX", unsigned_step)
+            self.assertNotIn("PASSWORD", unsigned_step)
             self.assertLess(package_at, verify_at)
             self.assertLess(verify_at, archive_inventory_at)
             self.assertLess(archive_inventory_at, preserve_at)
             self.assertLess(preserve_at, attest_at)
-            self.assertLess(inventory_at, verify_at)
             self.assertLess(attest_at, upload_at)
-            preserve_context = job[max(0, preserve_at - 400) : preserve_at + 500]
+            preserve_context = job[max(0, preserve_at - 400) : preserve_at + 800]
             self.assertIn("if: always() && runner.os == 'Windows'", preserve_context)
             self.assertIn("if-no-files-found: warn", preserve_context)
+            self.assertIn("unsigned-inventory.json", preserve_context)
+            self.assertIn("signature-verification.json", preserve_context)
+            self.assertIn("secrets.QUOTABOT_WINDOWS_PFX_BASE64", job)
+            self.assertIn("secrets.QUOTABOT_WINDOWS_PFX_PASSWORD", job)
+            self.assertIn("vars.QUOTABOT_WINDOWS_TIMESTAMP_URL", job)
+            self.assertIn("vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT", job)
+            self.assertIn("vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT", job)
+            self.assertNotIn("Write-Host $env:QUOTABOT_WINDOWS_PFX", job)
+            self.assertNotIn("echo $env:QUOTABOT_WINDOWS_PFX", job)
 
         self.assertIn("tools.test_native_code_inventory", ci)
+        self.assertIn("tools.test_sign_windows", ci)
 
-    def test_windows_signature_verifier_is_tested_but_not_a_release_gate(
+    def test_windows_signature_verifier_is_a_fail_closed_release_gate(
         self,
     ) -> None:
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -690,7 +721,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         normalized_building = " ".join(building.split())
 
         self.assertIn("tools.test_verify_windows_signatures", ci)
-        self.assertNotIn("verify_windows_signatures.py", release)
+        self.assertIn("verify_windows_signatures.py", release)
+        self.assertIn("sign_windows.py", release)
         self.assertIn("new post-signing inventory", normalized_building)
         self.assertIn("real embedded-signed Windows fixture test", normalized_building)
         self.assertIn(
@@ -734,10 +766,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("40-hex SHA-1 thumbprint", normalized_building)
         self.assertIn("stop publication", normalized_building)
         self.assertIn("allowlisted failure stage", normalized_building)
-        self.assertIn(
-            "deliberately not called by the current release", normalized_building
-        )
-        self.assertIn("current release artifacts remain unsigned", normalized_building)
+        self.assertIn("fail closed without those values", normalized_building)
+        self.assertIn("v0.9.9 release artifacts remain unsigned", normalized_building)
 
     def test_signing_scope_names_pe_modules_and_the_standalone_macos_cli(
         self,

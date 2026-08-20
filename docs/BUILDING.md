@@ -237,9 +237,9 @@ and
 [`Get-AuthenticodeSignature` contract](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature),
 [Microsoft Authenticode timestamping guidance](https://learn.microsoft.com/en-us/windows/win32/seccrypto/time-stamping-authenticode-signatures),
 and [RFC 3161](https://www.rfc-editor.org/rfc/rfc3161), checked 2026-07-28.
-The future credential-bearing signing command must set `/fd SHA256` and `/tr`
-followed by `/td SHA256`, retain the bounded receipt, and pass this independent
-verifier. If `timestamp_policy_unproven` follows a wrong or uncertain signing
+The credential-bearing signing command sets `/fd SHA256` and `/tr`
+followed by `/td SHA256`, retains the bounded receipt, and must pass this
+independent verifier. If `timestamp_policy_unproven` follows a wrong or uncertain signing
 policy, sign a fresh candidate with those exact options, re-inventory because
 signing changes PE bytes, and re-verify. Do not reuse the prior post-signing
 inventory. If the result repeats after the expected policy was used, retain the
@@ -284,14 +284,21 @@ The before and after inventories prove snapshot equality, not continuous
 filesystem immutability. This verifier shares the isolated-runner assumption
 stated above; no untrusted local process may race candidate-path replacement.
 
-This checker does not sign code, select a certificate, handle credentials, or
-authorize publication. It is deliberately not called by the current release
-workflow, and current release artifacts remain unsigned. Activation still needs
-the owner-approved publisher identity, certificate custody, timestamp service,
-release environment, cost, and channel decisions. The intended Windows order is
-build, capture the unsigned sign set, sign every inventoried PE, capture a new
-post-signing inventory, verify it, package without rebuilding, then require the
-extracted archive to match that post-signing inventory.
+The credential-bearing signer is `python tools/sign_windows.py`. It reads the
+PFX and password from `QUOTABOT_WINDOWS_PFX_BASE64` and
+`QUOTABOT_WINDOWS_PFX_PASSWORD`, and the RFC 3161 timestamp service from
+`QUOTABOT_WINDOWS_TIMESTAMP_URL`. It never prints those values. SignTool is
+invoked with `/fd SHA256`, `/tr` for that timestamp URL, and `/td SHA256`.
+The tagged Windows release jobs then capture a new post-signing inventory and
+call this verifier with `QUOTABOT_WINDOWS_SIGNER_SUBJECT` and
+`QUOTABOT_WINDOWS_SIGNER_THUMBPRINT`. Those jobs fail closed without those
+values, so a `v*` tag stays unpublished until the owner provisions the signing
+identity. The published v0.9.9 release artifacts remain unsigned.
+The Windows order is build, capture the unsigned sign set, sign every
+inventoried PE, capture a new post-signing inventory, verify it, package
+without rebuilding, then require the extracted archive to match that
+post-signing inventory. Ordinary CI packaging stays unsigned and cannot read
+the signing secrets.
 
 The current scanner is intentionally Windows-only. The roadmap still requires
 the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be
