@@ -3031,7 +3031,7 @@ Future<void> _login(String provider) async {
             stderr.writeln(url);
             stderr.writeln('');
             stderr.write(
-              'After authorizing, paste the code shown by the browser here: ',
+              'After authorizing, paste the full code#state value shown on the callback page: ',
             );
           },
           promptCode: () async => stdin.readLineSync() ?? '',
