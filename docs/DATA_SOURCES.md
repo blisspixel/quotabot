@@ -386,8 +386,8 @@ Antigravity can run two ways:
   provider-required account onboarding request automatically. Grok uses the
   device-code flow; Antigravity and Codex use a loopback plus PKCE
   authorization-code flow against the provider's public client (Codex on a
-  fixed loopback port); Claude uses a PKCE authorization-code flow whose console
-  callback shows a code to paste back.
+  fixed loopback port); Claude uses a PKCE authorization-code flow whose
+  platform callback shows a code to paste back.
   Override the public client id with `QUOTABOT_ANTHROPIC_CLIENT_ID`,
   `QUOTABOT_OPENAI_CLIENT_ID`, or
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET`. Claude and Codex

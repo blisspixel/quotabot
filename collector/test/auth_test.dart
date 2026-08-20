@@ -1030,7 +1030,8 @@ void main() {
   group('AnthropicAuth', () {
     test('refresh maps the token response and posts the client id', () async {
       final mock = MockClient((req) async {
-        expect(req.url.toString(), contains('console.anthropic.com'));
+        expect(
+            req.url.toString(), contains('platform.claude.com/v1/oauth/token'));
         expect(req.body, contains('grant_type=refresh_token'));
         expect(req.headers['anthropic-beta'], 'oauth-2025-04-20');
         return http.Response(
@@ -1041,6 +1042,51 @@ void main() {
       final t = await AnthropicAuth(client: mock).refresh('R1');
       expect(t!.accessToken, 'AT');
       expect(t.refreshToken, 'R1'); // carried forward
+    });
+
+    test('loginManual uses the current platform OAuth hosts', () async {
+      const provider = AnthropicAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      late Uri shown;
+      final mock = MockClient((req) async {
+        expect(req.method, 'POST');
+        expect(
+          req.url.toString(),
+          'https://platform.claude.com/v1/oauth/token',
+        );
+        expect(
+          req.body,
+          contains(
+            'redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback',
+          ),
+        );
+        expect(req.body, contains('grant_type=authorization_code'));
+        expect(req.body, contains('code=pasted-code'));
+        return http.Response(
+          jsonEncode({
+            'access_token': 'AT',
+            'refresh_token': 'RT',
+            'expires_in': 3600,
+          }),
+          200,
+        );
+      });
+
+      final tokens = await AnthropicAuth(client: mock).loginManual(
+        showUrl: (url) => shown = Uri.parse(url),
+        promptCode: () async => 'pasted-code',
+        openBrowser: (_) async {},
+      );
+
+      expect(shown.scheme, 'https');
+      expect(shown.host, 'claude.ai');
+      expect(shown.path, '/oauth/authorize');
+      expect(
+        shown.queryParameters['redirect_uri'],
+        'https://platform.claude.com/oauth/code/callback',
+      );
+      expect(tokens.accessToken, 'AT');
+      expect(tokens.refreshToken, 'RT');
     });
 
     test('freshAccessToken returns a still-fresh grant without network',

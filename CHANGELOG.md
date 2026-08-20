@@ -5,6 +5,11 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Fixed
+- `quotabot login claude` now uses Anthropic's current platform OAuth callback
+  and token hosts (`platform.claude.com`). The retired
+  `console.anthropic.com` generation rejected the public Claude Code client
+  with "Invalid request format", so an idle machine could not mint a
+  refreshable usage-metadata grant.
 - Linux desktop release verify now downloads, checksums, and attests the
   draft archive before installing GTK and xvfb. CI and release share a
   time-bounded apt helper, and the verify job budget is 45 minutes, so a
