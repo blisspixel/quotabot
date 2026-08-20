@@ -30,7 +30,7 @@ class AnthropicCredential {
 /// endpoint, so a connected grant still spends nothing.
 ///
 /// Flow shape: Claude Code's public client redirects the browser to a fixed
-/// console callback that displays a `code#state` value for the user to paste
+/// platform callback that displays a `code#state` value for the user to paste
 /// back (it does not allow arbitrary loopback redirects the way Antigravity's
 /// client does), so this is a manual paste-back flow rather than a loopback
 /// capture. [promptCode] receives the shown URL indirectly (via [showUrl]) and
@@ -42,12 +42,13 @@ class AnthropicAuth {
   // confidential secret; the user still signs in with their own Anthropic
   // account in the browser. These endpoints and the client id are the values
   // Claude Code itself uses; override the client id with QUOTABOT_ANTHROPIC_
-  // CLIENT_ID if Anthropic rotates the public client. Confirm on the first real
-  // `quotabot login claude` and adjust here if the provider has changed them.
+  // CLIENT_ID if Anthropic rotates the public client. The retired
+  // console.anthropic.com callback and token hosts reject the current client
+  // with "Invalid request format"; platform.claude.com is the live generation.
   static const _defaultClientId = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
   static const _authEndpoint = 'https://claude.ai/oauth/authorize';
-  static const _tokenEndpoint = 'https://console.anthropic.com/v1/oauth/token';
-  static const _redirect = 'https://console.anthropic.com/oauth/code/callback';
+  static const _tokenEndpoint = 'https://platform.claude.com/v1/oauth/token';
+  static const _redirect = 'https://platform.claude.com/oauth/code/callback';
 
   // Scope set that authorizes the account usage-metadata read. `user:profile`
   // is the account-identity scope; `user:inference` matches the scope Claude
@@ -81,11 +82,12 @@ class AnthropicAuth {
   /// Runs the paste-back login: builds the authorize URL, opens the browser via
   /// [showUrl], then exchanges the code the user pastes (via [promptCode]) for a
   /// token set and persists it as quotabot's grant. The pasted value may be the
-  /// bare code or the `code#state` form the console page shows.
+  /// bare code or the `code#state` form the platform callback page shows.
   Future<Tokens> loginManual({
     required void Function(String url) showUrl,
     required Future<String> Function() promptCode,
     String? account,
+    Future<void> Function(String url)? openBrowser,
   }) async {
     final pkce = pkcePair();
     final state = randomState();
@@ -103,7 +105,7 @@ class AnthropicAuth {
     ).toString();
 
     showUrl(authUrl);
-    await openInBrowser(authUrl);
+    await (openBrowser ?? openInBrowser)(authUrl);
 
     final pasted = (await promptCode()).trim();
     if (pasted.isEmpty) throw StateError('no authorization code provided');

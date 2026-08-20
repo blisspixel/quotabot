@@ -265,7 +265,7 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
         _https('GET', 'api.anthropic.com', '/api/oauth/profile',
             'Claude account and plan metadata',
             dataClass: 'account_metadata'),
-        _https('POST', 'console.anthropic.com', '/v1/oauth/token',
+        _https('POST', 'platform.claude.com', '/v1/oauth/token',
             'Claude OAuth token refresh',
             dataClass: 'credential_exchange'),
       ],
