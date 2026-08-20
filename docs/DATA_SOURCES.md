@@ -430,14 +430,26 @@ account has been discovered.
 ## Cursor (agentic IDE)
 
 - Source class: `passive_local_evidence`.
-- Current paid plans expose a monthly included-usage pool with optional
-  pay-as-you-go overage; quotabot surfaces that pool as a `monthly` window when
-  local state provides used/included values and a period reset.
-- Local data primarily ~/.cursor (config + SQLite state like other forks).
-- Usage often shown in-app Settings, but local state allows passive detection
-  and opportunistic reads. The adapter scans usage/credit/plan/account rows in
-  Cursor's `state.vscdb`, accepts JSON stored as either strings or blobs, and
-  surfaces account and plan labels when the local state includes them.
+- Cursor's current usage model has separate monthly Cursor Models and Other
+  Models pools. They are not one interchangeable monthly balance. See Cursor's
+  [Models and Pricing documentation](https://cursor.com/docs/models-and-pricing).
+- Local data is read from Cursor's `globalStorage/state.vscdb`. Cursor 3.x
+  persists bounded membership metadata there, but not the current used and
+  remaining values for either quota pool.
+- The adapter passively recognizes exact `cursorAuth` membership, subscription
+  status, and membership-owner rows. It accepts a recognized current plan only
+  when the stored owner exactly matches the subject of the existing local
+  Cursor access-token JWT. Only that subject claim is consulted. The token and
+  owner identifier are never logged or serialized.
+- A detected Cursor 3.x plan is diagnostic host-credential evidence, not live
+  entitlement or quota evidence. It carries no quota windows, remains
+  unroutable, and directs the user to Cursor Settings > Usage for the current
+  Cursor Models and Other Models balances. The adapter does not call Cursor's
+  private DashboardService RPC.
+- Older exact usage, credit, plan, and account rows remain an opportunistic
+  compatibility source when a local Cursor build persists them. JSON strings
+  and blobs are accepted, but these legacy rows are not interpreted as the
+  current two-pool Cursor 3.x quota model.
 - Quota `as_of` follows the rows that supply the selected windows. Identical
   copies use their newest safe timestamp, while the oldest selected window sets
   provider age. A row without an embedded quota timestamp remains visible but

@@ -91,12 +91,14 @@ filters, alerts, analytics, drift recovery, routing receipts, and every command.
 
 ## Supported sources
 
-Cloud sources include Claude, Codex, Antigravity / Gemini, Grok, Cursor,
-Windsurf, Kiro, and optional NVIDIA NIM discovery. Local sources are Ollama, LM
-Studio, and Lemonade. Manual entries remain explicitly self-reported. Exact
-endpoints, evidence classes, credential behavior, and limitations are in
-[Data sources](docs/DATA_SOURCES.md); provider-owned cross-checks are in
-[Provider CLIs](docs/PROVIDER_CLIS.md).
+Subscription sources include Claude, Codex, Antigravity / Gemini, Grok, Cursor,
+Windsurf, Kiro, and optional NVIDIA NIM discovery. Cursor 3.x support passively
+detects an owner-bound local plan, but Cursor does not persist its current quota
+pools in the supported local state, so quotabot cannot yet route on Cursor
+headroom. Local sources are Ollama, LM Studio, and Lemonade. Manual entries
+remain explicitly self-reported. Exact endpoints, evidence classes, credential
+behavior, and limitations are in [Data sources](docs/DATA_SOURCES.md);
+provider-owned cross-checks are in [Provider CLIs](docs/PROVIDER_CLIS.md).
 
 ## Desktop app
 
