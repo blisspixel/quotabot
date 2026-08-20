@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
@@ -60,7 +61,12 @@ class CursorAdapter {
 
       String? err;
       if (windows.isEmpty) {
-        err = 'no quota data found in local state';
+        err = state.planEvidenceSource ==
+                ProviderPlanEvidenceSource.hostCredential
+            ? 'Cursor ${state.plan} plan detected, but current Cursor quota is '
+                'unavailable from local state; quotabot cannot route Cursor, '
+                'so check Cursor Settings > Usage'
+            : 'no quota data found in local state';
       } else {
         final spent = _bindingCurrentSpentWindow(windows, asOf);
         if (spent != null) {
@@ -74,6 +80,8 @@ class CursorAdapter {
         displayName: name,
         account: state.account ?? 'default',
         plan: state.plan,
+        planEvidenceSource: state.planEvidenceSource,
+        planEvidenceAsOf: state.planEvidenceSource == null ? null : asOf,
         // Zero is deliberate when the quota row carries no capture timestamp.
         // The database check time proves only when we looked, not when this
         // machine-scoped balance was produced.
@@ -108,7 +116,7 @@ class CursorAdapter {
         for (final row in rows) row['key'] as String: row['value'],
       };
       final decodedByKey = <String, Map<String, dynamic>>{};
-      for (final key in _cursorStateRowKeys) {
+      for (final key in _cursorIdentityRowKeys) {
         final parsed = decodeStateJsonObject(valuesByKey[key]);
         if (parsed != null) decodedByKey[key] = parsed;
       }
@@ -116,6 +124,7 @@ class CursorAdapter {
       final usages = <Map<String, dynamic>>[];
       String? account;
       String? plan;
+      ProviderPlanEvidenceSource? planEvidenceSource;
       for (final key in _cursorIdentityRowKeys) {
         final parsed = decodedByKey[key];
         if (parsed == null) continue;
@@ -134,13 +143,25 @@ class CursorAdapter {
           'membershipType',
         ]);
       }
-      for (final key in _cursorStateRowKeys) {
+      final authPlan = _authenticatedCursorPlan(valuesByKey);
+      if (valuesByKey.containsKey(_cursorMembershipTypeKey)) {
+        plan = authPlan;
+        if (authPlan != null) {
+          planEvidenceSource = ProviderPlanEvidenceSource.hostCredential;
+        }
+      }
+      for (final key in _cursorIdentityRowKeys) {
         final parsed = decodedByKey[key];
         if (parsed == null) continue;
         final projected = _cursorQuotaProjection(parsed);
         if (_looksLikeUsage(projected)) usages.add(projected);
       }
-      return _CursorState(usages: usages, account: account, plan: plan);
+      return _CursorState(
+        usages: usages,
+        account: account,
+        plan: plan,
+        planEvidenceSource: planEvidenceSource,
+      );
     } catch (_) {
       return const _CursorState();
     } finally {
@@ -202,7 +223,98 @@ const List<String> _cursorIdentityRowKeys = [
 
 const List<String> _cursorStateRowKeys = [
   ..._cursorIdentityRowKeys,
+  ..._cursorAuthRowKeys,
 ];
+
+const String _cursorAccessTokenKey = 'cursorAuth/accessToken';
+const String _cursorMembershipTypeKey = 'cursorAuth/stripeMembershipType';
+const String _cursorSubscriptionStatusKey =
+    'cursorAuth/stripeSubscriptionStatus';
+const String _cursorMembershipOwnerKey = 'cursorAuth/stripeMembershipAuthId';
+
+const List<String> _cursorAuthRowKeys = [
+  _cursorAccessTokenKey,
+  _cursorMembershipTypeKey,
+  _cursorSubscriptionStatusKey,
+  _cursorMembershipOwnerKey,
+];
+
+const Map<String, String> _cursorPlanLabels = {
+  'free': 'Free',
+  'pro': 'Pro',
+  'pro_plus': 'Pro Plus',
+  'ultra': 'Ultra',
+  'express': 'Express',
+  'enterprise': 'Enterprise',
+};
+
+const Set<String> _cursorCurrentSubscriptionStatuses = {'active', 'trialing'};
+
+String? _authenticatedCursorPlan(Map<String, Object?> valuesByKey) {
+  final membership = _boundedCursorScalar(
+    valuesByKey[_cursorMembershipTypeKey],
+    maxBytes: 64,
+  );
+  final plan = _cursorPlanLabels[membership];
+  if (plan == null) return null;
+
+  final status = _boundedCursorScalar(
+    valuesByKey[_cursorSubscriptionStatusKey],
+    maxBytes: 64,
+  );
+  if (!_cursorCurrentSubscriptionStatuses.contains(status)) return null;
+
+  final owner = _boundedCursorScalar(
+    valuesByKey[_cursorMembershipOwnerKey],
+    maxBytes: 256,
+  );
+  final token = _boundedCursorScalar(
+    valuesByKey[_cursorAccessTokenKey],
+    maxBytes: 16 * 1024,
+  );
+  final subject = _cursorJwtSubject(token);
+  return owner != null && subject == owner ? plan : null;
+}
+
+String? _cursorJwtSubject(String? token) {
+  if (token == null) return null;
+  final segments = token.split('.');
+  if (segments.length != 3 || segments[1].length > 8 * 1024) return null;
+  try {
+    // This is local ownership correlation only, not token validation. The
+    // resulting plan stays host-credential evidence, and no claim other than
+    // the bounded subject is used.
+    final payloadBytes = base64Url.decode(base64Url.normalize(segments[1]));
+    if (payloadBytes.length > 8 * 1024) return null;
+    final payload = jsonDecode(
+      utf8.decode(payloadBytes, allowMalformed: false),
+    );
+    if (payload is! Map<String, dynamic>) return null;
+    return _boundedCursorScalar(payload['sub'], maxBytes: 256);
+  } catch (_) {
+    return null;
+  }
+}
+
+String? _boundedCursorScalar(Object? value, {required int maxBytes}) {
+  String decoded;
+  if (value is String) {
+    if (value.length > maxBytes) return null;
+    decoded = value;
+  } else if (value is List<int>) {
+    if (value.length > maxBytes) return null;
+    try {
+      decoded = utf8.decode(value, allowMalformed: false);
+    } catch (_) {
+      return null;
+    }
+  } else {
+    return null;
+  }
+  final trimmed = decoded.trim();
+  if (trimmed.isEmpty || utf8.encode(trimmed).length > maxBytes) return null;
+  return trimmed;
+}
 
 const List<String> _cursorIdentityContainers = [
   'profile',
@@ -387,8 +499,14 @@ class _CursorState {
   final List<Map<String, dynamic>> usages;
   final String? account;
   final String? plan;
+  final ProviderPlanEvidenceSource? planEvidenceSource;
 
-  const _CursorState({this.usages = const [], this.account, this.plan});
+  const _CursorState({
+    this.usages = const [],
+    this.account,
+    this.plan,
+    this.planEvidenceSource,
+  });
 }
 
 List<QuotaWindow> _tightestCursorWindows(Iterable<QuotaWindow> windows) {

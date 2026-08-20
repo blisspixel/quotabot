@@ -19,8 +19,8 @@ void main() {
     if (temp.existsSync()) temp.deleteSync(recursive: true);
   });
 
-  File writeDb(Map<String, Object> rows) {
-    final file = File('${temp.path}/state.vscdb');
+  File writeDb(Map<String, Object> rows, {String name = 'state.vscdb'}) {
+    final file = File('${temp.path}/$name');
     final db = sqlite3.open(file.path);
     try {
       db.execute('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value BLOB)');
@@ -38,6 +38,29 @@ void main() {
 
   String updatedNow() => DateTime.now().toUtc().toIso8601String();
 
+  String jwtWithSubject(
+    String subject, {
+    Map<String, Object?> otherClaims = const {},
+  }) {
+    String segment(Map<String, Object?> value) =>
+        base64Url.encode(utf8.encode(jsonEncode(value))).replaceAll('=', '');
+    return '${segment(const {'alg': 'none', 'typ': 'JWT'})}.'
+        '${segment({...otherClaims, 'sub': subject})}.signature';
+  }
+
+  Map<String, Object> authRows({
+    String membership = 'ultra',
+    String status = 'active',
+    String owner = 'cursor-owner',
+    String? token,
+  }) =>
+      {
+        'cursorAuth/accessToken': token ?? jwtWithSubject(owner),
+        'cursorAuth/stripeMembershipType': membership,
+        'cursorAuth/stripeSubscriptionStatus': status,
+        'cursorAuth/stripeMembershipAuthId': owner,
+      };
+
   test('missing database reports Cursor installed without live quota',
       () async {
     final q =
@@ -47,6 +70,149 @@ void main() {
     expect(q.account, 'installed');
     expect(q.windows, isEmpty);
     expect(q.error, contains('Cursor installed'));
+  });
+
+  test('detects an owner-bound Cursor 3 plan without claiming quota', () async {
+    const owner = 'cursor-owner-nondisclosure-sentinel';
+    final token = jwtWithSubject(
+      owner,
+      otherClaims: const {
+        'exp': 0,
+        'prompt': 'do not inspect this unrelated claim',
+      },
+    );
+    final db = writeDb(authRows(owner: owner, token: token));
+
+    final q = await CursorAdapter(dbPath: db.path).collect();
+    final serialized = jsonEncode(q.toJson());
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    expect(q.plan, 'Ultra');
+    expect(q.planEvidenceSource, ProviderPlanEvidenceSource.hostCredential);
+    expect(q.planEvidenceAsOf, isNotNull);
+    expect(q.windows, isEmpty);
+    expect(providerAvailability(q, now).available, isFalse);
+    expect(
+      q.error,
+      'Cursor Ultra plan detected, but current Cursor quota is unavailable '
+      'from local state; quotabot cannot route Cursor, so check Cursor '
+      'Settings > Usage',
+    );
+    expect(q.toJson()['plan'], 'Ultra');
+    expect(q.toJson()['plan_evidence_source'], 'host_credential');
+    expect(q.toJson()['windows'], isEmpty);
+    expect(serialized, isNot(contains(owner)));
+    expect(serialized, isNot(contains(token)));
+    expect(serialized, isNot(contains('active')));
+    expect(serialized, isNot(contains('do not inspect')));
+  });
+
+  test('accepts only recognized plan labels and current statuses', () async {
+    const planCases = {
+      'free': 'Free',
+      'pro': 'Pro',
+      'pro_plus': 'Pro Plus',
+      'ultra': 'Ultra',
+      'express': 'Express',
+      'enterprise': 'Enterprise',
+    };
+    var index = 0;
+    for (final planCase in planCases.entries) {
+      for (final status in const ['active', 'trialing']) {
+        final db = writeDb(
+          authRows(membership: planCase.key, status: status),
+          name: 'recognized_${index++}.vscdb',
+        );
+        final q = await CursorAdapter(dbPath: db.path).collect();
+        expect(q.plan, planCase.value, reason: '${planCase.key}/$status');
+        expect(q.windows, isEmpty);
+      }
+    }
+  });
+
+  test('accepts bounded Cursor auth scalars stored as blobs', () async {
+    final rows = authRows(
+      membership: 'pro_plus',
+      status: 'trialing',
+    ).map((key, value) => MapEntry(key, utf8.encode(value as String)));
+    final db = writeDb(rows);
+
+    final q = await CursorAdapter(dbPath: db.path).collect();
+
+    expect(q.plan, 'Pro Plus');
+    expect(q.windows, isEmpty);
+  });
+
+  test(
+    'rejects a mismatched membership owner and legacy plan fallback',
+    () async {
+      const storedOwner = 'stored-owner-nondisclosure-sentinel';
+      const tokenOwner = 'token-owner-nondisclosure-sentinel';
+      final db = writeDb({
+        ...authRows(owner: storedOwner, token: jwtWithSubject(tokenOwner)),
+        'cursor.account': jsonEncode({'planName': 'Legacy Decoy'}),
+      });
+
+      final q = await CursorAdapter(dbPath: db.path).collect();
+      final serialized = jsonEncode(q.toJson());
+
+      expect(q.plan, isNull);
+      expect(q.planEvidenceSource, isNull);
+      expect(q.windows, isEmpty);
+      expect(q.error, 'no quota data found in local state');
+      expect(serialized, isNot(contains(storedOwner)));
+      expect(serialized, isNot(contains(tokenOwner)));
+      expect(serialized, isNot(contains('Legacy Decoy')));
+    },
+  );
+
+  test('malformed access tokens fail closed without disclosure', () async {
+    final malformed = <String>[
+      'not-a-jwt',
+      'one.two',
+      'one.%%%.three',
+      'one.${base64Url.encode(utf8.encode('[]'))}.three',
+      'one.${base64Url.encode(utf8.encode(jsonEncode({
+            'aud': 'cursor'
+          })))}.three',
+      'one.${base64Url.encode(utf8.encode(jsonEncode({'sub': 7})))}.three',
+    ];
+    for (var index = 0; index < malformed.length; index++) {
+      final token = '${malformed[index]}-secret-sentinel';
+      final db = writeDb(
+        authRows(token: token),
+        name: 'malformed_$index.vscdb',
+      );
+      final q = await CursorAdapter(dbPath: db.path).collect();
+      final serialized = jsonEncode(q.toJson());
+
+      expect(q.plan, isNull, reason: 'malformed token $index');
+      expect(q.windows, isEmpty);
+      expect(serialized, isNot(contains(token)));
+    }
+  });
+
+  test('unknown, inactive, and oversized auth scalars fail closed', () async {
+    final oversizedScalar = List.filled(65, 'x').join();
+    final oversizedOwner = List.filled(257, 'x').join();
+    final oversizedToken = List.filled(16 * 1024 + 1, 'x').join();
+    final cases = <Map<String, Object>>[
+      authRows(membership: 'future_plan'),
+      authRows(status: 'canceled'),
+      authRows(membership: oversizedScalar),
+      authRows(status: oversizedScalar),
+      authRows(owner: oversizedOwner),
+      authRows(token: oversizedToken),
+    ];
+    for (var index = 0; index < cases.length; index++) {
+      final db = writeDb(cases[index], name: 'bounded_$index.vscdb');
+      final q = await CursorAdapter(dbPath: db.path).collect();
+
+      expect(q.plan, isNull, reason: 'bounded case $index');
+      expect(q.planEvidenceSource, isNull);
+      expect(q.windows, isEmpty);
+      expect(q.error, 'no quota data found in local state');
+    }
   });
 
   test('reads monthly included-usage pool, account, and plan from SQLite',
