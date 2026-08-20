@@ -126,10 +126,12 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-Windows packages are not Authenticode-signed yet, so SmartScreen may warn. Do
-not bypass SmartScreen. Checksums and GitHub provenance do not establish Windows
-publisher identity. If Windows declines a normal launch, build from source or
-wait for a signed release.
+The published v0.9.9 Windows packages are not Authenticode-signed, so
+SmartScreen may warn. Do not bypass SmartScreen. Checksums and GitHub provenance
+do not establish Windows publisher identity. Tagged releases after this change
+fail closed until the owner-provisioned signing identity verifies. If Windows
+declines a normal launch of an unsigned package, build from source or wait for
+a signed release.
 
 ### macOS
 

@@ -4,6 +4,12 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Changed
+- Tagged Windows releases now Authenticode-sign every inventoried PE, recapture
+  a post-signing inventory, and fail closed unless the owner-provisioned PFX,
+  timestamp URL, and publisher identity verify. Ordinary CI builds stay
+  unsigned. Published v0.9.9 artifacts remain unsigned.
+
 ### Fixed
 - `quotabot login claude` now uses Anthropic's current platform OAuth callback
   and token hosts (`platform.claude.com`). The retired
