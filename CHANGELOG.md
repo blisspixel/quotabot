@@ -5,6 +5,12 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Updated the optional LiteLLM proxy integration to 1.92.2 with `aiohttp`
+  3.14.3 and `cryptography` 50.0.0. Updated the TypeScript MCP client examples
+  to SDK 1.30.0 with patched `fast-uri`, Hono, and `ip-address` versions,
+  removing the known vulnerable transitives from both reproducible locks. The
+  Python MCP example guide now pins the current maintained v1 release while
+  identifying v2 as the stable breaking line.
 - Tagged Windows releases now Authenticode-sign every inventoried PE, recapture
   a post-signing inventory, and fail closed unless the owner-provisioned PFX,
   timestamp URL, and publisher identity verify. Ordinary CI builds stay

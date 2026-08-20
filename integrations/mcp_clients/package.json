@@ -11,7 +11,7 @@
     "test": "python -m unittest test_mcp_client_snippets.py"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.29.0"
+    "@modelcontextprotocol/sdk": "1.30.0"
   },
   "overrides": {
     "@hono/node-server": "2.0.11"

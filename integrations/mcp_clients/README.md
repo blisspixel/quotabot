@@ -4,13 +4,15 @@ Runnable adoption snippets for using quotabot as a routing MCP server from
 Python or TypeScript. They call quota metadata tools only. They do not send
 prompts, code, or model requests.
 
-## SDK guidance checked July 21, 2026
+## SDK guidance checked August 20, 2026
 
-- Python: use the stable MCP Python SDK v1 line for production clients and pin
-  `mcp>=1.28,<2`. PyPI latest was `1.28.1` when checked.
+- Python: these snippets remain on the maintained MCP Python SDK v1
+  compatibility line and pin `mcp>=1.29,<2`. PyPI stable is now 2.0.0, while
+  1.29.0 is the current v1 release. Migrating the examples to the breaking v2
+  API belongs in a separately reviewed change.
 - TypeScript: use `@modelcontextprotocol/sdk` and the high-level `Client` with
   `StreamableHTTPClientTransport` or `StdioClientTransport`. npm latest was
-  `1.29.0` when checked.
+  `1.30.0` when checked.
 - TypeScript snippets require Node.js 20 or later. The lock overrides the MCP
   SDK's transitive Hono Node adapter to patched version 2.0.11 because versions
   below 2.0.5 are affected by the Windows path traversal in
@@ -24,9 +26,10 @@ prompts, code, or model requests.
   `resources/subscribe`; read the resource after
   `notifications/resources/updated` to receive `quotabot.alerts.v1`.
 
-Sources checked: MCP Python SDK v1.x README and client docs, MCP Python SDK v1.x
-`streamable_http.py`, MCP TypeScript SDK v1.x README, client source, Streamable
-HTTP transport source, and the Hono Node adapter advisory and v2 release notes.
+Sources checked: MCP Python SDK v2 and v1.x README and client docs, MCP Python
+SDK v1.x `streamable_http.py`, MCP TypeScript SDK v1.x README, client source,
+Streamable HTTP transport source, and the Hono Node adapter advisory and v2
+release notes.
 
 ## Start quotabot
 
@@ -64,10 +67,10 @@ owner-only permissions, not under the repository.
 
 ## Python
 
-Install the stable SDK line:
+Install the maintained v1 compatibility line used by these snippets:
 
 ```bash
-python -m pip install "mcp>=1.28,<2" httpx
+python -m pip install "mcp>=1.29,<2" httpx
 ```
 
 Run:
@@ -82,7 +85,8 @@ Environment:
 - `QUOTABOT_MCP_URL`: defaults to `http://127.0.0.1:8722/mcp`.
 - `QUOTABOT_MCP_TOKEN`: required bearer token for Streamable HTTP; use at least
   32 characters.
-- `QUOTABOT_TASK`: `simple`, `standard`, or `hard`, sent to `suggest_model`.
+- `QUOTABOT_TASK`: `simple`, `standard`, `complex`, `hard`, or `reasoning`, sent
+  to `suggest_model`.
 - `QUOTABOT_COLLECTOR_DIR`: collector directory for stdio. Defaults to this
   repository's `collector/`.
 - `DART`: Dart executable. Defaults to `dart`.
