@@ -67,7 +67,7 @@ void main() {
     );
     expect(
       claudeNetwork.any((record) =>
-          record['host'] == 'console.anthropic.com' &&
+          record['host'] == 'platform.claude.com' &&
           record['path'] == '/v1/oauth/token' &&
           record['data_class'] == 'credential_exchange' &&
           record['credential_material'] == true),
