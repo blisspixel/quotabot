@@ -629,8 +629,10 @@ void main() {
       expect(p.verifier.length, greaterThanOrEqualTo(43));
     });
 
-    test('randomState is unique and url-safe', () {
+    test('randomState is 256-bit, unique, and url-safe', () {
       final a = randomState(), b = randomState();
+      expect(a, hasLength(43));
+      expect(b, hasLength(43));
       expect(a, isNot(b));
       expect(a, matches(RegExp(r'^[A-Za-z0-9_\-]+$')));
     });
@@ -1105,6 +1107,16 @@ void main() {
       expect(shown.scheme, 'https');
       expect(shown.host, 'claude.ai');
       expect(shown.path, '/oauth/authorize');
+      expect(shown.queryParameters['state'], hasLength(43));
+      expect(
+        shown.queryParameters['scope'],
+        'user:profile user:inference',
+      );
+      expect(
+        shown.toString(),
+        contains('scope=user%3Aprofile%20user%3Ainference'),
+      );
+      expect(shown.toString(), isNot(contains('scope=user%3Aprofile+')));
       expect(
         shown.queryParameters['redirect_uri'],
         'https://platform.claude.com/oauth/code/callback',

@@ -94,18 +94,23 @@ class AnthropicAuth {
   }) async {
     final pkce = pkcePair();
     final state = randomState();
-    final authUrl = Uri.parse(_authEndpoint).replace(
-      queryParameters: {
-        'code': 'true',
-        'client_id': clientId,
-        'response_type': 'code',
-        'redirect_uri': _redirect,
-        'scope': _scope,
-        'state': state,
-        'code_challenge': pkce.challenge,
-        'code_challenge_method': 'S256',
-      },
-    ).toString();
+    final authUrl = Uri.parse(_authEndpoint)
+        .replace(
+          queryParameters: {
+            'code': 'true',
+            'client_id': clientId,
+            'response_type': 'code',
+            'redirect_uri': _redirect,
+            'scope': _scope,
+            'state': state,
+            'code_challenge': pkce.challenge,
+            'code_challenge_method': 'S256',
+          },
+        )
+        .toString()
+        // Dart renders query-parameter spaces as `+`. Anthropic's authorize
+        // flow is verified with the unambiguous percent-encoded separator.
+        .replaceAll('+', '%20');
 
     showUrl(authUrl);
     await (openBrowser ?? openInBrowser)(authUrl);

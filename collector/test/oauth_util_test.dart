@@ -8,10 +8,13 @@ import 'package:quotabot_collector/auth/oauth_util.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('randomState is url-safe, non-empty, and unique', () {
+  test('randomState has 256 bits of URL-safe entropy and is unique', () {
     final a = randomState();
     final b = randomState();
-    expect(a, isNotEmpty);
+    // 32 random bytes encode to 43 unpadded base64url characters. Anthropic's
+    // authorize POST rejects the previous 16-byte, 22-character value.
+    expect(a, hasLength(43));
+    expect(b, hasLength(43));
     expect(a, isNot(contains('=')));
     expect(a, matches(RegExp(r'^[A-Za-z0-9_-]+$')));
     expect(a, isNot(b));

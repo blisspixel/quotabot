@@ -11,6 +11,10 @@ Notable changes to quotabot. Newest first.
   unsigned. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
+- `quotabot login claude` now sends a 32-byte, 43-character OAuth state value
+  accepted by Anthropic's authorize POST and encodes the scope separator as an
+  unambiguous `%20`. The prior 22-character state could show a valid-looking
+  consent page and then fail with "Invalid request format" after authorization.
 - `quotabot login claude` now uses Anthropic's current platform OAuth callback
   and token hosts (`platform.claude.com`). The retired
   `console.anthropic.com` generation rejected the public Claude Code client
