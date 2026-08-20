@@ -259,10 +259,12 @@ def sign_windows_candidate(
         try:
             pfx_path.write_bytes(b"\x00" * min(pfx_path.stat().st_size, MAX_PFX_BYTES))
         except OSError:
+            # Best-effort wipe of the temp PFX. Deletion still runs next.
             pass
         try:
             pfx_path.unlink()
         except OSError:
+            # Temp-file cleanup must not mask a signing success or failure.
             pass
 
 
