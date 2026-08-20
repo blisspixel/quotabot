@@ -1032,8 +1032,14 @@ void main() {
       final mock = MockClient((req) async {
         expect(
             req.url.toString(), contains('platform.claude.com/v1/oauth/token'));
-        expect(req.body, contains('grant_type=refresh_token'));
-        expect(req.headers['anthropic-beta'], 'oauth-2025-04-20');
+        expect(req.headers['content-type'], contains('application/json'));
+        expect(req.body, isNot(contains('grant_type=')));
+        expect(jsonDecode(req.body), {
+          'grant_type': 'refresh_token',
+          'refresh_token': 'R1',
+          'client_id': '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+          'scope': 'user:profile user:inference',
+        });
         return http.Response(
           jsonEncode({'access_token': 'AT', 'expires_in': 3600}),
           200,
@@ -1042,6 +1048,20 @@ void main() {
       final t = await AnthropicAuth(client: mock).refresh('R1');
       expect(t!.accessToken, 'AT');
       expect(t.refreshToken, 'R1'); // carried forward
+    });
+
+    test('refresh stays fail-soft on a rejected token response', () async {
+      final mock = MockClient((req) async {
+        expect(req.headers['content-type'], contains('application/json'));
+        return http.Response(
+          jsonEncode({
+            'error': 'invalid_grant',
+            'error_description': 'Refresh token not found or invalid',
+          }),
+          400,
+        );
+      });
+      expect(await AnthropicAuth(client: mock).refresh('R1'), isNull);
     });
 
     test('loginManual uses the current platform OAuth hosts', () async {
@@ -1054,14 +1074,18 @@ void main() {
           req.url.toString(),
           'https://platform.claude.com/v1/oauth/token',
         );
+        expect(req.headers['content-type'], contains('application/json'));
+        expect(req.body, isNot(contains('grant_type=')));
+        final payload = jsonDecode(req.body) as Map<String, dynamic>;
+        expect(payload['grant_type'], 'authorization_code');
+        expect(payload['code'], 'pasted-code');
+        expect(payload['state'], shown.queryParameters['state']);
         expect(
-          req.body,
-          contains(
-            'redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback',
-          ),
+          payload['redirect_uri'],
+          'https://platform.claude.com/oauth/code/callback',
         );
-        expect(req.body, contains('grant_type=authorization_code'));
-        expect(req.body, contains('code=pasted-code'));
+        expect(payload['client_id'], '9d1c250a-e61b-44d9-88ed-5944d1962f5e');
+        expect(payload['code_verifier'], isNotEmpty);
         return http.Response(
           jsonEncode({
             'access_token': 'AT',
@@ -1074,7 +1098,7 @@ void main() {
 
       final tokens = await AnthropicAuth(client: mock).loginManual(
         showUrl: (url) => shown = Uri.parse(url),
-        promptCode: () async => 'pasted-code',
+        promptCode: () async => 'pasted-code#${shown.queryParameters['state']}',
         openBrowser: (_) async {},
       );
 
@@ -1087,6 +1111,41 @@ void main() {
       );
       expect(tokens.accessToken, 'AT');
       expect(tokens.refreshToken, 'RT');
+    });
+
+    test('loginManual reports a bounded Anthropic token error', () async {
+      final mock = MockClient((req) async {
+        expect(req.headers['content-type'], contains('application/json'));
+        return http.Response(
+          jsonEncode({
+            'error': 'invalid_request',
+            'error_description': 'Invalid request format',
+            'access_token': 'should-not-leak',
+          }),
+          400,
+        );
+      });
+
+      await expectLater(
+        AnthropicAuth(client: mock).loginManual(
+          showUrl: (_) {},
+          promptCode: () async => 'pasted-code',
+          openBrowser: (_) async {},
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              contains('HTTP 400'),
+              contains('invalid_request'),
+              contains('Invalid request format'),
+              isNot(contains('should-not-leak')),
+              isNot(contains('access_token')),
+            ),
+          ),
+        ),
+      );
     });
 
     test('freshAccessToken returns a still-fresh grant without network',
@@ -1119,7 +1178,7 @@ void main() {
         Tokens(accessToken: 'old', refreshToken: 'R0', expiresAt: 1),
       );
       final mock = MockClient((req) async {
-        expect(req.body, contains('refresh_token=R0'));
+        expect(jsonDecode(req.body)['refresh_token'], 'R0');
         return http.Response(
           jsonEncode({
             'access_token': 'new',

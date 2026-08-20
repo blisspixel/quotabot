@@ -387,7 +387,8 @@ Antigravity can run two ways:
   device-code flow; Antigravity and Codex use a loopback plus PKCE
   authorization-code flow against the provider's public client (Codex on a
   fixed loopback port); Claude uses a PKCE authorization-code flow whose
-  platform callback shows a code to paste back.
+  platform callback shows a `code#state` value to paste back. The token
+  exchange POSTs JSON to `https://platform.claude.com/v1/oauth/token`.
   Override the public client id with `QUOTABOT_ANTHROPIC_CLIENT_ID`,
   `QUOTABOT_OPENAI_CLIENT_ID`, or
   `QUOTABOT_GOOGLE_CLIENT_ID`/`QUOTABOT_GOOGLE_CLIENT_SECRET`. Claude and Codex

@@ -275,7 +275,7 @@ locally discovered account identity, so run that provider app on this machine
 first and retain its local account state.
 
 ```bash
-quotabot login claude        # opens a browser; paste back the code it shows
+quotabot login claude        # opens a browser; paste back the code#state value
 quotabot login codex         # opens a browser; loopback capture
 quotabot login grok          # device-code flow; confirm in the browser
 quotabot login antigravity   # opens a browser; sign in with the account you want

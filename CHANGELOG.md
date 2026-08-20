@@ -10,6 +10,11 @@ Notable changes to quotabot. Newest first.
   `console.anthropic.com` generation rejected the public Claude Code client
   with "Invalid request format", so an idle machine could not mint a
   refreshable usage-metadata grant.
+- `quotabot login claude` now POSTs the token exchange as JSON, matching
+  Claude Code's current `platform.claude.com/v1/oauth/token` contract.
+  Form-urlencoded bodies on that host can fail with no grant written. A
+  rejected exchange now prints the HTTP status and Anthropic's bounded error
+  text instead of a generic "token exchange failed".
 - Linux desktop release verify now downloads, checksums, and attests the
   draft archive before installing GTK and xvfb. CI and release share a
   time-bounded apt helper, and the verify job budget is 45 minutes, so a
