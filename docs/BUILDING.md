@@ -298,7 +298,11 @@ The Windows order is build, capture the unsigned sign set, sign every
 inventoried PE, capture a new post-signing inventory, verify it, package
 without rebuilding, then require the extracted archive to match that
 post-signing inventory. Ordinary CI packaging stays unsigned and cannot read
-the signing secrets.
+the signing secrets. Before signing begins, the signer also requires the
+complete current candidate tree to equal the unsigned inventory. The clean
+release-verification jobs download each exact draft Windows archive, inventory
+the extracted payload again, rerun the complete native signature verifier, and
+retain its bounded receipt before publication can continue.
 
 The current scanner is intentionally Windows-only. The roadmap still requires
 the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be

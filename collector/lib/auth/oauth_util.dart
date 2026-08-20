@@ -22,8 +22,11 @@ String _randomUrlSafe(int bytes) {
   return base64Url.encode(b).replaceAll('=', '');
 }
 
-/// A random opaque string for the OAuth `state` parameter.
-String randomState() => _randomUrlSafe(16);
+/// A 256-bit random opaque string for the OAuth `state` parameter.
+///
+/// Keep this at 32 bytes: Anthropic's authorize POST rejects the shorter
+/// 16-byte, 22-character state that quotabot used previously.
+String randomState() => _randomUrlSafe(32);
 
 /// Generates a PKCE verifier and its S256 challenge.
 Pkce pkcePair() {

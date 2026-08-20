@@ -5,12 +5,44 @@ Notable changes to quotabot. Newest first.
 ## Unreleased
 
 ### Changed
+- Updated the optional LiteLLM proxy integration to 1.92.2 with `aiohttp`
+  3.14.3 and `cryptography` 50.0.0. Updated the TypeScript MCP client examples
+  to SDK 1.30.0 with patched `fast-uri`, Hono, and `ip-address` versions,
+  removing the known vulnerable transitives from both reproducible locks. The
+  Python MCP example guide now pins the current maintained v1 release while
+  identifying v2 as the stable breaking line.
 - Tagged Windows releases now Authenticode-sign every inventoried PE, recapture
   a post-signing inventory, and fail closed unless the owner-provisioned PFX,
   timestamp URL, and publisher identity verify. Ordinary CI builds stay
   unsigned. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
+- `quotabot login claude` now sends a 32-byte, 43-character OAuth state value
+  accepted by Anthropic's authorize POST and encodes the scope separator as an
+  unambiguous `%20`. The prior 22-character state could show a valid-looking
+  consent page and then fail with "Invalid request format" after authorization.
+- Logout now removes every exact account grant slot, including malformed and
+  legacy records that cannot be discovered by their embedded account marker,
+  without following symbolic links or touching similarly prefixed files.
+- OAuth login now rejects successful HTTP responses that omit a nonempty access
+  token. Background refresh remains fail-soft and preserves the stored grant
+  when Google, xAI, Anthropic, or OpenAI returns an unusable token response.
+- Healthy subscriptions with a known reset time now keep the fail-soft
+  passthrough fallback instead of also telling callers to wait for the selected
+  provider. Only an unavailable subscription can produce a wait-for-reset
+  fallback in CLI, MCP, HTTP, receipt, and desktop output.
+- Cache-only routing now skips an individual snapshot whose metadata or contents
+  cannot be read and continues loading healthy sibling providers, rather than
+  silently stopping at the first filesystem error.
+- Windows source setup and the new one-command contributor gate now share the
+  space-safe Dart invocation for collector and Flutter native-asset commands,
+  including Flutter installs located under a user profile containing spaces.
+- Windows release signing now passes the RFC 3161 timestamp URL before the
+  SHA-256 timestamp digest option, as required by SignTool, and refuses to sign
+  when any file in the candidate tree differs from its unsigned inventory.
+- Tagged Windows release jobs now download the exact draft CLI and desktop
+  archives, re-inventory and independently verify every embedded signature,
+  and retain bounded verification receipts before publication can continue.
 - `quotabot login claude` now uses Anthropic's current platform OAuth callback
   and token hosts (`platform.claude.com`). The retired
   `console.anthropic.com` generation rejected the public Claude Code client

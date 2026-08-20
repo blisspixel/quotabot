@@ -60,6 +60,7 @@ class GoogleAuth {
   Future<Tokens> loginLoopback({
     required void Function(String url) showUrl,
     String? account,
+    Future<void> Function(String url)? openBrowser,
   }) async {
     if (clientId.isEmpty || clientSecret.isEmpty) {
       throw StateError(
@@ -90,7 +91,7 @@ class GoogleAuth {
     late final String code;
     try {
       showUrl(authUrl);
-      await openInBrowser(authUrl);
+      await (openBrowser ?? openInBrowser)(authUrl);
       code = await capture.code;
     } catch (_) {
       await capture.close();
@@ -116,14 +117,18 @@ class GoogleAuth {
   }
 
   Future<Tokens?> refresh(String refreshToken) async {
-    final json = await _post({
-      'grant_type': 'refresh_token',
-      'refresh_token': refreshToken,
-      'client_id': clientId,
-      'client_secret': clientSecret,
-    });
-    if (json == null) return null;
-    return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    try {
+      final json = await _post({
+        'grant_type': 'refresh_token',
+        'refresh_token': refreshToken,
+        'client_id': clientId,
+        'client_secret': clientSecret,
+      });
+      if (json == null) return null;
+      return Tokens.fromOAuth(json, priorRefresh: refreshToken);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Fresh access token from quotabot's own grant, refreshing and persisting as
@@ -137,14 +142,15 @@ class GoogleAuth {
           if (stored.isFresh) return stored.accessToken;
           if (stored.refreshToken == null) return null;
           final refreshed = await refresh(stored.refreshToken!);
-          if (refreshed?.accessToken == null) return null;
+          final accessToken = refreshed?.accessToken;
+          if (accessToken == null || accessToken.isEmpty) return null;
           // Persist the rotated token only to the slot it was loaded from.
           // Writing the default slot too would let one account overwrite the
           // provider-default grant and lend that token to another account.
           try {
             if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
           } catch (_) {}
-          return refreshed!.accessToken;
+          return accessToken;
         },
         account: account,
       );

@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import os
+import struct
 import tempfile
 import unittest
 import unittest.mock as mock
@@ -14,6 +15,17 @@ from pathlib import Path
 
 from tools import sign_windows
 from tools.sign_windows import WindowsSignError
+
+
+def _pe() -> bytes:
+    payload = bytearray(512)
+    payload[0:2] = b"MZ"
+    struct.pack_into("<I", payload, 0x3C, 0x80)
+    payload[0x80:0x84] = b"PE\x00\x00"
+    struct.pack_into("<HHIIIHH", payload, 0x84, 0x8664, 1, 0, 0, 0, 0xF0, 0x2022)
+    struct.pack_into("<H", payload, 0x98, 0x20B)
+    struct.pack_into("<II", payload, 0xD0, 4096, 512)
+    return bytes(payload)
 
 
 def _manifest(
@@ -116,9 +128,18 @@ class SignWindowsTests(unittest.TestCase):
             Path("quotabot.exe"),
         )
         self.assertEqual(
-            command[1:7], ["sign", "/fd", "SHA256", "/td", "SHA256", "/tr"]
+            command[1:7],
+            [
+                "sign",
+                "/fd",
+                "SHA256",
+                "/tr",
+                "http://timestamp.digicert.com",
+                "/td",
+            ],
         )
-        self.assertEqual(command[7], "http://timestamp.digicert.com")
+        self.assertEqual(command[7], "SHA256")
+        self.assertLess(command.index("/tr"), command.index("/td"))
         self.assertIn("/f", command)
         self.assertIn("/p", command)
         self.assertEqual(command[command.index("/p") + 1], "secret-password")
@@ -175,6 +196,44 @@ class SignWindowsTests(unittest.TestCase):
                     architecture="x64",
                 )
             self.assertEqual(raised.exception.code, "inventory_invalid")
+
+    def test_current_candidate_must_equal_complete_unsigned_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "candidate"
+            launcher = root / "bin" / "quotabot.exe"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_bytes(_pe())
+            notice = root / "lib" / "notice.txt"
+            notice.parent.mkdir()
+            notice.write_text("original\n", encoding="utf-8")
+            expected = sign_windows.inventory_native_code(
+                root,
+                platform="windows",
+                surface="cli",
+                architecture="x64",
+            ).to_dict()
+            manifest = Path(directory) / "unsigned-inventory.json"
+            manifest.write_text(json.dumps(expected), encoding="utf-8")
+
+            self.assertEqual(
+                sign_windows._require_current_inventory(
+                    manifest,
+                    root,
+                    surface="cli",
+                    architecture="x64",
+                ),
+                expected,
+            )
+
+            notice.write_text("changed\n", encoding="utf-8")
+            with self.assertRaises(WindowsSignError) as raised:
+                sign_windows._require_current_inventory(
+                    manifest,
+                    root,
+                    surface="cli",
+                    architecture="x64",
+                )
+            self.assertEqual(raised.exception.code, "candidate_changed")
 
     def test_main_missing_secret_prints_bounded_json(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -255,6 +314,11 @@ class SignWindowsTests(unittest.TestCase):
                 return mock.Mock(returncode=0, stdout=b"Successfully signed")
 
             with (
+                mock.patch.object(
+                    sign_windows,
+                    "_require_current_inventory",
+                    return_value=json.loads(manifest.read_text(encoding="utf-8")),
+                ),
                 mock.patch.object(
                     sign_windows,
                     "find_signtool",

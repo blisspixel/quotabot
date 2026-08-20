@@ -76,6 +76,7 @@ class OpenAiAuth {
   Future<Tokens> loginLoopback({
     required void Function(String url) showUrl,
     String? account,
+    Future<void> Function(String url)? openBrowser,
   }) async {
     final pkce = pkcePair();
     final state = randomState();
@@ -115,7 +116,7 @@ class OpenAiAuth {
     late final String code;
     try {
       showUrl(authUrl);
-      await openInBrowser(authUrl);
+      await (openBrowser ?? openInBrowser)(authUrl);
       code = await capture.code;
     } catch (_) {
       await capture.close();
@@ -140,14 +141,18 @@ class OpenAiAuth {
   }
 
   Future<_OpenAiTokenResponse?> _refreshResponse(String refreshToken) async {
-    final json = await _post({
-      'grant_type': 'refresh_token',
-      'refresh_token': refreshToken,
-      'client_id': clientId,
-      'scope': _scope,
-    });
-    if (json == null) return null;
-    return _tokenResponse(json, priorRefresh: refreshToken);
+    try {
+      final json = await _post({
+        'grant_type': 'refresh_token',
+        'refresh_token': refreshToken,
+        'client_id': clientId,
+        'scope': _scope,
+      });
+      if (json == null) return null;
+      return _tokenResponse(json, priorRefresh: refreshToken);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Tokens?> refresh(String refreshToken) async =>
@@ -233,11 +238,12 @@ class OpenAiAuth {
         if (stored.refreshToken == null) return null;
         final response = await _refreshResponse(stored.refreshToken!);
         final refreshed = response?.tokens;
-        if (refreshed?.accessToken == null) return null;
+        final accessToken = refreshed?.accessToken;
+        if (accessToken == null || accessToken.isEmpty) return null;
         try {
           if (!TokenStore.replaceIfCurrent(record, refreshed!)) return null;
         } catch (_) {}
-        return refreshed!.accessToken;
+        return accessToken;
       },
       account: account,
     );

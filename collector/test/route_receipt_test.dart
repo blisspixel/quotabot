@@ -119,7 +119,10 @@ void main() {
         }),
       );
       expect(receipt['alternatives'], isEmpty);
-      expect((receipt['fallback'] as Map)['kind'], 'soonest_reset');
+      final fallback = receipt['fallback'] as Map<String, dynamic>;
+      expect(fallback['kind'], 'passthrough');
+      expect(fallback['provider'], isNull);
+      expect(receipt['explanation'], isNot(contains('resets soonest')));
 
       final encoded = jsonEncode(receipt).toLowerCase();
       for (final forbidden in [

@@ -371,6 +371,7 @@ $doctorVerifiedBeforeDesktopRestart = $false
 $desktopSkipped = $false
 . (Join-Path $scriptDir 'windows-build-prereqs.ps1')
 . (Join-Path $scriptDir 'windows-architecture.ps1')
+. (Join-Path $scriptDir 'windows-space-safe-dart.ps1')
 $windowsArch = Get-QuotabotWindowsArchitecture
 
 if (-not $CliOnly -and -not $NoApp) {
@@ -638,8 +639,6 @@ if ($dartBin) {
   try {
     Push-Location $collector
     try {
-      & dart pub get --enforce-lockfile | Out-Null
-      if ($LASTEXITCODE -ne 0) { throw "dart pub get failed with exit code $LASTEXITCODE" }
       & (Join-Path $scriptDir 'package-cli.ps1')
     } finally { Pop-Location }
     $asset = Get-QuotabotWindowsReleaseArchive -RepositoryRoot $root -Architecture $windowsArch
@@ -725,14 +724,30 @@ try {
       if ($windowsBuildPrereqs) {
         Write-Ok "Visual Studio ATL ready: $($windowsBuildPrereqs.VisualStudioPath)"
       }
-      & flutter config --enable-windows-desktop | Out-Null
-      Push-Location $app
+      $desktopToolchain = Enable-QuotabotSpaceSafeDart `
+        -PreferredRoot $root `
+        -IncludeFlutter
       try {
-        & flutter pub get --enforce-lockfile
-        if ($LASTEXITCODE -ne 0) { throw "flutter pub get failed with exit code $LASTEXITCODE" }
-        & flutter build windows --release --no-pub
-        if ($LASTEXITCODE -ne 0) { throw "flutter build windows failed with exit code $LASTEXITCODE" }
-      } finally { Pop-Location }
+        if ($desktopToolchain.Kind -ne 'verbatim') {
+          Write-Ok "Using space-free Dart path $($desktopToolchain.DartExecutable) for Flutter native assets"
+        }
+        Invoke-QuotabotFlutter `
+          -State $desktopToolchain `
+          -Arguments @('config', '--enable-windows-desktop') | Out-Null
+        Push-Location $app
+        try {
+          Invoke-QuotabotFlutter `
+            -State $desktopToolchain `
+            -Arguments @('pub', 'get', '--enforce-lockfile')
+          Invoke-QuotabotFlutter `
+            -State $desktopToolchain `
+            -Arguments @('build', 'windows', '--release', '--no-pub')
+        } finally {
+          Pop-Location
+        }
+      } finally {
+        Disable-QuotabotSpaceSafeDart -State $desktopToolchain
+      }
 
       $builtAppExe = Resolve-BuiltAppExe
       if (-not $builtAppExe) { throw "Desktop build finished, but quotabot.exe was not found under app\build\windows" }

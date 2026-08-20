@@ -284,6 +284,12 @@ quotabot verify --require-live --profile=NAME  # strict automation gate
 quotabot logout claude       # or: codex | grok | antigravity
 ```
 
+For Claude, the login succeeds only after the callback page displays the
+`code#state` value. Loading the consent page alone does not validate the request.
+If the browser reports an authorization error after you select Authorize, no
+code was issued: cancel the waiting CLI with Ctrl+C, confirm that quotabot is
+current, and retry the login rather than pasting another value.
+
 These flows need no manual cloud project setup. Antigravity performs its
 provider-required account onboarding request automatically. quotabot stores its
 refreshing grant separately and never writes a host app's credentials. Claude

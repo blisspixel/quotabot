@@ -99,6 +99,23 @@ Future<List<T>> _runSerializedRefreshPair<T>({
   }
 }
 
+Future<void> _completeLoopbackLogin(String authUrl) async {
+  final authorize = Uri.parse(authUrl);
+  final redirect = Uri.parse(authorize.queryParameters['redirect_uri']!);
+  final response = await http
+      .get(
+        redirect.replace(
+          host: '127.0.0.1',
+          queryParameters: {
+            'code': 'test-code',
+            'state': authorize.queryParameters['state']!,
+          },
+        ),
+      )
+      .timeout(const Duration(seconds: 5));
+  expect(response.statusCode, 200);
+}
+
 void main() {
   late Directory tempConfig;
 
@@ -147,6 +164,28 @@ void main() {
         isFalse,
       );
       expect(Tokens(accessToken: 'a').isFresh, isFalse);
+      expect(
+        Tokens(accessToken: '', expiresAt: nowEpoch() + 3600).isFresh,
+        isFalse,
+      );
+    });
+
+    test('fromOAuth rejects missing and empty access tokens', () {
+      for (final response in <Map<String, dynamic>>[
+        {'refresh_token': 'R', 'expires_in': 3600},
+        {'access_token': '', 'refresh_token': 'R', 'expires_in': 3600},
+      ]) {
+        expect(
+          () => Tokens.fromOAuth(response),
+          throwsA(
+            isA<StateError>().having(
+              (error) => error.message,
+              'message',
+              contains('no usable access token'),
+            ),
+          ),
+        );
+      }
     });
 
     test('fromOAuth carries the prior refresh token forward', () {
@@ -607,6 +646,107 @@ void main() {
       expect(TokenStore.exists(provider, account: account), isTrue);
     });
 
+    test('clearAccounts removes every exact account slot by filename', () {
+      const ownerlessAccount = 'ownerless@example.com';
+      const mismatchedAccount = 'mismatched@example.com';
+      final authDir = quotabotDir('auth');
+      File accountSlot(String account) {
+        final hash = sha256.convert(utf8.encode(account)).toString();
+        return File('${authDir.path}/${provider}_account_$hash.json');
+      }
+
+      final ownerless = accountSlot(ownerlessAccount)
+        ..writeAsStringSync(
+          jsonEncode({
+            'access_token': 'ownerless-access',
+            'refresh_token': 'ownerless-refresh',
+          }),
+        );
+      final mismatched = accountSlot(mismatchedAccount)
+        ..writeAsStringSync(
+          jsonEncode({
+            'access_token': 'mismatched-access',
+            '_account': 'different@example.com',
+          }),
+        );
+      final malformed = File(
+        '${authDir.path}/${provider}_account_${List.filled(64, 'a').join()}.json',
+      )..writeAsStringSync('{');
+      final oversized = File(
+        '${authDir.path}/${provider}_account_${List.filled(64, 'b').join()}.json',
+      )..writeAsBytesSync(List.filled(128 * 1024 + 1, 0x20));
+      final similarlyPrefixed = File('${ownerless.path}.backup')
+        ..writeAsStringSync('preserve');
+      final shortHash = File(
+        '${authDir.path}/${provider}_account_${List.filled(63, 'c').join()}.json',
+      )..writeAsStringSync('preserve');
+
+      expect(
+        TokenStore.load(provider, account: ownerlessAccount)?.accessToken,
+        'ownerless-access',
+      );
+
+      TokenStore.clearAccounts(provider);
+
+      for (final removed in [ownerless, mismatched, malformed, oversized]) {
+        expect(removed.existsSync(), isFalse, reason: removed.path);
+        expect(File('${removed.path}.lock').existsSync(), isTrue);
+      }
+      expect(
+        TokenStore.load(provider, account: ownerlessAccount),
+        isNull,
+      );
+      expect(similarlyPrefixed.readAsStringSync(), 'preserve');
+      expect(shortHash.readAsStringSync(), 'preserve');
+    });
+
+    test('clearAccounts unlinks an exact symbolic-link slot only', () {
+      const account = 'linked@example.com';
+      final target = File('${tempConfig.path}/outside-token.json')
+        ..writeAsStringSync('outside-secret');
+      final hash = sha256.convert(utf8.encode(account)).toString();
+      final slotPath =
+          '${quotabotDir('auth').path}/${provider}_account_$hash.json';
+      try {
+        Link(slotPath).createSync(target.path);
+      } on FileSystemException {
+        if (Platform.isWindows) return;
+        rethrow;
+      }
+
+      TokenStore.clearAccounts(provider);
+
+      expect(
+        FileSystemEntity.typeSync(slotPath, followLinks: false),
+        FileSystemEntityType.notFound,
+      );
+      expect(target.readAsStringSync(), 'outside-secret');
+      expect(File('$slotPath.lock').existsSync(), isTrue);
+    });
+
+    test('clearAccounts unlinks an exact hard-link slot only', () {
+      const account = 'hard-linked@example.com';
+      final target = File('${tempConfig.path}/outside-hard-token.json')
+        ..writeAsStringSync('outside-hard-secret');
+      final hash = sha256.convert(utf8.encode(account)).toString();
+      final slot = File(
+        '${quotabotDir('auth').path}/${provider}_account_$hash.json',
+      );
+      final created = Platform.isWindows
+          ? Process.runSync(
+              'fsutil',
+              ['hardlink', 'create', slot.path, target.path],
+            )
+          : Process.runSync('ln', [target.path, slot.path]);
+      if (created.exitCode != 0) return;
+
+      TokenStore.clearAccounts(provider);
+
+      expect(slot.existsSync(), isFalse);
+      expect(target.readAsStringSync(), 'outside-hard-secret');
+      expect(File('${slot.path}.lock').existsSync(), isTrue);
+    });
+
     test('rejects empty or control-character account ids', () {
       expect(
         () => TokenStore.save(provider, Tokens(accessToken: 'a'), account: ' '),
@@ -629,14 +769,81 @@ void main() {
       expect(p.verifier.length, greaterThanOrEqualTo(43));
     });
 
-    test('randomState is unique and url-safe', () {
+    test('randomState is 256-bit, unique, and url-safe', () {
       final a = randomState(), b = randomState();
+      expect(a, hasLength(43));
+      expect(b, hasLength(43));
       expect(a, isNot(b));
       expect(a, matches(RegExp(r'^[A-Za-z0-9_\-]+$')));
     });
   });
 
   group('refresh', () {
+    test('unusable successful refreshes preserve every stored grant', () async {
+      final mock = MockClient((_) async => http.Response('{}', 200));
+      final providers = <String>[
+        GoogleAuth.provider,
+        XaiAuth.provider,
+        AnthropicAuth.provider,
+        OpenAiAuth.provider,
+      ];
+      addTearDown(() {
+        for (final provider in providers) {
+          TokenStore.clear(provider);
+          TokenStore.clearAccounts(provider);
+        }
+      });
+
+      Future<void> verify(String provider, Future<Object?> Function() read,
+          {String? account}) async {
+        TokenStore.save(
+          provider,
+          const Tokens(
+            accessToken: 'old-access',
+            refreshToken: 'old-refresh',
+            expiresAt: 1,
+          ),
+          account: account,
+        );
+        expect(await read(), isNull, reason: provider);
+        final stored = TokenStore.load(provider, account: account);
+        expect(stored?.accessToken, 'old-access', reason: provider);
+        expect(stored?.refreshToken, 'old-refresh', reason: provider);
+      }
+
+      await verify(
+        GoogleAuth.provider,
+        () => GoogleAuth(client: mock).freshAccessToken(),
+      );
+      await verify(
+        XaiAuth.provider,
+        () => XaiAuth(client: mock).freshAccessToken(),
+      );
+      await verify(
+        AnthropicAuth.provider,
+        () => AnthropicAuth(client: mock).freshCredential(),
+      );
+      await verify(
+        OpenAiAuth.provider,
+        () => OpenAiAuth(client: mock).freshCredential(),
+      );
+      const namedAccount = 'named@example.com';
+      await verify(
+        AnthropicAuth.provider,
+        () => AnthropicAuth(client: mock).freshAccessToken(
+          account: namedAccount,
+        ),
+        account: namedAccount,
+      );
+      await verify(
+        OpenAiAuth.provider,
+        () => OpenAiAuth(client: mock).freshAccessToken(
+          account: namedAccount,
+        ),
+        account: namedAccount,
+      );
+    });
+
     test('auth helpers leave an injected client open for its owner', () async {
       final client = _CloseTrackingClient();
 
@@ -1105,6 +1312,16 @@ void main() {
       expect(shown.scheme, 'https');
       expect(shown.host, 'claude.ai');
       expect(shown.path, '/oauth/authorize');
+      expect(shown.queryParameters['state'], hasLength(43));
+      expect(
+        shown.queryParameters['scope'],
+        'user:profile user:inference',
+      );
+      expect(
+        shown.toString(),
+        contains('scope=user%3Aprofile%20user%3Ainference'),
+      );
+      expect(shown.toString(), isNot(contains('scope=user%3Aprofile+')));
       expect(
         shown.queryParameters['redirect_uri'],
         'https://platform.claude.com/oauth/code/callback',
@@ -1146,6 +1363,27 @@ void main() {
           ),
         ),
       );
+    });
+
+    test('loginManual rejects a response without an access token', () async {
+      const provider = AnthropicAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      final mock = MockClient(
+        (_) async => http.Response(
+          jsonEncode({'refresh_token': 'must-not-be-saved'}),
+          200,
+        ),
+      );
+
+      await expectLater(
+        AnthropicAuth(client: mock).loginManual(
+          showUrl: (_) {},
+          promptCode: () async => 'pasted-code',
+          openBrowser: (_) async {},
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(TokenStore.exists(provider), isFalse);
     });
 
     test('freshAccessToken returns a still-fresh grant without network',
@@ -1416,6 +1654,32 @@ void main() {
       await server!.close(force: true);
     });
 
+    test('login rejects a response without an access token', () async {
+      const provider = OpenAiAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      final mock = MockClient(
+        (_) async => http.Response(
+          jsonEncode({'refresh_token': 'must-not-be-saved'}),
+          200,
+        ),
+      );
+
+      await expectLater(
+        OpenAiAuth(clientId: 'test-client', client: mock).loginLoopback(
+          showUrl: (_) {},
+          account: account,
+          openBrowser: _completeLoopbackLogin,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(TokenStore.exists(provider), isFalse);
+      expect(TokenStore.exists(provider, account: account), isFalse);
+    });
+
     test('refresh maps the token response and keeps rotation', () async {
       final mock = MockClient((req) async {
         expect(req.url.toString(), contains('auth.openai.com/oauth/token'));
@@ -1656,6 +1920,32 @@ void main() {
   });
 
   group('GoogleAuth client', () {
+    test('login rejects a response without an access token', () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      final mock = MockClient(
+        (_) async => http.Response(
+          jsonEncode({'refresh_token': 'must-not-be-saved'}),
+          200,
+        ),
+      );
+
+      await expectLater(
+        GoogleAuth(client: mock).loginLoopback(
+          showUrl: (_) {},
+          account: account,
+          openBrowser: _completeLoopbackLogin,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(TokenStore.exists(provider), isFalse);
+      expect(TokenStore.exists(provider, account: account), isFalse);
+    });
+
     test('defaults to the bundled public client when nothing is set', () {
       final g = GoogleAuth();
       expect(g.clientId, isNotEmpty);
@@ -1751,6 +2041,36 @@ void main() {
         XaiAuth(client: mock).deviceLogin(prompt: (_, __) {}),
         throwsA(isA<StateError>()),
       );
+    });
+
+    test('rejects missing and empty access tokens', () async {
+      const provider = XaiAuth.provider;
+      addTearDown(() => TokenStore.clear(provider));
+      for (final tokenResponse in <Map<String, dynamic>>[
+        {'refresh_token': 'must-not-be-saved'},
+        {'access_token': '', 'refresh_token': 'must-not-be-saved'},
+      ]) {
+        final mock = MockClient((req) async {
+          if (req.url.toString().contains('device/code')) {
+            return http.Response(
+              jsonEncode({
+                'device_code': 'DC',
+                'interval': 0,
+                'verification_uri_complete': 'https://x.ai/activate',
+                'user_code': 'ABCD',
+              }),
+              200,
+            );
+          }
+          return http.Response(jsonEncode(tokenResponse), 200);
+        });
+
+        await expectLater(
+          XaiAuth(client: mock).deviceLogin(prompt: (_, __) {}),
+          throwsA(isA<StateError>()),
+        );
+        expect(TokenStore.exists(provider), isFalse);
+      }
     });
 
     test('stores a successful device login under the id-token email', () async {

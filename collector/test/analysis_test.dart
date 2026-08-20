@@ -1726,15 +1726,26 @@ void main() {
       );
     });
 
-    test('fallback is present on the happy path', () {
+    test('healthy reset-bearing winner keeps the passthrough fallback', () {
       final s = suggestRoute(
         [
-          _q('codex', [QuotaWindow(label: 'w', usedPercent: 10)]), // 90% free
+          _q('codex', [
+            QuotaWindow(
+              label: 'w',
+              usedPercent: 10,
+              resetsAt: _now + 3600,
+            ),
+          ]), // 90% free
         ],
         _now,
       );
       expect(s.recommended?.provider, 'codex');
       expect(s.fallback.kind, RouteFallbackKind.passthrough);
+      expect(s.explanation, isNot(contains('resets soonest')));
+      expect(
+        (s.toJson()['fallback'] as Map<String, dynamic>)['kind'],
+        'passthrough',
+      );
     });
   });
 

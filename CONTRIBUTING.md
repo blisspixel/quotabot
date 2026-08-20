@@ -25,6 +25,26 @@ is intentionally outside the LiteLLM integration's declared range. Confirm that
 `flutter`, `dart`, and a supported `python` resolve in the current shell before
 running gates. See [Building from source](docs/BUILDING.md).
 
+On Windows, use the supported space-safe entry points. They automatically map
+the bundled Dart SDK to a temporary path without spaces before any collector or
+Flutter native-asset command runs:
+
+```powershell
+# Build and install from source.
+pwsh tools/setup.ps1
+
+# Run the complete contributor gate.
+pwsh tools/check.ps1
+```
+
+The complete desktop gate requires Windows symlink support for Flutter plugins,
+normally enabled through Windows Developer Mode. Source setup remains fail-soft:
+if that desktop prerequisite is unavailable, it skips the app and still builds
+and installs the CLI. The contributor gate stops so a desktop test is never
+silently omitted.
+
+On macOS or Linux, focused package checks can be run directly:
+
 ```bash
 # Collector (CLI, MCP, HTTP, adapters)
 cd collector
@@ -43,8 +63,9 @@ CI runs static policy, both Dart packages, the MCP clients, the LiteLLM router,
 coverage floors, and native packaging. Run the portable gates locally first.
 The exact platform package and readiness commands are in
 [Building from source](docs/BUILDING.md#build-a-release-binary).
-The command block below uses Bash syntax; on Windows, use Git Bash or translate
-environment assignment and line continuation to PowerShell.
+On Windows, `pwsh tools/check.ps1` is the equivalent complete gate and is the
+supported invocation when the Flutter SDK path may contain spaces. The command
+block below uses Bash syntax for macOS and Linux.
 
 ```bash
 # repository policy and release consistency

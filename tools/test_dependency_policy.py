@@ -225,6 +225,11 @@ class DependencyPolicyTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("Python 3.10 through 3.13", requirements)
 
+        lock = (ROOT / "integrations" / "litellm" / "requirements.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--universal --generate-hashes --python-version 3.10", lock)
+
     def test_ci_and_release_enforce_committed_pub_lockfiles(self) -> None:
         expected = {
             "ci.yml": (
@@ -312,9 +317,9 @@ class DependencyPolicyTest(unittest.TestCase):
     def test_source_setup_and_packaging_enforce_committed_lockfiles(self) -> None:
         expected = {
             "setup.ps1": (
-                "dart pub get --enforce-lockfile",
-                "flutter pub get --enforce-lockfile",
-                "flutter build windows --release --no-pub",
+                "& (Join-Path $scriptDir 'package-cli.ps1')",
+                "-Arguments @('pub', 'get', '--enforce-lockfile')",
+                "-Arguments @('build', 'windows', '--release', '--no-pub')",
             ),
             "setup.sh": (
                 "dart pub get --enforce-lockfile",

@@ -444,14 +444,24 @@ class LiteLLMProxyIntegrationTest(unittest.TestCase):
                     )
                     self.assertEqual(0, _FakeQuotabotHandler.requests_seen)
                     self.assertFalse(_FakeOpenAIHandler.bodies_seen)
-                    response = _post_json(
-                        f"{proxy_url}/v1/chat/completions",
-                        {
-                            "model": "frontier-coder",
-                            "messages": [{"role": "user", "content": "hello"}],
-                        },
-                        token=master_key,
-                    )
+                    try:
+                        response = _post_json(
+                            f"{proxy_url}/v1/chat/completions",
+                            {
+                                "model": "frontier-coder",
+                                "messages": [{"role": "user", "content": "hello"}],
+                            },
+                            token=master_key,
+                        )
+                    except TimeoutError:
+                        proxy_log = log_path.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        )[-6000:]
+                        self.fail(
+                            "LiteLLM proxy timed out routing the authenticated "
+                            f"completion:\n{proxy_log}"
+                        )
                     release_deadline = time.monotonic() + 5
                     while (
                         _FakeQuotabotHandler.releases_seen < 1

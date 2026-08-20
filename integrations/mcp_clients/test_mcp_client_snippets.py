@@ -35,7 +35,7 @@ class McpClientSnippetTest(unittest.TestCase):
         tsconfig = (ROOT / "tsconfig.json").read_text(encoding="utf-8")
 
         self.assertIn('"typecheck": "tsc --noEmit"', package_json)
-        self.assertIn('"@modelcontextprotocol/sdk": "1.29.0"', package_json)
+        self.assertIn('"@modelcontextprotocol/sdk": "1.30.0"', package_json)
         self.assertIn('"typescript": "7.0.2"', package_json)
         self.assertIn('"strict": true', tsconfig)
 
@@ -57,7 +57,7 @@ class McpClientSnippetTest(unittest.TestCase):
         )
         self.assertIn("@modelcontextprotocol/sdk/client/stdio.js", ts_stdio)
         self.assertIn("requestInit", ts_http)
-        self.assertIn('"mcp>=1.28,<2"', readme)
+        self.assertIn('"mcp>=1.29,<2"', readme)
 
     def test_http_snippets_validate_before_token_or_transport(self) -> None:
         python_http = (ROOT / "quotabot_mcp_http.py").read_text(encoding="utf-8")
