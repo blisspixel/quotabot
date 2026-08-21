@@ -507,6 +507,11 @@ jobs:
 
   verify-cli-release:
     needs: [create-release, build, package-windows-cli]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.build.result == 'success' &&
+          needs.package-windows-cli.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -938,6 +943,11 @@ jobs:
 
   verify-desktop-release:
     needs: [create-release, build-desktop, package-windows-desktop]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.build-desktop.result == 'success' &&
+          needs.package-windows-desktop.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1202,6 +1212,11 @@ jobs:
 
   audit-release-assets:
     needs: [create-release, verify-cli-release, verify-desktop-release]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.verify-cli-release.result == 'success' &&
+          needs.verify-desktop-release.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -1323,6 +1338,13 @@ jobs:
       - quality-gate
       - codeql-gate
       - secret-scan-gate
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.audit-release-assets.result == 'success' &&
+          needs.quality-gate.result == 'success' &&
+          needs.codeql-gate.result == 'success' &&
+          needs.secret-scan-gate.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

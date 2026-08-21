@@ -4,7 +4,7 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.10.0-rc.3 - 2026-08-20
+## 0.10.0-rc.4 - 2026-08-21
 
 ### Changed
 - Updated the optional LiteLLM proxy integration to 1.92.2 with `aiohttp`
@@ -31,6 +31,13 @@ Notable changes to quotabot. Newest first.
   Azure profile configuration. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
+- Made fresh-download verification, exact asset audit, and publication use
+  explicit `always()` conditions with exact-success requirements for every
+  direct prerequisite. GitHub's implicit status condition propagated the
+  intentionally skipped unsigned signer through successful Windows packaging,
+  so the `v0.10.0-rc.3` workflow skipped verification after uploading 12 draft
+  assets. The incomplete draft and partial assets were removed; its immutable
+  tag and workflow logs remain.
 - Checked out the tagged source before extracting curated release notes from
   `CHANGELOG.md`. The `v0.10.0-rc.2` release quality gate passed, but draft
   creation correctly stopped before any asset build because the release job had

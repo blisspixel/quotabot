@@ -900,6 +900,53 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             signing,
         )
 
+    def test_release_acceptance_jobs_do_not_inherit_skipped_signers(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        cases = (
+            (
+                "verify-cli-release",
+                "build-desktop",
+                ("create-release", "build", "package-windows-cli"),
+            ),
+            (
+                "verify-desktop-release",
+                "audit-release-assets",
+                ("create-release", "build-desktop", "package-windows-desktop"),
+            ),
+            (
+                "audit-release-assets",
+                "publish-release",
+                ("create-release", "verify-cli-release", "verify-desktop-release"),
+            ),
+        )
+
+        for job_name, next_job, required_jobs in cases:
+            job = release.split(f"  {job_name}:\n", 1)[1].split(f"  {next_job}:\n", 1)[
+                0
+            ]
+            self.assertIn("${{ always() &&", job)
+            for required_job in required_jobs:
+                self.assertIn(
+                    f"needs.{required_job}.result == 'success'",
+                    job,
+                )
+
+        publish = release.split("  publish-release:\n", 1)[1]
+        self.assertIn("${{ always() &&", publish)
+        for required_job in (
+            "create-release",
+            "audit-release-assets",
+            "quality-gate",
+            "codeql-gate",
+            "secret-scan-gate",
+        ):
+            self.assertIn(
+                f"needs.{required_job}.result == 'success'",
+                publish,
+            )
+
     def test_downloaded_windows_draft_assets_are_natively_reverified(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"

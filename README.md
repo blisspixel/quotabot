@@ -10,7 +10,7 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.3.
+> **Current release candidate:** 0.10.0-rc.4.
 > **Next:** a focused 0.10.x stabilization train for correctness, security,
 > quality-of-life refinement, and signed release readiness. No new product
 > breadth enters this train. See the [roadmap criteria](ROADMAP.md#next).
@@ -20,7 +20,7 @@ of the GitHub release notes. The protected Azure Artifact Signing activation and
 owner provisioning checklist is in
 [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
 
-The 0.10.0-rc.3 Claude login flow uses the 32-byte OAuth state confirmed by the
+The 0.10.0-rc.4 Claude login flow uses the 32-byte OAuth state confirmed by the
 issue reporter's authorize matrix. Live callback and token-exchange confirmation
 is tracked in [issue #77](https://github.com/blisspixel/quotabot/issues/77).
 Loading the consent page does not prove success; the flow is complete only when
