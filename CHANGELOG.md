@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Documentation
+
+- Ordered the remaining 0.10.x work so field-discovered correctness,
+  quality-of-life refinement, and native validation finish before platform
+  signing activation, and added the complete Windows and macOS publisher
+  enrollment and rehearsal checklist without changing the project's Apache 2.0
+  license.
+
 ## 0.10.0-rc.5 - 2026-08-21
 
 ### Fixed

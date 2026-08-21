@@ -108,20 +108,23 @@ a broad 0.x product to a boring 1.0:
 2. Continue adversarial bug hunts across provider lifecycles, stale and corrupt
    state, multi-account isolation, every transport, packaging, update, rollback,
    and first-run diagnostics. Record only reproducible findings.
-3. Complete Windows and macOS signing below, then run a signed 0.10.x rehearsal
-   through clean install, update, rollback, and immutable publication.
-4. Use later 0.10.x patches only for field-discovered regressions, release
-   rehearsal corrections, and quality-of-life refinement. Reopen product breadth
-   only after the exit criteria pass.
+3. Use the next 0.10.x candidates for field-discovered regressions,
+   quality-of-life refinement, first-run and recovery polish, and dated native
+   validation on Windows, macOS, and Linux. Compatibility work for an already
+   claimed provider may improve truthful detection, but must not invent quota or
+   depend on an undocumented private endpoint.
+4. When the developer-controlled stabilization inventory is quiet, complete
+   Windows and macOS signing below and run a signed 0.10.x rehearsal through
+   clean install, update, rollback, and immutable publication. Reopen product
+   breadth only after the exit criteria pass.
 
 Release progression is explicit: 0.10.0 carries the confirmed corrective
 inventory and the live-validated Claude recovery. Do not delay those fixes on
-external certificate procurement. If both platform identities are ready, sign
-0.10.0; otherwise retain the existing unsigned disclosure and make the earliest
-following 0.10.x patch the signed rehearsal. Later patches contain only field
-regressions, rehearsal corrections, and small recovery or diagnostic polish.
-The train does not exit until a signed rehearsal satisfies every criterion
-below.
+external certificate procurement. Retain the existing unsigned disclosure while
+the developer-controlled stabilization rounds continue. Once that inventory is
+quiet and both platform identities are ready, make the next 0.10.x candidate the
+signed rehearsal. The train does not exit until that rehearsal and every
+criterion below pass.
 
 **0.10.x exit criteria**
 
@@ -206,8 +209,11 @@ receive.
 - The setup and distribution docs describe the signed state without asking users
   to weaken platform protections.
 
-**Why now:** unsigned apps are the largest remaining first-install trust and
-acquisition gap, and signing is a dependency of the final native evidence pass.
+**Why after stabilization:** unsigned apps are the largest remaining
+first-install trust and acquisition gap, and signing is a dependency of the
+final native evidence pass. It should authenticate the release candidate users
+will actually keep, after reproducible correctness and recovery work has stopped
+changing that candidate.
 Apple requires Developer ID signing before notarization and recommends hardened
 runtime, a secure timestamp, notarization, and ticket stapling for direct
 distribution. Microsoft documents Authenticode signing and RFC 3161 SHA-256
