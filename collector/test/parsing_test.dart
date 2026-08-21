@@ -1611,6 +1611,42 @@ void main() {
       }
     });
 
+    test('isExhausted true with a reset is spent, not full remaining', () {
+      final reset = now + 3600;
+      final w = antigravityWindows({
+        'models': {
+          'gemini': {
+            'quotaInfo': {
+              'remainingFraction': 1,
+              'resetTime': reset,
+              'isExhausted': true,
+            },
+          },
+        },
+      }, now);
+      expect(w, hasLength(1));
+      expect(w.single.usedPercent, closeTo(100, 0.01));
+      expect(w.single.resetsAt, reset);
+    });
+
+    test('a non-boolean isExhausted flag rejects the live table', () {
+      final reset = now + 3600;
+      expect(
+        antigravityWindows({
+          'models': {
+            'gemini': {
+              'quotaInfo': {
+                'remainingFraction': 0.4,
+                'resetTime': reset,
+                'isExhausted': 'yes',
+              },
+            },
+          },
+        }, now),
+        isEmpty,
+      );
+    });
+
     test('non-metered helper rows are skipped, not fatal', () {
       final reset = now + 3600;
       // The endpoint lists tab-completion and chat helpers alongside metered

@@ -96,6 +96,9 @@ posix_desktop_prereq_reason() {
 }
 
 build_desktop_app() {
+  # shellcheck source=posix-space-safe-dart.sh
+  . "$script_dir/posix-space-safe-dart.sh"
+  quotabot_enable_space_safe_dart "$root" >/dev/null || true
   (
     cd "$app" || exit 1
     flutter pub get --enforce-lockfile || exit 1
@@ -106,7 +109,11 @@ build_desktop_app() {
       flutter config --enable-linux-desktop >/dev/null || true
       flutter build linux --release --no-pub || exit 1
     fi
-  ) || return 1
+  ) || {
+    quotabot_restore_space_safe_dart
+    return 1
+  }
+  quotabot_restore_space_safe_dart
   if [ "$os" = darwin ]; then
     desktop_source="$app/build/macos/Build/Products/Release/quotabot.app"
     desktop_kind="macos-app"
@@ -200,7 +207,7 @@ install_portable_desktop() {
   if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
     return 1
   fi
-  if [[ "$version" != "latest" && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "$version" != "latest" && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
     return 1
   fi
   if [ "$version" = latest ]; then
@@ -275,6 +282,12 @@ open_quotabot_after_setup() {
     nohup "$HOME/.local/share/quotabot-desktop/quotabot" >/dev/null 2>&1 &
     ok 'Opened the desktop app'
     launched=1
+    if [ "$desktop_skipped" -eq 1 ]; then
+      bash "$script_dir/write-desktop-entry.sh" \
+        "$script_dir/quotabot.desktop" \
+        "$HOME/.local/share/quotabot-desktop/quotabot" \
+        "$HOME/.local/share/applications/quotabot.desktop" || true
+    fi
   fi
   if [ "$launched" -eq 0 ]; then
     step 'Opening quotabot top'

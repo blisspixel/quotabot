@@ -331,7 +331,10 @@ State lives in the Antigravity globalStorage SQLite database at
   then calls the Cloud Code API
   (`https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then
   `:fetchAvailableModels`) for per-model `quotaInfo` with `remainingFraction`,
-  `resetTime`, and `isExhausted`. These are quota metadata calls, not generation,
+  `resetTime`, and `isExhausted`. A present `isExhausted` that is not a boolean
+  rejects the live table. `isExhausted: true` on a row with a reset is 100%
+  used, even when `remainingFraction` still reads full. These are quota metadata
+  calls, not generation,
   so they cost no tokens. The per-model quotas are bucketed into windows by reset.
   Non-metered helper models the endpoint lists alongside real ones - tab-completion
   and chat models that carry no reset window - are skipped rather than rejecting

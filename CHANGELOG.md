@@ -47,6 +47,16 @@ Notable changes to quotabot. Newest first.
 - Grok and Antigravity live account reads overlap instead of waiting for each
   account in series. Fleet collection still uses one worker isolate and the
   shared HTTP pool; the desktop collect remains off the UI isolate.
+- Antigravity `isExhausted: true` with a reset is treated as 100% used instead
+  of trusting a full remaining fraction.
+- Loopback `GET /?exclude=` filters the snapshot; unknown snapshot query
+  parameters are rejected. MCP alert subscriptions fire on amber and red, while
+  `quotabot watch` still defaults to red.
+- Release installers accept `vMAJOR.MINOR.PATCH-rc.N` tags. Windows space-safe
+  Dart mirrors use a user-owned directory instead of `C:\\quotabot-build`.
+  Windows desktop packaging uses the space-safe Flutter entry. Linux portable
+  desktop fallback writes an application-menu entry. Compact empty desktop
+  state offers Edit profile.
 
 ## 0.10.0-rc.6 - 2026-08-21
 

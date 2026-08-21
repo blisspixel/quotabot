@@ -19,8 +19,8 @@ if [[ ! "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   echo "Invalid QUOTABOT_REPO value. Expected owner/repo." >&2
   exit 1
 fi
-if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Invalid QUOTABOT_VERSION value. Expected vMAJOR.MINOR.PATCH." >&2
+if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+  echo "Invalid QUOTABOT_VERSION value. Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N." >&2
   exit 1
 fi
 

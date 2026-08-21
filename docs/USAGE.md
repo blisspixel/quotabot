@@ -1027,8 +1027,9 @@ the default `balanced` mode, opt-in `local_first`, or opt-in `quota_stretch` and
 its exact reserve.
 
 MCP clients can subscribe to `quotas://alerts` with standard
-`resources/subscribe`. The server runs the same edge-triggered alert scan as
-`quotabot watch`; when a provider crosses amber or red, it sends
+`resources/subscribe`. The MCP subscription loop fires on amber and red
+crossings. `quotabot watch` defaults to red only unless you pass a waste
+threshold. When an alert fires, the server sends
 `notifications/resources/updated` for `quotas://alerts`, and the client can read
 that resource to get `quotabot.alerts.v1` with the fired `quotabot.alert.v1`
 metadata. Subscribing to `quotas://current` sends resource-updated notifications
@@ -1073,9 +1074,11 @@ cd collector
 dart run bin/local_server.dart [port]   # defaults to 8721
 ```
 
-`GET /` returns the full snapshot as JSON; `GET /suggest` returns the routing
-recommendation, `GET /suggest?exclude=codex,grok` ignores those providers for
-that recommendation, `GET /suggest?local_first=true` prefers local capacity,
+`GET /` returns the snapshot as JSON. `GET /?exclude=codex,grok` omits those
+providers from the snapshot; unknown query parameters are rejected. `GET
+/suggest` returns the routing recommendation,
+`GET /suggest?exclude=codex,grok` ignores those providers for that
+recommendation, `GET /suggest?local_first=true` prefers local capacity,
 `GET /suggest?quota_stretch=true` preserves the default 25 percent
 included-quota reserve, and
 `GET /suggest?quota_stretch=true&quota_stretch_threshold_percent=30` selects an

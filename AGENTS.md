@@ -156,8 +156,9 @@ for that surface.
   POSTed for you (loopback unless `--allow-external`).
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`). Add `?exclude=codex,grok` to ignore
-  providers for one recommendation, or `?local_first=true` to prefer local
-  capacity. Add `?quota_stretch=true` to preserve the default 25 percent reserve,
+  providers on that snapshot or recommendation. Routing flags such as
+  `?local_first=true` and `?quota_stretch=true` apply to `/suggest` only.
+  On `/suggest`, `quota_stretch=true` preserves the default 25 percent reserve,
   with `&quota_stretch_threshold_percent=N` for a value from 20 through 50. The
   bundled LiteLLM router also uses authenticated
   `POST /leases/reserve` and `POST /leases/release`. Server startup creates a

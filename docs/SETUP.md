@@ -154,8 +154,8 @@ The installer downloads a prebuilt CLI bundle, verifies its checksum, and expose
 `quotabot` on your PATH from `~/.local/bin` (macOS/Linux) or
 `%LOCALAPPDATA%\quotabot\bin` (Windows). To install from a fork, set
 `QUOTABOT_REPO=owner/quotabot` first. The default is the latest published
-release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` selects one exact tag for a
-reproducible rollback.
+release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
+`vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
 [v0.9.9](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9). Its
@@ -474,7 +474,8 @@ irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 Remove-Item Env:QUOTABOT_VERSION
 ```
 
-Only exact `vMAJOR.MINOR.PATCH` tags are accepted. Run `quotabot --version` and
+Exact `vMAJOR.MINOR.PATCH` tags and release-candidate tags of the form
+`vMAJOR.MINOR.PATCH-rc.N` are accepted. Run `quotabot --version` and
 `quotabot doctor` after the replacement.
 
 ### Reset all local quotabot data

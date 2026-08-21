@@ -489,7 +489,7 @@ function Install-QuotabotPortableDesktop {
   $repo = if ($env:QUOTABOT_REPO) { $env:QUOTABOT_REPO } else { 'blisspixel/quotabot' }
   $version = if ($env:QUOTABOT_VERSION) { $env:QUOTABOT_VERSION } else { 'latest' }
   if ($repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return $null }
-  if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') { return $null }
+  if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$') { return $null }
 
   $asset = 'quotabot-windows-x64-desktop.zip'
   $url = if ($version -eq 'latest') {

@@ -611,6 +611,7 @@ void main() {
     expect(find.text(message), findsOneWidget);
     expect(find.bySemanticsLabel(message), findsOneWidget);
     expect(find.textContaining('No providers in'), findsNothing);
+    expect(find.text('Edit profile'), findsOneWidget);
   });
 
   testWidgets('desktop routing applies model capability budget gates', (

@@ -100,10 +100,20 @@ function Install-QuotabotPayload {
         $installError = $_.Exception.Message
         try {
             if ($binActivated -and (Test-Path -LiteralPath $binDst)) {
-                Remove-Item -LiteralPath $binDst -Force
+                $binItem = Get-Item -LiteralPath $binDst -Force
+                if ($binItem.LinkType) {
+                    Remove-Item -LiteralPath $binDst -Force
+                } else {
+                    Remove-Item -LiteralPath $binDst -Recurse -Force
+                }
             }
             if ($libActivated -and (Test-Path -LiteralPath $libDst)) {
-                Remove-Item -LiteralPath $libDst -Force
+                $libItem = Get-Item -LiteralPath $libDst -Force
+                if ($libItem.LinkType) {
+                    Remove-Item -LiteralPath $libDst -Force
+                } else {
+                    Remove-Item -LiteralPath $libDst -Recurse -Force
+                }
             }
             if ($binBackedUp -and (Test-Path -LiteralPath $backupBin)) {
                 Move-Item -LiteralPath $backupBin -Destination $binDst
@@ -179,8 +189,8 @@ if ($repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
     Write-Error "Invalid QUOTABOT_REPO value. Expected owner/repo."
     exit 1
 }
-if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
-    Write-Error "Invalid QUOTABOT_VERSION value. Expected vMAJOR.MINOR.PATCH."
+if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$') {
+    Write-Error "Invalid QUOTABOT_VERSION value. Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N."
     exit 1
 }
 $installRoot = "$env:LOCALAPPDATA\quotabot"

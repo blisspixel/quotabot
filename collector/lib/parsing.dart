@@ -942,19 +942,23 @@ List<_AntigravityLiveQuotaRow>? _antigravityLiveQuotaRows(
     if (quotaInfo is! Map) return null;
     final remainingFraction = _fraction(quotaInfo['remainingFraction']);
     final resetsAt = parseReset(quotaInfo['resetTime']);
+    final exhausted = quotaInfo['isExhausted'];
+    if (exhausted != null && exhausted is! bool) return null;
     if (resetsAt == null || resetsAt <= 0) {
       // No rolling window. That is a non-metered helper only when it also shows
       // no consumption (a full or absent fraction, like the tab-completion and
       // chat rows). A row that shows real consumption but carries no reset is an
       // incomplete metered pool; skipping it would drop a possibly-binding window
       // and overstate headroom, so fail the whole table closed instead.
+      // `isExhausted: true` without a reset is the same incomplete metered case.
+      if (exhausted == true) return null;
       if (remainingFraction == null || remainingFraction >= 1) continue;
       return null;
     }
     if (remainingFraction == null) return null;
     out.add((
       model: entry.key.toString(),
-      remainingFraction: remainingFraction,
+      remainingFraction: exhausted == true ? 0 : remainingFraction,
       resetsAt: resetsAt,
     ));
   }

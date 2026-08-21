@@ -326,6 +326,36 @@ void main() {
     }
   });
 
+  test('snapshot exclude filters providers and rejects unknown query',
+      () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 20),
+        _q('codex', 30),
+      ],
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final filtered = await _getJson(Uri.parse('$base/?exclude=codex'));
+      expect(
+        (filtered['providers'] as List)
+            .map((row) => (row as Map)['provider'])
+            .toList(),
+        ['claude'],
+      );
+
+      final unknown = await _getJson(
+        Uri.parse('$base/?local_first=true'),
+        expectedStatus: 400,
+      );
+      expect(unknown['error'], contains('unknown query parameter'));
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('HTTP lease mutations authenticate, distribute, and release', () async {
     var collections = 0;
     final leaseIds = ['lease-claude-0001', 'lease-codex-0002'];
