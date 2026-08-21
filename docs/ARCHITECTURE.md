@@ -174,10 +174,13 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   rather than failing the whole response.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
-  Cursor's current included-usage pool is normalized as a monthly quota window
-  when the local SQLite state exposes used/included values. Windsurf/Devin
-  Desktop daily and weekly Cascade quota shapes are normalized from local SQLite
-  state, with account and plan labels surfaced when present.
+  Current Cursor 3.x state can expose an owner-bound recognized plan, but it does
+  not persist current Cursor Models and Other Models quota balances in supported
+  local rows. That plan remains diagnostic and unroutable. Older exact
+  provider-owned usage rows are parsed only as compatibility evidence when a
+  Cursor build still writes them. Windsurf/Devin Desktop daily and weekly
+  Cascade quota shapes are normalized from local SQLite state, with account and
+  plan labels surfaced when present.
 - Ollama, LM Studio, and Lemonade are local-runtime adapters: they report
   installed and loaded models instead of a quota window. A reachable, error-free
   loopback daemon acts as a routing fallback only when it represents at least
@@ -776,7 +779,8 @@ then passed the three-OS
 [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
-Application signing, notarization, and interactive native evidence remain 1.0
-gates. Platform prerequisites and artifacts are documented in
+Application signing and notarization are 0.10.x exit gates. Interactive native
+evidence remains a final 1.0 gate and must run again on the exact signed
+candidate. Platform prerequisites and artifacts are documented in
 [BUILDING.md](BUILDING.md), [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md),
 and [../ROADMAP.md](../ROADMAP.md).
