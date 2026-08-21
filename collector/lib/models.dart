@@ -381,6 +381,56 @@ class LocalHardwareInfo {
   }
 }
 
+/// A self-reported manual quota retained beside one exact built-in
+/// provider/account identity. It is presentation metadata only: the enclosing
+/// [ProviderQuota] remains the sole routing, availability, and analytics
+/// evidence for that identity.
+class SupplementalManualQuota {
+  final String displayName;
+  final String? plan;
+  final int asOf;
+  final List<QuotaWindow> windows;
+
+  const SupplementalManualQuota({
+    required this.displayName,
+    required this.asOf,
+    required this.windows,
+    this.plan,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'source': providerQuotaManualSource,
+        'source_class': ProviderSourceClass.manual.wireName,
+        'display_name': displayName,
+        if (plan != null) 'plan': plan,
+        'as_of': asOf,
+        'windows': windows.map((window) => window.toJson()).toList(),
+      };
+
+  factory SupplementalManualQuota.fromJson(Map<String, dynamic> json) {
+    if (json['source'] != providerQuotaManualSource ||
+        json['source_class'] != ProviderSourceClass.manual.wireName) {
+      throw const FormatException(
+        'supplemental manual quota has invalid provenance',
+      );
+    }
+    return SupplementalManualQuota(
+      displayName: json['display_name'] as String,
+      plan: json['plan'] as String?,
+      asOf: json['as_of'] as int? ?? 0,
+      windows: ((json['windows'] as List?) ?? const [])
+          .map((window) => QuotaWindow.fromJson(
+                (window as Map).cast<String, dynamic>(),
+              ))
+          .toList(),
+    );
+  }
+}
+
+const supplementalManualQuotaDetail =
+    'Self-reported manual quota is also configured for this exact account; '
+    'built-in measured or status evidence remains primary.';
+
 class ProviderQuota {
   /// Stable provider id: "codex", "claude", "grok", "antigravity".
   final String provider;
@@ -411,6 +461,11 @@ class ProviderQuota {
   /// Unlike [source], this is present for every current producer and survives
   /// routing, caching, and verification as a machine-readable trust boundary.
   final ProviderSourceClass sourceClass;
+
+  /// A same-identity manual entry retained without creating a duplicate route,
+  /// analytics key, or desktop card. It never changes this row's source class,
+  /// windows, availability, or spend classification.
+  final SupplementalManualQuota? supplementalManualQuota;
 
   /// Provider class. [ProviderQuotaKind.subscription] is a metered paid/free
   /// account whose headroom governs routing. [ProviderQuotaKind.local] is an
@@ -533,6 +588,7 @@ class ProviderQuota {
     this.retryAfterSeconds,
     this.resetCreditsAvailable = 0,
     ProviderSourceClass? sourceClass,
+    this.supplementalManualQuota,
   }) : sourceClass = sourceClass ??
             inferProviderSourceClass(
               provider: provider,
@@ -557,6 +613,9 @@ class ProviderQuota {
       return 'local hardware evidence requires kind=local';
     }
     final classifiedManual = sourceClass == ProviderSourceClass.manual;
+    if (supplementalManualQuota != null && (isManual || isLocal)) {
+      return 'supplemental manual quota requires a built-in subscription row';
+    }
     if (isManual != classifiedManual) {
       return classifiedManual
           ? 'manual source class requires source=manual'
@@ -644,6 +703,8 @@ class ProviderQuota {
         if (planEvidenceAsOf != null) 'plan_evidence_as_of': planEvidenceAsOf,
         if (source != null) 'source': source,
         'source_class': sourceClass.wireName,
+        if (supplementalManualQuota != null)
+          'supplemental_manual_quota': supplementalManualQuota!.toJson(),
         'kind': kind.wireName,
         if (status != null) 'status': status,
         if (active) 'active': active,
@@ -679,6 +740,11 @@ class ProviderQuota {
             : boundedIntFromWire(j['plan_evidence_as_of'], min: 1),
         source: j['source'] as String?,
         sourceClass: _providerSourceClassFromJson(j),
+        supplementalManualQuota: j['supplemental_manual_quota'] is Map
+            ? SupplementalManualQuota.fromJson(
+                (j['supplemental_manual_quota'] as Map).cast<String, dynamic>(),
+              )
+            : null,
         ok: j['ok'] as bool? ?? true,
         error: j['error'] as String?,
         asOf: j['as_of'] as int? ?? 0,
@@ -730,6 +796,7 @@ class ProviderQuota {
             : planEvidenceAsOf,
         source: metadataFrom?.source ?? source,
         sourceClass: sourceClass,
+        supplementalManualQuota: supplementalManualQuota,
         ok: true,
         error: note,
         asOf: asOf,
@@ -772,6 +839,7 @@ class ProviderQuota {
         planEvidenceAsOf: planEvidenceAsOf,
         source: source,
         sourceClass: sourceClass,
+        supplementalManualQuota: supplementalManualQuota,
         ok: ok,
         error: error,
         windows: windows,
@@ -806,6 +874,7 @@ class ProviderQuota {
         planEvidenceAsOf: planEvidenceAsOf,
         source: source,
         sourceClass: sourceClass,
+        supplementalManualQuota: supplementalManualQuota,
         ok: true,
         error: 'provider drift detected; showing last trusted snapshot',
         windows: windows,
@@ -852,6 +921,7 @@ class ProviderQuota {
             : planEvidenceAsOf,
         source: metadataFrom?.source ?? source,
         sourceClass: sourceClass,
+        supplementalManualQuota: supplementalManualQuota,
         ok: false,
         error: 'provider drift detected; legacy quota evidence is quarantined '
             'because no trusted snapshot is available',
@@ -883,6 +953,7 @@ class ProviderQuota {
         planEvidenceAsOf: planEvidenceAsOf,
         source: source,
         sourceClass: sourceClass,
+        supplementalManualQuota: supplementalManualQuota,
         ok: ok,
         error: error,
         windows: windows,
@@ -893,6 +964,46 @@ class ProviderQuota {
         details: detail == null ? details : [...details, detail],
         models: models,
         localHardware: hardware,
+        modelQuotas: modelQuotas,
+        suspect: suspect,
+        driftReason: driftReason,
+        driftObservedAt: driftObservedAt,
+        perMachine: perMachine,
+        pipeHealth: pipeHealth,
+        httpStatus: httpStatus,
+        retryAfterSeconds: retryAfterSeconds,
+        resetCreditsAvailable: resetCreditsAvailable,
+      );
+
+  /// Retains one exact same-identity manual entry as non-routing provenance.
+  /// Every primary evidence field is preserved and one disclosure detail is
+  /// added for human CLI surfaces.
+  ProviderQuota withSupplementalManualQuota(
+    SupplementalManualQuota supplement,
+  ) =>
+      ProviderQuota(
+        provider: provider,
+        displayName: displayName,
+        account: account,
+        asOf: asOf,
+        plan: plan,
+        planEvidenceSource: planEvidenceSource,
+        planEvidenceAsOf: planEvidenceAsOf,
+        source: source,
+        sourceClass: sourceClass,
+        supplementalManualQuota: supplement,
+        ok: ok,
+        error: error,
+        windows: windows,
+        stale: stale,
+        kind: kind,
+        status: status,
+        active: active,
+        details: details.contains(supplementalManualQuotaDetail)
+            ? details
+            : [...details, supplementalManualQuotaDetail],
+        models: models,
+        localHardware: localHardware,
         modelQuotas: modelQuotas,
         suspect: suspect,
         driftReason: driftReason,
@@ -977,6 +1088,25 @@ ProviderQuota sanitizeProviderQuota(ProviderQuota q) {
     planEvidenceAsOf: q.planEvidenceAsOf,
     source: q.source == null ? null : t(q.source!),
     sourceClass: q.sourceClass,
+    supplementalManualQuota: q.supplementalManualQuota == null
+        ? null
+        : SupplementalManualQuota(
+            displayName: t(q.supplementalManualQuota!.displayName),
+            plan: q.supplementalManualQuota!.plan == null
+                ? null
+                : t(q.supplementalManualQuota!.plan!),
+            asOf: q.supplementalManualQuota!.asOf,
+            windows: [
+              for (final window in q.supplementalManualQuota!.windows)
+                QuotaWindow(
+                  label: t(window.label),
+                  usedPercent: window.usedPercent,
+                  used: window.used,
+                  limit: window.limit,
+                  resetsAt: window.resetsAt,
+                ),
+            ],
+          ),
     ok: q.ok,
     error: q.error == null ? null : t(q.error!),
     asOf: q.asOf,

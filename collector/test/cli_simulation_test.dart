@@ -317,6 +317,36 @@ void main() {
     expect(result.stdout as String, isEmpty);
   });
 
+  test('value options reject repeated values before collection', () async {
+    for (final args in [
+      [
+        'suggest',
+        '--json',
+        '--mock-provider=claude',
+        '--state=healthy',
+        '--state=spent',
+      ],
+      [
+        'suggest',
+        '--json',
+        '--mock-provider',
+        'claude',
+        '--exclude=codex',
+        '--exclude',
+        'grok',
+      ],
+    ]) {
+      final result = await runCli(args);
+      expect(result.exitCode, 64, reason: args.join(' '));
+      expect(
+        result.stderr as String,
+        contains('may be specified only once'),
+        reason: args.join(' '),
+      );
+      expect(result.stdout as String, isEmpty, reason: args.join(' '));
+    }
+  });
+
   test('option terminator keeps later dash-prefixed text positional', () async {
     final result = await runCollectCli(
       ['status', '--', '--json'],

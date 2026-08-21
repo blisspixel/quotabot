@@ -437,6 +437,81 @@ void main() {
       expect(ProviderQuota.fromJson(q.toJson()).isManual, isTrue);
     });
 
+    test('supplemental manual quota round-trips without replacing evidence',
+        () {
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'work',
+        plan: 'max',
+        asOf: 123,
+        sourceClass: ProviderSourceClass.authoritativeLive,
+        status: 'provider status',
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 25)],
+      ).withSupplementalManualQuota(
+        SupplementalManualQuota(
+          displayName: 'Claude manual',
+          plan: 'self-reported',
+          asOf: 120,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: 80)],
+        ),
+      );
+
+      final json = quota.toJson();
+      final supplement =
+          json['supplemental_manual_quota'] as Map<String, dynamic>;
+      expect(json['source_class'], 'authoritative_live');
+      expect(json['source'], isNull);
+      expect(
+          (json['windows'] as List).single, containsPair('used_percent', 25));
+      expect(supplement['source'], providerQuotaManualSource);
+      expect(supplement['source_class'], 'manual');
+      expect(supplement['plan'], 'self-reported');
+
+      final restored = ProviderQuota.fromJson(json);
+      expect(restored.sourceClass, ProviderSourceClass.authoritativeLive);
+      expect(restored.status, 'provider status');
+      expect(restored.windows.single.usedPercent, 25);
+      expect(restored.supplementalManualQuota?.windows.single.usedPercent, 80);
+      expect(
+        restored.withSuspect('review').supplementalManualQuota?.displayName,
+        'Claude manual',
+      );
+
+      final sanitized = sanitizeProviderQuota(
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'work',
+          asOf: 123,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 25)],
+          supplementalManualQuota: SupplementalManualQuota(
+            displayName: 'Manual\u0000 note',
+            plan: 'self\u0001 reported',
+            asOf: 120,
+            windows: [QuotaWindow(label: 'month\u0002ly', usedPercent: 80)],
+          ),
+        ),
+      );
+      expect(sanitized.supplementalManualQuota?.displayName, 'Manual note');
+      expect(sanitized.supplementalManualQuota?.plan, 'self reported');
+      expect(
+          sanitized.supplementalManualQuota?.windows.single.label, 'monthly');
+    });
+
+    test('supplemental manual provenance rejects a false source claim', () {
+      expect(
+        () => SupplementalManualQuota.fromJson({
+          'source': 'provider',
+          'source_class': 'manual',
+          'display_name': 'Manual',
+          'as_of': 120,
+          'windows': const <Object?>[],
+        }),
+        throwsFormatException,
+      );
+    });
+
     test('round-trips every normalized source class', () {
       expect(
         ProviderSourceClass.values.map((value) => value.wireName),

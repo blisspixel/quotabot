@@ -527,7 +527,7 @@ Future<List<ProviderQuota>> _collectAllProviders({
       // otherwise healthy local runtime or delay normal routing.
     }
   }
-  final results = [
+  final sanitized = [
     for (final quota in retained)
       sanitizeProviderQuota(
         quota.isLocal && hardware != null
@@ -538,8 +538,65 @@ Future<List<ProviderQuota>> _collectAllProviders({
             : quota,
       ),
   ];
+  final results = coalesceSupplementalManualQuotas(sanitized);
   _recordAnalytics(results);
   return results;
+}
+
+/// Coalesces one valid self-reported manual row into one exact built-in
+/// subscription identity. The built-in row remains primary, so provider
+/// windows, status, errors, availability, routing, and analytics are unchanged.
+/// The manual values remain structured supplemental provenance for display and
+/// JSON consumers. Ambiguous duplicates and local-runtime collisions remain
+/// separate so verification can report them instead of hiding a producer bug.
+List<ProviderQuota> coalesceSupplementalManualQuotas(
+  List<ProviderQuota> providers,
+) {
+  String exactIdentity(ProviderQuota quota) =>
+      '${quota.provider}\u0000${quota.account}';
+
+  final builtInIndices = <String, List<int>>{};
+  final manualIndices = <String, List<int>>{};
+  for (var i = 0; i < providers.length; i++) {
+    final quota = providers[i];
+    final key = exactIdentity(quota);
+    if (quota.isManual &&
+        quota.sourceClass == ProviderSourceClass.manual &&
+        quota.sourceClassViolation == null &&
+        quota.displayName.trim().isNotEmpty &&
+        quota.windows.isNotEmpty &&
+        quota.asOf >= 0) {
+      manualIndices.putIfAbsent(key, () => <int>[]).add(i);
+    } else if (!quota.isManual &&
+        !quota.isLocal &&
+        quota.sourceClassViolation == null) {
+      builtInIndices.putIfAbsent(key, () => <int>[]).add(i);
+    }
+  }
+
+  final replacements = <int, ProviderQuota>{};
+  final removed = <int>{};
+  for (final entry in manualIndices.entries) {
+    final primary = builtInIndices[entry.key];
+    if (entry.value.length != 1 || primary?.length != 1) continue;
+    final manual = providers[entry.value.single];
+    final primaryIndex = primary!.single;
+    replacements[primaryIndex] =
+        providers[primaryIndex].withSupplementalManualQuota(
+      SupplementalManualQuota(
+        displayName: manual.displayName,
+        plan: manual.plan,
+        asOf: manual.asOf,
+        windows: manual.windows,
+      ),
+    );
+    removed.add(entry.value.single);
+  }
+
+  return [
+    for (var i = 0; i < providers.length; i++)
+      if (!removed.contains(i)) replacements[i] ?? providers[i],
+  ];
 }
 
 List<ProviderAdapterRegistration> _selectedAdapterRegistry(

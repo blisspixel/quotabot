@@ -354,6 +354,21 @@ Future<HttpServer> startLocalQuotabotServer({
     return values.isEmpty ? null : values;
   }
 
+  String? repeatedSingletonQueryParameter(Uri uri) {
+    final counts = <String, int>{};
+    for (final entry in uri.queryParametersAll.entries) {
+      final canonical = entry.key.replaceAll('-', '_');
+      counts[canonical] = (counts[canonical] ?? 0) + entry.value.length;
+    }
+    final repeated = [
+      for (final entry in counts.entries)
+        if (entry.value > 1) entry.key,
+    ]..sort();
+    return repeated.isEmpty
+        ? null
+        : '${repeated.first} may be specified only once';
+  }
+
   ({bool value, String? error}) queryBoolean(
     Uri uri,
     String snakeName,
@@ -770,6 +785,15 @@ Future<HttpServer> startLocalQuotabotServer({
         {
           'error': 'unknown query parameter: ${unknownParameters.join(', ')}',
         },
+        HttpStatus.badRequest,
+      );
+      return;
+    }
+    final repeatedParameter = repeatedSingletonQueryParameter(request.uri);
+    if (repeatedParameter != null) {
+      writeJson(
+        request,
+        {'error': repeatedParameter},
         HttpStatus.badRequest,
       );
       return;

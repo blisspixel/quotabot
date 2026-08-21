@@ -1017,6 +1017,43 @@ void main() {
       expect(line, 'cached | manual | captured 1h ago');
     });
 
+    test('same-identity manual quota stays on one built-in desktop card', () {
+      const now = 1782046566;
+      final rows = coalesceSupplementalManualQuotas([
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'work@example.com',
+          asOf: now,
+          sourceClass: ProviderSourceClass.authoritativeLive,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
+        ),
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude manual',
+          account: 'work@example.com',
+          source: providerQuotaManualSource,
+          asOf: now - 60,
+          windows: [QuotaWindow(label: 'manual', usedPercent: 80)],
+        ),
+      ]);
+
+      expect(rows, hasLength(1));
+      expect(providerSetupRows(rows), hasLength(1));
+      expect(groupProvidersForDisplay(rows).single.quotas, hasLength(1));
+      expect(
+        desktopProviderTrustLine(rows.single, now),
+        'live | account-wide | quota plan | manual note | captured just now',
+      );
+      expect(
+        desktopProviderTrustDetail(rows.single, now),
+        allOf(
+          contains('manual 80% used'),
+          contains('does not replace built-in evidence'),
+        ),
+      );
+    });
+
     test('labels provider drift separately from ordinary cached data', () {
       const now = 1782046566;
       final line = desktopProviderTrustLine(

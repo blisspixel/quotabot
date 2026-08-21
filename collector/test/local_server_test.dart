@@ -1546,6 +1546,14 @@ void main() {
             'between 20 and 50',
         'quota_stretch=true&quota_stretch_threshold_percent=51':
             'between 20 and 50',
+        'task=simple&task=hard': 'task may be specified only once',
+        'exclude=claude&exclude=codex': 'exclude may be specified only once',
+        'cost_penalty=claude:1&cost-penalty=codex:2':
+            'cost_penalty may be specified only once',
+        'local_first=true&local-first=false':
+            'local_first may be specified only once',
+        'quota_stretch=true&quota_stretch=true':
+            'quota_stretch may be specified only once',
         'local_frist=true': 'unknown query parameter: local_frist',
       };
       for (final entry in cases.entries) {

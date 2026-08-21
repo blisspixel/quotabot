@@ -1396,6 +1396,7 @@ const _switchOptions = {
 /// this check both cases were silently ignored, so a command could report
 /// success while running with a materially different routing or filter policy.
 String? _optionError(List<String> args) {
+  final valueOptionCounts = <String, int>{};
   for (final arg in args) {
     if (arg == '--') break;
     if (_switchOptions.contains(arg)) continue;
@@ -1406,6 +1407,9 @@ String? _optionError(List<String> args) {
     final name = arg.substring(2, separator < 0 ? null : separator);
     if (_valueOptions.contains(name)) {
       if (separator < 0) return '--$name requires a value';
+      final count = (valueOptionCounts[name] ?? 0) + 1;
+      valueOptionCounts[name] = count;
+      if (count > 1) return '--$name may be specified only once';
       continue;
     }
     return 'unknown option "$arg"';
