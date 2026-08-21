@@ -424,9 +424,13 @@ if install_portable_desktop > "$test_root/portable-rollback.log" 2>&1; then
 fi
 unset FAIL_ACTIVATION FAIL_TARGET URL_TRACE
 test "$("$portable_executable")" = selected
-portable_versions="${portable_target%/*}/.quotabot-desktop-versions"
+portable_versions="${portable_target%/*}/.${portable_name}-versions"
 portable_count="$(count_generation_directories "$portable_versions")"
-test "$portable_count" -eq 2
+if [ "$portable_count" -ne 2 ]; then
+  echo "Portable rollback retained $portable_count generations in $portable_versions:" >&2
+  find "$portable_versions" -maxdepth 1 -mindepth 1 -print >&2
+  exit 1
+fi
 export HOME="$transaction_home"
 
 # Restore the CLI archive used by the remaining release-installer cases.
