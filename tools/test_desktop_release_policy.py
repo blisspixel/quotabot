@@ -870,11 +870,19 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
+        create_release = release.split("  create-release:\n", 1)[1].split(
+            "  build:\n", 1
+        )[0]
 
         self.assertNotIn("--generate-notes", release)
         self.assertIn("changelog_notes=", release)
         self.assertIn("CHANGELOG.md has no release section", release)
         self.assertIn('--notes "$release_notes"', release)
+        checkout_at = create_release.index("actions/checkout@")
+        changelog_at = create_release.index("changelog_notes=")
+        self.assertLess(checkout_at, changelog_at)
+        checkout_context = create_release[checkout_at : checkout_at + 300]
+        self.assertIn("persist-credentials: false", checkout_context)
 
     def test_release_signing_docs_require_azure_action_allowlist(self) -> None:
         signing = (ROOT / "docs" / "RELEASE-SIGNING.md").read_text(encoding="utf-8")
