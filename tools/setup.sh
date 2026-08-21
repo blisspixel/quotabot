@@ -18,10 +18,11 @@
 set -euo pipefail
 
 cli_only=0
+explicit_cli_only=0
 desktop_skipped=0
 for arg in "$@"; do
   case "$arg" in
-    --cli-only) cli_only=1 ;;
+    --cli-only) cli_only=1; explicit_cli_only=1 ;;
     -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -174,49 +175,8 @@ show_first_run() {
   local python_bin
   python_bin="$(command -v python3 || command -v python || true)"
   [ -n "$python_bin" ] || return 0
-  "$install_dir/quotabot" --json 2>/dev/null | "$python_bin" - <<'PY'
-import json, sys
-try:
-    snapshot = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-ready, login, other = [], [], []
-for provider in snapshot.get("providers") or []:
-    name = provider.get("display_name") or provider.get("provider") or "provider"
-    error = provider.get("error") or ""
-    key = provider.get("provider") or ""
-    if provider.get("ok"):
-        ready.append(str(name))
-        continue
-    if "invalid" in error.lower() and "usage" in error.lower():
-        ready.append(f"{name} (signed in)")
-        continue
-    if "quotabot login " in error:
-        login.append(error.split("quotabot login ", 1)[1].split()[0])
-    elif key in {"claude", "codex", "grok", "antigravity"} and any(
-        token in error.lower()
-        for token in ("token", "login", "auth", "credential", "signed out", "unauthorized")
-    ):
-        login.append(key)
-    elif error:
-        other.append(f"{name} - {error}")
-print("")
-print("First run")
-if ready:
-    print("  Already live (no extra login): " + ", ".join(ready))
-unique = []
-for item in login:
-    if item not in unique:
-        unique.append(item)
-if unique:
-    print("  Login only if a row is missing or stale on this machine:")
-    for item in unique:
-        print(f"    quotabot login {item}")
-else:
-    print("  No extra login required. Host apps already signed in on this machine are enough.")
-for line in other:
-    print("  " + line)
-PY
+  "$install_dir/quotabot" --json 2>/dev/null |
+    "$python_bin" "$script_dir/setup_first_run.py"
 }
 
 install_portable_desktop() {
@@ -292,15 +252,19 @@ install_portable_desktop() {
 
 open_quotabot_after_setup() {
   local launched=0
-  if [ "$desktop_skipped" -eq 1 ] || [ "$cli_only" -eq 1 ]; then
+  if [ "$explicit_cli_only" -eq 1 ]; then
+    ok 'Skipped app launch for CLI-only setup'
+    return 0
+  fi
+  if [ "$explicit_cli_only" -eq 0 ] && [ "$desktop_skipped" -eq 1 ]; then
     install_portable_desktop >/dev/null || true
   fi
-  if [ "$os" = darwin ] && [ -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot" ]; then
+  if [ "$explicit_cli_only" -eq 0 ] && [ "$os" = darwin ] && [ -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot" ]; then
     step 'Opening quotabot'
     open "$HOME/Applications/quotabot.app"
     ok 'Opened the desktop app'
     launched=1
-  elif [ "$os" = linux ] && [ -x "$HOME/.local/share/quotabot-desktop/quotabot" ]; then
+  elif [ "$explicit_cli_only" -eq 0 ] && [ "$os" = linux ] && [ -x "$HOME/.local/share/quotabot-desktop/quotabot" ]; then
     step 'Opening quotabot'
     nohup "$HOME/.local/share/quotabot-desktop/quotabot" >/dev/null 2>&1 &
     ok 'Opened the desktop app'
@@ -990,8 +954,10 @@ if [ "$used_release" -eq 1 ]; then
 elif [ "$used_shim" -eq 1 ]; then
   echo "  Note:  dart-run shim from this checkout"
 fi
-if [ -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot" ] || \
-   [ -x "$HOME/.local/share/quotabot-desktop/quotabot" ]; then
+if [ "$explicit_cli_only" -eq 1 ]; then
+  echo "  App:   skipped by --cli-only"
+elif [ -x "$HOME/Applications/quotabot.app/Contents/MacOS/quotabot" ] || \
+     [ -x "$HOME/.local/share/quotabot-desktop/quotabot" ]; then
   echo "  App:   opened"
 elif [ "$cli_only" -eq 0 ]; then
   echo "  App:   launch quotabot from your applications menu"

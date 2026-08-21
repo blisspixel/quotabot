@@ -130,15 +130,38 @@ class InstallerSecurityTests(unittest.TestCase):
         posix = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
 
         self.assertIn("function Show-QuotabotFirstRun", windows)
+        self.assertIn("setup_first_run.ps1", windows)
+        windows_first_run = (ROOT / "tools" / "setup_first_run.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("function Test-ReadyProvider", windows_first_run)
+        self.assertIn("$Provider.stale -eq $true", windows_first_run)
+        self.assertIn("$windows.Count -eq 0", windows_first_run)
+        self.assertIn("signed in, quota unreadable", windows_first_run)
         self.assertIn("function Start-QuotabotAfterSetup", windows)
         self.assertIn("function Install-QuotabotPortableDesktop", windows)
         self.assertIn("quotabot-windows-x64-desktop.zip", windows)
-        self.assertIn("Already live (no extra login)", windows)
-        self.assertIn("Start-QuotabotAfterSetup -CliExecutable $exe", windows)
+        self.assertIn("Already live (no extra login)", windows_first_run)
+        self.assertIn(
+            "Start-QuotabotAfterSetup -CliExecutable $exe -AllowDesktop", windows
+        )
+        self.assertIn("if (-not $CliOnly)", windows)
+        self.assertIn("Skipped app launch for CLI-only setup", windows)
+        self.assertIn("skipped by -CliOnly", windows)
         self.assertIn("show_first_run", posix)
+        self.assertIn('"$python_bin" "$script_dir/setup_first_run.py"', posix)
+        self.assertNotIn("\"$python_bin\" - <<'PY'", posix)
         self.assertIn("open_quotabot_after_setup", posix)
         self.assertIn("install_portable_desktop", posix)
-        self.assertIn("Already live (no extra login)", posix)
+        self.assertIn("explicit_cli_only=1", posix)
+        self.assertIn('[ "$explicit_cli_only" -eq 0 ]', posix)
+        self.assertIn('[ "$explicit_cli_only" -eq 1 ]', posix)
+        self.assertIn("Skipped app launch for CLI-only setup", posix)
+        self.assertIn("skipped by --cli-only", posix)
+        posix_first_run = (ROOT / "tools" / "setup_first_run.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Already live (no extra login)", posix_first_run)
 
     def test_posix_source_setup_installs_cli_when_desktop_is_unavailable(
         self,
@@ -150,6 +173,10 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("desktop_skipped=1", script)
         self.assertIn("cli_only=1", script)
         self.assertIn("Installing the CLI only", script)
+        self.assertNotIn(
+            '[ "$desktop_skipped" -eq 1 ] || [ "$cli_only" -eq 1 ]',
+            script,
+        )
         self.assertIn("flutter config --enable-macos-desktop", script)
         self.assertIn("flutter config --enable-linux-desktop", script)
         self.assertLess(

@@ -48,6 +48,7 @@ class McpServerCliOptions {
     String? token;
     String? tokenEnv;
     String? tokenFile;
+    var tokenSourceCount = 0;
 
     for (var i = 0; i < args.length; i++) {
       final arg = args[i];
@@ -70,14 +71,17 @@ class McpServerCliOptions {
       } else if (arg == '--token' || arg.startsWith('--token=')) {
         final next = _readOptionValue(args, i, '--token');
         token = next.value;
+        tokenSourceCount++;
         i = next.index;
       } else if (arg == '--token-env' || arg.startsWith('--token-env=')) {
         final next = _readOptionValue(args, i, '--token-env');
         tokenEnv = next.value;
+        tokenSourceCount++;
         i = next.index;
       } else if (arg == '--token-file' || arg.startsWith('--token-file=')) {
         final next = _readOptionValue(args, i, '--token-file');
         tokenFile = next.value;
+        tokenSourceCount++;
         i = next.index;
       } else {
         throw FormatException('unknown option: $arg');
@@ -98,11 +102,12 @@ class McpServerCliOptions {
         'HTTP MCP host must be loopback: localhost, 127.0.0.1, or ::1',
       );
     }
-    if (http &&
-        !help &&
-        token == null &&
-        tokenEnv == null &&
-        tokenFile == null) {
+    if (http && tokenSourceCount > 1) {
+      throw const FormatException(
+        'HTTP MCP accepts exactly one token source',
+      );
+    }
+    if (http && !help && tokenSourceCount == 0) {
       throw const FormatException(
         'HTTP MCP requires --token-file, --token-env, or --token',
       );

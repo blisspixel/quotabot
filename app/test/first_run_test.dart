@@ -9,19 +9,29 @@ ProviderQuota _quota({
   required String name,
   bool ok = true,
   bool local = false,
+  bool stale = false,
+  String account = 'default',
+  int? asOf,
+  String? suspect,
+  String? driftReason,
   String? error,
   List<QuotaWindow> windows = const [],
+  List<ModelInfo> models = const [],
 }) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   return ProviderQuota(
     provider: provider,
     displayName: name,
-    account: 'default',
-    asOf: now,
+    account: account,
+    asOf: asOf ?? now,
     ok: ok,
     kind: local ? ProviderQuotaKind.local : ProviderQuotaKind.subscription,
     error: error,
+    stale: stale,
+    suspect: suspect,
+    driftReason: driftReason,
     windows: windows,
+    models: models,
     sourceClass: local
         ? ProviderSourceClass.localRuntime
         : ProviderSourceClass.authoritativeLive,
@@ -44,6 +54,128 @@ void main() {
     expect(claude.defaultSelected, isTrue);
     expect(claude.needsSetup, isFalse);
     expect(claude.statusLabel, 'live');
+  });
+
+  test('best multi-account evidence wins regardless of snapshot order', () {
+    final live = _quota(
+      provider: 'claude',
+      name: 'Claude',
+      account: 'live-account',
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+    );
+    final missing = _quota(
+      provider: 'claude',
+      name: 'Claude',
+      account: 'missing-account',
+      ok: false,
+      error: 'Claude not configured',
+    );
+
+    for (final snapshot in [
+      [live, missing],
+      [missing, live],
+    ]) {
+      final claude = firstRunEntries(
+        snapshot,
+        now,
+      ).firstWhere((entry) => entry.id == 'claude');
+      expect(claude.presence, FirstRunPresence.live);
+      expect(claude.needsSetup, isFalse);
+    }
+  });
+
+  test('stale and expired quota is found but never called live', () {
+    final stale = _quota(
+      provider: 'claude',
+      name: 'Claude',
+      stale: true,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+    );
+    final expired = _quota(
+      provider: 'codex',
+      name: 'Codex',
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 10, resetsAt: now - 1),
+      ],
+    );
+
+    final entries = firstRunEntries([stale, expired], now);
+    for (final id in ['claude', 'codex']) {
+      final entry = entries.firstWhere((candidate) => candidate.id == id);
+      expect(entry.presence, FirstRunPresence.found);
+      expect(entry.defaultSelected, isTrue);
+      expect(entry.needsSetup, isTrue);
+    }
+  });
+
+  test('rejected evidence states are never called live', () {
+    final rejected = [
+      _quota(
+        provider: 'claude',
+        name: 'Claude',
+        suspect: 'implausible movement',
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+      ),
+      _quota(
+        provider: 'codex',
+        name: 'Codex',
+        driftReason: 'schema drift',
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+      ),
+      _quota(
+        provider: 'grok',
+        name: 'Grok',
+        asOf: now + 61,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 10)],
+      ),
+    ];
+
+    for (final quota in rejected) {
+      expect(firstRunPresence(quota, now), FirstRunPresence.found);
+    }
+  });
+
+  test('stale local runtime is found but never called live', () {
+    final entry = firstRunEntries([
+      _quota(
+        provider: 'ollama',
+        name: 'Ollama',
+        local: true,
+        stale: true,
+        models: const [ModelInfo(id: 'llama', local: true)],
+      ),
+    ], now).firstWhere((candidate) => candidate.id == 'ollama');
+
+    expect(entry.presence, FirstRunPresence.found);
+    expect(entry.needsSetup, isTrue);
+  });
+
+  test('local runtime is live only with on-device model capacity', () {
+    final entries = firstRunEntries([
+      _quota(
+        provider: 'ollama',
+        name: 'Ollama',
+        local: true,
+        models: const [ModelInfo(id: 'llama', local: true)],
+      ),
+      _quota(
+        provider: 'lemonade',
+        name: 'Lemonade',
+        local: true,
+        models: const [
+          ModelInfo(id: 'remote', local: true, cloudOffloaded: true),
+        ],
+      ),
+    ], now);
+
+    expect(
+      entries.firstWhere((entry) => entry.id == 'ollama').presence,
+      FirstRunPresence.live,
+    );
+    expect(
+      entries.firstWhere((entry) => entry.id == 'lemonade').presence,
+      FirstRunPresence.found,
+    );
   });
 
   test('installed but empty rows are found and selected', () {

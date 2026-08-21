@@ -63,6 +63,17 @@ void main() {
       () => McpServerCliOptions.parse(['--http']),
       throwsFormatException,
     );
+    for (final sources in [
+      ['--token', _token, '--token-env', 'QUOTABOT_TEST_TOKEN'],
+      ['--token', _token, '--token-file', 'token.txt'],
+      ['--token-env', 'QUOTABOT_TEST_TOKEN', '--token-file', 'token.txt'],
+      ['--token', _token, '--token', _token],
+    ]) {
+      expect(
+        () => McpServerCliOptions.parse(['--http', ...sources]),
+        throwsFormatException,
+      );
+    }
   });
 
   test('token-file loading trims tokens and fails soft for missing files',

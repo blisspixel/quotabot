@@ -6,7 +6,8 @@ library;
 import 'models.dart';
 
 /// A coarse "resets in ..." label for an optional reset time: `soon` when
-/// unknown, `now` when already reached, else the largest whole unit (`3d`, `5h`).
+/// unknown, `now` when already reached, else the largest useful whole unit
+/// (`3d`, `5h`, `45m`).
 /// Used by the passive-local adapters (Cursor, Kiro, Windsurf) whose state files
 /// carry a single reset boundary.
 String resetCountdownLabel(int? resetsAt, int now) {
@@ -15,7 +16,10 @@ String resetCountdownLabel(int? resetsAt, int now) {
   if (secs <= 0) return 'now';
   final days = secs ~/ 86400;
   if (days > 0) return '${days}d';
-  return '${secs ~/ 3600}h';
+  final hours = secs ~/ 3600;
+  if (hours > 0) return '${hours}h';
+  final minutes = secs ~/ 60;
+  return minutes > 0 ? '${minutes}m' : '<1m';
 }
 
 /// A compact single-unit age for [seconds] elapsed, rounded to the nearest unit:
@@ -93,7 +97,8 @@ String providerFailureSummary(
 
 /// A compact two-unit countdown to [resetsAt]: `now` when reached, `2d3h` when a
 /// day or more away, otherwise `3h20m`. Used wherever a precise time-to-reset is
-/// shown (the `top` view and the CLI).
+/// shown (the `top` view and the CLI). Sub-hour values omit a noisy zero-hour
+/// prefix, and a positive sub-minute value stays distinct from an elapsed reset.
 String countdown(int resetsAt, int now) {
   var secs = resetsAt - now;
   if (secs <= 0) return 'now';
@@ -101,5 +106,7 @@ String countdown(int resetsAt, int now) {
   secs %= 86400;
   final hours = secs ~/ 3600;
   if (days > 0) return '${days}d${hours}h';
-  return '${hours}h${(secs % 3600) ~/ 60}m';
+  final minutes = (secs % 3600) ~/ 60;
+  if (hours > 0) return '${hours}h${minutes}m';
+  return minutes > 0 ? '${minutes}m' : '<1m';
 }

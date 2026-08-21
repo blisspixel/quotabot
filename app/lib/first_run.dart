@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 
@@ -75,11 +76,10 @@ Set<String> firstRunHiddenProviders(Set<String> selected) => {
 
 FirstRunPresence firstRunPresence(ProviderQuota? quota, int now) {
   if (quota == null) return FirstRunPresence.missing;
-  if (quota.isLocal && quota.ok && quota.error == null) {
+  if (quota.isLocal && isLocalRuntimeAvailableAt(quota, now)) {
     return FirstRunPresence.live;
   }
   if (isTrustedQuotaEvidenceAt(quota, now)) return FirstRunPresence.live;
-  if (quota.ok && quota.windows.isNotEmpty) return FirstRunPresence.live;
   final error = (quota.error ?? '').toLowerCase();
   if (error.contains('not installed') || error.contains('not configured')) {
     return FirstRunPresence.missing;
@@ -134,9 +134,17 @@ List<FirstRunEntry> firstRunEntries(
   final latest = <String, ProviderQuota>{};
   for (final quota in snapshot) {
     final current = latest[quota.provider];
+    final candidatePresence = firstRunPresence(quota, now);
+    final currentPresence = firstRunPresence(current, now);
+    final candidateWinsTie =
+        current != null &&
+        candidatePresence == currentPresence &&
+        (quota.asOf > current.asOf ||
+            (quota.asOf == current.asOf &&
+                quota.account.compareTo(current.account) < 0));
     if (current == null ||
-        firstRunPresence(quota, now).index >
-            firstRunPresence(current, now).index) {
+        candidatePresence.index < currentPresence.index ||
+        candidateWinsTie) {
       latest[quota.provider] = quota;
     }
   }

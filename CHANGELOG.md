@@ -4,6 +4,20 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+
+- First-run readiness now keeps the best account for each provider and never
+  calls stale, drifted, suspect, or expired quota live. The source installers
+  apply the same conservative readiness rule, and macOS/Linux setup once again
+  receives and renders the CLI snapshot it was meant to summarize.
+- MCP Streamable HTTP startup now rejects repeated or conflicting bearer-token
+  sources instead of silently choosing one by argument precedence.
+- Reset countdowns below one hour now use useful minute labels instead of `0h`.
+- Explicit CLI-only source setup no longer downloads or installs the desktop
+  app, or opens an interactive dashboard. Automatic desktop-toolchain failures
+  can still use the verified portable desktop fallback during a normal full
+  setup.
+
 ### Documentation
 
 - Ordered the remaining 0.10.x work so field-discovered correctness,
