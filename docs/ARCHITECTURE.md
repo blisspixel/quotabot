@@ -682,7 +682,9 @@ leaves JSON standard output reserved for alert records.
   account when the "Show account names" preference is enabled; single-account
   labels remain hidden. `prefs.dart` persists hidden providers, compact state,
   cadence, always on top, taskbar visibility, enable notifications,
-  showAccounts, and window position across restarts.
+  showAccounts, window position, and a bounded 128-entry reset-reminder handled
+  ledger across restarts. Ledger entries contain only the numeric notification
+  ID and reset epoch, never the provider or account label.
 - `WindowBar` keeps normal text in a compact three-column row with safe reset
   wrap points. At large text it reflows label and value above a full-width meter,
   preserving common normalized window names and far reset times at the 320
@@ -714,9 +716,27 @@ leaves JSON standard output reserved for alert records.
   ("N recent checks" otherwise).
 - Notifications toggle drives guarded immediate low-headroom alerts, scheduled
   reset reminders, and edge-triggered redeemable-reset notifications via
-  flutter_local_notifications. Native notification bodies and Windows subtitles
-  follow the account-name preference and expose an account only when duplicate
-  provider accounts need disambiguation.
+  flutter_local_notifications. A trusted window above 80 percent used is
+  scheduled at reset minus 15 minutes, or shown immediately when first observed
+  inside that lead. Native notification bodies and Windows subtitles follow the
+  account-name preference and expose an account only when duplicate provider
+  accounts need disambiguation.
+- Pending reset requests are owned only when their payload exactly equals
+  `quotabot.reset-reminder.v1`. Reconciliation cancels obsolete owned requests
+  and preserves every foreign payload. It compares the owned request title and
+  body with current privacy-aware text; a mismatch is cancelled and rescheduled,
+  so hiding account names takes effect on already-pending reminders.
+- Alert checks, privacy reconciliation, and notification disablement share one
+  serialized flight. A disable request queued behind an in-progress schedule
+  cancels that newly registered owned request before the flight completes, while
+  a re-enable queued behind cancellation schedules the current desired set.
+- Successful schedules and immediate reset deliveries enter the bounded
+  preference ledger through their reset epoch. The ledger is not cleared by a
+  temporary stale or threshold gap, so a delivered OS schedule cannot become a
+  duplicate immediate alert after the pending request disappears, including
+  across process restarts. Cancelling an undelivered future schedule removes its
+  ledger entry, and expired epochs are pruned, preserving retry behavior for a
+  genuinely eligible reminder.
 
 ## Adaptive refresh
 

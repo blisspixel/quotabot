@@ -53,7 +53,9 @@ Notable changes to quotabot. Newest first.
   analytics remain authoritative; ambiguous, local-runtime, placeholder, and
   non-exact identities stay separate for verification and account selection.
 - Desktop reset reminders now arrive 15 minutes before reset, reconcile stale
-  scheduled requests, and are canceled when notifications are disabled.
+  or privacy-obsolete owned requests without touching unrelated notifications,
+  serialize disablement with in-flight scheduling, and use a bounded durable
+  ledger to prevent the same reset from being delivered twice.
 - "Skip for now" in first-run setup now defers the walkthrough only for the
   current process instead of permanently marking setup complete.
 
