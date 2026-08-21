@@ -45,25 +45,25 @@ trap cleanup_test EXIT
 
 count_directory_entries() {
   local directory="$1"
-  local entries
+  local entry count=0
   shopt -s nullglob dotglob
-  entries=("$directory"/*)
+  for entry in "$directory"/*; do
+    count=$((count + 1))
+  done
   shopt -u nullglob dotglob
-  printf '%s\n' "${#entries[@]}"
+  printf '%s\n' "$count"
 }
 
 count_generation_directories() {
   local directory="$1"
   local entry count=0
-  local entries
   shopt -s nullglob
-  entries=("$directory"/generation-* "$directory"/legacy-*)
-  shopt -u nullglob
-  for entry in "${entries[@]}"; do
+  for entry in "$directory"/generation-* "$directory"/legacy-*; do
     if [[ -d "$entry" && ! -L "$entry" ]]; then
       count=$((count + 1))
     fi
   done
+  shopt -u nullglob
   printf '%s\n' "$count"
 }
 
