@@ -479,60 +479,7 @@ function Show-QuotabotFirstRun {
 
   $raw = & $Executable --json 2>$null
   if (-not $raw) { return }
-  try {
-    $snapshot = $raw | ConvertFrom-Json
-  } catch {
-    return
-  }
-  if (-not $snapshot.providers) { return }
-
-  $ready = New-Object System.Collections.Generic.List[string]
-  $login = New-Object System.Collections.Generic.List[string]
-  $other = New-Object System.Collections.Generic.List[string]
-  foreach ($provider in @($snapshot.providers)) {
-    $name = if ($provider.display_name) { [string]$provider.display_name } else { [string]$provider.provider }
-    $error = [string]$provider.error
-    if ($provider.ok) {
-      $ready.Add($name) | Out-Null
-      continue
-    }
-    if ($error -match 'invalid' -and $error -match 'usage') {
-      $ready.Add("$name (signed in)") | Out-Null
-      continue
-    }
-    if ($error -match 'quotabot login (\w+)') {
-      $login.Add($Matches[1]) | Out-Null
-      continue
-    }
-    if (
-      (@('claude', 'codex', 'grok', 'antigravity') -contains [string]$provider.provider) -and
-      ($error -match 'token|login|auth|credential|signed out|unauthorized')
-    ) {
-      $login.Add([string]$provider.provider) | Out-Null
-      continue
-    }
-    if ($error) {
-      $other.Add("$name - $error") | Out-Null
-    }
-  }
-
-  Write-Host ''
-  Write-Host 'First run' -ForegroundColor Cyan
-  if ($ready.Count -gt 0) {
-    Write-Host "  Already live (no extra login): $($ready -join ', ')"
-  }
-  $uniqueLogin = @($login | Select-Object -Unique)
-  if ($uniqueLogin.Count -gt 0) {
-    Write-Host '  Login only if a row is missing or stale on this machine:'
-    foreach ($provider in $uniqueLogin) {
-      Write-Host "    quotabot login $provider"
-    }
-  } else {
-    Write-Host '  No extra login required. Host apps already signed in on this machine are enough.'
-  }
-  foreach ($line in $other) {
-    Write-Host "  $line"
-  }
+  $raw | & (Join-Path $PSScriptRoot 'setup_first_run.ps1')
 }
 
 function Install-QuotabotPortableDesktop {
@@ -583,13 +530,20 @@ function Install-QuotabotPortableDesktop {
 }
 
 function Start-QuotabotAfterSetup {
-  param([Parameter(Mandatory)][string]$CliExecutable)
+  param(
+    [Parameter(Mandatory)][string]$CliExecutable,
+    [switch]$AllowDesktop
+  )
 
   $appExe = Join-Path $installRoot 'desktop\quotabot.exe'
-  if (-not (Test-Path -LiteralPath $appExe -PathType Leaf) -and ($desktopSkipped -or $NoApp -or $CliOnly)) {
+  if ($AllowDesktop -and
+      -not (Test-Path -LiteralPath $appExe -PathType Leaf) -and
+      ($desktopSkipped -or $NoApp)) {
     $appExe = Install-QuotabotPortableDesktop
   }
-  if ($appExe -and (Test-Path -LiteralPath $appExe -PathType Leaf)) {
+  if ($AllowDesktop -and
+      $appExe -and
+      (Test-Path -LiteralPath $appExe -PathType Leaf)) {
     Write-Step 'Opening quotabot'
     Start-Process -FilePath $appExe -WorkingDirectory (Split-Path -Parent $appExe) | Out-Null
     Write-Ok 'Opened the desktop app'
@@ -866,7 +820,11 @@ if (-not $doctorVerifiedBeforeDesktopRestart) {
 }
 
 Show-QuotabotFirstRun -Executable $exe
-Start-QuotabotAfterSetup -CliExecutable $exe
+if (-not $CliOnly) {
+  Start-QuotabotAfterSetup -CliExecutable $exe -AllowDesktop
+} else {
+  Write-Ok 'Skipped app launch for CLI-only setup'
+}
 
 Write-Host ''
 Write-Host 'quotabot is set up.' -ForegroundColor Green
@@ -876,8 +834,11 @@ if ($usedRelease) {
 } elseif ($usedShim) {
   Write-Host '  Note:  dart-run shim from this checkout'
 }
-if (Test-Path -LiteralPath (Join-Path $installRoot 'desktop\quotabot.exe') -PathType Leaf) {
+if (-not $CliOnly -and
+    (Test-Path -LiteralPath (Join-Path $installRoot 'desktop\quotabot.exe') -PathType Leaf)) {
   Write-Host '  App:   opened; also on your Desktop shortcut and in the system tray'
+} elseif ($CliOnly) {
+  Write-Host '  App:   skipped by -CliOnly'
 } elseif (-not $CliOnly -and -not $NoApp) {
   Write-Host '  App:   launch from the Desktop shortcut, or it lives in your system tray'
 } elseif ($desktopSkipped) {

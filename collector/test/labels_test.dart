@@ -11,6 +11,8 @@ void main() {
       expect(resetCountdownLabel(1000 + 3 * 86400, 1000), '3d');
       expect(resetCountdownLabel(1000 + 5 * 3600, 1000), '5h');
       expect(resetCountdownLabel(1000 + 90 * 60, 1000), '1h'); // 1.5h floors
+      expect(resetCountdownLabel(1000 + 45 * 60, 1000), '45m');
+      expect(resetCountdownLabel(1059, 1000), '<1m');
     });
   });
 
@@ -50,7 +52,8 @@ void main() {
       expect(countdown(500, 1000), 'now');
       expect(countdown(1000 + 2 * 86400 + 3 * 3600, 1000), '2d3h');
       expect(countdown(1000 + 3 * 3600 + 20 * 60, 1000), '3h20m');
-      expect(countdown(1000 + 45 * 60, 1000), '0h45m');
+      expect(countdown(1000 + 45 * 60, 1000), '45m');
+      expect(countdown(1059, 1000), '<1m');
     });
   });
 
