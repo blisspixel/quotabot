@@ -5,7 +5,7 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.1. The next work in the focused 0.10.x stabilization train is signed
+0.10.0-rc.2. The next work in the focused 0.10.x stabilization train is signed
 release readiness: Authenticode-sign
 Windows binaries, then Developer ID-sign, notarize, and staple the macOS bundle
 without weakening existing checksums or provenance. The

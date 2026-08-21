@@ -13,6 +13,26 @@ stapling must be implemented and rehearsed before that mode can change.
 
 ## GitHub configuration
 
+The repository Actions policy must keep full-length commit SHA pinning required
+and allow the two signing action repositories in addition to the existing
+project allowlist:
+
+```text
+azure/login@*
+Azure/artifact-signing-action@*
+```
+
+The workflow itself pins Azure Login and Artifact Signing Action to reviewed
+full commit SHAs. GitHub resolves every referenced action before it evaluates a
+job condition, so these repository allowlist entries are required even while
+the signing mode is `unsigned` and both signing jobs will be skipped. Confirm
+the live policy before pushing an immutable release tag:
+
+```bash
+gh api repos/blisspixel/quotabot/actions/permissions
+gh api repos/blisspixel/quotabot/actions/permissions/selected-actions
+```
+
 Create one protected environment named `release-signing`:
 
 1. Restrict deployments to tag pattern `v*` only.
