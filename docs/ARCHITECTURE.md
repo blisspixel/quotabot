@@ -142,6 +142,33 @@ front ends could miss their deadline; a shared client reuses warm connections
 and lets a multi-call adapter reuse one. Adapters still accept an injected client
 for tests.
 
+## Concurrency
+
+Quota collection is I/O-bound: HTTP metadata, local files, and SQLite. The
+useful parallelism is overlapping those waits, not occupying every CPU core.
+
+- A fleet poll starts every selected adapter at once (`Future.wait` in
+  `collector.dart`). Multi-account live reads inside Grok and Antigravity overlap
+  the same way. Result order stays the discovered account order.
+- Claude and Codex start host and grant reads together so a slow grant cannot
+  hide a healthy host observation.
+- The desktop app runs `collectAll` on a background isolate so SQLite, protobuf,
+  and JSON work cannot freeze the UI isolate. If that isolate cannot start, it
+  falls back to the UI isolate.
+- One-shot CLI collection stays on the process isolate. Spawning a second
+  isolate for a command that exits immediately would cost more than it saves.
+- Analytics directory scans also run off the UI isolate, with a timeout and a
+  same-isolate fallback, so a stalled scan cannot freeze refresh.
+
+quotabot does not spawn one isolate per provider. Isolates do not share memory,
+so that design would drop the shared HTTP pool, duplicate credential and cache
+locks, and spend cores on waiting for network. Dart's test runner already uses
+available cores for the suite; CI runs the three OS matrices in parallel.
+
+Decision, parsing, and routing stay single-isolate and deterministic. Extra
+cores belong to overlapping metadata I/O and keeping the UI responsive, not to
+a 16-way compute farm on quota percentages.
+
 Each adapter has a single `collect()` method returning a `ProviderQuota`:
 
 - Codex calls the ChatGPT usage metadata endpoint with the OAuth access token
