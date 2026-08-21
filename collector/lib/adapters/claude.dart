@@ -110,7 +110,6 @@ class ClaudeAdapter {
           host.credential,
           hostPlan,
           asOf,
-          knownExpired: false,
         );
         if (outcome.quota != null) return outcome.quota!;
         if (!outcome.unauthorized) return outcome.error!;
@@ -129,7 +128,6 @@ class ClaudeAdapter {
           // from a host token that was not used for this provider read.
           null,
           asOf,
-          knownExpired: false,
         );
         if (outcome.quota != null) return outcome.quota!;
         // A 401 means "try the next token"; a non-auth HTTP/network error is
@@ -145,7 +143,6 @@ class ClaudeAdapter {
           host.credential,
           hostPlan,
           asOf,
-          knownExpired: host.knownExpired,
         );
         if (outcome.quota != null) return outcome.quota!;
         if (!outcome.unauthorized) return outcome.error!;
@@ -197,7 +194,6 @@ class ClaudeAdapter {
               host.credential,
               host.planEvidence,
               asOf,
-              knownExpired: host.knownExpired,
             );
       final grant = await _resolveGrantCredential().timeout(
         _grantResolutionDeadline,
@@ -211,7 +207,6 @@ class ClaudeAdapter {
               grant,
               null,
               asOf,
-              knownExpired: false,
             );
 
       final hostOutcome = await hostOutcomeFuture;
@@ -223,7 +218,6 @@ class ClaudeAdapter {
           grant,
           null,
           asOf,
-          knownExpired: false,
           timeout: _duplicateFallbackDeadline,
         );
         return [fallback.quota ?? fallback.error!];
@@ -348,7 +342,6 @@ class ClaudeAdapter {
     ClaudeCredential credential,
     _PlanEvidence? fallbackPlanEvidence,
     int asOf, {
-    required bool knownExpired,
     Duration timeout = const Duration(seconds: 10),
   }) async {
     final knownAccount = _accountForCredential(credential.identity);
@@ -414,12 +407,8 @@ class ClaudeAdapter {
     if (resp.statusCode != 200) {
       final retryAfter =
           retryAfterSeconds(resp.headers['retry-after'], now: asOf);
-      final recovery = knownExpired
-          ? '; saved Claude login expired '
-              '(re-run claude, or quotabot login claude)'
-          : '';
       return fail(
-        message: 'HTTP ${resp.statusCode}$recovery',
+        message: 'HTTP ${resp.statusCode}',
         pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
         httpStatus: resp.statusCode,
         retryAfter: retryAfter,
@@ -621,7 +610,6 @@ class ClaudeAdapter {
       final expiresAt = expiresAtMs is int ? expiresAtMs ~/ 1000 : null;
       final now = nowEpoch();
       final fresh = expiresAt != null && expiresAt > now + 60;
-      final knownExpired = expiresAt != null && expiresAt <= now;
       return _HostCredential(
         credential: ClaudeCredential(
           accessToken: token,
@@ -635,7 +623,6 @@ class ClaudeAdapter {
                 asOf: planEvidenceAsOf,
               ),
         fresh: fresh,
-        knownExpired: knownExpired,
       );
     } catch (_) {
       // A partially-written or corrupt host credential must not mask
@@ -649,12 +636,10 @@ class _HostCredential {
   final ClaudeCredential credential;
   final _PlanEvidence? planEvidence;
   final bool fresh;
-  final bool knownExpired;
   _HostCredential({
     required this.credential,
     this.planEvidence,
     required this.fresh,
-    required this.knownExpired,
   });
 
   String get identity => credential.identity;
