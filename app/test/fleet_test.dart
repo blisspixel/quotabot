@@ -759,6 +759,60 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets(
+    'legacy provider history is used only for one unambiguous account',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(820, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      ProviderQuota account(String account) => ProviderQuota(
+        provider: 'codex',
+        displayName: 'Codex',
+        account: account,
+        asOf: now,
+        windows: [
+          QuotaWindow(label: '5h', usedPercent: 20, resetsAt: now + 3600),
+        ],
+      );
+      final work = account('work@example.com');
+      final personal = account('personal@example.com');
+      final legacyBuckets = {'codex': _buckets(40)};
+
+      await tester.pumpWidget(
+        _wrap(
+          FleetScreen(
+            key: const ValueKey('ambiguous-provider-history'),
+            data: [work, personal],
+            buckets: legacyBuckets,
+            dark: true,
+            initialRange: FleetRange.quarter,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('history is still warming up'), findsOneWidget);
+      expect(find.text('DISTRIBUTION'), findsNothing);
+
+      await tester.pumpWidget(
+        _wrap(
+          FleetScreen(
+            key: const ValueKey('unambiguous-provider-history'),
+            data: [work],
+            buckets: legacyBuckets,
+            dark: true,
+            initialRange: FleetRange.quarter,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('DISTRIBUTION'), findsOneWidget);
+      expect(find.text('history is still warming up'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('FleetScreen shows a reset-aware best slot', (tester) async {
     await tester.binding.setSurfaceSize(const Size(520, 820));
     addTearDown(() => tester.binding.setSurfaceSize(null));

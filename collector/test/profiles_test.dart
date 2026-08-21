@@ -283,6 +283,9 @@ void main() {
     expect(loaded, isNotNull);
     expect(loaded!.name, 'work');
     expect(loaded.providers, {'grok'});
+    expect(loaded.accounts, {
+      'grok': {'work@example.com'},
+    });
     expect(loaded.hiddenProviders, {'cursor'});
     expect(loaded.routingPolicy, ProfileRoutingPolicy.balanced);
 

@@ -28,6 +28,10 @@ Notable changes to quotabot. Newest first.
 - Cache-only `decide_now` responses now derive snapshot timestamps and ages
   from the providers remaining after profile, account, and exclusion filters,
   so their provenance describes the actual routing evidence.
+- Named desktop profiles now retain their exact current provider and account
+  selections when every known option is selected, hidden accounts can be
+  restored after a sibling account leaves, and ambiguous multi-account
+  analytics no longer reuse legacy provider-only history.
 
 ### Documentation
 

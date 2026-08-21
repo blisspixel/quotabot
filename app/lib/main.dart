@@ -1341,6 +1341,7 @@ class _DashboardState extends State<Dashboard>
       final loadedHeatmaps = <String, List<List<double?>>>{};
       final rawInsights = <String, Insights>{};
       if (widget._hostIntegration) {
+        final accountCounts = distinctProviderAccountCounts(active);
         for (final q in active) {
           final key = quotaDisplayKey(q);
           try {
@@ -1349,6 +1350,7 @@ class _DashboardState extends State<Dashboard>
               final providerBuckets = loadBuckets(
                 q.provider,
                 account: q.account,
+                fallbackToProvider: accountCounts[q.provider] == 1,
               );
               loadedBuckets[key] = providerBuckets;
               rawInsights[key] = Insights.from(
@@ -1822,7 +1824,8 @@ class _DashboardState extends State<Dashboard>
         }
         _hidden.remove(target);
       } else if (hiddenTargetsQuota(_hidden, quota)) {
-        _hidden.remove(target);
+        _hidden.remove(quota.provider);
+        _hidden.remove(quotaHiddenTarget(quota));
       } else {
         _hidden.add(target);
       }
