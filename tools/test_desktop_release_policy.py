@@ -876,6 +876,24 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("CHANGELOG.md has no release section", release)
         self.assertIn('--notes "$release_notes"', release)
 
+    def test_release_signing_docs_require_azure_action_allowlist(self) -> None:
+        signing = (ROOT / "docs" / "RELEASE-SIGNING.md").read_text(
+            encoding="utf-8"
+        )
+        normalized = " ".join(signing.split())
+
+        self.assertIn("azure/login@*", signing)
+        self.assertIn("Azure/artifact-signing-action@*", signing)
+        self.assertIn("full-length commit SHA pinning required", normalized)
+        self.assertIn(
+            "GitHub resolves every referenced action before it evaluates a job condition",
+            normalized,
+        )
+        self.assertIn(
+            "gh api repos/blisspixel/quotabot/actions/permissions/selected-actions",
+            signing,
+        )
+
     def test_downloaded_windows_draft_assets_are_natively_reverified(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"

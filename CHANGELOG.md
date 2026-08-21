@@ -4,7 +4,7 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.10.0-rc.1 - 2026-08-20
+## 0.10.0-rc.2 - 2026-08-20
 
 ### Changed
 - Updated the optional LiteLLM proxy integration to 1.92.2 with `aiohttp`
@@ -31,6 +31,11 @@ Notable changes to quotabot. Newest first.
   Azure profile configuration. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
+- Added the two fully pinned Azure signing action repositories to the GitHub
+  Actions allowlist. GitHub validates every referenced action before evaluating
+  job conditions, so the missing allowlist entries prevented even an unsigned
+  release workflow from starting. The rejected `v0.10.0-rc.1` tag remains
+  immutable and has no GitHub release.
 - Cursor 3.x now passively detects a recognized current local plan only when its
   bounded membership owner matches the subject of the existing Cursor access
   token. The plan remains unroutable diagnostic evidence because Cursor does
