@@ -877,9 +877,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn('--notes "$release_notes"', release)
 
     def test_release_signing_docs_require_azure_action_allowlist(self) -> None:
-        signing = (ROOT / "docs" / "RELEASE-SIGNING.md").read_text(
-            encoding="utf-8"
-        )
+        signing = (ROOT / "docs" / "RELEASE-SIGNING.md").read_text(encoding="utf-8")
         normalized = " ".join(signing.split())
 
         self.assertIn("azure/login@*", signing)
