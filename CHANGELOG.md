@@ -4,13 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.0-rc.6 - 2026-08-21
+
 ### Fixed
 
 - `quotabot logout` now stays disconnected for Claude, Codex, Grok, and
   Antigravity even when their host applications remain signed in. A safe
   provider-wide marker blocks host and quotabot credentials for every account
   without changing host state, and only a successful explicit quotabot login
-  clears it.
+  clears it. Any exact marker-path entry fails closed, and marker mutation
+  never follows a link.
 - First-run readiness now keeps the best account for each provider and never
   calls stale, drifted, suspect, or expired quota live. The source installers
   apply the same conservative readiness rule, and macOS/Linux setup once again
@@ -71,6 +74,9 @@ Notable changes to quotabot. Newest first.
   signing activation, and added the complete Windows and macOS publisher
   enrollment and rehearsal checklist without changing the project's Apache 2.0
   license.
+- Aligned the README, roadmap, documentation index, setup, usage, architecture,
+  data-source, provider cross-check, schema, product-strategy, and desktop
+  distribution guidance with the rc.6 behavior and release order.
 
 ## 0.10.0-rc.5 - 2026-08-21
 
