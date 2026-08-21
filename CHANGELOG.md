@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.0-rc.1 - 2026-08-20
+
 ### Changed
 - Updated the optional LiteLLM proxy integration to 1.92.2 with `aiohttp`
   3.14.3 and `cryptography` 50.0.0. Updated the TypeScript MCP client examples
@@ -11,10 +13,22 @@ Notable changes to quotabot. Newest first.
   removing the known vulnerable transitives from both reproducible locks. The
   Python MCP example guide now pins the current maintained v1 release while
   identifying v2 as the stable breaking line.
-- Tagged Windows releases now Authenticode-sign every inventoried PE, recapture
-  a post-signing inventory, and fail closed unless the owner-provisioned PFX,
-  timestamp URL, and publisher identity verify. Ordinary CI builds stay
-  unsigned. Published v0.9.9 artifacts remain unsigned.
+- Replaced the exportable-PFX Windows release contract with a protected
+  `release-signing` environment, short-lived GitHub OIDC authentication, and
+  the pinned Azure Artifact Signing action. The signer receives an exact
+  full-tree-validated file catalog, SHA-256 file and RFC 3161 timestamp digests,
+  and no private-key material. Credential-free build and publication jobs
+  exchange immutable candidates with the isolated signing jobs, so dependency
+  resolution, compilation, packaging, attestation, and upload cannot obtain the
+  Azure signing identity.
+- Windows signature verification now binds platform trust to the Artifact
+  Signing Public Trust marker and the owner's durable subscriber identity EKU,
+  while recording but not pinning the service's daily rotating leaf subject and
+  thumbprint. Exact downloaded draft assets are reverified before publication.
+- Added explicit release signing modes and a mandatory release-note disclosure.
+  The transition `unsigned` mode preserves checksums and provenance without
+  claiming platform identity; signed mode fails closed without the protected
+  Azure profile configuration. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
 - Cursor 3.x now passively detects a recognized current local plan only when its

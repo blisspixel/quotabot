@@ -65,6 +65,43 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 ("1.2.3", "17"),
             )
 
+    def test_prerelease_source_keeps_consistent_stable_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.3.0-rc.1",
+                stable_version="1.2.3",
+                locked_version="1.3.0-rc.1",
+            )
+
+            self.assertEqual(
+                check_release_versions(root, tag="v1.3.0-rc.1"),
+                ("1.3.0-rc.1", "17"),
+            )
+
+    def test_prerelease_rejects_disagreeing_stable_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.3.0-rc.1",
+                stable_version="1.2.3",
+                locked_version="1.3.0-rc.1",
+            )
+            (root / "SECURITY.md").write_text(
+                "  The current audited release is "
+                "[v1.2.2](https://github.com/blisspixel/quotabot/releases/tag/v1.2.2).\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"expected stable 1\.2\.3; mismatched "
+                r"SECURITY current audited release=1\.2\.2",
+            ):
+                check_release_versions(root)
+
     def test_mismatched_release_tag_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -77,12 +114,20 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 check_release_versions(root, tag="v1.2.4")
 
     @staticmethod
-    def _write_fixture(root: Path, locked_version: str = "1.2.3") -> None:
+    def _write_fixture(
+        root: Path,
+        locked_version: str = "1.2.3",
+        *,
+        source_version: str = "1.2.3",
+        stable_version: str = "1.2.3",
+    ) -> None:
         files = {
-            "collector/pubspec.yaml": "version: 1.2.3\n",
-            "collector/bin/collect.dart": "const _version = '1.2.3';\n",
-            "collector/lib/mcp.dart": ("const quotabotMcpVersion = '1.2.3';\n"),
-            "app/pubspec.yaml": "version: 1.2.3+17\n",
+            "collector/pubspec.yaml": f"version: {source_version}\n",
+            "collector/bin/collect.dart": (f"const _version = '{source_version}';\n"),
+            "collector/lib/mcp.dart": (
+                f"const quotabotMcpVersion = '{source_version}';\n"
+            ),
+            "app/pubspec.yaml": f"version: {source_version}+17\n",
             "app/pubspec.lock": (
                 "packages:\n"
                 "  quotabot_collector:\n"
@@ -92,25 +137,30 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 "    dependency: transitive\n"
                 '    version: "1.0.0"\n'
             ),
-            "README.md": "> **Current stable:** 1.2.3. Release notes.\n",
+            "README.md": (f"> **Current stable:** {stable_version}. Release notes.\n"),
             "SECURITY.md": (
                 "  The current audited release is "
-                "[v1.2.3](https://github.com/blisspixel/quotabot/releases/tag/v1.2.3).\n"
+                f"[v{stable_version}](https://github.com/blisspixel/quotabot/"
+                f"releases/tag/v{stable_version}).\n"
             ),
             "AGENTS.md": (
-                "The current verified stable release is 1.2.3. Next steps.\n"
+                "The current verified stable release is "
+                f"{stable_version}. Next steps.\n"
             ),
             "docs/README.md": (
-                "The current verified stable release is 1.2.3. Next steps.\n"
+                "The current verified stable release is "
+                f"{stable_version}. Next steps.\n"
             ),
             "docs/SETUP.md": (
                 "The current stable release is\n"
-                "[v1.2.3](https://github.com/blisspixel/quotabot/releases/tag/v1.2.3).\n"
+                f"[v{stable_version}](https://github.com/blisspixel/quotabot/"
+                f"releases/tag/v{stable_version}).\n"
             ),
             "ROADMAP.md": (
-                "The current line, **1.2.3**, contains the release candidate.\n"
+                f"The current line, **{stable_version}**, "
+                "contains the release candidate.\n"
             ),
-            "CHANGELOG.md": "## Unreleased\n\n## 1.2.3 - 2026-07-09\n",
+            "CHANGELOG.md": (f"## Unreleased\n\n## {source_version} - 2026-07-09\n"),
         }
         for relative_path, content in files.items():
             path = root / relative_path

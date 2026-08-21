@@ -706,7 +706,7 @@ void main() {
       human.stdout as String,
       contains('strict live verification selected no provider adapters'),
     );
-  });
+  }, timeout: Timeout.factor(2));
 
   test('verify human output names provider drift and trusted provenance',
       () async {

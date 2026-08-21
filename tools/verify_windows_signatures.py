@@ -35,21 +35,28 @@ from tools.windows_timestamp_policy import (  # noqa: E402
 )
 
 
-SCHEMA = "quotabot.windows-signature-verification.v1"
+SCHEMA = "quotabot.windows-signature-verification.v2"
 ERROR_SCHEMA = "quotabot.windows-signature-verification-error.v1"
 MAX_NATIVE_OUTPUT_BYTES = 64 * 1024
 MAX_TOOL_BYTES = 100 * 1024 * 1024
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
 MAX_SIGNER_SUBJECT_CHARS = 512
-NATIVE_COMMAND_TIMEOUT_SECONDS = 60.0
+MAX_SIGNER_EKUS = 16
+MAX_EKU_CHARS = 256
+NATIVE_COMMAND_TIMEOUT_SECONDS = 90.0
 VERIFICATION_TIMEOUT_SECONDS = 300.0
 
 _THUMBPRINT = re.compile(r"^[0-9A-F]{40}$")
+_OID = re.compile(r"^(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))+$")
 _SIGNATURE_ROW = re.compile(
     r"^[ \t]*(?P<index>\d+)[ \t]+(?P<algorithm>[A-Za-z0-9_-]+)"
     r"[ \t]+(?P<timestamp>[A-Za-z0-9_-]+)[ \t]*\r?$",
     re.MULTILINE,
 )
+
+CODE_SIGNING_EKU = "1.3.6.1.5.5.7.3.3"
+ARTIFACT_SIGNING_EKU_PREFIX = "1.3.6.1.4.1.311.97."
+ARTIFACT_SIGNING_PUBLIC_TRUST_EKU = "1.3.6.1.4.1.311.97.1.0"
 
 _ERROR_MESSAGES = {
     "unsupported_platform": "Windows signature verification requires Windows",
@@ -160,6 +167,7 @@ class AuthenticodeMetadata:
     signer_thumbprint: str | None
     timestamp_subject: str | None
     timestamp_thumbprint: str | None
+    signer_ekus: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -172,6 +180,7 @@ class VerifiedPeSignature:
     timestamp_thumbprint: str
     timestamp_message_imprint_algorithm: str
     timestamp_message_imprint: str
+    signer_ekus: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -188,6 +197,7 @@ class VerifiedPeSignature:
             "timestamp_message_imprint": self.timestamp_message_imprint,
             "signer_subject": self.signer_subject,
             "signer_thumbprint": self.signer_thumbprint,
+            "signer_ekus": list(self.signer_ekus),
             "timestamp_subject": self.timestamp_subject,
             "timestamp_thumbprint": self.timestamp_thumbprint,
         }
@@ -202,9 +212,11 @@ class WindowsSignatureReceipt:
     inventory_sha256: str
     signtool_sha256: str
     powershell_sha256: str
-    expected_signer_subject: str
-    expected_signer_thumbprint: str
+    expected_signer_subject: str | None
+    expected_signer_thumbprint: str | None
     signatures: tuple[VerifiedPeSignature, ...]
+    identity_policy: str = "exact_certificate"
+    expected_subscriber_eku: str | None = None
 
     @property
     def native_code_count(self) -> int:
@@ -219,6 +231,8 @@ class WindowsSignatureReceipt:
             "inventory_sha256": self.inventory_sha256,
             "signtool_sha256": self.signtool_sha256,
             "powershell_sha256": self.powershell_sha256,
+            "identity_policy": self.identity_policy,
+            "expected_subscriber_eku": self.expected_subscriber_eku,
             "expected_signer_subject": self.expected_signer_subject,
             "expected_signer_thumbprint": self.expected_signer_thumbprint,
             "native_code_count": self.native_code_count,
@@ -240,6 +254,56 @@ def _normalize_thumbprint(value: str) -> str:
     if not _THUMBPRINT.fullmatch(normalized):
         raise WindowsSignatureVerificationError("invalid_expected_signer")
     return normalized
+
+
+def _validate_expected_subscriber_eku(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > MAX_EKU_CHARS
+        or _OID.fullmatch(value) is None
+        or not value.startswith(ARTIFACT_SIGNING_EKU_PREFIX)
+        or value == ARTIFACT_SIGNING_PUBLIC_TRUST_EKU
+    ):
+        raise WindowsSignatureVerificationError("invalid_expected_signer")
+    return value
+
+
+def _validate_artifact_signing_ekus(
+    values: tuple[str, ...],
+    *,
+    expected_subscriber_eku: str,
+) -> tuple[str, ...]:
+    if not values or len(values) > MAX_SIGNER_EKUS:
+        raise WindowsSignatureVerificationError("signer_metadata_invalid")
+    normalized: list[str] = []
+    for value in values:
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > MAX_EKU_CHARS
+            or _OID.fullmatch(value) is None
+            or value in normalized
+        ):
+            raise WindowsSignatureVerificationError("signer_metadata_invalid")
+        normalized.append(value)
+    observed = set(normalized)
+    required = {
+        CODE_SIGNING_EKU,
+        ARTIFACT_SIGNING_PUBLIC_TRUST_EKU,
+        expected_subscriber_eku,
+    }
+    subscriber_identities = {
+        value
+        for value in observed
+        if value.startswith(ARTIFACT_SIGNING_EKU_PREFIX)
+        and value != ARTIFACT_SIGNING_PUBLIC_TRUST_EKU
+    }
+    if not required.issubset(observed) or subscriber_identities != {
+        expected_subscriber_eku
+    }:
+        raise WindowsSignatureVerificationError("signer_mismatch")
+    return tuple(sorted(observed))
 
 
 def _validate_subject(value: str) -> str:
@@ -593,6 +657,17 @@ try {
   $securityModule = Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1'
   Import-Module -Name $securityModule -Force -ErrorAction Stop
   $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $env:QUOTABOT_SIGNATURE_TARGET
+  $signerEkus = @()
+  if ($null -ne $signature.SignerCertificate) {
+    foreach ($extension in $signature.SignerCertificate.Extensions) {
+      if ($extension.Oid.Value -eq '2.5.29.37') {
+        $ekuExtension = [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]$extension
+        foreach ($oid in $ekuExtension.EnhancedKeyUsages) {
+          $signerEkus += [string]$oid.Value
+        }
+      }
+    }
+  }
   $value = [ordered]@{
     status = [string]$signature.Status
     signature_type = [string]$signature.SignatureType
@@ -600,6 +675,7 @@ try {
     signer_thumbprint = if ($null -eq $signature.SignerCertificate) { $null } else { $signature.SignerCertificate.Thumbprint }
     timestamp_subject = if ($null -eq $signature.TimeStamperCertificate) { $null } else { $signature.TimeStamperCertificate.Subject }
     timestamp_thumbprint = if ($null -eq $signature.TimeStamperCertificate) { $null } else { $signature.TimeStamperCertificate.Thumbprint }
+    signer_ekus = @($signerEkus)
   }
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   [Console]::Write(($value | ConvertTo-Json -Compress))
@@ -634,8 +710,14 @@ try {
         value.get("timestamp_subject"),
         value.get("timestamp_thumbprint"),
     )
-    if any(not isinstance(item, str) for item in required_strings) or any(
-        item is not None and not isinstance(item, str) for item in optional_strings
+    signer_ekus = value.get("signer_ekus")
+    if (
+        any(not isinstance(item, str) for item in required_strings)
+        or any(
+            item is not None and not isinstance(item, str) for item in optional_strings
+        )
+        or not isinstance(signer_ekus, list)
+        or any(not isinstance(item, str) for item in signer_ekus)
     ):
         raise WindowsSignatureVerificationError("signer_metadata_invalid")
     return AuthenticodeMetadata(
@@ -645,6 +727,7 @@ try {
         signer_thumbprint=value.get("signer_thumbprint"),
         timestamp_subject=value.get("timestamp_subject"),
         timestamp_thumbprint=value.get("timestamp_thumbprint"),
+        signer_ekus=tuple(signer_ekus),
     )
 
 
@@ -687,23 +770,25 @@ def _verify_pe(
     *,
     relative_path: str,
     sha256: str,
-    expected_subject: str,
-    expected_thumbprint: str,
+    expected_subject: str | None,
+    expected_thumbprint: str | None,
     signtool_path: Path,
     powershell_path: Path,
     deadline: float,
+    expected_subscriber_eku: str | None = None,
 ) -> VerifiedPeSignature:
+    signtool_command = [
+        str(signtool_path),
+        "verify",
+        "/pa",
+        "/all",
+        "/tw",
+    ]
+    if expected_thumbprint is not None:
+        signtool_command.extend(("/sha1", expected_thumbprint))
+    signtool_command.append(str(target))
     signtool = _run_native(
-        [
-            str(signtool_path),
-            "verify",
-            "/pa",
-            "/all",
-            "/tw",
-            "/sha1",
-            expected_thumbprint,
-            str(target),
-        ],
+        signtool_command,
         target=target,
         deadline=deadline,
     )
@@ -736,7 +821,18 @@ def _verify_pe(
         raise WindowsSignatureVerificationError(
             "signer_metadata_invalid", relative_path
         )
-    if signer_subject != expected_subject or signer_thumbprint != expected_thumbprint:
+    signer_ekus = tuple(metadata.signer_ekus)
+    if expected_subscriber_eku is not None:
+        try:
+            signer_ekus = _validate_artifact_signing_ekus(
+                signer_ekus,
+                expected_subscriber_eku=expected_subscriber_eku,
+            )
+        except WindowsSignatureVerificationError as error:
+            raise WindowsSignatureVerificationError(
+                error.code, relative_path
+            ) from error
+    elif signer_subject != expected_subject or signer_thumbprint != expected_thumbprint:
         raise WindowsSignatureVerificationError("signer_mismatch", relative_path)
     if signtool.returncode == 2:
         raise WindowsSignatureVerificationError("native_tool_warning", relative_path)
@@ -756,6 +852,7 @@ def _verify_pe(
         timestamp_thumbprint=timestamp_thumbprint,
         timestamp_message_imprint_algorithm=timestamp_message_imprint.algorithm,
         timestamp_message_imprint=timestamp_message_imprint.digest,
+        signer_ekus=signer_ekus,
     )
 
 
@@ -765,14 +862,30 @@ def verify_windows_signatures(
     manifest_path: Path,
     surface: str,
     architecture: str,
-    expected_signer_subject: str,
-    expected_signer_thumbprint: str,
+    expected_subscriber_eku: str | None = None,
+    expected_signer_subject: str | None = None,
+    expected_signer_thumbprint: str | None = None,
 ) -> WindowsSignatureReceipt:
     """Verify one stable post-signing Windows candidate and return its receipt."""
     if os.name != "nt":
         raise WindowsSignatureVerificationError("unsupported_platform")
-    subject = _validate_subject(expected_signer_subject)
-    thumbprint = _normalize_thumbprint(expected_signer_thumbprint)
+    if expected_subscriber_eku is not None:
+        if (
+            expected_signer_subject is not None
+            or expected_signer_thumbprint is not None
+        ):
+            raise WindowsSignatureVerificationError("invalid_expected_signer")
+        subscriber_eku = _validate_expected_subscriber_eku(expected_subscriber_eku)
+        subject = None
+        thumbprint = None
+        identity_policy = "azure_artifact_signing_public_trust"
+    else:
+        if expected_signer_subject is None or expected_signer_thumbprint is None:
+            raise WindowsSignatureVerificationError("invalid_expected_signer")
+        subscriber_eku = None
+        subject = _validate_subject(expected_signer_subject)
+        thumbprint = _normalize_thumbprint(expected_signer_thumbprint)
+        identity_policy = "exact_certificate"
     try:
         expected = load_inventory_manifest(manifest_path)
         before = inventory_native_code(
@@ -811,6 +924,7 @@ def verify_windows_signatures(
                     target,
                     relative_path=entry.path,
                     sha256=entry.sha256,
+                    expected_subscriber_eku=subscriber_eku,
                     expected_subject=subject,
                     expected_thumbprint=thumbprint,
                     signtool_path=sign_tool,
@@ -849,6 +963,8 @@ def verify_windows_signatures(
         inventory_sha256=after.inventory_sha256,
         signtool_sha256=signtool_sha256,
         powershell_sha256=powershell_sha256,
+        identity_policy=identity_policy,
+        expected_subscriber_eku=subscriber_eku,
         expected_signer_subject=subject,
         expected_signer_thumbprint=thumbprint,
         signatures=tuple(verified),
@@ -885,16 +1001,21 @@ def _parser() -> argparse.ArgumentParser:
         help="Verify an x64 or arm64 candidate.",
     )
     parser.add_argument(
+        "--expected-subscriber-eku",
+        help=(
+            "Exact durable Azure Artifact Signing subscriber identity EKU required "
+            "for every PE. This cannot be combined with exact-certificate inputs."
+        ),
+    )
+    parser.add_argument(
         "--expected-signer-subject",
-        required=True,
-        help="Exact certificate subject required for every PE.",
+        help="Legacy exact certificate subject for native fixture verification.",
     )
     parser.add_argument(
         "--expected-signer-thumbprint",
-        required=True,
         help=(
-            "Exact 40-hex certificate thumbprint used to select signer identity, "
-            "not a content-digest policy."
+            "Legacy exact 40-hex certificate thumbprint for native fixture "
+            "verification. Release workflows use the durable subscriber EKU."
         ),
     )
     output = parser.add_mutually_exclusive_group()
@@ -948,6 +1069,7 @@ def main(argv: list[str] | None = None) -> int:
             manifest_path=args.manifest,
             surface=args.surface,
             architecture=args.architecture,
+            expected_subscriber_eku=args.expected_subscriber_eku,
             expected_signer_subject=args.expected_signer_subject,
             expected_signer_thumbprint=args.expected_signer_thumbprint,
         )
@@ -1004,8 +1126,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"inventory sha256: {receipt.inventory_sha256}")
     print(f"signtool sha256: {receipt.signtool_sha256}")
     print(f"powershell sha256: {receipt.powershell_sha256}")
-    print(f"expected signer: {receipt.expected_signer_subject}")
-    print(f"expected signer thumbprint: {receipt.expected_signer_thumbprint}")
+    print(f"identity policy: {receipt.identity_policy}")
+    if receipt.expected_subscriber_eku is not None:
+        print(f"expected subscriber eku: {receipt.expected_subscriber_eku}")
+    else:
+        print(f"expected signer: {receipt.expected_signer_subject}")
+        print(f"expected signer thumbprint: {receipt.expected_signer_thumbprint}")
     for signature in receipt.signatures:
         print(
             f"authenticode file-sha256={signature.sha256} "

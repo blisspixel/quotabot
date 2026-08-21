@@ -153,13 +153,12 @@ to match before attestation or publication. The manifest is retained with the
 workflow evidence.
 
 Authenticode changes PE bytes, so a signed candidate needs a new post-signing
-inventory. For a future release candidate, set the two non-secret environment
-values below to the exact owner-approved publisher identity, then verify that
-inventory with the credential-free policy checker:
+inventory. For an Azure Artifact Signing release candidate, set the non-secret
+durable subscriber identity EKU from the approved Public Trust profile, then
+verify that inventory with the credential-free policy checker:
 
 ```powershell
-$subject = $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT
-$thumbprint = $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT
+$subscriberEku = $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU
 $candidate = 'collector/build/quotabot_cli_release/bundle'
 $manifest = '.agent/windows-cli-post-sign-inventory.json'
 $receipt = '.agent/windows-cli-signature-verification.json'
@@ -171,8 +170,7 @@ Set-Content -LiteralPath $manifest -Value $inventory `
   -Encoding utf8NoBOM -NoNewline
 python tools/verify_windows_signatures.py `
   --manifest $manifest --surface cli --architecture x64 `
-  --expected-signer-subject $subject `
-  --expected-signer-thumbprint $thumbprint `
+  --expected-subscriber-eku $subscriberEku `
   --receipt $receipt $candidate
 if ($LASTEXITCODE -ne 0) {
   throw "Verification failed; receipt_output_invalid means $receipt is not current, may contain prior evidence, or may not exist; capture the terminal fallback and stop"
@@ -197,27 +195,26 @@ python -m unittest `
 ```
 
 That readiness test copies the installed, Microsoft-signed `pwsh.exe` into a
-temporary candidate and supplies its observed public identity to the verifier.
-It proves the local adapter can accept a real policy-valid embedded signature;
-it does not establish or substitute for the future quotabot publisher identity.
+temporary candidate. A legacy exact-certificate test seam proves the local
+adapter can accept a real policy-valid embedded signature. Release workflows do
+not use that seam, and it does not establish or substitute for the quotabot
+subscriber identity.
 
 Use `desktop` and `app/build/windows/x64/runner/Release` for the desktop bundle.
 The verifier does not accept native-tool overrides. It finds SignTool only from
 registered Windows SDK roots and uses the fixed Windows system PowerShell. It
 requires every inventoried PE module to have exactly one valid embedded
-Authenticode signature from the exact expected subject and certificate
-thumbprint. SignTool runs with `/pa /all /tw /sha1`, and its policy table must
-prove a SHA-256 file digest and RFC 3161 timestamp. A structured
+Authenticode signature. SignTool runs with `/pa /all /tw`, and its policy table
+must prove a SHA-256 file digest and RFC 3161 timestamp. A structured
 `Get-AuthenticodeSignature` read independently confirms the embedded signature
-type, OS trust result, signer identity, and timestamp certificate. Native
-verifier processes have bounded time and live-captured output, receive a minimal
-environment, and run from their own directories rather than the candidate
-directory.
-
-SignTool's `/sha1` value is the expected certificate's 40-hex SHA-1
-thumbprint, used to select and match publisher identity. It is not an accepted
-file or timestamp content-digest policy. Both content properties must still use
-SHA-256.
+type, OS trust result, signer and timestamp certificates, and signer EKUs. The
+release policy requires the standard code-signing EKU
+`1.3.6.1.5.5.7.3.3`, Artifact Signing Public Trust marker
+`1.3.6.1.4.1.311.97.1.0`, and exactly one configured durable subscriber
+identity EKU under `1.3.6.1.4.1.311.97.`. It records each daily leaf subject and
+thumbprint as evidence but does not pin either value. Native verifier processes
+have bounded time and live-captured output, receive a minimal environment, and
+run from their own directories rather than the candidate directory.
 
 After those Windows checks succeed, a separate standard-library parser reads
 only the bounded PE certificate table. It requires one current PKCS SignedData
@@ -248,11 +245,12 @@ code also covers malformed, ambiguous, unsupported, resource-limited, or
 signature-unbound timestamp evidence that another signing retry may not repair.
 
 The final full-tree inventory must still equal the supplied post-signing
-manifest. The deterministic `quotabot.windows-signature-verification.v1` receipt
-covers the candidate and inventory digests, relative PE paths and digests, signer
-and timestamp identities, each timestamp message-imprint algorithm and value,
-and stable hashes of SignTool and PowerShell. It emits no generated timestamp,
-absolute candidate root, or raw native diagnostic.
+manifest. The deterministic `quotabot.windows-signature-verification.v2` receipt
+covers the candidate and inventory digests, relative PE paths and digests,
+signer and timestamp identities, signer EKUs, the durable subscriber identity
+EKU, each timestamp message-imprint algorithm and value, and stable hashes of
+SignTool and PowerShell. It emits no generated timestamp, absolute candidate
+root, or raw native diagnostic.
 With `--json`, a failure emits the bounded
 `quotabot.windows-signature-verification-error.v1` object with a stable reason
 code, surface, architecture, allowlisted failure stage, and, when applicable,
@@ -284,31 +282,49 @@ The before and after inventories prove snapshot equality, not continuous
 filesystem immutability. This verifier shares the isolated-runner assumption
 stated above; no untrusted local process may race candidate-path replacement.
 
-The credential-bearing signer is `python tools/sign_windows.py`. It reads the
-PFX and password from `QUOTABOT_WINDOWS_PFX_BASE64` and
-`QUOTABOT_WINDOWS_PFX_PASSWORD`, and the RFC 3161 timestamp service from
-`QUOTABOT_WINDOWS_TIMESTAMP_URL`. It never prints those values. SignTool is
-invoked with `/fd SHA256`, `/tr` for that timestamp URL, and `/td SHA256`.
-The tagged Windows release jobs then capture a new post-signing inventory and
-call this verifier with `QUOTABOT_WINDOWS_SIGNER_SUBJECT` and
-`QUOTABOT_WINDOWS_SIGNER_THUMBPRINT`. Those jobs fail closed without those
-values, so a `v*` tag stays unpublished until the owner provisions the signing
-identity. The published v0.9.9 release artifacts remain unsigned.
-The Windows order is build, capture the unsigned sign set, sign every
-inventoried PE, capture a new post-signing inventory, verify it, package
-without rebuilding, then require the extracted archive to match that
-post-signing inventory. Ordinary CI packaging stays unsigned and cannot read
-the signing secrets. Before signing begins, the signer also requires the
-complete current candidate tree to equal the unsigned inventory. The clean
-release-verification jobs download each exact draft Windows archive, inventory
-the extracted payload again, rerun the complete native signature verifier, and
-retain its bounded receipt before publication can continue.
+The release workflow uses only the pinned Azure login and Artifact Signing
+actions. `tools/create_windows_signing_catalog.py` first requires the complete
+current candidate tree to equal the unsigned inventory, rejects links, path
+escapes, duplicate native entries, and an output inside the candidate, then
+writes the exact relative PE catalog beside the candidate. The protected
+`release-signing` environment supplies only OIDC identifiers and the one
+signing endpoint, account, and profile. The expected public subscriber EKU is a
+non-secret repository variable so packaging and fresh-download verification do
+not enter the signing environment. No client secret, certificate file,
+password, or exportable private key enters GitHub. The Entra identity must have
+only the `Artifact Signing Certificate Profile Signer` role on that profile
+and trust the environment-bound GitHub OIDC subject.
+
+The action receives only `files-catalog`, SHA-256 file and timestamp digests,
+`http://timestamp.acs.microsoft.com`, `append-signature: false`, and zero
+batch size. The workflow fails closed without those values when
+`QUOTABOT_WINDOWS_SIGNING_BACKEND` is `azure-artifact-signing`. Its Windows
+order is a credential-free build and immutable unsigned handoff, complete-tree
+and catalog revalidation in an isolated environment-bound signer,
+authentication with short-lived OIDC, signing, a new post-signing inventory and
+verification, then a second immutable handoff to packaging. Packaging,
+attestation, release upload, and fresh-download verification have no access to
+the signing environment. The archive must match the selected inventory, and
+the clean release-verification jobs download each exact draft Windows archive,
+inventory the extracted payload again, rerun the complete native signature
+verifier, and retain its bounded receipt before publication can continue.
+
+Until the owner completes Public Trust identity validation, the explicit
+`unsigned` transition mode packages the unchanged candidate only after its
+complete inventory matches. The release notes must disclose that Windows
+publisher identity is not established. The published v0.9.9 release artifacts
+remain unsigned. Ordinary CI packaging stays unsigned and cannot access the
+protected release environment.
 
 The current scanner is intentionally Windows-only. The roadmap still requires
 the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be
 inventoried and verified using native macOS evidence before Developer ID signing
 and notarization are enabled. Linux remains outside the current platform-signing
 scope.
+
+Owner provisioning and activation details for the protected environment, Entra
+federated subject, profile-scoped role, durable subscriber EKU, and transition
+mode are in [RELEASE-SIGNING.md](RELEASE-SIGNING.md).
 
 The CI workflow runs the Windows, macOS, and Linux desktop package scripts on
 their native runners and validates each resulting archive plus checksum, so
