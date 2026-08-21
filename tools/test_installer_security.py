@@ -15,7 +15,8 @@ class InstallerSecurityTests(unittest.TestCase):
         )
 
         self.assertNotIn("--demo", smoke)
-        self.assertEqual(smoke.count("doctor --json"), 5)
+        self.assertEqual(smoke.count("doctor --json"), 3)
+        self.assertEqual(smoke.count("./tools/verify-doctor.ps1 -Executable"), 2)
         clean_install = smoke.split("  clean-install:\n", 1)[1].split(
             "  upgrade-and-setup:\n", 1
         )[0]
@@ -162,6 +163,45 @@ class InstallerSecurityTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("Already live (no extra login)", posix_first_run)
+
+    def test_portable_desktop_fallback_replaces_the_selected_archive(self) -> None:
+        windows = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
+
+        windows_portable = windows.split("function Install-QuotabotPortableDesktop", 1)[
+            1
+        ].split("function Start-QuotabotAfterSetup", 1)[0]
+        self.assertNotIn(
+            "if (Test-Path -LiteralPath $installed -PathType Leaf) { return",
+            windows_portable,
+        )
+        self.assertIn("Install-QuotabotDesktopPayload `", windows_portable)
+        self.assertLess(
+            windows_portable.index("Expand-Archive"),
+            windows_portable.index("Install-QuotabotDesktopPayload `"),
+        )
+
+        posix_portable = posix.split("install_portable_desktop() {", 1)[1].split(
+            "open_quotabot_after_setup() {", 1
+        )[0]
+        self.assertNotIn('[ -x "$dest/Contents/MacOS/quotabot" ]', posix_portable)
+        self.assertNotIn('[ -x "$dest/quotabot" ]', posix_portable)
+        self.assertIn("install_versioned_single", posix_portable)
+        self.assertIn("QUOTABOT_VERSION:-latest", posix_portable)
+
+    def test_windows_install_smoke_uses_fail_closed_doctor_verification(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
+            encoding="utf-8"
+        )
+        verifier = (ROOT / "tools" / "verify-doctor.ps1").read_text(encoding="utf-8")
+
+        self.assertEqual(workflow.count("./tools/verify-doctor.ps1 -Executable"), 2)
+        self.assertNotIn("doctor --json | ConvertFrom-Json", workflow)
+        self.assertLess(
+            verifier.index("$doctorExitCode = $LASTEXITCODE"),
+            verifier.index("ConvertFrom-Json"),
+        )
+        self.assertIn("if ($doctorExitCode -ne 0)", verifier)
 
     def test_posix_source_setup_installs_cli_when_desktop_is_unavailable(
         self,
@@ -686,6 +726,30 @@ class InstallerSecurityTests(unittest.TestCase):
             completed.stdout + completed.stderr,
         )
 
+    @unittest.skipUnless(os.name == "nt", "PowerShell doctor test is Windows-only")
+    def test_windows_doctor_verifier_rejects_nonzero_native_exit(self) -> None:
+        completed = subprocess.run(
+            [
+                "pwsh",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(ROOT / "tools" / "test-verify-doctor.ps1"),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
     def test_package_pair_transaction_behavior(self) -> None:
         if os.name == "nt":
             command = [
@@ -757,6 +821,25 @@ class InstallerSecurityTests(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stdout + completed.stderr,
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX uninstall test needs a native host")
+    def test_posix_uninstall_behavior(self) -> None:
+        bash = shutil.which("bash")
+        self.assertIsNotNone(bash)
+        completed = subprocess.run(
+            [bash, str(ROOT / "tools" / "test-posix-uninstall.sh")],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
             check=False,
         )
 

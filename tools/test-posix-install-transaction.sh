@@ -113,6 +113,9 @@ case "$url" in
   *.sha256) cp "$FAKE_SIDECAR" "$destination" ;;
   *) cp "$FAKE_ARCHIVE" "$destination" ;;
 esac
+if [ -n "${URL_TRACE:-}" ]; then
+  printf '%s\n' "$url" >> "$URL_TRACE"
+fi
 EOF
 cat > "$fake_bin/uname" <<'EOF'
 #!/usr/bin/env sh
@@ -315,6 +318,95 @@ if ! declare -F install_versioned_single >/dev/null || \
   exit 1
 fi
 os="$transaction_os"
+
+# Load the portable fallback without executing the rest of setup. It must fetch
+# the exact selected tag and route both upgrade and failure rollback through the
+# same versioned single-target transaction.
+portable_function="$test_root/setup-portable-function.sh"
+sed -n '/^install_portable_desktop() {$/,/^}$/p' \
+  "$repository_root/tools/setup.sh" > "$portable_function"
+if ! grep -q '^install_portable_desktop() {' "$portable_function"; then
+  echo 'Could not extract the portable desktop function.' >&2
+  exit 1
+fi
+source "$portable_function"
+step() { :; }
+
+portable_archive="$test_root/quotabot-linux-x64-desktop.tar.gz"
+portable_sidecar="$portable_archive.sha256"
+portable_source="$test_root/portable-source"
+transaction_home="$HOME"
+export HOME="$test_root/portable/home"
+portable_target="$test_root/portable/home/.local/share/quotabot-desktop"
+portable_url_trace="$test_root/portable-url.trace"
+write_portable_archive() {
+  local version="$1" digest
+  rm -rf -- "$portable_source"
+  mkdir -p "$portable_source/data/flutter_assets" "$portable_source/lib"
+  cat > "$portable_source/quotabot" <<EOF
+#!/usr/bin/env sh
+printf '%s\n' '$version'
+EOF
+  chmod +x "$portable_source/quotabot"
+  printf '%s\n' "$version" > "$portable_source/data/flutter_assets/version"
+  printf '%s\n' "$version" > "$portable_source/lib/libapp.test"
+  tar -C "$portable_source" -czf "$portable_archive" .
+  if command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum "$portable_archive" | awk '{print $1}')"
+  else
+    digest="$(shasum -a 256 "$portable_archive" | awk '{print $1}')"
+  fi
+  printf '%s  %s\n' "$digest" "$(basename "$portable_archive")" \
+    > "$portable_sidecar"
+}
+
+export QUOTABOT_VERSION=v1.2.3
+export FAKE_ARCHIVE="$portable_archive"
+export FAKE_SIDECAR="$portable_sidecar"
+export URL_TRACE="$portable_url_trace"
+arch=x64
+write_portable_archive old
+install_portable_desktop >/dev/null
+test "$("$portable_target/quotabot")" = old
+write_portable_archive selected
+portable_lock="${portable_target%/*}/.quotabot-desktop-install.lock"
+printf '99999999\n' > "$portable_lock"
+install_portable_desktop >/dev/null
+test "$("$portable_target/quotabot")" = selected
+test ! -e "$portable_lock"
+if find "${portable_target%/*}" -maxdepth 1 \
+  -name '.quotabot-desktop-install.lock.stale.*' -print -quit | grep -q .; then
+  echo 'Portable desktop install retained a recovered stale lock.' >&2
+  exit 1
+fi
+grep -Fq '/releases/download/v1.2.3/quotabot-linux-x64-desktop.tar.gz' \
+  "$portable_url_trace"
+mkdir "$portable_lock"
+write_portable_archive blocked
+if install_portable_desktop > "$test_root/portable-invalid-lock.log" 2>&1; then
+  echo 'Portable desktop install accepted a directory as its transaction lock.' >&2
+  exit 1
+fi
+test -d "$portable_lock"
+test "$("$portable_target/quotabot")" = selected
+rm -rf -- "$portable_lock"
+write_portable_archive rejected
+export FAIL_ACTIVATION=1
+export FAIL_TARGET="$portable_target"
+if install_portable_desktop > "$test_root/portable-rollback.log" 2>&1; then
+  echo 'Portable desktop activation failure unexpectedly succeeded.' >&2
+  exit 1
+fi
+unset FAIL_ACTIVATION FAIL_TARGET URL_TRACE
+test "$("$portable_target/quotabot")" = selected
+portable_versions="${portable_target%/*}/.quotabot-desktop-versions"
+portable_count="$(count_generation_directories "$portable_versions")"
+test "$portable_count" -eq 2
+export HOME="$transaction_home"
+
+# Restore the CLI archive used by the remaining release-installer cases.
+export FAKE_ARCHIVE="$archive"
+export FAKE_SIDECAR="$sidecar"
 
 setup_invalid_source="$test_root/setup-invalid-source"
 mkdir -p "$setup_invalid_source/bin" "$setup_invalid_source/lib"

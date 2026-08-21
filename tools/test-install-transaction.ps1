@@ -596,6 +596,95 @@ try {
       $script:startedDesktopPaths[1] -ine $installedPairExe) {
     throw "Unexpected desktop restart sequence: $($script:startedDesktopPaths -join ', ')"
   }
+
+  # Uninstall stops only processes running from the install root, removes every
+  # executable generation, and preserves config when purge is not requested.
+  $uninstallScript = Join-Path $repositoryRoot 'uninstall.ps1'
+  Import-InstallFunction -Path $uninstallScript -Name 'Write-Step'
+  Import-InstallFunction -Path $uninstallScript -Name 'Write-Ok'
+  Import-InstallFunction -Path $uninstallScript -Name 'Invoke-QuotabotUninstall'
+  $uninstallRoot = Join-Path $testRoot 'uninstall-install'
+  $uninstallGeneration = Join-Path $uninstallRoot 'cli-versions\0123456789abcdef0123456789abcdef'
+  $uninstallDesktop = Join-Path $uninstallRoot 'desktop'
+  $uninstallSentinel = Join-Path $uninstallRoot 'manual\sentinel'
+  $uninstallShortcut = Join-Path $testRoot 'uninstall-shortcut.lnk'
+  New-Item -ItemType Directory -Force -Path `
+    (Join-Path $uninstallGeneration 'bin'), `
+    (Join-Path $uninstallGeneration 'lib'), `
+    $uninstallDesktop, `
+    (Split-Path -Parent $uninstallSentinel) | Out-Null
+  Set-Content -LiteralPath $uninstallSentinel -Value 'keep' -NoNewline
+  Set-Content -LiteralPath (Join-Path $uninstallGeneration 'lib\sqlite3.dll') -Value 'library' -NoNewline
+  Set-Content -LiteralPath (Join-Path $uninstallDesktop 'plugin.dll') -Value 'desktop' -NoNewline
+  Set-Content -LiteralPath $uninstallShortcut -Value 'shortcut' -NoNewline
+  $installedExecutable = Join-Path $uninstallGeneration 'bin\quotabot.exe'
+  $unrelatedRoot = Join-Path $testRoot 'unrelated-process'
+  New-Item -ItemType Directory -Force -Path $unrelatedRoot | Out-Null
+  $unrelatedExecutable = Join-Path $unrelatedRoot 'quotabot.exe'
+  Copy-Item -LiteralPath "$env:SystemRoot\System32\ping.exe" -Destination $installedExecutable
+  Copy-Item -LiteralPath "$env:SystemRoot\System32\ping.exe" -Destination $unrelatedExecutable
+  $installedProcess = Start-Process `
+    -FilePath $installedExecutable `
+    -ArgumentList @('-n', '30', '127.0.0.1') `
+    -PassThru
+  $unrelatedProcess = Start-Process `
+    -FilePath $unrelatedExecutable `
+    -ArgumentList @('-n', '30', '127.0.0.1') `
+    -PassThru
+  try {
+    Start-Sleep -Milliseconds 250
+    Invoke-QuotabotUninstall `
+      -InstallRoot $uninstallRoot `
+      -DesktopShortcut $uninstallShortcut
+    if (Get-Process -Id $installedProcess.Id -ErrorAction SilentlyContinue) {
+      throw 'Uninstall did not stop the installed quotabot process.'
+    }
+    if (-not (Get-Process -Id $unrelatedProcess.Id -ErrorAction SilentlyContinue)) {
+      throw 'Uninstall stopped an unrelated quotabot process.'
+    }
+    foreach ($removedName in @('bin', 'lib', 'cli-versions', 'desktop')) {
+      if (Test-Path -LiteralPath (Join-Path $uninstallRoot $removedName)) {
+        throw "Uninstall retained $removedName."
+      }
+    }
+    Assert-Content -Path $uninstallSentinel -Expected 'keep'
+    if (Test-Path -LiteralPath $uninstallShortcut) {
+      throw 'Uninstall retained the desktop shortcut.'
+    }
+  } finally {
+    Stop-Process -Id $installedProcess.Id -Force -ErrorAction SilentlyContinue
+    Stop-Process -Id $unrelatedProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+
+  # An independently held generation file cannot be deleted. The uninstaller
+  # must fail and name the retained payload rather than reporting success.
+  $retainedRoot = Join-Path $testRoot 'uninstall-retained'
+  $retainedFile = Join-Path $retainedRoot 'cli-versions\fedcba9876543210fedcba9876543210\bin\quotabot.exe'
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $retainedFile) | Out-Null
+  Set-Content -LiteralPath $retainedFile -Value 'locked' -NoNewline
+  $heldPayload = [IO.File]::Open(
+    $retainedFile,
+    [IO.FileMode]::Open,
+    [IO.FileAccess]::Read,
+    [IO.FileShare]::Read
+  )
+  $retainedFailed = $false
+  try {
+    try {
+      Invoke-QuotabotUninstall `
+        -InstallRoot $retainedRoot `
+        -DesktopShortcut (Join-Path $testRoot 'missing-shortcut.lnk')
+    } catch {
+      $retainedFailed = $_.Exception.Message -match 'uninstall was incomplete' -and
+        $_.Exception.Message -match 'cli-versions'
+      if (-not $retainedFailed) { throw }
+    }
+  } finally {
+    $heldPayload.Dispose()
+  }
+  if (-not $retainedFailed) {
+    throw 'Uninstall accepted a retained CLI generation store.'
+  }
 } finally {
   $resolvedRoot = [IO.Path]::GetFullPath($testRoot)
   $resolvedTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

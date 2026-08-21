@@ -32,6 +32,14 @@ Notable changes to quotabot. Newest first.
   selections when every known option is selected, hidden accounts can be
   restored after a sibling account leaves, and ambiguous multi-account
   analytics no longer reuse legacy provider-only history.
+- Portable desktop fallback installs now consume the selected release on every
+  run and use the same rollback-protected activation as source-built payloads,
+  so exact updates and rollbacks cannot silently reopen an older app.
+- Windows, macOS, and Linux uninstall now stop only processes launched from
+  quotabot install roots, remove guarded CLI and desktop generation stores,
+  preserve config unless purge is requested, and fail visibly if payloads
+  remain. The Windows install smoke also rejects any nonzero `doctor` exit
+  before parsing its JSON.
 
 ### Documentation
 
