@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -344,7 +345,7 @@ void main() {
     expect(q.single.sourceClass, ProviderSourceClass.authoritativeLive);
   });
 
-  test('non-ok Grok billing responses are plain account-only notes', () async {
+  test('non-auth Grok billing failures keep their exact status', () async {
     writeAuth({
       'a': {'email': 'a@example.com', 'key': 'token-a'},
       'b': {'email': 'b@example.com', 'key': 'token-b'},
@@ -352,7 +353,13 @@ void main() {
     var calls = 0;
     final client = MockClient((_) async {
       calls += 1;
-      if (calls == 1) return http.Response('denied', 403);
+      if (calls == 1) {
+        return http.Response(
+          'throttled',
+          429,
+          headers: {'retry-after': '90'},
+        );
+      }
       return http.Response.bytes(
         Uint8List.fromList([0, 0, 0, 0, 0]),
         200,
@@ -367,10 +374,74 @@ void main() {
     ).collectAccounts();
 
     expect(q, hasLength(2));
+    expect(q[0].account, 'a@example.com');
+    expect(q[0].ok, isFalse);
+    expect(q[0].error, 'HTTP 429');
+    expect(q[0].pipeHealth, providerPipeHealthThrottled);
+    expect(q[0].httpStatus, 429);
+    expect(q[0].retryAfterSeconds, 90);
+    expect(q[1].account, 'b@example.com');
+    expect(q[1].ok, isTrue);
     expect(
-      q.map((p) => p.error).toSet(),
-      {'token expired (open Grok to refresh) - account only'},
+      q[1].error,
+      'token expired (open Grok to refresh) - account only',
     );
+    expect(q[1].httpStatus, 200);
+  });
+
+  test('Grok HTTP 403 is not diagnosed as an expired login', () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient((_) async => http.Response('denied', 403)),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'HTTP 403');
+    expect(q.single.httpStatus, 403);
+    expect(q.single.pipeHealth, isNull);
+    expect(q.single.error, isNot(contains('token expired')));
+  });
+
+  test('Grok usage timeouts are throttled rather than expired logins',
+      () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient((_) async => throw TimeoutException('slow')),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'Grok usage read timed out');
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
+    expect(q.single.error, isNot(contains('token expired')));
+  });
+
+  test('invalid Grok billing payloads are not expired logins', () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          Uint8List.fromList([0, 0, 0, 0, 0]),
+          200,
+          headers: {'grpc-status': '0'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'invalid Grok usage response');
+    expect(q.single.windows, isEmpty);
   });
 
   test('a nonzero gRPC body trailer invalidates an apparent data frame',
@@ -394,7 +465,34 @@ void main() {
     ).collectAccounts();
 
     expect(q.single.windows, isEmpty);
+    expect(q.single.ok, isTrue);
     expect(q.single.error, contains('token expired'));
+    expect(q.single.httpStatus, 200);
+  });
+
+  test('a resource-exhausted gRPC trailer is throttling, not expiry', () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    });
+    const now = 1782000000;
+    final data = grpcFrame(grokMessage(17.0, now + 3600));
+    final exhausted = grpcFrame(
+      Uint8List.fromList(utf8.encode('grpc-status: 8\r\n')),
+      flag: 0x80,
+    );
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient((_) async => http.Response.bytes(
+            Uint8List.fromList([...data, ...exhausted]),
+            200,
+          )),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, 'gRPC status 8');
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
   });
 
   test('an account without any token stays visible with a plain note',

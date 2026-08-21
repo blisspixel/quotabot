@@ -1849,6 +1849,34 @@ void main() {
       expect(grpcMessage(Uint8List.fromList([...data, ...data])), isEmpty);
     });
 
+    test('grpcWebTrailerStatus reads a unary trailer without using the payload',
+        () {
+      final data = _grpcFrame(0, [1, 2, 3]);
+      final okTrailer = _grpcFrame(0x80, ascii.encode('grpc-status: 0\r\n'));
+      final denied = _grpcFrame(0x80, ascii.encode('grpc-status: 16\r\n'));
+      final exhausted = _grpcFrame(0x80, ascii.encode('grpc-status: 8\r\n'));
+      final malformed =
+          _grpcFrame(0x80, ascii.encode('grpc-message: nope\r\n'));
+
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...okTrailer])),
+        0,
+      );
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...denied])),
+        16,
+      );
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...exhausted])),
+        8,
+      );
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...malformed])),
+        isNull,
+      );
+      expect(grpcWebTrailerStatus(Uint8List.fromList(data)), isNull);
+    });
+
     test('grokWindow parses percent and nearest future reset', () {
       const now = 1782000000;
       final msg = _grokMessage(6.0, now + 86400);
