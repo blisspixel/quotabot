@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'identifiers.dart';
 import 'models.dart';
 import 'provider_ids.dart';
 import 'util.dart';
@@ -288,13 +289,7 @@ String? normalizeProfileName(String? name) {
 }
 
 String? normalizeProviderId(String? provider) {
-  final s = provider?.trim().toLowerCase();
-  if (s == null || s.isEmpty || s.length > 64) return null;
-  if (!RegExp(r'^[a-z0-9][a-z0-9._-]*$').hasMatch(s)) return null;
-  // Resolve a retired id to its current canonical id so a rename does not lose
-  // the profiles, hidden-provider choices, filters, and manual entries that
-  // funnel through here. Identity until a rename is registered.
-  return canonicalizeProviderId(s);
+  return parseExactProviderSelector(provider?.trim()).value;
 }
 
 /// True when a saved account filter predates opaque credential identities.
@@ -330,18 +325,24 @@ Set<String> _providerSet(Set<String> values) =>
 
 String? normalizeHiddenTarget(String? value) {
   final raw = value?.trim();
-  if (raw == null || raw.isEmpty || raw.length > 320) return null;
+  if (raw == null ||
+      raw.isEmpty ||
+      raw.length >
+          maxExactProviderSelectorCharacters +
+              1 +
+              maxExactAccountSelectorCharacters) {
+    return null;
+  }
   final provider = normalizeProviderId(raw);
   if (provider != null) return provider;
   final split = raw.indexOf('|');
   if (split <= 0 || split == raw.length - 1) return null;
   final keyProvider = normalizeProviderId(raw.substring(0, split));
-  final account = raw.substring(split + 1).trim();
-  if (keyProvider == null || account.isEmpty || account.length > 256) {
+  final account = parseExactAccountSelector(raw.substring(split + 1).trim());
+  if (keyProvider == null || account.error != null || account.value == null) {
     return null;
   }
-  if (RegExp(r'[\x00-\x1f\x7f]').hasMatch(account)) return null;
-  return '$keyProvider|$account';
+  return '$keyProvider|${account.value}';
 }
 
 String quotaHiddenTarget(ProviderQuota quota) {

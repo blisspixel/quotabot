@@ -83,6 +83,12 @@ void main() {
     expect(hiddenTargetsQuota({'grok| work@example.com '}, fleet[1]), isTrue);
     expect(hiddenTargetsQuota({'grok| work@example.com '}, fleet[2]), isFalse);
     expect(normalizeHiddenTarget('grok|bad${String.fromCharCode(7)}'), isNull);
+    final longestAccount = 'a' * 512;
+    expect(
+      normalizeHiddenTarget('grok|$longestAccount'),
+      'grok|$longestAccount',
+    );
+    expect(normalizeHiddenTarget('grok|${'a' * 513}'), isNull);
     expect(
       hiddenAccount.allowsProviderAdapter('grok', isLocal: false),
       isTrue,
@@ -277,6 +283,9 @@ void main() {
     expect(loaded, isNotNull);
     expect(loaded!.name, 'work');
     expect(loaded.providers, {'grok'});
+    expect(loaded.accounts, {
+      'grok': {'work@example.com'},
+    });
     expect(loaded.hiddenProviders, {'cursor'});
     expect(loaded.routingPolicy, ProfileRoutingPolicy.balanced);
 

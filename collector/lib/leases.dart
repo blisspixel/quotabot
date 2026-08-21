@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'file_guard.dart';
+import 'identifiers.dart';
 import 'provider_ids.dart';
 import 'storage_keys.dart';
 import 'util.dart';
@@ -99,9 +100,14 @@ class RouteLease {
 
   factory RouteLease.fromJson(Map<String, dynamic> json) {
     final id = normalizeLeaseText(json['id'], maxLength: 96);
+    final rawIdempotencyKey = json['idempotency_key'];
+    final idempotencyKey = parseIdempotencyKey(rawIdempotencyKey);
     final createdAt = (json['created_at'] as num?)?.toInt();
     final expiresAt = (json['expires_at'] as num?)?.toInt();
-    if (id == null || createdAt == null || expiresAt == null) {
+    if (id == null ||
+        createdAt == null ||
+        expiresAt == null ||
+        (rawIdempotencyKey != null && rawIdempotencyKey is! String)) {
       throw const FormatException('invalid lease');
     }
     return RouteLease(
@@ -112,7 +118,10 @@ class RouteLease {
       expiresAt: expiresAt,
       weightPercent: normalizeLeaseWeight(json['weight_percent']),
       client: normalizeLeaseText(json['client']),
-      idempotencyKey: normalizeLeaseText(json['idempotency_key']),
+      // Older releases accepted shorter retry keys. Preserve their active
+      // headroom discount while dropping the unusable retry identity.
+      idempotencyKey:
+          idempotencyKey.error == null ? idempotencyKey.value : null,
     );
   }
 }
@@ -284,6 +293,8 @@ class NoopRouteLeaseStore implements RouteLeaseStore {
     String? idempotencyKey,
     RouteLeaseReusePredicate? reuseWhere,
   }) {
+    final invalid = _invalidIdempotencyReservation(idempotencyKey, const []);
+    if (invalid != null) return invalid;
     final selection = select(const []);
     if (selection.target == null) {
       return RouteLeaseReservation(
@@ -312,14 +323,17 @@ class NoopRouteLeaseStore implements RouteLeaseStore {
     required double weightPercent,
     String? client,
     String? idempotencyKey,
-  }) =>
-      RouteLeaseReservation(
-        reserved: false,
-        reused: false,
-        reason: 'lease store unavailable',
-        lease: null,
-        activeLeases: const [],
-      );
+  }) {
+    final invalid = _invalidIdempotencyReservation(idempotencyKey, const []);
+    if (invalid != null) return invalid;
+    return RouteLeaseReservation(
+      reserved: false,
+      reused: false,
+      reason: 'lease store unavailable',
+      lease: null,
+      activeLeases: const [],
+    );
+  }
 
   @override
   RouteLeaseRelease release({required String leaseId, required int now}) =>
@@ -358,6 +372,8 @@ class InMemoryRouteLeaseStore implements RouteLeaseStore {
     String? idempotencyKey,
     RouteLeaseReusePredicate? reuseWhere,
   }) {
+    final invalid = _invalidIdempotencyReservation(idempotencyKey, const []);
+    if (invalid != null) return invalid;
     _leases = _activeOnly(_leases, now);
     final reservation = _selectAndReserve(
       active: _leases,
@@ -384,6 +400,8 @@ class InMemoryRouteLeaseStore implements RouteLeaseStore {
     String? client,
     String? idempotencyKey,
   }) {
+    final invalid = _invalidIdempotencyReservation(idempotencyKey, const []);
+    if (invalid != null) return invalid;
     _leases = _activeOnly(_leases, now);
     final request = _leaseFromRequest(
       provider: provider,
@@ -508,6 +526,8 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     String? idempotencyKey,
     RouteLeaseReusePredicate? reuseWhere,
   }) {
+    final invalid = _invalidIdempotencyReservation(idempotencyKey, const []);
+    if (invalid != null) return invalid;
     try {
       return _withLock((dir) {
         final file = _dataFile(dir);
@@ -547,6 +567,8 @@ class FileRouteLeaseStore implements RouteLeaseStore {
     String? client,
     String? idempotencyKey,
   }) {
+    final invalid = _invalidIdempotencyReservation(idempotencyKey, const []);
+    if (invalid != null) return invalid;
     try {
       return _withLock((dir) {
         final file = _dataFile(dir);
@@ -751,7 +773,11 @@ RouteLeaseReservation _selectAndReserve({
   String? idempotencyKey,
   RouteLeaseReusePredicate? reuseWhere,
 }) {
-  final normalizedKey = normalizeLeaseText(idempotencyKey);
+  final parsedKey = parseIdempotencyKey(idempotencyKey);
+  if (parsedKey.error != null) {
+    return _invalidIdempotencyReservation(idempotencyKey, active)!;
+  }
+  final normalizedKey = parsedKey.value;
   if (normalizedKey != null) {
     var conflictsWithScope = false;
     for (final lease in active) {
@@ -829,6 +855,11 @@ RouteLease _leaseFromRequest({
   String? client,
   String? idempotencyKey,
 }) {
+  final parsedKey = parseIdempotencyKey(idempotencyKey);
+  if (parsedKey.error != null) {
+    throw ArgumentError.value(
+        idempotencyKey, 'idempotencyKey', parsedKey.error);
+  }
   final seconds = normalizeLeaseSeconds(leaseSeconds);
   return RouteLease(
     id: idFactory(),
@@ -838,7 +869,22 @@ RouteLease _leaseFromRequest({
     expiresAt: now + seconds,
     weightPercent: normalizeLeaseWeight(weightPercent),
     client: normalizeLeaseText(client),
-    idempotencyKey: normalizeLeaseText(idempotencyKey),
+    idempotencyKey: parsedKey.value,
+  );
+}
+
+RouteLeaseReservation? _invalidIdempotencyReservation(
+  Object? idempotencyKey,
+  List<RouteLease> active,
+) {
+  final parsed = parseIdempotencyKey(idempotencyKey);
+  if (parsed.error == null) return null;
+  return RouteLeaseReservation(
+    reserved: false,
+    reused: false,
+    reason: parsed.error!,
+    lease: null,
+    activeLeases: List.unmodifiable(active),
   );
 }
 

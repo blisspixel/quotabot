@@ -17,6 +17,29 @@ Notable changes to quotabot. Newest first.
   app, or opens an interactive dashboard. Automatic desktop-toolchain failures
   can still use the verified portable desktop fallback during a normal full
   setup.
+- MCP provider and account selectors now use one bounded exact-identity
+  validator across quota, routing, model, availability, and reservation tools.
+  Blank, control-bearing, and oversized identities fail before quota
+  collection, cache reads, or lease access instead of silently widening or
+  truncating a request.
+- Lease idempotency keys now require an exact 8 to 120 character ASCII key at
+  every MCP, local HTTP, in-memory, and file-backed boundary. Distinct long
+  keys can no longer alias after truncation.
+- Cache-only `decide_now` responses now derive snapshot timestamps and ages
+  from the providers remaining after profile, account, and exclusion filters,
+  so their provenance describes the actual routing evidence.
+- Named desktop profiles now retain their exact current provider and account
+  selections when every known option is selected, hidden accounts can be
+  restored after a sibling account leaves, and ambiguous multi-account
+  analytics no longer reuse legacy provider-only history.
+- Portable desktop fallback installs now consume the selected release on every
+  run and use the same rollback-protected activation as source-built payloads,
+  so exact updates and rollbacks cannot silently reopen an older app.
+- Windows, macOS, and Linux uninstall now stop only processes launched from
+  quotabot install roots, remove guarded CLI and desktop generation stores,
+  preserve config unless purge is requested, and fail visibly if payloads
+  remain. The Windows install smoke also rejects any nonzero `doctor` exit
+  before parsing its JSON.
 
 ### Documentation
 

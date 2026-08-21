@@ -192,8 +192,7 @@ jobs:
           $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
           $actualVersion = & $installed --version
           if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
-          $doctor = & $installed doctor --json | ConvertFrom-Json
-          if ($doctor.schema -ne 'quotabot.v1') { throw "Unexpected doctor schema: $($doctor.schema)" }
+          ./tools/verify-doctor.ps1 -Executable $installed
 
       - name: Verify and clean-install macOS or Linux release
         if: runner.os != 'Windows'
@@ -517,8 +516,7 @@ jobs:
           $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
           $actualVersion = quotabot --version
           if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
-          $doctor = quotabot doctor --json | ConvertFrom-Json
-          if ($doctor.schema -ne 'quotabot.v1') { throw "Unexpected doctor schema: $($doctor.schema)" }
+          ./tools/verify-doctor.ps1 -Executable (Get-Command quotabot).Source
 
           $sentinel = Join-Path $env:LOCALAPPDATA 'quotabot/manual/install-smoke-sentinel'
           if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Source setup removed persistent state.' }

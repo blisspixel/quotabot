@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 
 import '../credential_identity.dart';
 import '../file_guard.dart';
+import '../identifiers.dart';
 import '../util.dart';
 
 export '../credential_identity.dart';
@@ -153,18 +154,15 @@ class TokenStore {
   }
 
   static String? _normalizeAccount(String? account) {
-    if (account == null) return null;
-    final trimmed = account.trim();
-    if (trimmed.isEmpty ||
-        trimmed.length > 512 ||
-        trimmed.runes.any((c) => c < 0x20 || c == 0x7f)) {
+    final parsed = parseExactAccountSelector(account?.trim());
+    if (parsed.error != null) {
       throw ArgumentError.value(
         account,
         'account',
         'must be a non-empty printable account identifier',
       );
     }
-    return trimmed;
+    return parsed.value;
   }
 
   static String _accountHash(String account) =>

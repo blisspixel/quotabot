@@ -13,6 +13,16 @@ bool quotaHasSpecificAccount(ProviderQuota q) =>
 String quotaDisplayKey(ProviderQuota q) =>
     quotaHasSpecificAccount(q) ? '${q.provider}|${q.account}' : q.provider;
 
+Map<String, int> distinctProviderAccountCounts(Iterable<ProviderQuota> quotas) {
+  final accounts = <String, Set<String>>{};
+  for (final quota in quotas) {
+    accounts
+        .putIfAbsent(quota.provider, () => <String>{})
+        .add(quota.account.trim());
+  }
+  return {for (final entry in accounts.entries) entry.key: entry.value.length};
+}
+
 String quotaHideTarget(ProviderQuota quota, Map<String, int> providerCounts) =>
     (providerCounts[quota.provider] ?? 0) > 1 && quotaHasSpecificAccount(quota)
     ? quotaHiddenTarget(quota)
@@ -133,20 +143,13 @@ QuotaProfile profileFromSelection({
   List<String> preferenceOrder = const [],
   String? theme,
 }) {
-  final allProviders = options.map((option) => option.provider).toSet();
-  final providers =
-      selectedProviders.containsAll(allProviders) &&
-          selectedProviders.length == allProviders.length
-      ? <String>{}
-      : selectedProviders;
+  final providers = Set<String>.of(selectedProviders);
   final accounts = <String, Set<String>>{};
   for (final option in options) {
     if (!selectedProviders.contains(option.provider)) continue;
     final chosen = selectedAccounts[option.provider] ?? const <String>{};
-    if (option.accounts.isNotEmpty &&
-        chosen.isNotEmpty &&
-        chosen.length < option.accounts.length) {
-      accounts[option.provider] = chosen;
+    if (option.accounts.isNotEmpty && chosen.isNotEmpty) {
+      accounts[option.provider] = Set<String>.of(chosen);
     }
   }
   return QuotaProfile(
