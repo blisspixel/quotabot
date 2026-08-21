@@ -25,6 +25,7 @@ import 'alerts.dart';
 import 'analysis.dart';
 import 'decision.dart';
 import 'drift.dart';
+import 'identifiers.dart';
 import 'leases.dart';
 import 'litellm_metrics.dart';
 import 'model_catalog.dart';
@@ -423,11 +424,25 @@ bool _hasRequirementArgs(Map<String, dynamic> args) {
 Map<String, dynamic> availabilityResponse(
   List<ProviderQuota> providers,
   int now,
-  String? providerId,
-  String? accountId,
+  Object? providerId,
+  Object? accountId,
 ) {
-  final name = providerId?.toLowerCase();
-  final account = _accountFilter(accountId);
+  final parsedProvider = parseExactProviderSelector(providerId);
+  final parsedAccount = parseExactAccountSelector(accountId);
+  final name = parsedProvider.value;
+  final account = parsedAccount.value;
+  final argumentError = parsedProvider.error ??
+      (name == null ? 'provider is required' : null) ??
+      parsedAccount.error;
+  if (argumentError != null) {
+    return {
+      'schema': quotabotCheckV1SchemaId,
+      'as_of': now,
+      'provider': name,
+      if (account != null) 'account': account,
+      'error': argumentError,
+    };
+  }
   final matches = providers.where((q) {
     if (q.provider != name) return false;
     return true;
@@ -1159,15 +1174,35 @@ final _modelEntrySchema = JsonSchema.object(
   required: ['id', 'provider', 'source_class', 'local', 'available'],
 );
 
+JsonSchema _providerSelectorInputSchema(String description) =>
+    JsonSchema.string(
+      minLength: 1,
+      maxLength: maxExactProviderSelectorCharacters,
+      pattern: r'^[A-Za-z0-9][A-Za-z0-9._-]*$',
+      description: description,
+    );
+
+JsonSchema _accountSelectorInputSchema(String description) => JsonSchema.string(
+      minLength: 1,
+      maxLength: maxExactAccountSelectorCharacters,
+      description: description,
+    );
+
+JsonSchema _idempotencyKeyInputSchema(String description) => JsonSchema.string(
+      minLength: minIdempotencyKeyCharacters,
+      maxLength: maxIdempotencyKeyCharacters,
+      pattern: r'^[A-Za-z0-9_-]+$',
+      description: description,
+    );
+
 /// Shared capability filter for `list_models` and `suggest_model`. quotabot never
 /// reads the task; the caller supplies the requirements it needs.
 final Map<String, JsonSchema> _modelFilterInputProperties = {
   'profile': JsonSchema.string(
     description: 'Optional local named profile to filter providers/accounts.',
   ),
-  'account': JsonSchema.string(
-    description:
-        'Optional exact account label to route within after profile filtering.',
+  'account': _accountSelectorInputSchema(
+    'Optional exact account label to route within after profile filtering.',
   ),
   'task': JsonSchema.string(
     description:
@@ -1217,9 +1252,8 @@ final _profileAndAccountInputSchema = JsonSchema.object(
     'profile': JsonSchema.string(
       description: 'Optional local named profile to filter providers/accounts.',
     ),
-    'account': JsonSchema.string(
-      description:
-          'Optional exact account label to route within after profile filtering.',
+    'account': _accountSelectorInputSchema(
+      'Optional exact account label to route within after profile filtering.',
     ),
     'exclude': JsonSchema.array(
       items: JsonSchema.string(),
@@ -1234,9 +1268,8 @@ final _routingInputSchema = JsonSchema.object(
     'profile': JsonSchema.string(
       description: 'Optional local named profile to filter providers/accounts.',
     ),
-    'account': JsonSchema.string(
-      description:
-          'Optional exact account label to route within after profile filtering.',
+    'account': _accountSelectorInputSchema(
+      'Optional exact account label to route within after profile filtering.',
     ),
     'exclude': JsonSchema.array(
       items: JsonSchema.string(),
@@ -1458,13 +1491,6 @@ class _ProfiledSnapshot {
   });
 }
 
-String? _accountFilter(Object? value) {
-  if (value is! String) return null;
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) return null;
-  return trimmed.length <= 240 ? trimmed : trimmed.substring(0, 240);
-}
-
 ({Map<String, double> penalties, double weight, String? error})
     _routingCostPolicy(Map<String, dynamic> args) {
   final parsed = parseProviderCostPenalties(args['cost_penalties']);
@@ -1554,15 +1580,35 @@ List<ProviderQuota> _filterAccount(
   return providers.where((provider) => provider.account == account).toList();
 }
 
+int? _filteredCachedSnapshotAsOf(
+  CachedQuotaSnapshot cached,
+  List<ProviderQuota> filteredProviders,
+) {
+  if (filteredProviders.length == cached.providers.length) return cached.asOf;
+  int? newest;
+  for (final provider in filteredProviders) {
+    if (newest == null || provider.asOf > newest) newest = provider.asOf;
+  }
+  return newest;
+}
+
 Future<_ProfiledSnapshot> _profiledSnapshot(
   Map<String, dynamic> args,
   SnapshotProvider snapshot,
   ProfileLoader profileLoader,
 ) async {
-  final account = _accountFilter(args['account']);
-  final exclude = parseProviderExclusions(args['exclude']);
   final rawProfile = args['profile'];
   final requested = rawProfile is String ? rawProfile.trim() : null;
+  final parsedAccount = parseExactAccountSelector(args['account']);
+  final account = parsedAccount.value;
+  if (parsedAccount.error != null) {
+    return _ProfiledSnapshot(
+      providers: const [],
+      profile: requested == null || requested.isEmpty ? null : requested,
+      error: parsedAccount.error,
+    );
+  }
+  final exclude = parseProviderExclusions(args['exclude']);
   if (exclude.error != null) {
     return _ProfiledSnapshot(
       providers: const [],
@@ -1834,16 +1880,14 @@ void _registerQuotaResourceSubscriptions(
 RouteCandidate? _explicitReserveTarget(
   List<ProviderQuota> providers,
   int now,
-  Map<String, dynamic> args,
+  String requestedProvider,
+  String? requestedAccount,
   List<RouteLease> activeLeases,
   Map<String, BurnStat> burnStatsByProvider,
   Map<String, double> pipePenaltyByProvider,
   Map<String, List<ModelInfo>> catalog, {
   List<String> preferenceOrder = const [],
 }) {
-  final requestedProvider = normalizeLeaseText(args['provider'])?.toLowerCase();
-  if (requestedProvider == null) return null;
-  final requestedAccount = normalizeLeaseText(args['account']);
   final matches = providers.where((provider) {
     if (provider.provider != requestedProvider) return false;
     if (requestedAccount == null) return true;
@@ -1870,21 +1914,24 @@ RouteCandidate? _explicitReserveTarget(
 
 Map<String, dynamic> _reserveUnavailable(
   String reason,
-  int now,
-  RouteLeaseState leaseState,
-) =>
-    {
-      'schema': 'quotabot.reserve.v1',
-      'as_of': now,
-      'reserved': false,
-      'reused': false,
-      'reason': reason,
-      'lease': null,
-      'active_leases': _leaseDiscountJson(leaseState.activeLeases),
-      'lease_store_available': leaseState.available,
-      if (!leaseState.available && leaseState.reason != null)
-        'lease_store_reason': leaseState.reason,
-    };
+  int now, {
+  RouteLeaseState? leaseState,
+}) {
+  final activeLeases = leaseState?.activeLeases ?? const <RouteLease>[];
+  final storeAvailable = leaseState?.available ?? true;
+  return {
+    'schema': 'quotabot.reserve.v1',
+    'as_of': now,
+    'reserved': false,
+    'reused': false,
+    'reason': reason,
+    'lease': null,
+    'active_leases': _leaseDiscountJson(activeLeases),
+    'lease_store_available': storeAvailable,
+    if (!storeAvailable && leaseState?.reason != null)
+      'lease_store_reason': leaseState!.reason,
+  };
+}
 
 Map<String, dynamic> _modelRegistryError(int now, String error) => {
       'schema': 'quotabot.models.v1',
@@ -2039,6 +2086,14 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         );
       }
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
+      if (profiled.error != null) {
+        final response = decide(const [], n).route.toJson();
+        response['error'] = profiled.error;
+        response['lease_store_available'] = true;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       final results = profiled.providers;
       final leaseState = leaseStore.activeState(n);
       return CallToolResult.fromStructuredContent(
@@ -2087,9 +2142,8 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           description:
               'Optional local named profile to filter providers/accounts.',
         ),
-        'account': JsonSchema.string(
-          description:
-              'Optional exact account label to route within after profile filtering.',
+        'account': _accountSelectorInputSchema(
+          'Optional exact account label to route within after profile filtering.',
         ),
         'exclude': JsonSchema.array(
           items: JsonSchema.string(),
@@ -2146,64 +2200,61 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     outputSchema: decideNowOutputSchema,
     annotations: _localMaintenance,
     callback: (args, extra) async {
+      final n = now();
+      final maxAge = (args['max_age_seconds'] as num?)?.toInt() ?? 300;
+      final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
+      final costPolicy = _routingCostPolicy(args);
+      final routeRequirements = _routeRequirementsFromArgs(args);
+      final preflight = await _profiledSnapshot(
+        args,
+        () async => const <ProviderQuota>[],
+        profileLoader,
+      );
+      final stretchPolicy = _quotaStretchPolicy(
+        args,
+        profilePolicy: preflight.routingPolicy,
+      );
+      final argumentError = preflight.error ??
+          routeRequirements.error ??
+          costPolicy.error ??
+          stretchPolicy.error;
+      if (argumentError != null) {
+        final response = decideNowResponse(
+          const CachedQuotaSnapshot.empty(),
+          n,
+          maxAgeSeconds: boundedMaxAge,
+          catalog: catalog,
+        );
+        response['error'] = argumentError;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, preflight),
+        );
+      }
       final cached = await cachedSnapshot();
       final profiled = await _profiledSnapshot(
         args,
         () async => cached.providers,
         profileLoader,
       );
-      final n = now();
+      if (profiled.error != null) {
+        final response = decideNowResponse(
+          const CachedQuotaSnapshot.empty(),
+          n,
+          maxAgeSeconds: boundedMaxAge,
+          catalog: catalog,
+        );
+        response['error'] = profiled.error;
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(response, profiled),
+        );
+      }
       final leaseState = leaseStore.activeState(n);
-      final maxAge = (args['max_age_seconds'] as num?)?.toInt() ?? 300;
-      final boundedMaxAge = maxAge.clamp(0, 86400).toInt();
-      final costPolicy = _routingCostPolicy(args);
-      final routeRequirements = _routeRequirementsFromArgs(args);
-      final stretchPolicy = _quotaStretchPolicy(
-        args,
-        profilePolicy: profiled.routingPolicy,
-      );
-      if (routeRequirements.error != null) {
-        final response = decideNowResponse(
-          const CachedQuotaSnapshot.empty(),
-          n,
-          maxAgeSeconds: boundedMaxAge,
-          catalog: catalog,
-        );
-        response['error'] = routeRequirements.error;
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(response, profiled),
-        );
-      }
-      if (costPolicy.error != null) {
-        final response = decideNowResponse(
-          const CachedQuotaSnapshot.empty(),
-          n,
-          maxAgeSeconds: boundedMaxAge,
-          catalog: catalog,
-        );
-        response['error'] = costPolicy.error;
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(response, profiled),
-        );
-      }
-      if (stretchPolicy.error != null) {
-        final response = decideNowResponse(
-          const CachedQuotaSnapshot.empty(),
-          n,
-          maxAgeSeconds: boundedMaxAge,
-          catalog: catalog,
-        );
-        response['error'] = stretchPolicy.error;
-        return CallToolResult.fromStructuredContent(
-          _withProfileMeta(response, profiled),
-        );
-      }
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           decideNowResponse(
             CachedQuotaSnapshot(
               providers: profiled.providers,
-              asOf: cached.asOf,
+              asOf: _filteredCachedSnapshotAsOf(cached, profiled.providers),
               source: cached.source,
             ),
             n,
@@ -2242,13 +2293,12 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'Antigravity onboarding, but never calls a model.',
     inputSchema: JsonSchema.object(
       properties: {
-        'provider': JsonSchema.string(
-          description:
-              'Optional provider id to reserve. If omitted, quotabot reserves '
-              'the current best subscription.',
+        'provider': _providerSelectorInputSchema(
+          'Optional provider id to reserve. If omitted, quotabot reserves '
+          'the current best subscription.',
         ),
-        'account': JsonSchema.string(
-          description: 'Optional account disambiguator for provider.',
+        'account': _accountSelectorInputSchema(
+          'Optional account disambiguator for provider.',
         ),
         'profile': JsonSchema.string(
           description:
@@ -2268,21 +2318,31 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'client': JsonSchema.string(
           description: 'Optional caller label stored with the local lease.',
         ),
-        'idempotency_key': JsonSchema.string(
-          description: 'Optional retry key; a matching active lease is reused.',
+        'idempotency_key': _idempotencyKeyInputSchema(
+          'Optional retry key; a matching active lease is reused.',
         ),
       },
     ),
     outputSchema: reserveProviderOutputSchema,
     annotations: _liveCollection,
     callback: (args, extra) async {
-      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       final n = now();
+      final providerSelection = parseExactProviderSelector(args['provider']);
+      final idempotencySelection = parseIdempotencyKey(
+        args['idempotency_key'],
+      );
+      final requestError =
+          providerSelection.error ?? idempotencySelection.error;
+      if (requestError != null) {
+        return CallToolResult.fromStructuredContent(
+          _reserveUnavailable(requestError, n),
+        );
+      }
+      final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       if (profiled.error != null) {
-        final leaseState = leaseStore.activeState(n);
         return CallToolResult.fromStructuredContent(
           _withProfileMeta(
-            _reserveUnavailable(profiled.error!, n, leaseState),
+            _reserveUnavailable(profiled.error!, n),
             profiled,
           ),
         );
@@ -2292,11 +2352,13 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       final burnStats = burnByProvider(results, n);
       final pipePenalties =
           loadRoutedRequestSummary().pipePenaltyByProvider(now: n);
-      final explicit = normalizeLeaseText(args['provider']) != null;
+      final requestedProvider = providerSelection.value;
+      final requestedAccount = profiled.accountFilter;
+      final explicit = requestedProvider != null;
       final leaseSeconds = normalizeLeaseSeconds(args['lease_seconds']);
       final weightPercent = normalizeLeaseWeight(args['weight_percent']);
       final client = normalizeLeaseText(args['client']);
-      final idempotencyKey = normalizeLeaseText(args['idempotency_key']);
+      final idempotencyKey = idempotencySelection.value;
 
       if (!explicit) {
         final reservation = leaseStore.selectAndReserve(
@@ -2352,15 +2414,13 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         );
       }
 
-      final requestedProvider =
-          normalizeLeaseText(args['provider'])?.toLowerCase();
-      final requestedAccount = normalizeLeaseText(args['account']);
       final reservation = leaseStore.selectAndReserve(
         select: (activeLeases) {
           final target = _explicitReserveTarget(
             results,
             n,
-            args,
+            requestedProvider,
+            requestedAccount,
             activeLeases,
             burnStats,
             pipePenalties,
@@ -2569,13 +2629,12 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
         'the binding window resets. A longer window spent means unavailable.',
     inputSchema: JsonSchema.object(
       properties: {
-        'provider': JsonSchema.string(
-          description: 'Provider id: codex, claude, grok, antigravity, kiro, '
-              'cursor, windsurf, or a local runtime.',
+        'provider': _providerSelectorInputSchema(
+          'Provider id: codex, claude, grok, antigravity, kiro, cursor, '
+          'windsurf, or a local runtime.',
         ),
-        'account': JsonSchema.string(
-          description:
-              'Optional exact account label for providers with multiple accounts.',
+        'account': _accountSelectorInputSchema(
+          'Optional exact account label for providers with multiple accounts.',
         ),
         'profile': JsonSchema.string(
           description:
@@ -2587,14 +2646,28 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     outputSchema: availabilityOutputSchema,
     annotations: _liveCollection,
     callback: (args, extra) async {
+      final providerSelection = parseExactProviderSelector(args['provider']);
+      final accountSelection = parseExactAccountSelector(args['account']);
+      if (providerSelection.error != null ||
+          providerSelection.value == null ||
+          accountSelection.error != null) {
+        return CallToolResult.fromStructuredContent(
+          availabilityResponse(
+            const [],
+            now(),
+            args['provider'],
+            args['account'],
+          ),
+        );
+      }
       final profiled = await _profiledSnapshot(args, snapshot, profileLoader);
       return CallToolResult.fromStructuredContent(
         _withProfileMeta(
           availabilityResponse(
             profiled.providers,
             now(),
-            args['provider'] as String?,
-            args['account'] as String?,
+            providerSelection.value,
+            accountSelection.value,
           ),
           profiled,
         ),

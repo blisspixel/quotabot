@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'analysis.dart';
 import 'cache.dart';
 import 'decision.dart';
+import 'identifiers.dart';
 import 'leases.dart';
 import 'litellm_metrics.dart';
 import 'local_http_auth.dart';
@@ -24,8 +25,6 @@ const _maxLocalMutationBodyBytes = 32 * 1024;
 const _maxLocalMutationDrainBytes = 64 * 1024;
 const _maxLocalMutationTargets = 64;
 final _localLeaseIdPattern = RegExp(r'^[A-Za-z0-9_-]{8,96}$');
-final _localLeaseProviderPattern = RegExp(r'^[A-Za-z0-9._-]{1,64}$');
-final _localLeaseIdempotencyPattern = RegExp(r'^[A-Za-z0-9_-]{8,120}$');
 
 class _LocalLeaseTarget {
   final String provider;
@@ -264,23 +263,19 @@ Future<HttpServer> startLocalQuotabotServer({
         const {'provider', 'account'},
       );
       if (targetUnknown != null) return (request: null, error: targetUnknown);
-      final rawProvider = target['provider'];
-      if (rawProvider is! String ||
-          !_localLeaseProviderPattern.hasMatch(rawProvider)) {
+      final parsedProvider = parseExactProviderSelector(target['provider']);
+      final provider = parsedProvider.value;
+      if (parsedProvider.error != null || provider == null) {
         return (request: null, error: 'target provider is invalid');
       }
-      final provider = normalizeLeaseProvider(rawProvider);
       final rawAccount = target['account'];
       String? account;
       if (rawAccount != null) {
-        if (rawAccount is! String ||
-            rawAccount != rawAccount.trim() ||
-            rawAccount.isEmpty ||
-            rawAccount.length > 256 ||
-            _containsControlCharacters(rawAccount)) {
+        final parsedAccount = parseExactAccountSelector(rawAccount);
+        if (parsedAccount.error != null || parsedAccount.value == null) {
           return (request: null, error: 'target account is invalid');
         }
-        account = normalizeLeaseAccount(rawAccount);
+        account = parsedAccount.value;
       }
       final identity = '$provider\u0000${account ?? '*'}';
       if (seenTargets.add(identity)) {
@@ -331,12 +326,8 @@ Future<HttpServer> startLocalQuotabotServer({
             _containsControlCharacters(rawClient))) {
       return (request: null, error: 'client is invalid');
     }
-    final rawIdempotency = body['idempotency_key'];
-    final idempotency =
-        rawIdempotency == null ? null : rawIdempotency as Object?;
-    if (idempotency != null &&
-        (idempotency is! String ||
-            !_localLeaseIdempotencyPattern.hasMatch(idempotency))) {
+    final parsedIdempotency = parseIdempotencyKey(body['idempotency_key']);
+    if (parsedIdempotency.error != null) {
       return (request: null, error: 'idempotency_key is invalid');
     }
 
@@ -347,7 +338,7 @@ Future<HttpServer> startLocalQuotabotServer({
         leaseSeconds: seconds,
         weightPercent: weight,
         client: client,
-        idempotencyKey: idempotency as String?,
+        idempotencyKey: parsedIdempotency.value,
       ),
       error: null,
     );

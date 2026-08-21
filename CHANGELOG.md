@@ -17,6 +17,17 @@ Notable changes to quotabot. Newest first.
   app, or opens an interactive dashboard. Automatic desktop-toolchain failures
   can still use the verified portable desktop fallback during a normal full
   setup.
+- MCP provider and account selectors now use one bounded exact-identity
+  validator across quota, routing, model, availability, and reservation tools.
+  Blank, control-bearing, and oversized identities fail before quota
+  collection, cache reads, or lease access instead of silently widening or
+  truncating a request.
+- Lease idempotency keys now require an exact 8 to 120 character ASCII key at
+  every MCP, local HTTP, in-memory, and file-backed boundary. Distinct long
+  keys can no longer alias after truncation.
+- Cache-only `decide_now` responses now derive snapshot timestamps and ages
+  from the providers remaining after profile, account, and exclusion filters,
+  so their provenance describes the actual routing evidence.
 
 ### Documentation
 

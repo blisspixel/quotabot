@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:mcp_dart/mcp_dart.dart';
+import 'package:quotabot_collector/identifiers.dart';
 import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/mcp.dart';
 import 'package:quotabot_collector/models.dart';
@@ -146,6 +147,77 @@ class _StaleReadRouteLeaseStore implements RouteLeaseStore {
     String? idempotencyKey,
   }) {
     directReserveCalls++;
+    return _store.reserve(
+      provider: provider,
+      account: account,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  @override
+  RouteLeaseRelease release({required String leaseId, required int now}) =>
+      _store.release(leaseId: leaseId, now: now);
+}
+
+class _CountingRouteLeaseStore implements RouteLeaseStore {
+  final InMemoryRouteLeaseStore _store = InMemoryRouteLeaseStore();
+  int activeCalls = 0;
+  int activeStateCalls = 0;
+  int selectAndReserveCalls = 0;
+  int reserveCalls = 0;
+
+  int get readOrWriteCalls =>
+      activeCalls + activeStateCalls + selectAndReserveCalls + reserveCalls;
+
+  @override
+  List<RouteLease> active(int now) {
+    activeCalls++;
+    return _store.active(now);
+  }
+
+  @override
+  RouteLeaseState activeState(int now) {
+    activeStateCalls++;
+    return _store.activeState(now);
+  }
+
+  @override
+  RouteLeaseReservation selectAndReserve({
+    required RouteLeaseSelector select,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+    RouteLeaseReusePredicate? reuseWhere,
+  }) {
+    selectAndReserveCalls++;
+    return _store.selectAndReserve(
+      select: select,
+      now: now,
+      leaseSeconds: leaseSeconds,
+      weightPercent: weightPercent,
+      client: client,
+      idempotencyKey: idempotencyKey,
+      reuseWhere: reuseWhere,
+    );
+  }
+
+  @override
+  RouteLeaseReservation reserve({
+    required String provider,
+    required String account,
+    required int now,
+    required int leaseSeconds,
+    required double weightPercent,
+    String? client,
+    String? idempotencyKey,
+  }) {
+    reserveCalls++;
     return _store.reserve(
       provider: provider,
       account: account,
@@ -496,7 +568,7 @@ void main() {
       );
       expect(
         availabilityResponse(_fixture(), _now, null, null)['error'],
-        'unknown provider',
+        'provider is required',
       );
     });
   });
@@ -754,6 +826,46 @@ void main() {
           isNot(contains('fleet-wide')),
         ),
       );
+      for (final name in [
+        'list_quotas',
+        'provider_with_most_headroom',
+        'suggest_provider',
+        'decide_now',
+        'reserve_provider',
+        'list_models',
+        'suggest_model',
+        'check_provider_availability',
+      ]) {
+        final properties = byName[name]!.inputSchema.toJson()['properties']
+            as Map<String, dynamic>;
+        final account = properties['account'] as Map<String, dynamic>;
+        expect(account['minLength'], 1, reason: name);
+        expect(
+          account['maxLength'],
+          maxExactAccountSelectorCharacters,
+          reason: name,
+        );
+      }
+      for (final name in ['reserve_provider', 'check_provider_availability']) {
+        final properties = byName[name]!.inputSchema.toJson()['properties']
+            as Map<String, dynamic>;
+        final provider = properties['provider'] as Map<String, dynamic>;
+        expect(provider['minLength'], 1, reason: name);
+        expect(
+          provider['maxLength'],
+          maxExactProviderSelectorCharacters,
+          reason: name,
+        );
+        expect(provider['pattern'], isNotEmpty, reason: name);
+      }
+      final reserveProperties = byName['reserve_provider']!
+          .inputSchema
+          .toJson()['properties'] as Map<String, dynamic>;
+      final idempotency =
+          reserveProperties['idempotency_key'] as Map<String, dynamic>;
+      expect(idempotency['minLength'], minIdempotencyKeyCharacters);
+      expect(idempotency['maxLength'], maxIdempotencyKeyCharacters);
+      expect(idempotency['pattern'], isNotEmpty);
     });
 
     // A schema/payload mismatch makes the server (and the client) raise, so a
@@ -1457,6 +1569,154 @@ void main() {
       );
     });
 
+    test('maximum account identity remains exact across every MCP path',
+        () async {
+      final account = 'a' * maxExactAccountSelectorCharacters;
+      final idempotencyKey = 'k' * maxIdempotencyKeyCharacters;
+      final providers = [
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'claude',
+          account: account,
+          asOf: _now,
+          windows: [
+            QuotaWindow(label: 'weekly', usedPercent: 20),
+          ],
+        ),
+      ];
+      final store = InMemoryRouteLeaseStore(idFactory: () => 'lease-long');
+      await connect(
+        providers,
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: providers,
+          asOf: _now,
+          source: 'memory',
+        ),
+        leaseStore: store,
+      );
+
+      for (final name in [
+        'list_quotas',
+        'provider_with_most_headroom',
+        'suggest_provider',
+        'decide_now',
+        'list_models',
+        'suggest_model',
+      ]) {
+        final result = await client.callTool(
+          CallToolRequest(name: name, arguments: {'account': account}),
+        );
+        expect(result.isError, isFalse, reason: name);
+        expect(result.structuredContent?['account_filter'], account,
+            reason: name);
+        expect(result.structuredContent?['error'], isNull, reason: name);
+      }
+
+      final availability = await client.callTool(
+        CallToolRequest(
+          name: 'check_provider_availability',
+          arguments: {'provider': 'claude', 'account': account},
+        ),
+      );
+      expect(availability.structuredContent?['account'], account);
+      expect(availability.structuredContent?['available'], isTrue);
+
+      final reservation = await client.callTool(
+        CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {
+            'provider': 'claude',
+            'account': account,
+            'idempotency_key': idempotencyKey,
+          },
+        ),
+      );
+      expect(reservation.structuredContent?['reserved'], isTrue);
+      expect(
+        (reservation.structuredContent?['lease'] as Map)['account'],
+        account,
+      );
+      expect(
+        (reservation.structuredContent?['lease'] as Map)['idempotency_key'],
+        idempotencyKey,
+      );
+      expect(store.active(_now).single.account, account);
+    });
+
+    test('invalid MCP identities fail before collection, cache, or leases',
+        () async {
+      var liveCollections = 0;
+      var cacheReads = 0;
+      final store = _CountingRouteLeaseStore();
+      await connect(
+        const [],
+        snapshotProvider: () async {
+          liveCollections++;
+          return _fixture();
+        },
+        cachedSnapshot: () async {
+          cacheReads++;
+          return CachedQuotaSnapshot(
+            providers: _fixture(),
+            asOf: _now,
+            source: 'memory',
+          );
+        },
+        leaseStore: store,
+      );
+
+      for (final name in [
+        'list_quotas',
+        'provider_with_most_headroom',
+        'suggest_provider',
+        'decide_now',
+        'reserve_provider',
+        'list_models',
+        'suggest_model',
+        'check_provider_availability',
+      ]) {
+        final arguments = <String, dynamic>{'account': '   '};
+        if (name == 'check_provider_availability') {
+          arguments['provider'] = 'claude';
+        }
+        final result = await client.callTool(
+          CallToolRequest(name: name, arguments: arguments),
+        );
+        expect(result.isError, isFalse, reason: name);
+        expect(result.structuredContent?['error'], contains('account'),
+            reason: name);
+      }
+
+      Future<void> expectProtocolRejection(
+        Map<String, dynamic> arguments,
+      ) async {
+        Object? rejection;
+        CallToolResult? result;
+        try {
+          result = await client.callTool(
+            CallToolRequest(name: 'reserve_provider', arguments: arguments),
+          );
+        } catch (error) {
+          rejection = error;
+        }
+        final structuredError = result?.structuredContent?['error'] ??
+            result?.structuredContent?['reason'];
+        expect(
+          rejection != null || structuredError != null,
+          isTrue,
+          reason: arguments.toString(),
+        );
+      }
+
+      await expectProtocolRejection({'provider': ' '});
+      await expectProtocolRejection({'provider': 'a' * 65});
+      await expectProtocolRejection({'idempotency_key': 'short'});
+      await expectProtocolRejection({'idempotency_key': 'k' * 121});
+      expect(liveCollections, 0);
+      expect(cacheReads, 0);
+      expect(store.readOrWriteCalls, 0);
+    });
+
     test('exclude arguments filter MCP routing and model tools', () async {
       await connect(_fixture());
 
@@ -2010,6 +2270,72 @@ void main() {
         'ollama',
       );
       expect(liveCalls, 0);
+    });
+
+    test('decide_now recomputes provenance after every identity filter',
+        () async {
+      final providers = [
+        ProviderQuota(
+          provider: 'codex',
+          displayName: 'codex',
+          account: 'personal',
+          asOf: _now - 5,
+          windows: [
+            QuotaWindow(label: 'weekly', usedPercent: 30),
+          ],
+        ),
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'claude',
+          account: 'work',
+          asOf: _now - 120,
+          windows: [
+            QuotaWindow(label: 'weekly', usedPercent: 20),
+          ],
+        ),
+      ];
+      await connect(
+        const [],
+        cachedSnapshot: () async => CachedQuotaSnapshot(
+          providers: providers,
+          asOf: _now - 5,
+          source: 'disk',
+        ),
+        profileLoader: (name) => name == 'claude-only'
+            ? const QuotaProfile(
+                name: 'claude-only',
+                providers: {'claude'},
+              )
+            : null,
+      );
+
+      for (final arguments in [
+        <String, dynamic>{'profile': 'claude-only'},
+        <String, dynamic>{'account': 'work'},
+        <String, dynamic>{
+          'exclude': ['codex'],
+        },
+      ]) {
+        final decision = await client.callTool(
+          CallToolRequest(name: 'decide_now', arguments: arguments),
+        );
+        expect(decision.structuredContent?['snapshot_as_of'], _now - 120,
+            reason: arguments.toString());
+        expect(decision.structuredContent?['snapshot_age_seconds'], 120,
+            reason: arguments.toString());
+        final receipt =
+            decision.structuredContent?['receipt'] as Map<String, dynamic>;
+        final receiptSnapshot = receipt['snapshot'] as Map<String, dynamic>;
+        expect(receiptSnapshot['as_of'], _now - 120,
+            reason: arguments.toString());
+        expect(receiptSnapshot['age_seconds'], 120,
+            reason: arguments.toString());
+        expect(
+          (decision.structuredContent?['recommended'] as Map)['provider'],
+          'claude',
+          reason: arguments.toString(),
+        );
+      }
     });
 
     test('decide_now exposes quota-stretch policy from the same cache core',

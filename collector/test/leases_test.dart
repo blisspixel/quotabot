@@ -199,7 +199,7 @@ void main() {
       now: 100,
       leaseSeconds: 60,
       weightPercent: 12,
-      idempotencyKey: 'retry-1',
+      idempotencyKey: 'retry-01',
     );
     expect(first.reserved, isTrue);
     expect(first.reused, isFalse);
@@ -211,7 +211,7 @@ void main() {
       now: 101,
       leaseSeconds: 60,
       weightPercent: 12,
-      idempotencyKey: 'retry-1',
+      idempotencyKey: 'retry-01',
     );
     expect(retry.reserved, isTrue);
     expect(retry.reused, isTrue);
@@ -224,6 +224,72 @@ void main() {
     expect(store.release(leaseId: 'lease-1', now: 103).released, isFalse);
   });
 
+  test('memory store rejects invalid idempotency before target selection', () {
+    final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
+    var selections = 0;
+    final invalid = store.selectAndReserve(
+      select: (_) {
+        selections += 1;
+        return const RouteLeaseSelection.selected(
+          RouteLeaseTarget(provider: 'claude', account: 'work'),
+        );
+      },
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: '${'k' * 120}a',
+    );
+
+    expect(invalid.reserved, isFalse);
+    expect(invalid.reason, contains('8 to 120'));
+    expect(invalid.activeLeases, isEmpty);
+    expect(selections, 0);
+    expect(store.active(100), isEmpty);
+  });
+
+  test('maximum-length idempotency keys remain exact', () {
+    final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
+    final prefix = 'k' * 119;
+    final first = store.reserve(
+      provider: 'claude',
+      account: 'work',
+      now: 100,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: '${prefix}a',
+    );
+    final second = store.reserve(
+      provider: 'claude',
+      account: 'work',
+      now: 101,
+      leaseSeconds: 60,
+      weightPercent: 12,
+      idempotencyKey: '${prefix}b',
+    );
+
+    expect(first.reused, isFalse);
+    expect(second.reused, isFalse);
+    expect(second.activeLeases, hasLength(2));
+    expect(first.lease!.idempotencyKey, '${prefix}a');
+    expect(second.lease!.idempotencyKey, '${prefix}b');
+  });
+
+  test('legacy invalid idempotency keys retain the active lease only', () {
+    final lease = RouteLease.fromJson({
+      'id': 'legacy-lease',
+      'provider': 'claude',
+      'account': 'work',
+      'created_at': 100,
+      'expires_at': 160,
+      'weight_percent': 12,
+      'idempotency_key': 'retry-1',
+    });
+
+    expect(lease.provider, 'claude');
+    expect(lease.account, 'work');
+    expect(lease.idempotencyKey, isNull);
+  });
+
   test('memory store rejects an idempotency key for a different target', () {
     final store = InMemoryRouteLeaseStore(idFactory: _idFactory());
     final first = store.reserve(
@@ -232,7 +298,7 @@ void main() {
       now: 100,
       leaseSeconds: 60,
       weightPercent: 12,
-      idempotencyKey: 'retry-1',
+      idempotencyKey: 'retry-01',
     );
 
     final conflict = store.reserve(
@@ -241,7 +307,7 @@ void main() {
       now: 101,
       leaseSeconds: 60,
       weightPercent: 12,
-      idempotencyKey: 'retry-1',
+      idempotencyKey: 'retry-01',
     );
 
     expect(first.reserved, isTrue);
@@ -260,7 +326,7 @@ void main() {
       now: 100,
       leaseSeconds: 60,
       weightPercent: 12,
-      idempotencyKey: 'retry-1',
+      idempotencyKey: 'retry-01',
     );
     var selections = 0;
 
@@ -274,7 +340,7 @@ void main() {
       now: 101,
       leaseSeconds: 60,
       weightPercent: 12,
-      idempotencyKey: 'retry-1',
+      idempotencyKey: 'retry-01',
       reuseWhere: (lease) => lease.provider == 'codex',
     );
 
