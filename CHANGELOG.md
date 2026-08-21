@@ -40,16 +40,18 @@ Notable changes to quotabot. Newest first.
   preserve config unless purge is requested, and fail visibly if payloads
   remain. The Windows install smoke also rejects any nonzero `doctor` exit
   before parsing its JSON.
-- CLI value options and local HTTP `/suggest` query parameters now reject
-  repeated singleton values before quota collection. HTTP snake-case and
+- CLI value options and singleton local HTTP `/suggest` query parameters now
+  reject repeated values before quota collection. HTTP snake-case and
   kebab-case aliases are treated as the same option, so conflicting aliases
-  cannot silently select the last value.
-- A valid manual quota with the exact same provider and account as one built-in
-  subscription is now retained as explicit supplemental provenance on the
-  built-in row instead of creating a competing route, analytics identity, or
-  desktop card. Measured windows, status, availability, routing, and analytics
-  remain authoritative; ambiguous, local-runtime, and non-exact identities stay
-  separate for verification and account selection.
+  cannot silently select the last value. Repeatable `exclude` and
+  `cost_penalty` collections retain all distinct values, while duplicate cost
+  keys are rejected after provider normalization.
+- A valid manual quota with the exact same provider and specific account as one
+  built-in subscription is now retained as explicit supplemental provenance on
+  the built-in row instead of creating a competing route, analytics identity,
+  or desktop card. Measured windows, status, availability, routing, and
+  analytics remain authoritative; ambiguous, local-runtime, placeholder, and
+  non-exact identities stay separate for verification and account selection.
 
 ### Documentation
 

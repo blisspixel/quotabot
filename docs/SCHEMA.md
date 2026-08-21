@@ -65,9 +65,10 @@ Provider snapshots keep these stable fields:
   measured adapter telemetry. Current manual entries carry both
   `source: "manual"` and `source_class: "manual"`.
 - `supplemental_manual_quota` appears only when one valid manual entry has the
-  exact same provider and account strings as one built-in subscription row. The
-  built-in row remains the sole source for routing, availability, analytics,
-  status, and primary windows. The nested object retains the manual
+  exact same provider and specific, non-placeholder account string as one
+  built-in subscription row. The built-in row remains the sole source for
+  routing, availability, analytics, status, and primary windows. The nested
+  object retains the manual
   `display_name`, optional `plan`, `as_of`, and non-empty `windows`, with fixed
   `source: "manual"` and `source_class: "manual"` provenance. Ambiguous
   duplicates, local-runtime collisions, and non-exact account labels remain

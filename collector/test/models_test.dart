@@ -111,6 +111,21 @@ void main() {
   });
 
   group('ProviderQuota', () {
+    test('specific account policy rejects provider placeholders', () {
+      for (final account in const [
+        '',
+        ' ',
+        'default',
+        'DEFAULT',
+        'unknown',
+        'installed',
+        'cli',
+      ]) {
+        expect(hasSpecificQuotaAccount(account), isFalse, reason: account);
+      }
+      expect(hasSpecificQuotaAccount('work@example.com'), isTrue);
+    });
+
     test('plan evidence provenance round-trips and survives safe copies', () {
       final q = ProviderQuota(
         provider: 'claude',

@@ -355,9 +355,11 @@ Future<HttpServer> startLocalQuotabotServer({
   }
 
   String? repeatedSingletonQueryParameter(Uri uri) {
+    const repeatableParameters = {'exclude', 'cost_penalty'};
     final counts = <String, int>{};
     for (final entry in uri.queryParametersAll.entries) {
       final canonical = entry.key.replaceAll('-', '_');
+      if (repeatableParameters.contains(canonical)) continue;
       counts[canonical] = (counts[canonical] ?? 0) + entry.value.length;
     }
     final repeated = [

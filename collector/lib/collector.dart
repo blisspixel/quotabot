@@ -543,12 +543,13 @@ Future<List<ProviderQuota>> _collectAllProviders({
   return results;
 }
 
-/// Coalesces one valid self-reported manual row into one exact built-in
-/// subscription identity. The built-in row remains primary, so provider
+/// Coalesces one valid self-reported manual row into one exact, specific
+/// built-in subscription identity. The built-in row remains primary, so provider
 /// windows, status, errors, availability, routing, and analytics are unchanged.
 /// The manual values remain structured supplemental provenance for display and
-/// JSON consumers. Ambiguous duplicates and local-runtime collisions remain
-/// separate so verification can report them instead of hiding a producer bug.
+/// JSON consumers. Placeholder labels, ambiguous duplicates, and local-runtime
+/// collisions remain separate so verification can report them instead of
+/// hiding a producer bug.
 List<ProviderQuota> coalesceSupplementalManualQuotas(
   List<ProviderQuota> providers,
 ) {
@@ -559,6 +560,7 @@ List<ProviderQuota> coalesceSupplementalManualQuotas(
   final manualIndices = <String, List<int>>{};
   for (var i = 0; i < providers.length; i++) {
     final quota = providers[i];
+    if (!hasSpecificQuotaAccount(quota.account)) continue;
     final key = exactIdentity(quota);
     if (quota.isManual &&
         quota.sourceClass == ProviderSourceClass.manual &&

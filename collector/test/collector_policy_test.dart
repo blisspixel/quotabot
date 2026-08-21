@@ -223,12 +223,14 @@ void main() {
     );
   });
 
-  test('ambiguous and local manual collisions remain visible to verification',
+  test(
+      'ambiguous, placeholder, and local manual collisions remain visible to verification',
       () {
-    ProviderQuota builtIn({bool local = false}) => ProviderQuota(
+    ProviderQuota builtIn({bool local = false, String account = 'same'}) =>
+        ProviderQuota(
           provider: local ? ollamaProviderId : claudeProviderId,
           displayName: local ? 'Ollama' : 'Claude',
-          account: 'same',
+          account: account,
           asOf: 1782000000,
           kind:
               local ? ProviderQuotaKind.local : ProviderQuotaKind.subscription,
@@ -236,10 +238,11 @@ void main() {
               ? ProviderSourceClass.localRuntime
               : ProviderSourceClass.authoritativeLive,
         );
-    ProviderQuota manual(String provider) => ProviderQuota(
+    ProviderQuota manual(String provider, {String account = 'same'}) =>
+        ProviderQuota(
           provider: provider,
           displayName: provider,
-          account: 'same',
+          account: account,
           source: providerQuotaManualSource,
           asOf: 1782000000,
           windows: [QuotaWindow(label: 'manual', usedPercent: 10)],
@@ -265,23 +268,13 @@ void main() {
       ),
       manual(claudeProviderId),
     ]);
-    final genericAccountLabels = coalesceSupplementalManualQuotas([
-      ProviderQuota(
-        provider: claudeProviderId,
-        displayName: 'Claude',
-        account: 'default',
-        asOf: 1782000000,
-        sourceClass: ProviderSourceClass.authoritativeLive,
-      ),
-      ProviderQuota(
-        provider: claudeProviderId,
-        displayName: 'Claude manual',
-        account: 'unknown',
-        source: providerQuotaManualSource,
-        asOf: 1782000000,
-        windows: [QuotaWindow(label: 'manual', usedPercent: 10)],
-      ),
-    ]);
+    final placeholderCollisions = {
+      for (final account in const ['default', 'unknown', 'installed', 'cli'])
+        account: coalesceSupplementalManualQuotas([
+          builtIn(account: account),
+          manual(claudeProviderId, account: account),
+        ]),
+    };
 
     expect(duplicateBuiltIns, hasLength(3));
     expect(
@@ -291,7 +284,14 @@ void main() {
     expect(localCollision, hasLength(2));
     expect(invalidBuiltIn, hasLength(2));
     expect(invalidBuiltIn.first.sourceClassViolation, isNotNull);
-    expect(genericAccountLabels, hasLength(2));
+    for (final entry in placeholderCollisions.entries) {
+      expect(entry.value, hasLength(2), reason: entry.key);
+      expect(
+        entry.value.every((quota) => quota.supplementalManualQuota == null),
+        isTrue,
+        reason: entry.key,
+      );
+    }
   });
 
   test('wrong adapter identity cannot read or poison another provider cache',

@@ -1203,8 +1203,11 @@ String? resetAvailableMessage(ProviderQuota q) {
 
 /// True when an account string names a specific identity rather than a generic
 /// placeholder used by providers that do not expose account metadata.
-bool hasSpecificQuotaAccount(String account) =>
-    account.isNotEmpty && account != 'unknown' && account != 'default';
+bool hasSpecificQuotaAccount(String account) {
+  final normalized = account.trim().toLowerCase();
+  return normalized.isNotEmpty &&
+      !const {'unknown', 'default', 'installed', 'cli'}.contains(normalized);
+}
 
 /// Internal key used when local analytics need account-specific history. Public
 /// JSON keeps provider and account as separate fields; this is only for maps.
