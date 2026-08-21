@@ -45,6 +45,19 @@ jobs:
           fi
       - name: Verify tag matches the source release version
         run: python tools/check_release_version.py --tag "$GITHUB_REF_NAME"
+      - name: Validate explicit native signing modes
+        env:
+          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          MACOS_SIGNING_MODE: ${{ vars.QUOTABOT_MACOS_SIGNING_MODE }}
+        run: |
+          case "$WINDOWS_SIGNING_BACKEND" in
+            unsigned|azure-artifact-signing) ;;
+            *) echo 'QUOTABOT_WINDOWS_SIGNING_BACKEND must be unsigned or azure-artifact-signing.' >&2; exit 1 ;;
+          esac
+          case "$MACOS_SIGNING_MODE" in
+            unsigned) ;;
+            *) echo 'QUOTABOT_MACOS_SIGNING_MODE must be unsigned until the Developer ID path is enabled.' >&2; exit 1 ;;
+          esac
 
   quality-gate:
     needs: preflight
@@ -83,6 +96,8 @@ jobs:
         id: ensure_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          MACOS_SIGNING_MODE: ${{ vars.QUOTABOT_MACOS_SIGNING_MODE }}
         run: |
           resolve_remote_tag_commit() {
             local object_type object_sha
@@ -115,6 +130,13 @@ jobs:
           case "$GITHUB_REF_NAME" in
             *-*) expected_prerelease=true; prerelease_args+=(--prerelease --latest=false) ;;
           esac
+          if [ "$WINDOWS_SIGNING_BACKEND" = azure-artifact-signing ]; then
+            windows_status='Windows: Azure Artifact Signing Public Trust with RFC 3161 SHA-256 timestamping.'
+          else
+            windows_status='Windows: unsigned transition artifact. SmartScreen publisher identity is not established.'
+          fi
+          macos_status='macOS: unsigned transition artifact. Developer ID and notarization are not established.'
+          signing_note="Native signing status: $windows_status $macos_status Checksums and GitHub build provenance remain required. Do not bypass SmartScreen or Gatekeeper."
           main_commit="$(gh api \
             "repos/$GITHUB_REPOSITORY/commits/main" \
             --jq '.sha')"
@@ -135,6 +157,14 @@ jobs:
               echo "Draft prerelease classification does not match $GITHUB_REF_NAME." >&2
               exit 1
             fi
+            release_body="$(gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json body \
+              --jq '.body')"
+            case "$release_body" in
+              *"$signing_note"*) ;;
+              *) echo 'Draft release native signing disclosure does not match the current mode.' >&2; exit 1 ;;
+            esac
             remote_tag_commit="$(resolve_remote_tag_commit)"
             if [ "$remote_tag_commit" != "$GITHUB_SHA" ]; then
               echo 'Remote release tag no longer points to the workflow commit.' >&2
@@ -153,6 +183,7 @@ jobs:
               --draft \
               --verify-tag \
               "${prerelease_args[@]}" \
+              --notes "$signing_note" \
               --generate-notes
           fi
           release_id="$(gh release view "$GITHUB_REF_NAME" \
@@ -183,9 +214,6 @@ jobs:
           - os: macos-latest
             script: bash tools/package-cli.sh
             archive: release/quotabot-darwin-arm64.tar.gz
-          - os: windows-latest
-            script: pwsh tools/package-cli.ps1
-            archive: release/quotabot-windows-x64.zip
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -206,61 +234,9 @@ jobs:
         working-directory: collector
         run: dart pub get --enforce-lockfile
       - name: Build and package the CLI asset
-        if: runner.os != 'Windows'
         run: ${{ matrix.script }}
-      - name: Build and inventory the unsigned Windows CLI asset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./tools/package-cli.ps1 -NoArchive
-          $candidate = 'collector/build/quotabot_cli_release/bundle'
-          $unsigned = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-unsigned-inventory.json'
-          $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Native signing inventory failed with exit code $LASTEXITCODE" }
-          Set-Content -LiteralPath $unsigned -Value $inventory -Encoding utf8NoBOM -NoNewline
-      - name: Sign, verify, and package the Windows CLI asset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          QUOTABOT_WINDOWS_PFX_BASE64: ${{ secrets.QUOTABOT_WINDOWS_PFX_BASE64 }}
-          QUOTABOT_WINDOWS_PFX_PASSWORD: ${{ secrets.QUOTABOT_WINDOWS_PFX_PASSWORD }}
-          QUOTABOT_WINDOWS_TIMESTAMP_URL: ${{ vars.QUOTABOT_WINDOWS_TIMESTAMP_URL }}
-          QUOTABOT_WINDOWS_SIGNER_SUBJECT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT }}
-          QUOTABOT_WINDOWS_SIGNER_THUMBPRINT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT }}
-        run: |
-          $candidate = 'collector/build/quotabot_cli_release/bundle'
-          $unsigned = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-unsigned-inventory.json'
-          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-inventory.json'
-          $receipt = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-signature-verification.json'
-          python tools/sign_windows.py --manifest $unsigned --surface cli --architecture x64 $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Windows Authenticode signing failed with exit code $LASTEXITCODE" }
-          $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Post-signing native inventory failed with exit code $LASTEXITCODE" }
-          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
-          python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT --expected-signer-thumbprint $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT --receipt $receipt $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Windows signature verification failed with exit code $LASTEXITCODE" }
-          ./tools/package-cli.ps1 -PackageOnly
       - name: Verify CLI archive shape and checksum
         run: python tools/verify_cli_archive.py "${{ matrix.archive }}"
-      - name: Bind the Windows CLI archive to its native inventory
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-inventory.json'
-          $extract = Join-Path $env:RUNNER_TEMP "quotabot-windows-cli-$([Guid]::NewGuid().ToString('N'))"
-          Expand-Archive -LiteralPath "${{ matrix.archive }}" -DestinationPath $extract
-          python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --expect-manifest $manifest $extract
-      - name: Preserve the Windows CLI native signing inventory
-        if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: windows-cli-native-signing-inventory
-          path: |
-            ${{ runner.temp }}/quotabot-windows-cli-unsigned-inventory.json
-            ${{ runner.temp }}/quotabot-windows-cli-inventory.json
-            ${{ runner.temp }}/quotabot-windows-cli-signature-verification.json
-          if-no-files-found: warn
-          retention-days: 14
       - name: Attest build provenance for the archive
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -276,8 +252,248 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
+  build-windows-cli-unsigned:
+    needs: create-release
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+        with:
+          sdk: '3.12.2'
+      - name: Resolve collector dependencies
+        working-directory: collector
+        run: dart pub get --enforce-lockfile
+      - name: Build and inventory the unsigned Windows CLI candidate
+        shell: pwsh
+        run: |
+          ./tools/package-cli.ps1 -NoArchive
+          $source = 'collector/build/quotabot_cli_release/bundle'
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-unsigned'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'unsigned-inventory.json'
+          $catalog = Join-Path $stage 'signing-catalog.txt'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item -LiteralPath $source -Destination $candidate -Recurse
+          $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Unsigned native inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/create_windows_signing_catalog.py --manifest $manifest --output $catalog --surface cli --architecture x64 $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Signing catalog creation failed with exit code $LASTEXITCODE" }
+      - name: Preserve the immutable unsigned Windows CLI candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cli-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-windows-cli-unsigned
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  sign-windows-cli:
+    needs: build-windows-cli-unsigned
+    if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+    runs-on: windows-latest
+    environment: release-signing
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the immutable unsigned Windows CLI candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-cli-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-windows-cli-signing
+      - name: Validate the complete candidate and exact signing catalog
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-signing'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'unsigned-inventory.json'
+          $catalog = Join-Path $stage 'signing-catalog.txt'
+          $validatedCatalog = Join-Path $stage 'validated-signing-catalog.txt'
+          python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --expect-manifest $manifest $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Unsigned candidate validation failed with exit code $LASTEXITCODE" }
+          python tools/create_windows_signing_catalog.py --manifest $manifest --output $validatedCatalog --surface cli --architecture x64 $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Signing catalog validation failed with exit code $LASTEXITCODE" }
+          $expectedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $catalog).Hash
+          $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $validatedCatalog).Hash
+          if ($actualHash -ne $expectedHash) { throw 'Downloaded signing catalog does not match the validated candidate.' }
+      - name: Authenticate the isolated signer to Azure
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        with:
+          client-id: ${{ vars.QUOTABOT_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.QUOTABOT_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.QUOTABOT_AZURE_SUBSCRIPTION_ID }}
+          auth-type: SERVICE_PRINCIPAL
+      - name: Sign the exact Windows CLI catalog with Azure Artifact Signing
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.QUOTABOT_AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.QUOTABOT_AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.QUOTABOT_AZURE_CERTIFICATE_PROFILE }}
+          files-catalog: ${{ runner.temp }}\quotabot-windows-cli-signing\validated-signing-catalog.txt
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          append-signature: false
+          enhanced-key-usage: 1.3.6.1.5.5.7.3.3
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          timeout: 300
+          batch-size: 0
+          cache-dependencies: false
+          trace: false
+      - name: Verify the signed Windows CLI candidate
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-signing'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'inventory.json'
+          $receipt = Join-Path $stage 'signature-verification.json'
+          $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Post-signing native inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Windows signature verification failed with exit code $LASTEXITCODE" }
+      - name: Preserve the immutable signed Windows CLI candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cli-signed-candidate
+          path: ${{ runner.temp }}/quotabot-windows-cli-signing
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  package-windows-cli:
+    needs: [create-release, build-windows-cli-unsigned, sign-windows-cli]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.build-windows-cli-unsigned.result == 'success' &&
+          ((vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned' &&
+            needs.sign-windows-cli.result == 'skipped') ||
+           (vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing' &&
+            needs.sign-windows-cli.result == 'success')) }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the signed Windows CLI candidate
+        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-cli-signed-candidate
+          path: ${{ runner.temp }}/quotabot-windows-cli-package
+      - name: Download the explicitly unsigned Windows CLI candidate
+        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-cli-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-windows-cli-package
+      - name: Revalidate and package the selected Windows CLI candidate
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-package'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
+            Join-Path $stage 'inventory.json'
+          } else {
+            Join-Path $stage 'unsigned-inventory.json'
+          }
+          python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --expect-manifest $manifest $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Selected candidate validation failed with exit code $LASTEXITCODE" }
+          if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
+            $receipt = Join-Path $stage 'packaging-signature-verification.json'
+            python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $candidate
+            if ($LASTEXITCODE -ne 0) { throw "Selected candidate signature verification failed with exit code $LASTEXITCODE" }
+          }
+          $destination = 'collector/build/quotabot_cli_release/bundle'
+          New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+          if (Test-Path -LiteralPath $destination) { throw 'Package destination unexpectedly exists.' }
+          Copy-Item -LiteralPath $candidate -Destination $destination -Recurse
+          ./tools/package-cli.ps1 -PackageOnly
+      - name: Verify the Windows CLI archive shape and checksum
+        run: python tools/verify_cli_archive.py release/quotabot-windows-x64.zip
+      - name: Bind the Windows CLI archive to its native inventory
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-package'
+          $manifest = if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
+            Join-Path $stage 'inventory.json'
+          } else {
+            Join-Path $stage 'unsigned-inventory.json'
+          }
+          $extract = Join-Path $env:RUNNER_TEMP "quotabot-windows-cli-$([Guid]::NewGuid().ToString('N'))"
+          Expand-Archive -LiteralPath 'release/quotabot-windows-x64.zip' -DestinationPath $extract
+          python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --expect-manifest $manifest $extract
+          if ($LASTEXITCODE -ne 0) { throw "Packaged archive inventory mismatch with exit code $LASTEXITCODE" }
+      - name: Preserve the Windows CLI signing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-cli-native-signing-inventory
+          path: |
+            ${{ runner.temp }}/quotabot-windows-cli-package/*.json
+            ${{ runner.temp }}/quotabot-windows-cli-package/*.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Attest Windows CLI archive build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release/quotabot-windows-x64.zip
+      - name: Upload the Windows CLI asset to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            release/quotabot-windows-x64.zip \
+            release/quotabot-windows-x64.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
   verify-cli-release:
-    needs: [create-release, build]
+    needs: [create-release, build, package-windows-cli]
     strategy:
       fail-fast: false
       matrix:
@@ -350,8 +566,7 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
-          QUOTABOT_WINDOWS_SIGNER_SUBJECT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT }}
-          QUOTABOT_WINDOWS_SIGNER_THUMBPRINT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-cli-release\${{ matrix.archive }}'
           $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-cli-expanded'
@@ -362,8 +577,10 @@ jobs:
           $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $expanded
           if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI native inventory failed with exit code $LASTEXITCODE" }
           Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
-          python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-signer-subject $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT --expected-signer-thumbprint $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT --receipt $receipt $expanded
-          if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI signature verification failed with exit code $LASTEXITCODE" }
+          if ('${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}' -eq 'azure-artifact-signing') {
+            python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $expanded
+            if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI signature verification failed with exit code $LASTEXITCODE" }
+          }
           $executable = Join-Path $expanded 'bin\quotabot.exe'
           $expectedVersion = 'quotabot ' + $env:GITHUB_REF_NAME.TrimStart('v')
           $actualVersion = & $executable --version
@@ -375,7 +592,7 @@ jobs:
             throw 'Downloaded CLI doctor check failed.'
           }
       - name: Preserve downloaded Windows CLI signature evidence
-        if: always() && runner.os == 'Windows'
+        if: always() && runner.os == 'Windows' && vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-cli-draft-signature-verification
@@ -413,9 +630,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            script: pwsh tools/package-windows.ps1
-            archive: release/quotabot-windows-x64-desktop.zip
           - os: macos-latest
             script: bash tools/package-macos.sh
             archive: release/quotabot-darwin-arm64-desktop.zip
@@ -451,61 +665,9 @@ jobs:
         working-directory: app
         run: flutter pub get --enforce-lockfile
       - name: Build and package the desktop asset
-        if: runner.os != 'Windows'
         run: ${{ matrix.script }}
-      - name: Build and inventory the unsigned Windows desktop asset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./tools/package-windows.ps1 -NoArchive
-          $candidate = 'app/build/windows/x64/runner/Release'
-          $unsigned = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-unsigned-inventory.json'
-          $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Native signing inventory failed with exit code $LASTEXITCODE" }
-          Set-Content -LiteralPath $unsigned -Value $inventory -Encoding utf8NoBOM -NoNewline
-      - name: Sign, verify, and package the Windows desktop asset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          QUOTABOT_WINDOWS_PFX_BASE64: ${{ secrets.QUOTABOT_WINDOWS_PFX_BASE64 }}
-          QUOTABOT_WINDOWS_PFX_PASSWORD: ${{ secrets.QUOTABOT_WINDOWS_PFX_PASSWORD }}
-          QUOTABOT_WINDOWS_TIMESTAMP_URL: ${{ vars.QUOTABOT_WINDOWS_TIMESTAMP_URL }}
-          QUOTABOT_WINDOWS_SIGNER_SUBJECT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT }}
-          QUOTABOT_WINDOWS_SIGNER_THUMBPRINT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT }}
-        run: |
-          $candidate = 'app/build/windows/x64/runner/Release'
-          $unsigned = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-unsigned-inventory.json'
-          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-inventory.json'
-          $receipt = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-signature-verification.json'
-          python tools/sign_windows.py --manifest $unsigned --surface desktop --architecture x64 $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Windows Authenticode signing failed with exit code $LASTEXITCODE" }
-          $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Post-signing native inventory failed with exit code $LASTEXITCODE" }
-          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
-          python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-signer-subject $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT --expected-signer-thumbprint $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT --receipt $receipt $candidate
-          if ($LASTEXITCODE -ne 0) { throw "Windows signature verification failed with exit code $LASTEXITCODE" }
-          ./tools/package-windows.ps1 -PackageOnly
       - name: Verify archive shape and checksum
         run: python tools/verify_desktop_archive.py "${{ matrix.archive }}"
-      - name: Bind the Windows desktop archive to its native inventory
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $manifest = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-inventory.json'
-          $extract = Join-Path $env:RUNNER_TEMP "quotabot-windows-desktop-$([Guid]::NewGuid().ToString('N'))"
-          Expand-Archive -LiteralPath "${{ matrix.archive }}" -DestinationPath $extract
-          python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --expect-manifest $manifest $extract
-      - name: Preserve the Windows desktop native signing inventory
-        if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: windows-desktop-native-signing-inventory
-          path: |
-            ${{ runner.temp }}/quotabot-windows-desktop-unsigned-inventory.json
-            ${{ runner.temp }}/quotabot-windows-desktop-inventory.json
-            ${{ runner.temp }}/quotabot-windows-desktop-signature-verification.json
-          if-no-files-found: warn
-          retention-days: 14
       - name: Attest desktop archive build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -521,8 +683,248 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber
 
+  build-windows-desktop-unsigned:
+    needs: create-release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+      - name: Build and inventory the unsigned Windows desktop candidate
+        shell: pwsh
+        run: |
+          ./tools/package-windows.ps1 -NoArchive
+          $source = 'app/build/windows/x64/runner/Release'
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-unsigned'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'unsigned-inventory.json'
+          $catalog = Join-Path $stage 'signing-catalog.txt'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item -LiteralPath $source -Destination $candidate -Recurse
+          $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Unsigned native inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/create_windows_signing_catalog.py --manifest $manifest --output $catalog --surface desktop --architecture x64 $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Signing catalog creation failed with exit code $LASTEXITCODE" }
+      - name: Preserve the immutable unsigned Windows desktop candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-desktop-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-windows-desktop-unsigned
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  sign-windows-desktop:
+    needs: build-windows-desktop-unsigned
+    if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+    runs-on: windows-latest
+    environment: release-signing
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the immutable unsigned Windows desktop candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-desktop-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-windows-desktop-signing
+      - name: Validate the complete candidate and exact signing catalog
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-signing'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'unsigned-inventory.json'
+          $catalog = Join-Path $stage 'signing-catalog.txt'
+          $validatedCatalog = Join-Path $stage 'validated-signing-catalog.txt'
+          python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --expect-manifest $manifest $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Unsigned candidate validation failed with exit code $LASTEXITCODE" }
+          python tools/create_windows_signing_catalog.py --manifest $manifest --output $validatedCatalog --surface desktop --architecture x64 $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Signing catalog validation failed with exit code $LASTEXITCODE" }
+          $expectedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $catalog).Hash
+          $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $validatedCatalog).Hash
+          if ($actualHash -ne $expectedHash) { throw 'Downloaded signing catalog does not match the validated candidate.' }
+      - name: Authenticate the isolated signer to Azure
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        with:
+          client-id: ${{ vars.QUOTABOT_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.QUOTABOT_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.QUOTABOT_AZURE_SUBSCRIPTION_ID }}
+          auth-type: SERVICE_PRINCIPAL
+      - name: Sign the exact Windows desktop catalog with Azure Artifact Signing
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.QUOTABOT_AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.QUOTABOT_AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.QUOTABOT_AZURE_CERTIFICATE_PROFILE }}
+          files-catalog: ${{ runner.temp }}\quotabot-windows-desktop-signing\validated-signing-catalog.txt
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          append-signature: false
+          enhanced-key-usage: 1.3.6.1.5.5.7.3.3
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          timeout: 300
+          batch-size: 0
+          cache-dependencies: false
+          trace: false
+      - name: Verify the signed Windows desktop candidate
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-signing'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'inventory.json'
+          $receipt = Join-Path $stage 'signature-verification.json'
+          $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Post-signing native inventory failed with exit code $LASTEXITCODE" }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Windows signature verification failed with exit code $LASTEXITCODE" }
+      - name: Preserve the immutable signed Windows desktop candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-desktop-signed-candidate
+          path: ${{ runner.temp }}/quotabot-windows-desktop-signing
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  package-windows-desktop:
+    needs: [create-release, build-windows-desktop-unsigned, sign-windows-desktop]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.build-windows-desktop-unsigned.result == 'success' &&
+          ((vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned' &&
+            needs.sign-windows-desktop.result == 'skipped') ||
+           (vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing' &&
+            needs.sign-windows-desktop.result == 'success')) }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the signed Windows desktop candidate
+        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-desktop-signed-candidate
+          path: ${{ runner.temp }}/quotabot-windows-desktop-package
+      - name: Download the explicitly unsigned Windows desktop candidate
+        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-desktop-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-windows-desktop-package
+      - name: Revalidate and package the selected Windows desktop candidate
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-package'
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
+            Join-Path $stage 'inventory.json'
+          } else {
+            Join-Path $stage 'unsigned-inventory.json'
+          }
+          python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --expect-manifest $manifest $candidate
+          if ($LASTEXITCODE -ne 0) { throw "Selected candidate validation failed with exit code $LASTEXITCODE" }
+          if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
+            $receipt = Join-Path $stage 'packaging-signature-verification.json'
+            python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $candidate
+            if ($LASTEXITCODE -ne 0) { throw "Selected candidate signature verification failed with exit code $LASTEXITCODE" }
+          }
+          $destination = 'app/build/windows/x64/runner/Release'
+          New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+          if (Test-Path -LiteralPath $destination) { throw 'Package destination unexpectedly exists.' }
+          Copy-Item -LiteralPath $candidate -Destination $destination -Recurse
+          ./tools/package-windows.ps1 -PackageOnly
+      - name: Verify the Windows desktop archive shape and checksum
+        run: python tools/verify_desktop_archive.py release/quotabot-windows-x64-desktop.zip
+      - name: Bind the Windows desktop archive to its native inventory
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-package'
+          $manifest = if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
+            Join-Path $stage 'inventory.json'
+          } else {
+            Join-Path $stage 'unsigned-inventory.json'
+          }
+          $extract = Join-Path $env:RUNNER_TEMP "quotabot-windows-desktop-$([Guid]::NewGuid().ToString('N'))"
+          Expand-Archive -LiteralPath 'release/quotabot-windows-x64-desktop.zip' -DestinationPath $extract
+          python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --expect-manifest $manifest $extract
+          if ($LASTEXITCODE -ne 0) { throw "Packaged archive inventory mismatch with exit code $LASTEXITCODE" }
+      - name: Preserve the Windows desktop signing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-desktop-native-signing-inventory
+          path: |
+            ${{ runner.temp }}/quotabot-windows-desktop-package/*.json
+            ${{ runner.temp }}/quotabot-windows-desktop-package/*.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Attest Windows desktop archive build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release/quotabot-windows-x64-desktop.zip
+      - name: Upload the Windows desktop asset to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            release/quotabot-windows-x64-desktop.zip \
+            release/quotabot-windows-x64-desktop.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
   verify-desktop-release:
-    needs: [create-release, build-desktop]
+    needs: [create-release, build-desktop, package-windows-desktop]
     strategy:
       fail-fast: false
       matrix:
@@ -587,11 +989,10 @@ jobs:
             --source-digest "$source_digest" \
             --deny-self-hosted-runners
       - name: Verify downloaded Windows desktop signatures
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
         shell: pwsh
         env:
-          QUOTABOT_WINDOWS_SIGNER_SUBJECT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT }}
-          QUOTABOT_WINDOWS_SIGNER_THUMBPRINT: ${{ vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-release\${{ matrix.archive }}'
           $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-expanded'
@@ -601,10 +1002,10 @@ jobs:
           $inventory = python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --json $expanded
           if ($LASTEXITCODE -ne 0) { throw "Downloaded desktop native inventory failed with exit code $LASTEXITCODE" }
           Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
-          python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-signer-subject $env:QUOTABOT_WINDOWS_SIGNER_SUBJECT --expected-signer-thumbprint $env:QUOTABOT_WINDOWS_SIGNER_THUMBPRINT --receipt $receipt $expanded
+          python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $expanded
           if ($LASTEXITCODE -ne 0) { throw "Downloaded desktop signature verification failed with exit code $LASTEXITCODE" }
       - name: Preserve downloaded Windows desktop signature evidence
-        if: always() && runner.os == 'Windows'
+        if: always() && runner.os == 'Windows' && vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-desktop-draft-signature-verification

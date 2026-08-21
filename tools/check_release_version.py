@@ -10,6 +10,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?"
+STABLE_VERSION_LABELS = {
+    "README current stable",
+    "SECURITY current audited release",
+    "AGENTS current stable",
+    "docs index current stable",
+    "setup current stable",
+    "ROADMAP current line",
+}
 
 
 class VersionCheckError(ValueError):
@@ -130,14 +138,48 @@ def check_release_versions(
 
     versions, build = release_versions(root)
     expected = versions["collector pubspec"]
-    mismatches = {
-        label: value for label, value in versions.items() if value != expected
+    source_mismatches = {
+        label: value
+        for label, value in versions.items()
+        if label not in STABLE_VERSION_LABELS and value != expected
     }
-    if mismatches:
+    if source_mismatches:
         details = ", ".join(
-            f"{label}={value}" for label, value in sorted(mismatches.items())
+            f"{label}={value}" for label, value in sorted(source_mismatches.items())
         )
         raise VersionCheckError(f"expected {expected}; mismatched {details}")
+    stable_versions = {
+        label: value
+        for label, value in versions.items()
+        if label in STABLE_VERSION_LABELS
+    }
+    if "-" in expected:
+        stable_expected = stable_versions["README current stable"]
+        if "-" in stable_expected:
+            raise VersionCheckError("README current stable must not name a prerelease")
+        stable_mismatches = {
+            label: value
+            for label, value in stable_versions.items()
+            if value != stable_expected
+        }
+        if stable_mismatches:
+            details = ", ".join(
+                f"{label}={value}" for label, value in sorted(stable_mismatches.items())
+            )
+            raise VersionCheckError(
+                f"expected stable {stable_expected}; mismatched {details}"
+            )
+    else:
+        stable_mismatches = {
+            label: value
+            for label, value in stable_versions.items()
+            if value != expected
+        }
+        if stable_mismatches:
+            details = ", ".join(
+                f"{label}={value}" for label, value in sorted(stable_mismatches.items())
+            )
+            raise VersionCheckError(f"expected {expected}; mismatched {details}")
     if int(build) <= 0:
         raise VersionCheckError("Flutter build number must be positive")
     if tag is not None and tag != f"v{expected}":

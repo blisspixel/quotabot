@@ -381,8 +381,8 @@ class DependencyPolicyTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("sdk: '3.12.2'", release)
-        self.assertEqual(6, release.count("uses: actions/setup-python@"))
-        self.assertEqual(6, release.count("python-version: '3.13'"))
+        self.assertEqual(12, release.count("uses: actions/setup-python@"))
+        self.assertEqual(12, release.count("python-version: '3.13'"))
 
         install_smoke = (
             ROOT / ".github" / "workflows" / "install-smoke.yml"

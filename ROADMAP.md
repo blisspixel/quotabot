@@ -98,18 +98,18 @@ than lost data.
 0.10.x is not a holding area for new features. It is the deliberate bridge from
 a broad 0.x product to a boring 1.0:
 
-1. Fix [the Claude authorization regression](https://github.com/blisspixel/quotabot/issues/77)
-   first and keep it open until the reporter completes a live authorize POST,
-   token exchange, and quota read with the patch.
-2. Land the confirmed auth-storage, malformed-token, routing-fallback, cache,
-   dependency, and Windows source-path fixes as small reviewed changes with
-   regressions.
-3. Continue adversarial bug hunts across provider lifecycles, stale and corrupt
+1. Publish 0.10.0-rc.1 with the confirmed auth-storage, malformed-token,
+   routing-fallback, cache, dependency, Windows source-path, safe Cursor plan
+   detection, and Claude OAuth-state fixes. Keep
+   [the Claude authorization issue](https://github.com/blisspixel/quotabot/issues/77)
+   open until the reporter completes a live authorize POST, token exchange, and
+   quota read with that exact candidate.
+2. Continue adversarial bug hunts across provider lifecycles, stale and corrupt
    state, multi-account isolation, every transport, packaging, update, rollback,
    and first-run diagnostics. Record only reproducible findings.
-4. Complete Windows and macOS signing below, then run a signed 0.10.x rehearsal
+3. Complete Windows and macOS signing below, then run a signed 0.10.x rehearsal
    through clean install, update, rollback, and immutable publication.
-5. Use later 0.10.x patches only for field-discovered regressions, release
+4. Use later 0.10.x patches only for field-discovered regressions, release
    rehearsal corrections, and quality-of-life refinement. Reopen product breadth
    only after the exit criteria pass.
 
@@ -174,7 +174,9 @@ receive.
 **Guardrails**
 
 - Signing credentials live only in protected release environments. Pull requests,
-  forks, and ordinary branch builds remain unsigned and cannot read them.
+  forks, ordinary branch builds, release compilation, packaging, attestation,
+  upload, and verification cannot read them. Only isolated signer jobs receive
+  the environment and OIDC permission, between immutable candidate handoffs.
 - Do not provision the current exportable-PFX contract for a new public-trust
   identity. Environment-bound signer jobs use least-privilege short-lived OIDC
   access. When a backend rotates leaf certificates, verification binds platform
@@ -695,12 +697,15 @@ claimed OS, and 1.0 is a version change rather than a discovery exercise.
   retains canonical success or bounded failure evidence with surface,
   architecture, allowlisted-stage context, and a comparison-only digest of all
   other receipt fields. That digest is not artifact identity, authentication,
-  attestation, or independent workflow provenance. Before relying on this path,
-  repair the SignTool timestamp argument order, verify exact downloaded draft
-  assets, and replace the exportable-PFX assumption with an owner-selected
-  hardware-backed or cloud signing service in a protected release environment.
-  The signing service, identity eligibility, credential custody, timestamp
-  service, and workflow activation remain owner decisions.
+  attestation, or independent workflow provenance. The SignTool timestamp
+  ordering and fresh-download verification gaps are fixed. The repository path
+  now replaces the exportable-PFX assumption with Azure Artifact Signing Public
+  Trust, exact file catalogs, environment-bound GitHub OIDC, and durable
+  subscriber EKU verification that does not pin daily leaf certificates. The
+  explicit unsigned transition mode keeps corrective 0.10.x candidates moving
+  while disclosing that platform identity is absent. Owner eligibility, Azure
+  resource and identity provisioning, the exact subscriber EKU, workflow mode
+  activation, and the signed rehearsal remain open.
 - Complete the native accessibility smoke for widget, analytics, profiles, dialogs,
   tray, and terminal navigation: keyboard, focus, text scaling, contrast, reduced
   motion, and basic screen reader. Automated widget checks already enforce

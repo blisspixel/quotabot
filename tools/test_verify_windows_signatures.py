@@ -362,7 +362,7 @@ class SignaturePolicyTests(unittest.TestCase):
             timestamp_message_imprint="2" * 64,
         )
         receipt = verify_windows_signatures.WindowsSignatureReceipt(
-            schema="quotabot.windows-signature-verification.v1",
+            schema="quotabot.windows-signature-verification.v2",
             surface="cli",
             architecture="x64",
             candidate_sha256="3" * 64,
@@ -503,7 +503,7 @@ class SignaturePolicyTests(unittest.TestCase):
 
     def test_receipt_mode_writes_success_and_failure_without_stdout(self) -> None:
         success_payload = {
-            "schema": "quotabot.windows-signature-verification.v1",
+            "schema": "quotabot.windows-signature-verification.v2",
             "verified": True,
         }
         success_receipt = mock.Mock()
@@ -589,7 +589,7 @@ class SignaturePolicyTests(unittest.TestCase):
     ) -> None:
         success_receipt = mock.Mock()
         success_receipt.to_dict.return_value = {
-            "schema": "quotabot.windows-signature-verification.v1",
+            "schema": "quotabot.windows-signature-verification.v2",
             "verified": True,
         }
         with tempfile.TemporaryDirectory() as directory:
@@ -1036,6 +1036,151 @@ class SignaturePolicyTests(unittest.TestCase):
                     caught.exception.relative_path,
                     "bin/quotabot.exe",
                 )
+
+    def test_artifact_signing_eku_policy_requires_one_durable_identity(self) -> None:
+        expected = "1.3.6.1.4.1.311.97.9.8.7.6"
+        good = (
+            verify_windows_signatures.CODE_SIGNING_EKU,
+            verify_windows_signatures.ARTIFACT_SIGNING_PUBLIC_TRUST_EKU,
+            expected,
+        )
+        self.assertEqual(
+            verify_windows_signatures._validate_artifact_signing_ekus(
+                good,
+                expected_subscriber_eku=expected,
+            ),
+            tuple(sorted(good)),
+        )
+
+        mismatch_cases = (
+            tuple(value for value in good if value != expected),
+            tuple(
+                value
+                for value in good
+                if value != verify_windows_signatures.ARTIFACT_SIGNING_PUBLIC_TRUST_EKU
+            ),
+            tuple(
+                value
+                for value in good
+                if value != verify_windows_signatures.CODE_SIGNING_EKU
+            ),
+            (*good, "1.3.6.1.4.1.311.97.1.2.3.4"),
+            (
+                verify_windows_signatures.CODE_SIGNING_EKU,
+                verify_windows_signatures.ARTIFACT_SIGNING_PUBLIC_TRUST_EKU,
+                "1.3.6.1.4.1.311.97.4.3.2.1",
+            ),
+        )
+        for values in mismatch_cases:
+            with (
+                self.subTest(values=values),
+                self.assertRaises(WindowsSignatureVerificationError) as raised,
+            ):
+                verify_windows_signatures._validate_artifact_signing_ekus(
+                    values,
+                    expected_subscriber_eku=expected,
+                )
+            self.assertEqual(raised.exception.code, "signer_mismatch")
+
+        malformed_cases = ((), (*good, expected), (*good, "not-an-oid"))
+        for values in malformed_cases:
+            with (
+                self.subTest(values=values),
+                self.assertRaises(WindowsSignatureVerificationError) as raised,
+            ):
+                verify_windows_signatures._validate_artifact_signing_ekus(
+                    values,
+                    expected_subscriber_eku=expected,
+                )
+            self.assertEqual(raised.exception.code, "signer_metadata_invalid")
+
+    def test_artifact_signing_policy_does_not_pin_rotating_leaf_certificate(
+        self,
+    ) -> None:
+        expected = "1.3.6.1.4.1.311.97.9.8.7.6"
+        metadata = AuthenticodeMetadata(
+            status="Valid",
+            signature_type="Authenticode",
+            signer_subject="CN=Daily Rotating Leaf",
+            signer_thumbprint="D" * 40,
+            timestamp_subject="CN=Timestamp",
+            timestamp_thumbprint="B" * 40,
+            signer_ekus=(
+                verify_windows_signatures.CODE_SIGNING_EKU,
+                verify_windows_signatures.ARTIFACT_SIGNING_PUBLIC_TRUST_EKU,
+                expected,
+            ),
+        )
+        commands: list[list[str]] = []
+
+        def fake_native(command, **_kwargs):
+            commands.append(list(command))
+            return subprocess.CompletedProcess(
+                args=command,
+                returncode=0,
+                stdout=VALID_SIGNTOOL_OUTPUT,
+                stderr=b"",
+            )
+
+        with (
+            mock.patch.object(
+                verify_windows_signatures,
+                "_run_native",
+                side_effect=fake_native,
+            ),
+            mock.patch.object(
+                verify_windows_signatures,
+                "_read_authenticode_metadata",
+                return_value=metadata,
+            ),
+            mock.patch.object(
+                verify_windows_signatures,
+                "_read_timestamp_message_imprint",
+                return_value=windows_timestamp_policy.TimestampMessageImprint(
+                    algorithm="sha256",
+                    digest="c" * 64,
+                ),
+            ),
+        ):
+            signature = verify_windows_signatures._verify_pe(
+                Path("hidden.exe"),
+                relative_path="bin/quotabot.exe",
+                sha256="a" * 64,
+                expected_subscriber_eku=expected,
+                expected_subject=None,
+                expected_thumbprint=None,
+                signtool_path=Path("signtool.exe"),
+                powershell_path=Path("powershell.exe"),
+                deadline=time.monotonic() + 10,
+            )
+
+        self.assertEqual(signature.signer_subject, "CN=Daily Rotating Leaf")
+        self.assertEqual(signature.signer_thumbprint, "D" * 40)
+        self.assertEqual(signature.signer_ekus, tuple(sorted(metadata.signer_ekus)))
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0][1:5], ["verify", "/pa", "/all", "/tw"])
+        self.assertNotIn("/sha1", commands[0])
+
+    def test_expected_subscriber_eku_is_bounded_and_specific(self) -> None:
+        expected = "1.3.6.1.4.1.311.97.9.8.7.6"
+        self.assertEqual(
+            verify_windows_signatures._validate_expected_subscriber_eku(expected),
+            expected,
+        )
+        for value in (
+            "",
+            "not-an-oid",
+            verify_windows_signatures.ARTIFACT_SIGNING_PUBLIC_TRUST_EKU,
+            verify_windows_signatures.CODE_SIGNING_EKU,
+            "1.3.6.1.4.1.311.97.01",
+            "1.3.6.1.4.1.311.97." + ("1" * 300),
+        ):
+            with (
+                self.subTest(value=value),
+                self.assertRaises(WindowsSignatureVerificationError) as raised,
+            ):
+                verify_windows_signatures._validate_expected_subscriber_eku(value)
+            self.assertEqual(raised.exception.code, "invalid_expected_signer")
 
     def test_native_timeout_and_output_limits_fail_closed(self) -> None:
         executable = str(Path(sys.executable).resolve())
@@ -1498,7 +1643,7 @@ class NativeWindowsSignatureTests(unittest.TestCase):
             payload = json.loads(stdout.getvalue())
             self.assertEqual(
                 payload["schema"],
-                "quotabot.windows-signature-verification.v1",
+                "quotabot.windows-signature-verification.v2",
             )
             self.assertTrue(payload["verified"])
             self.assertNotIn(str(base), stdout.getvalue())
