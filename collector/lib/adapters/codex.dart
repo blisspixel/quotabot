@@ -349,8 +349,8 @@ class CodexAdapter {
         account: account,
       );
 
-  bool _isDisconnected() => (_disconnectReader ??
-      () => ProviderDisconnectStore.isDisconnected(id))();
+  bool _isDisconnected() =>
+      (_disconnectReader ?? () => ProviderDisconnectStore.isDisconnected(id))();
 
   ProviderQuota _disconnected(int asOf) => ProviderQuota.error(
         id,

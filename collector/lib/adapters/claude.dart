@@ -272,8 +272,8 @@ class ClaudeAdapter {
         account: identity,
       );
 
-  bool _isDisconnected() => (_disconnectReader ??
-      () => ProviderDisconnectStore.isDisconnected(id))();
+  bool _isDisconnected() =>
+      (_disconnectReader ?? () => ProviderDisconnectStore.isDisconnected(id))();
 
   ProviderQuota _disconnected(int asOf) => ProviderQuota.error(
         id,

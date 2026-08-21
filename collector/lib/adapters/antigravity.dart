@@ -534,7 +534,7 @@ class AntigravityAdapter {
     final asOf = nowEpoch();
     try {
       if ((_disconnectReader ??
-              () => ProviderDisconnectStore.isDisconnected(id))()) {
+          () => ProviderDisconnectStore.isDisconnected(id))()) {
         return [
           ProviderQuota.error(
             id,

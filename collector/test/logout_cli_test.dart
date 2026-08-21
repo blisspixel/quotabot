@@ -64,8 +64,7 @@ void main() {
     expect(result.stderr, contains('Host credentials were left unchanged'));
   });
 
-  test(
-      'logout keeps every provider disconnected despite host credentials',
+  test('logout keeps every provider disconnected despite host credentials',
       () async {
     final home = Directory('${temp.path}/home')..createSync();
     final grokAuth = File('${home.path}/.grok/auth.json')
