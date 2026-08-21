@@ -1374,20 +1374,22 @@ void main() {
       snapshotProvider: () async => [
         _q('claude', 20),
         _q('codex', 30),
+        _q('grok', 40),
       ],
       now: () => _now,
     );
     try {
       final json = await _getJson(
-        Uri.parse('http://127.0.0.1:${server.port}/suggest?exclude=claude'),
+        Uri.parse(
+          'http://127.0.0.1:${server.port}/suggest?exclude=claude&exclude=codex',
+        ),
       );
 
-      expect((json['recommended'] as Map)['provider'], 'codex');
+      expect((json['recommended'] as Map)['provider'], 'grok');
       final ranked = json['ranked'] as List;
-      expect(
-        ranked.map((entry) => (entry as Map)['provider']),
-        isNot(contains('claude')),
-      );
+      final rankedProviders = ranked.map((entry) => (entry as Map)['provider']);
+      expect(rankedProviders, isNot(contains('claude')));
+      expect(rankedProviders, isNot(contains('codex')));
     } finally {
       await server.close(force: true);
     }
@@ -1546,6 +1548,13 @@ void main() {
             'between 20 and 50',
         'quota_stretch=true&quota_stretch_threshold_percent=51':
             'between 20 and 50',
+        'task=simple&task=hard': 'task may be specified only once',
+        'cost_penalty=claude:1&cost-penalty=claude:2':
+            'cost penalty for claude may be specified only once',
+        'local_first=true&local-first=false':
+            'local_first may be specified only once',
+        'quota_stretch=true&quota_stretch=true':
+            'quota_stretch may be specified only once',
         'local_frist=true': 'unknown query parameter: local_frist',
       };
       for (final entry in cases.entries) {
@@ -1579,7 +1588,7 @@ void main() {
     try {
       final json = await _getJson(
         Uri.parse(
-          'http://127.0.0.1:${server.port}/suggest?cost_penalty=claude:1',
+          'http://127.0.0.1:${server.port}/suggest?cost_penalty=claude:1&cost-penalty=codex:0.25',
         ),
       );
 
@@ -1593,6 +1602,13 @@ void main() {
           );
       expect(claude['cost_penalty'], 1.0);
       expect(claude['cost_discount'], 0.5);
+      final codex = (json['ranked'] as List<Object?>)
+          .cast<Map<String, dynamic>>()
+          .firstWhere(
+            (entry) => entry['provider'] == 'codex',
+          );
+      expect(codex['cost_penalty'], 0.25);
+      expect(codex['cost_discount'], 0.8);
     } finally {
       await server.close(force: true);
     }

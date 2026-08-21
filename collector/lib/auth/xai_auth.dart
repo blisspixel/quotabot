@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'provider_disconnect.dart';
 import 'tokens.dart';
 
 /// xAI (Grok) OAuth via the OIDC device-authorization flow, creating a token
@@ -60,11 +61,13 @@ class XaiAuth {
       }
       if (resp.statusCode == 200) {
         final tokens = Tokens.fromOAuth(body);
-        _saveGrant(
-          tokens,
-          account: account ?? _emailFromIdToken(body['id_token']?.toString()),
-        );
-        return tokens;
+        return ProviderDisconnectStore.publishSuccessfulLogin(provider, () {
+          _saveGrant(
+            tokens,
+            account: account ?? _emailFromIdToken(body['id_token']?.toString()),
+          );
+          return tokens;
+        });
       }
       final err = body['error'];
       // Per RFC 8628, slow_down means we are polling too fast: back off by 5s

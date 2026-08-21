@@ -40,8 +40,10 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   reads as "provider error - retrying". Temporary provider pushback does not
   offer a reconnect action; HTTP 401 and 403 keep that repair path.
 - **First run:** Review opens the provider-status dialog and records completion
-  only after that dialog closes. Dismiss remains an immediate, explicit way to
-  hide the prompt.
+  only after the user finishes it. "Skip for now" defers the walkthrough for
+  the current app process only and writes no completed preference, so refreshes
+  and window recreation in that process stay quiet but a later app launch asks
+  again. Finishing the walkthrough persists completion across launches.
 - **Route signal:** the expanded header always shows the next recommended route
   or an explicit no-safe-route fallback. Compact mode pins the same answer as a
   `Next` provider or `No route` control. Both work with pointer or keyboard and
@@ -244,7 +246,7 @@ local metadata. Add `--json` to any read command for machine output.
 | `explain`              | Dry-run manifest of local reads and network hosts.    |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect claude, codex, grok, or antigravity for refreshable reads. |
-| `logout <provider>`    | Disconnect a provider.                                |
+| `logout <provider>`    | Disconnect in quotabot without changing host credentials. |
 | `help`, `version`      | Global usage and version; `suggest` and `models` also have focused help. |
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
@@ -254,6 +256,14 @@ one, and capture age. The source class already communicates machine scope,
 manual origin, or runtime classification, so those ideas are not repeated as
 separate tags.
 The frozen `quotabot.v1` contract is documented in [SCHEMA.md](SCHEMA.md).
+
+Logout is provider-wide, including named accounts. It removes quotabot-owned
+grants and installs a local disconnect marker, so adapters ignore otherwise
+valid host credentials instead of reconnecting on the next read. Host files are
+never changed. Only a successful explicit `quotabot login PROVIDER` clears the
+marker; a failed or cancelled login keeps the provider disconnected.
+An unreadable or non-regular entry at the exact marker path also fails closed,
+so damaged local state cannot silently re-enable host credentials.
 
 ### Deterministic simulation
 
@@ -585,14 +595,32 @@ default there too, with an explicit "allow external host" checkbox.
 CLI rejection and startup diagnostics describe webhook delivery state without
 echoing the configured URL, whose path or query may contain a bearer secret.
 
-Beyond low-quota alerts, the desktop widget raises two more local notifications:
-a scheduled "Quota reset soon" reminder before a heavily used window resets, and
-a "Reset available" notification the moment a provider offers a redeemable
-off-cycle reset (Codex reset credits today), edge-triggered so it fires once and
-re-arms only after the reset is gone. The same reset shows as a prominent green
-"N resets available ... redeem now" line in `doctor` and `top` and a green banner
-on the desktop card. These reset notifications are local only, never sent to the
-webhook.
+Beyond low-quota alerts, the desktop widget raises two more local notifications.
+A "Quota reset soon" reminder is scheduled for 15 minutes before a heavily used
+trusted window resets. If the app first sees that window inside the 15-minute
+lead, it delivers the reminder immediately. A "Reset available" notification
+appears the moment a provider offers a redeemable off-cycle reset (Codex reset
+credits today), edge-triggered so it fires once and re-arms only after the reset
+is gone. The same reset shows as a prominent green "N resets available ...
+redeem now" line in `doctor` and `top` and a green banner on the desktop card.
+These reset notifications are local only, never sent to the webhook.
+
+Scheduled reset reminders carry the exact private payload
+`quotabot.reset-reminder.v1`. Reconciliation and notification disablement cancel
+only pending requests with that payload; unrelated pending notifications are
+left untouched. Scheduling, account-privacy reconciliation, and disablement use
+one serialized notification flight, so disabling notifications while a schedule
+call is in progress removes the just-created request before the flight settles.
+Turning "Show account names" off immediately replaces each owned pending reset
+reminder whose body could contain an account label.
+
+After a reset reminder is successfully scheduled or delivered immediately, the
+app stores its numeric notification ID and reset epoch in a 128-entry local
+ledger. That record prevents a delivered OS schedule from being repeated as an
+immediate alert, including after temporary ineligibility or an app restart, and
+expires at the reset boundary. If the app itself cancels a still-future schedule
+because it became ineligible or notifications were disabled, it removes that
+record so a newly eligible window can be scheduled again rather than missed.
 
 Native low-quota and reset notification bodies, including the Windows subtitle,
 follow the desktop "Show account names" preference. Even when enabled, an

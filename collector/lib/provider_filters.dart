@@ -114,6 +114,12 @@ ProviderCostPenaltyParseResult parseProviderCostPenalties(Object? value) {
         invalidProvider: rawProvider,
       );
     }
+    if (out.containsKey(provider)) {
+      return ProviderCostPenaltyParseResult.error(
+        'cost penalty for $provider may be specified only once',
+        invalidProvider: rawProvider,
+      );
+    }
     out[provider] = penalty;
     return ProviderCostPenaltyParseResult.ok(out);
   }

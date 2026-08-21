@@ -126,10 +126,117 @@ double _contrastRatio(Color foreground, Color background) {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+class _FakeDesktopNotificationClient implements DesktopNotificationClient {
+  final Map<int, DesktopPendingNotification> _pending;
+  final List<int> cancelled = [];
+  final List<({int id, String title, String body})> shown = [];
+  final List<({int id, String title, String body, DateTime scheduledDate})>
+  scheduled = [];
+  final Completer<void>? scheduleStarted;
+  final Future<void>? scheduleGate;
+
+  _FakeDesktopNotificationClient({
+    Set<int> pending = const {},
+    List<DesktopPendingNotification> pendingNotifications = const [],
+    this.scheduleStarted,
+    this.scheduleGate,
+  }) : _pending = {
+         for (final id in pending)
+           id: DesktopPendingNotification(
+             id: id,
+             title: 'Quota reset soon',
+             body: 'stale reset reminder',
+             payload: quotaResetReminderPayload,
+           ),
+         for (final request in pendingNotifications) request.id: request,
+       };
+
+  @override
+  Future<List<DesktopPendingNotification>> pendingNotifications() async => [
+    ..._pending.values,
+  ];
+
+  Set<int> get pendingIds => _pending.keys.toSet();
+
+  DesktopPendingNotification? pendingWithId(int id) => _pending[id];
+
+  void addPending(DesktopPendingNotification request) {
+    _pending[request.id] = request;
+  }
+
+  @override
+  Future<void> cancel(int id) async {
+    cancelled.add(id);
+    _pending.remove(id);
+  }
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required String title,
+    required String body,
+    required String providerLabel,
+    required DateTime scheduledDate,
+  }) async {
+    scheduled.add((
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: scheduledDate,
+    ));
+    if (!(scheduleStarted?.isCompleted ?? true)) scheduleStarted!.complete();
+    if (scheduleGate != null) await scheduleGate;
+    _pending[id] = DesktopPendingNotification(
+      id: id,
+      title: title,
+      body: body,
+      payload: quotaResetReminderPayload,
+    );
+  }
+
+  @override
+  Future<void> show({
+    required int id,
+    required String title,
+    required String body,
+    required String providerLabel,
+  }) async {
+    shown.add((id: id, title: title, body: body));
+  }
+}
+
 void main() {
   tearDown(() {
     appThemeSpec.value = appThemeSystem;
     textScale.value = 1;
+  });
+
+  test('reset reminders use a fixed lead and fire immediately inside it', () {
+    final now = DateTime(2026, 8, 21, 12);
+    final hourReset = now.add(const Duration(hours: 1));
+    final tenMinuteReset = now.add(const Duration(minutes: 10));
+
+    expect(
+      quotaResetReminderDeliveryTime(
+        resetsAt: hourReset.millisecondsSinceEpoch ~/ 1000,
+        now: now,
+      ),
+      hourReset.subtract(quotaResetReminderLeadTime),
+    );
+    expect(
+      quotaResetReminderDeliveryTime(
+        resetsAt: tenMinuteReset.millisecondsSinceEpoch ~/ 1000,
+        now: now,
+      ),
+      now,
+    );
+    expect(
+      quotaResetReminderDeliveryTime(
+        resetsAt: now.millisecondsSinceEpoch ~/ 1000,
+        now: now,
+      ),
+      isNull,
+    );
   });
 
   test('analytics incident inventory follows the active desktop view', () {
@@ -2102,23 +2209,352 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('first run Dismiss persists completion immediately', (
+  testWidgets(
+    'reset reminders reconcile stale requests and disabling cancels them',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final scheduledReset = now + 3600;
+      final immediateReset = now + 600;
+      final notifications = _FakeDesktopNotificationClient(
+        pending: {2147483000},
+        pendingNotifications: const [
+          DesktopPendingNotification(
+            id: 2147482999,
+            title: 'Calendar reminder',
+            body: 'Unrelated request',
+            payload: 'another.feature.v1',
+          ),
+        ],
+      );
+      Prefs? saved;
+      ProviderQuota quota(String provider, int resetsAt) => ProviderQuota(
+        provider: provider,
+        displayName: provider == 'claude' ? 'Claude' : 'Codex',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 90, resetsAt: resetsAt),
+        ],
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(enableNotifications: true, setupDone: true),
+            demoMode: false,
+            collector: () async => [
+              quota('claude', scheduledReset),
+              quota('codex', immediateReset),
+            ],
+            notificationClient: notifications,
+            prefsSaver: (prefs) async => saved = prefs,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(notifications.cancelled, contains(2147483000));
+      expect(notifications.pendingIds, isNot(contains(2147483000)));
+      expect(notifications.pendingIds, contains(2147482999));
+      expect(notifications.cancelled, isNot(contains(2147482999)));
+      expect(notifications.scheduled, hasLength(1));
+      expect(notifications.scheduled.single.title, 'Quota reset soon');
+      expect(
+        notifications.scheduled.single.scheduledDate,
+        DateTime.fromMillisecondsSinceEpoch(
+          scheduledReset * 1000,
+        ).subtract(quotaResetReminderLeadTime),
+      );
+      expect(
+        notifications.shown.where((item) => item.title == 'Quota reset soon'),
+        hasLength(1),
+      );
+      expect(saved?.handledResetReminders, hasLength(2));
+
+      await _selectMenuValue(tester, 'refresh');
+      await tester.pump();
+      await tester.pump();
+      expect(notifications.scheduled, hasLength(1));
+      expect(
+        notifications.shown.where((item) => item.title == 'Quota reset soon'),
+        hasLength(1),
+      );
+
+      notifications.addPending(
+        const DesktopPendingNotification(
+          id: 2147483001,
+          payload: quotaResetReminderPayload,
+        ),
+      );
+      final scheduledCount = notifications.scheduled.length;
+      await _selectMenuValue(tester, 'notifications');
+      await tester.pump();
+      await tester.pump();
+
+      expect(saved?.enableNotifications, isFalse);
+      expect(notifications.pendingIds, {2147482999});
+      expect(notifications.cancelled, contains(2147483001));
+      expect(notifications.cancelled, isNot(contains(2147482999)));
+      expect(notifications.scheduled, hasLength(scheduledCount));
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'reset reminder privacy changes replace owned pending text immediately',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final resetsAt = now + 3600;
+      final notifications = _FakeDesktopNotificationClient(
+        pendingNotifications: const [
+          DesktopPendingNotification(
+            id: 2147482998,
+            title: 'Calendar reminder',
+            body: 'Private foreign request',
+            payload: 'another.feature.v1',
+          ),
+        ],
+      );
+      ProviderQuota quota(String account) => ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: account,
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 90, resetsAt: resetsAt),
+        ],
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(
+              enableNotifications: true,
+              setupDone: true,
+              showAccounts: true,
+            ),
+            demoMode: false,
+            collector: () async => [
+              quota('personal@example.com'),
+              quota('work@example.com'),
+            ],
+            notificationClient: notifications,
+            prefsSaver: (_) async {},
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(notifications.scheduled, hasLength(2));
+      expect(
+        notifications.scheduled.every(
+          (request) => request.body.contains('@example.com'),
+        ),
+        isTrue,
+      );
+      final ownedIds = notifications.scheduled
+          .map((request) => request.id)
+          .toSet();
+
+      await _selectMenuValue(tester, 'show_accounts');
+      await tester.pump();
+      await tester.pump();
+
+      expect(notifications.scheduled, hasLength(4));
+      expect(
+        notifications.scheduled
+            .skip(2)
+            .every((request) => !request.body.contains('@example.com')),
+        isTrue,
+      );
+      expect(notifications.cancelled.toSet(), containsAll(ownedIds));
+      for (final id in ownedIds) {
+        expect(
+          notifications.pendingWithId(id)?.body,
+          isNot(contains('@example.com')),
+        );
+      }
+      expect(notifications.pendingIds, contains(2147482998));
+      expect(notifications.cancelled, isNot(contains(2147482998)));
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'handled reset ledger survives eligibility gaps and process restart',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final resetsAt = now + 600;
+      var eligible = true;
+      Prefs? saved;
+      ProviderQuota quota() => ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(
+            label: 'weekly',
+            usedPercent: eligible ? 90 : 70,
+            resetsAt: resetsAt,
+          ),
+        ],
+      );
+      final notifications = _FakeDesktopNotificationClient();
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(enableNotifications: true, setupDone: true),
+            demoMode: false,
+            collector: () async => [quota()],
+            notificationClient: notifications,
+            prefsSaver: (prefs) async => saved = prefs,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        notifications.shown.where(
+          (request) => request.title == 'Quota reset soon',
+        ),
+        hasLength(1),
+      );
+      expect(saved?.handledResetReminders, hasLength(1));
+
+      eligible = false;
+      await _selectMenuValue(tester, 'refresh');
+      eligible = true;
+      await _selectMenuValue(tester, 'refresh');
+      expect(
+        notifications.shown.where(
+          (request) => request.title == 'Quota reset soon',
+        ),
+        hasLength(1),
+      );
+
+      final restartedNotifications = _FakeDesktopNotificationClient();
+      final restartedPrefs = Prefs.fromJson(saved!.toJson());
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: restartedPrefs,
+            demoMode: false,
+            collector: () async => [quota()],
+            notificationClient: restartedNotifications,
+            prefsSaver: (_) async {},
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        restartedNotifications.shown.where(
+          (request) => request.title == 'Quota reset soon',
+        ),
+        isEmpty,
+      );
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'disabling waits behind an in-flight reset schedule and cancels it',
+    (tester) async {
+      await _useDesktopSurface(tester);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final scheduleStarted = Completer<void>();
+      final releaseSchedule = Completer<void>();
+      final notifications = _FakeDesktopNotificationClient(
+        scheduleStarted: scheduleStarted,
+        scheduleGate: releaseSchedule.future,
+        pendingNotifications: const [
+          DesktopPendingNotification(
+            id: 2147482997,
+            payload: 'another.feature.v1',
+          ),
+        ],
+      );
+      final quota = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'default',
+        asOf: now,
+        windows: [
+          QuotaWindow(label: 'weekly', usedPercent: 90, resetsAt: now + 3600),
+        ],
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          Dashboard.test(
+            prefs: const Prefs(enableNotifications: true, setupDone: true),
+            demoMode: false,
+            collector: () async => [quota],
+            notificationClient: notifications,
+            prefsSaver: (_) async {},
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(scheduleStarted.isCompleted, isTrue);
+
+      final menu = tester.widget<PopupMenuButton<String>>(
+        find.byType(PopupMenuButton<String>),
+      );
+      menu.onSelected!('notifications');
+      await tester.pump();
+      releaseSchedule.complete();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(notifications.scheduled, hasLength(1));
+      expect(notifications.pendingIds, {2147482997});
+      expect(
+        notifications.cancelled,
+        contains(notifications.scheduled.single.id),
+      );
+      expect(notifications.cancelled, isNot(contains(2147482997)));
+
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('first run Skip for now defers only the current process', (
     tester,
   ) async {
     await _useDesktopSurface(tester);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     Prefs? saved;
-
-    await tester.pumpWidget(
-      _wrap(
-        Dashboard.test(
-          prefs: const Prefs(enableNotifications: false, setupDone: false),
-          demoMode: false,
-          collector: () async => [_routeQuota('claude', 'Claude', now)],
-          prefsSaver: (prefs) async => saved = prefs,
-        ),
+    final session = FirstRunSession();
+    Widget dashboard(FirstRunSession firstRunSession) => _wrap(
+      Dashboard.test(
+        prefs: const Prefs(enableNotifications: false, setupDone: false),
+        demoMode: false,
+        collector: () async => [_routeQuota('claude', 'Claude', now)],
+        prefsSaver: (prefs) async => saved = prefs,
+        firstRunSession: firstRunSession,
       ),
     );
+
+    await tester.pumpWidget(dashboard(session));
     await tester.pump();
     await tester.pump();
     await tester.pump();
@@ -2128,7 +2564,26 @@ void main() {
     await tester.pump();
 
     expect(find.text('What we found'), findsNothing);
-    expect(saved?.setupDone, isTrue);
+    expect(saved, isNull);
+
+    await _selectMenuValue(tester, 'refresh');
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('What we found'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(dashboard(session));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('What we found'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(dashboard(FirstRunSession()));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('What we found'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
   });

@@ -35,7 +35,7 @@ Provider snapshots keep these stable fields:
   or a token. Raw credentials and provider account ids are never serialized in
   this field.
 - Optional `plan`, `plan_evidence_source`, `plan_evidence_as_of`, `source`,
-  `source_class`, `status`, `active`, `details`,
+  `source_class`, `supplemental_manual_quota`, `status`, `active`, `details`,
   `error`, `models`, `local_hardware`, `model_quotas`, `suspect`, `drift_reason`,
   `drift_observed_at`, `per_machine`, `pipe_health`, `http_status`,
   `retry_after_seconds`, and `reset_credits_available`.
@@ -64,6 +64,16 @@ Provider snapshots keep these stable fields:
   to `manual`, the provider window is a local self-reported quota entry, not
   measured adapter telemetry. Current manual entries carry both
   `source: "manual"` and `source_class: "manual"`.
+- `supplemental_manual_quota` appears only when one valid manual entry has the
+  exact same provider and specific, non-placeholder account string as one
+  built-in subscription row. The built-in row remains the sole source for
+  routing, availability, analytics, status, and primary windows. The nested
+  object retains the manual
+  `display_name`, optional `plan`, `as_of`, and non-empty `windows`, with fixed
+  `source: "manual"` and `source_class: "manual"` provenance. Ambiguous
+  duplicates, local-runtime collisions, and non-exact account labels remain
+  separate rows so verification and account selectors keep their existing
+  behavior.
 - `suspect`, when present, retains its original compatibility meaning: a
   non-fatal plausibility note on the fresh reading produced by the earlier
   drift canary. The reading remains in that snapshot for a human or agent to

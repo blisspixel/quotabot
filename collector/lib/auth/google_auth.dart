@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'oauth_util.dart';
+import 'provider_disconnect.dart';
 import 'tokens.dart';
 
 /// Google (Antigravity) OAuth via the native-app loopback authorization-code
@@ -112,8 +113,10 @@ class GoogleAuth {
         (tokens.accessToken == null
             ? null
             : await emailForAccessToken(tokens.accessToken!));
-    _saveGrant(tokens, account: resolvedAccount);
-    return tokens;
+    return ProviderDisconnectStore.publishSuccessfulLogin(provider, () {
+      _saveGrant(tokens, account: resolvedAccount);
+      return tokens;
+    });
   }
 
   Future<Tokens?> refresh(String refreshToken) async {

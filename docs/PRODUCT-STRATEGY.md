@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-07-27. Revisit this document when provider quota models, the MCP
+Updated 2026-08-21. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order and single immediate priority live in
 [ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
@@ -18,11 +18,14 @@ content-blind capacity decision system that combines subscription windows,
 local-runtime readiness, source provenance, fail-soft behavior, and concurrent
 agent reservations without becoming a proxy.
 
-The immediate product constraint is acquisition, not feature depth. Quota
-stretch shipped in 0.9.6, closing the policy gap between subscription-first and
-always-local routing without weakening the no-surprise-spend boundary. Release
-signing and notarization now come next, followed by native-host, account, and
-accessibility evidence on the signed 1.0 candidate.
+The immediate product constraint is trust, not feature depth. Quota stretch
+shipped in 0.9.6, closing the policy gap between subscription-first and
+always-local routing without weakening the no-surprise-spend boundary. The
+focused 0.10.x train now resolves field-discovered correctness, recovery, and
+quality-of-life defects and repeats native validation. Windows signing and
+macOS Developer ID signing, notarization, and stapling follow when that
+developer-controlled inventory is quiet, before final native-host, account,
+and accessibility evidence on the signed 1.0 candidate.
 
 ## User jobs
 
@@ -103,10 +106,12 @@ The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
 barrier. v0.9.9 completed the exact release and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
-proved. That evidence is not a substitute for rerunning the path on the exact
-1.0 candidate. The remaining acquisition work is operating-system signing and
-notarization. Update, uninstall, data preservation, destructive reset, and
-rollback remain separate documented operations.
+proved. That evidence is not a substitute for the current 0.10.x stabilization
+and signed rehearsal, or for rerunning the complete path on the exact 1.0
+candidate. The remaining acquisition work is to finish the reproducible defect
+inventory, then activate operating-system signing and notarization. Update,
+uninstall, data preservation, destructive reset, and rollback remain separate
+documented operations.
 
 ### Content-blind auditability
 

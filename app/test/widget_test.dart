@@ -411,6 +411,7 @@ void main() {
         activeProfile: 'work',
         webhookUrl: 'http://127.0.0.1:9000/quota',
         webhookAllowExternal: true,
+        handledResetReminders: {17: 1787300000, 29: 1787400000},
         windowX: 100,
         windowY: 200,
       );
@@ -426,6 +427,7 @@ void main() {
       expect(back.showAccounts, isFalse);
       expect(back.webhookUrl, 'http://127.0.0.1:9000/quota');
       expect(back.webhookAllowExternal, isTrue);
+      expect(back.handledResetReminders, {17: 1787300000, 29: 1787400000});
       expect(back.windowX, 100);
       expect(back.windowY, 200);
     });
@@ -443,8 +445,42 @@ void main() {
       expect(p.showAccounts, isFalse);
       expect(p.webhookUrl, isNull);
       expect(p.webhookAllowExternal, isFalse);
+      expect(p.handledResetReminders, isEmpty);
       expect(p.windowX, isNull);
     });
+
+    test(
+      'handled reset ledger rejects malformed records and stays bounded',
+      () {
+        final p = Prefs.fromJson({
+          'handled_reset_reminders': [
+            {'id': -1, 'resets_at': 1787300000},
+            {'id': 1, 'resets_at': 0},
+            {'id': '2', 'resets_at': 1787300000},
+            for (var id = 0; id < maxHandledResetReminders + 20; id++)
+              {'id': id, 'resets_at': 1787300000 + id},
+          ],
+        });
+
+        expect(p.handledResetReminders, hasLength(maxHandledResetReminders));
+        expect(p.handledResetReminders[-1], isNull);
+        expect(p.handledResetReminders[0], 1787300000);
+
+        final encoded =
+            Prefs(
+                  handledResetReminders: {
+                    for (var id = 0; id < maxHandledResetReminders + 20; id++)
+                      id: 1787300000 + id,
+                  },
+                ).toJson()['handled_reset_reminders']!
+                as List;
+        expect(encoded, hasLength(maxHandledResetReminders));
+        expect(encoded.first, {
+          'id': maxHandledResetReminders + 19,
+          'resets_at': 1787300000 + maxHandledResetReminders + 19,
+        });
+      },
+    );
 
     test('copyWith can clear the stored window position', () {
       const p = Prefs(windowX: 100, windowY: 200);
@@ -1015,6 +1051,43 @@ void main() {
       );
 
       expect(line, 'cached | manual | captured 1h ago');
+    });
+
+    test('same-identity manual quota stays on one built-in desktop card', () {
+      const now = 1782046566;
+      final rows = coalesceSupplementalManualQuotas([
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude',
+          account: 'work@example.com',
+          asOf: now,
+          sourceClass: ProviderSourceClass.authoritativeLive,
+          windows: [QuotaWindow(label: 'weekly', usedPercent: 40)],
+        ),
+        ProviderQuota(
+          provider: 'claude',
+          displayName: 'Claude manual',
+          account: 'work@example.com',
+          source: providerQuotaManualSource,
+          asOf: now - 60,
+          windows: [QuotaWindow(label: 'manual', usedPercent: 80)],
+        ),
+      ]);
+
+      expect(rows, hasLength(1));
+      expect(providerSetupRows(rows), hasLength(1));
+      expect(groupProvidersForDisplay(rows).single.quotas, hasLength(1));
+      expect(
+        desktopProviderTrustLine(rows.single, now),
+        'live | account-wide | quota plan | manual note | captured just now',
+      );
+      expect(
+        desktopProviderTrustDetail(rows.single, now),
+        allOf(
+          contains('manual 80% used'),
+          contains('does not replace built-in evidence'),
+        ),
+      );
     });
 
     test('labels provider drift separately from ordinary cached data', () {

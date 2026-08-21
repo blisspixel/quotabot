@@ -113,6 +113,187 @@ void main() {
     expect(empty.runtimeAccess.providers, isEmpty);
   });
 
+  test(
+      'same-identity manual quota supplements built-in evidence without shadowing it',
+      () async {
+    final now = nowEpoch();
+    const account = 'work@example.com';
+    const unrelatedAccount = 'Work@example.com';
+    saveManualQuotaEntries([
+      ManualQuotaEntry(
+        provider: claudeProviderId,
+        displayName: 'Claude manual',
+        account: account,
+        plan: 'self-reported plan',
+        window: 'monthly manual',
+        used: 90,
+        limit: 100,
+        resetsAt: now + 86400,
+        updatedAt: now - 10,
+      ),
+      ManualQuotaEntry(
+        provider: claudeProviderId,
+        displayName: 'Claude case-specific manual',
+        account: unrelatedAccount,
+        window: 'manual',
+        used: 20,
+        limit: 100,
+        resetsAt: now + 86400,
+        updatedAt: now - 10,
+      ),
+    ]);
+    final registry = [
+      ProviderAdapterRegistration(
+        id: claudeProviderId,
+        displayName: 'Claude',
+        adapterClass: ProviderAdapterClass.subscription,
+        sourceClasses: const {ProviderSourceClass.authoritativeLive},
+        collect: () async => [
+          ProviderQuota(
+            provider: claudeProviderId,
+            displayName: 'Claude',
+            account: account,
+            plan: 'max',
+            asOf: now,
+            status: 'provider status retained',
+            details: const ['provider detail retained'],
+            sourceClass: ProviderSourceClass.authoritativeLive,
+            windows: [
+              QuotaWindow(
+                label: 'weekly measured',
+                usedPercent: 40,
+                resetsAt: now + 86400,
+              ),
+            ],
+          ),
+        ],
+        cached: false,
+        fixtureKind: ProviderFixtureKind.claudeUsage,
+        fixtureFile: 'claude.json',
+      ),
+    ];
+
+    final collected = await collectAllWithRuntimeAccess(registry: registry);
+    final exact =
+        collected.providers.singleWhere((quota) => quota.account == account);
+    final unrelated = collected.providers
+        .singleWhere((quota) => quota.account == unrelatedAccount);
+
+    expect(collected.providers, hasLength(2));
+    expect(exact.isManual, isFalse);
+    expect(exact.sourceClass, ProviderSourceClass.authoritativeLive);
+    expect(exact.plan, 'max');
+    expect(exact.status, 'provider status retained');
+    expect(exact.windows.single.label, 'weekly measured');
+    expect(exact.windows.single.usedPercent, 40);
+    expect(exact.details, contains('provider detail retained'));
+    expect(exact.details, contains(supplementalManualQuotaDetail));
+    expect(exact.supplementalManualQuota?.displayName, 'Claude manual');
+    expect(exact.supplementalManualQuota?.plan, 'self-reported plan');
+    expect(
+      exact.supplementalManualQuota?.windows.single.percent,
+      90,
+    );
+    expect(unrelated.isManual, isTrue);
+    expect(unrelated.supplementalManualQuota, isNull);
+
+    final route = suggestRoute(collected.providers, now);
+    final exactCandidates = route.ranked
+        .where((candidate) => candidate.account == account)
+        .toList();
+    expect(exactCandidates, hasLength(1));
+    expect(exactCandidates.single.headroom, 60);
+    expect(exactCandidates.single.isManual, isFalse);
+    expect(
+      exactCandidates.single.sourceClass,
+      ProviderSourceClass.authoritativeLive,
+    );
+
+    final buckets = loadBuckets(claudeProviderId, account: account);
+    expect(buckets, hasLength(1));
+    expect(buckets.single.count, 1);
+    expect(buckets.single.mean, closeTo(60, 0.001));
+
+    final json = exact.toJson();
+    expect(json['source'], isNull);
+    expect(json['source_class'], 'authoritative_live');
+    expect(
+      (json['supplemental_manual_quota'] as Map)['source_class'],
+      'manual',
+    );
+  });
+
+  test(
+      'ambiguous, placeholder, and local manual collisions remain visible to verification',
+      () {
+    ProviderQuota builtIn({bool local = false, String account = 'same'}) =>
+        ProviderQuota(
+          provider: local ? ollamaProviderId : claudeProviderId,
+          displayName: local ? 'Ollama' : 'Claude',
+          account: account,
+          asOf: 1782000000,
+          kind:
+              local ? ProviderQuotaKind.local : ProviderQuotaKind.subscription,
+          sourceClass: local
+              ? ProviderSourceClass.localRuntime
+              : ProviderSourceClass.authoritativeLive,
+        );
+    ProviderQuota manual(String provider, {String account = 'same'}) =>
+        ProviderQuota(
+          provider: provider,
+          displayName: provider,
+          account: account,
+          source: providerQuotaManualSource,
+          asOf: 1782000000,
+          windows: [QuotaWindow(label: 'manual', usedPercent: 10)],
+        );
+
+    final duplicateBuiltIns = coalesceSupplementalManualQuotas([
+      builtIn(),
+      builtIn(),
+      manual(claudeProviderId),
+    ]);
+    final localCollision = coalesceSupplementalManualQuotas([
+      builtIn(local: true),
+      manual(ollamaProviderId),
+    ]);
+    final invalidBuiltIn = coalesceSupplementalManualQuotas([
+      ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'same',
+        asOf: 1782000000,
+        perMachine: true,
+        sourceClass: ProviderSourceClass.authoritativeLive,
+      ),
+      manual(claudeProviderId),
+    ]);
+    final placeholderCollisions = {
+      for (final account in const ['default', 'unknown', 'installed', 'cli'])
+        account: coalesceSupplementalManualQuotas([
+          builtIn(account: account),
+          manual(claudeProviderId, account: account),
+        ]),
+    };
+
+    expect(duplicateBuiltIns, hasLength(3));
+    expect(
+      duplicateBuiltIns.every((quota) => quota.supplementalManualQuota == null),
+      isTrue,
+    );
+    expect(localCollision, hasLength(2));
+    expect(invalidBuiltIn, hasLength(2));
+    expect(invalidBuiltIn.first.sourceClassViolation, isNotNull);
+    for (final entry in placeholderCollisions.entries) {
+      expect(entry.value, hasLength(2), reason: entry.key);
+      expect(
+        entry.value.every((quota) => quota.supplementalManualQuota == null),
+        isTrue,
+        reason: entry.key,
+      );
+    }
+  });
+
   test('wrong adapter identity cannot read or poison another provider cache',
       () {
     final now = nowEpoch();

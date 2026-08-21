@@ -58,8 +58,8 @@ collector/ (Dart package)
   collector.dart     full or provider-scoped adapter collection, cache; exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      nvidia, ollama, lmstudio, lemonade (thin I/O shells)
-  auth/              tokens + store, PKCE/loopback util, anthropic, openai,
-                     xai, and google OAuth
+  auth/              tokens + store, disconnect markers, PKCE/loopback util,
+                     anthropic, openai, xai, and google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
   bin/collect.dart        CLI: status/doctor, top, watch, models, suggest,
                           verify/explain, stats/report/calibration, manual,
@@ -174,10 +174,13 @@ Each adapter has a single `collect()` method returning a `ProviderQuota`:
   rather than failing the whole response.
 - Kiro, Cursor, and Windsurf are passive readers of local credit/state files, so
   they are detected (and report installed/free tiers) even with no live API.
-  Cursor's current included-usage pool is normalized as a monthly quota window
-  when the local SQLite state exposes used/included values. Windsurf/Devin
-  Desktop daily and weekly Cascade quota shapes are normalized from local SQLite
-  state, with account and plan labels surfaced when present.
+  Current Cursor 3.x state can expose an owner-bound recognized plan, but it does
+  not persist current Cursor Models and Other Models quota balances in supported
+  local rows. That plan remains diagnostic and unroutable. Older exact
+  provider-owned usage rows are parsed only as compatibility evidence when a
+  Cursor build still writes them. Windsurf/Devin Desktop daily and weekly
+  Cascade quota shapes are normalized from local SQLite state, with account and
+  plan labels surfaced when present.
 - Ollama, LM Studio, and Lemonade are local-runtime adapters: they report
   installed and loaded models instead of a quota window. A reachable, error-free
   loopback daemon acts as a routing fallback only when it represents at least
@@ -207,6 +210,15 @@ shows that as "no live data" instead of a gap.
   loaded, so a late refresh cannot overwrite a completed login or account
   replacement. Existing credential paths must resolve as regular files without
   following links before quotabot changes permissions or reads content.
+- `provider_disconnect.dart`: owner-only, provider-wide disconnect markers for
+  Claude, Codex, Grok, and Antigravity. Logout writes the marker before removing
+  quotabot grants. Adapters then ignore every host and quotabot credential for
+  that provider, including named accounts, without changing host state. Only a
+  successful explicit quotabot login clears the marker. Marker mutation uses an
+  exact provider allowlist, no-follow path checks, and the same process-and-
+  isolate locking discipline as other auth state. Reads treat an unreadable or
+  non-regular entry at the exact marker path as disconnected, so corrupted state
+  cannot fail open into host credentials.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -214,7 +226,9 @@ shows that as "no live data" instead of a gap.
   login and refresh.
 
 Each login mints an independent grant, so refreshing never invalidates the host
-CLI's or IDE's credentials. `login`/`logout` are CLI subcommands.
+CLI's or IDE's credentials. `login`/`logout` are CLI subcommands. Refresh alone
+cannot clear a disconnect marker, and a failed login cannot make collection
+fall through to host credentials.
 
 The desktop `prefs.json` may contain an authenticated webhook URL. Its directory
 and any existing file are checked owner-only before read or write; a failure
@@ -682,7 +696,9 @@ leaves JSON standard output reserved for alert records.
   account when the "Show account names" preference is enabled; single-account
   labels remain hidden. `prefs.dart` persists hidden providers, compact state,
   cadence, always on top, taskbar visibility, enable notifications,
-  showAccounts, and window position across restarts.
+  showAccounts, window position, and a bounded 128-entry reset-reminder handled
+  ledger across restarts. Ledger entries contain only the numeric notification
+  ID and reset epoch, never the provider or account label.
 - `WindowBar` keeps normal text in a compact three-column row with safe reset
   wrap points. At large text it reflows label and value above a full-width meter,
   preserving common normalized window names and far reset times at the 320
@@ -714,9 +730,27 @@ leaves JSON standard output reserved for alert records.
   ("N recent checks" otherwise).
 - Notifications toggle drives guarded immediate low-headroom alerts, scheduled
   reset reminders, and edge-triggered redeemable-reset notifications via
-  flutter_local_notifications. Native notification bodies and Windows subtitles
-  follow the account-name preference and expose an account only when duplicate
-  provider accounts need disambiguation.
+  flutter_local_notifications. A trusted window above 80 percent used is
+  scheduled at reset minus 15 minutes, or shown immediately when first observed
+  inside that lead. Native notification bodies and Windows subtitles follow the
+  account-name preference and expose an account only when duplicate provider
+  accounts need disambiguation.
+- Pending reset requests are owned only when their payload exactly equals
+  `quotabot.reset-reminder.v1`. Reconciliation cancels obsolete owned requests
+  and preserves every foreign payload. It compares the owned request title and
+  body with current privacy-aware text; a mismatch is cancelled and rescheduled,
+  so hiding account names takes effect on already-pending reminders.
+- Alert checks, privacy reconciliation, and notification disablement share one
+  serialized flight. A disable request queued behind an in-progress schedule
+  cancels that newly registered owned request before the flight completes, while
+  a re-enable queued behind cancellation schedules the current desired set.
+- Successful schedules and immediate reset deliveries enter the bounded
+  preference ledger through their reset epoch. The ledger is not cleared by a
+  temporary stale or threshold gap, so a delivered OS schedule cannot become a
+  duplicate immediate alert after the pending request disappears, including
+  across process restarts. Cancelling an undelivered future schedule removes its
+  ledger entry, and expired epochs are pruned, preserving retry behavior for a
+  genuinely eligible reminder.
 
 ## Adaptive refresh
 
@@ -756,7 +790,8 @@ then passed the three-OS
 [published install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
-Application signing, notarization, and interactive native evidence remain 1.0
-gates. Platform prerequisites and artifacts are documented in
+Application signing and notarization are 0.10.x exit gates. Interactive native
+evidence remains a final 1.0 gate and must run again on the exact signed
+candidate. Platform prerequisites and artifacts are documented in
 [BUILDING.md](BUILDING.md), [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md),
 and [../ROADMAP.md](../ROADMAP.md).

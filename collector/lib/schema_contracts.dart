@@ -157,6 +157,9 @@ const quotabotV1JsonSchema = <String, Object?>{
           'type': 'string',
           'enum': ProviderSourceClass.wireValues,
         },
+        'supplemental_manual_quota': {
+          r'$ref': r'#/$defs/supplementalManualQuota',
+        },
         'kind': {
           'type': 'string',
           'enum': ['subscription', 'local'],
@@ -205,6 +208,29 @@ const quotabotV1JsonSchema = <String, Object?>{
         'model_quotas': {
           'type': 'array',
           'items': {r'$ref': r'#/$defs/modelQuota'},
+        },
+      },
+    },
+    'supplementalManualQuota': {
+      'type': 'object',
+      'additionalProperties': true,
+      'required': [
+        'source',
+        'source_class',
+        'display_name',
+        'as_of',
+        'windows',
+      ],
+      'properties': {
+        'source': {'const': providerQuotaManualSource},
+        'source_class': {'const': 'manual'},
+        'display_name': {'type': 'string', 'minLength': 1},
+        'plan': {'type': 'string'},
+        'as_of': {'type': 'integer', 'minimum': 0},
+        'windows': {
+          'type': 'array',
+          'minItems': 1,
+          'items': {r'$ref': r'#/$defs/quotaWindow'},
         },
       },
     },
@@ -562,6 +588,31 @@ void _validateProvider(
     required: false,
   );
   _checkStringEnum(provider, 'kind', path, {'subscription', 'local'}, errors);
+  final supplementalManualQuota = provider['supplemental_manual_quota'];
+  if (provider.containsKey('supplemental_manual_quota')) {
+    if (provider['source'] == providerQuotaManualSource ||
+        provider['source_class'] == ProviderSourceClass.manual.wireName ||
+        provider['kind'] == providerQuotaLocalKind) {
+      errors.add(
+        '$path.supplemental_manual_quota requires a built-in subscription row',
+      );
+    }
+    if (supplementalManualQuota is Map<String, dynamic>) {
+      _validateSupplementalManualQuota(
+        supplementalManualQuota,
+        '$path.supplemental_manual_quota',
+        errors,
+      );
+    } else if (supplementalManualQuota is Map) {
+      _validateSupplementalManualQuota(
+        supplementalManualQuota.cast<String, dynamic>(),
+        '$path.supplemental_manual_quota',
+        errors,
+      );
+    } else {
+      errors.add('$path.supplemental_manual_quota must be an object');
+    }
+  }
   _checkOptionalString(provider, 'status', path, errors);
   _checkBool(provider, 'active', path, errors, required: false);
   _checkStringList(provider, 'details', path, errors);
@@ -672,6 +723,47 @@ void _validateProvider(
           errors.add('$modelQuotaPath must be an object');
         }
       }
+    }
+  }
+}
+
+void _validateSupplementalManualQuota(
+  Map<String, dynamic> supplemental,
+  String path,
+  List<String> errors,
+) {
+  const required = [
+    'source',
+    'source_class',
+    'display_name',
+    'as_of',
+    'windows',
+  ];
+  _checkRequired(supplemental, required, path, errors);
+  if (supplemental['source'] != providerQuotaManualSource) {
+    errors.add('$path.source must be "$providerQuotaManualSource"');
+  }
+  if (supplemental['source_class'] != 'manual') {
+    errors.add('$path.source_class must be "manual"');
+  }
+  _checkNonEmptyString(supplemental, 'display_name', path, errors);
+  _checkOptionalString(supplemental, 'plan', path, errors);
+  _checkNonNegativeInt(supplemental, 'as_of', path, errors);
+  final windows = supplemental['windows'];
+  if (windows is! List) {
+    errors.add('$path.windows must be an array');
+    return;
+  }
+  if (windows.isEmpty) errors.add('$path.windows must not be empty');
+  for (var i = 0; i < windows.length; i++) {
+    final window = windows[i];
+    final windowPath = '$path.windows[$i]';
+    if (window is Map<String, dynamic>) {
+      _validateWindow(window, windowPath, errors);
+    } else if (window is Map) {
+      _validateWindow(window.cast<String, dynamic>(), windowPath, errors);
+    } else {
+      errors.add('$windowPath must be an object');
     }
   }
 }

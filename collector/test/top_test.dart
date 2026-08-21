@@ -1,6 +1,8 @@
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
+import 'package:quotabot_collector/collector.dart'
+    show coalesceSupplementalManualQuotas;
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/palette.dart';
 import 'package:quotabot_collector/top.dart';
@@ -943,6 +945,33 @@ void main() {
     // A single-account provider stays unlabeled.
     final single = _frame([grok('work@example.com', 57)], width: 110);
     expect(single.any((l) => _plain(l).contains('@work@example.com')), isFalse);
+  });
+
+  test('same-identity manual quota renders as one authoritative CLI row', () {
+    final providers = coalesceSupplementalManualQuotas([
+      _q(
+        'claude',
+        [QuotaWindow(label: 'weekly', usedPercent: 25)],
+        account: 'work@example.com',
+      ),
+      _q(
+        'claude',
+        [QuotaWindow(label: 'monthly', usedPercent: 80)],
+        account: 'work@example.com',
+        source: providerQuotaManualSource,
+      ),
+    ]);
+    final text = _frame(providers, width: 110).map(_plain).join('\n');
+
+    expect(providers, hasLength(1));
+    expect(
+        RegExp(r'^  claude', multiLine: true).allMatches(text), hasLength(1));
+    expect(text, contains('weekly'));
+    expect(
+      text,
+      contains('Self-reported manual quota is also configured'),
+    );
+    expect(text, isNot(contains('monthly')));
   });
 
   test('spent duplicate rows keep trust tags when no bar is rendered', () {

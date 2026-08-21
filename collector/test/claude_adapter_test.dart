@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/claude.dart';
+import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/provider_adapters.dart';
@@ -46,6 +47,29 @@ void main() {
             ? 'account-id:$accountUuid'
             : 'account-id:$accountUuid\u0000organization-id:$organizationUuid',
       );
+
+  test('disconnect blocks host and grant credentials before network work',
+      () async {
+    var grantReads = 0;
+    var networkReads = 0;
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      disconnectReader: () => true,
+      grantToken: () async {
+        grantReads++;
+        return 'grant-token';
+      },
+      client: MockClient((_) async {
+        networkReads++;
+        return http.Response('{}', 200);
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.error, providerDisconnectedMessage(ClaudeAdapter.id));
+    expect(grantReads, 0);
+    expect(networkReads, 0);
+  });
 
   test('preserves throttled metadata from the usage endpoint', () async {
     final q = await ClaudeAdapter(
