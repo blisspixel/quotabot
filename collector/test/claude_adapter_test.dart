@@ -324,6 +324,41 @@ void main() {
     expect(quotas.single.hasWindows, isTrue);
   });
 
+  test('an expired host throttle cannot obscure a healthy grant', () async {
+    writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
+    final grantIdentity =
+        opaqueCredentialIdentity(ClaudeAdapter.id, 'healthy-grant');
+    final quotas = await ClaudeAdapter(
+      credentialsFile: credentials,
+      grantCredential: () async => ClaudeCredential(
+        accessToken: 'grant-token',
+        identity: grantIdentity,
+      ),
+      client: MockClient((request) async {
+        if (_isProfileRequest(request)) {
+          return http.Response(
+            _profileBody(accountUuid: 'account-shared'),
+            200,
+          );
+        }
+        if (request.headers['Authorization'] == 'Bearer host-token') {
+          return http.Response(
+            '{}',
+            429,
+            headers: {'retry-after': '120'},
+          );
+        }
+        return http.Response(_usageBody(), 200);
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.ok, isTrue);
+    expect(quotas.single.account, profileIdentity('account-shared'));
+    expect(quotas.single.hasWindows, isTrue);
+    expect(quotas.single.error, isNull);
+  });
+
   test('collectAccounts represents an indexed grant refresh failure', () async {
     credentials.deleteSync();
     final grantIdentity =
@@ -1015,7 +1050,7 @@ void main() {
     expect(q.error, contains('quotabot login claude'));
   });
 
-  test('preserves throttle metadata and recovery for a known-expired login',
+  test('preserves throttle metadata without a false expiration diagnosis',
       () async {
     writeCreds(expiresAtMs: (nowEpoch() - 10) * 1000);
     final q = await ClaudeAdapter(
@@ -1029,10 +1064,8 @@ void main() {
     ).collect();
 
     expect(q.ok, isFalse);
-    expect(q.error, startsWith('HTTP 429'));
-    expect(q.error, contains('saved Claude login expired'));
-    expect(q.error, contains('re-run claude'));
-    expect(q.error, contains('quotabot login claude'));
+    expect(q.error, 'HTTP 429');
+    expect(q.error, isNot(contains('expired')));
     expect(q.account, hostIdentity());
     expect(q.plan, 'max');
     expect(q.pipeHealth, providerPipeHealthThrottled);
