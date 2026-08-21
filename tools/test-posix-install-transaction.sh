@@ -332,25 +332,48 @@ fi
 source "$portable_function"
 step() { :; }
 
-portable_archive="$test_root/quotabot-linux-x64-desktop.tar.gz"
+if [ "$transaction_os" = darwin ]; then
+  portable_archive="$test_root/quotabot-darwin-arm64-desktop.zip"
+  portable_target="$test_root/portable/home/Applications/quotabot.app"
+  portable_executable="$portable_target/Contents/MacOS/quotabot"
+  portable_asset='quotabot-darwin-arm64-desktop.zip'
+  arch=arm64
+else
+  portable_archive="$test_root/quotabot-linux-x64-desktop.tar.gz"
+  portable_target="$test_root/portable/home/.local/share/quotabot-desktop"
+  portable_executable="$portable_target/quotabot"
+  portable_asset='quotabot-linux-x64-desktop.tar.gz'
+  arch=x64
+fi
 portable_sidecar="$portable_archive.sha256"
 portable_source="$test_root/portable-source"
 transaction_home="$HOME"
 export HOME="$test_root/portable/home"
-portable_target="$test_root/portable/home/.local/share/quotabot-desktop"
 portable_url_trace="$test_root/portable-url.trace"
 write_portable_archive() {
-  local version="$1" digest
+  local version="$1" digest portable_payload portable_marker
   rm -rf -- "$portable_source"
-  mkdir -p "$portable_source/data/flutter_assets" "$portable_source/lib"
-  cat > "$portable_source/quotabot" <<EOF
+  if [ "$transaction_os" = darwin ]; then
+    mkdir -p "$portable_source/quotabot.app/Contents/MacOS" \
+      "$portable_source/quotabot.app/Contents/Frameworks"
+    portable_payload="$portable_source/quotabot.app/Contents/MacOS/quotabot"
+    portable_marker="$portable_source/quotabot.app/Contents/Frameworks/libapp.test"
+  else
+    mkdir -p "$portable_source/data/flutter_assets" "$portable_source/lib"
+    portable_payload="$portable_source/quotabot"
+    portable_marker="$portable_source/lib/libapp.test"
+  fi
+  cat > "$portable_payload" <<EOF
 #!/usr/bin/env sh
 printf '%s\n' '$version'
 EOF
-  chmod +x "$portable_source/quotabot"
-  printf '%s\n' "$version" > "$portable_source/data/flutter_assets/version"
-  printf '%s\n' "$version" > "$portable_source/lib/libapp.test"
-  tar -C "$portable_source" -czf "$portable_archive" .
+  chmod +x "$portable_payload"
+  printf '%s\n' "$version" > "$portable_marker"
+  if [ "$transaction_os" = darwin ]; then
+    ditto -c -k --keepParent "$portable_source/quotabot.app" "$portable_archive"
+  else
+    tar -C "$portable_source" -czf "$portable_archive" .
+  fi
   if command -v sha256sum >/dev/null 2>&1; then
     digest="$(sha256sum "$portable_archive" | awk '{print $1}')"
   else
@@ -364,22 +387,22 @@ export QUOTABOT_VERSION=v1.2.3
 export FAKE_ARCHIVE="$portable_archive"
 export FAKE_SIDECAR="$portable_sidecar"
 export URL_TRACE="$portable_url_trace"
-arch=x64
 write_portable_archive old
 install_portable_desktop >/dev/null
-test "$("$portable_target/quotabot")" = old
+test "$("$portable_executable")" = old
 write_portable_archive selected
-portable_lock="${portable_target%/*}/.quotabot-desktop-install.lock"
+portable_name="$(basename "$portable_target")"
+portable_lock="${portable_target%/*}/.${portable_name}-install.lock"
 printf '99999999\n' > "$portable_lock"
 install_portable_desktop >/dev/null
-test "$("$portable_target/quotabot")" = selected
+test "$("$portable_executable")" = selected
 test ! -e "$portable_lock"
 if find "${portable_target%/*}" -maxdepth 1 \
-  -name '.quotabot-desktop-install.lock.stale.*' -print -quit | grep -q .; then
+  -name ".${portable_name}-install.lock.stale.*" -print -quit | grep -q .; then
   echo 'Portable desktop install retained a recovered stale lock.' >&2
   exit 1
 fi
-grep -Fq '/releases/download/v1.2.3/quotabot-linux-x64-desktop.tar.gz' \
+grep -Fq "/releases/download/v1.2.3/$portable_asset" \
   "$portable_url_trace"
 mkdir "$portable_lock"
 write_portable_archive blocked
@@ -388,7 +411,7 @@ if install_portable_desktop > "$test_root/portable-invalid-lock.log" 2>&1; then
   exit 1
 fi
 test -d "$portable_lock"
-test "$("$portable_target/quotabot")" = selected
+test "$("$portable_executable")" = selected
 rm -rf -- "$portable_lock"
 write_portable_archive rejected
 export FAIL_ACTIVATION=1
@@ -398,7 +421,7 @@ if install_portable_desktop > "$test_root/portable-rollback.log" 2>&1; then
   exit 1
 fi
 unset FAIL_ACTIVATION FAIL_TARGET URL_TRACE
-test "$("$portable_target/quotabot")" = selected
+test "$("$portable_executable")" = selected
 portable_versions="${portable_target%/*}/.quotabot-desktop-versions"
 portable_count="$(count_generation_directories "$portable_versions")"
 test "$portable_count" -eq 2
