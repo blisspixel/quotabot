@@ -4,7 +4,7 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
-## 0.10.0-rc.2 - 2026-08-20
+## 0.10.0-rc.3 - 2026-08-20
 
 ### Changed
 - Updated the optional LiteLLM proxy integration to 1.92.2 with `aiohttp`
@@ -31,6 +31,10 @@ Notable changes to quotabot. Newest first.
   Azure profile configuration. Published v0.9.9 artifacts remain unsigned.
 
 ### Fixed
+- Checked out the tagged source before extracting curated release notes from
+  `CHANGELOG.md`. The `v0.10.0-rc.2` release quality gate passed, but draft
+  creation correctly stopped before any asset build because the release job had
+  no workspace checkout. Its immutable tag has no GitHub release.
 - Added the two fully pinned Azure signing action repositories to the GitHub
   Actions allowlist. GitHub validates every referenced action before evaluating
   job conditions, so the missing allowlist entries prevented even an unsigned

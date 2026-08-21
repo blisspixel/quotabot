@@ -98,7 +98,7 @@ than lost data.
 0.10.x is not a holding area for new features. It is the deliberate bridge from
 a broad 0.x product to a boring 1.0:
 
-1. Publish 0.10.0-rc.2 with the confirmed auth-storage, malformed-token,
+1. Publish 0.10.0-rc.3 with the confirmed auth-storage, malformed-token,
    routing-fallback, cache, dependency, Windows source-path, safe Cursor plan
    detection, and Claude OAuth-state fixes. Keep
    [the Claude authorization issue](https://github.com/blisspixel/quotabot/issues/77)
