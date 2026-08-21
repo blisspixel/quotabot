@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/antigravity.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
+import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/util.dart';
@@ -44,6 +45,40 @@ void main() {
         modelQuotas: modelQuotas,
         useCliToken: useCliToken,
       );
+
+  test('disconnect blocks all account discovery and live credential work',
+      () async {
+    var discoveries = 0;
+    var tokenReads = 0;
+    var liveReads = 0;
+    final quotas = await AntigravityAdapter(
+      disconnectReader: () => true,
+      accountSource: () {
+        discoveries++;
+        return [
+          candidate('first@example.com', ideAccessToken: 'first-host-token'),
+          candidate('second@example.com', ideAccessToken: 'second-host-token'),
+        ];
+      },
+      tokenResolver: (_, __) async {
+        tokenReads++;
+        return 'quotabot-token';
+      },
+      loadCodeAssist: (_) async {
+        liveReads++;
+        return <String, dynamic>{};
+      },
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(
+      quotas.single.error,
+      providerDisconnectedMessage(AntigravityAdapter.id),
+    );
+    expect(discoveries, 0);
+    expect(tokenReads, 0);
+    expect(liveReads, 0);
+  });
 
   List<int> fieldString(String value) {
     final bytes = utf8.encode(value);

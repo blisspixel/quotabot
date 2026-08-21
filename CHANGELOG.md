@@ -6,6 +6,11 @@ Notable changes to quotabot. Newest first.
 
 ### Fixed
 
+- `quotabot logout` now stays disconnected for Claude, Codex, Grok, and
+  Antigravity even when their host applications remain signed in. A safe
+  provider-wide marker blocks host and quotabot credentials for every account
+  without changing host state, and only a successful explicit quotabot login
+  clears it.
 - First-run readiness now keeps the best account for each provider and never
   calls stale, drifted, suspect, or expired quota live. The source installers
   apply the same conservative readiness rule, and macOS/Linux setup once again

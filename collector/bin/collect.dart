@@ -8,6 +8,7 @@ import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/anthropic_auth.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/openai_auth.dart';
+import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/cache.dart';
@@ -2187,7 +2188,9 @@ void _printHelp([String? command]) {
     '  login <provider>    connect grok, antigravity, claude, or codex '
     '(adds a refreshable path; inspect with doctor)',
   );
-  stdout.writeln('  logout <provider>   disconnect a provider');
+  stdout.writeln(
+    '  logout <provider>   disconnect a provider in quotabot without changing host credentials',
+  );
   stdout.writeln(
     '  manual set NAME --used N --limit N --reset VALUE'
     '  add/update a local entry',
@@ -3082,13 +3085,35 @@ void _logout(String provider) {
     exitCode = _exitUsage;
     return;
   }
-  // Login persists both a provider-default grant and an account-scoped grant
-  // (keyed by the email in the id token). Clearing only the default slot would
-  // leave the account grant on disk, and the next collect would refresh and
-  // keep using it, so disconnect must remove every slot for the provider.
-  TokenStore.clear(provider);
-  TokenStore.clearAccounts(provider);
-  stderr.writeln('$provider disconnected.');
+  var markerPublished = false;
+  try {
+    // Publish the provider-wide marker first. Even if grant cleanup then fails,
+    // every adapter will ignore both host and quotabot credentials, so logout
+    // never reports a state that the next collection immediately reverses. The
+    // shared provider lock also makes concurrent successful login deterministic.
+    ProviderDisconnectStore.markDisconnected(
+      provider,
+      afterMark: () {
+        markerPublished = true;
+        // Login persists both a provider-default grant and account-scoped
+        // grants. Remove every quotabot-owned slot while leaving host state
+        // untouched.
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      },
+    );
+  } catch (_) {
+    stderr.writeln(
+      markerPublished
+          ? '$provider is disconnected in quotabot, but its stored quotabot grant could not be fully removed. Host credentials remain ignored until a successful "quotabot login $provider".'
+          : 'Could not disconnect $provider in quotabot. No host credentials were changed.',
+    );
+    exitCode = _exitUnavailable;
+    return;
+  }
+  stderr.writeln(
+    '$provider disconnected in quotabot. Host credentials were left unchanged and will remain ignored until "quotabot login $provider" succeeds.',
+  );
 }
 
 /// Pads a state to the column width, then colors it (so the padding stays

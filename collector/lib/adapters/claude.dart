@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../auth/anthropic_auth.dart';
+import '../auth/provider_disconnect.dart';
 import '../auth/tokens.dart';
 import '../http_client.dart';
 import '../models.dart';
@@ -58,6 +59,7 @@ class ClaudeAdapter {
   final http.Client? _http;
   final File? _credentialsFile;
   final ClaudeGrantCredential _grantCredential;
+  final bool Function()? _disconnectReader;
   final Duration _grantResolutionDeadline;
 
   ClaudeAdapter({
@@ -65,6 +67,7 @@ class ClaudeAdapter {
     File? credentialsFile,
     ClaudeGrantToken? grantToken,
     ClaudeGrantCredential? grantCredential,
+    bool Function()? disconnectReader,
     Duration grantResolutionDeadline = const Duration(seconds: 8),
   })  : assert(
           grantToken == null || grantCredential == null,
@@ -73,6 +76,7 @@ class ClaudeAdapter {
         assert(grantResolutionDeadline.inMicroseconds > 0),
         _http = client,
         _credentialsFile = credentialsFile,
+        _disconnectReader = disconnectReader,
         _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
@@ -98,6 +102,7 @@ class ClaudeAdapter {
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
     try {
+      if (_isDisconnected()) return _disconnected(asOf);
       final host = _readHostCredential();
       final hostPlan = host?.planEvidence;
 
@@ -182,6 +187,7 @@ class ClaudeAdapter {
   Future<List<ProviderQuota>> collectAccounts() async {
     final asOf = nowEpoch();
     try {
+      if (_isDisconnected()) return [_disconnected(asOf)];
       final host = _readHostCredential();
       final indexedGrantIdentity = AnthropicAuth.currentCredentialIdentity();
 
@@ -264,6 +270,16 @@ class ClaudeAdapter {
         'unable to refresh Claude grant (run quotabot login claude)',
         asOf,
         account: identity,
+      );
+
+  bool _isDisconnected() => (_disconnectReader ??
+      () => ProviderDisconnectStore.isDisconnected(id))();
+
+  ProviderQuota _disconnected(int asOf) => ProviderQuota.error(
+        id,
+        name,
+        providerDisconnectedMessage(id),
+        asOf,
       );
 
   /// Keeps independently proven provider accounts separate while preventing
@@ -541,6 +557,7 @@ class ClaudeAdapter {
   static Set<String> get currentAccounts => currentCredentialIdentities();
 
   static Set<String> currentCredentialIdentities({File? credentialsFile}) {
+    if (ProviderDisconnectStore.isDisconnected(id)) return const {};
     final found = <String>{};
     final host = _readHostCredentialFile(
       credentialsFile ?? File('${home()}/.claude/.credentials.json'),

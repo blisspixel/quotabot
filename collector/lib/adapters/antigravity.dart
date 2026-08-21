@@ -8,6 +8,7 @@ import 'package:sqlite3/sqlite3.dart';
 import '../auth/cli_oauth.dart';
 import '../auth/google_auth.dart';
 import '../auth/os_secret_store.dart';
+import '../auth/provider_disconnect.dart';
 import '../auth/tokens.dart';
 import '../http_client.dart';
 import '../models.dart';
@@ -107,6 +108,7 @@ class AntigravityAdapter {
   final bool Function()? _hasGeminiCredsSource;
   final bool Function()? _looksInstalledSource;
   final List<String> Function()? _storedGrantAccountsSource;
+  final bool Function()? _disconnectReader;
 
   AntigravityAdapter({
     AntigravityAccountSource? accountSource,
@@ -122,6 +124,7 @@ class AntigravityAdapter {
     bool Function()? hasGeminiCreds,
     bool Function()? looksInstalled,
     List<String> Function()? storedGrantAccounts,
+    bool Function()? disconnectReader,
   })  : _accountSource = accountSource,
         _tokenResolver = tokenResolver,
         _emailResolver = emailResolver,
@@ -134,13 +137,15 @@ class AntigravityAdapter {
         _activeAccountSource = activeAccountSource,
         _hasGeminiCredsSource = hasGeminiCreds,
         _looksInstalledSource = looksInstalled,
-        _storedGrantAccountsSource = storedGrantAccounts;
+        _storedGrantAccountsSource = storedGrantAccounts,
+        _disconnectReader = disconnectReader;
 
   /// Returns the set of emails for currently active Antigravity profiles.
   /// Scans IDE DBs plus the active ~/.gemini account. The "old" account list is
   /// deliberately ignored so explicitly signed-out accounts stay hidden.
   static Set<String> get currentAccounts {
     try {
+      if (ProviderDisconnectStore.isDisconnected(id)) return const {};
       return AntigravityAdapter()
           ._discoverAccounts()
           .map((a) => a.account)
@@ -528,6 +533,17 @@ class AntigravityAdapter {
   Future<List<ProviderQuota>> collectAccounts() async {
     final asOf = nowEpoch();
     try {
+      if ((_disconnectReader ??
+              () => ProviderDisconnectStore.isDisconnected(id))()) {
+        return [
+          ProviderQuota.error(
+            id,
+            name,
+            providerDisconnectedMessage(id),
+            asOf,
+          ),
+        ];
+      }
       final accounts =
           _dedupeAccounts(_accountSource?.call() ?? _discoverAccounts());
       if (accounts.isEmpty) {

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../auth/openai_auth.dart';
+import '../auth/provider_disconnect.dart';
 import '../auth/tokens.dart';
 import '../http_client.dart';
 import '../models.dart';
@@ -40,6 +41,7 @@ class CodexAdapter {
   final String? _usageCredentialIdentity;
   final http.Client? _http;
   final CodexGrantCredential _grantCredential;
+  final bool Function()? _disconnectReader;
   final Duration _grantResolutionDeadline;
 
   CodexAdapter({
@@ -49,6 +51,7 @@ class CodexAdapter {
     http.Client? client,
     CodexGrantToken? grantToken,
     CodexGrantCredential? grantCredential,
+    bool Function()? disconnectReader,
     Duration grantResolutionDeadline = const Duration(seconds: 8),
   })  : assert(
           grantToken == null || grantCredential == null,
@@ -59,6 +62,7 @@ class CodexAdapter {
         _usageFetcher = usageFetcher,
         _usageCredentialIdentity = usageCredentialIdentity,
         _http = client,
+        _disconnectReader = disconnectReader,
         _grantResolutionDeadline = grantResolutionDeadline,
         _grantCredential = grantCredential ??
             (grantToken != null
@@ -74,6 +78,7 @@ class CodexAdapter {
 
   Future<ProviderQuota> collect() async {
     final asOf = nowEpoch();
+    if (_isDisconnected()) return _disconnected(asOf);
     if (_usageFetcher != null) return _collectInjected(asOf);
 
     try {
@@ -116,6 +121,7 @@ class CodexAdapter {
   /// Exact duplicate identities use the host token first and emit one row.
   Future<List<ProviderQuota>> collectAccounts() async {
     final asOf = nowEpoch();
+    if (_isDisconnected()) return [_disconnected(asOf)];
     if (_usageFetcher != null) return [await _collectInjected(asOf)];
 
     try {
@@ -343,6 +349,16 @@ class CodexAdapter {
         account: account,
       );
 
+  bool _isDisconnected() => (_disconnectReader ??
+      () => ProviderDisconnectStore.isDisconnected(id))();
+
+  ProviderQuota _disconnected(int asOf) => ProviderQuota.error(
+        id,
+        name,
+        providerDisconnectedMessage(id),
+        asOf,
+      );
+
   _HostCredential? _readHostCredential() => _readHostCredentialFile(
         _authFile ?? File('${home()}/.codex/auth.json'),
       );
@@ -353,6 +369,7 @@ class CodexAdapter {
   static Set<String> get currentAccounts => currentCredentialIdentities();
 
   static Set<String> currentCredentialIdentities({File? authFile}) {
+    if (ProviderDisconnectStore.isDisconnected(id)) return const {};
     final found = <String>{};
     final host = _readHostCredentialFile(
       authFile ?? File('${home()}/.codex/auth.json'),

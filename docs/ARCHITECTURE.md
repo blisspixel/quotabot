@@ -58,8 +58,8 @@ collector/ (Dart package)
   collector.dart     full or provider-scoped adapter collection, cache; exports
   adapters/          codex, claude, grok, antigravity, kiro, cursor, windsurf,
                      nvidia, ollama, lmstudio, lemonade (thin I/O shells)
-  auth/              tokens + store, PKCE/loopback util, anthropic, openai,
-                     xai, and google OAuth
+  auth/              tokens + store, disconnect markers, PKCE/loopback util,
+                     anthropic, openai, xai, and google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
   bin/collect.dart        CLI: status/doctor, top, watch, models, suggest,
                           verify/explain, stats/report/calibration, manual,
@@ -210,6 +210,15 @@ shows that as "no live data" instead of a gap.
   loaded, so a late refresh cannot overwrite a completed login or account
   replacement. Existing credential paths must resolve as regular files without
   following links before quotabot changes permissions or reads content.
+- `provider_disconnect.dart`: owner-only, provider-wide disconnect markers for
+  Claude, Codex, Grok, and Antigravity. Logout writes the marker before removing
+  quotabot grants. Adapters then ignore every host and quotabot credential for
+  that provider, including named accounts, without changing host state. Only a
+  successful explicit quotabot login clears the marker. Marker mutation uses an
+  exact provider allowlist, no-follow path checks, and the same process-and-
+  isolate locking discipline as other auth state. Reads treat an unreadable or
+  non-regular entry at the exact marker path as disconnected, so corrupted state
+  cannot fail open into host credentials.
 - `oauth_util.dart`: PKCE (S256), a free-port helper, a one-shot loopback server
   to capture the redirect, and a system-browser launcher.
 - `xai_auth.dart`: the Grok device-code login and refresh.
@@ -217,7 +226,9 @@ shows that as "no live data" instead of a gap.
   login and refresh.
 
 Each login mints an independent grant, so refreshing never invalidates the host
-CLI's or IDE's credentials. `login`/`logout` are CLI subcommands.
+CLI's or IDE's credentials. `login`/`logout` are CLI subcommands. Refresh alone
+cannot clear a disconnect marker, and a failed login cannot make collection
+fall through to host credentials.
 
 The desktop `prefs.json` may contain an authenticated webhook URL. Its directory
 and any existing file are checked owner-only before read or write; a failure

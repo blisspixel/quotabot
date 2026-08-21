@@ -246,7 +246,7 @@ local metadata. Add `--json` to any read command for machine output.
 | `explain`              | Dry-run manifest of local reads and network hosts.    |
 | `json`                 | Full snapshot as `quotabot.v1` JSON.                  |
 | `login <provider>`     | Connect claude, codex, grok, or antigravity for refreshable reads. |
-| `logout <provider>`    | Disconnect a provider.                                |
+| `logout <provider>`    | Disconnect in quotabot without changing host credentials. |
 | `help`, `version`      | Global usage and version; `suggest` and `models` also have focused help. |
 
 Color follows the terminal (honors `NO_COLOR`, `CLICOLOR`, `--color/--no-color`).
@@ -256,6 +256,14 @@ one, and capture age. The source class already communicates machine scope,
 manual origin, or runtime classification, so those ideas are not repeated as
 separate tags.
 The frozen `quotabot.v1` contract is documented in [SCHEMA.md](SCHEMA.md).
+
+Logout is provider-wide, including named accounts. It removes quotabot-owned
+grants and installs a local disconnect marker, so adapters ignore otherwise
+valid host credentials instead of reconnecting on the next read. Host files are
+never changed. Only a successful explicit `quotabot login PROVIDER` clears the
+marker; a failed or cancelled login keeps the provider disconnected.
+An unreadable or non-regular entry at the exact marker path also fails closed,
+so damaged local state cannot silently re-enable host credentials.
 
 ### Deterministic simulation
 

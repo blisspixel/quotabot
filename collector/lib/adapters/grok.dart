@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../auth/provider_disconnect.dart';
 import '../auth/xai_auth.dart';
 import '../http_client.dart';
 import '../models.dart';
@@ -33,22 +34,26 @@ class GrokAdapter {
   final File? _authFile;
   final GrokUsageFetcher? _usageFetcher;
   final GrokTokenResolver? _tokenResolver;
+  final bool Function()? _disconnectReader;
   final http.Client? _http;
 
   GrokAdapter({
     File? authFile,
     GrokUsageFetcher? usageFetcher,
     GrokTokenResolver? tokenResolver,
+    bool Function()? disconnectReader,
     http.Client? client,
   })  : _authFile = authFile,
         _usageFetcher = usageFetcher,
         _tokenResolver = tokenResolver,
+        _disconnectReader = disconnectReader,
         _http = client;
 
   static File defaultAuthFile() => File('${home()}/.grok/auth.json');
 
   static Set<String> get currentAccounts {
     try {
+      if (ProviderDisconnectStore.isDisconnected(id)) return const {};
       return _readAccounts(defaultAuthFile()).map((a) => a.email).toSet();
     } catch (_) {
       return const {};
@@ -63,6 +68,17 @@ class GrokAdapter {
   Future<List<ProviderQuota>> collectAccounts() async {
     final asOf = nowEpoch();
     try {
+      if ((_disconnectReader ??
+              () => ProviderDisconnectStore.isDisconnected(id))()) {
+        return [
+          ProviderQuota.error(
+            id,
+            name,
+            providerDisconnectedMessage(id),
+            asOf,
+          ),
+        ];
+      }
       final authFile = _authFile ?? defaultAuthFile();
       if (!authFile.existsSync()) {
         return [ProviderQuota.error(id, name, 'no ~/.grok/auth.json', asOf)];

@@ -297,6 +297,16 @@ and Codex try a current host token first, then their independent grant when
 needed. Grok and Antigravity can use an account-scoped grant when its discovered
 identity matches; their login saves the account slot when the provider returns
 an email.
+
+`quotabot logout` disconnects that provider from quotabot without signing the
+host app out or changing its credential files. The disconnect applies to every
+account for the provider, removes quotabot's stored grants, and makes collection
+ignore host credentials until an explicit `quotabot login PROVIDER` succeeds.
+This prevents a host login from reconnecting the provider immediately after
+logout. A failed or cancelled login leaves the disconnect in place.
+If the exact marker path is unreadable or contains an unexpected filesystem
+entry, collection fails closed and does not fall through to host credentials.
+
 (Advanced: override the Antigravity OAuth client with
 `QUOTABOT_GOOGLE_CLIENT_ID` and `QUOTABOT_GOOGLE_CLIENT_SECRET`.)
 
