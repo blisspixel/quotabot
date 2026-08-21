@@ -137,6 +137,17 @@ jobs:
           fi
           macos_status='macOS: unsigned transition artifact. Developer ID and notarization are not established.'
           signing_note="Native signing status: $windows_status $macos_status Checksums and GitHub build provenance remain required. Do not bypass SmartScreen or Gatekeeper."
+          release_version="${GITHUB_REF_NAME#v}"
+          changelog_notes="$(awk -v version="$release_version" '
+            index($0, "## " version " - ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          if [ -z "$changelog_notes" ]; then
+            echo "CHANGELOG.md has no release section for $release_version." >&2
+            exit 1
+          fi
+          release_notes="$(printf '%s\n\n%s\n' "$signing_note" "$changelog_notes")"
           main_commit="$(gh api \
             "repos/$GITHUB_REPOSITORY/commits/main" \
             --jq '.sha')"
@@ -183,8 +194,7 @@ jobs:
               --draft \
               --verify-tag \
               "${prerelease_args[@]}" \
-              --notes "$signing_note" \
-              --generate-notes
+              --notes "$release_notes"
           fi
           release_id="$(gh release view "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \

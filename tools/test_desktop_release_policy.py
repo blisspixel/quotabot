@@ -866,6 +866,16 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("Draft release native signing disclosure", release)
         self.assertNotIn("QUOTABOT_WINDOWS_PFX", release)
 
+    def test_release_notes_are_curated_without_generated_attribution(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("--generate-notes", release)
+        self.assertIn("changelog_notes=", release)
+        self.assertIn("CHANGELOG.md has no release section", release)
+        self.assertIn('--notes "$release_notes"', release)
+
     def test_downloaded_windows_draft_assets_are_natively_reverified(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
