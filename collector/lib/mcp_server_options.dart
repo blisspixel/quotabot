@@ -49,6 +49,9 @@ class McpServerCliOptions {
     String? tokenEnv;
     String? tokenFile;
     var tokenSourceCount = 0;
+    var hostCount = 0;
+    var portCount = 0;
+    var pathCount = 0;
 
     for (var i = 0; i < args.length; i++) {
       final arg = args[i];
@@ -57,14 +60,17 @@ class McpServerCliOptions {
       } else if (arg == '--http') {
         http = true;
       } else if (arg == '--host' || arg.startsWith('--host=')) {
+        hostCount++;
         final next = _readOptionValue(args, i, '--host');
         host = next.value;
         i = next.index;
       } else if (arg == '--port' || arg.startsWith('--port=')) {
+        portCount++;
         final next = _readOptionValue(args, i, '--port');
         port = _parsePort(next.value);
         i = next.index;
       } else if (arg == '--path' || arg.startsWith('--path=')) {
+        pathCount++;
         final next = _readOptionValue(args, i, '--path');
         path = normalizeMcpHttpPath(next.value);
         i = next.index;
@@ -100,6 +106,11 @@ class McpServerCliOptions {
     if (http && !isLoopbackMcpHost(host)) {
       throw FormatException(
         'HTTP MCP host must be loopback: localhost, 127.0.0.1, or ::1',
+      );
+    }
+    if (hostCount > 1 || portCount > 1 || pathCount > 1) {
+      throw const FormatException(
+        'HTTP MCP bind options may be specified only once',
       );
     }
     if (http && tokenSourceCount > 1) {
@@ -166,8 +177,12 @@ Future<String?> loadMcpBearerToken(McpServerCliOptions options) async {
   final tokenFile = options.tokenFile;
   if (tokenFile == null) return null;
   final file = File(tokenFile);
-  if (!await file.exists()) {
+  final type = FileSystemEntity.typeSync(file.path, followLinks: false);
+  if (type == FileSystemEntityType.notFound) {
     throw FormatException('token file does not exist: $tokenFile');
+  }
+  if (type != FileSystemEntityType.file) {
+    throw FormatException('token file must be a regular file: $tokenFile');
   }
   if (!Platform.isWindows) {
     final mode = (await file.stat()).mode;
@@ -177,7 +192,11 @@ Future<String?> loadMcpBearerToken(McpServerCliOptions options) async {
       );
     }
   }
-  return _nonEmptyToken(await file.readAsString(), '--token-file');
+  try {
+    return _nonEmptyToken(await file.readAsString(), '--token-file');
+  } on FileSystemException {
+    throw FormatException('token file is unreadable: $tokenFile');
+  }
 }
 
 String _nonEmptyToken(String value, String source) {

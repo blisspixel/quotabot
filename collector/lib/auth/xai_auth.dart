@@ -61,11 +61,13 @@ class XaiAuth {
       }
       if (resp.statusCode == 200) {
         final tokens = Tokens.fromOAuth(body);
+        final email =
+            account ?? _emailFromIdToken(body['id_token']?.toString());
+        if (email == null) {
+          throw StateError('device login failed: no account identity');
+        }
         return ProviderDisconnectStore.publishSuccessfulLogin(provider, () {
-          _saveGrant(
-            tokens,
-            account: account ?? _emailFromIdToken(body['id_token']?.toString()),
-          );
+          _saveGrant(tokens, account: email);
           return tokens;
         });
       }
@@ -159,7 +161,10 @@ class XaiAuth {
           utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
       final decoded = jsonDecode(payload) as Map<String, dynamic>;
       final email = decoded['email'];
-      return email is String && email.isNotEmpty ? email : null;
+      if (email is! String) return null;
+      final trimmed = email.trim();
+      if (trimmed.isEmpty || trimmed.length > 512) return null;
+      return trimmed;
     } catch (_) {
       return null;
     }

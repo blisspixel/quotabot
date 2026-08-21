@@ -2047,6 +2047,26 @@ void main() {
       expect(ws.first.resetsAt, 1782088200);
     });
 
+    test('kiroWindows ignores a reset-only breakdown sibling', () {
+      const now = 1782000000;
+      final ws = kiroWindows({
+        'usageBreakdowns': [
+          {
+            'displayName': 'Credits',
+            'percentageUsed': 82,
+            'resetDate': now + 3600,
+          },
+          {
+            'displayName': 'Bonus',
+            'resetDate': now + 7200,
+          },
+        ],
+      }, now);
+      expect(ws, hasLength(1));
+      expect(ws.single.label, 'credits');
+      expect(ws.single.usedPercent, 82);
+    });
+
     test('kiroWindows rejects invalid percent and negative count evidence', () {
       expect(
         kiroWindows({

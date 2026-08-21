@@ -129,7 +129,7 @@ double _contrastRatio(Color foreground, Color background) {
 class _FakeDesktopNotificationClient implements DesktopNotificationClient {
   final Map<int, DesktopPendingNotification> _pending;
   final List<int> cancelled = [];
-  final List<({int id, String title, String body})> shown = [];
+  final List<({int id, String title, String body, String? payload})> shown = [];
   final List<({int id, String title, String body, DateTime scheduledDate})>
   scheduled = [];
   final Completer<void>? scheduleStarted;
@@ -200,8 +200,9 @@ class _FakeDesktopNotificationClient implements DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   }) async {
-    shown.add((id: id, title: title, body: body));
+    shown.add((id: id, title: title, body: body, payload: payload));
   }
 }
 

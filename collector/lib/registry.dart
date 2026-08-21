@@ -1043,8 +1043,10 @@ ExpiringQuotaSignal? _entryExpiringSignal(
 String _quotaSignalKey(String provider, String account) =>
     '$provider\u0000$account';
 
+bool _onDeviceRuntimeEntry(ModelEntry e) => e.local && !e.model.cloudOffloaded;
+
 /// Recommendation order for picking one model: usable now first, then optionally
-/// soon-expiring included quota, then local-runtime before cloud, then loaded
+/// soon-expiring included quota, then on-device local-runtime before cloud, then loaded
 /// local readiness, the lightest provider-declared tier, and remaining headroom.
 int _recommendCompare(
   ModelEntry a,
@@ -1063,14 +1065,13 @@ int _recommendCompare(
       if (waste != 0) return waste;
     }
   }
-  if (a.local != b.local) return a.local ? -1 : 1;
-  if (a.local && b.local && a.model.cloudOffloaded != b.model.cloudOffloaded) {
-    return a.model.cloudOffloaded ? 1 : -1;
-  }
-  if (a.local && b.local && a.model.loaded != b.model.loaded) {
+  final aOnDevice = _onDeviceRuntimeEntry(a);
+  final bOnDevice = _onDeviceRuntimeEntry(b);
+  if (aOnDevice != bOnDevice) return aOnDevice ? -1 : 1;
+  if (aOnDevice && bOnDevice && a.model.loaded != b.model.loaded) {
     return a.model.loaded ? -1 : 1;
   }
-  if (a.local && b.local) {
+  if (aOnDevice && bOnDevice) {
     final fit = _hardwareFitRank(a.hardwareFit?.status)
         .compareTo(_hardwareFitRank(b.hardwareFit?.status));
     if (fit != 0) return fit;
@@ -1089,6 +1090,11 @@ String _recommendReason(
   ModelEntry e, {
   ExpiringQuotaSignal? expiringQuota,
 }) {
+  if (e.local && e.model.cloudOffloaded) {
+    return '${e.model.id} on ${e.provider} is reachable through a local '
+        'daemon but executes in the provider cloud; it is not on-device '
+        'capacity.';
+  }
   if (e.local) {
     final readiness = e.model.loaded
         ? 'loaded and ready now'

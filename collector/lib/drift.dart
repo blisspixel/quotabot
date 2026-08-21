@@ -422,7 +422,7 @@ QuotaEvidenceAdmission admitQuotaEvidence(
       driftReason: quarantine.driftReason,
     );
   }
-  if (!isTrustedQuotaEvidenceAt(previous, observedAt) ||
+  if (!isTrustedQuotaEvidenceAtCapture(previous) ||
       !isComparableQuotaEvidence(fresh, previous)) {
     return QuotaEvidenceAdmission(snapshot: fresh, shouldPersist: true);
   }

@@ -67,11 +67,19 @@ $env:Path = "$binDir;$flutterBin;$env:Path"
 
 Write-Host "Starting quotabot GUI from SOURCE (flutter run - gets your login + fixes)"
 
-Get-Process -Name quotabot -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-taskkill /IM quotabot.exe /F /T 2>$null | Out-Null
-Start-Sleep -Milliseconds 300
-
 if (!(Test-Path $appDir)) { Write-Error "App dir missing: $appDir"; exit 1 }
+$appRoot = (Resolve-Path -LiteralPath $appDir).Path
+Get-Process -Name quotabot -ErrorAction SilentlyContinue |
+  Where-Object {
+    try {
+      $_.Path -and ([IO.Path]::GetFullPath($_.Path).StartsWith(
+        $appRoot + [IO.Path]::DirectorySeparatorChar,
+        [StringComparison]::OrdinalIgnoreCase
+      ))
+    } catch { $false }
+  } |
+  Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 300
 Set-Location $appDir
 
 if ($appDir -like "*OneDrive*" -or $PWD -like "*OneDrive*") {
@@ -126,7 +134,17 @@ Write-Host ""
 Write-Host "Launching desktop app (via flutter)..."
 $gui = Join-Path $root "app\build\windows\x64\runner\Release\quotabot.exe"
 if (Test-Path $gui) {
-  taskkill /IM quotabot.exe /F 2>$null | Out-Null
+  $guiRoot = Split-Path -Parent $gui
+  Get-Process -Name quotabot -ErrorAction SilentlyContinue |
+    Where-Object {
+      try {
+        $_.Path -and ([IO.Path]::GetFullPath($_.Path).StartsWith(
+          $guiRoot + [IO.Path]::DirectorySeparatorChar,
+          [StringComparison]::OrdinalIgnoreCase
+        ))
+      } catch { $false }
+    } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Process $gui
   Start-Sleep 1
   # Try to focus it

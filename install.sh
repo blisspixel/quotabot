@@ -440,7 +440,7 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     fish)
       mkdir -p "$HOME/.config/fish"
       profile="$HOME/.config/fish/config.fish"
-      line="fish_add_path $INSTALL_DIR"
+      line="fish_add_path \"$INSTALL_DIR\""
       ;;
     *)
       profile="$HOME/.profile"

@@ -11,6 +11,38 @@ Notable changes to quotabot. Newest first.
   throttling and provider errors retain their exact status, pipe health, and
   retry metadata. NVIDIA model discovery timeouts are classified as throttling
   rather than a rejected key.
+- Ollama `:cloud` source tags are treated as cloud-offloaded, so they cannot
+  satisfy a local or included-quota budget. `suggest_model` with `budget=any`
+  no longer ranks those daemon-exposed cloud models as on-device capacity.
+- `quota_stretch` spent/wait advice now uses measured included quota only, so a
+  credit-backed pool cannot be named as the thing that resets soonest.
+- Auto `reserve_provider` now applies the same profile `quota_stretch` and
+  `local_first` policy as `suggest_provider`. Out-of-range lease TTL, weight,
+  client, and lease id values are rejected on MCP the same way as local HTTP.
+- Filtered suggest and decide-now responses only list leases for identities
+  still in the filtered snapshot.
+- Whitespace OAuth access tokens are rejected, and whitespace refresh tokens
+  keep the prior grant instead of destroying it. Grok device login without an
+  account identity no longer saves an unusable grant.
+- Drift admission still compares a live weekly window after a shorter cached
+  window has expired, so a spent weekly drop cannot be admitted as a new 5h
+  baseline.
+- Cursor 3.x membership metadata no longer promotes leftover usage rows into
+  routable quota. Reset-only Cursor and Kiro breakdown siblings are ignored
+  instead of becoming 0% used windows.
+- Codex loopback login now also listens on IPv6 `::1` for the allowlisted
+  `localhost` redirect. MCP HTTP bind options may be specified only once, and
+  token files must be regular files.
+- Default-slot logout unlinks credential files without following links.
+- Desktop first-run expands out of compact mode while the wizard is open.
+  Compact mode surfaces refresh failures. Immediate reset reminders carry the
+  owned payload so privacy changes can rewrite them. Local-only profiles are
+  labeled as such in the explanation dialog.
+- Source first-run guidance keeps one outcome per provider, and no longer
+  treats status-only NVIDIA discovery as live quota.
+- Windows source `local-setup` stops only processes launched from that app
+  tree. Fish PATH lines quote directories that contain spaces. Portable
+  desktop docs no longer claim uninstall removes versioned extracts.
 
 ## 0.10.0-rc.6 - 2026-08-21
 

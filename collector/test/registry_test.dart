@@ -2049,6 +2049,32 @@ void main() {
       expect(s.recommended?.local, isTrue);
       expect(s.expiringQuotaUsed, isNull);
     });
+
+    test('budget any does not rank a cloud-offloaded daemon model as local',
+        () {
+      final s = suggestModel(
+        [
+          _cloud('claude', 20),
+          _local('ollama', const [
+            ModelInfo(
+              id: 'kimi-k2.5:cloud',
+              local: true,
+              cloudOffloaded: true,
+            ),
+          ]),
+        ],
+        _now,
+        catalog: catalog,
+        requirements: const ModelRequirements(
+          budgetPolicy: ModelBudgetPolicy.any,
+        ),
+      );
+
+      expect(s.recommended?.provider, 'claude');
+      expect(s.recommended?.local, isFalse);
+      expect(s.recommended?.model.cloudOffloaded, isNot(isTrue));
+      expect(s.reason, isNot(contains('local-runtime entry')));
+    });
   });
 
   group('expiringQuotaSignals', () {

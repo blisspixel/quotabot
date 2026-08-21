@@ -1153,11 +1153,10 @@ List<QuotaWindow> cursorWindows(dynamic usageData, int now) {
       final resetsAt = parseReset(block['resetDate']);
       final label = (block['displayName'] ?? 'usage').toString().toLowerCase();
       final usedP = pct ?? _ratioPercent(used, limit);
-      if (usedP != null || resetsAt != null) {
-        windows.add(
-          QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
-        );
-      }
+      if (usedP == null) continue;
+      windows.add(
+        QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
+      );
     }
   }
 
@@ -1582,11 +1581,10 @@ List<QuotaWindow> kiroWindows(dynamic usageState, int now) {
     final resetsAt = parseReset(block['resetDate']);
     final label = (block['displayName'] ?? 'Credits').toString().toLowerCase();
     final usedP = pct ?? _ratioPercent(used, limit);
-    if (usedP != null || resetsAt != null) {
-      windows.add(
-        QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
-      );
-    }
+    if (usedP == null) continue;
+    windows.add(
+      QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
+    );
   }
   return windows;
 }

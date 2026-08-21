@@ -101,6 +101,7 @@ abstract interface class DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   });
 
   Future<void> schedule({
@@ -148,11 +149,13 @@ class FlutterDesktopNotificationClient implements DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   }) => plugin.show(
     id: id,
     title: title,
     body: body,
     notificationDetails: _details(providerLabel),
+    payload: payload,
   );
 
   @override
@@ -2271,7 +2274,12 @@ class _DashboardState extends State<Dashboard>
       return;
     }
     _firstRunReviewOpen = true;
+    final restoreCompact = _compact;
     try {
+      if (_compact) {
+        setState(() => _compact = false);
+        _applySize();
+      }
       final result = await showFirstRunWizard(
         context: context,
         entries: () => firstRunEntries(
@@ -2299,6 +2307,10 @@ class _DashboardState extends State<Dashboard>
       _applySize();
       unawaited(_persistPrefs());
     } finally {
+      if (restoreCompact && mounted && !_setupDone) {
+        setState(() => _compact = true);
+        _applySize();
+      }
       _firstRunReviewOpen = false;
     }
   }
@@ -2437,6 +2449,22 @@ class _DashboardState extends State<Dashboard>
                   message: trayUnavailableMessage,
                   child: Semantics(
                     label: trayUnavailableMessage,
+                    liveRegion: true,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 4),
+                      child: Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Color(0xFFD29922),
+                      ),
+                    ),
+                  ),
+                ),
+              if (_lastRefreshError != null)
+                Tooltip(
+                  message: _lastRefreshError!,
+                  child: Semantics(
+                    label: _lastRefreshError,
                     liveRegion: true,
                     child: const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 4),
@@ -2847,7 +2875,10 @@ class _DashboardState extends State<Dashboard>
                   Text(suggestion.explanation),
                   const SizedBox(height: 12),
                   Text(
-                    suggestion.routingPolicy == 'quota_stretch'
+                    _activeProfile.routingPolicy ==
+                            ProfileRoutingPolicy.localOnly
+                        ? 'Profile policy: Local only'
+                        : suggestion.routingPolicy == 'quota_stretch'
                         ? 'Routing policy: Quota stretch at '
                               '${suggestion.quotaStretchThreshold.round()}% reserve'
                         : suggestion.routingPolicy == 'local_first'
@@ -3598,6 +3629,7 @@ class _DashboardState extends State<Dashboard>
             title: 'Quota reset soon',
             body: reminder.body,
             providerLabel: reminder.providerLabel,
+            payload: quotaResetReminderPayload,
           );
           ledgerChanged = _markResetReminderHandled(reminder) || ledgerChanged;
         } catch (_) {
