@@ -126,12 +126,14 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-The published v0.9.9 Windows packages are not Authenticode-signed, so
-SmartScreen may warn. Do not bypass SmartScreen. Checksums and GitHub provenance
-do not establish Windows publisher identity. Tagged releases after this change
-fail closed until the owner-provisioned signing identity verifies. If Windows
-declines a normal launch of an unsigned package, build from source or wait for
-a signed release.
+The published v0.9.9 Windows packages are not Authenticode-signed. Each newer
+release begins with a mandatory native signing status in its GitHub release
+notes. `Windows: unsigned transition artifact` means SmartScreen publisher
+identity is not established. Checksums and GitHub provenance do not establish
+Windows publisher identity. Both remain required. Do not bypass SmartScreen. A
+release marked as Azure Artifact Signing
+must pass Windows trust, SHA-256 Authenticode and RFC 3161 policy, durable
+subscriber identity, and fresh-download verification before publication.
 
 ### macOS
 
@@ -148,9 +150,10 @@ rm -rf "$tmp"
 open "$destination"
 ```
 
-The macOS bundle is not Developer ID-signed or notarized yet. Gatekeeper may
-refuse a normal launch. Do not remove quarantine metadata merely to silence that
-warning. A signed, notarized bundle remains a 1.0 release gate.
+The release notes also state the macOS signing mode. Current transition bundles
+are not Developer ID-signed or notarized, so Gatekeeper may refuse a normal
+launch. Do not remove quarantine metadata merely to silence that warning. A
+signed, notarized bundle remains a 0.10.x exit criterion.
 
 ### Linux
 

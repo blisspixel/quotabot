@@ -34,7 +34,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("build-desktop:", workflow)
         self.assertIn("verify-desktop-release:", workflow)
-        self.assertIn("needs: [create-release, build-desktop]", workflow)
+        self.assertIn(
+            "needs: [create-release, build-desktop, package-windows-desktop]",
+            workflow,
+        )
         self.assertIn("audit-release-assets:", workflow)
         self.assertIn(
             "needs: [create-release, verify-cli-release, verify-desktop-release]",
@@ -76,9 +79,6 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertEqual(
             "        include:\n"
-            "          - os: windows-latest\n"
-            "            script: pwsh tools/package-windows.ps1\n"
-            "            archive: release/quotabot-windows-x64-desktop.zip\n"
             "          - os: macos-latest\n"
             "            script: bash tools/package-macos.sh\n"
             "            archive: release/quotabot-darwin-arm64-desktop.zip\n"
@@ -87,6 +87,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "            archive: release/quotabot-linux-x64-desktop.tar.gz\n",
             matrix,
         )
+        windows_job = workflow.split("  build-windows-desktop-unsigned:\n", 1)[1].split(
+            "  sign-windows-desktop:\n", 1
+        )[0]
+        self.assertIn("runs-on: windows-latest", windows_job)
+        self.assertIn("./tools/package-windows.ps1 -NoArchive", windows_job)
 
     def test_release_executes_every_uploaded_cli_before_publication(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -120,7 +125,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertLess(attest_at, upload_at)
         self.assertNotIn("release/quotabot-*", build_job)
 
-        self.assertIn("needs: [create-release, build]", verify_job)
+        self.assertIn(
+            "needs: [create-release, build, package-windows-cli]",
+            verify_job,
+        )
         self.assertIn("ubuntu-24.04-arm", verify_job)
         self.assertIn("Accept: application/octet-stream", verify_job)
         self.assertIn("gh attestation verify", verify_job)
@@ -263,25 +271,42 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        job_names = (
+        job_order = (
+            "preflight",
+            "quality-gate",
+            "codeql-gate",
+            "secret-scan-gate",
+            "create-release",
             "build",
+            "build-windows-cli-unsigned",
+            "sign-windows-cli",
+            "package-windows-cli",
             "verify-cli-release",
             "build-desktop",
+            "build-windows-desktop-unsigned",
+            "sign-windows-desktop",
+            "package-windows-desktop",
+            "verify-desktop-release",
+            "audit-release-assets",
+            "publish-release",
+        )
+        job_names = (
+            "build",
+            "package-windows-cli",
+            "verify-cli-release",
+            "build-desktop",
+            "package-windows-desktop",
             "verify-desktop-release",
             "audit-release-assets",
         )
 
-        for index, name in enumerate(job_names):
+        for name in job_names:
+            index = job_order.index(name)
             start = release.index(f"  {name}:\n")
-            later_starts = [
-                release.find(f"  {later}:\n", start + 1)
-                for later in job_names[index + 1 :]
-            ]
-            later_starts = [position for position in later_starts if position >= 0]
             end = (
-                min(later_starts)
-                if later_starts
-                else release.index("  publish-release:\n", start)
+                release.index(f"  {job_order[index + 1]}:\n", start)
+                if index + 1 < len(job_order)
+                else len(release)
             )
             job = release[start:end]
             self.assertIn("contents: write", job, name)
@@ -633,11 +658,22 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(ci.count("native_code_inventory.py"), 4)
-        self.assertEqual(release.count("native_code_inventory.py"), 8)
-        self.assertEqual(ci.count("sign_windows.py"), 0)
-        self.assertEqual(release.count("sign_windows.py"), 2)
+        self.assertEqual(release.count("native_code_inventory.py"), 12)
+        self.assertNotIn("sign_windows.py", ci)
+        self.assertNotIn("sign_windows.py", release)
+        self.assertEqual(release.count("create_windows_signing_catalog.py"), 4)
+        self.assertEqual(
+            release.count("azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca"),
+            2,
+        )
+        self.assertEqual(
+            release.count(
+                "Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82"
+            ),
+            2,
+        )
         self.assertEqual(ci.count("verify_windows_signatures.py"), 0)
-        self.assertEqual(release.count("verify_windows_signatures.py"), 4)
+        self.assertEqual(release.count("verify_windows_signatures.py"), 6)
         for workflow in (ci, release):
             self.assertNotIn("--platform macos", workflow)
 
@@ -652,63 +688,193 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertEqual(ci.count("--expect-manifest"), 2)
         self.assertEqual(
             release.count("--platform windows --surface cli --architecture x64"),
-            4,
+            6,
         )
         self.assertEqual(
             release.count("--platform windows --surface desktop --architecture x64"),
-            4,
+            6,
         )
-        self.assertEqual(release.count("--expect-manifest"), 2)
+        self.assertEqual(release.count("--expect-manifest"), 6)
 
-        release_cli = release.split("  build:\n", 1)[1].split(
+        cli_unsigned = release.split("  build-windows-cli-unsigned:\n", 1)[1].split(
+            "  sign-windows-cli:\n", 1
+        )[0]
+        cli_sign = release.split("  sign-windows-cli:\n", 1)[1].split(
+            "  package-windows-cli:\n", 1
+        )[0]
+        cli_package = release.split("  package-windows-cli:\n", 1)[1].split(
             "  verify-cli-release:\n", 1
         )[0]
-        release_desktop = release.split("  build-desktop:\n", 1)[1].split(
+        desktop_unsigned = release.split("  build-windows-desktop-unsigned:\n", 1)[
+            1
+        ].split("  sign-windows-desktop:\n", 1)[0]
+        desktop_sign = release.split("  sign-windows-desktop:\n", 1)[1].split(
+            "  package-windows-desktop:\n", 1
+        )[0]
+        desktop_package = release.split("  package-windows-desktop:\n", 1)[1].split(
             "  verify-desktop-release:\n", 1
         )[0]
-        for job, verifier in (
-            (release_cli, "verify_cli_archive.py"),
-            (release_desktop, "verify_desktop_archive.py"),
+
+        for unsigned, sign, package, verifier in (
+            (
+                cli_unsigned,
+                cli_sign,
+                cli_package,
+                "verify_cli_archive.py",
+            ),
+            (
+                desktop_unsigned,
+                desktop_sign,
+                desktop_package,
+                "verify_desktop_archive.py",
+            ),
         ):
-            build_at = job.index("-NoArchive")
-            unsigned_at = job.index("unsigned-inventory.json")
-            sign_at = job.index("sign_windows.py")
-            post_sign_at = job.index("Post-signing native inventory failed")
-            verify_sig_at = job.index("verify_windows_signatures.py")
-            package_at = job.index("-PackageOnly")
-            verify_at = job.index(verifier)
-            archive_inventory_at = job.rindex("native_code_inventory.py")
-            preserve_at = job.index("actions/upload-artifact@")
-            attest_at = job.index("actions/attest-build-provenance@")
-            upload_at = job.index("gh release upload")
-            self.assertLess(build_at, unsigned_at)
-            self.assertLess(unsigned_at, sign_at)
+            self.assertIn("-NoArchive", unsigned)
+            self.assertIn("unsigned-inventory.json", unsigned)
+            self.assertIn("create_windows_signing_catalog.py", unsigned)
+            self.assertIn("actions/upload-artifact@", unsigned)
+            self.assertIn("include-hidden-files: true", unsigned)
+            self.assertIn("if-no-files-found: error", unsigned)
+            self.assertNotIn("environment: release-signing", unsigned)
+            self.assertNotIn("id-token: write", unsigned)
+            self.assertNotIn("azure/login@", unsigned)
+            self.assertNotIn("Azure/artifact-signing-action@", unsigned)
+            self.assertNotIn("PFX", unsigned)
+            self.assertNotIn("PASSWORD", unsigned)
+
+            validate_at = sign.index("--expect-manifest")
+            catalog_at = sign.index("create_windows_signing_catalog.py")
+            azure_login_at = sign.index("azure/login@")
+            sign_at = sign.index("Azure/artifact-signing-action@")
+            post_sign_at = sign.index("Post-signing native inventory failed")
+            verify_sig_at = sign.index("verify_windows_signatures.py")
+            preserve_at = sign.index("actions/upload-artifact@", sign_at)
+            self.assertLess(validate_at, catalog_at)
+            self.assertLess(catalog_at, azure_login_at)
+            self.assertLess(azure_login_at, sign_at)
             self.assertLess(sign_at, post_sign_at)
             self.assertLess(post_sign_at, verify_sig_at)
-            self.assertLess(verify_sig_at, package_at)
-            unsigned_step = job[build_at : job.index("Sign, verify, and package")]
-            self.assertNotIn("PFX", unsigned_step)
-            self.assertNotIn("PASSWORD", unsigned_step)
+            self.assertLess(verify_sig_at, preserve_at)
+            self.assertIn("environment: release-signing", sign)
+            self.assertIn("contents: read", sign)
+            self.assertIn("id-token: write", sign)
+            self.assertNotIn("contents: write", sign)
+            self.assertNotIn("attestations: write", sign)
+            self.assertNotIn("-NoArchive", sign)
+            self.assertNotIn("-PackageOnly", sign)
+            self.assertIn("vars.QUOTABOT_AZURE_CLIENT_ID", sign)
+            self.assertIn("vars.QUOTABOT_AZURE_TENANT_ID", sign)
+            self.assertIn("vars.QUOTABOT_AZURE_SUBSCRIPTION_ID", sign)
+            self.assertIn("vars.QUOTABOT_AZURE_SIGNING_ENDPOINT", sign)
+            self.assertIn("vars.QUOTABOT_AZURE_SIGNING_ACCOUNT", sign)
+            self.assertIn("vars.QUOTABOT_AZURE_CERTIFICATE_PROFILE", sign)
+            self.assertIn("vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU", sign)
+            self.assertIn("files-catalog:", sign)
+            self.assertIn("file-digest: SHA256", sign)
+            self.assertIn(
+                "timestamp-rfc3161: http://timestamp.acs.microsoft.com",
+                sign,
+            )
+            self.assertIn("timestamp-digest: SHA256", sign)
+            self.assertIn("append-signature: false", sign)
+            self.assertIn("batch-size: 0", sign)
+            self.assertIn("cache-dependencies: false", sign)
+            self.assertIn("trace: false", sign)
+            self.assertIn("exclude-environment-credential: true", sign)
+            self.assertIn("exclude-azure-cli-credential: false", sign)
+            self.assertIn("--expected-subscriber-eku", sign)
+            self.assertNotIn("secrets.", sign[azure_login_at:sign_at])
+
+            self.assertIn("always()", package)
+            self.assertIn("result == 'skipped'", package)
+            self.assertIn("result == 'success'", package)
+            self.assertIn("actions/download-artifact@", package)
+            self.assertIn("-PackageOnly", package)
+            self.assertIn(verifier, package)
+            self.assertIn("--expect-manifest", package)
+            self.assertIn("--expected-subscriber-eku", package)
+            self.assertIn("actions/attest-build-provenance@", package)
+            self.assertIn("gh release upload", package)
+            self.assertNotIn("environment: release-signing", package)
+            self.assertNotIn("azure/login@", package)
+            self.assertNotIn("Azure/artifact-signing-action@", package)
+            self.assertNotIn("PFX", package)
+            self.assertNotIn("CLIENT_SECRET", package)
+            self.assertNotIn("--expected-signer-subject", package)
+            self.assertNotIn("--expected-signer-thumbprint", package)
+
+            package_at = package.index("-PackageOnly")
+            verify_at = package.index(verifier)
+            archive_inventory_at = package.rindex("native_code_inventory.py")
+            preserve_at = package.index("actions/upload-artifact@")
+            attest_at = package.index("actions/attest-build-provenance@")
+            upload_at = package.index("gh release upload")
             self.assertLess(package_at, verify_at)
             self.assertLess(verify_at, archive_inventory_at)
             self.assertLess(archive_inventory_at, preserve_at)
             self.assertLess(preserve_at, attest_at)
             self.assertLess(attest_at, upload_at)
-            preserve_context = job[max(0, preserve_at - 400) : preserve_at + 800]
-            self.assertIn("if: always() && runner.os == 'Windows'", preserve_context)
-            self.assertIn("if-no-files-found: warn", preserve_context)
-            self.assertIn("unsigned-inventory.json", preserve_context)
-            self.assertIn("signature-verification.json", preserve_context)
-            self.assertIn("secrets.QUOTABOT_WINDOWS_PFX_BASE64", job)
-            self.assertIn("secrets.QUOTABOT_WINDOWS_PFX_PASSWORD", job)
-            self.assertIn("vars.QUOTABOT_WINDOWS_TIMESTAMP_URL", job)
-            self.assertIn("vars.QUOTABOT_WINDOWS_SIGNER_SUBJECT", job)
-            self.assertIn("vars.QUOTABOT_WINDOWS_SIGNER_THUMBPRINT", job)
-            self.assertNotIn("Write-Host $env:QUOTABOT_WINDOWS_PFX", job)
-            self.assertNotIn("echo $env:QUOTABOT_WINDOWS_PFX", job)
+
+        non_windows_cli = release.split("  build:\n", 1)[1].split(
+            "  build-windows-cli-unsigned:\n", 1
+        )[0]
+        non_windows_desktop = release.split("  build-desktop:\n", 1)[1].split(
+            "  build-windows-desktop-unsigned:\n", 1
+        )[0]
+        for job in (non_windows_cli, non_windows_desktop):
+            self.assertNotIn("environment: release-signing", job)
+            self.assertNotIn("azure/login@", job)
+            self.assertNotIn("Azure/artifact-signing-action@", job)
 
         self.assertIn("tools.test_native_code_inventory", ci)
-        self.assertIn("tools.test_sign_windows", ci)
+        self.assertIn("tools.test_windows_signing_catalog", ci)
+
+    def test_release_signing_modes_are_explicit_and_disclosed(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(release.count("environment: release-signing"), 2)
+        for job_name, next_job in (
+            ("sign-windows-cli", "package-windows-cli"),
+            ("sign-windows-desktop", "package-windows-desktop"),
+        ):
+            job = release.split(f"  {job_name}:\n", 1)[1].split(f"  {next_job}:\n", 1)[
+                0
+            ]
+            self.assertIn("environment: release-signing", job)
+        self.assertNotIn(
+            "environment: release-signing",
+            release.split("  build:\n", 1)[1].split("  sign-windows-cli:\n", 1)[0],
+        )
+        self.assertNotIn(
+            "environment: release-signing",
+            release.split("  package-windows-cli:\n", 1)[1].split(
+                "  sign-windows-desktop:\n", 1
+            )[0],
+        )
+        self.assertNotIn(
+            "environment: release-signing",
+            release.split("  package-windows-desktop:\n", 1)[1],
+        )
+        self.assertIn(
+            "unsigned|azure-artifact-signing",
+            release,
+        )
+        self.assertIn("QUOTABOT_MACOS_SIGNING_MODE must be unsigned", release)
+        self.assertIn("Native signing status:", release)
+        self.assertIn("Do not bypass SmartScreen or Gatekeeper.", release)
+        self.assertIn("Draft release native signing disclosure", release)
+        self.assertNotIn("QUOTABOT_WINDOWS_PFX", release)
+
+    def test_release_notes_are_curated_without_generated_attribution(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("--generate-notes", release)
+        self.assertIn("changelog_notes=", release)
+        self.assertIn("CHANGELOG.md has no release section", release)
+        self.assertIn('--notes "$release_notes"', release)
 
     def test_downloaded_windows_draft_assets_are_natively_reverified(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -740,11 +906,16 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertLess(provenance_at, inventory_at)
             self.assertLess(inventory_at, signature_at)
             self.assertLess(signature_at, preserve_at)
-            self.assertIn("--expected-signer-subject", job)
-            self.assertIn("--expected-signer-thumbprint", job)
+            self.assertIn("--expected-subscriber-eku", job)
+            self.assertIn("vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU", job)
+            self.assertNotIn("--expected-signer-subject", job)
+            self.assertNotIn("--expected-signer-thumbprint", job)
             self.assertIn("--receipt $receipt $expanded", job)
             preserve_context = job[max(0, preserve_at - 500) : preserve_at + 500]
-            self.assertIn("if: always() && runner.os == 'Windows'", preserve_context)
+            self.assertIn(
+                "vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'",
+                preserve_context,
+            )
             self.assertIn("if-no-files-found: warn", preserve_context)
 
         audit_job = release.split("  audit-release-assets:\n", 1)[1].split(
@@ -767,7 +938,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("tools.test_verify_windows_signatures", ci)
         self.assertIn("verify_windows_signatures.py", release)
-        self.assertIn("sign_windows.py", release)
+        self.assertIn("create_windows_signing_catalog.py", release)
         self.assertIn("new post-signing inventory", normalized_building)
         self.assertIn("real embedded-signed Windows fixture test", normalized_building)
         self.assertIn(
@@ -808,10 +979,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("or may not exist", normalized_building)
         self.assertIn("capture the terminal fallback", normalized_building)
         self.assertIn("SignTool and PowerShell hashes", normalized_building)
-        self.assertIn("40-hex SHA-1 thumbprint", normalized_building)
+        self.assertIn("durable subscriber identity EKU", normalized_building)
         self.assertIn("stop publication", normalized_building)
         self.assertIn("allowlisted failure stage", normalized_building)
-        self.assertIn("fail closed without those values", normalized_building)
+        self.assertIn("fails closed without those values", normalized_building)
         self.assertIn("v0.9.9 release artifacts remain unsigned", normalized_building)
 
     def test_signing_scope_names_pe_modules_and_the_standalone_macos_cli(

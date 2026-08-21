@@ -4,9 +4,11 @@ Start with the shortest path for what you need.
 
 ## Project status
 
-The current verified stable release is 0.9.9. The next work is release signing:
-Authenticode-sign Windows binaries, then Developer ID-sign, notarize, and staple
-the macOS bundle without weakening existing checksums or provenance. The
+The current verified stable release is 0.9.9. The current release candidate is
+0.10.0-rc.1. The next work in the focused 0.10.x stabilization train is signed
+release readiness: Authenticode-sign
+Windows binaries, then Developer ID-sign, notarize, and staple the macOS bundle
+without weakening existing checksums or provenance. The
 [roadmap Next section](../ROADMAP.md#next) owns the exact behavior, guardrails,
 completion criteria, rationale, and place ahead of the remaining native 1.0
 evidence gates.
@@ -16,6 +18,8 @@ evidence gates.
 - [SETUP.md](SETUP.md): install, run `doctor`, connect providers, and recover
   from common first-run states.
 - [BUILDING.md](BUILDING.md): build the CLI and desktop application from source.
+- [RELEASE-SIGNING.md](RELEASE-SIGNING.md): provision and operate the protected
+  native signing environment.
 - [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md): verify, run, update,
   roll back, and uninstall native desktop release bundles.
 
