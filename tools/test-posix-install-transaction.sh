@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
+
+trap 'failure_status=$?; printf "POSIX transaction test failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2; exit "$failure_status"' ERR
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "$script_dir/.." && pwd)"
