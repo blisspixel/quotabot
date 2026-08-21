@@ -61,6 +61,105 @@ String _joinedCredentialProviderNames(List<String> providers) {
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
+const Duration quotaResetReminderLeadTime = Duration(minutes: 15);
+
+@visibleForTesting
+DateTime? quotaResetReminderDeliveryTime({
+  required int resetsAt,
+  required DateTime now,
+}) {
+  final reset = DateTime.fromMillisecondsSinceEpoch(resetsAt * 1000);
+  if (!reset.isAfter(now)) return null;
+  final preferred = reset.subtract(quotaResetReminderLeadTime);
+  return preferred.isAfter(now) ? preferred : now;
+}
+
+abstract interface class DesktopNotificationClient {
+  Future<Set<int>> pendingNotificationIds();
+
+  Future<void> cancel(int id);
+
+  Future<void> show({
+    required int id,
+    required String title,
+    required String body,
+    required String providerLabel,
+  });
+
+  Future<void> schedule({
+    required int id,
+    required String title,
+    required String body,
+    required String providerLabel,
+    required DateTime scheduledDate,
+  });
+}
+
+class FlutterDesktopNotificationClient implements DesktopNotificationClient {
+  final FlutterLocalNotificationsPlugin plugin;
+
+  const FlutterDesktopNotificationClient(this.plugin);
+
+  NotificationDetails _details(String name) => NotificationDetails(
+    android: const AndroidNotificationDetails(
+      'quotabot_quota',
+      'Quota Alerts',
+      importance: Importance.high,
+    ),
+    macOS: const DarwinNotificationDetails(),
+    linux: const LinuxNotificationDetails(defaultActionName: 'View'),
+    windows: WindowsNotificationDetails(subtitle: name),
+  );
+
+  @override
+  Future<Set<int>> pendingNotificationIds() async => {
+    for (final request in await plugin.pendingNotificationRequests())
+      request.id,
+  };
+
+  @override
+  Future<void> cancel(int id) => plugin.cancel(id: id);
+
+  @override
+  Future<void> show({
+    required int id,
+    required String title,
+    required String body,
+    required String providerLabel,
+  }) => plugin.show(
+    id: id,
+    title: title,
+    body: body,
+    notificationDetails: _details(providerLabel),
+  );
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required String title,
+    required String body,
+    required String providerLabel,
+    required DateTime scheduledDate,
+  }) => plugin.zonedSchedule(
+    id: id,
+    title: title,
+    body: body,
+    scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
+    notificationDetails: _details(providerLabel),
+    androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    payload: 'quotabot.reset-reminder.v1',
+  );
+}
+
+final DesktopNotificationClient _desktopNotificationClient =
+    FlutterDesktopNotificationClient(flutterLocalNotificationsPlugin);
+
+class FirstRunSession {
+  bool deferred = false;
+}
+
+final FirstRunSession _processFirstRunSession = FirstRunSession();
+
 const Size _compactMinimumWindowSize = Size(200, 40);
 const Size _expandedMinimumWindowSize = Size(320, 120);
 
@@ -451,6 +550,22 @@ typedef TrayInitializer = Future<void> Function();
 
 const String trayUnavailableMessage = 'Tray unavailable; Close exits the app.';
 
+class _ResetReminder {
+  final int id;
+  final String key;
+  final String body;
+  final String providerLabel;
+  final DateTime deliveryTime;
+
+  const _ResetReminder({
+    required this.id,
+    required this.key,
+    required this.body,
+    required this.providerLabel,
+    required this.deliveryTime,
+  });
+}
+
 class Dashboard extends StatefulWidget {
   final Prefs prefs;
   final String? startupStorageWarning;
@@ -474,6 +589,10 @@ class Dashboard extends StatefulWidget {
   final ProfileSaver? profileSaver;
   @visibleForTesting
   final TrayInitializer? trayInitializer;
+  @visibleForTesting
+  final DesktopNotificationClient? notificationClient;
+  @visibleForTesting
+  final FirstRunSession? firstRunSession;
   final RouteLeaseStore leaseStore;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
@@ -488,6 +607,8 @@ class Dashboard extends StatefulWidget {
       profileDeleter = null,
       profileSaver = null,
       trayInitializer = null,
+      notificationClient = null,
+      firstRunSession = null,
       leaseStore = const FileRouteLeaseStore();
 
   /// Builds a deterministic dashboard without desktop plugin or preference
@@ -507,6 +628,8 @@ class Dashboard extends StatefulWidget {
     this.profileDeleter,
     this.profileSaver,
     this.trayInitializer,
+    this.notificationClient,
+    this.firstRunSession,
     this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
   }) : _hostIntegration = false,
@@ -552,6 +675,8 @@ class _DashboardState extends State<Dashboard>
   bool _isRefreshing = false;
   Future<void>? _refreshInFlight;
   bool _firstRunReviewOpen = false;
+  late final FirstRunSession _firstRunSession;
+  late final DesktopNotificationClient? _notificationClient;
   final FocusNode _routeExplanationFocusNode = FocusNode(
     debugLabel: 'Route explanation',
   );
@@ -585,12 +710,11 @@ class _DashboardState extends State<Dashboard>
   // menu), never as a separate route, so the chrome stays consistent.
   late bool _showingAnalytics = widget.initialAnalytics;
   FleetRange _analyticsRange = FleetRange.now;
-  final Map<String, DateTime> _lastNotified =
-      {}; // debounce key -> time for notif spam reduction
   // Providers currently notified about an available redeemable reset. Edge
   // triggered: fire once when a reset appears, re-arm only after it is gone, so
   // an available reset does not re-notify every poll.
   final Set<String> _resetArmed = <String>{};
+  final Set<String> _deliveredImmediateResetReminders = <String>{};
   Offset? _windowPos;
   DateTime _updated = DateTime.now();
   Timer? _refreshTimer;
@@ -780,6 +904,12 @@ class _DashboardState extends State<Dashboard>
   @override
   void initState() {
     super.initState();
+    _firstRunSession =
+        widget.firstRunSession ??
+        (widget._hostIntegration ? _processFirstRunSession : FirstRunSession());
+    _notificationClient =
+        widget.notificationClient ??
+        (widget._hostIntegration ? _desktopNotificationClient : null);
     _defaultHidden = {...widget.prefs.hidden};
     _defaultSort = widget.prefs.sort;
     _profiles = _loadProfiles();
@@ -807,6 +937,9 @@ class _DashboardState extends State<Dashboard>
     }
     if (widget._hostIntegration || widget.trayInitializer != null) {
       unawaited(_initTray());
+    }
+    if (!_enableNotifications && _notificationClient != null) {
+      unawaited(_cancelPendingResetReminders());
     }
     _refresh();
     if (_shotsMode) unawaited(_exportShots());
@@ -1434,7 +1567,7 @@ class _DashboardState extends State<Dashboard>
             : refreshNoCurrentDataMessage(hasRows: active.isNotEmpty);
         _insights = loadedInsights;
       }
-      if (widget._hostIntegration || widget.alertPoster != null) {
+      if (_notificationClient != null || widget.alertPoster != null) {
         // Fire-and-forget: notification and webhook posting must not delay the
         // refresh completing or the post-frame resize; _checkAndNotify swallows
         // its own errors, so an unawaited failure cannot escape.
@@ -2093,7 +2226,12 @@ class _DashboardState extends State<Dashboard>
   }
 
   void _maybeStartFirstRun() {
-    if (_setupDone || _firstRunReviewOpen || _loading) return;
+    if (_setupDone ||
+        _firstRunSession.deferred ||
+        _firstRunReviewOpen ||
+        _loading) {
+      return;
+    }
     if (widget._demoModeOverride ?? _demoMode) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_reviewFirstRunSetup());
@@ -2101,7 +2239,12 @@ class _DashboardState extends State<Dashboard>
   }
 
   Future<void> _reviewFirstRunSetup() async {
-    if (_setupDone || _firstRunReviewOpen || !mounted) return;
+    if (_setupDone ||
+        _firstRunSession.deferred ||
+        _firstRunReviewOpen ||
+        !mounted) {
+      return;
+    }
     _firstRunReviewOpen = true;
     try {
       final result = await showFirstRunWizard(
@@ -2117,7 +2260,7 @@ class _DashboardState extends State<Dashboard>
       );
       if (!mounted) return;
       if (result == null || result.skipped) {
-        _finishFirstRunSetup();
+        _firstRunSession.deferred = true;
         return;
       }
       setState(() {
@@ -2133,13 +2276,6 @@ class _DashboardState extends State<Dashboard>
     } finally {
       _firstRunReviewOpen = false;
     }
-  }
-
-  void _finishFirstRunSetup() {
-    if (_setupDone) return;
-    setState(() => _setupDone = true);
-    _applySize();
-    unawaited(_persistPrefs());
   }
 
   Widget _providerTile(ProviderQuota q, Color card, Map<String, int> counts) {
@@ -3147,10 +3283,14 @@ class _DashboardState extends State<Dashboard>
 
   Future<void> _checkAndNotifyOnce() async {
     final webhookUrl = _webhookUrl;
+    final notificationClient = _notificationClient;
     // Local notifications and the alert webhook are independent transports; run
     // when either is active. Alerts are still computed and armed so the
     // edge-trigger stays correct even when only the webhook is on.
-    if (!_enableNotifications && webhookUrl == null) return;
+    if ((!_enableNotifications || notificationClient == null) &&
+        webhookUrl == null) {
+      return;
+    }
     try {
       final now = DateTime.now();
       final nowSec = now.millisecondsSinceEpoch ~/ 1000;
@@ -3174,7 +3314,7 @@ class _DashboardState extends State<Dashboard>
         // plugin failure (for example no Windows implementation) must not
         // suppress the webhook or skip the rest of the batch. Both keys carry
         // the account so two accounts of one provider do not collide.
-        if (_enableNotifications) {
+        if (_enableNotifications && notificationClient != null) {
           final notificationBody = desktopQuotaAlertNotificationMessage(
             a,
             snapshot,
@@ -3193,14 +3333,16 @@ class _DashboardState extends State<Dashboard>
             '${quotaIdentityKey(a.provider, a.account)}:low',
           );
           try {
-            await flutterLocalNotificationsPlugin.cancel(id: id);
-            await flutterLocalNotificationsPlugin.show(
-              id: id,
-              title: 'Low quota',
-              body: notificationBody,
-              notificationDetails: _buildDetails(notificationLabel),
-            );
-            _setNotificationDeliveryFailed(false);
+            await notificationClient.cancel(id);
+            if (_enableNotifications) {
+              await notificationClient.show(
+                id: id,
+                title: 'Low quota',
+                body: notificationBody,
+                providerLabel: notificationLabel,
+              );
+              _setNotificationDeliveryFailed(false);
+            }
           } catch (_) {
             _setNotificationDeliveryFailed(true);
           }
@@ -3222,53 +3364,18 @@ class _DashboardState extends State<Dashboard>
         }
       }
 
-      // Scheduled "resets soon" reminders are local notifications only.
-      if (_enableNotifications) {
-        for (final q in snapshot) {
-          if (!canScheduleQuotaResetAlert(q, nowSec)) continue;
-          for (final w in q.windows) {
-            if (w.resetsAt != null &&
-                w.resetsAt! > nowSec &&
-                w.percent != null &&
-                w.percent! > 80) {
-              final key = '${quotaIdentityKeyFor(q)}:${w.label}:reset';
-              if (_shouldNotify(key, now)) {
-                final notificationLabel = desktopNotificationProviderLabel(
-                  q,
-                  snapshot,
-                  showAccounts: _showAccounts,
-                );
-                final resetDt = DateTime.fromMillisecondsSinceEpoch(
-                  w.resetsAt! * 1000,
-                );
-                final tzReset = tz.TZDateTime.from(resetDt, tz.local);
-                final id = notificationId(key);
-                try {
-                  await flutterLocalNotificationsPlugin.cancel(id: id);
-                  await flutterLocalNotificationsPlugin.zonedSchedule(
-                    id: id,
-                    title: 'Quota reset soon',
-                    body: '$notificationLabel ${w.label} resets soon',
-                    scheduledDate: tzReset,
-                    notificationDetails: _buildDetails(notificationLabel),
-                    androidScheduleMode:
-                        AndroidScheduleMode.exactAllowWhileIdle,
-                  );
-                  _setNotificationDeliveryFailed(false);
-                } catch (_) {
-                  _setNotificationDeliveryFailed(true);
-                }
-              }
-            }
-          }
-        }
+      // Scheduled "resets soon" reminders are local notifications only. The
+      // pending-request reconciliation removes reminders invalidated by new
+      // quota evidence, account visibility, or a changed reset epoch.
+      if (_enableNotifications && notificationClient != null) {
+        await _reconcileResetReminders(snapshot, now, nowSec);
       }
 
       // Reset-available alerts: fire once when a provider offers a redeemable
       // off-cycle reset (Codex reset credits), so the user sees the escape hatch
       // the moment it appears instead of only in the card. The edge-trigger and
       // its flap-resistant re-arm rule live in the pure computeResetSignals.
-      if (_enableNotifications) {
+      if (_enableNotifications && notificationClient != null) {
         final resets = computeResetSignals(
           snapshot: [
             for (final quota in snapshot)
@@ -3293,8 +3400,9 @@ class _DashboardState extends State<Dashboard>
             '${quotaIdentityKey(r.provider, r.account)}:reset-available',
           );
           try {
-            await flutterLocalNotificationsPlugin.cancel(id: id);
-            await flutterLocalNotificationsPlugin.show(
+            await notificationClient.cancel(id);
+            if (!_enableNotifications) break;
+            await notificationClient.show(
               id: id,
               title: 'Reset available',
               body: desktopResetAvailableNotificationMessage(
@@ -3302,7 +3410,7 @@ class _DashboardState extends State<Dashboard>
                 snapshot,
                 showAccounts: _showAccounts,
               ),
-              notificationDetails: _buildDetails(notificationLabel),
+              providerLabel: notificationLabel,
             );
             _setNotificationDeliveryFailed(false);
           } catch (_) {
@@ -3312,6 +3420,137 @@ class _DashboardState extends State<Dashboard>
       }
     } catch (_) {
       // ignore notif errors
+    }
+  }
+
+  List<_ResetReminder> _resetReminders(
+    List<ProviderQuota> snapshot,
+    DateTime now,
+    int nowSec,
+  ) {
+    final reminders = <_ResetReminder>[];
+    for (final quota in snapshot) {
+      if (!canScheduleQuotaResetAlert(quota, nowSec)) continue;
+      for (final window in quota.windows) {
+        final resetsAt = window.resetsAt;
+        final percent = window.percent;
+        if (resetsAt == null || percent == null || percent <= 80) continue;
+        final deliveryTime = quotaResetReminderDeliveryTime(
+          resetsAt: resetsAt,
+          now: now,
+        );
+        if (deliveryTime == null) continue;
+        final key =
+            '${quotaIdentityKeyFor(quota)}:${window.label}:$resetsAt:reset';
+        final notificationLabel = desktopNotificationProviderLabel(
+          quota,
+          snapshot,
+          showAccounts: _showAccounts,
+        );
+        reminders.add(
+          _ResetReminder(
+            id: notificationId(key),
+            key: key,
+            body: '$notificationLabel ${window.label} resets soon',
+            providerLabel: notificationLabel,
+            deliveryTime: deliveryTime,
+          ),
+        );
+      }
+    }
+    return reminders;
+  }
+
+  Future<void> _reconcileResetReminders(
+    List<ProviderQuota> snapshot,
+    DateTime now,
+    int nowSec,
+  ) async {
+    final client = _notificationClient;
+    if (client == null) return;
+    final reminders = _resetReminders(snapshot, now, nowSec);
+    final scheduled = {
+      for (final reminder in reminders)
+        if (reminder.deliveryTime.isAfter(now)) reminder.id: reminder,
+    };
+    final immediate = [
+      for (final reminder in reminders)
+        if (!reminder.deliveryTime.isAfter(now)) reminder,
+    ];
+    _deliveredImmediateResetReminders.retainAll(
+      reminders.map((reminder) => reminder.key).toSet(),
+    );
+
+    Set<int> pending;
+    try {
+      pending = await client.pendingNotificationIds();
+    } catch (_) {
+      _setNotificationDeliveryFailed(true);
+      return;
+    }
+
+    var failed = false;
+    for (final id in pending.difference(scheduled.keys.toSet())) {
+      try {
+        await client.cancel(id);
+      } catch (_) {
+        failed = true;
+      }
+    }
+    if (!_enableNotifications) return;
+
+    for (final entry in scheduled.entries) {
+      if (pending.contains(entry.key)) continue;
+      final reminder = entry.value;
+      try {
+        await client.schedule(
+          id: reminder.id,
+          title: 'Quota reset soon',
+          body: reminder.body,
+          providerLabel: reminder.providerLabel,
+          scheduledDate: reminder.deliveryTime,
+        );
+      } catch (_) {
+        failed = true;
+      }
+      if (!_enableNotifications) return;
+    }
+
+    for (final reminder in immediate) {
+      if (_deliveredImmediateResetReminders.contains(reminder.key)) continue;
+      try {
+        await client.show(
+          id: reminder.id,
+          title: 'Quota reset soon',
+          body: reminder.body,
+          providerLabel: reminder.providerLabel,
+        );
+        _deliveredImmediateResetReminders.add(reminder.key);
+      } catch (_) {
+        failed = true;
+      }
+      if (!_enableNotifications) return;
+    }
+    _setNotificationDeliveryFailed(failed);
+  }
+
+  Future<void> _cancelPendingResetReminders() async {
+    final client = _notificationClient;
+    if (client == null) return;
+    _deliveredImmediateResetReminders.clear();
+    try {
+      final pending = await client.pendingNotificationIds();
+      var failed = false;
+      for (final id in pending) {
+        try {
+          await client.cancel(id);
+        } catch (_) {
+          failed = true;
+        }
+      }
+      _setNotificationDeliveryFailed(failed);
+    } catch (_) {
+      _setNotificationDeliveryFailed(true);
     }
   }
 
@@ -3328,29 +3567,14 @@ class _DashboardState extends State<Dashboard>
     setState(() => _notificationDeliveryFailed = failed);
   }
 
-  bool _shouldNotify(String key, DateTime now) {
-    final last = _lastNotified[key];
-    if (last == null || now.difference(last).inSeconds > 300) {
-      _lastNotified[key] = now;
-      return true;
-    }
-    return false;
-  }
-
-  // Platform-aware details. Errors are caught by caller.
-  NotificationDetails _buildDetails(String name) => NotificationDetails(
-    android: const AndroidNotificationDetails(
-      'quotabot_quota',
-      'Quota Alerts',
-      importance: Importance.high,
-    ),
-    macOS: const DarwinNotificationDetails(),
-    linux: const LinuxNotificationDetails(defaultActionName: 'View'),
-    windows: WindowsNotificationDetails(subtitle: name),
-  );
-
   void _toggleNotifications() {
-    setState(() => _enableNotifications = !_enableNotifications);
+    final enabled = !_enableNotifications;
+    setState(() => _enableNotifications = enabled);
+    if (enabled) {
+      unawaited(_checkAndNotify());
+    } else {
+      unawaited(_cancelPendingResetReminders());
+    }
     unawaited(_persistPrefs());
   }
 

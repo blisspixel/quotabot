@@ -201,7 +201,8 @@ class Prefs {
   /// an alert can never reach an external service without an explicit opt-in.
   final bool webhookAllowExternal;
 
-  /// True once the first-run setup walkthrough has been completed or dismissed.
+  /// True once the first-run setup walkthrough has been completed.
+  /// "Skip for now" is process-local and is never persisted here.
   final bool setupDone;
   final double? windowX;
   final double? windowY;
