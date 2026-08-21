@@ -179,6 +179,35 @@ enum TextSize {
   final double scale;
 }
 
+const int maxHandledResetReminders = 128;
+
+Map<int, int> _decodeHandledResetReminders(Object? encoded) {
+  if (encoded is! List) return const {};
+  final decoded = <int, int>{};
+  for (final value in encoded) {
+    if (decoded.length >= maxHandledResetReminders) break;
+    if (value is! Map) continue;
+    final id = value['id'];
+    final resetsAt = value['resets_at'];
+    if (id is! int || id < 0 || id > 0x7fffffff) continue;
+    if (resetsAt is! int || resetsAt <= 0) continue;
+    decoded[id] = resetsAt;
+  }
+  return decoded;
+}
+
+List<Map<String, int>> _encodeHandledResetReminders(Map<int, int> reminders) {
+  final newest = reminders.entries.toList()
+    ..sort((a, b) {
+      final byReset = b.value.compareTo(a.value);
+      return byReset != 0 ? byReset : a.key.compareTo(b.key);
+    });
+  return [
+    for (final entry in newest.take(maxHandledResetReminders))
+      {'id': entry.key, 'resets_at': entry.value},
+  ];
+}
+
 /// User interface preferences, persisted across restarts under the per-user
 /// config directory.
 class Prefs {
@@ -193,6 +222,12 @@ class Prefs {
   final bool showAccounts;
   final TextSize textSize;
 
+  /// Reset-reminder deliveries already handed to the operating system. Keys
+  /// are stable notification IDs and values are the corresponding reset epoch.
+  /// The bounded ledger prevents a delivered scheduled reminder from being
+  /// repeated as an immediate notification after a restart.
+  final Map<int, int> handledResetReminders;
+
   /// Optional webhook that low-quota alerts are POSTed to (quotabot.alert.v1).
   /// Null disables it. Empty or whitespace is treated as disabled.
   final String? webhookUrl;
@@ -201,7 +236,8 @@ class Prefs {
   /// an alert can never reach an external service without an explicit opt-in.
   final bool webhookAllowExternal;
 
-  /// True once the first-run setup walkthrough has been completed or dismissed.
+  /// True once the first-run setup walkthrough has been completed.
+  /// "Skip for now" is process-local and is never persisted here.
   final bool setupDone;
   final double? windowX;
   final double? windowY;
@@ -217,6 +253,7 @@ class Prefs {
     this.activeProfile = defaultProfileName,
     this.showAccounts = false,
     this.textSize = TextSize.medium,
+    this.handledResetReminders = const {},
     this.webhookUrl,
     this.webhookAllowExternal = false,
     this.setupDone = false,
@@ -235,6 +272,7 @@ class Prefs {
     String? activeProfile,
     bool? showAccounts,
     TextSize? textSize,
+    Map<int, int>? handledResetReminders,
     String? webhookUrl,
     bool? webhookAllowExternal,
     bool clearWebhook = false,
@@ -253,6 +291,7 @@ class Prefs {
     activeProfile: activeProfile ?? this.activeProfile,
     showAccounts: showAccounts ?? this.showAccounts,
     textSize: textSize ?? this.textSize,
+    handledResetReminders: handledResetReminders ?? this.handledResetReminders,
     webhookUrl: clearWebhook ? null : webhookUrl ?? this.webhookUrl,
     webhookAllowExternal: webhookAllowExternal ?? this.webhookAllowExternal,
     setupDone: setupDone ?? this.setupDone,
@@ -271,6 +310,10 @@ class Prefs {
     'active_profile': activeProfile,
     'show_accounts': showAccounts,
     'text_size': textSize.name,
+    if (handledResetReminders.isNotEmpty)
+      'handled_reset_reminders': _encodeHandledResetReminders(
+        handledResetReminders,
+      ),
     if (webhookUrl != null) 'webhook_url': webhookUrl,
     'webhook_allow_external': webhookAllowExternal,
     'setup_done': setupDone,
@@ -307,6 +350,9 @@ class Prefs {
       textSize: TextSize.values.firstWhere(
         (t) => t.name == j['text_size'],
         orElse: () => TextSize.medium,
+      ),
+      handledResetReminders: _decodeHandledResetReminders(
+        j['handled_reset_reminders'],
       ),
       webhookUrl: (j['webhook_url'] as String?)?.trim().isEmpty ?? true
           ? null

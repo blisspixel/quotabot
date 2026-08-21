@@ -236,6 +236,7 @@ String desktopProviderTrustLine(ProviderQuota quota, int now) {
   ];
   final spendClass = _desktopProviderSpendClass(quota);
   if (spendClass != null) parts.add(spendClass);
+  if (quota.supplementalManualQuota != null) parts.add('manual note');
   final captured = _desktopCaptureAgeLabel(quota.asOf, now);
   if (captured.isNotEmpty) parts.add(captured);
   return parts.join(' | ');
@@ -292,6 +293,20 @@ String desktopProviderTrustDetail(ProviderQuota quota, int now) {
       'Quota entered manually; it is not provider-measured evidence.',
   };
   final detail = <String>['State: $state.', scope];
+  final manual = quota.supplementalManualQuota;
+  if (manual != null) {
+    final windows = [
+      for (final window in manual.windows)
+        window.percent == null
+            ? window.label
+            : '${window.label} ${window.percent!.round()}% used',
+    ];
+    detail.add(
+      'A self-reported manual entry is also configured for this exact account'
+      '${windows.isEmpty ? '' : ' (${windows.join(', ')})'}. '
+      'It is shown for reference and does not replace built-in evidence.',
+    );
+  }
   final violation = quota.sourceClassViolation;
   if (violation != null) detail.add('Evidence rejected: $violation.');
   if (quota.suspect != null) {

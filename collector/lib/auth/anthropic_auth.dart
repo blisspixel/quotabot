@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'oauth_util.dart';
+import 'provider_disconnect.dart';
 import 'tokens.dart';
 
 /// One usable Anthropic access token plus its safe local evidence identity.
@@ -137,8 +138,10 @@ class AnthropicAuth {
     });
     if (json == null) throw StateError('token exchange failed');
     final tokens = Tokens.fromOAuth(json);
-    _saveGrant(tokens, account: account);
-    return tokens;
+    return ProviderDisconnectStore.publishSuccessfulLogin(provider, () {
+      _saveGrant(tokens, account: account);
+      return tokens;
+    });
   }
 
   Future<Tokens?> refresh(String refreshToken) async {

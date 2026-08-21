@@ -32,6 +32,26 @@ void main() {
     expect(fromObject.penalties, {'grok': 0.25});
   });
 
+  test('parseProviderCostPenalties rejects duplicate normalized providers', () {
+    final repeated = parseProviderCostPenalties([
+      'Claude:1',
+      'claude:2',
+    ]);
+    final repeatedInOneValue = parseProviderCostPenalties('codex:1,CODEX:1');
+
+    expect(repeated.ok, isFalse);
+    expect(
+      repeated.error,
+      'cost penalty for claude may be specified only once',
+    );
+    expect(repeated.invalidProvider, 'claude');
+    expect(repeatedInOneValue.ok, isFalse);
+    expect(
+      repeatedInOneValue.error,
+      'cost penalty for codex may be specified only once',
+    );
+  });
+
   test('parseProviderCostPenalties rejects unsafe keys and bad values', () {
     final badProvider = parseProviderCostPenalties('../bad:1');
     expect(badProvider.ok, isFalse);

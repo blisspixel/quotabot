@@ -310,19 +310,34 @@ void main() {
     expect(json['recovered'], isFalse);
   });
 
-  test('drift recovery rejects conflicting repeated exact targets', () async {
-    final result = await runCli([
+  test('drift recovery rejects repeated exact target options', () async {
+    final repeatedProvider = await runCli([
       'verify',
       '--recover-drift=codex',
       '--recover-drift=claude',
+      '--account=first',
+      '--yes',
+    ]);
+    final repeatedAccount = await runCli([
+      'verify',
+      '--recover-drift=codex',
       '--account=first',
       '--account=second',
       '--yes',
     ]);
 
-    expectExitCode(result, 64);
-    expect(result.stdout, isEmpty);
-    expect(result.stderr, contains('one exact provider and account'));
+    expectExitCode(repeatedProvider, 64);
+    expect(repeatedProvider.stdout, isEmpty);
+    expect(
+      repeatedProvider.stderr,
+      contains('--recover-drift may be specified only once'),
+    );
+    expectExitCode(repeatedAccount, 64);
+    expect(repeatedAccount.stdout, isEmpty);
+    expect(
+      repeatedAccount.stderr,
+      contains('--account may be specified only once'),
+    );
   });
 
   test('analytics recovery inspection is read-only and machine-readable',

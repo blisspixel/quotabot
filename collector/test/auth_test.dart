@@ -10,6 +10,7 @@ import 'package:quotabot_collector/auth/anthropic_auth.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
 import 'package:quotabot_collector/auth/oauth_util.dart';
 import 'package:quotabot_collector/auth/openai_auth.dart';
+import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/util.dart';
@@ -1274,6 +1275,7 @@ void main() {
     test('loginManual uses the current platform OAuth hosts', () async {
       const provider = AnthropicAuth.provider;
       addTearDown(() => TokenStore.clear(provider));
+      ProviderDisconnectStore.markDisconnected(provider);
       late Uri shown;
       final mock = MockClient((req) async {
         expect(req.method, 'POST');
@@ -1328,6 +1330,7 @@ void main() {
       );
       expect(tokens.accessToken, 'AT');
       expect(tokens.refreshToken, 'RT');
+      expect(ProviderDisconnectStore.isDisconnected(provider), isFalse);
     });
 
     test('loginManual reports a bounded Anthropic token error', () async {
@@ -1368,6 +1371,7 @@ void main() {
     test('loginManual rejects a response without an access token', () async {
       const provider = AnthropicAuth.provider;
       addTearDown(() => TokenStore.clear(provider));
+      ProviderDisconnectStore.markDisconnected(provider);
       final mock = MockClient(
         (_) async => http.Response(
           jsonEncode({'refresh_token': 'must-not-be-saved'}),
@@ -1384,6 +1388,7 @@ void main() {
         throwsA(isA<StateError>()),
       );
       expect(TokenStore.exists(provider), isFalse);
+      expect(ProviderDisconnectStore.isDisconnected(provider), isTrue);
     });
 
     test('freshAccessToken returns a still-fresh grant without network',
@@ -1661,6 +1666,7 @@ void main() {
         TokenStore.clear(provider);
         TokenStore.clearAccounts(provider);
       });
+      ProviderDisconnectStore.markDisconnected(provider);
       final mock = MockClient(
         (_) async => http.Response(
           jsonEncode({'refresh_token': 'must-not-be-saved'}),
@@ -1678,6 +1684,37 @@ void main() {
       );
       expect(TokenStore.exists(provider), isFalse);
       expect(TokenStore.exists(provider, account: account), isFalse);
+      expect(ProviderDisconnectStore.isDisconnected(provider), isTrue);
+    });
+
+    test('successful explicit login clears the disconnect marker', () async {
+      const provider = OpenAiAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      ProviderDisconnectStore.markDisconnected(provider);
+      final mock = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'access_token': 'AT',
+            'refresh_token': 'RT',
+            'expires_in': 3600,
+          }),
+          200,
+        ),
+      );
+
+      await OpenAiAuth(clientId: 'test-client', client: mock).loginLoopback(
+        showUrl: (_) {},
+        account: account,
+        openBrowser: _completeLoopbackLogin,
+      );
+
+      expect(TokenStore.exists(provider), isTrue);
+      expect(TokenStore.exists(provider, account: account), isTrue);
+      expect(ProviderDisconnectStore.isDisconnected(provider), isFalse);
     });
 
     test('refresh maps the token response and keeps rotation', () async {
@@ -1927,6 +1964,7 @@ void main() {
         TokenStore.clear(provider);
         TokenStore.clearAccounts(provider);
       });
+      ProviderDisconnectStore.markDisconnected(provider);
       final mock = MockClient(
         (_) async => http.Response(
           jsonEncode({'refresh_token': 'must-not-be-saved'}),
@@ -1944,6 +1982,37 @@ void main() {
       );
       expect(TokenStore.exists(provider), isFalse);
       expect(TokenStore.exists(provider, account: account), isFalse);
+      expect(ProviderDisconnectStore.isDisconnected(provider), isTrue);
+    });
+
+    test('successful explicit login clears the disconnect marker', () async {
+      const provider = GoogleAuth.provider;
+      const account = 'work@example.com';
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      ProviderDisconnectStore.markDisconnected(provider);
+      final mock = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'access_token': 'AT',
+            'refresh_token': 'RT',
+            'expires_in': 3600,
+          }),
+          200,
+        ),
+      );
+
+      await GoogleAuth(client: mock).loginLoopback(
+        showUrl: (_) {},
+        account: account,
+        openBrowser: _completeLoopbackLogin,
+      );
+
+      expect(TokenStore.exists(provider), isTrue);
+      expect(TokenStore.exists(provider, account: account), isTrue);
+      expect(ProviderDisconnectStore.isDisconnected(provider), isFalse);
     });
 
     test('defaults to the bundled public client when nothing is set', () {
@@ -2046,6 +2115,7 @@ void main() {
     test('rejects missing and empty access tokens', () async {
       const provider = XaiAuth.provider;
       addTearDown(() => TokenStore.clear(provider));
+      ProviderDisconnectStore.markDisconnected(provider);
       for (final tokenResponse in <Map<String, dynamic>>[
         {'refresh_token': 'must-not-be-saved'},
         {'access_token': '', 'refresh_token': 'must-not-be-saved'},
@@ -2070,6 +2140,7 @@ void main() {
           throwsA(isA<StateError>()),
         );
         expect(TokenStore.exists(provider), isFalse);
+        expect(ProviderDisconnectStore.isDisconnected(provider), isTrue);
       }
     });
 
@@ -2080,6 +2151,7 @@ void main() {
         TokenStore.clear(provider);
         TokenStore.clearAccounts(provider);
       });
+      ProviderDisconnectStore.markDisconnected(provider);
       final idToken = _unsignedJwt({'email': account});
       final mock = MockClient((req) async {
         if (req.url.toString().contains('device/code')) {
@@ -2112,6 +2184,7 @@ void main() {
         'AT',
       );
       expect(TokenStore.accounts(provider), contains(account));
+      expect(ProviderDisconnectStore.isDisconnected(provider), isFalse);
     });
   });
 }

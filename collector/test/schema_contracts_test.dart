@@ -21,6 +21,7 @@ void main() {
       final provider = defs['providerQuota'] as Map<String, Object?>;
       final properties = provider['properties'] as Map<String, Object?>;
       expect(properties, contains('source_class'));
+      expect(properties, contains('supplemental_manual_quota'));
       expect(properties, contains('plan_evidence_source'));
       expect(properties, contains('plan_evidence_as_of'));
       final sourceClass = properties['source_class'] as Map<String, Object?>;
@@ -31,6 +32,7 @@ void main() {
       expect(properties, contains('reset_credits_available'));
       expect(properties, contains('model_quotas'));
       expect(defs, contains('modelQuota'));
+      expect(defs, contains('supplementalManualQuota'));
       final modelQuota = defs['modelQuota'] as Map<String, Object?>;
       final modelQuotaProperties =
           modelQuota['properties'] as Map<String, Object?>;
@@ -279,6 +281,70 @@ void main() {
         }),
         contains(
           r'$.providers[0].source_class must be one of authoritative_live, this_machine_fallback, passive_local_evidence, local_runtime, status_only, manual',
+        ),
+      );
+    });
+
+    test('validates supplemental manual provenance without changing primary',
+        () {
+      final provider = ProviderQuota(
+        provider: 'claude',
+        displayName: 'Claude',
+        account: 'work',
+        asOf: 1782000000,
+        sourceClass: ProviderSourceClass.authoritativeLive,
+        windows: [QuotaWindow(label: 'weekly', usedPercent: 20)],
+      ).withSupplementalManualQuota(
+        SupplementalManualQuota(
+          displayName: 'Claude manual',
+          asOf: 1781999900,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: 70)],
+        ),
+      );
+      Map<String, dynamic> snapshot(Map<String, dynamic> row) => {
+            'schema': quotabotV1SchemaId,
+            'generated_at': 1782000000,
+            'providers': [row],
+          };
+
+      expect(validateQuotabotV1Snapshot(snapshot(provider.toJson())), isEmpty);
+
+      final invalidSource = provider.toJson();
+      (invalidSource['supplemental_manual_quota']
+          as Map<String, dynamic>)['source_class'] = 'authoritative_live';
+      expect(
+        validateQuotabotV1Snapshot(snapshot(invalidSource)),
+        contains(
+          r'$.providers[0].supplemental_manual_quota.source_class must be "manual"',
+        ),
+      );
+
+      final invalidPrimary = ProviderQuota(
+        provider: 'custom',
+        displayName: 'Custom',
+        account: 'work',
+        source: providerQuotaManualSource,
+        asOf: 1782000000,
+        windows: [QuotaWindow(label: 'monthly', usedPercent: 70)],
+        supplementalManualQuota: SupplementalManualQuota(
+          displayName: 'Another manual',
+          asOf: 1781999900,
+          windows: [QuotaWindow(label: 'monthly', usedPercent: 60)],
+        ),
+      ).toJson();
+      expect(
+        validateQuotabotV1Snapshot(snapshot(invalidPrimary)),
+        contains(
+          r'$.providers[0].supplemental_manual_quota requires a built-in subscription row',
+        ),
+      );
+
+      final nullSupplement = provider.toJson()
+        ..['supplemental_manual_quota'] = null;
+      expect(
+        validateQuotabotV1Snapshot(snapshot(nullSupplement)),
+        contains(
+          r'$.providers[0].supplemental_manual_quota must be an object',
         ),
       );
     });

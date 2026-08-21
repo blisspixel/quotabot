@@ -10,7 +10,7 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.5.
+> **Current release candidate:** 0.10.0-rc.6.
 > **Next:** a focused 0.10.x stabilization train for correctness, security,
 > quality-of-life refinement, and native field validation, followed by signed
 > release readiness. No new product breadth enters this train. See the
@@ -26,6 +26,10 @@ reporter's live authorize, callback, token-exchange, grant-save, and native quot
 read in [issue #77](https://github.com/blisspixel/quotabot/issues/77). The issue
 is closed after end-to-end confirmation. Release candidate 5 also keeps a quota
 HTTP 429 labeled as throttling instead of misdiagnosing it as an expired login.
+Release candidate 6 tightens exact transport identities, profile and account
+isolation, install and uninstall transactions, explicit quotabot-only logout,
+duplicate-option handling, supplemental manual evidence, first-run deferral,
+and the privacy and delivery lifecycle of desktop reset reminders.
 
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
 calls, spend no usage tokens, and never read prompts or source code.

@@ -410,6 +410,13 @@ from local IDE/profile state. Run the provider on this machine first and retain
 that local identity state; a quotabot grant is selected only after a matching
 account has been discovered.
 
+`quotabot logout` is a provider-wide local disconnect, not a host-app logout. It
+removes quotabot-owned grants and records an owner-only marker that makes all
+four adapters ignore host and quotabot credentials for every account. Host
+credential files remain unchanged. Only a successful explicit quotabot login
+clears the marker; refresh, failed login, and cancelled login do not. An
+unreadable or non-regular marker entry fails closed without trying credentials.
+
 ## Kiro (agentic CLI + IDE)
 
 - Source class: `passive_local_evidence`.
@@ -694,6 +701,7 @@ quotabot reads existing tokens only to make the same authenticated requests the
 provider's own tools already make on your behalf. Tokens are never logged; only
 the resulting usage numbers are written to the snapshot cache. quotabot's own
 OAuth tokens are stored separately from the host applications' credentials.
+Disconnect markers contain no credentials or account identifiers.
 
 Agnostic tools (Aider, Cline, etc.) typically use your existing API keys
 (Codex, Claude, etc.) so their usage is covered by the underlying provider

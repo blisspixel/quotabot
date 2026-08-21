@@ -4,8 +4,16 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.0-rc.6 - 2026-08-21
+
 ### Fixed
 
+- `quotabot logout` now stays disconnected for Claude, Codex, Grok, and
+  Antigravity even when their host applications remain signed in. A safe
+  provider-wide marker blocks host and quotabot credentials for every account
+  without changing host state, and only a successful explicit quotabot login
+  clears it. Any exact marker-path entry fails closed, and marker mutation
+  never follows a link.
 - First-run readiness now keeps the best account for each provider and never
   calls stale, drifted, suspect, or expired quota live. The source installers
   apply the same conservative readiness rule, and macOS/Linux setup once again
@@ -40,6 +48,24 @@ Notable changes to quotabot. Newest first.
   preserve config unless purge is requested, and fail visibly if payloads
   remain. The Windows install smoke also rejects any nonzero `doctor` exit
   before parsing its JSON.
+- CLI value options and singleton local HTTP `/suggest` query parameters now
+  reject repeated values before quota collection. HTTP snake-case and
+  kebab-case aliases are treated as the same option, so conflicting aliases
+  cannot silently select the last value. Repeatable `exclude` and
+  `cost_penalty` collections retain all distinct values, while duplicate cost
+  keys are rejected after provider normalization.
+- A valid manual quota with the exact same provider and specific account as one
+  built-in subscription is now retained as explicit supplemental provenance on
+  the built-in row instead of creating a competing route, analytics identity,
+  or desktop card. Measured windows, status, availability, routing, and
+  analytics remain authoritative; ambiguous, local-runtime, placeholder, and
+  non-exact identities stay separate for verification and account selection.
+- Desktop reset reminders now arrive 15 minutes before reset, reconcile stale
+  or privacy-obsolete owned requests without touching unrelated notifications,
+  serialize disablement with in-flight scheduling, and use a bounded durable
+  ledger to prevent the same reset from being delivered twice.
+- "Skip for now" in first-run setup now defers the walkthrough only for the
+  current process instead of permanently marking setup complete.
 
 ### Documentation
 
@@ -48,6 +74,9 @@ Notable changes to quotabot. Newest first.
   signing activation, and added the complete Windows and macOS publisher
   enrollment and rehearsal checklist without changing the project's Apache 2.0
   license.
+- Aligned the README, roadmap, documentation index, setup, usage, architecture,
+  data-source, provider cross-check, schema, product-strategy, and desktop
+  distribution guidance with the rc.6 behavior and release order.
 
 ## 0.10.0-rc.5 - 2026-08-21
 

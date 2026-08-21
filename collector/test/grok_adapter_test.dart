@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/grok.dart';
+import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/models.dart';
@@ -59,6 +60,33 @@ void main() {
       ...payload,
     ]);
   }
+
+  test('disconnect blocks every host account before token or quota work',
+      () async {
+    writeAuth({
+      'first': {'email': 'first@example.com', 'key': 'host-first'},
+      'second': {'email': 'second@example.com', 'key': 'host-second'},
+    });
+    var tokenReads = 0;
+    var usageReads = 0;
+    final quotas = await GrokAdapter(
+      authFile: authFile,
+      disconnectReader: () => true,
+      tokenResolver: (_, __) async {
+        tokenReads++;
+        return 'quotabot-token';
+      },
+      usageFetcher: (_, __) async {
+        usageReads++;
+        return QuotaWindow(label: 'weekly', usedPercent: 20);
+      },
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.error, providerDisconnectedMessage(GrokAdapter.id));
+    expect(tokenReads, 0);
+    expect(usageReads, 0);
+  });
 
   test('collectAccounts reads every account in auth.json', () async {
     writeAuth({

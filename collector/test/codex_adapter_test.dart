@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/codex.dart';
 import 'package:quotabot_collector/auth/openai_auth.dart';
+import 'package:quotabot_collector/auth/provider_disconnect.dart';
 import 'package:quotabot_collector/auth/tokens.dart';
 import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/parsing.dart';
@@ -48,6 +49,30 @@ void main() {
 
   String hostIdentity(String accountId) =>
       opaqueCredentialIdentity(CodexAdapter.id, 'account-id:$accountId');
+
+  test('disconnect blocks host and grant credentials before network work',
+      () async {
+    final authFile = writeAuth('host-token');
+    var grantReads = 0;
+    var networkReads = 0;
+    final quotas = await CodexAdapter(
+      authFile: authFile,
+      disconnectReader: () => true,
+      grantToken: () async {
+        grantReads++;
+        return 'grant-token';
+      },
+      client: MockClient((_) async {
+        networkReads++;
+        return http.Response('{}', 200);
+      }),
+    ).collectAccounts();
+
+    expect(quotas, hasLength(1));
+    expect(quotas.single.error, providerDisconnectedMessage(CodexAdapter.id));
+    expect(grantReads, 0);
+    expect(networkReads, 0);
+  });
 
   test('uses the host auth.json token for the account-wide read', () async {
     final authFile = writeAuth('host-tok');

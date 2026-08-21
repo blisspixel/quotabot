@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import 'oauth_util.dart';
+import 'provider_disconnect.dart';
 import 'tokens.dart';
 
 /// One usable OpenAI access token plus its safe local evidence identity.
@@ -132,12 +133,14 @@ class OpenAiAuth {
     });
     if (json == null) throw StateError('token exchange failed');
     final response = _tokenResponse(json);
-    _saveGrant(
-      response.tokens,
-      account: account,
-      accountId: response.accountId,
-    );
-    return response.tokens;
+    return ProviderDisconnectStore.publishSuccessfulLogin(provider, () {
+      _saveGrant(
+        response.tokens,
+        account: account,
+        accountId: response.accountId,
+      );
+      return response.tokens;
+    });
   }
 
   Future<_OpenAiTokenResponse?> _refreshResponse(String refreshToken) async {
