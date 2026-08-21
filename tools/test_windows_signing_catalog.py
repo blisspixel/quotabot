@@ -4,10 +4,9 @@ import io
 import json
 import os
 import tempfile
-import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest import mock
+from unittest import TestCase, main, mock, skipIf
 
 from tools import create_windows_signing_catalog, native_code_inventory
 
@@ -45,7 +44,7 @@ def _candidate(base: Path) -> tuple[Path, Path]:
     return root, manifest
 
 
-class WindowsSigningCatalogTests(unittest.TestCase):
+class WindowsSigningCatalogTests(TestCase):
     def test_catalog_is_exact_relative_sorted_and_path_private(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -151,7 +150,7 @@ class WindowsSigningCatalogTests(unittest.TestCase):
                 )
             self.assertEqual(raised.exception.code, "catalog_path_invalid")
 
-    @unittest.skipIf(os.name == "nt", "symlink creation is not portable on Windows")
+    @skipIf(os.name == "nt", "symlink creation is not portable on Windows")
     def test_candidate_and_output_links_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
@@ -271,4 +270,4 @@ class WindowsSigningCatalogTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()
