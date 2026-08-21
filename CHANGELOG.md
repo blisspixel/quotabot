@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+- Grok billing reads no longer diagnose HTTP 429, HTTP 403, timeouts, malformed
+  payloads, or non-auth gRPC statuses as an expired login. HTTP 401 and gRPC
+  unauthenticated still keep the account visible with reconnect guidance, while
+  throttling and provider errors retain their exact status, pipe health, and
+  retry metadata. NVIDIA model discovery timeouts are classified as throttling
+  rather than a rejected key.
+
 ## 0.10.0-rc.6 - 2026-08-21
 
 ### Fixed

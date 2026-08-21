@@ -114,7 +114,7 @@ class GrokAdapter {
     int asOf, {
     required bool allowDefaultGrant,
   }) async {
-    ProviderQuota offline(String note) => ProviderQuota(
+    ProviderQuota offline(String note, {int? httpStatus}) => ProviderQuota(
           provider: id,
           displayName: name,
           account: account.email,
@@ -123,6 +123,25 @@ class GrokAdapter {
           ok: true,
           error: note,
           windows: const [],
+          httpStatus: httpStatus,
+        );
+
+    ProviderQuota failed({
+      required String message,
+      String? pipeHealth,
+      int? httpStatus,
+      int? retryAfterSeconds,
+    }) =>
+        ProviderQuota.error(
+          id,
+          name,
+          message,
+          asOf,
+          account: account.email,
+          plan: 'SuperGrok',
+          pipeHealth: pipeHealth,
+          httpStatus: httpStatus,
+          retryAfterSeconds: retryAfterSeconds,
         );
 
     try {
@@ -147,24 +166,41 @@ class GrokAdapter {
       }
 
       final snapshot = await _fetchUsage(token, asOf);
-      if (snapshot == null) {
-        return offline('token expired (open Grok to refresh) - account only');
+      if (snapshot.window != null) {
+        return ProviderQuota(
+          provider: id,
+          displayName: name,
+          account: account.email,
+          plan: 'SuperGrok',
+          asOf: asOf,
+          windows: [snapshot.window!],
+          details: snapshot.details,
+        );
       }
-
-      return ProviderQuota(
-        provider: id,
-        displayName: name,
-        account: account.email,
-        plan: 'SuperGrok',
-        asOf: asOf,
-        windows: [snapshot.window],
-        details: snapshot.details,
+      if (snapshot.unauthorized) {
+        return offline(
+          snapshot.error ??
+              'token expired (open Grok to refresh) - account only',
+          httpStatus: snapshot.httpStatus,
+        );
+      }
+      return failed(
+        message: snapshot.error ?? 'unable to read Grok usage',
+        pipeHealth: snapshot.pipeHealth,
+        httpStatus: snapshot.httpStatus,
+        retryAfterSeconds: snapshot.retryAfterSeconds,
       );
-    } catch (_) {
+    } catch (e) {
       // Isolate this account: a token-refresh or network throw here must not
       // escape to collectAccounts' single catch, which would discard the other
       // accounts' results already gathered in the fan-out.
-      return offline('unable to read this account (network or token error)');
+      final health = providerPipeHealthForReadError(e);
+      return failed(
+        message: health == providerPipeHealthThrottled
+            ? 'Grok usage read timed out'
+            : 'unable to read this account (network or token error)',
+        pipeHealth: health,
+      );
     }
   }
 
@@ -199,7 +235,7 @@ class GrokAdapter {
   }
 
   /// Calls the gRPC-web billing endpoint and parses the credit usage window.
-  Future<({QuotaWindow window, List<String> details})?> _fetchUsage(
+  Future<_GrokUsageSnapshot> _fetchUsage(
     String token,
     int asOf,
   ) async {
@@ -216,16 +252,101 @@ class GrokAdapter {
       },
       body: body,
     ).timeout(const Duration(seconds: 12));
-    if (resp.statusCode != 200) return null;
-    if (resp.headers['grpc-status'] != null &&
-        resp.headers['grpc-status'] != '0') {
-      return null;
+    final retryAfter =
+        retryAfterSeconds(resp.headers['retry-after'], now: asOf);
+    if (resp.statusCode == 401) {
+      return _GrokUsageSnapshot.fail(
+        error: 'token expired (open Grok to refresh) - account only',
+        httpStatus: resp.statusCode,
+        unauthorized: true,
+      );
+    }
+    if (resp.statusCode != 200) {
+      return _GrokUsageSnapshot.fail(
+        error: 'HTTP ${resp.statusCode}',
+        pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
+        httpStatus: resp.statusCode,
+        retryAfterSeconds: retryAfter,
+      );
+    }
+    final headerStatus = int.tryParse(
+      (resp.headers['grpc-status'] ?? '').trim(),
+    );
+    if (headerStatus != null && headerStatus != 0) {
+      return _grokGrpcStatusFailure(
+        headerStatus,
+        httpStatus: resp.statusCode,
+        retryAfterSeconds: retryAfter,
+      );
+    }
+    final trailerStatus = grpcWebTrailerStatus(resp.bodyBytes);
+    if (trailerStatus != null && trailerStatus != 0) {
+      return _grokGrpcStatusFailure(
+        trailerStatus,
+        httpStatus: resp.statusCode,
+        retryAfterSeconds: retryAfter,
+      );
     }
     final message = grpcMessage(resp.bodyBytes);
     final window = grokWindow(message, asOf);
-    if (window == null) return null;
-    return (window: window, details: grokCategoryDetails(message));
+    if (window == null) {
+      return const _GrokUsageSnapshot.fail(
+        error: 'invalid Grok usage response',
+      );
+    }
+    return _GrokUsageSnapshot.ok(window, grokCategoryDetails(message));
   }
+}
+
+class _GrokUsageSnapshot {
+  final QuotaWindow? window;
+  final List<String> details;
+  final String? error;
+  final String? pipeHealth;
+  final int? httpStatus;
+  final int? retryAfterSeconds;
+  final bool unauthorized;
+
+  const _GrokUsageSnapshot.ok(this.window, this.details)
+      : error = null,
+        pipeHealth = null,
+        httpStatus = null,
+        retryAfterSeconds = null,
+        unauthorized = false;
+
+  const _GrokUsageSnapshot.fail({
+    required this.error,
+    this.pipeHealth,
+    this.httpStatus,
+    this.retryAfterSeconds,
+    this.unauthorized = false,
+  })  : window = null,
+        details = const [];
+}
+
+_GrokUsageSnapshot _grokGrpcStatusFailure(
+  int status, {
+  int? httpStatus,
+  int? retryAfterSeconds,
+}) {
+  if (status == 16) {
+    return _GrokUsageSnapshot.fail(
+      error: 'token expired (open Grok to refresh) - account only',
+      httpStatus: httpStatus,
+      unauthorized: true,
+    );
+  }
+  final pipeHealth = switch (status) {
+    4 || 8 => providerPipeHealthThrottled,
+    2 || 13 || 14 => providerPipeHealthDegraded,
+    _ => null,
+  };
+  return _GrokUsageSnapshot.fail(
+    error: 'gRPC status $status',
+    pipeHealth: pipeHealth,
+    httpStatus: httpStatus,
+    retryAfterSeconds: retryAfterSeconds,
+  );
 }
 
 class _GrokAccount {

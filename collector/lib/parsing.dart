@@ -1852,12 +1852,8 @@ List<int> grpcMessage(Uint8List resp) {
       if (flag != 0x80 || message == null || offset != resp.length) {
         return const [];
       }
-      final trailer = ascii.decode(payload, allowInvalid: true);
-      final status = RegExp(
-        r'(?:^|\r?\n)grpc-status:\s*([0-9]+)\s*(?:\r?\n|$)',
-        caseSensitive: false,
-      ).firstMatch(trailer);
-      if (status == null || status.group(1) != '0') return const [];
+      final status = _grpcWebTrailerStatusFromPayload(payload);
+      if (status != 0) return const [];
       continue;
     }
 
@@ -1867,6 +1863,42 @@ List<int> grpcMessage(Uint8List resp) {
     message = payload;
   }
   return message ?? const [];
+}
+
+/// gRPC-web unary trailer status, when the body is framed well enough to read
+/// one. A missing, truncated, or malformed trailer is not a status.
+int? grpcWebTrailerStatus(Uint8List resp) {
+  var offset = 0;
+  var sawData = false;
+  while (offset < resp.length) {
+    if (resp.length - offset < 5) return null;
+    final flag = resp[offset];
+    final len = (resp[offset + 1] << 24) |
+        (resp[offset + 2] << 16) |
+        (resp[offset + 3] << 8) |
+        (resp[offset + 4]);
+    offset += 5;
+    if (len < 0 || len > resp.length - offset) return null;
+    final payload = resp.sublist(offset, offset + len);
+    offset += len;
+    if ((flag & 0x80) != 0) {
+      if (flag != 0x80 || !sawData || offset != resp.length) return null;
+      return _grpcWebTrailerStatusFromPayload(payload);
+    }
+    if (flag != 0) return null;
+    sawData = true;
+  }
+  return null;
+}
+
+int? _grpcWebTrailerStatusFromPayload(List<int> payload) {
+  final trailer = ascii.decode(payload, allowInvalid: true);
+  final status = RegExp(
+    r'(?:^|\r?\n)grpc-status:\s*([0-9]+)\s*(?:\r?\n|$)',
+    caseSensitive: false,
+  ).firstMatch(trailer);
+  if (status == null) return null;
+  return int.tryParse(status.group(1)!);
 }
 
 /// Parses the Grok billing protobuf into a single shared weekly usage window.
