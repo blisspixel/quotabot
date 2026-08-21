@@ -485,7 +485,6 @@ function Show-QuotabotFirstRun {
 function Install-QuotabotPortableDesktop {
   if ($windowsArch -ne 'x64') { return $null }
   $installed = Join-Path $installRoot 'desktop\quotabot.exe'
-  if (Test-Path -LiteralPath $installed -PathType Leaf) { return $installed }
 
   $repo = if ($env:QUOTABOT_REPO) { $env:QUOTABOT_REPO } else { 'blisspixel/quotabot' }
   $version = if ($env:QUOTABOT_VERSION) { $env:QUOTABOT_VERSION } else { 'latest' }
@@ -510,16 +509,16 @@ function Install-QuotabotPortableDesktop {
     if ($expected -notmatch '^[0-9a-f]{64}$') { throw "Invalid checksum file for $asset" }
     $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
     if ($actual -ne $expected) { throw "Checksum mismatch for $asset" }
-    $destination = Join-Path $installRoot 'desktop'
-    if (Test-Path -LiteralPath $destination) {
-      Remove-Item -LiteralPath $destination -Recurse -Force
-    }
-    Expand-Archive -LiteralPath $zip -DestinationPath $destination
-    if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) {
+    $expanded = Join-Path $work 'expanded'
+    Expand-Archive -LiteralPath $zip -DestinationPath $expanded
+    if (-not (Test-Path -LiteralPath (Join-Path $expanded 'quotabot.exe') -PathType Leaf)) {
       throw 'Portable desktop archive did not contain quotabot.exe'
     }
+    Install-QuotabotDesktopPayload `
+      -SourceRoot $expanded `
+      -InstallRoot $installRoot
     & (Join-Path $scriptDir 'create-shortcut.ps1') -ExePath $installed
-    Write-Ok "Installed the desktop app to $destination"
+    Write-Ok "Installed the desktop app to $(Split-Path -Parent $installed)"
     return $installed
   } catch {
     Write-Warn2 "Portable desktop install skipped: $($_.Exception.Message)"
@@ -536,10 +535,9 @@ function Start-QuotabotAfterSetup {
   )
 
   $appExe = Join-Path $installRoot 'desktop\quotabot.exe'
-  if ($AllowDesktop -and
-      -not (Test-Path -LiteralPath $appExe -PathType Leaf) -and
-      ($desktopSkipped -or $NoApp)) {
-    $appExe = Install-QuotabotPortableDesktop
+  if ($AllowDesktop -and ($desktopSkipped -or $NoApp)) {
+    $portableAppExe = Install-QuotabotPortableDesktop
+    if ($portableAppExe) { $appExe = $portableAppExe }
   }
   if ($AllowDesktop -and
       $appExe -and

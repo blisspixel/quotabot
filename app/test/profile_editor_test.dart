@@ -266,8 +266,10 @@ void main() {
 
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
-    expect(result.value?.profile?.providers, isEmpty);
-    expect(result.value?.profile?.accounts, isEmpty);
+    expect(result.value?.profile?.providers, {'codex', 'grok'});
+    expect(result.value?.profile?.accounts, {
+      'grok': {'home@example.com', 'work@example.com'},
+    });
   });
 
   testWidgets('editing the active profile preserves live UI preferences', (
@@ -376,11 +378,25 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
-    // Selecting the only current credential compacts to an unfiltered account
-    // map, which includes that credential without retaining the obsolete label.
+    // Selecting the only current credential replaces the obsolete label with
+    // an exact current filter, so a future credential cannot silently join.
     final saved = result.value!.profile!;
-    expect(saved.accounts, isEmpty);
+    expect(saved.providers, {'codex'});
+    expect(saved.accounts, {
+      'codex': {current},
+    });
     expect(applyProfile([currentQuota], saved), [currentQuota]);
+    expect(
+      applyProfile([
+        currentQuota,
+        _provider(
+          'codex',
+          'Codex',
+          'credential:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        ),
+      ], saved),
+      [currentQuota],
+    );
   });
 
   testWidgets('switching profiles loads that profile stored UI preferences', (

@@ -1903,6 +1903,45 @@ void main() {
     expect(find.byType(ProviderTile), findsOneWidget);
   });
 
+  testWidgets('exact hidden account can be restored after its sibling leaves', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var snapshot = _multiAccountClaude(now);
+    Prefs? saved;
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            enableNotifications: false,
+            showAccounts: true,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => snapshot,
+          prefsSaver: (prefs) async => saved = prefs,
+          testProfiles: [QuotaProfile.defaultProfile()],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await _selectMenuValue(tester, 'show:claude|work@example.com');
+    expect(find.byType(ProviderTile), findsOneWidget);
+    expect(saved?.hidden, {'claude|work@example.com'});
+
+    snapshot = [_multiAccountClaude(now).last];
+    await tester.tap(find.byTooltip('Refresh now'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ProviderTile), findsNothing);
+
+    await _selectMenuValue(tester, 'show:claude');
+    expect(find.byType(ProviderTile), findsOneWidget);
+    expect(saved?.hidden, isEmpty);
+  });
+
   testWidgets('initial refresh failure leaves an actionable dashboard', (
     tester,
   ) async {

@@ -10,7 +10,11 @@ import 'package:quotabot_collector/models.dart';
 import 'package:quotabot_collector/palette.dart';
 
 import 'headroom_colors.dart';
-import 'profile_ui.dart' show quotaDisplayKey, quotaShouldShowAccountLabel;
+import 'profile_ui.dart'
+    show
+        distinctProviderAccountCounts,
+        quotaDisplayKey,
+        quotaShouldShowAccountLabel;
 import 'theme_spec.dart';
 import 'typography.dart';
 
@@ -99,11 +103,21 @@ class _FleetScreenState extends State<FleetScreen> {
 
   /// The history buckets for [q], keyed the way the dashboard stores them
   /// (provider|account when the account is specific), with a plain provider-id
-  /// fallback for callers that key by provider only.
-  List<HeadroomBucket> _bucketsFor(ProviderQuota q) =>
-      widget.buckets[quotaDisplayKey(q)] ??
-      widget.buckets[q.provider] ??
-      const <HeadroomBucket>[];
+  /// fallback for callers that key by provider only when exactly one account
+  /// makes that legacy history unambiguous.
+  List<HeadroomBucket> _bucketsFor(ProviderQuota q) {
+    final displayKey = quotaDisplayKey(q);
+    final accountCounts = distinctProviderAccountCounts(widget.data);
+    final allowProviderFallback = accountCounts[q.provider] == 1;
+    if (displayKey != q.provider) {
+      final exact = widget.buckets[displayKey];
+      if (exact != null) return exact;
+    }
+    if (allowProviderFallback) {
+      return widget.buckets[q.provider] ?? const <HeadroomBucket>[];
+    }
+    return const <HeadroomBucket>[];
+  }
 
   List<AnalyticsStorageNotice> get _relevantAnalyticsNotices {
     final identities = widget.data.map(quotaIdentityKeyFor).toSet();

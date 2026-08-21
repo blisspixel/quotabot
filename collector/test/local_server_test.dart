@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:quotabot_collector/identifiers.dart';
 import 'package:quotabot_collector/leases.dart';
 import 'package:quotabot_collector/litellm_metrics.dart';
 import 'package:quotabot_collector/local_http_auth.dart';
@@ -545,6 +546,43 @@ void main() {
       expect(unknown.status, HttpStatus.badRequest);
       expect(unknown.body['error'], contains('unknown field'));
 
+      for (final body in [
+        {
+          'targets': [
+            {'provider': 'p' * 65},
+          ],
+        },
+        {
+          'targets': [
+            {'provider': 'claude', 'account': 'a' * 513},
+          ],
+        },
+        {
+          'targets': [
+            {'provider': 'claude'},
+          ],
+          'idempotency_key': 'short',
+        },
+        {
+          'targets': [
+            {'provider': 'claude'},
+          ],
+          'idempotency_key': 'k' * 121,
+        },
+      ]) {
+        final invalidIdentity = await _requestJson(
+          Uri.parse('$base/leases/reserve'),
+          method: 'POST',
+          headers: headers,
+          jsonBody: body,
+        );
+        expect(
+          invalidIdentity.status,
+          HttpStatus.badRequest,
+          reason: body.toString(),
+        );
+      }
+
       final oversized = await _requestJson(
         Uri.parse('$base/leases/reserve'),
         method: 'POST',
@@ -556,6 +594,46 @@ void main() {
       );
       expect(oversized.status, 413);
       expect(collections, 0, reason: 'invalid bodies must not collect quota');
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('HTTP lease reservation preserves maximum exact identities', () async {
+    final account = 'a' * maxExactAccountSelectorCharacters;
+    final idempotencyKey = 'k' * maxIdempotencyKeyCharacters;
+    final store = InMemoryRouteLeaseStore(idFactory: () => 'lease-exact');
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 20, account: account),
+      ],
+      routeSummaryProvider: _emptyRouteSummary,
+      leaseStore: store,
+      mutationToken: _mutationToken,
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final response = await _requestJson(
+        Uri.parse('$base/leases/reserve'),
+        method: 'POST',
+        headers: {
+          HttpHeaders.authorizationHeader: 'Bearer $_mutationToken',
+        },
+        jsonBody: {
+          'targets': [
+            {'provider': 'claude', 'account': account},
+          ],
+          'idempotency_key': idempotencyKey,
+        },
+      );
+
+      expect(response.status, HttpStatus.ok);
+      expect(response.body['reserved'], isTrue);
+      final lease = response.body['lease'] as Map<String, dynamic>;
+      expect(lease['account'], account);
+      expect(lease['idempotency_key'], idempotencyKey);
     } finally {
       await server.close(force: true);
     }

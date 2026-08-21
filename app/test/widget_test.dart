@@ -564,7 +564,7 @@ void main() {
       expect(options[3].accounts, ['work@example.com']);
     });
 
-    test('builds compact profile filters from editor selection', () {
+    test('builds exact profile filters from editor selection', () {
       final options = [
         const ProfileProviderOption(
           provider: 'codex',
@@ -589,8 +589,20 @@ void main() {
         routingPolicy: ProfileRoutingPolicy.balanced,
         sort: ProviderSort.defaultOrder,
       );
-      expect(all.providers, isEmpty);
-      expect(all.accounts, isEmpty);
+      expect(all.providers, {'codex', 'grok'});
+      expect(all.accounts, {
+        'grok': {'home@example.com', 'work@example.com'},
+      });
+      expect(
+        applyProfile([
+          _provider('codex', 'default'),
+          _provider('grok', 'home@example.com'),
+          _provider('grok', 'work@example.com'),
+          _provider('grok', 'future@example.com'),
+          _provider('cursor', 'default'),
+        ], all).map((quota) => '${quota.provider}|${quota.account}'),
+        ['codex|default', 'grok|home@example.com', 'grok|work@example.com'],
+      );
 
       final work = profileFromSelection(
         name: 'work',
@@ -663,6 +675,18 @@ void main() {
         isFalse,
       );
       expect(hiddenTargetsQuota({'antigravity'}, home), isTrue);
+    });
+
+    test('counts distinct provider accounts for analytics fallback', () {
+      expect(
+        distinctProviderAccountCounts([
+          _provider('grok', 'work@example.com'),
+          _provider('grok', 'work@example.com'),
+          _provider('grok', 'home@example.com'),
+          _provider('codex', 'default'),
+        ]),
+        {'grok': 2, 'codex': 1},
+      );
     });
 
     test('hides single-account labels from the main display', () {

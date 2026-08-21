@@ -371,36 +371,14 @@ irm https://raw.githubusercontent.com/blisspixel/quotabot/main/uninstall.ps1 | i
 
 By default, the uninstall scripts preserve your local configuration and history. To perform a complete removal including all local metadata, add the `--purge` or `-Purge` flag when executing the scripts locally, or append it to the remote execution (e.g. `| bash -s -- --purge`).
 
-Open a new terminal after uninstalling. Desktop release bundles and source-setup
-desktop installs are separate from the release CLI. The source setup locations
-are `%LOCALAPPDATA%\quotabot\desktop` on Windows,
-`~/.local/share/quotabot-desktop` on Linux, and
-`~/Applications/quotabot.app` on macOS. Portable desktop lifecycle instructions
-are in [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md); source build and
-launcher behavior remain in [BUILDING.md](BUILDING.md).
-
-Source setup uses sibling version stores on macOS and Linux. To remove a source
-desktop install while preserving quotabot data, close the app and remove both
-its stable path and private generations. On Linux, also remove the menu entry:
-
-```bash
-# Linux
-rm -rf "$HOME/.local/share/quotabot-desktop"
-rm -rf "$HOME/.local/share/.quotabot-desktop-versions"
-rm -f "$HOME/.local/share/applications/quotabot.desktop"
-
-# macOS
-rm -rf "$HOME/Applications/quotabot.app"
-rm -rf "$HOME/Applications/.quotabot.app-versions"
-```
-
-On Windows, close the app, then remove its stable bundle and shortcut:
-
-```powershell
-Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'quotabot\desktop') -Recurse -Force -ErrorAction SilentlyContinue
-$shortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'quotabot.lnk'
-Remove-Item -LiteralPath $shortcut -Force -ErrorAction SilentlyContinue
-```
+Open a new terminal after uninstalling. The scripts stop only quotabot
+processes launched from the recognized install roots, then remove the release
+CLI, source or portable desktop payload, private generation stores, shortcut,
+and Linux menu entry. They fail visibly and name any retained payload. Local
+configuration, history, grants, profiles, and manual entries remain unless
+purge is requested. Portable desktop lifecycle details are in
+[DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md); source build and launcher
+behavior remain in [BUILDING.md](BUILDING.md).
 
 ### Roll back
 

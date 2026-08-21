@@ -180,7 +180,7 @@ show_first_run() {
 }
 
 install_portable_desktop() {
-  local repo version asset url work zip sum expected actual dest
+  local repo version asset url work archive sum expected actual dest expanded
   repo="${QUOTABOT_REPO:-blisspixel/quotabot}"
   version="${QUOTABOT_VERSION:-latest}"
   case "$os" in
@@ -197,14 +197,6 @@ install_portable_desktop() {
       return 1
       ;;
   esac
-  if [ "$os" = darwin ] && [ -x "$dest/Contents/MacOS/quotabot" ]; then
-    printf '%s\n' "$dest"
-    return 0
-  fi
-  if [ "$os" = linux ] && [ -x "$dest/quotabot" ]; then
-    printf '%s\n' "$dest/quotabot"
-    return 0
-  fi
   if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
     return 1
   fi
@@ -217,18 +209,23 @@ install_portable_desktop() {
     url="https://github.com/${repo}/releases/download/${version}/${asset}"
   fi
   work="$(mktemp -d)"
-  zip="$work/$asset"
+  archive="$work/$asset"
   sum="$work/$asset.sha256"
+  expanded="$work/expanded"
   step 'Installing the portable desktop app'
-  if ! curl -fsSL "$url" -o "$zip" || ! curl -fsSL "${url}.sha256" -o "$sum"; then
+  if ! curl -fsSL "$url" -o "$archive" || ! curl -fsSL "${url}.sha256" -o "$sum"; then
     rm -rf "$work"
     return 1
   fi
-  expected="$(awk '{print tolower($1)}' "$sum")"
+  expected="$(awk 'NR == 1 {print tolower($1)}' "$sum")"
+  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    rm -rf "$work"
+    return 1
+  fi
   if command -v sha256sum >/dev/null 2>&1; then
-    actual="$(sha256sum "$zip" | awk '{print tolower($1)}')"
+    actual="$(sha256sum "$archive" | awk '{print tolower($1)}')"
   else
-    actual="$(shasum -a 256 "$zip" | awk '{print tolower($1)}')"
+    actual="$(shasum -a 256 "$archive" | awk '{print tolower($1)}')"
   fi
   if [ "$expected" != "$actual" ]; then
     rm -rf "$work"
@@ -236,16 +233,25 @@ install_portable_desktop() {
   fi
   if [ "$os" = darwin ]; then
     mkdir -p "$HOME/Applications"
-    tmp="$(mktemp -d)"
-    ditto -x -k "$zip" "$tmp"
-    rm -rf "$dest"
-    ditto "$tmp/quotabot.app" "$dest"
-    rm -rf "$tmp" "$work"
+    mkdir -p "$expanded"
+    if ! ditto -x -k "$archive" "$expanded" || \
+       [ ! -x "$expanded/quotabot.app/Contents/MacOS/quotabot" ] || \
+       ! install_versioned_single \
+         "$expanded/quotabot.app" "$dest" macos-app; then
+      rm -rf "$work"
+      return 1
+    fi
+    rm -rf "$work"
     printf '%s\n' "$dest"
     return 0
   fi
-  mkdir -p "$dest"
-  tar -xzf "$zip" -C "$dest"
+  mkdir -p "$expanded"
+  if ! tar -xzf "$archive" -C "$expanded" || \
+     [ ! -x "$expanded/quotabot" ] || \
+     ! install_versioned_single "$expanded" "$dest" linux-desktop; then
+    rm -rf "$work"
+    return 1
+  fi
   rm -rf "$work"
   printf '%s\n' "$dest/quotabot"
 }
@@ -532,6 +538,10 @@ acquire_pair_lock() {
     pair_lock_held[$index]=1
     return 0
   fi
+  if [[ ! -f "$lock_path" || -L "$lock_path" ]]; then
+    echo "Refusing to recover an invalid quotabot install lock: $lock_path" >&2
+    return 1
+  fi
   existing_owner="$(cat "$lock_path" 2>/dev/null || true)"
   case "$existing_owner" in
     '' | *[!0-9]*) owner_is_live=0 ;;
@@ -552,7 +562,11 @@ acquire_pair_lock() {
     echo 'Could not recover a stale quotabot install lock.' >&2
     return 1
   fi
-  rm -f "$stale_lock"
+  if ! rm -f -- "$stale_lock"; then
+    mv "$stale_lock" "$lock_path" 2>/dev/null || true
+    echo 'Could not remove a stale quotabot install lock.' >&2
+    return 1
+  fi
   if ! (set -o noclobber; printf '%s\n' "$pair_lock_owner" > "$lock_path") 2>/dev/null; then
     echo 'Another quotabot install started activating a bundle.' >&2
     return 1
