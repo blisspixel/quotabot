@@ -4,6 +4,14 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.0-rc.5 - 2026-08-21
+
+### Fixed
+- Claude usage throttling and other non-authentication HTTP failures no longer
+  claim that a locally known-expired Claude Code login caused the response.
+  HTTP 401 keeps the login recovery guidance, while HTTP 429 retains its exact
+  status, throttled pipe health, and bounded retry metadata.
+
 ## 0.10.0-rc.4 - 2026-08-21
 
 ### Changed

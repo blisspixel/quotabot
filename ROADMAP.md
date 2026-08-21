@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-20. This file is the forward plan. It records brief shipped
+Updated 2026-08-21. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -98,12 +98,13 @@ than lost data.
 0.10.x is not a holding area for new features. It is the deliberate bridge from
 a broad 0.x product to a boring 1.0:
 
-1. Publish 0.10.0-rc.4 with the confirmed auth-storage, malformed-token,
+1. Publish 0.10.0-rc.5 with the confirmed auth-storage, malformed-token,
    routing-fallback, cache, dependency, Windows source-path, safe Cursor plan
-   detection, and Claude OAuth-state fixes. Keep
+   detection, Claude OAuth-state fixes, and honest throttle diagnostics.
+   Release candidate 4 passed its complete release gate, and
    [the Claude authorization issue](https://github.com/blisspixel/quotabot/issues/77)
-   open until the reporter completes a live authorize POST, token exchange, and
-   quota read with that exact candidate.
+   closed after the reporter confirmed the authorize POST, callback, token
+   exchange, grant save, and native quota read end to end.
 2. Continue adversarial bug hunts across provider lifecycles, stale and corrupt
    state, multi-account isolation, every transport, packaging, update, rollback,
    and first-run diagnostics. Record only reproducible findings.
