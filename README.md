@@ -12,8 +12,9 @@ runtimes, so work can fall back locally when subscription caps are low.
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
 > **Current release candidate:** 0.10.0-rc.5.
 > **Next:** a focused 0.10.x stabilization train for correctness, security,
-> quality-of-life refinement, and signed release readiness. No new product
-> breadth enters this train. See the [roadmap criteria](ROADMAP.md#next).
+> quality-of-life refinement, and native field validation, followed by signed
+> release readiness. No new product breadth enters this train. See the
+> [roadmap criteria](ROADMAP.md#next).
 
 Release candidates state their Windows and macOS native signing mode at the top
 of the GitHub release notes. The protected Azure Artifact Signing activation and

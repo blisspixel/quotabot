@@ -5,10 +5,10 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.4. The next work in the focused 0.10.x stabilization train is signed
-release readiness: Authenticode-sign
-Windows binaries, then Developer ID-sign, notarize, and staple the macOS bundle
-without weakening existing checksums or provenance. The
+0.10.0-rc.5. The next work in the focused 0.10.x stabilization train is
+field-discovered correctness, recovery and quality-of-life refinement, and
+native validation. Signed release readiness follows once that inventory is
+quiet, without weakening existing checksums or provenance. The
 [roadmap Next section](../ROADMAP.md#next) owns the exact behavior, guardrails,
 completion criteria, rationale, and place ahead of the remaining native 1.0
 evidence gates.
