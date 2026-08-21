@@ -98,16 +98,18 @@ than lost data.
 0.10.x is not a holding area for new features. It is the deliberate bridge from
 a broad 0.x product to a boring 1.0:
 
-1. Publish 0.10.0-rc.5 with the confirmed auth-storage, malformed-token,
+1. Release candidate 5 published the confirmed auth-storage, malformed-token,
    routing-fallback, cache, dependency, Windows source-path, safe Cursor plan
    detection, Claude OAuth-state fixes, and honest throttle diagnostics.
    Release candidate 4 passed its complete release gate, and
    [the Claude authorization issue](https://github.com/blisspixel/quotabot/issues/77)
    closed after the reporter confirmed the authorize POST, callback, token
    exchange, grant save, and native quota read end to end.
-2. Continue adversarial bug hunts across provider lifecycles, stale and corrupt
-   state, multi-account isolation, every transport, packaging, update, rollback,
-   and first-run diagnostics. Record only reproducible findings.
+2. Release candidate 6 carries the next reproducible stabilization inventory:
+   exact transport identities and idempotency keys, profile/account isolation,
+   transactional install and uninstall, explicit quotabot-only logout state,
+   duplicate-option rejection, safe manual-quota coalescing, reset-reminder
+   lifecycle fixes, and first-run deferral polish.
 3. Use the next 0.10.x candidates for field-discovered regressions,
    quality-of-life refinement, first-run and recovery polish, and dated native
    validation on Windows, macOS, and Linux. Compatibility work for an already
@@ -238,10 +240,12 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 
 ## Current state
 
-The current line, **0.9.9**, is also the tagged stable release and installer
-version. It contains the implemented core of the first three
-milestones below: the truthful substrate (0.6), one calibrated forecast behind a
-single decision core (0.7), and the self-tuning calibration moat (0.8). Those
+The current line, **0.9.9**, remains the tagged stable and default installer
+version. The focused **0.10.0-rc.6** candidate carries the latest stabilization
+inventory described in [Next](#next). The stable line contains the implemented
+core of the first three milestones below: the truthful substrate (0.6), one
+calibrated forecast behind a single decision core (0.7), and the self-tuning
+calibration moat (0.8). Those
 implementation milestones are not the same as closing every 1.0 evidence gate.
 The core product surface exists: CLI, `top`, desktop, analytics, MCP, loopback
 HTTP, model registry, profiles, alerts, reports, leases, LiteLLM integration,
@@ -253,11 +257,11 @@ milestone sections below.
 
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
-| Core contracts and automated quality | Corrective work in progress | Analysis, coverage, schema, security, and release-policy gates are automated; the 0.9.9 audit found routing-fallback and partial-cache edge cases | Land their regressions, clear the advisory inventory, and rerun every gate on each 0.10.x candidate |
-| Integration trust boundary | Corrective work in progress | Loopback, authentication, request bounds, and LiteLLM reservation behavior are enforced and tested | Update the optional dependency locks, keep the launch regression green, and verify packaged guidance |
-| Provider truth and drift handling | Partial | Drift fails closed; account recovery, grant, parser, and cache-provenance fixtures exist | Fix and live-test Claude authorization, harden malformed token and logout behavior, then validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining response shapes |
+| Core contracts and automated quality | Stabilization candidate | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, and install-lifecycle regressions are covered | Keep every candidate green across the full matrix and resolve any new reproducible defect before signing activation |
+| Integration trust boundary | Stabilization candidate | Loopback, authentication, request bounds, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.9 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8 | Sign and notarize, repeat the lifecycle on a 0.10.x rehearsal, then rerun it on the frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.9; hardened in 0.10.x | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8; later candidates add transactional update, rollback, and guarded uninstall regressions | Repeat the lifecycle on the unsigned 0.10.x stabilization candidate, then on the signed rehearsal and frozen 1.0 candidate |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
 | Release rehearsal | Ready for signed rerun | v0.9.9 completed the tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |

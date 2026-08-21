@@ -140,7 +140,11 @@ account id enters quota output.
 ## Passive and local
 
 - **Cursor, Windsurf, Kiro:** detected from their local state files; no usage
-  command needed. quotabot reports what it can read opportunistically.
+  command needed. quotabot reports only provider-owned metadata it can read
+  opportunistically. Current Cursor 3.x state can identify a recognized,
+  owner-bound plan but does not persist the current Cursor Models and Other
+  Models quota balances in supported local rows, so that plan is diagnostic and
+  unroutable. Open Cursor Settings > Usage to inspect those balances.
 - **Ollama, LM Studio, Lemonade (and other OpenAI-compatible runtimes):**
   quotabot lists installed and loaded models from the local API. Locally
   executed models have no quota to spend, so a supported runtime is a fallback

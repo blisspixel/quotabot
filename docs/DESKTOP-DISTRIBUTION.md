@@ -40,8 +40,9 @@ The [release workflow](https://github.com/blisspixel/quotabot/actions/runs/32290
 built and attested those archives. The separate
 [install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058)
 passed packaged desktop and source-setup checks on Windows, macOS, and Ubuntu.
-Application signing, notarization, and interactive native accessibility evidence
-remain separate 1.0 gates.
+Application signing and notarization are 0.10.x exit gates. Interactive native
+accessibility evidence remains a separate final 1.0 gate and must run again on
+the exact signed candidate.
 
 The bundles are portable applications, not system installers. They do not
 replace the separately installed `quotabot` CLI and do not move or delete local
