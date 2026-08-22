@@ -261,6 +261,19 @@ void main() {
       expect(r[1].cloud, isFalse);
     });
 
+    test('flags a :cloud source tag as cloud-offloaded', () {
+      final r = ollamaModelsFromJson({
+        'models': [
+          {'name': 'kimi-k2.5:cloud', 'size': 0},
+          {'name': 'qwen3.5:cloud', 'size': 0},
+          {'name': 'llama3.2:3b', 'size': 1000},
+        ],
+      });
+      expect(r[0].cloud, isTrue);
+      expect(r[1].cloud, isTrue);
+      expect(r[2].cloud, isFalse);
+    });
+
     test('the model list declares no capabilities on its own', () {
       final r = ollamaModelsFromJson({
         'models': [

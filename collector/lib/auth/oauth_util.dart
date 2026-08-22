@@ -86,34 +86,45 @@ Future<LoopbackCodeCapture> startLoopbackCodeCapture({
   required String path,
   required String expectedState,
 }) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-  final capture = _captureFromServer(
-    server,
+  final ipv4 = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+  HttpServer? ipv6;
+  try {
+    ipv6 = await HttpServer.bind(InternetAddress.loopbackIPv6, ipv4.port);
+  } on SocketException {
+    ipv6 = null;
+  }
+  final servers = [ipv4, if (ipv6 != null) ipv6];
+  final capture = _captureFromServers(
+    servers,
     path: path,
     expectedState: expectedState,
   );
   return (
-    port: server.port,
+    port: ipv4.port,
     code: capture.code,
     close: capture.close,
   );
 }
 
-({Future<String> code, Future<void> Function() close}) _captureFromServer(
-  HttpServer server, {
+({Future<String> code, Future<void> Function() close}) _captureFromServers(
+  List<HttpServer> servers, {
   required String path,
   required String expectedState,
 }) {
   final completer = Completer<String>();
-  late final StreamSubscription<HttpRequest> sub;
+  final subscriptions = <StreamSubscription<HttpRequest>>[];
   late final Future<String> code;
   var closed = false;
 
   Future<void> closeOnce() async {
     if (closed) return;
     closed = true;
-    await sub.cancel();
-    await server.close(force: true);
+    for (final sub in subscriptions) {
+      await sub.cancel();
+    }
+    for (final server in servers) {
+      await server.close(force: true);
+    }
   }
 
   Future<void> cancel() async {
@@ -128,7 +139,7 @@ Future<LoopbackCodeCapture> startLoopbackCodeCapture({
     await closeOnce();
   }
 
-  sub = server.listen((req) async {
+  Future<void> handle(HttpRequest req) async {
     if (req.uri.path != path) {
       req.response.statusCode = 404;
       await req.response.close();
@@ -167,7 +178,11 @@ Future<LoopbackCodeCapture> startLoopbackCodeCapture({
     if (ok && !completer.isCompleted) {
       completer.complete(code);
     }
-  });
+  }
+
+  for (final server in servers) {
+    subscriptions.add(server.listen(handle));
+  }
 
   code = completer.future
       .timeout(const Duration(minutes: 5))

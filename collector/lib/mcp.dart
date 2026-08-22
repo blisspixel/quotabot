@@ -132,6 +132,13 @@ Map<String, dynamic> suggestResponse(
     ),
   ).route.toJson();
   response['active_leases'] = leaseDiscounts(activeLeases)
+      .where(
+        (discount) => providers.any(
+          (provider) =>
+              provider.provider == discount.provider &&
+              provider.account == discount.account,
+        ),
+      )
       .map((discount) => discount.toJson())
       .toList();
   response['lease_store_available'] = leaseStoreAvailable;
@@ -260,6 +267,13 @@ Map<String, dynamic> decideNowResponse(
     'ranked': suggestion['ranked'],
     'receipt': suggestion['receipt'],
     'active_leases': leaseDiscounts(activeLeases)
+        .where(
+          (discount) => cached.providers.any(
+            (provider) =>
+                provider.provider == discount.provider &&
+                provider.account == discount.account,
+          ),
+        )
         .map((discount) => discount.toJson())
         .toList(),
     'lease_store_available': leaseStoreAvailable,
@@ -1887,6 +1901,9 @@ RouteCandidate? _explicitReserveTarget(
   Map<String, double> pipePenaltyByProvider,
   Map<String, List<ModelInfo>> catalog, {
   List<String> preferenceOrder = const [],
+  bool preferLocal = false,
+  bool quotaStretch = false,
+  double quotaStretchThreshold = kDefaultQuotaStretchThreshold,
 }) {
   final matches = providers.where((provider) {
     if (provider.provider != requestedProvider) return false;
@@ -1907,6 +1924,9 @@ RouteCandidate? _explicitReserveTarget(
       pipePenaltyByProvider: pipePenaltyByProvider,
       catalog: catalog,
       preferenceOrder: preferenceOrder,
+      preferLocal: preferLocal,
+      quotaStretch: quotaStretch,
+      quotaStretchThreshold: quotaStretchThreshold,
     ),
   ).route.ranked;
   return ranked.isEmpty ? null : ranked.first;
@@ -2310,10 +2330,12 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
               'Optional provider ids to ignore for this one request, after profile filtering.',
         ),
         'lease_seconds': JsonSchema.integer(
-          description: 'Lease TTL, clamped to 15..3600 seconds.',
+          description:
+              'Lease TTL in seconds, 15 through 3600. Out of range is rejected.',
         ),
         'weight_percent': JsonSchema.number(
-          description: 'Effective-headroom discount, clamped to 1..50.',
+          description:
+              'Effective-headroom discount, 1 through 50. Out of range is rejected.',
         ),
         'client': JsonSchema.string(
           description: 'Optional caller label stored with the local lease.',
@@ -2349,16 +2371,30 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
       }
 
       final results = profiled.providers;
+      final stretchPolicy = _quotaStretchPolicy(
+        args,
+        profilePolicy: profiled.routingPolicy,
+      );
+      final leaseSeconds = parseLeaseSeconds(args['lease_seconds']);
+      final weightPercent = parseLeaseWeight(args['weight_percent']);
+      final client = parseLeaseClient(args['client']);
+      final fieldError = stretchPolicy.error ??
+          leaseSeconds.error ??
+          weightPercent.error ??
+          client.error;
+      if (fieldError != null) {
+        return CallToolResult.fromStructuredContent(
+          _withProfileMeta(_reserveUnavailable(fieldError, n), profiled),
+        );
+      }
       final burnStats = burnByProvider(results, n);
       final pipePenalties =
           loadRoutedRequestSummary().pipePenaltyByProvider(now: n);
       final requestedProvider = providerSelection.value;
       final requestedAccount = profiled.accountFilter;
       final explicit = requestedProvider != null;
-      final leaseSeconds = normalizeLeaseSeconds(args['lease_seconds']);
-      final weightPercent = normalizeLeaseWeight(args['weight_percent']);
-      final client = normalizeLeaseText(args['client']);
       final idempotencyKey = idempotencySelection.value;
+      final preferLocal = args['local_first'] == true;
 
       if (!explicit) {
         final reservation = leaseStore.selectAndReserve(
@@ -2374,6 +2410,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
                 pipePenaltyByProvider: pipePenalties,
                 catalog: catalog,
                 preferenceOrder: profiled.preferenceOrder,
+                preferLocal: preferLocal,
+                quotaStretch: stretchPolicy.enabled,
+                quotaStretchThreshold: stretchPolicy.threshold,
               ),
             ).route.recommended;
             if (target == null) {
@@ -2399,9 +2438,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             );
           },
           now: n,
-          leaseSeconds: leaseSeconds,
-          weightPercent: weightPercent,
-          client: client,
+          leaseSeconds: leaseSeconds.value!,
+          weightPercent: weightPercent.value!,
+          client: client.value,
           idempotencyKey: idempotencyKey,
           reuseWhere: (lease) => results.any(
             (quota) =>
@@ -2426,6 +2465,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
             pipePenalties,
             catalog,
             preferenceOrder: profiled.preferenceOrder,
+            preferLocal: preferLocal,
+            quotaStretch: stretchPolicy.enabled,
+            quotaStretchThreshold: stretchPolicy.threshold,
           );
           if (target == null) {
             return const RouteLeaseSelection.unavailable(
@@ -2450,9 +2492,9 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
           );
         },
         now: n,
-        leaseSeconds: leaseSeconds,
-        weightPercent: weightPercent,
-        client: client,
+        leaseSeconds: leaseSeconds.value!,
+        weightPercent: weightPercent.value!,
+        client: client.value,
         idempotencyKey: idempotencyKey,
         reuseWhere: (lease) => results.any(
           (quota) =>
@@ -2486,14 +2528,15 @@ QuotaResourceSubscriptionHub registerQuotabotTools(
     annotations: _localRelease,
     callback: (args, extra) async {
       final n = now();
-      final leaseId = normalizeLeaseText(args['lease_id'], maxLength: 96);
-      if (leaseId == null) {
+      final parsedId = parseLeaseId(args['lease_id']);
+      final leaseId = parsedId.value;
+      if (parsedId.error != null || leaseId == null) {
         final leaseState = leaseStore.activeState(n);
         return CallToolResult.fromStructuredContent(
           _releaseJson(
             RouteLeaseRelease(
               released: false,
-              reason: 'lease_id is required',
+              reason: parsedId.error ?? 'lease_id is required',
               lease: null,
               activeLeases: leaseState.activeLeases,
             ),

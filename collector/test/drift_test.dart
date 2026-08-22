@@ -501,6 +501,40 @@ void main() {
       expect(admission.snapshot.stale, isTrue);
     });
 
+    test('an expired short window still detects drift on a live weekly', () {
+      final previous = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'a',
+        asOf: 100,
+        windows: [win('5h', 90, 150), win('weekly', 95, 5000)],
+      );
+      final dropped = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'a',
+        asOf: 200,
+        windows: [win('5h', 5, 800), win('weekly', 8, 5000)],
+      );
+
+      final admission = admitQuotaEvidence(
+        dropped,
+        previous,
+        observedAt: 200,
+      );
+
+      expect(isTrustedQuotaEvidenceAt(previous, 200), isFalse);
+      expect(isTrustedQuotaEvidenceAtCapture(previous), isTrue);
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('weekly'));
+      expect(admission.snapshot.stale, isTrue);
+      expect(
+          admission.snapshot.windows
+              .firstWhere((w) => w.label == 'weekly')
+              .usedPercent,
+          95);
+    });
+
     test('expired trusted baseline stays visible when fresh evidence fails',
         () {
       final previous = evidence(used: 72, asOf: 100, reset: 200);

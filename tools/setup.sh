@@ -144,7 +144,7 @@ append_local_bin_to_profile() {
     fish)
       mkdir -p "$HOME/.config/fish"
       profile="$HOME/.config/fish/config.fish"
-      line="fish_add_path $install_dir"
+      line="fish_add_path \"$install_dir\""
       ;;
     *)
       profile="$HOME/.profile"

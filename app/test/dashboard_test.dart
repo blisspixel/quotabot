@@ -129,7 +129,7 @@ double _contrastRatio(Color foreground, Color background) {
 class _FakeDesktopNotificationClient implements DesktopNotificationClient {
   final Map<int, DesktopPendingNotification> _pending;
   final List<int> cancelled = [];
-  final List<({int id, String title, String body})> shown = [];
+  final List<({int id, String title, String body, String? payload})> shown = [];
   final List<({int id, String title, String body, DateTime scheduledDate})>
   scheduled = [];
   final Completer<void>? scheduleStarted;
@@ -200,8 +200,9 @@ class _FakeDesktopNotificationClient implements DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   }) async {
-    shown.add((id: id, title: title, body: body));
+    shown.add((id: id, title: title, body: body, payload: payload));
   }
 }
 
@@ -1503,6 +1504,69 @@ void main() {
     expect(find.textContaining('No live quota data.'), findsOneWidget);
     expect(find.textContaining('Fallback:'), findsOneWidget);
     expect(find.text('Decision id'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        'No current quota data; showing cached or unavailable providers',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact stacked warnings keep the no-route control on screen', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    const warning = 'Settings not loaded (storage unavailable)';
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          startupStorageWarning: warning,
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('compact-route-decision')),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        'No current quota data; showing cached or unavailable providers',
+      ),
+      findsOneWidget,
+    );
+    for (final tooltip in ['Expand', 'Close']) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+    }
     expect(tester.takeException(), isNull);
   });
 

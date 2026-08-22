@@ -24,7 +24,6 @@ typedef LocalRoutedRequestSummaryProvider = RoutedRequestSummary Function();
 const _maxLocalMutationBodyBytes = 32 * 1024;
 const _maxLocalMutationDrainBytes = 64 * 1024;
 const _maxLocalMutationTargets = 64;
-final _localLeaseIdPattern = RegExp(r'^[A-Za-z0-9_-]{8,96}$');
 
 class _LocalLeaseTarget {
   final String provider;
@@ -291,41 +290,21 @@ Future<HttpServer> startLocalQuotabotServer({
         error: 'minimum_effective_headroom must be between 0 and 100',
       );
     }
-    final rawSeconds = body['lease_seconds'];
-    final seconds =
-        rawSeconds == null ? defaultLeaseSeconds : _exactInteger(rawSeconds);
-    if (seconds == null ||
-        seconds < minLeaseSeconds ||
-        seconds > maxLeaseSeconds) {
-      return (
-        request: null,
-        error: 'lease_seconds must be between 15 and 3600',
-      );
+    final parsedSeconds = parseLeaseSeconds(body['lease_seconds']);
+    if (parsedSeconds.error != null || parsedSeconds.value == null) {
+      return (request: null, error: parsedSeconds.error);
     }
-    final rawWeight = body['weight_percent'];
-    final weight = rawWeight == null
-        ? defaultLeaseWeightPercent
-        : _finiteDouble(rawWeight);
-    if (weight == null ||
-        weight < minLeaseWeightPercent ||
-        weight > maxLeaseWeightPercent) {
-      return (
-        request: null,
-        error: 'weight_percent must be between 1 and 50',
-      );
+    final seconds = parsedSeconds.value!;
+    final parsedWeight = parseLeaseWeight(body['weight_percent']);
+    if (parsedWeight.error != null || parsedWeight.value == null) {
+      return (request: null, error: parsedWeight.error);
     }
-    final rawClient = body['client'];
-    final client = rawClient == null
-        ? null
-        : normalizeLeaseText(rawClient, maxLength: 120);
-    if (rawClient != null &&
-        (rawClient is! String ||
-            rawClient != rawClient.trim() ||
-            client == null ||
-            client.length != rawClient.length ||
-            _containsControlCharacters(rawClient))) {
-      return (request: null, error: 'client is invalid');
+    final weight = parsedWeight.value!;
+    final parsedClient = parseLeaseClient(body['client']);
+    if (parsedClient.error != null) {
+      return (request: null, error: parsedClient.error);
     }
+    final client = parsedClient.value;
     final parsedIdempotency = parseIdempotencyKey(body['idempotency_key']);
     if (parsedIdempotency.error != null) {
       return (request: null, error: 'idempotency_key is invalid');
@@ -692,25 +671,23 @@ Future<HttpServer> startLocalQuotabotServer({
     Map<String, dynamic> body,
   ) {
     final unknown = rejectUnknownFields(body, const {'lease_id'});
-    final rawLeaseId = body['lease_id'];
-    if (unknown != null ||
-        rawLeaseId is! String ||
-        !_localLeaseIdPattern.hasMatch(rawLeaseId)) {
+    final parsedId = parseLeaseId(body['lease_id']);
+    if (unknown != null || parsedId.error != null || parsedId.value == null) {
       writeJson(
         request,
-        {'error': unknown ?? 'lease_id is invalid'},
+        {'error': unknown ?? parsedId.error ?? 'lease_id is invalid'},
         HttpStatus.badRequest,
       );
       return;
     }
     final current = now();
-    final release = leaseStore.release(leaseId: rawLeaseId, now: current);
+    final release = leaseStore.release(leaseId: parsedId.value!, now: current);
     writeJson(request, {
       'schema': 'quotabot.release.v1',
       'as_of': current,
       'released': release.released,
       'reason': release.reason,
-      'lease_id': rawLeaseId,
+      'lease_id': parsedId.value,
       'lease': release.lease?.toJson(),
       'active_leases': activeLeaseJson(release.activeLeases),
     });
@@ -1142,16 +1119,6 @@ double? _finiteDouble(Object? value) {
   final parsed = value.toDouble();
   return parsed.isFinite ? parsed : null;
 }
-
-int? _exactInteger(Object? value) {
-  final parsed = _finiteDouble(value);
-  if (parsed == null || parsed.truncateToDouble() != parsed) return null;
-  return parsed.toInt();
-}
-
-bool _containsControlCharacters(String value) => value.runes.any(
-      (rune) => rune <= 0x1f || (rune >= 0x7f && rune <= 0x9f),
-    );
 
 bool _matchesLocalLeaseTarget(
   ProviderQuota quota,
