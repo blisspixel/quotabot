@@ -35,9 +35,10 @@ Notable changes to quotabot. Newest first.
   token files must be regular files.
 - Default-slot logout unlinks credential files without following links.
 - Desktop first-run expands out of compact mode while the wizard is open.
-  Compact mode surfaces refresh failures. Immediate reset reminders carry the
-  owned payload so privacy changes can rewrite them. Local-only profiles are
-  labeled as such in the explanation dialog.
+  Compact mode surfaces refresh failures without overflowing the 200px minimum
+  strip. Immediate reset reminders carry the owned payload so privacy changes
+  can rewrite them. Local-only profiles are labeled as such in the explanation
+  dialog.
 - Source first-run guidance keeps one outcome per provider, and no longer
   treats status-only NVIDIA discovery as live quota.
 - Windows source `local-setup` stops only processes launched from that app

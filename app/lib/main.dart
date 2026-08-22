@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -2370,112 +2371,113 @@ class _DashboardState extends State<Dashboard>
           policy: WidgetOrderTraversalPolicy(),
           child: Row(
             children: [
-              _compactRouteButton(
-                suggestion,
-                routeLine,
-                routeDetail,
-                fg,
-                providerCounts: counts,
-                showProviderName: showRouteProviderName,
-                iconOnly: routeIconOnly,
-              ),
-              const SizedBox(width: 5),
-              Container(width: 1, height: 24, color: chrome.tileBorder),
-              const SizedBox(width: 5),
               Expanded(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onPanStart: widget._hostIntegration
-                      ? (_) => windowManager.startDragging()
-                      : null,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: _shotsMode
-                        ? const NeverScrollableScrollPhysics()
-                        : const ClampingScrollPhysics(),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    const dividerAndGaps = 11.0;
+                    const minChipSlot = 8.0;
+                    const iconOnlyWidth = 28.0;
+                    const readableRouteWidth = 72.0;
+                    final naturalRouteMax = routeIconOnly
+                        ? iconOnlyWidth
+                        : showRouteProviderName
+                        ? (largeText ? 360.0 : 240.0)
+                        : 100.0;
+                    final routeBudget = math.min(
+                      naturalRouteMax,
+                      math.max(
+                        iconOnlyWidth,
+                        constraints.maxWidth - dividerAndGaps - minChipSlot,
+                      ),
+                    );
+                    final iconOnly =
+                        routeIconOnly || routeBudget < readableRouteWidth;
+                    return Row(
                       children: [
-                        if (displayed.isEmpty)
-                          Text(
-                            'No providers',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppType.caption,
-                              color: muted,
-                            ),
-                          )
-                        else
-                          for (int i = 0; i < displayed.length; i++)
-                            Padding(
-                              padding: EdgeInsets.only(
-                                right: i == displayed.length - 1 ? 0 : 10,
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: iconOnly ? iconOnlyWidth : routeBudget,
+                          ),
+                          child: _compactRouteButton(
+                            suggestion,
+                            routeLine,
+                            routeDetail,
+                            fg,
+                            providerCounts: counts,
+                            showProviderName: showRouteProviderName,
+                            iconOnly: iconOnly,
+                            maxWidth: iconOnly ? iconOnlyWidth : routeBudget,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Container(
+                          width: 1,
+                          height: 24,
+                          color: chrome.tileBorder,
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onPanStart: widget._hostIntegration
+                                ? (_) => windowManager.startDragging()
+                                : null,
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              physics: _shotsMode
+                                  ? const NeverScrollableScrollPhysics()
+                                  : const ClampingScrollPhysics(),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (displayed.isEmpty)
+                                    Text(
+                                      'No providers',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: AppType.caption,
+                                        color: muted,
+                                      ),
+                                    )
+                                  else
+                                    for (int i = 0; i < displayed.length; i++)
+                                      Padding(
+                                        padding: EdgeInsets.only(
+                                          right: i == displayed.length - 1
+                                              ? 0
+                                              : 10,
+                                        ),
+                                        child: _FocusableCompactProviderChip(
+                                          key: ValueKey(
+                                            'compact-provider-${quotaDisplayKey(displayed[i])}',
+                                          ),
+                                          message: _compactTooltip(
+                                            displayed[i],
+                                            counts,
+                                            now,
+                                          ),
+                                          child: _compactChip(
+                                            displayed[i],
+                                            now,
+                                            fg,
+                                          ),
+                                        ),
+                                      ),
+                                ],
                               ),
-                              child: _FocusableCompactProviderChip(
-                                key: ValueKey(
-                                  'compact-provider-${quotaDisplayKey(displayed[i])}',
-                                ),
-                                message: _compactTooltip(
-                                  displayed[i],
-                                  counts,
-                                  now,
-                                ),
-                                child: _compactChip(displayed[i], now, fg),
-                              ),
                             ),
+                          ),
+                        ),
                       ],
-                    ),
-                  ),
+                    );
+                  },
                 ),
               ),
               if (_preferenceStorageWarning != null)
-                Tooltip(
-                  message: _preferenceStorageWarning!,
-                  child: Semantics(
-                    label: _preferenceStorageWarning,
-                    liveRegion: true,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color: Color(0xFFD29922),
-                      ),
-                    ),
-                  ),
-                ),
-              if (_trayUnavailable)
-                Tooltip(
-                  message: trayUnavailableMessage,
-                  child: Semantics(
-                    label: trayUnavailableMessage,
-                    liveRegion: true,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color: Color(0xFFD29922),
-                      ),
-                    ),
-                  ),
-                ),
+                _compactStatusIcon(_preferenceStorageWarning!),
+              if (_trayUnavailable) _compactStatusIcon(trayUnavailableMessage),
               if (_lastRefreshError != null)
-                Tooltip(
-                  message: _lastRefreshError!,
-                  child: Semantics(
-                    label: _lastRefreshError,
-                    liveRegion: true,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color: Color(0xFFD29922),
-                      ),
-                    ),
-                  ),
-                ),
+                _compactStatusIcon(_lastRefreshError!),
               _iconButton(
                 Icons.open_in_full_rounded,
                 muted,
@@ -2495,6 +2497,24 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
+  Widget _compactStatusIcon(String message) {
+    return Tooltip(
+      message: message,
+      child: Semantics(
+        label: message,
+        liveRegion: true,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: Icon(
+            Icons.warning_amber_rounded,
+            size: 16,
+            color: Color(0xFFD29922),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _compactRouteButton(
     RouteSuggestion suggestion,
     String routeLine,
@@ -2503,6 +2523,7 @@ class _DashboardState extends State<Dashboard>
     required Map<String, int> providerCounts,
     required bool showProviderName,
     required bool iconOnly,
+    double? maxWidth,
   }) {
     final chrome = AppChromeTheme.of(context);
     final candidate = suggestion.recommended;
@@ -2543,13 +2564,15 @@ class _DashboardState extends State<Dashboard>
           child: Container(
             constraints: BoxConstraints(
               minHeight: 30,
-              maxWidth: iconOnly
-                  ? 28
-                  : providerName == null
-                  ? 100
-                  : largeText
-                  ? 360
-                  : 240,
+              maxWidth:
+                  maxWidth ??
+                  (iconOnly
+                      ? 28
+                      : providerName == null
+                      ? 100
+                      : largeText
+                      ? 360
+                      : 240),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6),
             decoration: BoxDecoration(
