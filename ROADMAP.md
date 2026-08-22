@@ -672,6 +672,10 @@ an actionable recovery path instead of a plausible-looking partial success.
 - Run repeated evidence-driven bug hunts and quality-of-life passes across every
   existing surface. Prefer fewer, clearer states and bounded recovery guidance
   over new controls.
+- Keep collection as overlapping metadata I/O on one worker isolate, with the
+  desktop collect off the UI isolate. Do not turn quota reads into a
+  per-provider isolate farm; the work is waiting on files and provider metadata,
+  and extra isolates would drop the shared HTTP pool.
 - Complete signed release readiness and use a signed 0.10.x candidate for the
   native install, update, rollback, provider, and accessibility evidence pass.
 

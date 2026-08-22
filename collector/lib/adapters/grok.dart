@@ -93,17 +93,16 @@ class GrokAdapter {
       // fetching one account's usage under another account's label, since the
       // Grok billing response carries no identity to cross-check.
       final soleAccount = accounts.length == 1;
-      final out = <ProviderQuota>[];
-      for (var i = 0; i < accounts.length; i++) {
-        out.add(
-          await _collectAccount(
+      // Overlap live billing reads. Account identity and default-grant lending
+      // stay index-based, and Future.wait keeps the discovered order.
+      return Future.wait([
+        for (var i = 0; i < accounts.length; i++)
+          _collectAccount(
             accounts[i],
             asOf,
             allowDefaultGrant: i == 0 && soleAccount,
           ),
-        );
-      }
-      return out;
+      ]);
     } catch (_) {
       return [ProviderQuota.error(id, name, 'unable to read Grok usage', asOf)];
     }

@@ -116,10 +116,41 @@ void main() {
       'b@example.com',
     ]);
     expect(q.map((p) => p.windows.single.usedPercent).toList(), [10, 20]);
-    expect(tokens, ['token-a', 'token-b']);
+    expect(tokens, unorderedEquals(['token-a', 'token-b']));
     // With more than one account, the default grant is offered to none of them,
     // so neither resolver call permits it.
-    expect(resolverCalls, ['a@example.com:false', 'b@example.com:false']);
+    expect(
+      resolverCalls,
+      unorderedEquals(['a@example.com:false', 'b@example.com:false']),
+    );
+  });
+
+  test('collectAccounts overlaps live reads for several accounts', () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+      'b': {'email': 'b@example.com', 'key': 'token-b'},
+    });
+    final started = <String>[];
+    final release = Completer<void>();
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      usageFetcher: (token, asOf) async {
+        started.add(token);
+        if (started.length == 2) release.complete();
+        await release.future;
+        return QuotaWindow(
+          label: 'monthly',
+          usedPercent: token.endsWith('a') ? 10 : 20,
+        );
+      },
+    ).collectAccounts();
+
+    expect(q.map((p) => p.account).toList(), [
+      'a@example.com',
+      'b@example.com',
+    ]);
+    expect(q.map((p) => p.windows.single.usedPercent).toList(), [10, 20]);
   });
 
   test('collect returns the first account snapshot', () async {

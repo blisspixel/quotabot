@@ -44,6 +44,9 @@ Notable changes to quotabot. Newest first.
 - Windows source `local-setup` stops only processes launched from that app
   tree. Fish PATH lines quote directories that contain spaces. Portable
   desktop docs no longer claim uninstall removes versioned extracts.
+- Grok and Antigravity live account reads overlap instead of waiting for each
+  account in series. Fleet collection still uses one worker isolate and the
+  shared HTTP pool; the desktop collect remains off the UI isolate.
 
 ## 0.10.0-rc.6 - 2026-08-21
 
