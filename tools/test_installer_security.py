@@ -39,7 +39,9 @@ class InstallerSecurityTests(unittest.TestCase):
             resolver,
         )
         self.assertNotIn('latest="${tags[0]}"', resolver)
-        self.assertIn('"$tag" != "$latest"', resolver)
+        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$", resolver)
+        self.assertIn('"$target" =~ -rc\\.', resolver)
+        self.assertIn('"$tag" != "$target"', resolver)
 
     def test_install_smoke_pins_the_resolved_tag_during_install(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(

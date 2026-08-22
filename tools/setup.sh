@@ -98,7 +98,7 @@ posix_desktop_prereq_reason() {
 build_desktop_app() {
   # shellcheck source=posix-space-safe-dart.sh
   . "$script_dir/posix-space-safe-dart.sh"
-  quotabot_enable_space_safe_dart "$root" >/dev/null || true
+  quotabot_enable_space_safe_dart "$root" flutter >/dev/null || true
   (
     cd "$app" || exit 1
     flutter pub get --enforce-lockfile || exit 1

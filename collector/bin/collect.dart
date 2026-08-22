@@ -17,6 +17,7 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/demo.dart' as demo;
 import 'package:quotabot_collector/drift.dart';
 import 'package:quotabot_collector/http_client.dart';
+import 'package:quotabot_collector/identifiers.dart';
 import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/route_render.dart';
@@ -2806,8 +2807,11 @@ Future<void> _check(
   );
   final results = read.results;
   final now = nowEpoch();
-  bool matchesTarget(ProviderQuota result) =>
-      result.provider == key || result.displayName.toLowerCase() == rawKey;
+  bool matchesTarget(ProviderQuota result) {
+    if (targetAdapter != null) return result.provider == targetAdapter.id;
+    return result.provider == key || result.displayName.toLowerCase() == rawKey;
+  }
+
   final matches = results.where(matchesTarget).toList();
   final unfilteredMatches =
       read.unfilteredResults.where(matchesTarget).toList();
@@ -2985,7 +2989,7 @@ String _providerDriftEvidenceSummary(ProviderQuota quota) => quota.hasWindows
     : 'legacy evidence is quarantined; no trusted snapshot is available';
 
 Future<void> _login(String provider) async {
-  switch (provider) {
+  switch (parseExactProviderSelector(provider).value) {
     case 'grok':
       try {
         await XaiAuth().deviceLogin(
@@ -3080,7 +3084,8 @@ Future<void> _login(String provider) async {
 
 void _logout(String provider) {
   const known = {'grok', 'antigravity', 'claude', 'codex'};
-  if (!known.contains(provider)) {
+  final id = parseExactProviderSelector(provider).value;
+  if (id == null || !known.contains(id)) {
     stderr.writeln('usage: quotabot logout <grok|antigravity|claude|codex>');
     exitCode = _exitUsage;
     return;
@@ -3092,27 +3097,27 @@ void _logout(String provider) {
     // never reports a state that the next collection immediately reverses. The
     // shared provider lock also makes concurrent successful login deterministic.
     ProviderDisconnectStore.markDisconnected(
-      provider,
+      id,
       afterMark: () {
         markerPublished = true;
         // Login persists both a provider-default grant and account-scoped
         // grants. Remove every quotabot-owned slot while leaving host state
         // untouched.
-        TokenStore.clear(provider);
-        TokenStore.clearAccounts(provider);
+        TokenStore.clear(id);
+        TokenStore.clearAccounts(id);
       },
     );
   } catch (_) {
     stderr.writeln(
       markerPublished
-          ? '$provider is disconnected in quotabot, but its stored quotabot grant could not be fully removed. Host credentials remain ignored until a successful "quotabot login $provider".'
-          : 'Could not disconnect $provider in quotabot. No host credentials were changed.',
+          ? '$id is disconnected in quotabot, but its stored quotabot grant could not be fully removed. Host credentials remain ignored until a successful "quotabot login $id".'
+          : 'Could not disconnect $id in quotabot. No host credentials were changed.',
     );
     exitCode = _exitUnavailable;
     return;
   }
   stderr.writeln(
-    '$provider disconnected in quotabot. Host credentials were left unchanged and will remain ignored until "quotabot login $provider" succeeds.',
+    '$id disconnected in quotabot. Host credentials were left unchanged and will remain ignored until "quotabot login $id" succeeds.',
   );
 }
 

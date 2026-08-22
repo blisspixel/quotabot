@@ -2572,8 +2572,7 @@ class _DashboardState extends State<Dashboard>
           child: Container(
             constraints: BoxConstraints(
               minHeight: 30,
-              maxWidth:
-                  maxWidth ??
+              maxWidth: maxWidth ??
                   (iconOnly
                       ? 28
                       : providerName == null

@@ -54,9 +54,19 @@ Notable changes to quotabot. Newest first.
   `quotabot watch` still defaults to red.
 - Release installers accept `vMAJOR.MINOR.PATCH-rc.N` tags. Windows space-safe
   Dart mirrors use a user-owned directory instead of `C:\\quotabot-build`.
-  Windows desktop packaging uses the space-safe Flutter entry. Linux portable
-  desktop fallback writes an application-menu entry. Compact empty desktop
-  state offers Edit profile.
+  Windows desktop packaging uses the space-safe Flutter entry. macOS and Linux
+  desktop packaging remap a Flutter SDK whose path contains spaces, using a
+  user-owned cache parent instead of shared `/tmp` when the checkout path has
+  spaces. Linux portable desktop fallback writes an application-menu entry.
+  Compact empty desktop state offers Edit profile. Compact mode keeps the
+  no-route control, warnings, and window chrome inside the 200px minimum width.
+  `quotabot check`
+  matches a built-in provider by id, so a custom display name cannot impersonate
+  a shipped adapter. `login` and `logout` accept the same display-case ids.
+  Loopback `/providers/` and `/health` reject unknown query parameters. The
+  LiteLLM router fails closed on out-of-range lease TTL or weight instead of
+  clamping. Install-smoke workflow dispatch accepts RC tags and upgrades those
+  from the latest stable 0.x release.
 
 ## 0.10.0-rc.6 - 2026-08-21
 

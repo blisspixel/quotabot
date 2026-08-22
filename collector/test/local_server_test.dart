@@ -991,6 +991,30 @@ void main() {
     }
   });
 
+  test('/providers and /health reject unknown query parameters', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final provider = await _getJson(
+        Uri.parse('$base/providers/claude?exclude=claude'),
+        expectedStatus: 400,
+      );
+      expect(provider['error'], contains('unknown query parameter'));
+
+      final health = await _getJson(
+        Uri.parse('$base/health?verbose=1'),
+        expectedStatus: 400,
+      );
+      expect(health['error'], contains('unknown query parameter'));
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('/providers resolves equal accounts by stable account key', () async {
     for (final accounts in const [
       ['zeta', 'alpha'],

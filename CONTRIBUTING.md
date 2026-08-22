@@ -37,6 +37,9 @@ pwsh tools/setup.ps1
 pwsh tools/check.ps1
 ```
 
+On macOS and Linux, `tools/setup.sh` and the desktop packagers remap a Flutter
+or Dart SDK whose path contains spaces before native-asset commands run.
+
 The complete desktop gate requires Windows symlink support for Flutter plugins,
 normally enabled through Windows Developer Mode. Source setup remains fail-soft:
 if that desktop prerequisite is unavailable, it skips the app and still builds
