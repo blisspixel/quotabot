@@ -376,8 +376,15 @@ $windowsArch = Get-QuotabotWindowsArchitecture
 
 if (-not $CliOnly -and -not $NoApp) {
   Write-Step 'Checking Windows desktop build tools'
-  if (Test-WindowsDesktopAtlAvailable) {
-    Write-Ok 'Visual Studio C++ ATL headers found'
+  $desktopBuildPrereqs = Get-WindowsDesktopBuildPrereqStatus
+  if ($desktopBuildPrereqs.AtlHeader) {
+    if (Test-WindowsDesktopPluginLinksAvailable) {
+      Write-Ok "Visual Studio C++ ATL headers and plugin symlink permission found in $($desktopBuildPrereqs.VisualStudioPath)"
+    } else {
+      $NoApp = $true
+      $desktopSkipped = $true
+      Write-Warn2 'Desktop source build skipped: plugin symlink permission is unavailable. Installing the exact checksum-verified portable release when published. Enable Windows Developer Mode or run from an elevated terminal to build the tray app from source.'
+    }
   } else {
     $NoApp = $true
     $desktopSkipped = $true
@@ -482,14 +489,37 @@ function Show-QuotabotFirstRun {
   $raw | & (Join-Path $PSScriptRoot 'setup_first_run.ps1')
 }
 
+function Get-QuotabotSourceReleaseTag {
+  param([string]$AppRoot = $app)
+
+  $manifest = Join-Path $AppRoot 'pubspec.yaml'
+  if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return $null }
+  foreach ($line in Get-Content -LiteralPath $manifest) {
+    if ($line -match '^\s*version:\s*((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\s*$') {
+      return "v$($Matches[1])"
+    }
+  }
+  return $null
+}
+
 function Install-QuotabotPortableDesktop {
   if ($windowsArch -ne 'x64') { return $null }
   $installed = Join-Path $installRoot 'desktop\quotabot.exe'
 
   $repo = if ($env:QUOTABOT_REPO) { $env:QUOTABOT_REPO } else { 'blisspixel/quotabot' }
-  $version = if ($env:QUOTABOT_VERSION) { $env:QUOTABOT_VERSION } else { 'latest' }
+  $sourceTag = Get-QuotabotSourceReleaseTag
+  $version = if ($env:QUOTABOT_VERSION) {
+    $env:QUOTABOT_VERSION
+  } elseif ($sourceTag) {
+    $sourceTag
+  } else {
+    'latest'
+  }
   if ($repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { return $null }
-  if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$') { return $null }
+  if ($version -ne 'latest' -and
+      $version -notmatch '^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+    return $null
+  }
 
   $asset = 'quotabot-windows-x64-desktop.zip'
   $url = if ($version -eq 'latest') {
@@ -513,6 +543,16 @@ function Install-QuotabotPortableDesktop {
     Expand-Archive -LiteralPath $zip -DestinationPath $expanded
     if (-not (Test-Path -LiteralPath (Join-Path $expanded 'quotabot.exe') -PathType Leaf)) {
       throw 'Portable desktop archive did not contain quotabot.exe'
+    }
+    $runningInstalled = @(Get-RunningDesktopApp $installed)
+    if ($runningInstalled.Count -gt 0) {
+      Write-Step 'Stopping the running desktop app for portable activation'
+      foreach ($proc in $runningInstalled) {
+        Stop-Process -Id $proc.Id -Force
+      }
+      foreach ($proc in $runningInstalled) {
+        try { Wait-Process -Id $proc.Id -Timeout 10 } catch {}
+      }
     }
     Install-QuotabotDesktopPayload `
       -SourceRoot $expanded `
@@ -542,9 +582,13 @@ function Start-QuotabotAfterSetup {
   if ($AllowDesktop -and
       $appExe -and
       (Test-Path -LiteralPath $appExe -PathType Leaf)) {
-    Write-Step 'Opening quotabot'
-    Start-Process -FilePath $appExe -WorkingDirectory (Split-Path -Parent $appExe) | Out-Null
-    Write-Ok 'Opened the desktop app'
+    if (@(Get-RunningDesktopApp $appExe).Count -eq 0) {
+      Write-Step 'Opening quotabot'
+      Start-Process -FilePath $appExe -WorkingDirectory (Split-Path -Parent $appExe) | Out-Null
+      Write-Ok 'Opened the desktop app'
+    } else {
+      Write-Ok 'Desktop app already running'
+    }
     return
   }
   Write-Step 'Opening quotabot top'

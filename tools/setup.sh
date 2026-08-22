@@ -186,10 +186,27 @@ show_first_run() {
     "$python_bin" "$script_dir/setup_first_run.py"
 }
 
+source_release_tag() {
+  local raw version
+  [ -f "$app/pubspec.yaml" ] || return 1
+  raw="$(awk '/^version:[[:space:]]*/ {print $2; exit}' "$app/pubspec.yaml")"
+  version="${raw%%+*}"
+  if [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+    printf 'v%s\n' "$version"
+    return 0
+  fi
+  return 1
+}
+
 install_portable_desktop() {
   local repo version asset url work archive sum expected actual dest expanded
   repo="${QUOTABOT_REPO:-blisspixel/quotabot}"
-  version="${QUOTABOT_VERSION:-latest}"
+  if [ -n "${QUOTABOT_VERSION:-}" ]; then
+    version="$QUOTABOT_VERSION"
+  else
+    version="$(source_release_tag || true)"
+    version="${version:-latest}"
+  fi
   case "$os" in
     darwin)
       [ "$arch" = arm64 ] || return 1
@@ -207,7 +224,7 @@ install_portable_desktop() {
   if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
     return 1
   fi
-  if [[ "$version" != "latest" && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+  if [[ "$version" != "latest" && ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
     return 1
   fi
   if [ "$version" = latest ]; then

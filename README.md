@@ -104,6 +104,13 @@ provider-owned cross-checks are in [Provider CLIs](docs/PROVIDER_CLIS.md).
 Portable desktop bundles are published for Windows, macOS, and Linux alongside
 the CLI. The app is optional. Windows signing and macOS Developer ID signing,
 notarization, and stapling are required 0.10.x release-readiness gates.
+The grouped Settings dialog includes the installed build and an explicit
+**Check for updates** action. It contacts GitHub only after that action, shows
+the latest candidate and latest stable release separately, and opens the chosen
+release so signing status, checksums, assets, and update instructions stay
+visible. Stable builds recommend stable updates without hiding newer previews;
+release candidates follow the preview channel. The app never checks
+automatically or prompts on launch.
 Verification, launch, update, rollback, and uninstall belong in [Desktop
 release bundles](docs/DESKTOP-DISTRIBUTION.md). Source setup and packaging are
 in [Building from source](docs/BUILDING.md).
@@ -121,6 +128,8 @@ tool and schema contract is in [AGENTS.md](AGENTS.md). See the
 - No model calls or reads of prompts, code, model output, or other user content.
 - Local metadata stays local. Live adapters contact only provider quota or
   model-list metadata endpoints; Antigravity may perform required onboarding.
+- The desktop update check reads public GitHub release metadata only after the
+  user invokes it. It sends no quota, account, history, prompt, or code data.
 - Routing fails soft, so callers can continue if quotabot is unavailable.
 
 Run `quotabot explain` to inspect files and network destinations used by each

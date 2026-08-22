@@ -70,7 +70,7 @@ foreach ($provider in @($snapshot.providers)) {
   $grouped[$key].Add($provider) | Out-Null
 }
 foreach ($key in $grouped.Keys) {
-  $rows = @($grouped[$key])
+  $rows = @($grouped[$key].ToArray())
   $name = if ($rows[0].display_name) { [string]$rows[0].display_name } else { $key }
   if (@($rows | Where-Object { Test-ReadyProvider -Provider $_ -Now $now }).Count -gt 0) {
     $ready.Add($name) | Out-Null

@@ -338,14 +338,24 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), contains('usage fell'));
     });
 
-    test('Antigravity still rejects a disappeared exhaustive model quota', () {
+    test('Antigravity admits a dynamic model catalog change', () {
       final prev = snapModels(antigravityProviderId, const [
         ModelQuota(model: 'Gemini', usedPercent: 20, resetsAt: 2000),
       ]);
       final fresh = snapModels(antigravityProviderId, const []);
 
-      expect(
-          detectQuotaDrift(fresh, prev), contains('model quota disappeared'));
+      expect(detectQuotaDrift(fresh, prev), isNull);
+    });
+
+    test('Antigravity still rejects impossible surviving model drift', () {
+      final prev = snapModels(antigravityProviderId, const [
+        ModelQuota(model: 'Gemini', usedPercent: 60, resetsAt: 2000),
+      ]);
+      final fresh = snapModels(antigravityProviderId, const [
+        ModelQuota(model: 'Gemini', usedPercent: 20, resetsAt: 2000),
+      ]);
+
+      expect(detectQuotaDrift(fresh, prev), contains('usage fell'));
     });
   });
 

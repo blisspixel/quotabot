@@ -341,7 +341,11 @@ State lives in the Antigravity globalStorage SQLite database at
   the whole table. A metered row (one that carries a reset window) whose fraction
   is unparseable still rejects the live table so a hidden sibling cannot overstate
   account headroom, and the adapter then fails soft to its documented fallback
-  instead of mixing partial live rows.
+  instead of mixing partial live rows. The provider can also add or remove
+  otherwise valid model rows between reads as rollout and account availability
+  change. A removed row no longer quarantines every surviving Antigravity quota;
+  surviving rows still receive reset and monotonicity validation, while an empty
+  or malformed live table still fails closed.
 - The local `userStatus` cache is this-machine state. It is used for account and
   plan discovery, and as an offline last-known fallback when live quota is
   unavailable. A successful live read is preferred and is not overridden by local

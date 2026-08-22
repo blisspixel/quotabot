@@ -44,11 +44,14 @@ const int _maxQuotaDriftDimensionCharacters = 96;
 /// non-monotonically; its real signal is per-model quota, checked elsewhere.
 const _syntheticWindowProviders = {antigravityProviderId};
 
-/// Providers whose model quotas are optional overlays on shared provider
-/// windows rather than an exhaustive list of independent model pools. Claude
-/// and Codex can add or remove a promotional or plan-specific scoped limit
-/// without invalidating the account-wide session and weekly evidence.
+/// Providers whose model-quota response can legitimately add or remove rows.
+/// Claude and Codex expose optional scoped overlays, while Antigravity's live
+/// model catalog varies with provider rollout and account availability. A
+/// surviving row still receives the normal monotonicity checks. An empty or
+/// malformed Antigravity response is rejected by the adapter before admission,
+/// so allowing a removed row does not turn missing quota into trusted evidence.
 const _optionalModelQuotaProviders = {
+  antigravityProviderId,
   claudeProviderId,
   codexProviderId,
 };
@@ -592,10 +595,8 @@ String? detectQuotaDrift(
     }
   }
   // Per-model pools keep the same monotonicity checks when a model survives in
-  // both snapshots. Antigravity's list is exhaustive, so disappearance is also
-  // drift. Claude and Codex scoped lists are optional, so addition or removal
-  // can reflect a legitimate plan-policy change without invalidating shared
-  // windows.
+  // both snapshots. Providers with dynamic or optional rows can add or remove
+  // a model without invalidating every surviving quota dimension.
   final prevModels = {
     for (final m in previous.modelQuotas) _modelQuotaDriftKey(m): m,
   };

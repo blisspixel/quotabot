@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-21. This file is the forward plan. It records brief shipped
+Updated 2026-08-22. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -40,7 +40,8 @@ by being correct, quiet, and predictable, not by being large.
   metadata to that provider's own metadata endpoint; Antigravity may also run
   its provider-required account onboarding request. An external alert webhook
   can send alert metadata only after the user explicitly enables an external
-  host.
+  host. Desktop release discovery may read public GitHub metadata only after a
+  user explicitly checks for updates; it never runs automatically.
 - **Bounded local writes.** Cache, history, OAuth rotation, profiles, manual
   entries, preferences, alerts, and routing leases are explicit local metadata
   writes. Machine outputs never include secrets.
@@ -114,7 +115,11 @@ a broad 0.x product to a boring 1.0:
    quality-of-life refinement, first-run and recovery polish, and dated native
    validation on Windows, macOS, and Linux. Compatibility work for an already
    claimed provider may improve truthful detection, but must not invent quota or
-   depend on an undocumented private endpoint.
+   depend on an undocumented private endpoint. Keep desktop maintenance quiet:
+   grouped Settings replaces the oversized scrolling menu, and release discovery
+   remains an explicit GitHub action that distinguishes preview from stable,
+   preserves the installed release channel, and uses one bounded request without
+   automatic checks or upgrade prompts.
 4. When the developer-controlled stabilization inventory is quiet, complete
    Windows and macOS signing below and run a signed 0.10.x rehearsal through
    clean install, update, rollback, and immutable publication. Reopen product

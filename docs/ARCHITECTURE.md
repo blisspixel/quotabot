@@ -684,6 +684,12 @@ leaves JSON standard output reserved for alert records.
   Antigravity) shows an inline Connect action for authentication or reconnection
   failures, so it can be reconnected from the app without a terminal. Automatic
   timeout, rate-limit, and service-error recovery does not show that action.
+- Desktop maintenance uses one responsive Settings dialog instead of a long
+  popup menu. Profile and provider visibility, display, refresh and alert, and
+  update controls are grouped into bounded sections. Release discovery is
+  user-triggered, validates a bounded GitHub response, distinguishes the newest
+  candidate from the newest stable release, and opens release details rather
+  than silently replacing a running binary. No update request runs at startup.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
   a route. Entry grows a short content-hugged quota window to the normal

@@ -134,7 +134,7 @@ Future<HttpServer> startLocalQuotabotServer({
       ..write(const JsonEncoder.withIndent('  ').convert(data));
   }
 
-  bool _rejectUnknownQuery(HttpRequest request) {
+  bool rejectUnknownQuery(HttpRequest request) {
     final unknownParameters = request.uri.queryParametersAll.keys.toList()
       ..sort();
     if (unknownParameters.isEmpty) return false;
@@ -992,11 +992,11 @@ Future<HttpServer> startLocalQuotabotServer({
       case '/suggest':
         await handleSuggest(request);
       case '/health':
-        if (_rejectUnknownQuery(request)) return;
+        if (rejectUnknownQuery(request)) return;
         writeJson(request, {'ok': true, 'generated_at': now()});
       default:
         if (path.startsWith('/providers/')) {
-          if (_rejectUnknownQuery(request)) return;
+          if (rejectUnknownQuery(request)) return;
           final rawName = Uri.decodeComponent(
             path.substring('/providers/'.length),
           );

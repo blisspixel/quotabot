@@ -6,7 +6,7 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
 ## The desktop widget
 
 - **Header buttons** (left to right): refresh now, open Quota Analytics
-  (bar-chart icon), collapse, the providers/settings menu, setup and help, and
+  (bar-chart icon), collapse, Settings, setup and help, and
   close. Hover for a tooltip on each.
 - **Move it:** drag the header bar or the cards area (the control buttons on the
   right are excluded). The expanded window measures its rendered cards and
@@ -16,12 +16,18 @@ setup see [SETUP.md](SETUP.md); for agent integration see [../AGENTS.md](../AGEN
   no-safe-route control beside the provider logos and status dots; expand to
   restore the full view. The route control opens the shared decision details,
   and keyboard traversal reaches horizontally clipped provider chips in order.
-- **Menu:** hide or show individual providers, set the refresh cadence (smart,
-  every 15 minutes, or every hour), choose the icon sort (default, alphabetical,
-  most available, most used), choose or manage a named profile, and toggle
-  always-on-top, taskbar visibility, notifications, and "Show account names".
-  Account names auto-hide for single-account providers and show only when a
-  provider has more than one account on screen.
+- **Settings:** one responsive dialog groups profiles and visible-provider
+  chips, display choices, refresh and alert controls, and updates. It replaces
+  the long scrolling overflow menu. Choose or manage a named profile, hide or
+  show provider cards, set cadence and provider order, select text size, and
+  toggle always-on-top, taskbar visibility, notifications, and "Show account
+  names". Account names auto-hide for single-account providers and show only
+  when a provider has more than one account on screen.
+- **Updates:** Settings shows the installed build. "Check for updates" is a
+  user-invoked GitHub read that shows the latest release candidate and stable
+  release separately, then opens the selected release for signing status,
+  checksums, assets, and install guidance. quotabot does not contact GitHub for
+  updates automatically and never prompts on launch.
 - **Setup/help:** shows the current setup state for supported providers,
   including key-based providers hidden from the main quota view until they are
   configured. A provider that supports quotabot's own login (Grok, Antigravity)

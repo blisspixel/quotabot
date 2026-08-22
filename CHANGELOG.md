@@ -4,6 +4,26 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+
+- Antigravity live model rollout changes no longer quarantine the whole account
+  when one otherwise valid model row disappears. Surviving model quotas still
+  receive drift validation, and empty or malformed live quota still fails
+  closed.
+- Desktop controls now use one responsive grouped Settings dialog instead of a
+  long overflow menu. Its explicit update check shows the installed build,
+  latest GitHub candidate, and latest stable release without checking or
+  prompting at startup. Stable installs recommend stable updates while still
+  exposing previews, preview installs follow the newest candidate, and the
+  bounded GitHub read now uses one whole-request deadline. Closing Settings
+  suppresses an in-flight result, and provider setup distinguishes rate limits
+  and temporary provider failures from login problems.
+- Source setup portable fallback selects the published release matching the
+  checkout version, including release candidates, stops only the exact running
+  installed app before transactional activation, and avoids duplicate launches.
+  Windows setup also detects missing Flutter plugin symlink permission before
+  starting a desktop compile.
+
 ## 0.10.0-rc.7 - 2026-08-22
 
 ### Fixed
