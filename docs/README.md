@@ -5,7 +5,7 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.6. The next work in the focused 0.10.x stabilization train is
+0.10.0-rc.7. The next work in the focused 0.10.x stabilization train is
 field-discovered correctness, recovery and quality-of-life refinement, and
 native validation. Signed release readiness follows once that inventory is
 quiet, without weakening existing checksums or provenance. The
@@ -13,10 +13,18 @@ quiet, without weakening existing checksums or provenance. The
 completion criteria, rationale, and place ahead of the remaining native 1.0
 evidence gates.
 
+Claude OAuth recovery is confirmed end to end in
+[issue #77](https://github.com/blisspixel/quotabot/issues/77). Release
+candidate 5 keeps HTTP 429 labeled as throttling instead of an expired login.
 Release candidate 6 covers exact transport identity and retry keys,
 profile/account isolation, transactional install and uninstall, explicit
 quotabot-only logout, duplicate-option handling, supplemental manual evidence,
-first-run deferral, and reset-reminder privacy and delivery lifecycle fixes.
+first-run deferral, and reset-reminder privacy and delivery lifecycle.
+Release candidate 7 carries the field round after rc.6: Grok and NVIDIA
+live-read diagnostics, Ollama cloud-offload honesty, compact first-run and
+200px recovery, exact `check`/`login`/`logout` identities, MCP Streamable HTTP
+401/413 admission, POSIX space-safe Flutter, LiteLLM fail-closed leases, and
+stacked pull-request CI. Changelog detail is in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Install and first success
 

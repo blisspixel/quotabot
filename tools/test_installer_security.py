@@ -39,7 +39,9 @@ class InstallerSecurityTests(unittest.TestCase):
             resolver,
         )
         self.assertNotIn('latest="${tags[0]}"', resolver)
-        self.assertIn('"$tag" != "$latest"', resolver)
+        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$", resolver)
+        self.assertIn('"$target" =~ -rc\\.', resolver)
+        self.assertIn('"$tag" != "$target"', resolver)
 
     def test_install_smoke_pins_the_resolved_tag_during_install(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
@@ -176,10 +178,22 @@ class InstallerSecurityTests(unittest.TestCase):
             windows_portable,
         )
         self.assertIn("Install-QuotabotDesktopPayload `", windows_portable)
+        self.assertIn("Get-QuotabotSourceReleaseTag", windows_portable)
+        self.assertIn("Get-RunningDesktopApp $installed", windows_portable)
         self.assertLess(
             windows_portable.index("Expand-Archive"),
+            windows_portable.index("Get-RunningDesktopApp $installed"),
+        )
+        self.assertLess(
+            windows_portable.index("Get-RunningDesktopApp $installed"),
             windows_portable.index("Install-QuotabotDesktopPayload `"),
         )
+
+        windows_launch = windows.split("function Start-QuotabotAfterSetup", 1)[1].split(
+            "function Invoke-QuotabotDoctor", 1
+        )[0]
+        self.assertIn("Get-RunningDesktopApp $appExe", windows_launch)
+        self.assertIn("Desktop app already running", windows_launch)
 
         posix_portable = posix.split("install_portable_desktop() {", 1)[1].split(
             "open_quotabot_after_setup() {", 1
@@ -187,7 +201,13 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertNotIn('[ -x "$dest/Contents/MacOS/quotabot" ]', posix_portable)
         self.assertNotIn('[ -x "$dest/quotabot" ]', posix_portable)
         self.assertIn("install_versioned_single", posix_portable)
-        self.assertIn("QUOTABOT_VERSION:-latest", posix_portable)
+        self.assertIn("source_release_tag", posix_portable)
+        self.assertIn('version="${version:-latest}"', posix_portable)
+
+        self.assertIn("function Get-QuotabotSourceReleaseTag", windows)
+        self.assertIn("source_release_tag()", posix)
+        self.assertIn('return "v$($Matches[1])"', windows)
+        self.assertIn("printf 'v%s\\n'", posix)
 
     def test_windows_install_smoke_uses_fail_closed_doctor_verification(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
@@ -253,6 +273,13 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("quotabot_mirror_dart_sdk()", helper)
         self.assertIn("cp -a --link", helper)
         self.assertIn("cp -al", helper)
+
+    def test_posix_desktop_packagers_map_spaced_dart_paths(self) -> None:
+        for name in ("package-linux.sh", "package-macos.sh", "setup.sh"):
+            script = (ROOT / "tools" / name).read_text(encoding="utf-8")
+            with self.subTest(script=name):
+                self.assertIn("posix-space-safe-dart.sh", script)
+                self.assertIn("quotabot_enable_space_safe_dart", script)
 
     def test_posix_installers_persist_local_bin_on_path(self) -> None:
         for path in (ROOT / "install.sh", ROOT / "tools" / "setup.sh"):
@@ -455,10 +482,10 @@ class InstallerSecurityTests(unittest.TestCase):
         windows = (ROOT / "install.ps1").read_text(encoding="utf-8")
 
         self.assertIn('VERSION="${QUOTABOT_VERSION:-latest}"', posix)
-        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+$", posix)
+        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$", posix)
         self.assertIn("releases/download/${VERSION}/${ASSET}", posix)
         self.assertIn("$env:QUOTABOT_VERSION", windows)
-        self.assertIn(r"'^v[0-9]+\.[0-9]+\.[0-9]+$'", windows)
+        self.assertIn(r"'^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'", windows)
         self.assertIn("releases/download/$version/$assetName", windows)
 
     def test_invalid_rollback_tag_fails_before_download(self) -> None:
@@ -492,6 +519,21 @@ class InstallerSecurityTests(unittest.TestCase):
         output = completed.stdout + completed.stderr
         self.assertIn("Invalid QUOTABOT_VERSION", output)
         self.assertNotIn("Downloading quotabot-", output)
+
+    def test_windows_space_safe_dart_does_not_use_world_writable_roots(self) -> None:
+        script = (ROOT / "tools" / "windows-space-safe-dart.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Join-Path $env:LOCALAPPDATA 'quotabot-build'", script)
+        self.assertIn("Join-Path $env:TEMP 'quotabot-build'", script)
+        self.assertNotIn("Join-Path $env:ProgramData 'quotabot-build'", script)
+        self.assertNotIn("Join-Path $env:SystemDrive 'quotabot-build'", script)
+
+    def test_windows_desktop_packager_uses_space_safe_flutter(self) -> None:
+        script = (ROOT / "tools" / "package-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("Enable-QuotabotSpaceSafeDart", script)
+        self.assertIn("-IncludeFlutter", script)
+        self.assertIn("Invoke-QuotabotFlutter", script)
 
     def test_package_helpers_preserve_old_artifacts_until_new_pair_is_ready(
         self,
@@ -619,17 +661,20 @@ class InstallerSecurityTests(unittest.TestCase):
         )
 
         self.assertIn("function Test-WindowsDesktopAtlAvailable", prereqs)
+        self.assertIn("function Test-WindowsDesktopPluginLinksAvailable", prereqs)
         self.assertIn("function Get-WindowsAtlHeaderForInstall", prereqs)
-        self.assertIn("Test-WindowsDesktopAtlAvailable", script)
+        self.assertIn("Get-WindowsDesktopBuildPrereqStatus", script)
+        self.assertIn("Test-WindowsDesktopPluginLinksAvailable", script)
         self.assertIn("$desktopSkipped = $true", script)
         self.assertIn("$NoApp = $true", script)
         self.assertIn("Desktop skipped: Visual Studio C++ ATL headers", script)
+        self.assertIn("plugin symlink permission is unavailable", script)
         self.assertLess(
-            script.index("Test-WindowsDesktopAtlAvailable"),
+            script.index("Get-WindowsDesktopBuildPrereqStatus"),
             script.index("Building the quotabot CLI"),
         )
         self.assertLess(
-            script.index("Test-WindowsDesktopAtlAvailable"),
+            script.index("Get-WindowsDesktopBuildPrereqStatus"),
             script.index("-Arguments @('build', 'windows', '--release', '--no-pub')"),
         )
         self.assertIn(

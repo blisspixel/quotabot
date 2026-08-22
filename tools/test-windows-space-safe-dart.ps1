@@ -7,6 +7,10 @@ $atl = Test-WindowsDesktopAtlAvailable
 if ($atl -ne $true -and $atl -ne $false) {
   throw 'Test-WindowsDesktopAtlAvailable did not return a boolean.'
 }
+$pluginLinks = Test-WindowsDesktopPluginLinksAvailable
+if ($pluginLinks -ne $true -and $pluginLinks -ne $false) {
+  throw 'Test-WindowsDesktopPluginLinksAvailable did not return a boolean.'
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $parent = Get-QuotabotSpaceFreeParent -PreferredRoot $repoRoot

@@ -24,6 +24,21 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ):
                 check_release_versions(root)
 
+    def test_stale_desktop_update_version_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root)
+            (root / "app/lib/update_check.dart").write_text(
+                "const String quotabotAppVersion = '1.2.2';\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"expected 1\.2\.3; mismatched Flutter update check=1\.2\.2",
+            ):
+                check_release_versions(root)
+
     def test_stale_readme_release_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -128,6 +143,9 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 f"const quotabotMcpVersion = '{source_version}';\n"
             ),
             "app/pubspec.yaml": f"version: {source_version}+17\n",
+            "app/lib/update_check.dart": (
+                f"const String quotabotAppVersion = '{source_version}';\n"
+            ),
             "app/pubspec.lock": (
                 "packages:\n"
                 "  quotabot_collector:\n"

@@ -75,17 +75,18 @@ class Tokens {
   /// previous refresh token forward when the response omits a new one.
   factory Tokens.fromOAuth(Map<String, dynamic> json, {String? priorRefresh}) {
     final access = json['access_token'];
-    if (access is! String || access.isEmpty) {
+    if (access is! String || access.trim().isEmpty) {
       throw StateError('token response returned no usable access token');
     }
     final expiresIn = (json['expires_in'] as num?)?.toInt();
-    // Treat an empty refresh_token as absent so a blank value cannot overwrite
-    // a still-valid prior refresh token and leave a dead grant.
-    final rotated = json['refresh_token'] as String?;
+    // Treat a missing or blank refresh_token as absent so whitespace cannot
+    // overwrite a still-valid prior refresh token and leave a dead grant.
+    final rotated = json['refresh_token'];
+    final rotatedRefresh =
+        rotated is String && rotated.trim().isNotEmpty ? rotated : null;
     return Tokens(
       accessToken: access,
-      refreshToken:
-          (rotated != null && rotated.isNotEmpty) ? rotated : priorRefresh,
+      refreshToken: rotatedRefresh ?? priorRefresh,
       expiresAt: expiresIn == null ? null : nowEpoch() + expiresIn,
     );
   }
@@ -429,12 +430,22 @@ class TokenStore {
   static void clear(String provider, {String? account}) {
     final f = _file(provider, account: account);
     _withFileLock(f, () {
-      if (f.existsSync()) f.deleteSync();
+      final type = FileSystemEntity.typeSync(f.path, followLinks: false);
+      if (type == FileSystemEntityType.file) {
+        f.deleteSync();
+      } else if (type == FileSystemEntityType.link) {
+        Link(f.path).deleteSync();
+      }
     });
   }
 
-  static bool exists(String provider, {String? account}) =>
-      _file(provider, account: account).existsSync();
+  static bool exists(String provider, {String? account}) {
+    final type = FileSystemEntity.typeSync(
+      _file(provider, account: account).path,
+      followLinks: false,
+    );
+    return type == FileSystemEntityType.file;
+  }
 
   static List<String> accounts(String provider) {
     final prefix = '${_providerFileName(provider)}_account_';

@@ -340,6 +340,48 @@ def _normalize_spend(value: Optional[str]) -> str:
     return "paid_api"
 
 
+def _bounded_int(
+    value: Any,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+    name: str,
+) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be an integer from {minimum} through {maximum}"
+        ) from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{name} must be {minimum} through {maximum}")
+    return parsed
+
+
+def _bounded_float(
+    value: Any,
+    *,
+    default: float,
+    minimum: float,
+    maximum: float,
+    name: str,
+) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name} must be a number from {minimum} through {maximum}"
+        ) from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{name} must be {minimum} through {maximum}")
+    return parsed
+
+
 def _bool_value(value: Any, default: bool) -> bool:
     if value is None:
         return default
@@ -415,10 +457,19 @@ class Policy:
             block_unsafe_passthrough,
             self.default_block_unsafe_passthrough,
         )
-        self.lease_seconds = max(15, min(int(lease_seconds), 3600))
-        self.lease_weight_percent = max(
-            1.0,
-            min(float(lease_weight_percent), 50.0),
+        self.lease_seconds = _bounded_int(
+            lease_seconds,
+            default=self.default_lease_seconds,
+            minimum=15,
+            maximum=3600,
+            name="lease_seconds",
+        )
+        self.lease_weight_percent = _bounded_float(
+            lease_weight_percent,
+            default=self.default_lease_weight_percent,
+            minimum=1.0,
+            maximum=50.0,
+            name="lease_weight_percent",
         )
         self.metrics_path = _safe_metrics_path(metrics_path)
         self.models = models or {}

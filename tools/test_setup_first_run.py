@@ -157,9 +157,23 @@ class SetupFirstRunTests(unittest.TestCase):
 
         output = render_first_run(snapshot, now=NOW)
 
-        self.assertIn("Already live (no extra login): Ollama, NVIDIA NIM", output)
+        self.assertIn("Already live (no extra login): Ollama", output)
+        self.assertIn("NVIDIA NIM - no fresh quota evidence", output)
         self.assertIn("Lemonade - no fresh quota evidence", output)
         self.assertNotIn("No extra login required", output)
+
+    def test_a_live_account_hides_a_sibling_login_for_the_same_provider(self) -> None:
+        live = provider("claude", name="Claude")
+        stale_login = provider(
+            "claude",
+            name="Claude",
+            ok=False,
+            error="quotabot login claude",
+        )
+        stale_login["account"] = "personal"
+        output = render_first_run({"providers": [stale_login, live]}, now=NOW)
+        self.assertIn("Already live (no extra login): Claude", output)
+        self.assertNotIn("quotabot login claude", output)
 
     def test_deduplicates_multi_account_output(self) -> None:
         live = provider("claude", name="Claude")

@@ -49,24 +49,33 @@ jobs:
           fi
 
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
-          target="${INPUT_TARGET_TAG:-$latest}"
-          if [[ "$target" != "$latest" ]]; then
-            echo "target_tag must equal the latest published release ($latest)." >&2
-            exit 1
-          fi
-          if [[ ! "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid target tag: $target" >&2
-            exit 1
+          if [[ -n "$INPUT_TARGET_TAG" ]]; then
+            target="$INPUT_TARGET_TAG"
+            if [[ ! "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+              echo "Invalid target tag: $target" >&2
+              exit 1
+            fi
+            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$target" >/dev/null
+          else
+            target="$latest"
+            if [[ ! "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "Latest published release is not a stable tag: $target" >&2
+              exit 1
+            fi
           fi
 
           previous="${INPUT_PREVIOUS_TAG:-}"
           if [[ -z "$previous" ]]; then
-            for tag in "${tags[@]}"; do
-              if [[ "$tag" != "$latest" && "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
-                previous="$tag"
-                break
-              fi
-            done
+            if [[ "$target" =~ -rc\. && "$latest" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+              previous="$latest"
+            else
+              for tag in "${tags[@]}"; do
+                if [[ "$tag" != "$target" && "$tag" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+                  previous="$tag"
+                  break
+                fi
+              done
+            fi
           fi
           if [[ ! "$previous" =~ ^v0\.[0-9]+\.[0-9]+$ || "$previous" == "$target" ]]; then
             echo "Invalid previous 0.x tag: $previous" >&2

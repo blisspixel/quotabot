@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:quotabot_collector/analysis.dart';
 import 'package:quotabot_collector/ansi.dart';
 import 'package:quotabot_collector/auth/google_auth.dart';
+import 'package:quotabot_collector/auth/oauth_util.dart';
 import 'package:quotabot_collector/auth/xai_auth.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
@@ -42,6 +44,7 @@ import 'single_instance.dart';
 import 'termshot.dart';
 import 'theme_spec.dart';
 import 'typography.dart';
+import 'update_check.dart';
 import 'window_geometry.dart';
 
 String _joinedCredentialProviderNames(List<String> providers) {
@@ -101,6 +104,7 @@ abstract interface class DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   });
 
   Future<void> schedule({
@@ -148,11 +152,13 @@ class FlutterDesktopNotificationClient implements DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   }) => plugin.show(
     id: id,
     title: title,
     body: body,
     notificationDetails: _details(providerLabel),
+    payload: payload,
   );
 
   @override
@@ -570,6 +576,10 @@ typedef ProfileSaver = void Function(QuotaProfile profile);
 
 typedef TrayInitializer = Future<void> Function();
 
+typedef UpdateChecker = Future<QuotabotUpdateStatus> Function();
+
+typedef ReleaseOpener = Future<void> Function(String url);
+
 const String trayUnavailableMessage = 'Tray unavailable; Close exits the app.';
 
 class _ResetReminder {
@@ -615,6 +625,10 @@ class Dashboard extends StatefulWidget {
   final DesktopNotificationClient? notificationClient;
   @visibleForTesting
   final FirstRunSession? firstRunSession;
+  @visibleForTesting
+  final UpdateChecker? updateChecker;
+  @visibleForTesting
+  final ReleaseOpener? releaseOpener;
   final RouteLeaseStore leaseStore;
 
   const Dashboard({super.key, required this.prefs, this.startupStorageWarning})
@@ -631,6 +645,8 @@ class Dashboard extends StatefulWidget {
       trayInitializer = null,
       notificationClient = null,
       firstRunSession = null,
+      updateChecker = null,
+      releaseOpener = null,
       leaseStore = const FileRouteLeaseStore();
 
   /// Builds a deterministic dashboard without desktop plugin or preference
@@ -652,6 +668,8 @@ class Dashboard extends StatefulWidget {
     this.trayInitializer,
     this.notificationClient,
     this.firstRunSession,
+    this.updateChecker,
+    this.releaseOpener,
     this.leaseStore = const NoopRouteLeaseStore(),
     this.startupStorageWarning,
   }) : _hostIntegration = false,
@@ -2235,15 +2253,14 @@ class _DashboardState extends State<Dashboard>
                 ),
               ),
             ),
-            if (needsCredentialFilterRepair)
-              TextButton(
-                onPressed: _showProfileEditor,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.only(top: 4),
-                  minimumSize: const Size(0, 30),
-                ),
-                child: const Text('Edit profile'),
+            TextButton(
+              onPressed: _showProfileEditor,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.only(top: 4),
+                minimumSize: const Size(0, 30),
               ),
+              child: const Text('Edit profile'),
+            ),
           ],
         ),
       ),
@@ -2271,7 +2288,12 @@ class _DashboardState extends State<Dashboard>
       return;
     }
     _firstRunReviewOpen = true;
+    final restoreCompact = _compact;
     try {
+      if (_compact) {
+        setState(() => _compact = false);
+        _applySize();
+      }
       final result = await showFirstRunWizard(
         context: context,
         entries: () => firstRunEntries(
@@ -2299,6 +2321,10 @@ class _DashboardState extends State<Dashboard>
       _applySize();
       unawaited(_persistPrefs());
     } finally {
+      if (restoreCompact && mounted && !_setupDone) {
+        setState(() => _compact = true);
+        _applySize();
+      }
       _firstRunReviewOpen = false;
     }
   }
@@ -2350,6 +2376,24 @@ class _DashboardState extends State<Dashboard>
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final showRouteProviderName = compactWidth >= (largeText ? 520 : 360);
     final routeIconOnly = largeText && compactWidth < 240;
+    const iconOnlyWidth = 28.0;
+    const readableRouteWidth = 72.0;
+    var warningCount = 0;
+    if (_preferenceStorageWarning != null) warningCount++;
+    if (_trayUnavailable) warningCount++;
+    if (_lastRefreshError != null) warningCount++;
+    final trailingChrome = 28.0 * 2 + 24.0 * warningCount;
+    final naturalRouteMax = routeIconOnly
+        ? iconOnlyWidth
+        : showRouteProviderName
+        ? (largeText ? 360.0 : 240.0)
+        : 100.0;
+    final routeBudget = math.min(
+      naturalRouteMax,
+      math.max(iconOnlyWidth, compactWidth - 18 - trailingChrome - 11 - 8),
+    );
+    final iconOnly = routeIconOnly || routeBudget < readableRouteWidth;
+    final routeMax = iconOnly ? iconOnlyWidth : routeBudget;
     return Container(
       constraints: BoxConstraints(minHeight: largeText ? 64 : 46),
       child: Padding(
@@ -2358,14 +2402,18 @@ class _DashboardState extends State<Dashboard>
           policy: WidgetOrderTraversalPolicy(),
           child: Row(
             children: [
-              _compactRouteButton(
-                suggestion,
-                routeLine,
-                routeDetail,
-                fg,
-                providerCounts: counts,
-                showProviderName: showRouteProviderName,
-                iconOnly: routeIconOnly,
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: routeMax),
+                child: _compactRouteButton(
+                  suggestion,
+                  routeLine,
+                  routeDetail,
+                  fg,
+                  providerCounts: counts,
+                  showProviderName: showRouteProviderName,
+                  iconOnly: iconOnly,
+                  maxWidth: routeMax,
+                ),
               ),
               const SizedBox(width: 5),
               Container(width: 1, height: 24, color: chrome.tileBorder),
@@ -2385,12 +2433,20 @@ class _DashboardState extends State<Dashboard>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (displayed.isEmpty)
-                          Text(
-                            'No providers',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: AppType.caption,
-                              color: muted,
+                          TextButton(
+                            onPressed: _showProfileEditor,
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(0, 30),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(
+                              'No providers - Edit profile',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.caption,
+                                color: muted,
+                              ),
                             ),
                           )
                         else
@@ -2417,37 +2473,10 @@ class _DashboardState extends State<Dashboard>
                 ),
               ),
               if (_preferenceStorageWarning != null)
-                Tooltip(
-                  message: _preferenceStorageWarning!,
-                  child: Semantics(
-                    label: _preferenceStorageWarning,
-                    liveRegion: true,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color: Color(0xFFD29922),
-                      ),
-                    ),
-                  ),
-                ),
-              if (_trayUnavailable)
-                Tooltip(
-                  message: trayUnavailableMessage,
-                  child: Semantics(
-                    label: trayUnavailableMessage,
-                    liveRegion: true,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(
-                        Icons.warning_amber_rounded,
-                        size: 16,
-                        color: Color(0xFFD29922),
-                      ),
-                    ),
-                  ),
-                ),
+                _compactStatusIcon(_preferenceStorageWarning!),
+              if (_trayUnavailable) _compactStatusIcon(trayUnavailableMessage),
+              if (_lastRefreshError != null)
+                _compactStatusIcon(_lastRefreshError!),
               _iconButton(
                 Icons.open_in_full_rounded,
                 muted,
@@ -2467,6 +2496,24 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
+  Widget _compactStatusIcon(String message) {
+    return Tooltip(
+      message: message,
+      child: Semantics(
+        label: message,
+        liveRegion: true,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: Icon(
+            Icons.warning_amber_rounded,
+            size: 16,
+            color: Color(0xFFD29922),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _compactRouteButton(
     RouteSuggestion suggestion,
     String routeLine,
@@ -2475,6 +2522,7 @@ class _DashboardState extends State<Dashboard>
     required Map<String, int> providerCounts,
     required bool showProviderName,
     required bool iconOnly,
+    double? maxWidth,
   }) {
     final chrome = AppChromeTheme.of(context);
     final candidate = suggestion.recommended;
@@ -2515,13 +2563,15 @@ class _DashboardState extends State<Dashboard>
           child: Container(
             constraints: BoxConstraints(
               minHeight: 30,
-              maxWidth: iconOnly
-                  ? 28
-                  : providerName == null
-                  ? 100
-                  : largeText
-                  ? 360
-                  : 240,
+              maxWidth:
+                  maxWidth ??
+                  (iconOnly
+                      ? 28
+                      : providerName == null
+                      ? 100
+                      : largeText
+                      ? 360
+                      : 240),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6),
             decoration: BoxDecoration(
@@ -2714,7 +2764,12 @@ class _DashboardState extends State<Dashboard>
         _toggleCompact,
         tooltip: 'Collapse',
       ),
-      _menuButton(muted),
+      _iconButton(
+        Icons.settings_outlined,
+        muted,
+        _showSettings,
+        tooltip: 'Settings',
+      ),
       _iconButton(
         Icons.help_outline_rounded,
         muted,
@@ -2847,7 +2902,10 @@ class _DashboardState extends State<Dashboard>
                   Text(suggestion.explanation),
                   const SizedBox(height: 12),
                   Text(
-                    suggestion.routingPolicy == 'quota_stretch'
+                    _activeProfile.routingPolicy ==
+                            ProfileRoutingPolicy.localOnly
+                        ? 'Profile policy: Local only'
+                        : suggestion.routingPolicy == 'quota_stretch'
                         ? 'Routing policy: Quota stretch at '
                               '${suggestion.quotaStretchThreshold.round()}% reserve'
                         : suggestion.routingPolicy == 'local_first'
@@ -2876,183 +2934,720 @@ class _DashboardState extends State<Dashboard>
     );
   }
 
-  Widget _menuButton(Color muted) {
-    final counts = _providerCounts(_profiledData);
-    return PopupMenuButton<String>(
-      tooltip: 'Menu: profiles, providers, and settings',
-      padding: EdgeInsets.zero,
-      position: PopupMenuPosition.under,
-      icon: Icon(Icons.more_vert_rounded, size: 16, color: muted),
-      onSelected: _onMenu,
-      itemBuilder: (_) => [
-        const PopupMenuItem(
-          enabled: false,
-          height: 26,
-          child: Text(
-            'PROFILE',
-            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
-          ),
-        ),
-        for (final profile in _profiles)
-          CheckedPopupMenuItem(
-            value: 'profile:${profile.name}',
-            checked: _activeProfile.name == profile.name,
-            child: Text(
-              profileLabel(profile),
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: AppType.subtitle),
-            ),
-          ),
-        PopupMenuItem(
-          value: 'profiles:manage',
-          child: Text(
-            'Manage profiles...',
-            style: const TextStyle(fontSize: AppType.subtitle),
-          ),
-        ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          enabled: false,
-          height: 26,
-          child: Text(
-            'PROVIDERS',
-            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
-          ),
-        ),
-        for (final q in _menuProviders)
-          CheckedPopupMenuItem(
-            value: 'show:${_menuVisibilityTarget(q, counts)}',
-            checked: _menuProviderVisible(q),
-            child: Text(
-              !_showAccounts
-                  ? q.displayName
-                  : (counts[q.provider] ?? 0) > 1
-                  ? _shouldShowAccount(q, counts)
-                        ? '${q.displayName} '
-                              '(${quotaAccountDisplayLabel(q.account)})'
-                        : '${q.displayName} (${counts[q.provider]} accounts)'
-                  : _shouldShowAccount(q, counts)
-                  ? '${q.displayName} '
-                        '(${quotaAccountDisplayLabel(q.account)})'
-                  : q.displayName,
-              style: const TextStyle(fontSize: AppType.subtitle),
-            ),
-          ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          enabled: false,
-          height: 26,
-          child: Text(
-            'REFRESH',
-            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
-          ),
-        ),
-        _cadenceItem('cad:smart', Cadence.smart, 'Smart (default)'),
-        _cadenceItem('cad:m15', Cadence.m15, 'Every 15 min'),
-        _cadenceItem('cad:h1', Cadence.h1, 'Every hour'),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          enabled: false,
-          height: 26,
-          child: Text(
-            'SORT',
-            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
-          ),
-        ),
-        _sortItem('sort:default', ProviderSort.defaultOrder, 'Default order'),
-        _sortItem('sort:alpha', ProviderSort.alphabetical, 'Alphabetical'),
-        _sortItem('sort:avail', ProviderSort.mostAvailable, 'Most available'),
-        _sortItem('sort:used', ProviderSort.mostUsed, 'Most used'),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          enabled: false,
-          height: 26,
-          child: Text(
-            'OPTIONS',
-            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
-          ),
-        ),
-        CheckedPopupMenuItem(
-          value: 'always_on_top',
-          checked: _alwaysOnTop,
-          child: Text(
-            'Always on top',
-            style: const TextStyle(fontSize: AppType.subtitle),
-          ),
-        ),
-        CheckedPopupMenuItem(
-          value: 'show_in_taskbar',
-          checked: _showInTaskbar,
-          child: Text(
-            'Show in taskbar',
-            style: const TextStyle(fontSize: AppType.subtitle),
-          ),
-        ),
-        CheckedPopupMenuItem(
-          value: 'notifications',
-          checked: _enableNotifications,
-          child: Text(
-            _notificationDeliveryFailed
-                ? 'Notifications: delivery failed'
-                : 'Notifications',
-            style: const TextStyle(fontSize: AppType.subtitle),
-          ),
-        ),
-        PopupMenuItem(
-          value: 'webhook',
-          child: Text(
-            _webhookUrl == null
-                ? 'Alert webhook...'
+  Future<void> _showSettings() async {
+    var checkingForUpdates = false;
+    var settingsOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            void apply(String action) {
+              _onMenu(action);
+              if (dialogContext.mounted) setDialogState(() {});
+            }
+
+            void closeThen(VoidCallback action) {
+              settingsOpen = false;
+              Navigator.of(dialogContext).pop();
+              action();
+            }
+
+            final counts = _providerCounts(_profiledData);
+            final providerOptions = _menuProviders;
+            final webhookLabel = _webhookUrl == null
+                ? 'Configure alert webhook'
                 : _lastWebhookDeliveryFailed ?? false
                 ? 'Alert webhook: delivery failed'
-                : 'Alert webhook: on',
-            style: const TextStyle(fontSize: AppType.subtitle),
-          ),
+                : 'Alert webhook: on';
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 20,
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 680,
+                  maxHeight: 720,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Settings',
+                              style: TextStyle(
+                                fontSize: AppType.title,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            key: const ValueKey('settings-close'),
+                            tooltip: 'Close settings',
+                            onPressed: () {
+                              settingsOpen = false;
+                              Navigator.of(dialogContext).pop();
+                            },
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 28,
+                              minHeight: 28,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final twoColumns = constraints.maxWidth >= 560;
+                              final sectionWidth = twoColumns
+                                  ? (constraints.maxWidth - 12) / 2
+                                  : constraints.maxWidth;
+                              return Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
+                                children: [
+                                  SizedBox(
+                                    width: constraints.maxWidth,
+                                    child: _settingsSection(
+                                      context,
+                                      title: 'Profiles and providers',
+                                      icon: Icons.tune_rounded,
+                                      children: [
+                                        DropdownButtonFormField<String>(
+                                          key: const ValueKey(
+                                            'settings-profile',
+                                          ),
+                                          initialValue: _activeProfile.name,
+                                          isExpanded: true,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Active profile',
+                                            border: OutlineInputBorder(),
+                                            isDense: true,
+                                          ),
+                                          items: [
+                                            for (final profile in _profiles)
+                                              DropdownMenuItem(
+                                                value: profile.name,
+                                                child: Text(
+                                                  profileLabel(profile),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                          ],
+                                          onChanged: (value) {
+                                            if (value == null) return;
+                                            _setActiveProfile(value);
+                                            setDialogState(() {});
+                                          },
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: OutlinedButton.icon(
+                                                key: const ValueKey(
+                                                  'settings-manage-profiles',
+                                                ),
+                                                onPressed: () => closeThen(
+                                                  () => unawaited(
+                                                    _showProfileEditor(),
+                                                  ),
+                                                ),
+                                                icon: const Icon(
+                                                  Icons
+                                                      .manage_accounts_outlined,
+                                                  size: 16,
+                                                ),
+                                                label: const Text(
+                                                  'Manage profiles',
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: OutlinedButton.icon(
+                                                key: const ValueKey(
+                                                  'settings-provider-help',
+                                                ),
+                                                onPressed: () => closeThen(
+                                                  () => unawaited(_showSetup()),
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.link_rounded,
+                                                  size: 16,
+                                                ),
+                                                label: const Text(
+                                                  'Connections',
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (providerOptions.isNotEmpty) ...[
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            'Visible provider cards',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.labelMedium,
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Wrap(
+                                            spacing: 6,
+                                            runSpacing: 2,
+                                            children: [
+                                              for (final quota
+                                                  in providerOptions)
+                                                FilterChip(
+                                                  key: ValueKey(
+                                                    'settings-provider-${_menuVisibilityTarget(quota, counts)}',
+                                                  ),
+                                                  selected:
+                                                      _menuProviderVisible(
+                                                        quota,
+                                                      ),
+                                                  onSelected: (_) => apply(
+                                                    'show:${_menuVisibilityTarget(quota, counts)}',
+                                                  ),
+                                                  label: Text(
+                                                    _settingsProviderLabel(
+                                                      quota,
+                                                      counts,
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: sectionWidth,
+                                    child: _settingsSection(
+                                      context,
+                                      title: 'Display',
+                                      icon: Icons.desktop_windows_outlined,
+                                      children: [
+                                        DropdownButtonFormField<ProviderSort>(
+                                          key: const ValueKey('settings-sort'),
+                                          initialValue: _sort,
+                                          isExpanded: true,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Provider order',
+                                            border: OutlineInputBorder(),
+                                            isDense: true,
+                                          ),
+                                          items: const [
+                                            DropdownMenuItem(
+                                              value: ProviderSort.defaultOrder,
+                                              child: Text('Default order'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: ProviderSort.alphabetical,
+                                              child: Text('Alphabetical'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: ProviderSort.mostAvailable,
+                                              child: Text('Most available'),
+                                            ),
+                                            DropdownMenuItem(
+                                              value: ProviderSort.mostUsed,
+                                              child: Text('Most used'),
+                                            ),
+                                          ],
+                                          onChanged: (value) {
+                                            if (value == null) return;
+                                            _setSort(value);
+                                            setDialogState(() {});
+                                          },
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Text size',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelMedium,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Wrap(
+                                          spacing: 6,
+                                          children: [
+                                            _settingsChoice<TextSize>(
+                                              key: const ValueKey(
+                                                'settings-text-small',
+                                              ),
+                                              label: 'Small',
+                                              value: TextSize.small,
+                                              selected: _textSize,
+                                              onSelected: _setTextSize,
+                                              refresh: setDialogState,
+                                            ),
+                                            _settingsChoice<TextSize>(
+                                              key: const ValueKey(
+                                                'settings-text-medium',
+                                              ),
+                                              label: 'Medium',
+                                              value: TextSize.medium,
+                                              selected: _textSize,
+                                              onSelected: _setTextSize,
+                                              refresh: setDialogState,
+                                            ),
+                                            _settingsChoice<TextSize>(
+                                              key: const ValueKey(
+                                                'settings-text-large',
+                                              ),
+                                              label: 'Large',
+                                              value: TextSize.large,
+                                              selected: _textSize,
+                                              onSelected: _setTextSize,
+                                              refresh: setDialogState,
+                                            ),
+                                          ],
+                                        ),
+                                        _settingsSwitch(
+                                          key: const ValueKey(
+                                            'settings-always-on-top',
+                                          ),
+                                          label: 'Always on top',
+                                          value: _alwaysOnTop,
+                                          onChanged: (_) =>
+                                              apply('always_on_top'),
+                                        ),
+                                        _settingsSwitch(
+                                          key: const ValueKey(
+                                            'settings-show-taskbar',
+                                          ),
+                                          label: 'Show in taskbar',
+                                          value: _showInTaskbar,
+                                          onChanged: (_) =>
+                                              apply('show_in_taskbar'),
+                                        ),
+                                        _settingsSwitch(
+                                          key: const ValueKey(
+                                            'settings-show-accounts',
+                                          ),
+                                          label: 'Show account names',
+                                          value: _showAccounts,
+                                          onChanged: (_) =>
+                                              apply('show_accounts'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: sectionWidth,
+                                    child: _settingsSection(
+                                      context,
+                                      title: 'Refresh and alerts',
+                                      icon: Icons.notifications_none_rounded,
+                                      children: [
+                                        Text(
+                                          'Refresh cadence',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelMedium,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Wrap(
+                                          spacing: 6,
+                                          children: [
+                                            _settingsChoice<Cadence>(
+                                              key: const ValueKey(
+                                                'settings-cadence-smart',
+                                              ),
+                                              label: 'Smart',
+                                              value: Cadence.smart,
+                                              selected: _cadence,
+                                              onSelected: _setCadence,
+                                              refresh: setDialogState,
+                                            ),
+                                            _settingsChoice<Cadence>(
+                                              key: const ValueKey(
+                                                'settings-cadence-15m',
+                                              ),
+                                              label: '15 min',
+                                              value: Cadence.m15,
+                                              selected: _cadence,
+                                              onSelected: _setCadence,
+                                              refresh: setDialogState,
+                                            ),
+                                            _settingsChoice<Cadence>(
+                                              key: const ValueKey(
+                                                'settings-cadence-hourly',
+                                              ),
+                                              label: 'Hourly',
+                                              value: Cadence.h1,
+                                              selected: _cadence,
+                                              onSelected: _setCadence,
+                                              refresh: setDialogState,
+                                            ),
+                                          ],
+                                        ),
+                                        _settingsSwitch(
+                                          key: const ValueKey(
+                                            'settings-notifications',
+                                          ),
+                                          label: _notificationDeliveryFailed
+                                              ? 'Notifications: delivery failed'
+                                              : 'Notifications',
+                                          value: _enableNotifications,
+                                          onChanged: (_) =>
+                                              apply('notifications'),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            key: const ValueKey(
+                                              'settings-webhook',
+                                            ),
+                                            onPressed: () => closeThen(
+                                              () => unawaited(
+                                                _showWebhookDialog(),
+                                              ),
+                                            ),
+                                            icon: const Icon(
+                                              Icons.webhook_outlined,
+                                              size: 16,
+                                            ),
+                                            label: Text(webhookLabel),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: sectionWidth,
+                                    child: _settingsSection(
+                                      context,
+                                      title: 'Updates',
+                                      icon: Icons.system_update_alt_rounded,
+                                      children: [
+                                        const Text(
+                                          'Installed build: $quotabotAppVersion',
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'GitHub is contacted only when you use '
+                                          'one of these actions.',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodySmall,
+                                        ),
+                                        const SizedBox(height: 10),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: FilledButton.tonalIcon(
+                                            key: const ValueKey(
+                                              'settings-check-updates',
+                                            ),
+                                            onPressed: checkingForUpdates
+                                                ? null
+                                                : () async {
+                                                    setDialogState(
+                                                      () => checkingForUpdates =
+                                                          true,
+                                                    );
+                                                    await _checkForUpdates(
+                                                      dialogContext,
+                                                      () => settingsOpen,
+                                                    );
+                                                    if (dialogContext.mounted) {
+                                                      setDialogState(
+                                                        () =>
+                                                            checkingForUpdates =
+                                                                false,
+                                                      );
+                                                    }
+                                                  },
+                                            icon: checkingForUpdates
+                                                ? const SizedBox(
+                                                    width: 14,
+                                                    height: 14,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                        ),
+                                                  )
+                                                : const Icon(
+                                                    Icons.refresh_rounded,
+                                                    size: 16,
+                                                  ),
+                                            label: Text(
+                                              checkingForUpdates
+                                                  ? 'Checking GitHub releases'
+                                                  : 'Check for updates',
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: TextButton(
+                                            key: const ValueKey(
+                                              'settings-open-releases',
+                                            ),
+                                            onPressed: () => unawaited(
+                                              _openRelease(quotabotReleasesUrl),
+                                            ),
+                                            child: const Text(
+                                              'Open all GitHub releases',
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
-        CheckedPopupMenuItem(
-          value: 'show_accounts',
-          checked: _showAccounts,
-          child: Text(
-            'Show account names',
-            style: const TextStyle(fontSize: AppType.subtitle),
-          ),
+      );
+    } finally {
+      settingsOpen = false;
+    }
+  }
+
+  String _settingsProviderLabel(ProviderQuota quota, Map<String, int> counts) {
+    if (!_showAccounts) return quota.displayName;
+    if ((counts[quota.provider] ?? 0) > 1) {
+      return _shouldShowAccount(quota, counts)
+          ? '${quota.displayName} (${quotaAccountDisplayLabel(quota.account)})'
+          : '${quota.displayName} (${counts[quota.provider]} accounts)';
+    }
+    return _shouldShowAccount(quota, counts)
+        ? '${quota.displayName} (${quotaAccountDisplayLabel(quota.account)})'
+        : quota.displayName;
+  }
+
+  Widget _settingsSection(
+    BuildContext context, {
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    final chrome = AppChromeTheme.of(context);
+    return Material(
+      color: chrome.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: chrome.tileBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: chrome.muted),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: AppType.subtitle,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            ...children,
+          ],
         ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          enabled: false,
-          height: 26,
-          child: Text(
-            'TEXT SIZE',
-            style: TextStyle(fontSize: AppType.label, letterSpacing: 0.6),
-          ),
-        ),
-        _textSizeItem('text:small', TextSize.small, 'Small'),
-        _textSizeItem('text:medium', TextSize.medium, 'Medium'),
-        _textSizeItem('text:large', TextSize.large, 'Large'),
-      ],
+      ),
     );
   }
 
-  PopupMenuItem<String> _textSizeItem(String value, TextSize t, String label) =>
-      CheckedPopupMenuItem(
-        value: value,
-        checked: _textSize == t,
-        child: Text(label, style: const TextStyle(fontSize: AppType.subtitle)),
-      );
+  Widget _settingsSwitch({
+    required Key key,
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) => SwitchListTile.adaptive(
+    key: key,
+    value: value,
+    onChanged: onChanged,
+    title: Text(label, style: const TextStyle(fontSize: AppType.bodySmall)),
+    dense: true,
+    contentPadding: EdgeInsets.zero,
+  );
 
-  PopupMenuItem<String> _cadenceItem(String value, Cadence c, String label) =>
-      CheckedPopupMenuItem(
-        value: value,
-        checked: _cadence == c,
-        child: Text(label, style: const TextStyle(fontSize: AppType.subtitle)),
-      );
+  Widget _settingsChoice<T>({
+    required Key key,
+    required String label,
+    required T value,
+    required T selected,
+    required ValueChanged<T> onSelected,
+    required StateSetter refresh,
+  }) => ChoiceChip(
+    key: key,
+    label: Text(label),
+    selected: value == selected,
+    onSelected: (_) {
+      onSelected(value);
+      refresh(() {});
+    },
+  );
 
-  PopupMenuItem<String> _sortItem(String value, ProviderSort s, String label) =>
-      CheckedPopupMenuItem(
-        value: value,
-        checked: _sort == s,
-        child: Text(label, style: const TextStyle(fontSize: AppType.subtitle)),
+  Future<void> _openRelease(String url) async {
+    final opener = widget.releaseOpener ?? openInBrowser;
+    await opener(url);
+  }
+
+  Future<void> _checkForUpdates(
+    BuildContext launchContext,
+    bool Function() shouldPresent,
+  ) async {
+    try {
+      final status = await (widget.updateChecker ?? checkQuotabotUpdates)();
+      if (!mounted || !launchContext.mounted || !shouldPresent()) return;
+      await showDialog<void>(
+        context: launchContext,
+        builder: (resultContext) {
+          final newest = status.latest;
+          final recommended = status.recommended;
+          final relation = recommended == null
+              ? null
+              : compareQuotabotVersions(
+                  recommended.version,
+                  status.currentVersion,
+                );
+          final summary = recommended == null
+              ? status.previewAvailable
+                    ? 'No stable release appeared in this GitHub response. '
+                          'A newer preview is available if you choose to test it.'
+                    : 'No stable release appeared in this GitHub response.'
+              : relation! > 0
+              ? 'A newer ${recommended.prerelease ? 'preview' : 'stable'} '
+                    'GitHub release is available.'
+              : relation == 0
+              ? status.previewAvailable && newest.tag != recommended.tag
+                    ? 'This build matches the latest stable release. A newer '
+                          'preview is also available.'
+                    : 'This build matches its latest GitHub release channel.'
+              : 'This build is newer than its latest GitHub release channel.';
+          return AlertDialog(
+            title: Text(
+              recommended == null
+                  ? 'No stable update found'
+                  : status.updateAvailable
+                  ? 'Update available'
+                  : 'quotabot is current',
+            ),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(summary),
+                  const SizedBox(height: 12),
+                  Text('Installed build: ${status.currentVersion}'),
+                  Text(
+                    '${newest.prerelease ? 'Latest preview' : 'Latest release'}: '
+                    '${newest.version}',
+                  ),
+                  if (status.stable != null && status.stable!.tag != newest.tag)
+                    Text('Latest stable: ${status.stable!.version}'),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Open the release to review signing status, checksums, '
+                    'assets, and update instructions.',
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(resultContext).pop(),
+                child: const Text('Close'),
+              ),
+              if (recommended != null &&
+                  status.stable != null &&
+                  status.stable!.tag != recommended.tag)
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(resultContext).pop();
+                    unawaited(_openRelease(status.stable!.url));
+                  },
+                  child: const Text('Open stable release'),
+                ),
+              if (newest.tag != recommended?.tag)
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(resultContext).pop();
+                    unawaited(_openRelease(newest.url));
+                  },
+                  child: const Text('Open preview release'),
+                ),
+              if (recommended != null)
+                FilledButton(
+                  onPressed: () {
+                    Navigator.of(resultContext).pop();
+                    unawaited(_openRelease(recommended.url));
+                  },
+                  child: Text(
+                    recommended.prerelease
+                        ? 'Open preview update'
+                        : 'Open stable update',
+                  ),
+                ),
+            ],
+          );
+        },
       );
+    } catch (error) {
+      if (!mounted || !launchContext.mounted || !shouldPresent()) return;
+      final message = error is UpdateCheckException
+          ? error.message
+          : 'Could not check GitHub releases';
+      await showDialog<void>(
+        context: launchContext,
+        builder: (resultContext) => AlertDialog(
+          title: const Text('Update check failed'),
+          content: Text('$message. Try again or open the releases page.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(resultContext).pop(),
+              child: const Text('Close'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(resultContext).pop();
+                unawaited(_openRelease(quotabotReleasesUrl));
+              },
+              child: const Text('Open releases'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 
   void _onMenu(String value) {
     if (value.startsWith('profile:')) {
@@ -3598,6 +4193,7 @@ class _DashboardState extends State<Dashboard>
             title: 'Quota reset soon',
             body: reminder.body,
             providerLabel: reminder.providerLabel,
+            payload: quotaResetReminderPayload,
           );
           ledgerChanged = _markResetReminderHandled(reminder) || ledgerChanged;
         } catch (_) {
@@ -4109,7 +4705,15 @@ class _DashboardState extends State<Dashboard>
       return q.active ? ('in use', green) : ('idle', blue);
     }
     if (q.driftReason != null) return ('provider drift', errorColor);
-    if (!q.ok) return ('no live data', grey);
+    if (!q.ok) {
+      if (q.pipeHealth == providerPipeHealthThrottled) {
+        return (q.httpStatus == 429 ? 'rate limited' : 'provider slow', amber);
+      }
+      if (q.pipeHealth == providerPipeHealthDegraded) {
+        return ('provider error', amber);
+      }
+      return ('no live data', grey);
+    }
     if (q.stale) return ('cached', amber);
     if (q.suspect != null) return ('review', amber);
     if (q.asOf <= 0 || q.asOf > now + kQuotaEvidenceClockSkewSeconds) {

@@ -27,14 +27,20 @@ prints the repair step. If Dart is missing or `dart build cli` fails, setup
 downloads the checksum-verified release CLI instead of exiting. If that
 download also fails and Dart is present, it installs a `dart run` shim from
 this checkout. Re-run the same command after adding the tools to
-install the desktop app. On Windows that is Visual Studio C++ ATL; on macOS,
-Xcode command-line tools; on Linux, clang, cmake, ninja, pkg-config, and GTK 3.
-Setup also enables the matching Flutter desktop target before building.
+install the desktop app. On Windows that is Visual Studio C++ ATL plus plugin
+symlink permission from Windows Developer Mode or an elevated terminal; on
+macOS, Xcode command-line tools; on Linux, clang, cmake, ninja, pkg-config, and
+GTK 3. Setup checks both Windows conditions before compiling and uses the exact
+checksum-verified portable release matching the checkout when source desktop
+prerequisites are unavailable and that release has been published. Setup also
+enables the matching Flutter desktop target before building.
 `dart build cli` native-asset hooks fail when the Dart SDK path contains spaces
 (a typical `C:\Users\First Last\...` or `/Users/First Last/...` profile);
-setup and the CLI packagers hardlink or copy the Dart SDK into a space-free
-directory for that compile. Junctions, subst drives, and 8.3 short names are
-not enough, because Dart reports the long path.
+setup and the packagers hardlink or copy the Dart SDK into a space-free
+directory for that compile. Desktop packagers on every OS also remap a Flutter
+SDK whose path contains spaces: Windows uses a junction view, and macOS/Linux
+copy the launcher scripts and dart-sdk into a space-free tree. Junctions, subst
+drives, and 8.3 short names are not enough, because Dart reports the long path.
 
 The CLI command is exposed through your per-user bin
 (`%LOCALAPPDATA%\quotabot\bin` on Windows, `~/.local/bin` on macOS and Linux).
@@ -93,9 +99,11 @@ Notes:
   different native build as that x64 asset. Add `-NoArchive` for a build-only
   check. The desktop notification plugin uses Visual Studio ATL headers; if a
   build reports `atlbase.h` missing, modify Visual Studio Build Tools and add C++
-  ATL support for your installed MSVC toolset. `-PackageOnly` archives that exact
-  existing bundle without resolving Flutter or rebuilding it. `-NoArchive` and
-  `-PackageOnly` are mutually exclusive.
+  ATL support for your installed MSVC toolset. If Flutter reports that building
+  with plugins requires symlink support, enable Windows Developer Mode or use an
+  elevated terminal. `-PackageOnly` archives that exact existing bundle without
+  resolving Flutter or rebuilding it. `-NoArchive` and `-PackageOnly` are
+  mutually exclusive.
 - **macOS:** `bash tools/package-macos.sh` verifies the committed lockfile, then
   runs `flutter build macos --release --no-pub`
   on a macOS host, verifies the `.app` bundle, and writes a portable desktop ZIP

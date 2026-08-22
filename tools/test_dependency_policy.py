@@ -204,6 +204,22 @@ class DependencyPolicyTest(unittest.TestCase):
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("tools.test_archive_dependabot_advisory", ci)
 
+    def test_quality_workflows_run_on_stacked_pull_requests(self) -> None:
+        workflows = (
+            "ci.yml",
+            "codeql.yml",
+            "dependency-review.yml",
+            "gitleaks.yml",
+        )
+        limiter = re.compile(r"(?m)^  pull_request:\n    branches: \[main\]$")
+        for name in workflows:
+            with self.subTest(workflow=name):
+                text = (ROOT / ".github" / "workflows" / name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertRegex(text, r"(?m)^  pull_request:\s*$")
+                self.assertIsNone(limiter.search(text))
+
     def test_litellm_resolver_uses_the_supported_python_line(self) -> None:
         metadata = tomllib.loads(
             (ROOT / "integrations" / "litellm" / "pyproject.toml").read_text(
@@ -330,8 +346,8 @@ class DependencyPolicyTest(unittest.TestCase):
             "package-cli.ps1": ("dart pub get --enforce-lockfile",),
             "package-cli.sh": ("dart pub get --enforce-lockfile",),
             "package-windows.ps1": (
-                "flutter pub get --enforce-lockfile",
-                "flutter build windows --release --no-pub",
+                "'pub', 'get', '--enforce-lockfile'",
+                "'build', 'windows', '--release', '--no-pub'",
             ),
             "package-macos.sh": (
                 "flutter pub get --enforce-lockfile",

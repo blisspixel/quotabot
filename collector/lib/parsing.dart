@@ -942,19 +942,23 @@ List<_AntigravityLiveQuotaRow>? _antigravityLiveQuotaRows(
     if (quotaInfo is! Map) return null;
     final remainingFraction = _fraction(quotaInfo['remainingFraction']);
     final resetsAt = parseReset(quotaInfo['resetTime']);
+    final exhausted = quotaInfo['isExhausted'];
+    if (exhausted != null && exhausted is! bool) return null;
     if (resetsAt == null || resetsAt <= 0) {
       // No rolling window. That is a non-metered helper only when it also shows
       // no consumption (a full or absent fraction, like the tab-completion and
       // chat rows). A row that shows real consumption but carries no reset is an
       // incomplete metered pool; skipping it would drop a possibly-binding window
       // and overstate headroom, so fail the whole table closed instead.
+      // `isExhausted: true` without a reset is the same incomplete metered case.
+      if (exhausted == true) return null;
       if (remainingFraction == null || remainingFraction >= 1) continue;
       return null;
     }
     if (remainingFraction == null) return null;
     out.add((
       model: entry.key.toString(),
-      remainingFraction: remainingFraction,
+      remainingFraction: exhausted == true ? 0 : remainingFraction,
       resetsAt: resetsAt,
     ));
   }
@@ -1153,11 +1157,10 @@ List<QuotaWindow> cursorWindows(dynamic usageData, int now) {
       final resetsAt = parseReset(block['resetDate']);
       final label = (block['displayName'] ?? 'usage').toString().toLowerCase();
       final usedP = pct ?? _ratioPercent(used, limit);
-      if (usedP != null || resetsAt != null) {
-        windows.add(
-          QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
-        );
-      }
+      if (usedP == null) continue;
+      windows.add(
+        QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
+      );
     }
   }
 
@@ -1582,11 +1585,10 @@ List<QuotaWindow> kiroWindows(dynamic usageState, int now) {
     final resetsAt = parseReset(block['resetDate']);
     final label = (block['displayName'] ?? 'Credits').toString().toLowerCase();
     final usedP = pct ?? _ratioPercent(used, limit);
-    if (usedP != null || resetsAt != null) {
-      windows.add(
-        QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
-      );
-    }
+    if (usedP == null) continue;
+    windows.add(
+      QuotaWindow(label: label, usedPercent: usedP, resetsAt: resetsAt),
+    );
   }
   return windows;
 }
@@ -1852,12 +1854,8 @@ List<int> grpcMessage(Uint8List resp) {
       if (flag != 0x80 || message == null || offset != resp.length) {
         return const [];
       }
-      final trailer = ascii.decode(payload, allowInvalid: true);
-      final status = RegExp(
-        r'(?:^|\r?\n)grpc-status:\s*([0-9]+)\s*(?:\r?\n|$)',
-        caseSensitive: false,
-      ).firstMatch(trailer);
-      if (status == null || status.group(1) != '0') return const [];
+      final status = _grpcWebTrailerStatusFromPayload(payload);
+      if (status != 0) return const [];
       continue;
     }
 
@@ -1867,6 +1865,42 @@ List<int> grpcMessage(Uint8List resp) {
     message = payload;
   }
   return message ?? const [];
+}
+
+/// gRPC-web unary trailer status, when the body is framed well enough to read
+/// one. A missing, truncated, or malformed trailer is not a status.
+int? grpcWebTrailerStatus(Uint8List resp) {
+  var offset = 0;
+  var sawData = false;
+  while (offset < resp.length) {
+    if (resp.length - offset < 5) return null;
+    final flag = resp[offset];
+    final len = (resp[offset + 1] << 24) |
+        (resp[offset + 2] << 16) |
+        (resp[offset + 3] << 8) |
+        (resp[offset + 4]);
+    offset += 5;
+    if (len < 0 || len > resp.length - offset) return null;
+    final payload = resp.sublist(offset, offset + len);
+    offset += len;
+    if ((flag & 0x80) != 0) {
+      if (flag != 0x80 || !sawData || offset != resp.length) return null;
+      return _grpcWebTrailerStatusFromPayload(payload);
+    }
+    if (flag != 0) return null;
+    sawData = true;
+  }
+  return null;
+}
+
+int? _grpcWebTrailerStatusFromPayload(List<int> payload) {
+  final trailer = ascii.decode(payload, allowInvalid: true);
+  final status = RegExp(
+    r'(?:^|\r?\n)grpc-status:\s*([0-9]+)\s*(?:\r?\n|$)',
+    caseSensitive: false,
+  ).firstMatch(trailer);
+  if (status == null) return null;
+  return int.tryParse(status.group(1)!);
 }
 
 /// Parses the Grok billing protobuf into a single shared weekly usage window.

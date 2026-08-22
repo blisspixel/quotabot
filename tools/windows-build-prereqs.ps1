@@ -98,15 +98,35 @@ function Test-WindowsDesktopAtlAvailable {
   return $false
 }
 
+function Test-WindowsDesktopPluginLinksAvailable {
+  $testRoot = Join-Path ([IO.Path]::GetTempPath()) "quotabot-symlink-$([guid]::NewGuid().ToString('N'))"
+  $target = Join-Path $testRoot 'target'
+  $link = Join-Path $testRoot 'link'
+  try {
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    New-Item -ItemType SymbolicLink -Path $link -Target $target -ErrorAction Stop | Out-Null
+    return Test-Path -LiteralPath $link -PathType Container
+  } catch {
+    return $false
+  } finally {
+    Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Assert-WindowsDesktopBuildPrereqs {
   if ($IsWindows -eq $false) { return }
   $status = Get-WindowsDesktopBuildPrereqStatus
-  if ($status.AtlHeader) { return $status }
-
-  $selected = if ($status.VisualStudioPath) {
-    " Selected Visual Studio instance: $($status.VisualStudioPath)."
-  } else {
-    ' No Visual Studio instance with MSVC tools was found.'
+  if (-not $status.AtlHeader) {
+    $selected = if ($status.VisualStudioPath) {
+      " Selected Visual Studio instance: $($status.VisualStudioPath)."
+    } else {
+      ' No Visual Studio instance with MSVC tools was found.'
+    }
+    throw "Windows desktop builds require the Visual Studio C++ ATL headers (atlbase.h), used by flutter_local_notifications_windows.$selected In Visual Studio Installer, modify that Build Tools instance and add C++ ATL support for its MSVC toolset, then re-run. Use -CliOnly or -NoApp when you only need the CLI."
   }
-  throw "Windows desktop builds require the Visual Studio C++ ATL headers (atlbase.h), used by flutter_local_notifications_windows.$selected In Visual Studio Installer, modify that Build Tools instance and add C++ ATL support for its MSVC toolset, then re-run. Use -CliOnly or -NoApp when you only need the CLI."
+  if (-not (Test-WindowsDesktopPluginLinksAvailable)) {
+    throw 'Windows desktop builds require plugin symlink permission. Enable Windows Developer Mode or run setup from an elevated terminal, then re-run. Use -CliOnly or -NoApp when you only need the CLI.'
+  }
+  return $status
 }

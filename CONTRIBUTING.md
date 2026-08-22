@@ -37,6 +37,9 @@ pwsh tools/setup.ps1
 pwsh tools/check.ps1
 ```
 
+On macOS and Linux, `tools/setup.sh` and the desktop packagers remap a Flutter
+or Dart SDK whose path contains spaces before native-asset commands run.
+
 The complete desktop gate requires Windows symlink support for Flutter plugins,
 normally enabled through Windows Developer Mode. Source setup remains fail-soft:
 if that desktop prerequisite is unavailable, it skips the app and still builds
@@ -60,7 +63,8 @@ flutter test
 ## Before you open a pull request
 
 CI runs static policy, both Dart packages, the MCP clients, the LiteLLM router,
-coverage floors, and native packaging. Run the portable gates locally first.
+coverage floors, and native packaging. Stacked pull requests get the same
+quality workflows as PRs into main. Run the portable gates locally first.
 The exact platform package and readiness commands are in
 [Building from source](docs/BUILDING.md#build-a-release-binary).
 On Windows, `pwsh tools/check.ps1` is the equivalent complete gate and is the

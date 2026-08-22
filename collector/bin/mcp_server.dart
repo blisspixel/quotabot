@@ -76,7 +76,7 @@ Future<void> _runMain(List<String> args) async {
 
   if (options.http) {
     late final String? token;
-    late final StreamableMcpServer server;
+    late final QuotabotStreamableHttpServer server;
     try {
       token = await loadMcpBearerToken(options);
       server = buildQuotabotStreamableHttpServer(
