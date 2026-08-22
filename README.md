@@ -10,31 +10,18 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.6.
-> **Next:** a focused 0.10.x stabilization train for correctness, security,
-> quality-of-life refinement, and native field validation, followed by signed
-> release readiness. No new product breadth enters this train. See the
-> [roadmap criteria](ROADMAP.md#next).
+> **Current release candidate:** 0.10.0-rc.7.
+> **Next:** a focused 0.10.x stabilization train, then signed release
+> readiness. No new product breadth. See [roadmap Next](ROADMAP.md#next)
+> and the [documentation index](docs/README.md).
 
-Release candidates state their Windows and macOS native signing mode at the top
-of the GitHub release notes. The protected Azure Artifact Signing activation and
-owner provisioning checklist is in
+Release candidates state Windows and macOS signing mode at the top of the
+GitHub release notes. Owner provisioning lives in
 [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
 
-The 0.10.0 release candidates use the 32-byte OAuth state confirmed by the
-reporter's live authorize, callback, token-exchange, grant-save, and native quota
-read in [issue #77](https://github.com/blisspixel/quotabot/issues/77). The issue
-is closed after end-to-end confirmation. Release candidate 5 also keeps a quota
-HTTP 429 labeled as throttling instead of misdiagnosing it as an expired login.
-Release candidate 6 tightens exact transport identities, profile and account
-isolation, install and uninstall transactions, explicit quotabot-only logout,
-duplicate-option handling, supplemental manual evidence, first-run deferral,
-and the privacy and delivery lifecycle of desktop reset reminders.
-
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
-calls, spend no usage tokens, and never read prompts or source code.
-The complete quota and routing workflow is available from the CLI; the desktop
-app is optional.
+calls, spend no usage tokens, and never read prompts or source code. The CLI
+is the complete workflow; the desktop app is optional.
 
 ## What it looks like
 

@@ -2362,6 +2362,24 @@ class _DashboardState extends State<Dashboard>
     final largeText = MediaQuery.textScalerOf(context).scale(10) > 14;
     final showRouteProviderName = compactWidth >= (largeText ? 520 : 360);
     final routeIconOnly = largeText && compactWidth < 240;
+    const iconOnlyWidth = 28.0;
+    const readableRouteWidth = 72.0;
+    var warningCount = 0;
+    if (_preferenceStorageWarning != null) warningCount++;
+    if (_trayUnavailable) warningCount++;
+    if (_lastRefreshError != null) warningCount++;
+    final trailingChrome = 28.0 * 2 + 24.0 * warningCount;
+    final naturalRouteMax = routeIconOnly
+        ? iconOnlyWidth
+        : showRouteProviderName
+        ? (largeText ? 360.0 : 240.0)
+        : 100.0;
+    final routeBudget = math.min(
+      naturalRouteMax,
+      math.max(iconOnlyWidth, compactWidth - 18 - trailingChrome - 11 - 8),
+    );
+    final iconOnly = routeIconOnly || routeBudget < readableRouteWidth;
+    final routeMax = iconOnly ? iconOnlyWidth : routeBudget;
     return Container(
       constraints: BoxConstraints(minHeight: largeText ? 64 : 46),
       child: Padding(
@@ -2370,115 +2388,74 @@ class _DashboardState extends State<Dashboard>
           policy: WidgetOrderTraversalPolicy(),
           child: Row(
             children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: routeMax),
+                child: _compactRouteButton(
+                  suggestion,
+                  routeLine,
+                  routeDetail,
+                  fg,
+                  providerCounts: counts,
+                  showProviderName: showRouteProviderName,
+                  iconOnly: iconOnly,
+                  maxWidth: routeMax,
+                ),
+              ),
+              const SizedBox(width: 5),
+              Container(width: 1, height: 24, color: chrome.tileBorder),
+              const SizedBox(width: 5),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    const dividerAndGaps = 11.0;
-                    const minChipSlot = 8.0;
-                    const iconOnlyWidth = 28.0;
-                    const readableRouteWidth = 72.0;
-                    final naturalRouteMax = routeIconOnly
-                        ? iconOnlyWidth
-                        : showRouteProviderName
-                        ? (largeText ? 360.0 : 240.0)
-                        : 100.0;
-                    final routeBudget = math.min(
-                      naturalRouteMax,
-                      math.max(
-                        iconOnlyWidth,
-                        constraints.maxWidth - dividerAndGaps - minChipSlot,
-                      ),
-                    );
-                    final iconOnly =
-                        routeIconOnly || routeBudget < readableRouteWidth;
-                    return Row(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onPanStart: widget._hostIntegration
+                      ? (_) => windowManager.startDragging()
+                      : null,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: _shotsMode
+                        ? const NeverScrollableScrollPhysics()
+                        : const ClampingScrollPhysics(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: iconOnly ? iconOnlyWidth : routeBudget,
-                          ),
-                          child: _compactRouteButton(
-                            suggestion,
-                            routeLine,
-                            routeDetail,
-                            fg,
-                            providerCounts: counts,
-                            showProviderName: showRouteProviderName,
-                            iconOnly: iconOnly,
-                            maxWidth: iconOnly ? iconOnlyWidth : routeBudget,
-                          ),
-                        ),
-                        const SizedBox(width: 5),
-                        Container(
-                          width: 1,
-                          height: 24,
-                          color: chrome.tileBorder,
-                        ),
-                        const SizedBox(width: 5),
-                        Expanded(
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            onPanStart: widget._hostIntegration
-                                ? (_) => windowManager.startDragging()
-                                : null,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              physics: _shotsMode
-                                  ? const NeverScrollableScrollPhysics()
-                                  : const ClampingScrollPhysics(),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (displayed.isEmpty)
-                                    TextButton(
-                                      onPressed: _showProfileEditor,
-                                      style: TextButton.styleFrom(
-                                        padding: EdgeInsets.zero,
-                                        minimumSize: const Size(0, 30),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      child: Text(
-                                        'No providers - Edit profile',
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: AppType.caption,
-                                          color: muted,
-                                        ),
-                                      ),
-                                    )
-                                  else
-                                    for (int i = 0; i < displayed.length; i++)
-                                      Padding(
-                                        padding: EdgeInsets.only(
-                                          right: i == displayed.length - 1
-                                              ? 0
-                                              : 10,
-                                        ),
-                                        child: _FocusableCompactProviderChip(
-                                          key: ValueKey(
-                                            'compact-provider-${quotaDisplayKey(displayed[i])}',
-                                          ),
-                                          message: _compactTooltip(
-                                            displayed[i],
-                                            counts,
-                                            now,
-                                          ),
-                                          child: _compactChip(
-                                            displayed[i],
-                                            now,
-                                            fg,
-                                          ),
-                                        ),
-                                      ),
-                                ],
+                        if (displayed.isEmpty)
+                          TextButton(
+                            onPressed: _showProfileEditor,
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(0, 30),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(
+                              'No providers - Edit profile',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.caption,
+                                color: muted,
                               ),
                             ),
-                          ),
-                        ),
+                          )
+                        else
+                          for (int i = 0; i < displayed.length; i++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                right: i == displayed.length - 1 ? 0 : 10,
+                              ),
+                              child: _FocusableCompactProviderChip(
+                                key: ValueKey(
+                                  'compact-provider-${quotaDisplayKey(displayed[i])}',
+                                ),
+                                message: _compactTooltip(
+                                  displayed[i],
+                                  counts,
+                                  now,
+                                ),
+                                child: _compactChip(displayed[i], now, fg),
+                              ),
+                            ),
                       ],
-                    );
-                  },
+                    ),
+                  ),
                 ),
               ),
               if (_preferenceStorageWarning != null)
@@ -2572,7 +2549,8 @@ class _DashboardState extends State<Dashboard>
           child: Container(
             constraints: BoxConstraints(
               minHeight: 30,
-              maxWidth: maxWidth ??
+              maxWidth:
+                  maxWidth ??
                   (iconOnly
                       ? 28
                       : providerName == null

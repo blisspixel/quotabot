@@ -486,7 +486,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("if (-not $PackageOnly)", windows)
         self.assertLess(
             windows.index("if ($NoArchive -and $PackageOnly)"),
-            windows.index("Get-Command flutter"),
+            windows.index("Enable-QuotabotSpaceSafeDart"),
         )
         self.assertIn("Using existing Windows release bundle", windows)
         self.assertIn("Package-only mode requires", windows)

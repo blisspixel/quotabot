@@ -346,8 +346,8 @@ class DependencyPolicyTest(unittest.TestCase):
             "package-cli.ps1": ("dart pub get --enforce-lockfile",),
             "package-cli.sh": ("dart pub get --enforce-lockfile",),
             "package-windows.ps1": (
-                "flutter pub get --enforce-lockfile",
-                "flutter build windows --release --no-pub",
+                "'pub', 'get', '--enforce-lockfile'",
+                "'build', 'windows', '--release', '--no-pub'",
             ),
             "package-macos.sh": (
                 "flutter pub get --enforce-lockfile",

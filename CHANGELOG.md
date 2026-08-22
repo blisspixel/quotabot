@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.0-rc.7 - 2026-08-22
+
 ### Fixed
 - Grok billing reads no longer diagnose HTTP 429, HTTP 403, timeouts, malformed
   payloads, or non-auth gRPC statuses as an expired login. HTTP 401 and gRPC
@@ -59,7 +61,8 @@ Notable changes to quotabot. Newest first.
   user-owned cache parent instead of shared `/tmp` when the checkout path has
   spaces. Linux portable desktop fallback writes an application-menu entry.
   Compact empty desktop state offers Edit profile. Compact mode keeps the
-  no-route control, warnings, and window chrome inside the 200px minimum width.
+  no-route control, warnings, and window chrome inside the 200px minimum width
+  without breaking keyboard focus through overflow chips.
   `quotabot check` matches a built-in provider by id, so a custom display name
   cannot impersonate a shipped adapter. `login` and `logout` accept the same
   display-case ids.
