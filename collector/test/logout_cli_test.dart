@@ -131,4 +131,12 @@ void main() {
     expectExitCode(
         await runCollectCli(['login', 'bogus'], environment: env), 64);
   });
+
+  test('logout accepts a shipped adapter display-case id', () async {
+    final env = {'LOCALAPPDATA': temp.path, 'XDG_CONFIG_HOME': temp.path};
+    final result = await runCollectCli(['logout', 'Grok'], environment: env);
+    expectExitCode(result, 0);
+    expect(result.stderr as String, contains('grok disconnected'));
+    expect(result.stderr as String, isNot(contains('usage:')));
+  });
 }

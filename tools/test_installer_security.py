@@ -39,7 +39,9 @@ class InstallerSecurityTests(unittest.TestCase):
             resolver,
         )
         self.assertNotIn('latest="${tags[0]}"', resolver)
-        self.assertIn('"$tag" != "$latest"', resolver)
+        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$", resolver)
+        self.assertIn('"$target" =~ -rc\\.', resolver)
+        self.assertIn('"$tag" != "$target"', resolver)
 
     def test_install_smoke_pins_the_resolved_tag_during_install(self) -> None:
         smoke = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
@@ -254,6 +256,13 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("cp -a --link", helper)
         self.assertIn("cp -al", helper)
 
+    def test_posix_desktop_packagers_map_spaced_dart_paths(self) -> None:
+        for name in ("package-linux.sh", "package-macos.sh", "setup.sh"):
+            script = (ROOT / "tools" / name).read_text(encoding="utf-8")
+            with self.subTest(script=name):
+                self.assertIn("posix-space-safe-dart.sh", script)
+                self.assertIn("quotabot_enable_space_safe_dart", script)
+
     def test_posix_installers_persist_local_bin_on_path(self) -> None:
         for path in (ROOT / "install.sh", ROOT / "tools" / "setup.sh"):
             script = path.read_text(encoding="utf-8")
@@ -455,10 +464,10 @@ class InstallerSecurityTests(unittest.TestCase):
         windows = (ROOT / "install.ps1").read_text(encoding="utf-8")
 
         self.assertIn('VERSION="${QUOTABOT_VERSION:-latest}"', posix)
-        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+$", posix)
+        self.assertIn(r"^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$", posix)
         self.assertIn("releases/download/${VERSION}/${ASSET}", posix)
         self.assertIn("$env:QUOTABOT_VERSION", windows)
-        self.assertIn(r"'^v[0-9]+\.[0-9]+\.[0-9]+$'", windows)
+        self.assertIn(r"'^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'", windows)
         self.assertIn("releases/download/$version/$assetName", windows)
 
     def test_invalid_rollback_tag_fails_before_download(self) -> None:
@@ -492,6 +501,21 @@ class InstallerSecurityTests(unittest.TestCase):
         output = completed.stdout + completed.stderr
         self.assertIn("Invalid QUOTABOT_VERSION", output)
         self.assertNotIn("Downloading quotabot-", output)
+
+    def test_windows_space_safe_dart_does_not_use_world_writable_roots(self) -> None:
+        script = (ROOT / "tools" / "windows-space-safe-dart.ps1").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Join-Path $env:LOCALAPPDATA 'quotabot-build'", script)
+        self.assertIn("Join-Path $env:TEMP 'quotabot-build'", script)
+        self.assertNotIn("Join-Path $env:ProgramData 'quotabot-build'", script)
+        self.assertNotIn("Join-Path $env:SystemDrive 'quotabot-build'", script)
+
+    def test_windows_desktop_packager_uses_space_safe_flutter(self) -> None:
+        script = (ROOT / "tools" / "package-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("Enable-QuotabotSpaceSafeDart", script)
+        self.assertIn("-IncludeFlutter", script)
+        self.assertIn("Invoke-QuotabotFlutter", script)
 
     def test_package_helpers_preserve_old_artifacts_until_new_pair_is_ready(
         self,

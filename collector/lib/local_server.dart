@@ -134,6 +134,20 @@ Future<HttpServer> startLocalQuotabotServer({
       ..write(const JsonEncoder.withIndent('  ').convert(data));
   }
 
+  bool _rejectUnknownQuery(HttpRequest request) {
+    final unknownParameters = request.uri.queryParametersAll.keys.toList()
+      ..sort();
+    if (unknownParameters.isEmpty) return false;
+    writeJson(
+      request,
+      {
+        'error': 'unknown query parameter: ${unknownParameters.join(', ')}',
+      },
+      HttpStatus.badRequest,
+    );
+    return true;
+  }
+
   bool constantTimeEquals(String actual, String expected) {
     final left = utf8.encode(actual);
     final right = utf8.encode(expected);
@@ -693,6 +707,40 @@ Future<HttpServer> startLocalQuotabotServer({
     });
   }
 
+  Future<void> handleSnapshot(HttpRequest request) async {
+    const allowedQueryParameters = {'exclude'};
+    final unknownParameters = request.uri.queryParametersAll.keys
+        .where((name) => !allowedQueryParameters.contains(name))
+        .toList()
+      ..sort();
+    if (unknownParameters.isNotEmpty) {
+      writeJson(
+        request,
+        {
+          'error': 'unknown query parameter: ${unknownParameters.join(', ')}',
+        },
+        HttpStatus.badRequest,
+      );
+      return;
+    }
+    final exclusions = parseProviderExclusions(
+      request.uri.queryParametersAll['exclude'],
+    );
+    if (!exclusions.ok) {
+      writeJson(request, {'error': exclusions.error}, HttpStatus.badRequest);
+      return;
+    }
+    final results = filterExcludedProviders(
+      await snapshot(),
+      exclusions.providers,
+    );
+    writeJson(request, {
+      'schema': 'quotabot.v1',
+      'generated_at': now(),
+      'providers': results.map((r) => r.toJson()).toList(),
+    });
+  }
+
   Future<void> handleMutation(HttpRequest request) async {
     if (!authorizedMutation(request)) {
       request.response.headers.set(
@@ -940,21 +988,29 @@ Future<HttpServer> startLocalQuotabotServer({
     }
     switch (path) {
       case '/':
-        final results = await snapshot();
-        writeJson(request, {
-          'schema': 'quotabot.v1',
-          'generated_at': now(),
-          'providers': results.map((r) => r.toJson()).toList(),
-        });
+        await handleSnapshot(request);
       case '/suggest':
         await handleSuggest(request);
       case '/health':
+        if (_rejectUnknownQuery(request)) return;
         writeJson(request, {'ok': true, 'generated_at': now()});
       default:
         if (path.startsWith('/providers/')) {
-          final name = path.substring('/providers/'.length).toLowerCase();
+          if (_rejectUnknownQuery(request)) return;
+          final rawName = Uri.decodeComponent(
+            path.substring('/providers/'.length),
+          );
+          final parsed = parseExactProviderSelector(rawName);
+          if (parsed.error != null || parsed.value == null) {
+            writeJson(
+              request,
+              {'error': parsed.error ?? 'provider is invalid'},
+              HttpStatus.badRequest,
+            );
+            return;
+          }
           final match = bestProviderAccountForCheck(
-            (await snapshot()).where((r) => r.provider == name),
+            (await snapshot()).where((r) => r.provider == parsed.value),
             now(),
           );
           if (match == null) {

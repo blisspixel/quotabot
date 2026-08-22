@@ -45,7 +45,7 @@ Future<int> _freePort() async {
 }
 
 class _Harness {
-  final StreamableMcpServer server;
+  final QuotabotStreamableHttpServer server;
   final Uri uri;
 
   const _Harness(this.server, this.uri);
@@ -217,7 +217,11 @@ void main() {
       },
       body: jsonEncode(_initializeBody()),
     );
-    expect(denied.statusCode, HttpStatus.forbidden);
+    expect(denied.statusCode, HttpStatus.unauthorized);
+    expect(
+      denied.headers[HttpHeaders.wwwAuthenticateHeader],
+      contains('Bearer realm="$mcpHttpBearerRealm"'),
+    );
 
     final client = await _connect(harness.uri);
     addTearDown(client.close);
@@ -239,7 +243,7 @@ void main() {
       headers: headers,
       body: List<int>.filled(maxMcpHttpRequestBytes + 1, 0x20),
     );
-    expect(oversized.statusCode, HttpStatus.forbidden);
+    expect(oversized.statusCode, HttpStatus.requestEntityTooLarge);
 
     final rawClient = HttpClient();
     addTearDown(() => rawClient.close(force: true));
@@ -248,7 +252,32 @@ void main() {
     chunked.add(utf8.encode(jsonEncode(_initializeBody())));
     final chunkedResponse = await chunked.close();
     await chunkedResponse.drain<void>();
-    expect(chunkedResponse.statusCode, HttpStatus.forbidden);
+    expect(chunkedResponse.statusCode, HttpStatus.requestEntityTooLarge);
+
+    final unauthenticatedOversized = await http.post(
+      harness.uri,
+      headers: {
+        HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: List<int>.filled(maxMcpHttpRequestBytes + 1, 0x20),
+    );
+    expect(
+      unauthenticatedOversized.statusCode,
+      HttpStatus.requestEntityTooLarge,
+    );
+
+    final wrongToken = await http.post(
+      harness.uri,
+      headers: {
+        HttpHeaders.authorizationHeader:
+            'Bearer ${_token.replaceFirst('0', '1')}',
+        HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: jsonEncode(_initializeBody()),
+    );
+    expect(wrongToken.statusCode, HttpStatus.unauthorized);
   });
 
   test('DNS rebinding and endpoint hardening reject unsafe requests', () async {
@@ -259,6 +288,7 @@ void main() {
       harness.uri,
       headers: {
         'origin': 'https://evil.example',
+        HttpHeaders.authorizationHeader: 'Bearer $_token',
         HttpHeaders.acceptHeader: 'application/json, text/event-stream',
         HttpHeaders.contentTypeHeader: 'application/json',
       },

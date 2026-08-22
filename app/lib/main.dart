@@ -2239,15 +2239,14 @@ class _DashboardState extends State<Dashboard>
                 ),
               ),
             ),
-            if (needsCredentialFilterRepair)
-              TextButton(
-                onPressed: _showProfileEditor,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.only(top: 4),
-                  minimumSize: const Size(0, 30),
-                ),
-                child: const Text('Edit profile'),
+            TextButton(
+              onPressed: _showProfileEditor,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.only(top: 4),
+                minimumSize: const Size(0, 30),
               ),
+              child: const Text('Edit profile'),
+            ),
           ],
         ),
       ),
@@ -2431,12 +2430,21 @@ class _DashboardState extends State<Dashboard>
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   if (displayed.isEmpty)
-                                    Text(
-                                      'No providers',
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: AppType.caption,
-                                        color: muted,
+                                    TextButton(
+                                      onPressed: _showProfileEditor,
+                                      style: TextButton.styleFrom(
+                                        padding: EdgeInsets.zero,
+                                        minimumSize: const Size(0, 30),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      child: Text(
+                                        'No providers - Edit profile',
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: AppType.caption,
+                                          color: muted,
+                                        ),
                                       ),
                                     )
                                   else
@@ -2564,8 +2572,7 @@ class _DashboardState extends State<Dashboard>
           child: Container(
             constraints: BoxConstraints(
               minHeight: 30,
-              maxWidth:
-                  maxWidth ??
+              maxWidth: maxWidth ??
                   (iconOnly
                       ? 28
                       : providerName == null

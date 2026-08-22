@@ -32,9 +32,11 @@ Xcode command-line tools; on Linux, clang, cmake, ninja, pkg-config, and GTK 3.
 Setup also enables the matching Flutter desktop target before building.
 `dart build cli` native-asset hooks fail when the Dart SDK path contains spaces
 (a typical `C:\Users\First Last\...` or `/Users/First Last/...` profile);
-setup and the CLI packagers hardlink or copy the Dart SDK into a space-free
-directory for that compile. Junctions, subst drives, and 8.3 short names are
-not enough, because Dart reports the long path.
+setup and the packagers hardlink or copy the Dart SDK into a space-free
+directory for that compile. Desktop packagers on every OS also remap a Flutter
+SDK whose path contains spaces: Windows uses a junction view, and macOS/Linux
+copy the launcher scripts and dart-sdk into a space-free tree. Junctions, subst
+drives, and 8.3 short names are not enough, because Dart reports the long path.
 
 The CLI command is exposed through your per-user bin
 (`%LOCALAPPDATA%\quotabot\bin` on Windows, `~/.local/bin` on macOS and Linux).

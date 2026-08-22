@@ -611,6 +611,7 @@ void main() {
     expect(find.text(message), findsOneWidget);
     expect(find.bySemanticsLabel(message), findsOneWidget);
     expect(find.textContaining('No providers in'), findsNothing);
+    expect(find.text('Edit profile'), findsOneWidget);
   });
 
   testWidgets('desktop routing applies model capability budget gates', (
@@ -1513,6 +1514,41 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('compact empty profile and no-route fit at minimum width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => const <ProviderQuota>[],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('compact-route-decision')), findsOneWidget);
+    expect(find.text('No providers - Edit profile'), findsOneWidget);
+    expect(find.text('Edit profile'), findsNothing);
+    for (final tooltip in ['Expand', 'Close']) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('compact stacked warnings keep the no-route control on screen', (
     tester,
   ) async {
@@ -1547,10 +1583,7 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(
-      find.byKey(const ValueKey('compact-route-decision')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('compact-route-decision')), findsOneWidget);
     expect(
       find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
       findsOneWidget,
