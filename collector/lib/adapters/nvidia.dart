@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -80,6 +81,11 @@ class NvidiaAdapter {
         ],
         windows: const [],
         kind: ProviderQuotaKind.subscription,
+      );
+    } on TimeoutException {
+      return _keyInvalid(
+        asOf,
+        pipeHealth: providerPipeHealthThrottled,
       );
     } catch (_) {
       return _keyInvalid(asOf);

@@ -218,6 +218,28 @@ void main() {
       expect(t.refreshToken, 'R0');
     });
 
+    test('fromOAuth treats whitespace refresh tokens as absent', () {
+      for (final blank in [' ', '\n', '\t', '  ']) {
+        final t = Tokens.fromOAuth({
+          'access_token': 'AT',
+          'refresh_token': blank,
+          'expires_in': 3600,
+        }, priorRefresh: 'R0');
+        expect(t.refreshToken, 'R0', reason: 'blank ${jsonEncode(blank)}');
+      }
+    });
+
+    test('fromOAuth rejects a whitespace access token', () {
+      expect(
+        () => Tokens.fromOAuth({
+          'access_token': ' ',
+          'refresh_token': 'R1',
+          'expires_in': 3600,
+        }),
+        throwsStateError,
+      );
+    });
+
     test('round-trips through json', () {
       final t = Tokens(accessToken: 'a', refreshToken: 'r', expiresAt: 123);
       final back = Tokens.fromJson(t.toJson());
@@ -2185,6 +2207,45 @@ void main() {
       );
       expect(TokenStore.accounts(provider), contains(account));
       expect(ProviderDisconnectStore.isDisconnected(provider), isFalse);
+    });
+
+    test('device login without an account identity does not save a grant',
+        () async {
+      const provider = XaiAuth.provider;
+      addTearDown(() {
+        TokenStore.clear(provider);
+        TokenStore.clearAccounts(provider);
+      });
+      ProviderDisconnectStore.markDisconnected(provider);
+      final mock = MockClient((req) async {
+        if (req.url.toString().contains('device/code')) {
+          return http.Response(
+            jsonEncode({
+              'device_code': 'DC',
+              'interval': 0,
+              'verification_uri_complete': 'https://x.ai/activate',
+              'user_code': 'ABCD',
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'access_token': 'AT',
+            'refresh_token': 'RT',
+            'expires_in': 21600,
+          }),
+          200,
+        );
+      });
+
+      await expectLater(
+        XaiAuth(client: mock).deviceLogin(prompt: (_, __) {}),
+        throwsA(isA<StateError>()),
+      );
+      expect(TokenStore.exists(provider), isFalse);
+      expect(TokenStore.accounts(provider), isEmpty);
+      expect(ProviderDisconnectStore.isDisconnected(provider), isTrue);
     });
   });
 }

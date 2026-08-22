@@ -107,6 +107,34 @@ void main() {
     expect(serialized, isNot(contains('do not inspect')));
   });
 
+  test('Cursor 3 membership ignores leftover usage projections', () async {
+    const owner = 'cursor-owner-nondisclosure-sentinel';
+    final token = jwtWithSubject(owner);
+    final db = writeDb({
+      ...authRows(owner: owner, token: token),
+      'cursor.planUsage': utf8.encode(jsonEncode({
+        'updatedAt': updatedNow(),
+        'profile': {
+          'email': 'work@example.com',
+          'planName': 'Pro',
+        },
+        'monthlyUsage': {
+          'usedCents': 20,
+          'includedCents': 100,
+          'currentPeriodEnd': '2026-07-01T00:00:00.000Z',
+        },
+      })),
+    });
+
+    final q = await CursorAdapter(dbPath: db.path).collect();
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+    expect(q.plan, 'Ultra');
+    expect(q.windows, isEmpty);
+    expect(providerAvailability(q, now).available, isFalse);
+    expect(q.error, contains('cannot route Cursor'));
+  });
+
   test('accepts only recognized plan labels and current statuses', () async {
     const planCases = {
       'free': 'Free',

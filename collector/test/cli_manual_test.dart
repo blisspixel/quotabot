@@ -212,6 +212,72 @@ void main() {
     expect(json['headroom_percent'], 80);
   }, timeout: Timeout.factor(2));
 
+  test('check does not treat a custom display name as a built-in provider',
+      () async {
+    final saved = await runCli([
+      'manual',
+      'set',
+      'custom-ai',
+      '--display-name',
+      'Claude',
+      '--used=1',
+      '--limit=10',
+      '--reset=${_futureReset()}',
+    ]);
+    expectExitCode(saved, 0);
+
+    final builtin = await runCli(['check', 'claude', '--json']);
+    final builtinJson =
+        jsonDecode(builtin.stdout as String) as Map<String, dynamic>;
+    expect(builtinJson['provider'], 'claude');
+    expect(builtinJson['provider'], isNot('custom-ai'));
+    if (builtinJson['found'] == false) {
+      expectExitCode(builtin, 69);
+      expect(builtinJson['reason'], 'provider_not_returned');
+    } else {
+      expect(builtinJson.containsKey('available'), isTrue);
+    }
+
+    final display = await runCli(['check', 'Claude', '--json']);
+    final displayJson =
+        jsonDecode(display.stdout as String) as Map<String, dynamic>;
+    expect(displayJson['provider'], 'claude');
+    expect(displayJson['provider'], isNot('custom-ai'));
+    if (displayJson['found'] == false) {
+      expectExitCode(display, 69);
+      expect(displayJson['reason'], 'provider_not_returned');
+    } else {
+      expect(displayJson.containsKey('available'), isTrue);
+    }
+
+    final custom = await runCli(['check', 'custom-ai', '--json']);
+    expectExitCode(custom, 0);
+    final customJson =
+        jsonDecode(custom.stdout as String) as Map<String, dynamic>;
+    expect(customJson['provider'], 'custom-ai');
+    expect(customJson['available'], isTrue);
+  }, timeout: Timeout.factor(2));
+
+  test('check still resolves a custom provider by its display name', () async {
+    final saved = await runCli([
+      'manual',
+      'set',
+      'custom-ai',
+      '--display-name',
+      'Custom AI',
+      '--used=1',
+      '--limit=10',
+      '--reset=${_futureReset()}',
+    ]);
+    expectExitCode(saved, 0);
+
+    final checked = await runCli(['check', 'Custom AI', '--json']);
+    expectExitCode(checked, 0);
+    final json = jsonDecode(checked.stdout as String) as Map<String, dynamic>;
+    expect(json['provider'], 'custom-ai');
+    expect(json['available'], isTrue);
+  }, timeout: Timeout.factor(2));
+
   test('check identifies a filtered manual provider as hidden', () async {
     final saved = await runCli([
       'manual',

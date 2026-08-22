@@ -49,6 +49,10 @@ if [ "$package_only" -eq 0 ]; then
     echo "flutter not found on PATH. Install Flutter and add it to PATH." >&2
     exit 1
   fi
+  # shellcheck source=posix-space-safe-dart.sh
+  . "$script_dir/posix-space-safe-dart.sh"
+  quotabot_enable_space_safe_dart "$root" flutter >/dev/null
+  trap quotabot_restore_space_safe_dart EXIT
 
   flutter config --enable-macos-desktop >/dev/null
   (cd "$app_dir" && \

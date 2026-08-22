@@ -86,7 +86,7 @@ The point of a trust claim you can verify is that you do not have to trust it.
 | Claim | How to check |
 |---|---|
 | No inference, ever | `quotabot explain` prints every file read and network destination per adapter. No generation endpoint appears, because none exists in the source. |
-| Nothing unexpected leaves the machine | Same command lists the exact provider metadata endpoints contacted. Watch it live with any network monitor; the fleet read is all you will see. |
+| Nothing unexpected leaves the machine | Same command lists the exact provider metadata endpoints contacted. Watch it live with any network monitor; the fleet read is all you will see. A desktop update check contacts GitHub only after you invoke it and sends no local quota or account data. |
 | No account, no service | Turn off your network and run `quotabot`. Cached history and last-known quota still render, labeled stale. Nothing waits on a login. |
 | Your data is yours | `quotabot --json` is the whole snapshot. History and analytics are plain files under your per-user config directory. |
 | No hidden spend | `quotabot suggest --task=hard` defaults to a `quota` budget. Paid catalog entries require an explicit `--budget=any`. |

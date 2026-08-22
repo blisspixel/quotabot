@@ -4,6 +4,96 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+
+- Antigravity live model rollout changes no longer quarantine the whole account
+  when one otherwise valid model row disappears. Surviving model quotas still
+  receive drift validation, and empty or malformed live quota still fails
+  closed.
+- Desktop controls now use one responsive grouped Settings dialog instead of a
+  long overflow menu. Its explicit update check shows the installed build,
+  latest GitHub candidate, and latest stable release without checking or
+  prompting at startup. Stable installs recommend stable updates while still
+  exposing previews, preview installs follow the newest candidate, and the
+  bounded GitHub read now uses one whole-request deadline. Closing Settings
+  suppresses an in-flight result, and provider setup distinguishes rate limits
+  and temporary provider failures from login problems.
+- Source setup portable fallback selects the published release matching the
+  checkout version, including release candidates, stops only the exact running
+  installed app before transactional activation, and avoids duplicate launches.
+  Windows setup also detects missing Flutter plugin symlink permission before
+  starting a desktop compile.
+
+## 0.10.0-rc.7 - 2026-08-22
+
+### Fixed
+- Grok billing reads no longer diagnose HTTP 429, HTTP 403, timeouts, malformed
+  payloads, or non-auth gRPC statuses as an expired login. HTTP 401 and gRPC
+  unauthenticated still keep the account visible with reconnect guidance, while
+  throttling and provider errors retain their exact status, pipe health, and
+  retry metadata. NVIDIA model discovery timeouts are classified as throttling
+  rather than a rejected key.
+- Ollama `:cloud` source tags are treated as cloud-offloaded, so they cannot
+  satisfy a local or included-quota budget. `suggest_model` with `budget=any`
+  no longer ranks those daemon-exposed cloud models as on-device capacity.
+- `quota_stretch` spent/wait advice now uses measured included quota only, so a
+  credit-backed pool cannot be named as the thing that resets soonest.
+- Auto `reserve_provider` now applies the same profile `quota_stretch` and
+  `local_first` policy as `suggest_provider`. Out-of-range lease TTL, weight,
+  client, and lease id values are rejected on MCP the same way as local HTTP.
+- Filtered suggest and decide-now responses only list leases for identities
+  still in the filtered snapshot.
+- Whitespace OAuth access tokens are rejected, and whitespace refresh tokens
+  keep the prior grant instead of destroying it. Grok device login without an
+  account identity no longer saves an unusable grant.
+- Drift admission still compares a live weekly window after a shorter cached
+  window has expired, so a spent weekly drop cannot be admitted as a new 5h
+  baseline.
+- Cursor 3.x membership metadata no longer promotes leftover usage rows into
+  routable quota. Reset-only Cursor and Kiro breakdown siblings are ignored
+  instead of becoming 0% used windows.
+- Codex loopback login now also listens on IPv6 `::1` for the allowlisted
+  `localhost` redirect. MCP HTTP bind options may be specified only once, and
+  token files must be regular files.
+- Default-slot logout unlinks credential files without following links.
+- Desktop first-run expands out of compact mode while the wizard is open.
+  Compact mode surfaces refresh failures without overflowing the 200px minimum
+  strip. Immediate reset reminders carry the owned payload so privacy changes
+  can rewrite them. Local-only profiles are labeled as such in the explanation
+  dialog.
+- Source first-run guidance keeps one outcome per provider, and no longer
+  treats status-only NVIDIA discovery as live quota.
+- Windows source `local-setup` stops only processes launched from that app
+  tree. Fish PATH lines quote directories that contain spaces. Portable
+  desktop docs no longer claim uninstall removes versioned extracts.
+- Grok and Antigravity live account reads overlap instead of waiting for each
+  account in series. Fleet collection still uses one worker isolate and the
+  shared HTTP pool; the desktop collect remains off the UI isolate.
+- Antigravity `isExhausted: true` with a reset is treated as 100% used instead
+  of trusting a full remaining fraction.
+- Loopback `GET /?exclude=` filters the snapshot; unknown snapshot query
+  parameters are rejected. MCP alert subscriptions fire on amber and red, while
+  `quotabot watch` still defaults to red.
+- Release installers accept `vMAJOR.MINOR.PATCH-rc.N` tags. Windows space-safe
+  Dart mirrors use a user-owned directory instead of `C:\\quotabot-build`.
+  Windows desktop packaging uses the space-safe Flutter entry. macOS and Linux
+  desktop packaging remap a Flutter SDK whose path contains spaces, using a
+  user-owned cache parent instead of shared `/tmp` when the checkout path has
+  spaces. Linux portable desktop fallback writes an application-menu entry.
+  Compact empty desktop state offers Edit profile. Compact mode keeps the
+  no-route control, warnings, and window chrome inside the 200px minimum width
+  without breaking keyboard focus through overflow chips.
+  `quotabot check` matches a built-in provider by id, so a custom display name
+  cannot impersonate a shipped adapter. `login` and `logout` accept the same
+  display-case ids.
+  Loopback `/providers/` and `/health` reject unknown query parameters. MCP
+  Streamable HTTP missing bearer is HTTP 401, and oversized or chunked POST
+  bodies are HTTP 413, instead of mapping every admission failure to 403.
+  Quality workflows run on stacked pull requests, not only PRs into main. The
+  LiteLLM router fails closed on out-of-range lease TTL or weight instead of
+  clamping. Install-smoke workflow dispatch accepts RC tags and upgrades those
+  from the latest stable 0.x release.
+
 ## 0.10.0-rc.6 - 2026-08-21
 
 ### Fixed

@@ -713,6 +713,41 @@ void main() {
       );
     });
 
+    test('quota-stretch spent wait uses measured quota, not a credit pool', () {
+      final s = suggestRoute(
+        [
+          _q(
+            'claude',
+            [
+              QuotaWindow(
+                label: 'weekly',
+                usedPercent: 100,
+                resetsAt: _now + 8 * 3600,
+              ),
+            ],
+          ),
+          _q(
+            'cursor',
+            [
+              QuotaWindow(
+                label: 'monthly',
+                usedPercent: 1,
+                resetsAt: _now + 3600,
+              ),
+            ],
+          ),
+        ],
+        _now,
+        quotaStretch: true,
+      );
+
+      expect(s.recommended, isNull);
+      expect(s.decisionCode, RouteDecisionCode.spentWait);
+      expect(s.reason, contains('claude'));
+      expect(s.reason, isNot(contains('cursor')));
+      expect(s.fallback.provider, 'claude');
+    });
+
     test('quota-stretch rejects manual and non-quota metered capacity', () {
       final manual = _q(
         'custom',

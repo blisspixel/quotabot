@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -228,20 +229,54 @@ void main() {
       q.every((p) => p.sourceClass == ProviderSourceClass.authoritativeLive),
       isTrue,
     );
-    expect(tokenCalls, [
-      // The first account tries its own grant, then the default fallback.
-      'a@example.com:false',
-      'a@example.com:true',
-      'b@example.com:false',
-      'c@example.com:false',
-    ]);
-    expect(loadTokens, ['default-token', 'grant-b', 'ide-c']);
+    expect(
+      tokenCalls,
+      unorderedEquals([
+        // The first account tries its own grant, then the default fallback.
+        'a@example.com:false',
+        'a@example.com:true',
+        'b@example.com:false',
+        'c@example.com:false',
+      ]),
+    );
+    expect(
+      loadTokens,
+      unorderedEquals(['default-token', 'grant-b', 'ide-c']),
+    );
     expect(onboardCalls, isEmpty);
-    expect(fetchCalls, [
-      'default-token:load-default-token',
-      'grant-b:load-grant-b',
-      'ide-c:load-ide-c',
+    expect(
+      fetchCalls,
+      unorderedEquals([
+        'default-token:load-default-token',
+        'grant-b:load-grant-b',
+        'ide-c:load-ide-c',
+      ]),
+    );
+  });
+
+  test('collectAccounts overlaps live reads for several accounts', () async {
+    final started = <String>[];
+    final release = Completer<void>();
+    final q = await AntigravityAdapter(
+      accountSource: () => [
+        candidate('a@example.com', ideAccessToken: 'ide-a'),
+        candidate('b@example.com', ideAccessToken: 'ide-b'),
+      ],
+      tokenResolver: (_, __) async => null,
+      loadCodeAssist: (access) async {
+        started.add(access);
+        if (started.length == 2) release.complete();
+        await release.future;
+        return load(project: 'load-$access');
+      },
+      fetchModels: (access, project) async => models(0.4),
+    ).collectAccounts();
+
+    expect(q.map((p) => p.account).toList(), [
+      'a@example.com',
+      'b@example.com',
     ]);
+    expect(q.map((p) => p.windows.single.usedPercent).toList(), [60, 60]);
   });
 
   test(
@@ -380,7 +415,7 @@ void main() {
       fetchModels: (_, __) async => models(0.7),
     ).collectAccounts();
 
-    expect(loaded, ['default-token', 'work-token']);
+    expect(loaded, unorderedEquals(['default-token', 'work-token']));
     expect(q.last.account, 'missing-grant@example.com');
     expect(q.last.error, contains('quotabot login antigravity'));
   });
@@ -417,11 +452,14 @@ void main() {
       'work@example.com',
       'home@example.com',
     ]);
-    expect(tokenCalls, [
-      'active@example.com:false',
-      'work@example.com:false',
-      'home@example.com:false',
-    ]);
+    expect(
+      tokenCalls,
+      unorderedEquals([
+        'active@example.com:false',
+        'work@example.com:false',
+        'home@example.com:false',
+      ]),
+    );
   });
 
   test('active CLI account is not replaced by a default grant', () async {

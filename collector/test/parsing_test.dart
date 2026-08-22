@@ -1611,6 +1611,42 @@ void main() {
       }
     });
 
+    test('isExhausted true with a reset is spent, not full remaining', () {
+      final reset = now + 3600;
+      final w = antigravityWindows({
+        'models': {
+          'gemini': {
+            'quotaInfo': {
+              'remainingFraction': 1,
+              'resetTime': reset,
+              'isExhausted': true,
+            },
+          },
+        },
+      }, now);
+      expect(w, hasLength(1));
+      expect(w.single.usedPercent, closeTo(100, 0.01));
+      expect(w.single.resetsAt, reset);
+    });
+
+    test('a non-boolean isExhausted flag rejects the live table', () {
+      final reset = now + 3600;
+      expect(
+        antigravityWindows({
+          'models': {
+            'gemini': {
+              'quotaInfo': {
+                'remainingFraction': 0.4,
+                'resetTime': reset,
+                'isExhausted': 'yes',
+              },
+            },
+          },
+        }, now),
+        isEmpty,
+      );
+    });
+
     test('non-metered helper rows are skipped, not fatal', () {
       final reset = now + 3600;
       // The endpoint lists tab-completion and chat helpers alongside metered
@@ -1849,6 +1885,34 @@ void main() {
       expect(grpcMessage(Uint8List.fromList([...data, ...data])), isEmpty);
     });
 
+    test('grpcWebTrailerStatus reads a unary trailer without using the payload',
+        () {
+      final data = _grpcFrame(0, [1, 2, 3]);
+      final okTrailer = _grpcFrame(0x80, ascii.encode('grpc-status: 0\r\n'));
+      final denied = _grpcFrame(0x80, ascii.encode('grpc-status: 16\r\n'));
+      final exhausted = _grpcFrame(0x80, ascii.encode('grpc-status: 8\r\n'));
+      final malformed =
+          _grpcFrame(0x80, ascii.encode('grpc-message: nope\r\n'));
+
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...okTrailer])),
+        0,
+      );
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...denied])),
+        16,
+      );
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...exhausted])),
+        8,
+      );
+      expect(
+        grpcWebTrailerStatus(Uint8List.fromList([...data, ...malformed])),
+        isNull,
+      );
+      expect(grpcWebTrailerStatus(Uint8List.fromList(data)), isNull);
+    });
+
     test('grokWindow parses percent and nearest future reset', () {
       const now = 1782000000;
       final msg = _grokMessage(6.0, now + 86400);
@@ -2017,6 +2081,26 @@ void main() {
       expect(ws.length, 1);
       expect(ws.first.percent, closeTo(50, 0.1));
       expect(ws.first.resetsAt, 1782088200);
+    });
+
+    test('kiroWindows ignores a reset-only breakdown sibling', () {
+      const now = 1782000000;
+      final ws = kiroWindows({
+        'usageBreakdowns': [
+          {
+            'displayName': 'Credits',
+            'percentageUsed': 82,
+            'resetDate': now + 3600,
+          },
+          {
+            'displayName': 'Bonus',
+            'resetDate': now + 7200,
+          },
+        ],
+      }, now);
+      expect(ws, hasLength(1));
+      expect(ws.single.label, 'credits');
+      expect(ws.single.usedPercent, 82);
     });
 
     test('kiroWindows rejects invalid percent and negative count evidence', () {

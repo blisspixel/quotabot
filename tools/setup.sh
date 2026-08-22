@@ -96,6 +96,9 @@ posix_desktop_prereq_reason() {
 }
 
 build_desktop_app() {
+  # shellcheck source=posix-space-safe-dart.sh
+  . "$script_dir/posix-space-safe-dart.sh"
+  quotabot_enable_space_safe_dart "$root" flutter >/dev/null || true
   (
     cd "$app" || exit 1
     flutter pub get --enforce-lockfile || exit 1
@@ -106,7 +109,11 @@ build_desktop_app() {
       flutter config --enable-linux-desktop >/dev/null || true
       flutter build linux --release --no-pub || exit 1
     fi
-  ) || return 1
+  ) || {
+    quotabot_restore_space_safe_dart
+    return 1
+  }
+  quotabot_restore_space_safe_dart
   if [ "$os" = darwin ]; then
     desktop_source="$app/build/macos/Build/Products/Release/quotabot.app"
     desktop_kind="macos-app"
@@ -144,7 +151,7 @@ append_local_bin_to_profile() {
     fish)
       mkdir -p "$HOME/.config/fish"
       profile="$HOME/.config/fish/config.fish"
-      line="fish_add_path $install_dir"
+      line="fish_add_path \"$install_dir\""
       ;;
     *)
       profile="$HOME/.profile"
@@ -179,10 +186,27 @@ show_first_run() {
     "$python_bin" "$script_dir/setup_first_run.py"
 }
 
+source_release_tag() {
+  local raw version
+  [ -f "$app/pubspec.yaml" ] || return 1
+  raw="$(awk '/^version:[[:space:]]*/ {print $2; exit}' "$app/pubspec.yaml")"
+  version="${raw%%+*}"
+  if [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+    printf 'v%s\n' "$version"
+    return 0
+  fi
+  return 1
+}
+
 install_portable_desktop() {
   local repo version asset url work archive sum expected actual dest expanded
   repo="${QUOTABOT_REPO:-blisspixel/quotabot}"
-  version="${QUOTABOT_VERSION:-latest}"
+  if [ -n "${QUOTABOT_VERSION:-}" ]; then
+    version="$QUOTABOT_VERSION"
+  else
+    version="$(source_release_tag || true)"
+    version="${version:-latest}"
+  fi
   case "$os" in
     darwin)
       [ "$arch" = arm64 ] || return 1
@@ -200,7 +224,7 @@ install_portable_desktop() {
   if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
     return 1
   fi
-  if [[ "$version" != "latest" && ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  if [[ "$version" != "latest" && ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
     return 1
   fi
   if [ "$version" = latest ]; then
@@ -275,6 +299,12 @@ open_quotabot_after_setup() {
     nohup "$HOME/.local/share/quotabot-desktop/quotabot" >/dev/null 2>&1 &
     ok 'Opened the desktop app'
     launched=1
+    if [ "$desktop_skipped" -eq 1 ]; then
+      bash "$script_dir/write-desktop-entry.sh" \
+        "$script_dir/quotabot.desktop" \
+        "$HOME/.local/share/quotabot-desktop/quotabot" \
+        "$HOME/.local/share/applications/quotabot.desktop" || true
+    fi
   fi
   if [ "$launched" -eq 0 ]; then
     step 'Opening quotabot top'

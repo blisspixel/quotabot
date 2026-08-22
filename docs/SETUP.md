@@ -48,7 +48,9 @@ source, run the idempotent setup script from the repo root. It builds the CLI
 from this checkout, installs it onto your PATH, runs `quotabot doctor`, prints
 what already works without extra login, and opens the app. The desktop tray app
 is built from source when OS build tools are present; otherwise setup installs
-the portable desktop release and launches it.
+the checksum-verified portable desktop release matching the checkout version,
+including a release candidate, when that release has been published, and
+launches it.
 
 ```powershell
 pwsh tools/setup.ps1          # Windows; add -CliOnly for just the CLI
@@ -66,6 +68,12 @@ unavailable. The script prints the repair step; re-run the same setup command
 after adding desktop tools to install the tray app. End users who only want a
 release binary should keep using the one-liner in
 [Install the quotabot CLI](#2-install-the-quotabot-cli).
+
+On Windows, a source desktop build also needs permission to create Flutter
+plugin symlinks. Enable Windows Developer Mode or run setup from an elevated
+terminal. Setup checks this before starting the desktop compile. Portable
+release installation does not need that permission and stops only the exact
+running installed app during its transactional replacement.
 
 The detailed sections below explain provider preparation, recovery, the optional
 desktop widget, and routing.
@@ -154,8 +162,8 @@ The installer downloads a prebuilt CLI bundle, verifies its checksum, and expose
 `quotabot` on your PATH from `~/.local/bin` (macOS/Linux) or
 `%LOCALAPPDATA%\quotabot\bin` (Windows). To install from a fork, set
 `QUOTABOT_REPO=owner/quotabot` first. The default is the latest published
-release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` selects one exact tag for a
-reproducible rollback.
+release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
+`vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
 [v0.9.9](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9). Its
@@ -474,7 +482,8 @@ irm https://raw.githubusercontent.com/blisspixel/quotabot/main/install.ps1 | iex
 Remove-Item Env:QUOTABOT_VERSION
 ```
 
-Only exact `vMAJOR.MINOR.PATCH` tags are accepted. Run `quotabot --version` and
+Exact `vMAJOR.MINOR.PATCH` tags and release-candidate tags of the form
+`vMAJOR.MINOR.PATCH-rc.N` are accepted. Run `quotabot --version` and
 `quotabot doctor` after the replacement.
 
 ### Reset all local quotabot data

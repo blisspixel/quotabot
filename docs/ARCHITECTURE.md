@@ -142,6 +142,33 @@ front ends could miss their deadline; a shared client reuses warm connections
 and lets a multi-call adapter reuse one. Adapters still accept an injected client
 for tests.
 
+## Concurrency
+
+Quota collection is I/O-bound: HTTP metadata, local files, and SQLite. The
+useful parallelism is overlapping those waits, not occupying every CPU core.
+
+- A fleet poll starts every selected adapter at once (`Future.wait` in
+  `collector.dart`). Multi-account live reads inside Grok and Antigravity overlap
+  the same way. Result order stays the discovered account order.
+- Claude and Codex start host and grant reads together so a slow grant cannot
+  hide a healthy host observation.
+- The desktop app runs `collectAll` on a background isolate so SQLite, protobuf,
+  and JSON work cannot freeze the UI isolate. If that isolate cannot start, it
+  falls back to the UI isolate.
+- One-shot CLI collection stays on the process isolate. Spawning a second
+  isolate for a command that exits immediately would cost more than it saves.
+- Analytics directory scans also run off the UI isolate, with a timeout and a
+  same-isolate fallback, so a stalled scan cannot freeze refresh.
+
+quotabot does not spawn one isolate per provider. Isolates do not share memory,
+so that design would drop the shared HTTP pool, duplicate credential and cache
+locks, and spend cores on waiting for network. Dart's test runner already uses
+available cores for the suite; CI runs the three OS matrices in parallel.
+
+Decision, parsing, and routing stay single-isolate and deterministic. Extra
+cores belong to overlapping metadata I/O and keeping the UI responsive, not to
+a 16-way compute farm on quota percentages.
+
 Each adapter has a single `collect()` method returning a `ProviderQuota`:
 
 - Codex calls the ChatGPT usage metadata endpoint with the OAuth access token
@@ -469,9 +496,10 @@ polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
 by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
 keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
 rejects batch JSON-RPC payloads, requires a bearer token of at least 32
-characters, and rejects indeterminate or larger-than-256-KiB POST bodies in the
-pre-body admission hook. The pinned upstream transport therefore never buffers
-an unauthenticated or unbounded request body.
+characters, and admits requests before the session transport reads a body.
+Missing or invalid bearer tokens return HTTP 401 with a Bearer challenge.
+POST bodies without a declared length, or larger than 256 KiB, return HTTP 413
+without buffering. Host and origin rebinding stays HTTP 403.
 `bin/example_routing_agent.dart` shows the same logic used for direct Dart
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
@@ -656,6 +684,12 @@ leaves JSON standard output reserved for alert records.
   Antigravity) shows an inline Connect action for authentication or reconnection
   failures, so it can be reconnected from the app without a terminal. Automatic
   timeout, rate-limit, and service-error recovery does not show that action.
+- Desktop maintenance uses one responsive Settings dialog instead of a long
+  popup menu. Profile and provider visibility, display, refresh and alert, and
+  update controls are grouped into bounded sections. Release discovery is
+  user-triggered, validates a bounded GitHub response, distinguishes the newest
+  candidate from the newest stable release, and opens release details rather
+  than silently replacing a running binary. No update request runs at startup.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
   a route. Entry grows a short content-hugged quota window to the normal

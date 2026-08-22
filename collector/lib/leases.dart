@@ -64,6 +64,81 @@ String? normalizeLeaseText(Object? value, {int maxLength = 120}) {
       : trimmed.substring(0, maxLength);
 }
 
+final leaseIdPattern = RegExp(r'^[A-Za-z0-9_-]{8,96}$');
+
+bool _leaseTextHasControlCharacters(String value) => value.runes.any(
+      (character) =>
+          character <= 0x1f || (character >= 0x7f && character <= 0x9f),
+    );
+
+int? _exactLeaseInteger(Object? value) {
+  if (value is int) return value;
+  if (value is num && value.isFinite && value == value.roundToDouble()) {
+    return value.round();
+  }
+  return null;
+}
+
+({int? value, String? error}) parseLeaseSeconds(Object? value) {
+  if (value == null) return (value: defaultLeaseSeconds, error: null);
+  final seconds = _exactLeaseInteger(value);
+  if (seconds == null ||
+      seconds < minLeaseSeconds ||
+      seconds > maxLeaseSeconds) {
+    return (
+      value: null,
+      error:
+          'lease_seconds must be between $minLeaseSeconds and $maxLeaseSeconds',
+    );
+  }
+  return (value: seconds, error: null);
+}
+
+({double? value, String? error}) parseLeaseWeight(Object? value) {
+  if (value == null) return (value: defaultLeaseWeightPercent, error: null);
+  final weight = value is num ? value.toDouble() : null;
+  if (weight == null ||
+      !weight.isFinite ||
+      weight < minLeaseWeightPercent ||
+      weight > maxLeaseWeightPercent) {
+    return (
+      value: null,
+      error: 'weight_percent must be between '
+          '${minLeaseWeightPercent.round()} and ${maxLeaseWeightPercent.round()}',
+    );
+  }
+  return (value: weight, error: null);
+}
+
+({String? value, String? error}) parseLeaseClient(Object? value) {
+  if (value == null) return (value: null, error: null);
+  if (value is! String ||
+      value.isEmpty ||
+      value != value.trim() ||
+      value.length > 120 ||
+      _leaseTextHasControlCharacters(value)) {
+    return (value: null, error: 'client is invalid');
+  }
+  return (value: value, error: null);
+}
+
+({String? value, String? error}) parseLeaseId(Object? value) {
+  if (value == null) {
+    return (value: null, error: 'lease_id is required');
+  }
+  if (value is! String) {
+    return (value: null, error: 'lease_id is invalid');
+  }
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) {
+    return (value: null, error: 'lease_id is required');
+  }
+  if (value != trimmed || !leaseIdPattern.hasMatch(value)) {
+    return (value: null, error: 'lease_id is invalid');
+  }
+  return (value: value, error: null);
+}
+
 class RouteLease {
   final String id;
   final String provider;

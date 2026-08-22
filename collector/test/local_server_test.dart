@@ -326,6 +326,36 @@ void main() {
     }
   });
 
+  test('snapshot exclude filters providers and rejects unknown query',
+      () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('claude', 20),
+        _q('codex', 30),
+      ],
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final filtered = await _getJson(Uri.parse('$base/?exclude=codex'));
+      expect(
+        (filtered['providers'] as List)
+            .map((row) => (row as Map)['provider'])
+            .toList(),
+        ['claude'],
+      );
+
+      final unknown = await _getJson(
+        Uri.parse('$base/?local_first=true'),
+        expectedStatus: 400,
+      );
+      expect(unknown['error'], contains('unknown query parameter'));
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('HTTP lease mutations authenticate, distribute, and release', () async {
     var collections = 0;
     final leaseIds = ['lease-claude-0001', 'lease-codex-0002'];
@@ -956,6 +986,30 @@ void main() {
 
       expect(provider['account'], 'live');
       expect((provider['windows'] as List).single['used_percent'], 20);
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('/providers and /health reject unknown query parameters', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final provider = await _getJson(
+        Uri.parse('$base/providers/claude?exclude=claude'),
+        expectedStatus: 400,
+      );
+      expect(provider['error'], contains('unknown query parameter'));
+
+      final health = await _getJson(
+        Uri.parse('$base/health?verbose=1'),
+        expectedStatus: 400,
+      );
+      expect(health['error'], contains('unknown query parameter'));
     } finally {
       await server.close(force: true);
     }

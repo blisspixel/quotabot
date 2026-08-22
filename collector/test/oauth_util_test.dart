@@ -49,6 +49,22 @@ void main() {
     expect(await capture.code, 'abc123');
   });
 
+  test('startLoopbackCodeCapture accepts a matching IPv6 callback', () async {
+    final capture = await startLoopbackCodeCapture(
+      path: '/cb',
+      expectedState: 'xyz',
+    );
+    try {
+      final resp = await http.get(
+        Uri.parse('http://[::1]:${capture.port}/cb?code=v6code&state=xyz'),
+      );
+      expect(resp.statusCode, 200);
+      expect(await capture.code, 'v6code');
+    } on SocketException catch (_) {
+      await capture.close();
+    }
+  });
+
   test(
     'startLoopbackCodeCapture ignores a state mismatch and keeps waiting',
     () async {

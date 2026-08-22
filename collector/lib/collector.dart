@@ -403,9 +403,12 @@ typedef CollectProgress = void Function(
 );
 
 /// Runs every provider adapter concurrently and returns their snapshots.
-/// Shared by the CLI (bin/collect.dart) and the desktop app. [onProviderDone]
-/// fires once per adapter as it settles, in completion order, so an interactive
-/// caller can show which providers are in and which are still outstanding.
+/// Shared by the CLI (bin/collect.dart) and the desktop app. Adapters overlap
+/// I/O on one worker isolate, including multi-account live reads inside a
+/// provider. This is a metadata fleet poll, not a CPU-parallel compute job.
+/// [onProviderDone] fires once per adapter as it settles, in completion order,
+/// so an interactive caller can show which providers are in and which are still
+/// outstanding.
 Future<List<ProviderQuota>> collectAll({CollectProgress? onProviderDone}) =>
     _collectAllProviders(onProviderDone: onProviderDone);
 

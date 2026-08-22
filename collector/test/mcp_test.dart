@@ -1781,7 +1781,7 @@ void main() {
       // A profile preferring claude must reserve claude so leases match suggest.
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [
@@ -1817,7 +1817,7 @@ void main() {
     test('exclude arguments filter reservation choice', () async {
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [
@@ -1845,10 +1845,75 @@ void main() {
       expect(lease['provider'], 'codex');
     });
 
+    test('quota_stretch profile auto-reserve matches suggest, not comfort',
+        () async {
+      var nextId = 0;
+      final store = InMemoryRouteLeaseStore(
+        idFactory: () => 'leaseid-${++nextId}',
+      );
+      await connect(
+        [
+          _q('claude', [
+            QuotaWindow(label: 'weekly', usedPercent: 80),
+          ]),
+          _local('ollama'),
+        ],
+        leaseStore: store,
+        profileLoader: (name) => name == 'stretch'
+            ? const QuotaProfile(
+                name: 'stretch',
+                routingPolicy: ProfileRoutingPolicy.quotaStretch,
+              )
+            : null,
+      );
+
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'profile': 'stretch'},
+        ),
+      );
+      expect(reserved.structuredContent?['reserved'], isFalse);
+      expect(
+        reserved.structuredContent?['reason'],
+        contains('local runtimes'),
+      );
+    });
+
+    test('reserve_provider rejects an out-of-range lease TTL', () async {
+      await connect(_fixture());
+      final reserved = await client.callTool(
+        const CallToolRequest(
+          name: 'reserve_provider',
+          arguments: {'lease_seconds': 5},
+        ),
+      );
+      expect(reserved.structuredContent?['reserved'], isFalse);
+      expect(
+        reserved.structuredContent?['reason'],
+        contains('lease_seconds'),
+      );
+    });
+
+    test('release_provider rejects an invalid lease id', () async {
+      await connect(_fixture());
+      final released = await client.callTool(
+        const CallToolRequest(
+          name: 'release_provider',
+          arguments: {'lease_id': 'short'},
+        ),
+      );
+      expect(released.structuredContent?['released'], isFalse);
+      expect(
+        released.structuredContent?['reason'],
+        'lease_id is invalid',
+      );
+    });
+
     test('reserve_provider shifts later suggestions until release', () async {
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [
@@ -1876,7 +1941,7 @@ void main() {
       expect(reserved.structuredContent?['reserved'], isTrue);
       expect(reserved.structuredContent?['reused'], isFalse);
       final lease = reserved.structuredContent?['lease'] as Map;
-      expect(lease['id'], 'lease-1');
+      expect(lease['id'], 'leaseid-1');
       expect(lease['provider'], 'claude');
 
       final retry = await client.callTool(
@@ -1891,7 +1956,7 @@ void main() {
         ),
       );
       expect(retry.structuredContent?['reused'], isTrue);
-      expect((retry.structuredContent?['lease'] as Map)['id'], 'lease-1');
+      expect((retry.structuredContent?['lease'] as Map)['id'], 'leaseid-1');
 
       final leasedSuggestion = await client.callTool(
         const CallToolRequest(name: 'suggest_provider'),
@@ -1907,7 +1972,7 @@ void main() {
       final released = await client.callTool(
         const CallToolRequest(
           name: 'release_provider',
-          arguments: {'lease_id': 'lease-1'},
+          arguments: {'lease_id': 'leaseid-1'},
         ),
       );
       expect(released.structuredContent?['released'], isTrue);
@@ -1925,7 +1990,7 @@ void main() {
     test('concurrent auto reservations select different providers', () async {
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [
@@ -1964,7 +2029,7 @@ void main() {
         () async {
       var nextId = 0;
       final store = _StaleReadRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [
@@ -2016,7 +2081,7 @@ void main() {
         () async {
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [
@@ -2066,7 +2131,7 @@ void main() {
         () async {
       var nextId = 0;
       final store = InMemoryRouteLeaseStore(
-        idFactory: () => 'lease-${++nextId}',
+        idFactory: () => 'leaseid-${++nextId}',
       );
       await connect(
         [

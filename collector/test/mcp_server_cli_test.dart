@@ -52,6 +52,18 @@ void main() {
       throwsFormatException,
     );
     expect(
+      () => McpServerCliOptions.parse([
+        '--http',
+        '--host',
+        '127.0.0.1',
+        '--host',
+        'localhost',
+        '--token',
+        _token,
+      ]),
+      throwsFormatException,
+    );
+    expect(
       () => McpServerCliOptions.parse(['--http', '--port', '0']),
       throwsFormatException,
     );

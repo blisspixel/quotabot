@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quotabot_collector/adapters/nvidia.dart';
@@ -120,6 +122,19 @@ void main() {
       expect(q.pipeHealth, providerPipeHealthThrottled);
       expect(q.httpStatus, 429);
       expect(q.retryAfterSeconds, 90);
+    });
+
+    test('model discovery timeouts are throttled rather than key failures',
+        () async {
+      final q = await NvidiaAdapter(
+        keySource: () => 'nvapi-slow',
+        client: MockClient((_) async => throw TimeoutException('slow')),
+      ).collect();
+
+      expect(q.ok, isFalse);
+      expect(q.error, 'NVIDIA /models throttled');
+      expect(q.pipeHealth, providerPipeHealthThrottled);
+      expect(q.httpStatus, isNull);
     });
   });
 }

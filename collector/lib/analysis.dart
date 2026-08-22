@@ -1833,9 +1833,11 @@ RouteSuggestion suggestRoute(
     );
   }
 
-  final drifted =
-      subs.where((candidate) => candidate.driftReason != null).toList();
-  final driftOnly = drifted.isNotEmpty && drifted.length == subs.length;
+  final drifted = policyEvidenceSubs
+      .where((candidate) => candidate.driftReason != null)
+      .toList();
+  final driftOnly =
+      drifted.isNotEmpty && drifted.length == policyEvidenceSubs.length;
   if (driftOnly) {
     final best = drifted.first;
     final evidence = best.headroom == null
@@ -1850,7 +1852,7 @@ RouteSuggestion suggestRoute(
     );
   }
   final staleWithLastKnown =
-      subs.where((c) => c.stale && c.headroom != null).toList();
+      policyEvidenceSubs.where((c) => c.stale && c.headroom != null).toList();
   if (staleWithLastKnown.isNotEmpty) {
     final best = staleWithLastKnown.first;
     return result(
@@ -1860,8 +1862,12 @@ RouteSuggestion suggestRoute(
     );
   }
 
-  // Everything is spent. Point at whatever resets soonest.
-  final resetting = subs.where((c) => !c.stale && c.resetsAt != null).toList()
+  // Everything in the active policy pool is spent. Point at whatever
+  // measured, in-policy subscription resets soonest. Credit-backed or
+  // manual rows cannot satisfy quota_stretch, so they must not win the wait.
+  final resetting = policyEvidenceSubs
+      .where((c) => !c.stale && c.resetsAt != null)
+      .toList()
     ..sort((a, b) => a.resetsAt!.compareTo(b.resetsAt!));
   if (resetting.isNotEmpty) {
     final soonest = resetting.first;

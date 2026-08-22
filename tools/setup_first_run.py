@@ -108,7 +108,7 @@ def _is_ready(provider: Mapping[str, Any], now: int) -> bool:
             )
         )
     if source_class == "status_only":
-        return True
+        return False
     return _has_current_measured_windows(provider, now)
 
 
@@ -124,44 +124,56 @@ def render_first_run(snapshot: object, *, now: int | None = None) -> str:
     if not isinstance(providers, list) or not providers:
         return ""
     observed_at = int(time.time()) if now is None else now
-    ready: list[str] = []
-    login: list[str] = []
-    other: list[str] = []
-
+    grouped: dict[str, list[Mapping[str, object]]] = {}
     for provider in providers:
         if not isinstance(provider, Mapping):
             continue
         key = _text(provider.get("provider"))
-        name = _text(provider.get("display_name")) or key or "provider"
-        error = _text(provider.get("error"))
-        lower_error = error.lower()
-        if _is_ready(provider, observed_at):
+        if not key:
+            continue
+        grouped.setdefault(key, []).append(provider)
+
+    ready: list[str] = []
+    login: list[str] = []
+    other: list[str] = []
+
+    for key, rows in grouped.items():
+        name = _text(rows[0].get("display_name")) or key
+        if any(_is_ready(row, observed_at) for row in rows):
             ready.append(name)
             continue
-        if "invalid" in lower_error and "usage" in lower_error:
-            other.append(f"{name} - signed in, quota unreadable: {error}")
-            continue
-        command = _LOGIN_COMMAND.search(lower_error)
-        if command is not None:
-            login.append(command.group(1))
-            continue
-        if key in _LOGIN_PROVIDERS and any(
-            token in lower_error
-            for token in (
-                "token",
-                "login",
-                "auth",
-                "credential",
-                "signed out",
-                "unauthorized",
-            )
-        ):
-            login.append(key)
-            continue
-        if error:
-            other.append(f"{name} - {error}")
-        elif provider.get("ok") is True:
-            other.append(f"{name} - no fresh quota evidence")
+        login_added = False
+        for row in rows:
+            error = _text(row.get("error"))
+            lower_error = error.lower()
+            if "invalid" in lower_error and "usage" in lower_error:
+                other.append(f"{name} - signed in, quota unreadable: {error}")
+                continue
+            command = _LOGIN_COMMAND.search(lower_error)
+            if command is not None:
+                if not login_added:
+                    login.append(command.group(1))
+                    login_added = True
+                continue
+            if key in _LOGIN_PROVIDERS and any(
+                token in lower_error
+                for token in (
+                    "token",
+                    "login",
+                    "auth",
+                    "credential",
+                    "signed out",
+                    "unauthorized",
+                )
+            ):
+                if not login_added:
+                    login.append(key)
+                    login_added = True
+                continue
+            if error:
+                other.append(f"{name} - {error}")
+            elif row.get("ok") is True:
+                other.append(f"{name} - no fresh quota evidence")
 
     ready = _unique(ready)
     login = _unique(login)

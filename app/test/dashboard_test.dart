@@ -11,6 +11,7 @@ import 'package:quotabot/prefs.dart';
 import 'package:quotabot/provider_display.dart';
 import 'package:quotabot/quota_loading_indicator.dart';
 import 'package:quotabot/theme_spec.dart';
+import 'package:quotabot/update_check.dart';
 import 'package:quotabot_collector/cache.dart';
 import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
@@ -48,10 +49,79 @@ Future<void> _useDesktopSurface(WidgetTester tester) async {
 }
 
 Future<void> _selectMenuValue(WidgetTester tester, String value) async {
-  final menu = tester.widget<PopupMenuButton<String>>(
-    find.byType(PopupMenuButton<String>),
-  );
-  menu.onSelected!(value);
+  if (value == 'refresh') {
+    final refresh = find.byTooltip('Refresh now');
+    if (refresh.evaluate().isNotEmpty) await tester.tap(refresh);
+    await tester.pumpAndSettle();
+    return;
+  }
+  if (find.byTooltip('Settings').evaluate().isEmpty) {
+    await tester.tap(find.byTooltip('Expand'));
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.byTooltip('Settings'));
+  await tester.pumpAndSettle();
+
+  if (value == 'profiles:manage') {
+    final target = find.byKey(const ValueKey('settings-manage-profiles'));
+    await tester.ensureVisible(target);
+    await tester.tap(target);
+    await tester.pumpAndSettle();
+    return;
+  }
+  if (value == 'webhook') {
+    final target = find.byKey(const ValueKey('settings-webhook'));
+    await tester.ensureVisible(target);
+    await tester.tap(target);
+    await tester.pumpAndSettle();
+    return;
+  }
+  if (value.startsWith('show:')) {
+    final target = find.byKey(
+      ValueKey('settings-provider-${value.substring(5)}'),
+    );
+    await tester.ensureVisible(target);
+    await tester.tap(target);
+  } else {
+    final key = switch (value) {
+      'sort:alpha' => 'settings-sort-alpha',
+      'sort:avail' => 'settings-sort-available',
+      'sort:used' => 'settings-sort-used',
+      'sort:default' => 'settings-sort-default',
+      'cad:m15' => 'settings-cadence-15m',
+      'cad:h1' => 'settings-cadence-hourly',
+      'cad:smart' => 'settings-cadence-smart',
+      'always_on_top' => 'settings-always-on-top',
+      'show_in_taskbar' => 'settings-show-taskbar',
+      'notifications' => 'settings-notifications',
+      'show_accounts' => 'settings-show-accounts',
+      'text:small' => 'settings-text-small',
+      'text:large' => 'settings-text-large',
+      'text:medium' => 'settings-text-medium',
+      _ => throw StateError('Unknown settings action $value'),
+    };
+    if (value.startsWith('sort:')) {
+      final target = find.byKey(const ValueKey('settings-sort'));
+      await tester.ensureVisible(target);
+      await tester.tap(target);
+      await tester.pumpAndSettle();
+      final label = switch (key) {
+        'settings-sort-alpha' => 'Alphabetical',
+        'settings-sort-available' => 'Most available',
+        'settings-sort-used' => 'Most used',
+        _ => 'Default order',
+      };
+      await tester.tap(find.text(label).last);
+    } else {
+      final target = find.byKey(ValueKey(key));
+      await tester.ensureVisible(target);
+      await tester.tap(target);
+    }
+  }
+  await tester.pumpAndSettle();
+  if (find.byKey(const ValueKey('settings-close')).evaluate().isNotEmpty) {
+    await tester.tap(find.byKey(const ValueKey('settings-close')));
+  }
   await tester.pumpAndSettle();
 }
 
@@ -106,12 +176,12 @@ ProviderQuota _routeQuota(
 );
 
 List<String> _providerMenuValues(WidgetTester tester) => tester
-    .widgetList<CheckedPopupMenuItem<String>>(
-      find.byType(CheckedPopupMenuItem<String>),
-    )
-    .map((item) => item.value)
-    .whereType<String>()
-    .where((value) => value.startsWith('show:'))
+    .widgetList<FilterChip>(find.byType(FilterChip))
+    .map((chip) => chip.key)
+    .whereType<ValueKey<String>>()
+    .map((key) => key.value)
+    .where((value) => value.startsWith('settings-provider-'))
+    .map((value) => 'show:${value.substring('settings-provider-'.length)}')
     .toList();
 
 double _contrastRatio(Color foreground, Color background) {
@@ -129,7 +199,7 @@ double _contrastRatio(Color foreground, Color background) {
 class _FakeDesktopNotificationClient implements DesktopNotificationClient {
   final Map<int, DesktopPendingNotification> _pending;
   final List<int> cancelled = [];
-  final List<({int id, String title, String body})> shown = [];
+  final List<({int id, String title, String body, String? payload})> shown = [];
   final List<({int id, String title, String body, DateTime scheduledDate})>
   scheduled = [];
   final Completer<void>? scheduleStarted;
@@ -200,8 +270,9 @@ class _FakeDesktopNotificationClient implements DesktopNotificationClient {
     required String title,
     required String body,
     required String providerLabel,
+    String? payload,
   }) async {
-    shown.add((id: id, title: title, body: body));
+    shown.add((id: id, title: title, body: body, payload: payload));
   }
 }
 
@@ -610,6 +681,7 @@ void main() {
     expect(find.text(message), findsOneWidget);
     expect(find.bySemanticsLabel(message), findsOneWidget);
     expect(find.textContaining('No providers in'), findsNothing);
+    expect(find.text('Edit profile'), findsOneWidget);
   });
 
   testWidgets('desktop routing applies model capability budget gates', (
@@ -725,7 +797,7 @@ void main() {
     await tester.pump();
 
     expect(posts, 1);
-    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
 
@@ -741,7 +813,7 @@ void main() {
     );
     await tester.tap(find.widgetWithText(TextButton, 'Save'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(find.text('Alert webhook: delivery failed'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -889,6 +961,50 @@ void main() {
       },
     );
   }
+
+  testWidgets('provider setup distinguishes throttling from reconnecting', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final throttled = ProviderQuota(
+      provider: 'claude',
+      displayName: 'Claude',
+      account: 'test',
+      asOf: now,
+      ok: false,
+      error: 'HTTP 429',
+      pipeHealth: providerPipeHealthThrottled,
+      httpStatus: 429,
+      retryAfterSeconds: 120,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(enableNotifications: false, setupDone: true),
+          demoMode: false,
+          collector: () async => [throttled],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Setup and help'));
+    await tester.pumpAndSettle();
+
+    final dialog = find.byType(Dialog);
+    expect(
+      find.descendant(of: dialog, matching: find.text('rate limited')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: dialog, matching: find.text('no live data')),
+      findsNothing,
+    );
+    expect(find.textContaining('needs reconnecting'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('provider setup refresh keeps every matching account visible', (
     tester,
@@ -1503,6 +1619,107 @@ void main() {
     expect(find.textContaining('No live quota data.'), findsOneWidget);
     expect(find.textContaining('Fallback:'), findsOneWidget);
     expect(find.text('Decision id'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        'No current quota data; showing cached or unavailable providers',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact empty profile and no-route fit at minimum width', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          demoMode: false,
+          collector: () async => const <ProviderQuota>[],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('compact-route-decision')),
+      findsOneWidget,
+    );
+    expect(find.text('No providers - Edit profile'), findsOneWidget);
+    expect(find.text('Edit profile'), findsNothing);
+    for (final tooltip in ['Expand', 'Close']) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('compact stacked warnings keep the no-route control on screen', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(200, 600);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    const warning = 'Settings not loaded (storage unavailable)';
+
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(
+            compact: true,
+            enableNotifications: false,
+            setupDone: true,
+          ),
+          startupStorageWarning: warning,
+          demoMode: false,
+          collector: () async => [
+            ProviderQuota(
+              provider: 'grok',
+              displayName: 'Grok',
+              account: 'default',
+              asOf: now,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('compact-route-decision')),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(RegExp(r'No quota data.*Open decision details')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel(warning), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        'No current quota data; showing cached or unavailable providers',
+      ),
+      findsOneWidget,
+    );
+    for (final tooltip in ['Expand', 'Close']) {
+      final rect = tester.getRect(find.byTooltip(tooltip));
+      expect(rect.left, greaterThanOrEqualTo(0), reason: tooltip);
+      expect(rect.right, lessThanOrEqualTo(200), reason: tooltip);
+    }
     expect(tester.takeException(), isNull);
   });
 
@@ -1856,10 +2073,10 @@ void main() {
     await tester.pumpWidget(_wrap(const Dashboard.test(prefs: Prefs())));
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('Alphabetical'), findsOneWidget);
-    expect(find.text('Alert webhook...'), findsOneWidget);
+    expect(find.text('Provider order'), findsOneWidget);
+    expect(find.text('Configure alert webhook'), findsOneWidget);
     tester.state<NavigatorState>(find.byType(Navigator).first).pop();
     await tester.pumpAndSettle();
 
@@ -1932,6 +2149,207 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('settings checks GitHub releases only after user action', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    var checks = 0;
+    final opened = <String>[];
+    const latest = QuotabotRelease(
+      tag: 'v0.10.0-rc.8',
+      version: '0.10.0-rc.8',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.8',
+      prerelease: true,
+    );
+    const stable = QuotabotRelease(
+      tag: 'v0.9.9',
+      version: '0.9.9',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.9.9',
+      prerelease: false,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          updateChecker: () async {
+            checks++;
+            return const QuotabotUpdateStatus(
+              currentVersion: quotabotAppVersion,
+              stable: stable,
+              latest: latest,
+            );
+          },
+          releaseOpener: (url) async => opened.add(url),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(checks, 0);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Profiles and providers'), findsOneWidget);
+    expect(find.text('Display'), findsOneWidget);
+    expect(find.text('Refresh and alerts'), findsOneWidget);
+    expect(find.text('Updates'), findsOneWidget);
+    expect(find.text('Installed build: $quotabotAppVersion'), findsOneWidget);
+    expect(checks, 0);
+
+    final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
+    await tester.ensureVisible(checkUpdates);
+    await tester.tap(checkUpdates);
+    await tester.pump();
+    await tester.pump();
+    expect(checks, 1);
+    expect(find.text('Update available'), findsOneWidget);
+    expect(find.text('Latest preview: 0.10.0-rc.8'), findsOneWidget);
+    expect(find.text('Latest stable: 0.9.9'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Open preview update'));
+    await tester.pumpAndSettle();
+    expect(opened, [latest.url]);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('stable settings channel keeps previews optional', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final opened = <String>[];
+    const latest = QuotabotRelease(
+      tag: 'v0.10.0-rc.7',
+      version: '0.10.0-rc.7',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.7',
+      prerelease: true,
+    );
+    const stable = QuotabotRelease(
+      tag: 'v0.9.9',
+      version: '0.9.9',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.9.9',
+      prerelease: false,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          updateChecker: () async => const QuotabotUpdateStatus(
+            currentVersion: '0.9.9',
+            stable: stable,
+            latest: latest,
+          ),
+          releaseOpener: (url) async => opened.add(url),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
+    await tester.ensureVisible(checkUpdates);
+    await tester.tap(checkUpdates);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('quotabot is current'), findsOneWidget);
+    expect(
+      find.text(
+        'This build matches the latest stable release. A newer preview is '
+        'also available.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Open preview release'), findsOneWidget);
+    expect(find.text('Open stable update'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Open preview release'));
+    await tester.pump();
+    expect(opened, [latest.url]);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('closing settings suppresses a pending update result', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    final pending = Completer<QuotabotUpdateStatus>();
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          updateChecker: () => pending.future,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
+    await tester.ensureVisible(checkUpdates);
+    await tester.tap(checkUpdates);
+    await tester.pump();
+    expect(find.text('Checking GitHub releases'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('settings-close')));
+    await tester.pump();
+    pending.complete(
+      const QuotabotUpdateStatus(
+        currentVersion: quotabotAppVersion,
+        stable: QuotabotRelease(
+          tag: 'v0.9.9',
+          version: '0.9.9',
+          url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.9.9',
+          prerelease: false,
+        ),
+        latest: QuotabotRelease(
+          tag: 'v0.10.0-rc.7',
+          version: '0.10.0-rc.7',
+          url:
+              'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.7',
+          prerelease: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byType(Dialog), findsNothing);
+    expect(find.text('Update available'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('settings stays usable at narrow width and 2x text', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 900);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await tester.pumpWidget(_wrap(const Dashboard.test(prefs: Prefs())));
+    await tester.pump();
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Settings'), findsOneWidget);
+
+    final releases = find.byKey(const ValueKey('settings-open-releases'));
+    await tester.ensureVisible(releases);
+    await tester.pumpAndSettle();
+    expect(releases, findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('hidden account mode uses one private provider control', (
     tester,
   ) async {
@@ -1958,7 +2376,7 @@ void main() {
     expect(find.text('personal@example.com'), findsNothing);
     expect(find.text('work@example.com'), findsNothing);
 
-    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(_providerMenuValues(tester), ['show:claude']);
     expect(find.text('personal@example.com'), findsNothing);
@@ -1997,7 +2415,7 @@ void main() {
     expect(find.text('personal@example.com'), findsOneWidget);
     expect(find.text('work@example.com'), findsWidgets);
 
-    await tester.tap(find.byTooltip('Menu: profiles, providers, and settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     expect(_providerMenuValues(tester), [
       'show:claude|personal@example.com',
@@ -2515,10 +2933,9 @@ void main() {
       await tester.pump();
       expect(scheduleStarted.isCompleted, isTrue);
 
-      final menu = tester.widget<PopupMenuButton<String>>(
-        find.byType(PopupMenuButton<String>),
-      );
-      menu.onSelected!('notifications');
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('settings-notifications')));
       await tester.pump();
       releaseSchedule.complete();
       await tester.pump();

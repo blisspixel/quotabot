@@ -25,25 +25,18 @@ if ($windowsArch -ne 'x64') {
 }
 
 if (-not $PackageOnly) {
-  # Find flutter on PATH so this builds on any machine.
-  $flutter = (Get-Command flutter -ErrorAction SilentlyContinue).Source
-  if (-not $flutter) { throw "flutter not found on PATH. Install Flutter and add it to PATH." }
   $windowsBuildPrereqs = Assert-WindowsDesktopBuildPrereqs
   if ($windowsBuildPrereqs) {
     Write-Host "Visual Studio ATL ready: $($windowsBuildPrereqs.VisualStudioPath)"
   }
 
   Write-Host 'Building Windows release...'
+  . (Join-Path $scriptDir 'windows-space-safe-dart.ps1')
+  $spaceSafe = Enable-QuotabotSpaceSafeDart -PreferredRoot $root -IncludeFlutter
   Push-Location $appDir
   try {
-    & $flutter pub get --enforce-lockfile
-    if ($LASTEXITCODE -ne 0) {
-      throw "flutter pub get failed with exit code $LASTEXITCODE"
-    }
-    & $flutter build windows --release --no-pub
-    if ($LASTEXITCODE -ne 0) {
-      throw "flutter build failed with exit code $LASTEXITCODE"
-    }
+    Invoke-QuotabotFlutter -State $spaceSafe -Arguments @('pub', 'get', '--enforce-lockfile')
+    Invoke-QuotabotFlutter -State $spaceSafe -Arguments @('build', 'windows', '--release', '--no-pub')
   } finally {
     Pop-Location
   }

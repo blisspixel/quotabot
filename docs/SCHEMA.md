@@ -270,7 +270,10 @@ code, responses, credentials, or exception messages.
 provider/account), or `account`, `source_class`, `available`,
 `headroom_percent`, `resets_at`, and `stale`, with an optional plain `error` when
 a failed live read is showing last-known evidence, plus optional `drift_reason`
-and `drift_observed_at`.
+and `drift_observed_at`. CLI `check` accepts a shipped adapter id or display
+name and then matches rows by provider id. A custom provider matches by its id
+or display name and cannot satisfy a shipped adapter name. MCP and loopback
+HTTP `/providers/` keep the exact provider selector.
 
 The CLI's successful form additionally carries `captured_at`,
 `staleness_seconds`, `snapshot_source`, `matched_account_count`,

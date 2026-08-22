@@ -57,6 +57,11 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             rf"^version:\s*({VERSION})\+[0-9]+\s*$",
             "Flutter pubspec",
         ),
+        "Flutter update check": _required_match(
+            app / "lib" / "update_check.dart",
+            rf"^const String quotabotAppVersion = '({VERSION})';$",
+            "Flutter update check",
+        ),
         "Flutter collector lock": _locked_collector_version(app / "pubspec.lock"),
         "README current stable": _required_match(
             root / "README.md",

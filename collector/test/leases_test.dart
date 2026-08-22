@@ -168,6 +168,24 @@ void main() {
     expect(normalizeLeaseText('abcdef', maxLength: 3), 'abc');
   });
 
+  test('lease request parsers reject out-of-range values instead of clamping',
+      () {
+    expect(parseLeaseSeconds(null).value, defaultLeaseSeconds);
+    expect(parseLeaseSeconds(120).value, 120);
+    expect(parseLeaseSeconds(5).error, contains('lease_seconds'));
+    expect(parseLeaseSeconds(99999).error, contains('lease_seconds'));
+    expect(parseLeaseWeight(15).value, 15);
+    expect(parseLeaseWeight(0).error, contains('weight_percent'));
+    expect(parseLeaseWeight(99).error, contains('weight_percent'));
+    expect(parseLeaseClient(null).value, isNull);
+    expect(parseLeaseClient('agent').value, 'agent');
+    expect(parseLeaseClient('  padded  ').error, 'client is invalid');
+    expect(parseLeaseId('lease-ok').value, 'lease-ok');
+    expect(parseLeaseId('short').error, 'lease_id is invalid');
+    expect(parseLeaseId('lease.id.with.dots').error, 'lease_id is invalid');
+    expect(parseLeaseId(null).error, 'lease_id is required');
+  });
+
   test('noop store is a safe unavailable implementation', () {
     const store = NoopRouteLeaseStore();
     expect(store.active(100), isEmpty);

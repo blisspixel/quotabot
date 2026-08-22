@@ -17,7 +17,7 @@ function Test-ReadyProvider {
     if ($sourceClass -ne 'local_runtime') { return $false }
     return @($Provider.models | Where-Object { $_.cloud_offloaded -ne $true }).Count -gt 0
   }
-  if ($sourceClass -eq 'status_only') { return $true }
+  if ($sourceClass -eq 'status_only') { return $false }
   if (@('authoritative_live', 'this_machine_fallback', 'passive_local_evidence') -notcontains $sourceClass) {
     return $false
   }
@@ -60,32 +60,51 @@ $ready = New-Object System.Collections.Generic.List[string]
 $login = New-Object System.Collections.Generic.List[string]
 $other = New-Object System.Collections.Generic.List[string]
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$grouped = @{}
 foreach ($provider in @($snapshot.providers)) {
-  $name = if ($provider.display_name) { [string]$provider.display_name } else { [string]$provider.provider }
-  $errorText = [string]$provider.error
-  if (Test-ReadyProvider -Provider $provider -Now $now) {
+  $key = [string]$provider.provider
+  if (-not $key) { continue }
+  if (-not $grouped.ContainsKey($key)) {
+    $grouped[$key] = New-Object System.Collections.Generic.List[object]
+  }
+  $grouped[$key].Add($provider) | Out-Null
+}
+foreach ($key in $grouped.Keys) {
+  $rows = @($grouped[$key].ToArray())
+  $name = if ($rows[0].display_name) { [string]$rows[0].display_name } else { $key }
+  if (@($rows | Where-Object { Test-ReadyProvider -Provider $_ -Now $now }).Count -gt 0) {
     $ready.Add($name) | Out-Null
     continue
   }
-  if ($errorText -match 'invalid' -and $errorText -match 'usage') {
-    $other.Add("$name - signed in, quota unreadable: $errorText") | Out-Null
-    continue
-  }
-  if ($errorText -match '(?i)\bquotabot login ([a-z0-9_-]{1,64})\b') {
-    $login.Add($Matches[1].ToLowerInvariant()) | Out-Null
-    continue
-  }
-  if (
-    (@('claude', 'codex', 'grok', 'antigravity') -contains [string]$provider.provider) -and
-    ($errorText -match 'token|login|auth|credential|signed out|unauthorized')
-  ) {
-    $login.Add([string]$provider.provider) | Out-Null
-    continue
-  }
-  if ($errorText) {
-    $other.Add("$name - $errorText") | Out-Null
-  } elseif ($provider.ok) {
-    $other.Add("$name - no fresh quota evidence") | Out-Null
+  $loginAdded = $false
+  foreach ($provider in $rows) {
+    $errorText = [string]$provider.error
+    if ($errorText -match 'invalid' -and $errorText -match 'usage') {
+      $other.Add("$name - signed in, quota unreadable: $errorText") | Out-Null
+      continue
+    }
+    if ($errorText -match '(?i)\bquotabot login ([a-z0-9_-]{1,64})\b') {
+      if (-not $loginAdded) {
+        $login.Add($Matches[1].ToLowerInvariant()) | Out-Null
+        $loginAdded = $true
+      }
+      continue
+    }
+    if (
+      (@('claude', 'codex', 'grok', 'antigravity') -contains $key) -and
+      ($errorText -match 'token|login|auth|credential|signed out|unauthorized')
+    ) {
+      if (-not $loginAdded) {
+        $login.Add($key) | Out-Null
+        $loginAdded = $true
+      }
+      continue
+    }
+    if ($errorText) {
+      $other.Add("$name - $errorText") | Out-Null
+    } elseif ($provider.ok) {
+      $other.Add("$name - no fresh quota evidence") | Out-Null
+    }
   }
 }
 

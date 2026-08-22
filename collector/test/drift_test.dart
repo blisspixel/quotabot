@@ -338,14 +338,24 @@ void main() {
       expect(detectQuotaDrift(fresh, prev), contains('usage fell'));
     });
 
-    test('Antigravity still rejects a disappeared exhaustive model quota', () {
+    test('Antigravity admits a dynamic model catalog change', () {
       final prev = snapModels(antigravityProviderId, const [
         ModelQuota(model: 'Gemini', usedPercent: 20, resetsAt: 2000),
       ]);
       final fresh = snapModels(antigravityProviderId, const []);
 
-      expect(
-          detectQuotaDrift(fresh, prev), contains('model quota disappeared'));
+      expect(detectQuotaDrift(fresh, prev), isNull);
+    });
+
+    test('Antigravity still rejects impossible surviving model drift', () {
+      final prev = snapModels(antigravityProviderId, const [
+        ModelQuota(model: 'Gemini', usedPercent: 60, resetsAt: 2000),
+      ]);
+      final fresh = snapModels(antigravityProviderId, const [
+        ModelQuota(model: 'Gemini', usedPercent: 20, resetsAt: 2000),
+      ]);
+
+      expect(detectQuotaDrift(fresh, prev), contains('usage fell'));
     });
   });
 
@@ -499,6 +509,40 @@ void main() {
       expect(admission.shouldPersist, isFalse);
       expect(admission.driftReason, contains('with no reset'));
       expect(admission.snapshot.stale, isTrue);
+    });
+
+    test('an expired short window still detects drift on a live weekly', () {
+      final previous = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'a',
+        asOf: 100,
+        windows: [win('5h', 90, 150), win('weekly', 95, 5000)],
+      );
+      final dropped = ProviderQuota(
+        provider: claudeProviderId,
+        displayName: 'Claude',
+        account: 'a',
+        asOf: 200,
+        windows: [win('5h', 5, 800), win('weekly', 8, 5000)],
+      );
+
+      final admission = admitQuotaEvidence(
+        dropped,
+        previous,
+        observedAt: 200,
+      );
+
+      expect(isTrustedQuotaEvidenceAt(previous, 200), isFalse);
+      expect(isTrustedQuotaEvidenceAtCapture(previous), isTrue);
+      expect(admission.shouldPersist, isFalse);
+      expect(admission.driftReason, contains('weekly'));
+      expect(admission.snapshot.stale, isTrue);
+      expect(
+          admission.snapshot.windows
+              .firstWhere((w) => w.label == 'weekly')
+              .usedPercent,
+          95);
     });
 
     test('expired trusted baseline stays visible when fresh evidence fails',

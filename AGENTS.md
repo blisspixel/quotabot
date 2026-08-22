@@ -74,7 +74,8 @@ for that surface.
   bin/mcp_server.dart` (or a compiled `quotabot-mcp`) for stdio. For clients
   that need MCP Streamable HTTP, run `dart run bin/mcp_server.dart --http`
   with `--token-file` or `--token-env` (loopback only, bearer auth required).
-  HTTP POST bodies must declare a length and are capped at 256 KiB. Tools:
+  HTTP POST bodies must declare a length and are capped at 256 KiB. Missing
+  bearer is HTTP 401; oversized or chunked bodies are HTTP 413. Tools:
   - `list_quotas` - full normalized snapshot for every provider.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low. Pass `local_first: true` to
@@ -156,8 +157,9 @@ for that surface.
   POSTed for you (loopback unless `--allow-external`).
 - **HTTP (loopback).** `GET http://127.0.0.1:8721/suggest` and `GET /` (start it
   with `dart run bin/local_server.dart`). Add `?exclude=codex,grok` to ignore
-  providers for one recommendation, or `?local_first=true` to prefer local
-  capacity. Add `?quota_stretch=true` to preserve the default 25 percent reserve,
+  providers on that snapshot or recommendation. Routing flags such as
+  `?local_first=true` and `?quota_stretch=true` apply to `/suggest` only.
+  On `/suggest`, `quota_stretch=true` preserves the default 25 percent reserve,
   with `&quota_stretch_threshold_percent=N` for a value from 20 through 50. The
   bundled LiteLLM router also uses authenticated
   `POST /leases/reserve` and `POST /leases/release`. Server startup creates a

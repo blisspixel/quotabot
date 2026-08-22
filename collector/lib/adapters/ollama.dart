@@ -403,9 +403,10 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
         min: 1,
         max: 100000000,
       ),
-      // Ollama cloud models carry a `-cloud` tag suffix (e.g.
-      // `qwen3-coder:480b-cloud`); they run on ollama.com, not on-device.
-      cloud: name.toLowerCase().endsWith('-cloud'),
+      // Ollama cloud models use a `:cloud` source tag (`kimi-k2.5:cloud`) or a
+      // `-cloud` tag suffix (`qwen3-coder:480b-cloud`). Either form runs on
+      // ollama.com, not on-device.
+      cloud: ollamaModelNameIsCloud(name),
       // Neither model-list endpoint declares capabilities; `/api/show` does,
       // and the adapter folds that in afterwards.
       tools: null,
@@ -415,6 +416,21 @@ List<LocalModel> ollamaModelsFromJson(dynamic data) {
     ));
   }
   return out;
+}
+
+/// Whether an Ollama model name is a cloud-offloaded route.
+///
+/// Documented names use a `:cloud` source tag (`kimi-k2.5:cloud`) or a
+/// `-cloud` suffix on the last tag (`qwen3-coder:480b-cloud`). Any colon
+/// segment that is exactly `cloud` or that ends with `-cloud` is treated as
+/// offloaded so a local-only or free budget cannot count it as on-device.
+bool ollamaModelNameIsCloud(String name) {
+  final lower = name.trim().toLowerCase();
+  if (lower.isEmpty) return false;
+  for (final segment in lower.split(':')) {
+    if (segment == 'cloud' || segment.endsWith('-cloud')) return true;
+  }
+  return false;
 }
 
 /// Accepts a plausible content digest for use as a cache key only. A rogue or

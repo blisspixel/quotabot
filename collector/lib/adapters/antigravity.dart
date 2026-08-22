@@ -549,17 +549,16 @@ class AntigravityAdapter {
       if (accounts.isEmpty) {
         return [ProviderQuota.error(id, name, _emptyDiscoveryError(), asOf)];
       }
-      final out = <ProviderQuota>[];
-      for (var i = 0; i < accounts.length; i++) {
-        out.add(
-          await _collectAccount(
+      // Overlap live account reads. Default-grant lending stays on the first
+      // discovered identity, and Future.wait keeps that discovered order.
+      return Future.wait([
+        for (var i = 0; i < accounts.length; i++)
+          _collectAccount(
             accounts[i],
             asOf,
             allowDefaultGrant: i == 0,
           ),
-        );
-      }
-      return out;
+      ]);
     } catch (_) {
       return [
         ProviderQuota.error(

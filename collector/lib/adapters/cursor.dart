@@ -150,9 +150,15 @@ class CursorAdapter {
           planEvidenceSource = ProviderPlanEvidenceSource.hostCredential;
         }
       }
+      final membershipPresent =
+          valuesByKey.containsKey(_cursorMembershipTypeKey);
       for (final key in _cursorIdentityRowKeys) {
         final parsed = decodedByKey[key];
         if (parsed == null) continue;
+        // Cursor 3.x membership metadata is diagnostic only. Leftover
+        // planUsage/usage rows are not current Cursor Models or Other Models
+        // balances, so they must not become routable windows.
+        if (membershipPresent) continue;
         final projected = _cursorQuotaProjection(parsed);
         if (_looksLikeUsage(projected)) usages.add(projected);
       }

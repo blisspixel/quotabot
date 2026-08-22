@@ -39,6 +39,11 @@ case "$arch" in
   *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
+# shellcheck source=posix-space-safe-dart.sh
+. "$script_dir/posix-space-safe-dart.sh"
+quotabot_enable_space_safe_dart "$root" flutter >/dev/null
+trap quotabot_restore_space_safe_dart EXIT
+
 flutter config --enable-linux-desktop >/dev/null
 (cd "$app_dir" && \
   flutter pub get --enforce-lockfile && \

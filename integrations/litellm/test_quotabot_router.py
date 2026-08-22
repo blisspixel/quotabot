@@ -1122,6 +1122,26 @@ agents:
         self.assertEqual(policy.agents["architect"].pin_spend, "quota_plan")
         self.assertTrue(policy.agents["architect"].pin_overages_disabled)
 
+    def test_policy_rejects_out_of_range_lease_fields(self):
+        with self.assertRaisesRegex(ValueError, "lease_seconds"):
+            Policy(lease_seconds=14)
+        with self.assertRaisesRegex(ValueError, "lease_seconds"):
+            Policy(lease_seconds=3601)
+        with self.assertRaisesRegex(ValueError, "lease_weight_percent"):
+            Policy(lease_weight_percent=0.5)
+        with self.assertRaisesRegex(ValueError, "lease_weight_percent"):
+            Policy(lease_weight_percent=99)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.yaml"
+            path.write_text("lease_seconds: 99\n", encoding="utf-8")
+            policy = Policy.load(path)
+            self.assertEqual(policy.lease_seconds, 99)
+
+            path.write_text("lease_seconds: 14\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "lease_seconds"):
+                Policy.load(path)
+
     def test_policy_string_booleans_do_not_enable_paid_api(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "policy.yaml"

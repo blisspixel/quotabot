@@ -321,9 +321,23 @@ try {
   $setupScript = Join-Path $repositoryRoot 'tools\setup.ps1'
   Import-InstallFunction -Path $setupScript -Name 'Install-QuotabotDesktopPayload'
   Import-InstallFunction -Path $setupScript -Name 'Install-QuotabotPayloadPair'
+  Import-InstallFunction -Path $setupScript -Name 'Get-QuotabotSourceReleaseTag'
+  Import-InstallFunction -Path $setupScript -Name 'Start-QuotabotAfterSetup'
   Import-InstallFunction `
     -Path $setupScript `
     -Name 'Restart-QuotabotDesktopAfterSetup'
+
+  $sourceReleaseTag = Get-QuotabotSourceReleaseTag `
+    -AppRoot (Join-Path $repositoryRoot 'app')
+  $appManifestVersion = @(
+    Get-Content -LiteralPath (Join-Path $repositoryRoot 'app\pubspec.yaml') |
+      Where-Object { $_ -match '^version:\s+' } |
+      Select-Object -First 1
+  )[0] -replace '^version:\s+', ''
+  $expectedSourceReleaseTag = "v$(($appManifestVersion -split '\+')[0])"
+  if ($sourceReleaseTag -ne $expectedSourceReleaseTag) {
+    throw "Source release tag lost its preview identifier: $sourceReleaseTag"
+  }
 
   $desktopSource = Join-Path $testRoot 'desktop-success-source'
   $desktopInstall = Join-Path $testRoot 'desktop-success-install'
@@ -587,9 +601,30 @@ try {
     if ($successRestart -ine $installedPairExe) {
       throw 'Successful setup did not select the installed desktop path.'
     }
+    function Get-RunningDesktopApp {
+      param($exePath)
+      if ($exePath -ieq $installedPairExe) {
+        return @([pscustomobject]@{ Id = 123; Path = $installedPairExe })
+      }
+      return @()
+    }
+    function Write-Step { param([string]$Message) }
+    function Write-Ok { param([string]$Message) }
+    $installRoot = $pairInstall
+    $desktopSkipped = $false
+    $NoApp = $false
+    $startCount = $script:startedDesktopPaths.Count
+    Start-QuotabotAfterSetup `
+      -CliExecutable (Join-Path $pairInstall 'bin\quotabot.exe') `
+      -AllowDesktop
+    if ($script:startedDesktopPaths.Count -ne $startCount) {
+      throw 'Setup launched a duplicate desktop process.'
+    }
   } finally {
     Remove-Item Function:\Get-RunningDesktopApp -ErrorAction SilentlyContinue
     Remove-Item Function:\Start-Process -ErrorAction SilentlyContinue
+    Remove-Item Function:\Write-Step -ErrorAction SilentlyContinue
+    Remove-Item Function:\Write-Ok -ErrorAction SilentlyContinue
   }
   if ($script:startedDesktopPaths.Count -ne 2 -or
       $script:startedDesktopPaths[0] -ine $priorBuildExe -or

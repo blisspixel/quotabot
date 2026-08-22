@@ -69,8 +69,12 @@ function Get-QuotabotSpaceFreeParent {
       $parents += (Join-Path $resolved '.setup-cache')
     }
   }
-  $parents += (Join-Path $env:ProgramData 'quotabot-build')
-  $parents += (Join-Path $env:SystemDrive 'quotabot-build')
+  if ($env:LOCALAPPDATA -and $env:LOCALAPPDATA -notmatch ' ') {
+    $parents += (Join-Path $env:LOCALAPPDATA 'quotabot-build')
+  }
+  if ($env:TEMP -and $env:TEMP -notmatch ' ') {
+    $parents += (Join-Path $env:TEMP 'quotabot-build')
+  }
 
   foreach ($parent in $parents) {
     if (-not $parent -or $parent -match ' ') { continue }
