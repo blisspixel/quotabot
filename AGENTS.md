@@ -74,7 +74,8 @@ for that surface.
   bin/mcp_server.dart` (or a compiled `quotabot-mcp`) for stdio. For clients
   that need MCP Streamable HTTP, run `dart run bin/mcp_server.dart --http`
   with `--token-file` or `--token-env` (loopback only, bearer auth required).
-  HTTP POST bodies must declare a length and are capped at 256 KiB. Tools:
+  HTTP POST bodies must declare a length and are capped at 256 KiB. Missing
+  bearer is HTTP 401; oversized or chunked bodies are HTTP 413. Tools:
   - `list_quotas` - full normalized snapshot for every provider.
   - `suggest_provider` - the provider to use next, with ranked alternatives and a
     local fallback when subscriptions are low. Pass `local_first: true` to

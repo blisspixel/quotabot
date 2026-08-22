@@ -496,9 +496,10 @@ polling a tool. `bin/mcp_server.dart` feeds the shared server factory over stdio
 by default or MCP Streamable HTTP when launched with `--http`. `mcp_http.dart`
 keeps HTTP opt-in and loopback-only, enables DNS-rebinding host/origin checks,
 rejects batch JSON-RPC payloads, requires a bearer token of at least 32
-characters, and rejects indeterminate or larger-than-256-KiB POST bodies in the
-pre-body admission hook. The pinned upstream transport therefore never buffers
-an unauthenticated or unbounded request body.
+characters, and admits requests before the session transport reads a body.
+Missing or invalid bearer tokens return HTTP 401 with a Bearer challenge.
+POST bodies without a declared length, or larger than 256 KiB, return HTTP 413
+without buffering. Host and origin rebinding stays HTTP 403.
 `bin/example_routing_agent.dart` shows the same logic used for direct Dart
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.

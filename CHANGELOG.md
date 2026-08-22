@@ -60,10 +60,13 @@ Notable changes to quotabot. Newest first.
   spaces. Linux portable desktop fallback writes an application-menu entry.
   Compact empty desktop state offers Edit profile. Compact mode keeps the
   no-route control, warnings, and window chrome inside the 200px minimum width.
-  `quotabot check`
-  matches a built-in provider by id, so a custom display name cannot impersonate
-  a shipped adapter. `login` and `logout` accept the same display-case ids.
-  Loopback `/providers/` and `/health` reject unknown query parameters. The
+  `quotabot check` matches a built-in provider by id, so a custom display name
+  cannot impersonate a shipped adapter. `login` and `logout` accept the same
+  display-case ids.
+  Loopback `/providers/` and `/health` reject unknown query parameters. MCP
+  Streamable HTTP missing bearer is HTTP 401, and oversized or chunked POST
+  bodies are HTTP 413, instead of mapping every admission failure to 403.
+  Quality workflows run on stacked pull requests, not only PRs into main. The
   LiteLLM router fails closed on out-of-range lease TTL or weight instead of
   clamping. Install-smoke workflow dispatch accepts RC tags and upgrades those
   from the latest stable 0.x release.

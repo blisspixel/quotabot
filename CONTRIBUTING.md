@@ -63,7 +63,8 @@ flutter test
 ## Before you open a pull request
 
 CI runs static policy, both Dart packages, the MCP clients, the LiteLLM router,
-coverage floors, and native packaging. Run the portable gates locally first.
+coverage floors, and native packaging. Stacked pull requests get the same
+quality workflows as PRs into main. Run the portable gates locally first.
 The exact platform package and readiness commands are in
 [Building from source](docs/BUILDING.md#build-a-release-binary).
 On Windows, `pwsh tools/check.ps1` is the equivalent complete gate and is the
