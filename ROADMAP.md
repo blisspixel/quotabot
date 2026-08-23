@@ -246,7 +246,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 ## Current state
 
 The current line, **0.9.9**, remains the tagged stable and default installer
-version. The focused **0.10.0-rc.7** candidate carries the latest stabilization
+version. The focused **0.10.0-rc.8** candidate carries the latest stabilization
 inventory described in [Next](#next). The stable line contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning

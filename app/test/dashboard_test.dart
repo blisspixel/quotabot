@@ -968,8 +968,8 @@ void main() {
     await _useDesktopSurface(tester);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final throttled = ProviderQuota(
-      provider: 'claude',
-      displayName: 'Claude',
+      provider: 'antigravity',
+      displayName: 'Antigravity',
       account: 'test',
       asOf: now,
       ok: false,
@@ -984,6 +984,7 @@ void main() {
           prefs: const Prefs(enableNotifications: false, setupDone: true),
           demoMode: false,
           collector: () async => [throttled],
+          providerConnector: (_) async {},
         ),
       ),
     );
@@ -1001,6 +1002,14 @@ void main() {
       findsNothing,
     );
     expect(find.textContaining('needs reconnecting'), findsNothing);
+    expect(
+      find.descendant(
+        of: dialog,
+        matching: find.widgetWithText(TextButton, 'Connect'),
+      ),
+      findsNothing,
+    );
+    expect(find.byTooltip('Set up Antigravity'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
@@ -1011,15 +1020,13 @@ void main() {
   ) async {
     await _useDesktopSurface(tester);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final stale = ProviderQuota(
+    final needsLogin = ProviderQuota(
       provider: 'grok',
       displayName: 'Grok',
       account: 'old@example.com',
-      asOf: now - 300,
-      stale: true,
-      windows: [
-        QuotaWindow(label: 'weekly', usedPercent: 60, resetsAt: now + 86400),
-      ],
+      asOf: now,
+      ok: true,
+      error: 'no token - run: quotabot login grok',
     );
     final fresh = ProviderQuota(
       provider: 'grok',
@@ -1040,7 +1047,7 @@ void main() {
           demoMode: false,
           collector: () async {
             collections++;
-            return collections == 1 ? [stale] : [stale, fresh];
+            return collections == 1 ? [needsLogin] : [needsLogin, fresh];
           },
           providerConnector: (provider) async {
             expect(provider, 'grok');
@@ -1056,7 +1063,7 @@ void main() {
     await tester.pumpAndSettle();
     final dialog = find.byType(Dialog);
     expect(
-      find.descendant(of: dialog, matching: find.text('cached')),
+      find.descendant(of: dialog, matching: find.text('no live data')),
       findsOneWidget,
     );
     final connect = find.descendant(
@@ -1085,7 +1092,7 @@ void main() {
     expect(find.text('Grok (old@example.com)'), findsOneWidget);
     expect(find.text('Grok (fresh@example.com)'), findsOneWidget);
     expect(
-      find.descendant(of: dialog, matching: find.text('cached')),
+      find.descendant(of: dialog, matching: find.text('no live data')),
       findsOneWidget,
     );
     expect(
@@ -1211,7 +1218,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('invalid evidence'), findsOneWidget);
-    expect(find.widgetWithText(TextButton, 'Connect'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Connect'), findsNothing);
+    expect(find.byTooltip('Set up Grok'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -1220,15 +1228,13 @@ void main() {
   ) async {
     await _useDesktopSurface(tester);
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final stale = ProviderQuota(
+    final needsLogin = ProviderQuota(
       provider: 'grok',
       displayName: 'Grok',
       account: 'test@example.com',
-      asOf: now - 300,
-      stale: true,
-      windows: [
-        QuotaWindow(label: 'weekly', usedPercent: 60, resetsAt: now + 86400),
-      ],
+      asOf: now,
+      ok: true,
+      error: 'no token - run: quotabot login grok',
     );
     final fresh = ProviderQuota(
       provider: 'grok',
@@ -1250,7 +1256,7 @@ void main() {
           demoMode: false,
           collector: () {
             collections++;
-            if (collections == 1) return Future.value([stale]);
+            if (collections == 1) return Future.value([needsLogin]);
             if (collections == 2) return activeRefresh.future;
             return Future.value([fresh]);
           },
@@ -1278,7 +1284,7 @@ void main() {
     expect(connections, 1);
     expect(collections, 2);
 
-    activeRefresh.complete([stale]);
+    activeRefresh.complete([needsLogin]);
     await tester.pumpAndSettle();
 
     expect(collections, 3);
@@ -2156,9 +2162,9 @@ void main() {
     var checks = 0;
     final opened = <String>[];
     const latest = QuotabotRelease(
-      tag: 'v0.10.0-rc.8',
-      version: '0.10.0-rc.8',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.8',
+      tag: 'v0.10.0-rc.9',
+      version: '0.10.0-rc.9',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.9',
       prerelease: true,
     );
     const stable = QuotabotRelease(
@@ -2175,6 +2181,7 @@ void main() {
             checks++;
             return const QuotabotUpdateStatus(
               currentVersion: quotabotAppVersion,
+              currentBuild: quotabotAppBuild,
               stable: stable,
               latest: latest,
             );
@@ -2192,7 +2199,7 @@ void main() {
     expect(find.text('Display'), findsOneWidget);
     expect(find.text('Refresh and alerts'), findsOneWidget);
     expect(find.text('Updates'), findsOneWidget);
-    expect(find.text('Installed build: $quotabotAppVersion'), findsOneWidget);
+    expect(find.text('Installed build: $quotabotAppBuild'), findsOneWidget);
     expect(checks, 0);
 
     final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
@@ -2202,7 +2209,14 @@ void main() {
     await tester.pump();
     expect(checks, 1);
     expect(find.text('Update available'), findsOneWidget);
-    expect(find.text('Latest preview: 0.10.0-rc.8'), findsOneWidget);
+    expect(find.text('Latest preview: 0.10.0-rc.9'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.text('Installed build: $quotabotAppBuild'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('Latest stable: 0.9.9'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Open preview update'));
@@ -2262,7 +2276,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Open preview release'), findsOneWidget);
-    expect(find.text('Open stable update'), findsOneWidget);
+    expect(find.text('Open stable release'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(TextButton, 'Open preview release'));
     await tester.pump();
@@ -2270,6 +2284,57 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('newer local build opens a release without calling it an update', (
+    tester,
+  ) async {
+    await _useDesktopSurface(tester);
+    const latest = QuotabotRelease(
+      tag: 'v0.10.0-rc.7',
+      version: '0.10.0-rc.7',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.7',
+      prerelease: true,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        Dashboard.test(
+          prefs: const Prefs(),
+          updateChecker: () async => const QuotabotUpdateStatus(
+            currentVersion: quotabotAppVersion,
+            currentBuild: quotabotAppBuild,
+            stable: QuotabotRelease(
+              tag: 'v0.9.9',
+              version: '0.9.9',
+              url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.9.9',
+              prerelease: false,
+            ),
+            latest: latest,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    final checkUpdates = find.byKey(const ValueKey('settings-check-updates'));
+    await tester.ensureVisible(checkUpdates);
+    await tester.tap(checkUpdates);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('quotabot is current'), findsOneWidget);
+    expect(
+      find.text('This build is newer than its latest GitHub release channel.'),
+      findsOneWidget,
+    );
+    expect(
+      find.widgetWithText(FilledButton, 'Open preview release'),
+      findsOneWidget,
+    );
+    expect(find.text('Open preview update'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('closing settings suppresses a pending update result', (

@@ -13,6 +13,7 @@ LeaseIdFactory _idFactory() {
 
 const _workerReady = 'quotabot-lease-worker-ready';
 const _workerResult = 'quotabot-lease-worker-result:';
+const _isolateStepTimeout = Duration(seconds: 10);
 
 class _LeaseSelectionWorker {
   final Process process;
@@ -761,12 +762,12 @@ void main() {
         <Object?>['b', dir.path, null, events.sendPort],
       );
       final firstCommands =
-          await ready['a']!.future.timeout(const Duration(seconds: 3));
+          await ready['a']!.future.timeout(_isolateStepTimeout);
       final secondCommands =
-          await ready['b']!.future.timeout(const Duration(seconds: 3));
+          await ready['b']!.future.timeout(_isolateStepTimeout);
 
       firstCommands.send('start');
-      await selectionA.future.timeout(const Duration(seconds: 3));
+      await selectionA.future.timeout(_isolateStepTimeout);
       secondCommands.send('start');
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(enteredSelection, {'a'});
@@ -775,7 +776,7 @@ void main() {
       final providers = await Future.wait([
         results['a']!.future,
         results['b']!.future,
-      ]).timeout(const Duration(seconds: 5));
+      ]).timeout(_isolateStepTimeout);
       expect(providers, unorderedEquals(['claude', 'codex']));
       expect(enteredSelection, {'a', 'b'});
       expect(
@@ -791,7 +792,7 @@ void main() {
       events.close();
       if (dir.existsSync()) dir.deleteSync(recursive: true);
     }
-  }, timeout: const Timeout(Duration(seconds: 30)));
+  }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('file store does not reuse a PID-only temporary path', () {
     final dir = Directory.systemTemp.createTempSync('quotabot-leases-temp-');

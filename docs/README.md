@@ -5,7 +5,7 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.7. The next work in the focused 0.10.x stabilization train is
+0.10.0-rc.8. The next work in the focused 0.10.x stabilization train is
 field-discovered correctness, recovery and quality-of-life refinement, and
 native validation. Signed release readiness follows once that inventory is
 quiet, without weakening existing checksums or provenance. The

@@ -3,11 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-const String quotabotAppVersion = '0.10.0-rc.7';
+const String quotabotAppVersion = '0.10.0-rc.8';
+const String quotabotAppBuild = '0.10.0-rc.8+39';
 const String quotabotReleasesUrl =
     'https://github.com/blisspixel/quotabot/releases';
 const String quotabotReleasesApi =
-    'https://api.github.com/repos/blisspixel/quotabot/releases?per_page=20';
+    'https://api.github.com/repos/blisspixel/quotabot/releases?per_page=100';
 const int _maxReleaseResponseBytes = 512 * 1024;
 
 class QuotabotRelease {
@@ -26,14 +27,16 @@ class QuotabotRelease {
 
 class QuotabotUpdateStatus {
   final String currentVersion;
+  final String currentBuild;
   final QuotabotRelease? stable;
   final QuotabotRelease latest;
 
   const QuotabotUpdateStatus({
     required this.currentVersion,
+    String? currentBuild,
     required this.stable,
     required this.latest,
-  });
+  }) : currentBuild = currentBuild ?? currentVersion;
 
   bool get currentIsPrerelease =>
       _parseVersion(currentVersion)?.prerelease.isNotEmpty ?? false;
@@ -138,17 +141,21 @@ int compareQuotabotVersions(String left, String right) {
 QuotabotUpdateStatus parseQuotabotReleases(
   Object? decoded, {
   String currentVersion = quotabotAppVersion,
+  String? currentBuild,
 }) {
   if (decoded is! List) {
     throw const UpdateCheckException('GitHub returned an invalid release list');
   }
   final releases = <QuotabotRelease>[];
   for (final row in decoded) {
-    if (row is! Map || row['draft'] == true) continue;
+    if (row is! Map) continue;
+    final draft = row['draft'];
     final tag = row['tag_name'];
     final url = row['html_url'];
     final prerelease = row['prerelease'];
-    if (tag is! String ||
+    if (draft is! bool ||
+        draft ||
+        tag is! String ||
         url is! String ||
         prerelease is! bool ||
         !tag.startsWith('v')) {
@@ -181,6 +188,7 @@ QuotabotUpdateStatus parseQuotabotReleases(
   final stable = releases.where((release) => !release.prerelease).firstOrNull;
   return QuotabotUpdateStatus(
     currentVersion: currentVersion,
+    currentBuild: currentBuild,
     stable: stable,
     latest: releases.first,
   );
@@ -242,6 +250,7 @@ Future<void> _cancelReleaseResponse(HttpClientResponse response) async {
 /// Checks GitHub only after a user explicitly invokes the update action.
 Future<QuotabotUpdateStatus> checkQuotabotUpdates({
   String currentVersion = quotabotAppVersion,
+  String? currentBuild,
   HttpClient? client,
   Uri? releasesApi,
   Duration timeout = const Duration(seconds: 10),
@@ -261,6 +270,7 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
       HttpHeaders.userAgentHeader,
       'quotabot/$currentVersion',
     );
+    request.followRedirects = false;
     late HttpClientResponse response;
     try {
       response = await request.close().timeout(_remaining(clock, timeout));
@@ -269,14 +279,18 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
       rethrow;
     }
     if (response.statusCode != HttpStatus.ok) {
-      await _cancelReleaseResponse(response);
+      await _cancelReleaseResponse(
+        response,
+      ).timeout(_remaining(clock, timeout));
       throw UpdateCheckException(
         'GitHub release check returned HTTP ${response.statusCode}',
       );
     }
     final declaredLength = response.contentLength;
     if (declaredLength > _maxReleaseResponseBytes) {
-      await _cancelReleaseResponse(response);
+      await _cancelReleaseResponse(
+        response,
+      ).timeout(_remaining(clock, timeout));
       throw const UpdateCheckException('GitHub release response was too large');
     }
     final bytes = await _readReleaseBytes(response, _remaining(clock, timeout));
@@ -288,7 +302,15 @@ Future<QuotabotUpdateStatus> checkQuotabotUpdates({
         'GitHub returned an invalid release response',
       );
     }
-    return parseQuotabotReleases(decoded, currentVersion: currentVersion);
+    return parseQuotabotReleases(
+      decoded,
+      currentVersion: currentVersion,
+      currentBuild:
+          currentBuild ??
+          (currentVersion == quotabotAppVersion
+              ? quotabotAppBuild
+              : currentVersion),
+    );
   } on UpdateCheckException {
     rethrow;
   } on TimeoutException {

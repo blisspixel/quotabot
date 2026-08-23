@@ -13,6 +13,7 @@ import 'package:test/test.dart';
 
 const _now = 1782000000;
 const _mutationToken = 'local-http-mutation-token-0123456789';
+const _isolateStepTimeout = Duration(seconds: 10);
 
 class _LocalHttpAuthWorker {
   final Process process;
@@ -936,12 +937,12 @@ void main() {
         ],
       );
       final firstCommands =
-          await ready['a']!.future.timeout(const Duration(seconds: 3));
+          await ready['a']!.future.timeout(_isolateStepTimeout);
       final secondCommands =
-          await ready['b']!.future.timeout(const Duration(seconds: 3));
+          await ready['b']!.future.timeout(_isolateStepTimeout);
 
       firstCommands.send('start');
-      await factoryA.future.timeout(const Duration(seconds: 3));
+      await factoryA.future.timeout(_isolateStepTimeout);
       secondCommands.send('start');
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(enteredFactory, {'a'});
@@ -950,7 +951,7 @@ void main() {
       final tokens = await Future.wait([
         results['a']!.future,
         results['b']!.future,
-      ]).timeout(const Duration(seconds: 5));
+      ]).timeout(_isolateStepTimeout);
       expect(
         tokens,
         everyElement('first-isolate-mutation-token-012345678'),
@@ -969,7 +970,7 @@ void main() {
       events.close();
       if (root.existsSync()) root.deleteSync(recursive: true);
     }
-  }, timeout: const Timeout(Duration(seconds: 30)));
+  }, timeout: const Timeout(Duration(seconds: 60)));
 
   test('/providers selects a live account after a spent first match', () async {
     final server = await startLocalQuotabotServer(

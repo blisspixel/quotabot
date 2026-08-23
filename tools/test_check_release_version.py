@@ -29,13 +29,30 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             root = Path(directory)
             self._write_fixture(root)
             (root / "app/lib/update_check.dart").write_text(
-                "const String quotabotAppVersion = '1.2.2';\n",
+                "const String quotabotAppVersion = '1.2.2';\n"
+                "const String quotabotAppBuild = '1.2.3+17';\n",
                 encoding="utf-8",
             )
 
             with self.assertRaisesRegex(
                 VersionCheckError,
                 r"expected 1\.2\.3; mismatched Flutter update check=1\.2\.2",
+            ):
+                check_release_versions(root)
+
+    def test_stale_displayed_build_number_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(root)
+            (root / "app/lib/update_check.dart").write_text(
+                "const String quotabotAppVersion = '1.2.3';\n"
+                "const String quotabotAppBuild = '1.2.3+16';\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"displayed build number 16 does not match .* build number 17",
             ):
                 check_release_versions(root)
 
@@ -145,6 +162,7 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             "app/pubspec.yaml": f"version: {source_version}+17\n",
             "app/lib/update_check.dart": (
                 f"const String quotabotAppVersion = '{source_version}';\n"
+                f"const String quotabotAppBuild = '{source_version}+17';\n"
             ),
             "app/pubspec.lock": (
                 "packages:\n"

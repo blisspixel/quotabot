@@ -37,6 +37,7 @@ import 'logos.dart';
 import 'prefs.dart';
 import 'profile_editor.dart';
 import 'profile_ui.dart';
+import 'provider_connection.dart';
 import 'provider_display.dart';
 import 'quota_labels.dart';
 import 'quota_loading_indicator.dart';
@@ -1849,12 +1850,9 @@ class _DashboardState extends State<Dashboard>
             card += 18; // model-specific section heading
           }
           if (q.suspect != null && q.driftReason == null) card += 20;
-          // The inline Connect button shows on a failed read for a provider that
-          // supports quotabot's own login; budget its row so the first frame
-          // before measured sizing does not clip it.
-          if (_canConnectProvider(q.provider) &&
-              !q.isLocal &&
-              (q.stale || !isTrustedQuotaEvidenceAt(q, now))) {
+          // Budget a truthful inline Connect row so the first frame before
+          // measured sizing does not clip it.
+          if (_canConnectProvider(q.provider) && providerNeedsConnection(q)) {
             card += 28;
           }
           if (q.isLocal || isExpanded) {
@@ -2041,10 +2039,12 @@ class _DashboardState extends State<Dashboard>
   }
 
   /// A setup-help dialog tailored to the provider, with an inline "Connect now"
-  /// for the two providers that support quotabot's own login.
+  /// when an explicit authentication failure can be repaired in the app.
   void _showProviderSetup(ProviderQuota q) {
     final canConnect =
-        widget._hostIntegration && _canConnectProvider(q.provider);
+        widget._hostIntegration &&
+        _canConnectProvider(q.provider) &&
+        providerNeedsConnection(q);
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -2344,7 +2344,10 @@ class _DashboardState extends State<Dashboard>
         _applySize();
       }),
       onContextMenu: (pos) => _showCardMenu(q, pos),
-      onConnect: widget._hostIntegration && _canConnectProvider(q.provider)
+      onConnect:
+          widget._hostIntegration &&
+              _canConnectProvider(q.provider) &&
+              providerNeedsConnection(q)
           ? () => unawaited(_connectAndValidate(q.provider, account: q.account))
           : null,
       showAccounts: _shouldShowAccount(q, counts),
@@ -3335,7 +3338,7 @@ class _DashboardState extends State<Dashboard>
                                       icon: Icons.system_update_alt_rounded,
                                       children: [
                                         const Text(
-                                          'Installed build: $quotabotAppVersion',
+                                          'Installed build: $quotabotAppBuild',
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
@@ -3567,7 +3570,7 @@ class _DashboardState extends State<Dashboard>
                 children: [
                   Text(summary),
                   const SizedBox(height: 12),
-                  Text('Installed build: ${status.currentVersion}'),
+                  Text('Installed build: ${status.currentBuild}'),
                   Text(
                     '${newest.prerelease ? 'Latest preview' : 'Latest release'}: '
                     '${newest.version}',
@@ -3612,9 +3615,8 @@ class _DashboardState extends State<Dashboard>
                     unawaited(_openRelease(recommended.url));
                   },
                   child: Text(
-                    recommended.prerelease
-                        ? 'Open preview update'
-                        : 'Open stable update',
+                    '${recommended.prerelease ? 'Open preview' : 'Open stable'} '
+                    '${status.updateAvailable ? 'update' : 'release'}',
                   ),
                 ),
             ],
@@ -4302,8 +4304,9 @@ class _DashboardState extends State<Dashboard>
   }
 
   /// Compact setup/help panel: a short intro, then every provider account from
-  /// the latest snapshot with its live status and an inline Connect for
-  /// Grok/Antigravity. Reachable from the help button; never pops up on its own.
+  /// the latest snapshot with its live status and an inline Connect only for
+  /// actionable Grok/Antigravity login failures. Reachable from the help
+  /// button; never pops up on its own.
   /// All path/state reads are portable, so it works the same on every OS.
   Future<void> _showSetup() async {
     // Mid-connect providers; declared outside the builder so it survives the
@@ -4472,7 +4475,7 @@ class _DashboardState extends State<Dashboard>
     final canConnect = widget.providerConnector != null
         ? q.provider == 'grok' || q.provider == 'antigravity'
         : widget._hostIntegration && _canConnectProvider(q.provider);
-    final isLive = label == 'live' || label == 'in use';
+    final needsConnection = canConnect && providerNeedsConnection(q);
     final busy = connecting.contains(q.provider);
     final displayLabel = showAccount
         ? '${q.displayName} (${quotaAccountDisplayLabel(q.account)})'
@@ -4501,7 +4504,7 @@ class _DashboardState extends State<Dashboard>
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
           )
-        : canConnect && !isLive
+        : needsConnection
         ? TextButton(
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -5324,14 +5327,10 @@ class ProviderTile extends StatelessWidget {
                   quota.driftReason == null &&
                   quota.error?.isNotEmpty == true)
                 _providerStaleFailureRow(quota, driftColor),
-              // Surface the in-app login right where the failure shows, so a
-              // provider that supports quotabot's own grant (Grok, Antigravity)
-              // can be reconnected without a terminal. Kept out of the tight/
-              // expanded gate because a failed login is always actionable.
-              if (onConnect != null &&
-                  providerRetrySummary(quota) == null &&
-                  !quota.isLocal &&
-                  (quota.stale || !trustedEvidence))
+              // Surface in-app login only for an explicit authentication
+              // failure. Spent quota, throttling, outages, cached evidence,
+              // and drift cannot be repaired by reconnecting.
+              if (onConnect != null && providerNeedsConnection(quota))
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Align(
