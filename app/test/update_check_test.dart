@@ -102,6 +102,13 @@ void main() {
   test('release parser ignores drafts, malformed rows, and external URLs', () {
     final status = parseQuotabotReleases([
       release('v9.0.0', draft: true),
+      {
+        'tag_name': 'v8.0.0',
+        'html_url':
+            'https://github.com/blisspixel/quotabot/releases/tag/v8.0.0',
+        'prerelease': false,
+      },
+      {...release('v7.0.0'), 'draft': 'false'},
       release('not-a-version'),
       release(
         'v8.0.0',
@@ -166,6 +173,74 @@ void main() {
 
     expect(status.latest.version, '0.10.0-rc.6');
     expect(status.stable?.version, '0.9.9');
+    expect(status.currentBuild, quotabotAppBuild);
+  });
+
+  test(
+    'custom comparison version does not inherit this app build number',
+    () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.headers.contentType = ContentType.json;
+        request.response.write(jsonEncode([release('v0.9.9')]));
+        await request.response.close();
+      });
+
+      final status = await checkQuotabotUpdates(
+        currentVersion: '0.9.8',
+        releasesApi: Uri.parse('http://127.0.0.1:${server.port}/releases'),
+        timeout: const Duration(seconds: 2),
+      );
+
+      expect(status.currentBuild, '0.9.8');
+    },
+  );
+
+  test('release endpoint requests enough history for the stable channel', () {
+    final uri = Uri.parse(quotabotReleasesApi);
+
+    expect(uri.queryParameters['per_page'], '100');
+  });
+
+  test('live checker does not follow release endpoint redirects', () async {
+    final redirectTarget = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(() => redirectTarget.close(force: true));
+    var targetWasRead = false;
+    redirectTarget.listen((request) async {
+      targetWasRead = true;
+      request.response.write(jsonEncode([release('v9.9.9')]));
+      await request.response.close();
+    });
+
+    final source = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => source.close(force: true));
+    source.listen((request) async {
+      request.response.statusCode = HttpStatus.found;
+      request.response.headers.set(
+        HttpHeaders.locationHeader,
+        'http://127.0.0.1:${redirectTarget.port}/releases',
+      );
+      await request.response.close();
+    });
+
+    await expectLater(
+      checkQuotabotUpdates(
+        releasesApi: Uri.parse('http://127.0.0.1:${source.port}/redirect'),
+        timeout: const Duration(seconds: 2),
+      ),
+      throwsA(
+        isA<UpdateCheckException>().having(
+          (error) => error.message,
+          'message',
+          'GitHub release check returned HTTP 302',
+        ),
+      ),
+    );
+    expect(targetWasRead, isFalse);
   });
 
   test('live checker reports a GitHub HTTP failure clearly', () async {

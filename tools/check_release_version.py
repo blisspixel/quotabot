@@ -62,6 +62,11 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             rf"^const String quotabotAppVersion = '({VERSION})';$",
             "Flutter update check",
         ),
+        "Flutter displayed build": _required_match(
+            app / "lib" / "update_check.dart",
+            rf"^const String quotabotAppBuild = '({VERSION})\+[0-9]+';$",
+            "Flutter displayed build",
+        ),
         "Flutter collector lock": _locked_collector_version(app / "pubspec.lock"),
         "README current stable": _required_match(
             root / "README.md",
@@ -110,6 +115,16 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
         rf"^version:\s*{VERSION}\+([0-9]+)\s*$",
         "Flutter build number",
     )
+    displayed_build = _required_match(
+        app / "lib" / "update_check.dart",
+        rf"^const String quotabotAppBuild = '{VERSION}\+([0-9]+)';$",
+        "Flutter displayed build number",
+    )
+    if displayed_build != build:
+        raise VersionCheckError(
+            "Flutter displayed build number "
+            f"{displayed_build} does not match Flutter pubspec build number {build}"
+        )
     return versions, build
 
 

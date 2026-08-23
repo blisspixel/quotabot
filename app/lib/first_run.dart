@@ -6,6 +6,7 @@ import 'package:quotabot_collector/collector.dart';
 import 'package:quotabot_collector/drift.dart';
 
 import 'logos.dart';
+import 'provider_connection.dart';
 import 'theme_spec.dart';
 import 'typography.dart';
 
@@ -163,7 +164,9 @@ List<FirstRunEntry> firstRunEntries(
           firstRunPresence(latest[id], now),
           error: latest[id]?.error,
         ),
-        canConnect: canConnect?.call(id) ?? false,
+        canConnect:
+            (canConnect?.call(id) ?? false) &&
+            (latest[id] == null || providerNeedsConnection(latest[id]!)),
       ),
   ];
 }
