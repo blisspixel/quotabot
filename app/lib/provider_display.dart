@@ -18,7 +18,7 @@ import 'quota_labels.dart';
 
 String _desktopSourceLabel(ProviderSourceClass sourceClass) =>
     sourceClass == ProviderSourceClass.authoritativeLive
-    ? 'account-wide'
+    ? 'scope: whole account'
     : sourceClass.label;
 
 class ProviderDisplayGroup {

@@ -821,7 +821,7 @@ void main() {
         now,
         showAccounts: true,
       );
-      expect(detail, contains('account-wide'));
+      expect(detail, contains('scope: whole account'));
       expect(detail, contains('60% after burn'));
       expect(detail, contains('medium confidence (67%)'));
       expect(detail, contains('Receipt: qb-$now-'));
@@ -917,7 +917,7 @@ void main() {
         now,
         showAccounts: true,
       );
-      expect(detail, contains('account-wide'));
+      expect(detail, contains('scope: whole account'));
     });
 
     test('names machine fallback provenance without a duplicate scope tag', () {
@@ -1032,7 +1032,10 @@ void main() {
         now,
       );
 
-      expect(line, 'live | account-wide | quota plan | captured just now');
+      expect(
+        line,
+        'live | scope: whole account | quota plan | captured just now',
+      );
     });
 
     test('labels cached manual quota without plan identity noise', () {
@@ -1079,7 +1082,8 @@ void main() {
       expect(groupProvidersForDisplay(rows).single.quotas, hasLength(1));
       expect(
         desktopProviderTrustLine(rows.single, now),
-        'live | account-wide | quota plan | manual note | captured just now',
+        'live | scope: whole account | quota plan | manual note | '
+        'captured just now',
       );
       expect(
         desktopProviderTrustDetail(rows.single, now),
@@ -1103,7 +1107,8 @@ void main() {
 
       expect(
         line,
-        'provider drift | account-wide | quota plan | captured just now',
+        'provider drift | scope: whole account | quota plan | '
+        'captured just now',
       );
     });
 
@@ -1296,7 +1301,7 @@ void main() {
 
       expect(
         desktopProviderTrustLine(suspect, now),
-        startsWith('review reading | account-wide'),
+        startsWith('review reading | scope: whole account'),
       );
       expect(
         desktopProviderTrustDetail(suspect, now),
@@ -1304,7 +1309,7 @@ void main() {
       );
       expect(
         desktopProviderTrustLine(future, now),
-        startsWith('unverified | account-wide'),
+        startsWith('unverified | scope: whole account'),
       );
     });
   });
