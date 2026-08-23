@@ -713,7 +713,7 @@ void main() {
     expect(find.text('provider drift - showing last trusted'), findsOneWidget);
     expect(find.textContaining('Run quotabot verify'), findsNothing);
     expect(
-      find.textContaining('provider drift | account-wide | quota plan'),
+      find.textContaining('provider drift | scope: whole account | quota plan'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -741,7 +741,7 @@ void main() {
     );
     expect(find.textContaining('Showing the last trusted quota'), findsNothing);
     expect(
-      find.textContaining('provider drift | account-wide | captured'),
+      find.textContaining('provider drift | scope: whole account | captured'),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);
@@ -793,7 +793,18 @@ void main() {
     await tester.pump();
 
     expect(find.text('40% last known'), findsOneWidget);
-    expect(find.text('live read failed - showing last known'), findsOneWidget);
+    expect(
+      find.text('quota above is last known - refresh failed'),
+      findsOneWidget,
+    );
+    expect(
+      tester.getTopLeft(find.text('40% last known')).dy,
+      lessThan(
+        tester
+            .getTopLeft(find.text('quota above is last known - refresh failed'))
+            .dy,
+      ),
+    );
     expect(
       find.bySemanticsLabel(
         RegExp(
@@ -826,7 +837,10 @@ void main() {
       find.text('provider slow - retrying, showing last known'),
       findsOneWidget,
     );
-    expect(find.text('live read failed - showing last known'), findsNothing);
+    expect(
+      find.text('quota above is last known - refresh failed'),
+      findsNothing,
+    );
     expect(
       find.bySemanticsLabel(RegExp('provider slow', caseSensitive: false)),
       findsWidgets,
@@ -1047,7 +1061,10 @@ void main() {
 
     expect(find.text('5h was spent (unverified)'), findsOneWidget);
     expect(find.text('refresh to confirm'), findsOneWidget);
-    expect(find.textContaining('unverified | account-wide'), findsOneWidget);
+    expect(
+      find.textContaining('unverified | scope: whole account'),
+      findsOneWidget,
+    );
     expect(find.text('ready'), findsNothing);
     expect(find.textContaining('100% free'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -1622,7 +1639,9 @@ void main() {
     await tester.pump();
 
     expect(
-      find.textContaining('live | account-wide | quota plan | captured'),
+      find.textContaining(
+        'live | scope: whole account | quota plan | captured',
+      ),
       findsOneWidget,
     );
     expect(tester.takeException(), isNull);

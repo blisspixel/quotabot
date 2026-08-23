@@ -1850,6 +1850,13 @@ class _DashboardState extends State<Dashboard>
             card += 18; // model-specific section heading
           }
           if (q.suspect != null && q.driftReason == null) card += 20;
+          if (!q.isLocal &&
+              q.hasWindows &&
+              q.stale &&
+              q.driftReason == null &&
+              q.error?.isNotEmpty == true) {
+            card += 20; // secondary live-read warning below retained quota
+          }
           // Budget a truthful inline Connect row so the first frame before
           // measured sizing does not clip it.
           if (_canConnectProvider(q.provider) && providerNeedsConnection(q)) {
@@ -5321,12 +5328,6 @@ class ProviderTile extends StatelessWidget {
                   driftColor,
                   hasTrustedWindows: quota.hasWindows,
                 ),
-              if (!quota.isLocal &&
-                  quota.hasWindows &&
-                  quota.stale &&
-                  quota.driftReason == null &&
-                  quota.error?.isNotEmpty == true)
-                _providerStaleFailureRow(quota, driftColor),
               // Surface in-app login only for an explicit authentication
               // failure. Spent quota, throttling, outages, cached evidence,
               // and drift cannot be repaired by reconnecting.
@@ -5406,6 +5407,14 @@ class ProviderTile extends StatelessWidget {
                     ),
                   ),
                 ),
+              // Retained trusted quota is the useful primary signal. Keep a
+              // failed refresh visible, but below the quota bars it qualifies.
+              if (!quota.isLocal &&
+                  quota.hasWindows &&
+                  quota.stale &&
+                  quota.driftReason == null &&
+                  quota.error?.isNotEmpty == true)
+                _providerStaleFailureRow(quota, driftColor),
               if (showDetail &&
                   !quota.isLocal &&
                   quota.hasWindows &&
@@ -5692,7 +5701,7 @@ class ProviderTile extends StatelessWidget {
         ? 'Automatic recovery: $retryLabel. Diagnostic: ${quota.error}'
         : 'The latest live quota read failed. Showing last-known quota; routing '
               'is disabled until a clean read succeeds. Reason: ${quota.error}';
-    final label = retryLabel ?? 'live read failed - showing last known';
+    final label = retryLabel ?? 'quota above is last known - refresh failed';
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Semantics(

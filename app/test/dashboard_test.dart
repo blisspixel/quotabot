@@ -2618,7 +2618,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.byTooltip('Explain why no route is safe'), findsOneWidget);
-    expect(find.text('live read failed - showing last known'), findsOneWidget);
+    expect(
+      find.text('quota above is last known - refresh failed'),
+      findsOneWidget,
+    );
     expect(
       find.bySemanticsLabel('Trusted quota headroom unavailable'),
       findsOneWidget,
@@ -2628,7 +2631,10 @@ void main() {
     await tester.tap(find.byType(ProviderTile));
     await tester.pump();
     await tester.pump();
-    expect(find.textContaining('cached | account-wide'), findsOneWidget);
+    expect(
+      find.textContaining('cached | scope: whole account'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byTooltip('Explain why no route is safe'));
     await tester.pumpAndSettle();
@@ -3113,11 +3119,14 @@ void main() {
     // The tight default proves staleness above without the full provenance
     // line, which is one tap away in the expanded card and still never reads as
     // current.
-    expect(find.textContaining('cached | account-wide'), findsNothing);
+    expect(find.textContaining('cached | scope: whole account'), findsNothing);
     await tester.tap(find.byType(ProviderTile));
     await tester.pump();
     await tester.pump();
-    expect(find.textContaining('cached | account-wide'), findsOneWidget);
+    expect(
+      find.textContaining('cached | scope: whole account'),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox());
   });

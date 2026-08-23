@@ -4,6 +4,13 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+### Fixed
+
+- Desktop provider cards keep retained quota bars and reset times above a
+  failed-refresh warning, so a temporary Grok or Claude metadata failure cannot
+  visually replace known quota. Compact provenance now labels whole-account
+  scope explicitly instead of reading like the error affects the whole account.
+
 ## 0.10.0-rc.8 - 2026-08-22
 
 ### Fixed
