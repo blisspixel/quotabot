@@ -224,6 +224,35 @@ void main() {
     expect(antigravity.defaultSelected, isFalse);
   });
 
+  test('first run offers Connect only for an authentication failure', () {
+    final throttled = _quota(
+      provider: 'antigravity',
+      name: 'Antigravity',
+      ok: false,
+      error: 'HTTP 429',
+    );
+    final needsLogin = _quota(
+      provider: 'grok',
+      name: 'Grok',
+      ok: true,
+      error: 'no token - run: quotabot login grok',
+    );
+    final entries = firstRunEntries(
+      [throttled, needsLogin],
+      now,
+      canConnect: (_) => true,
+    );
+
+    expect(
+      entries.firstWhere((entry) => entry.id == 'antigravity').canConnect,
+      isFalse,
+    );
+    expect(
+      entries.firstWhere((entry) => entry.id == 'grok').canConnect,
+      isTrue,
+    );
+  });
+
   test('hidden set is every catalog id the user did not check', () {
     expect(
       firstRunHiddenProviders({'claude', 'grok'}),

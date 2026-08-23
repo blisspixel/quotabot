@@ -974,7 +974,13 @@ void main() {
     tester,
   ) async {
     var connects = 0;
-    final stale = _q(60).asStale('token expired');
+    final stale = ProviderQuota(
+      provider: antigravityProviderId,
+      displayName: antigravityProviderName,
+      account: 'user@example.com',
+      asOf: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      windows: [QuotaWindow(label: 'weekly', usedPercent: 60)],
+    ).asStale('token expired');
 
     await tester.pumpWidget(
       _wrap(

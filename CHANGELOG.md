@@ -4,6 +4,8 @@ Notable changes to quotabot. Newest first.
 
 ## Unreleased
 
+## 0.10.0-rc.8 - 2026-08-22
+
 ### Fixed
 
 - Antigravity live model rollout changes no longer quarantine the whole account
@@ -17,7 +19,14 @@ Notable changes to quotabot. Newest first.
   exposing previews, preview installs follow the newest candidate, and the
   bounded GitHub read now uses one whole-request deadline. Closing Settings
   suppresses an in-flight result, and provider setup distinguishes rate limits
-  and temporary provider failures from login problems.
+  and temporary provider failures from login problems. Provider cards, first
+  run, and setup now offer Connect only for explicit authentication failures,
+  not for spent quota, throttling, upstream errors, drift, or ordinary cached
+  evidence.
+- The explicit GitHub update action rejects malformed draft flags and
+  redirects, reads enough release history to retain the stable channel, shows
+  the exact desktop build number, and labels an older published candidate as a
+  release rather than an update when the local build is newer.
 - Source setup portable fallback selects the published release matching the
   checkout version, including release candidates, stops only the exact running
   installed app before transactional activation, and avoids duplicate launches.
