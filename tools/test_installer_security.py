@@ -216,6 +216,16 @@ class InstallerSecurityTests(unittest.TestCase):
         verifier = (ROOT / "tools" / "verify-doctor.ps1").read_text(encoding="utf-8")
 
         self.assertEqual(workflow.count("./tools/verify-doctor.ps1 -Executable"), 2)
+        self.assertEqual(
+            workflow.count(
+                "if (-not (Test-Path -LiteralPath ./tools/verify-doctor.ps1))"
+            ),
+            2,
+        )
+        self.assertEqual(
+            workflow.count("$env:GITHUB_SHA/tools/verify-doctor.ps1"),
+            2,
+        )
         self.assertNotIn("doctor --json | ConvertFrom-Json", workflow)
         self.assertLess(
             verifier.index("$doctorExitCode = $LASTEXITCODE"),

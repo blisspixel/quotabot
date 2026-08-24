@@ -201,6 +201,12 @@ jobs:
           $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
           $actualVersion = & $installed --version
           if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+          # The target release checkout can predate the verifier; use the
+          # workflow commit's copy so older releases still get the fail-closed
+          # doctor check.
+          if (-not (Test-Path -LiteralPath ./tools/verify-doctor.ps1)) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/tools/verify-doctor.ps1" -OutFile ./tools/verify-doctor.ps1
+          }
           ./tools/verify-doctor.ps1 -Executable $installed
 
       - name: Verify and clean-install macOS or Linux release
@@ -525,6 +531,12 @@ jobs:
           $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
           $actualVersion = quotabot --version
           if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+          # The target release checkout can predate the verifier; use the
+          # workflow commit's copy so older releases still get the fail-closed
+          # doctor check.
+          if (-not (Test-Path -LiteralPath ./tools/verify-doctor.ps1)) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/tools/verify-doctor.ps1" -OutFile ./tools/verify-doctor.ps1
+          }
           ./tools/verify-doctor.ps1 -Executable (Get-Command quotabot).Source
 
           $sentinel = Join-Path $env:LOCALAPPDATA 'quotabot/manual/install-smoke-sentinel'
