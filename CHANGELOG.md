@@ -6,6 +6,10 @@ Notable changes to quotabot. Newest first.
 
 ### Fixed
 
+- The scheduled install smoke no longer fails when the target release predates
+  `tools/verify-doctor.ps1`. The workflow fetches its own commit's verifier
+  before the Windows doctor checks, so smoking the latest stable release keeps
+  the fail-closed verification instead of erroring on a missing script.
 - Desktop provider cards keep retained quota bars and reset times above a
   failed-refresh warning, so a temporary Grok or Claude metadata failure cannot
   visually replace known quota. Compact provenance now labels whole-account
