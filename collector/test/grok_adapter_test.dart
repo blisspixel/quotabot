@@ -526,6 +526,161 @@ void main() {
     expect(q.single.pipeHealth, providerPipeHealthThrottled);
   });
 
+  test(
+      'a permission denial for a token past its recorded expiry is an '
+      'expired login with the repair steps', () async {
+    writeAuth({
+      'a': {
+        'email': 'a@example.com',
+        'key': 'token-a',
+        'expires_at': '2020-01-01T00:00:00.000000000Z',
+      },
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          Uint8List(0),
+          200,
+          headers: {'grpc-status': '7'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isTrue);
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, contains('token expired'));
+    expect(q.single.error, contains('gRPC status 7'));
+    expect(q.single.error, contains('open Grok to refresh'));
+    expect(q.single.error, contains('run: quotabot login grok'));
+    expect(q.single.httpStatus, 200);
+  });
+
+  test('a permission denial with an unexpired token keeps its exact status',
+      () async {
+    writeAuth({
+      'a': {
+        'email': 'a@example.com',
+        'key': 'token-a',
+        'expires_at': '2099-01-01T00:00:00Z',
+      },
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          Uint8List(0),
+          200,
+          headers: {'grpc-status': '7'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'gRPC status 7');
+    expect(q.single.error, isNot(contains('token expired')));
+  });
+
+  test('a permission denial without a recorded expiry keeps its exact status',
+      () async {
+    writeAuth({
+      'a': {'email': 'a@example.com', 'key': 'token-a'},
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          Uint8List(0),
+          200,
+          headers: {'grpc-status': '7'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'gRPC status 7');
+    expect(q.single.error, isNot(contains('token expired')));
+  });
+
+  test('a locally expired token does not reclassify throttling', () async {
+    writeAuth({
+      'a': {
+        'email': 'a@example.com',
+        'key': 'token-a',
+        'expires_at': '2020-01-01T00:00:00Z',
+      },
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          Uint8List(0),
+          200,
+          headers: {'grpc-status': '8'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'gRPC status 8');
+    expect(q.single.pipeHealth, providerPipeHealthThrottled);
+    expect(q.single.error, isNot(contains('token expired')));
+  });
+
+  test('an HTTP 403 for a token past its recorded expiry is an expired login',
+      () async {
+    writeAuth({
+      'a': {
+        'email': 'a@example.com',
+        'key': 'token-a',
+        'expires_at': '2020-01-01T00:00:00Z',
+      },
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => null,
+      client: MockClient((_) async => http.Response('denied', 403)),
+    ).collectAccounts();
+
+    expect(q.single.ok, isTrue);
+    expect(q.single.windows, isEmpty);
+    expect(q.single.error, contains('token expired'));
+    expect(q.single.error, contains('HTTP 403'));
+    expect(q.single.error, contains('run: quotabot login grok'));
+    expect(q.single.httpStatus, 403);
+  });
+
+  test(
+      'a permission denial on a quotabot grant read keeps its exact status '
+      'even when the unused CLI token is expired', () async {
+    writeAuth({
+      'a': {
+        'email': 'a@example.com',
+        'key': 'token-a',
+        'expires_at': '2020-01-01T00:00:00Z',
+      },
+    });
+    final q = await GrokAdapter(
+      authFile: authFile,
+      tokenResolver: (_, __) async => 'own-grant-token',
+      client: MockClient(
+        (_) async => http.Response.bytes(
+          Uint8List(0),
+          200,
+          headers: {'grpc-status': '7'},
+        ),
+      ),
+    ).collectAccounts();
+
+    expect(q.single.ok, isFalse);
+    expect(q.single.error, 'gRPC status 7');
+    expect(q.single.error, isNot(contains('token expired')));
+  });
+
   test('an account without any token stays visible with a plain note',
       () async {
     writeAuth({

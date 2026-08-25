@@ -278,6 +278,14 @@ PROV-DM conformance.
 - Account: `~/.grok/auth.json` (email).
 - Auth: quotabot's own grant from `login grok` if present, otherwise the bearer
   token (`key`) the CLI currently holds. See "Authentication" below.
+- Expired host logins are named, not guessed: the CLI records the token's
+  expiry (`expires_at`) next to the token, and xAI answers an expired bearer
+  with a permission denial (observed gRPC status 7) rather than an
+  unauthenticated status. When the token quotabot sent is already past that
+  recorded expiry and the read is denied, the account reports an expired login
+  with the repair steps (use Grok once, or `quotabot login grok`). A denial for
+  a token that should still be valid keeps its exact status, because a status
+  code alone does not prove an expired login.
 - Live usage: a gRPC-web POST to
   `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` with the
   bearer token and an empty request frame. The protobuf response carries the
