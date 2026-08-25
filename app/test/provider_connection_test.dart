@@ -58,6 +58,22 @@ void main() {
       ),
       isTrue,
     );
+    // A denial for a CLI token already past its recorded expiry is proven
+    // login expiry, so the collector's reclassified message must connect even
+    // though the raw provider status alone would not.
+    expect(
+      providerNeedsConnection(
+        quota(
+          provider: 'grok',
+          ok: true,
+          error:
+              'token expired (gRPC status 7; open Grok to refresh, or '
+              'run: quotabot login grok) - account only',
+          httpStatus: 200,
+        ),
+      ),
+      isTrue,
+    );
   });
 
   test('operational and quota states do not offer connection', () {
