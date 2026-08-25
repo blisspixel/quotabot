@@ -144,9 +144,17 @@ class GrokAdapter {
         );
 
     try {
-      final token = await _resolveToken(account.email, allowDefaultGrant) ??
-          account.cliToken;
+      final resolved = await _resolveToken(account.email, allowDefaultGrant);
+      final token = resolved ?? account.cliToken;
       if (token == null) return offline('no token - run: quotabot login grok');
+      // The CLI records its token's expiry next to the token. A denial for a
+      // token already past that recorded expiry is proven login expiry, so it
+      // must not surface as an unexplained provider status. A denial for a
+      // token that should still be valid keeps its exact status, because
+      // guessing auth from a status code alone was the rc.7 defect.
+      final cliTokenExpiredByRecord = resolved == null &&
+          account.cliTokenExpiresAt != null &&
+          account.cliTokenExpiresAt! <= asOf;
 
       final injected = _usageFetcher;
       if (injected != null) {
@@ -180,6 +188,13 @@ class GrokAdapter {
         return offline(
           snapshot.error ??
               'token expired (open Grok to refresh) - account only',
+          httpStatus: snapshot.httpStatus,
+        );
+      }
+      if (snapshot.permissionDenied && cliTokenExpiredByRecord) {
+        return offline(
+          'token expired (${snapshot.error}; open Grok to refresh, or '
+          'run: quotabot login grok) - account only',
           httpStatus: snapshot.httpStatus,
         );
       }
@@ -228,7 +243,12 @@ class GrokAdapter {
       final email = raw['email']?.toString();
       final account = (email == null || email.isEmpty) ? 'default' : email;
       if (!seen.add(account)) continue;
-      out.add(_GrokAccount(account, raw['key']?.toString()));
+      final expiresAt = DateTime.tryParse(raw['expires_at']?.toString() ?? '');
+      out.add(_GrokAccount(
+        account,
+        raw['key']?.toString(),
+        expiresAt == null ? null : expiresAt.millisecondsSinceEpoch ~/ 1000,
+      ));
     }
     return out;
   }
@@ -266,6 +286,7 @@ class GrokAdapter {
         pipeHealth: providerPipeHealthForHttpStatus(resp.statusCode),
         httpStatus: resp.statusCode,
         retryAfterSeconds: retryAfter,
+        permissionDenied: resp.statusCode == 403,
       );
     }
     final headerStatus = int.tryParse(
@@ -305,13 +326,15 @@ class _GrokUsageSnapshot {
   final int? httpStatus;
   final int? retryAfterSeconds;
   final bool unauthorized;
+  final bool permissionDenied;
 
   const _GrokUsageSnapshot.ok(this.window, this.details)
       : error = null,
         pipeHealth = null,
         httpStatus = null,
         retryAfterSeconds = null,
-        unauthorized = false;
+        unauthorized = false,
+        permissionDenied = false;
 
   const _GrokUsageSnapshot.fail({
     required this.error,
@@ -319,6 +342,7 @@ class _GrokUsageSnapshot {
     this.httpStatus,
     this.retryAfterSeconds,
     this.unauthorized = false,
+    this.permissionDenied = false,
   })  : window = null,
         details = const [];
 }
@@ -345,11 +369,13 @@ _GrokUsageSnapshot _grokGrpcStatusFailure(
     pipeHealth: pipeHealth,
     httpStatus: httpStatus,
     retryAfterSeconds: retryAfterSeconds,
+    permissionDenied: status == 7,
   );
 }
 
 class _GrokAccount {
   final String email;
   final String? cliToken;
-  const _GrokAccount(this.email, this.cliToken);
+  final int? cliTokenExpiresAt;
+  const _GrokAccount(this.email, this.cliToken, [this.cliTokenExpiresAt]);
 }

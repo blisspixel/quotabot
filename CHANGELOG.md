@@ -6,6 +6,13 @@ Notable changes to quotabot. Newest first.
 
 ### Fixed
 
+- A Grok read denied because the CLI's stored token is already past its
+  recorded expiry now reports an expired login with the repair steps (use Grok
+  once, or `quotabot login grok`) instead of a bare gRPC status, so an idle
+  machine shows what to do rather than an unexplained code. The exact provider
+  status is kept in the message, denials for a token that should still be
+  valid keep their raw status, and throttling and provider errors are never
+  reclassified. The desktop Connect action now appears for this proven expiry.
 - The scheduled install smoke no longer fails when the target release predates
   `tools/verify-doctor.ps1`. The workflow fetches its own commit's verifier
   before the Windows doctor checks, so smoking the latest stable release keeps
