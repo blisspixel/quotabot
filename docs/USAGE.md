@@ -1064,7 +1064,9 @@ characters. Prefer a local owner-only token file for normal use. A literal
 `--token TOKEN` can be exposed through shell history or process inspection, so
 reserve it for ephemeral local testing. POST bodies must declare `Content-Length`
 and cannot exceed 256 KiB; the supported MCP clients do this automatically. The
-endpoint is MCP Streamable HTTP, not the plain JSON endpoint below.
+server rejects missing credentials before reading the body, applies a 15-second
+body deadline, and retains at most 64 active sessions. The endpoint is MCP
+Streamable HTTP, not the plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
 `collector/bin/example_routing_agent.dart` for a Dart routing example, and
@@ -1094,17 +1096,20 @@ The server also exposes authenticated `POST /leases/reserve` and
 `POST /leases/release` for the bundled LiteLLM router. Startup creates a stable
 owner-only bearer token under the local quotabot HTTP directory; the token is
 never printed or returned. Mutation bodies are bounded quota target metadata
-only and never contain prompts or code. Read endpoints remain unauthenticated.
+only, have a 15-second read deadline, and never contain prompts or code. Read
+endpoints remain unauthenticated, but replace email-shaped account labels with
+stable keyed pseudonyms. Supplying the owner-only bearer token on a read returns
+exact labels for local integrations that need account-specific routing.
 
 Browser requests must use a loopback `Origin`. When a browser omits `Origin`,
 Fetch Metadata rejects same-site and cross-site subresource requests before any
 provider collection. Normal non-browser clients that send no Fetch Metadata and
 explicit user-activated top-level navigations remain supported.
 
-The server binds to loopback and spends zero usage tokens. Snapshots can include
-bounded account identifiers, so treat the port as trusted local metadata: run it
-only on a machine whose local processes you trust, and stop it when it is not
-needed.
+The server binds to loopback and spends zero usage tokens. Snapshots can still
+include bounded non-email account identifiers, so treat the port as trusted
+local metadata: run it only on a machine whose local processes you trust, and
+stop it when it is not needed.
 
 ## Demo mode
 

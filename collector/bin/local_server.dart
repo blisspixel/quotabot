@@ -15,8 +15,9 @@ import 'package:quotabot_collector/local_server.dart';
 /// 2026 research). Useful for external consumers (e.g. ESP32, dashboards).
 /// Zero token metadata reads only. Use Ctrl-C to stop. Read endpoints are local
 /// only. Lease mutations require a stable owner-only bearer token that is never
-/// printed or served. Snapshots include bounded account identifiers, so treat
-/// the loopback port as trusted.
+/// printed or served. Unauthenticated reads pseudonymize email-shaped account
+/// labels; authenticated reads preserve exact identities. Snapshots can include
+/// other bounded account identifiers, so treat the loopback port as trusted.
 Future<void> main(List<String> args) async {
   final port = args.isNotEmpty ? int.tryParse(args.first) : 8721;
   if (port == null || port < 1 || port > 65535) {

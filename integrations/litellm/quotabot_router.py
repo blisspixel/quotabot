@@ -882,8 +882,11 @@ class QuotabotRouter(CustomLogger):
         if not _is_loopback_url(self.policy.quotabot_url):
             return None
         url = self.policy.quotabot_url.rstrip("/") + "/suggest"
+        token = _load_local_http_token()
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        request = urllib.request.Request(url, headers=headers)  # noqa: S310 (local only)
         try:
-            with _NO_REDIRECT_OPENER.open(url, timeout=2) as resp:  # noqa: S310 (local only)
+            with _NO_REDIRECT_OPENER.open(request, timeout=2) as resp:
                 raw = resp.read(_MAX_SUGGEST_RESPONSE_BYTES + 1)
                 if len(raw) > _MAX_SUGGEST_RESPONSE_BYTES:
                     return None

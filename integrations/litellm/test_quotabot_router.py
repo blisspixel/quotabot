@@ -1443,6 +1443,7 @@ class LeaseHttpTests(unittest.TestCase):
         token = "local-test-mutation-token-0123456789"
         state = {
             "authorizations": [],
+            "read_authorizations": [],
             "reservations": [],
             "releases": [],
         }
@@ -1461,6 +1462,10 @@ class LeaseHttpTests(unittest.TestCase):
                 if self.path != "/suggest":
                     self._write_json(404, {"error": "not found"})
                     return
+                with state_lock:
+                    state["read_authorizations"].append(
+                        self.headers.get("Authorization")
+                    )
                 self._write_json(
                     200,
                     {
@@ -1643,6 +1648,7 @@ class LeaseHttpTests(unittest.TestCase):
             state["authorizations"],
             [f"Bearer {token}"] * 4,
         )
+        self.assertEqual(state["read_authorizations"], [f"Bearer {token}"])
 
 
 if __name__ == "__main__":

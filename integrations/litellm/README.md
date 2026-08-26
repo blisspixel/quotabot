@@ -60,7 +60,9 @@ proxy consistent with the desktop widget and MCP server.
    Linux. `QUOTABOT_HTTP_TOKEN_FILE` can select another protected file, while
    `QUOTABOT_HTTP_TOKEN` is intended only for ephemeral testing. Remote managed
    routes fail closed when the token is absent or invalid; a configured local
-   fallback remains available.
+   fallback remains available. The plugin also supplies this token on
+   `GET /suggest`, which preserves exact account selection while unauthenticated
+   plain HTTP reads receive pseudonymous email-shaped account labels.
 
 2. Install LiteLLM and copy the example files:
 

@@ -65,7 +65,10 @@ reads and writes helps scope any report:
   top-level navigations remain supported. The shipped LiteLLM example binds its
   separate proxy explicitly to loopback and requires a bearer key. LiteLLM is an
   external process, so removing either safeguard can expose provider-backed
-  routes beyond quotabot's trust boundary.
+  routes beyond quotabot's trust boundary. Plain HTTP reads pseudonymize
+  email-shaped account labels unless the caller presents the owner-only bearer
+  token. Both HTTP transports bound request-body time, and MCP also caps active
+  sessions and rejects invalid credentials before reading a body.
 - Alert webhooks are loopback-only by default. Enabling an external host is an
   explicit disclosure of alert metadata, which can include provider, account,
   window, remaining percentage, reset, and suggested route. Prompts, source,

@@ -2,6 +2,29 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.10 - 2026-08-26
+
+### Fixed
+
+- Plain loopback HTTP reads now replace email-shaped account labels with stable
+  keyed pseudonyms. A caller with the existing owner-only bearer token still
+  receives exact account identities, and the bundled LiteLLM router supplies
+  that token on recommendation reads so exact account dispatch keeps working.
+- Local HTTP and MCP request bodies now have a 15-second read deadline. MCP
+  rejects missing bearer credentials before body processing and force-closes a
+  stalled unauthorized sender after flushing the HTTP 401 response.
+- MCP Streamable HTTP now limits active sessions to 64, including concurrent
+  initialization attempts, and returns HTTP 503 when capacity is full. Its
+  public constructor now rejects non-loopback hosts and invalid body-timeout or
+  session-limit configuration instead of relying only on CLI validation.
+- A bare Grok HTTP 403 keeps its provider diagnostic instead of incorrectly
+  claiming that reconnect is available. Antigravity keeps its provider-specific
+  reconnect path.
+- Desktop startup height now reserves an inline Connect row only when the
+  provider is actually connectable through the current native host. The first
+  frame and rendered cards share one predicate, preventing an empty row on
+  unsupported hosts.
+
 ## 0.10.0-rc.9 - 2026-08-25
 
 ### Fixed

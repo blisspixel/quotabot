@@ -24,6 +24,31 @@ ProviderQuota quota({
 );
 
 void main() {
+  test('inline Connect height follows desktop host availability', () {
+    final reconnectable = quota(
+      provider: 'grok',
+      ok: true,
+      error: 'no token - run: quotabot login grok',
+    );
+
+    expect(
+      providerInlineConnectRowVisible(
+        quota: reconnectable,
+        hostIntegration: false,
+        canConnect: true,
+      ),
+      isFalse,
+    );
+    expect(
+      providerInlineConnectRowVisible(
+        quota: reconnectable,
+        hostIntegration: true,
+        canConnect: true,
+      ),
+      isTrue,
+    );
+  });
+
   test('explicit provider login failures are connectable', () {
     expect(
       providerNeedsConnection(
