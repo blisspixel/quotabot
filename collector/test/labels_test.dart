@@ -122,5 +122,39 @@ void main() {
       expect(providerFailureSummary(auth), 'live quota needs reconnecting');
       expect(providerFailureSummary(ordinary), 'invalid response');
     });
+
+    test('a gRPC resource-exhausted throttle is labeled rate limited', () {
+      expect(
+        providerFailureSummary(
+          ProviderQuota.error(
+            'grok',
+            'Grok',
+            'gRPC status 8',
+            1000,
+            pipeHealth: providerPipeHealthThrottled,
+            httpStatus: 200,
+          ),
+        ),
+        'rate limited - retrying',
+      );
+    });
+
+    test('an expired-login message is never displaced by the reconnect line',
+        () {
+      const message =
+          'token expired (HTTP 403; open Grok to refresh, or run: quotabot '
+          'login grok) - account only';
+      final quota = ProviderQuota(
+        provider: 'grok',
+        displayName: 'Grok',
+        account: 'a@example.com',
+        asOf: 1000,
+        ok: true,
+        error: message,
+        httpStatus: 403,
+        windows: const [],
+      );
+      expect(providerFailureSummary(quota), message);
+    });
   });
 }

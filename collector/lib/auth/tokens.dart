@@ -325,10 +325,16 @@ class TokenStore {
     final tmp = _createTemporaryFile(f);
     try {
       _hardenTokenFile(tmp);
-      tmp.writeAsStringSync(jsonEncode({
-        ...tokens.toJson(),
-        if (ownerStamp != null) _accountKey: ownerStamp,
-      }));
+      // flush guarantees the data blocks reach disk before the rename is
+      // journaled; without it an OS crash can produce a truncated grant even
+      // though the rename itself is atomic.
+      tmp.writeAsStringSync(
+        jsonEncode({
+          ...tokens.toJson(),
+          if (ownerStamp != null) _accountKey: ownerStamp,
+        }),
+        flush: true,
+      );
       _replaceAtomically(tmp, f);
       // A same-directory rename preserves the checked temporary file's security
       // descriptor. Do not reset permissions after the secret has been written.

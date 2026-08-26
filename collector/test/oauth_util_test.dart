@@ -49,6 +49,41 @@ void main() {
     expect(await capture.code, 'abc123');
   });
 
+  test(
+      'a fixed-port capture fails closed when another process holds the '
+      'IPv6 loopback port', () async {
+    // A fixed-port flow redirects to localhost, which a browser may resolve
+    // to ::1 first. A silent IPv4-only fallback would hand the authorization
+    // redirect to whichever process pre-bound the IPv6 port.
+    HttpServer squatter;
+    try {
+      squatter = await HttpServer.bind(InternetAddress.loopbackIPv6, 0);
+    } on SocketException {
+      return; // No IPv6 loopback on this host; the lenient path is correct.
+    }
+    try {
+      await expectLater(
+        startLoopbackCodeCapture(
+          port: squatter.port,
+          path: '/cb',
+          expectedState: 'xyz',
+        ),
+        throwsA(isA<SocketException>().having(
+          (e) => e.message,
+          'message',
+          contains('already in use on the IPv6 loopback interface'),
+        )),
+      );
+      // The failed capture must release its IPv4 socket so a retry after
+      // closing the conflicting process can bind the same port.
+      final reclaimed =
+          await HttpServer.bind(InternetAddress.loopbackIPv4, squatter.port);
+      await reclaimed.close(force: true);
+    } finally {
+      await squatter.close(force: true);
+    }
+  });
+
   test('startLoopbackCodeCapture accepts a matching IPv6 callback', () async {
     final capture = await startLoopbackCodeCapture(
       path: '/cb',
