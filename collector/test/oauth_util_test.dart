@@ -54,34 +54,46 @@ void main() {
       'IPv6 loopback port', () async {
     // A fixed-port flow redirects to localhost, which a browser may resolve
     // to ::1 first. A silent IPv4-only fallback would hand the authorization
-    // redirect to whichever process pre-bound the IPv6 port.
-    HttpServer squatter;
-    try {
-      squatter = await HttpServer.bind(InternetAddress.loopbackIPv6, 0);
-    } on SocketException {
-      return; // No IPv6 loopback on this host; the lenient path is correct.
+    // redirect to whichever process pre-bound the IPv6 port. Parallel suites
+    // bind loopback ports constantly, so an ephemeral port whose IPv4 twin is
+    // taken by an unrelated socket is retried rather than failed.
+    for (var attempt = 0; attempt < 8; attempt++) {
+      HttpServer squatter;
+      try {
+        squatter = await HttpServer.bind(InternetAddress.loopbackIPv6, 0);
+      } on SocketException {
+        return; // No IPv6 loopback on this host; the lenient path is correct.
+      }
+      try {
+        LoopbackCodeCapture? capture;
+        try {
+          capture = await startLoopbackCodeCapture(
+            port: squatter.port,
+            path: '/cb',
+            expectedState: 'xyz',
+          );
+        } on SocketException catch (e) {
+          if (!e.message
+              .contains('already in use on the IPv6 loopback interface')) {
+            continue; // Unrelated IPv4 collision; try a fresh port.
+          }
+          // The refusal under test. The failed capture must also have
+          // released its IPv4 socket so a retry after closing the
+          // conflicting process can bind the same port.
+          final reclaimed = await HttpServer.bind(
+            InternetAddress.loopbackIPv4,
+            squatter.port,
+          );
+          await reclaimed.close(force: true);
+          return;
+        }
+        await capture.close();
+        fail('capture bound despite the IPv6 loopback conflict');
+      } finally {
+        await squatter.close(force: true);
+      }
     }
-    try {
-      await expectLater(
-        startLoopbackCodeCapture(
-          port: squatter.port,
-          path: '/cb',
-          expectedState: 'xyz',
-        ),
-        throwsA(isA<SocketException>().having(
-          (e) => e.message,
-          'message',
-          contains('already in use on the IPv6 loopback interface'),
-        )),
-      );
-      // The failed capture must release its IPv4 socket so a retry after
-      // closing the conflicting process can bind the same port.
-      final reclaimed =
-          await HttpServer.bind(InternetAddress.loopbackIPv4, squatter.port);
-      await reclaimed.close(force: true);
-    } finally {
-      await squatter.close(force: true);
-    }
+    fail('no ephemeral port with a free IPv4 twin after 8 attempts');
   });
 
   test('startLoopbackCodeCapture accepts a matching IPv6 callback', () async {
