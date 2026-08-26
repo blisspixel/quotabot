@@ -821,7 +821,10 @@ bool retainCollectedProviderQuota(ProviderQuota quota) =>
 
 /// Loads the last-known snapshot for [result]'s provider and account.
 /// Account-scoped providers are loaded by account rather than from the generic
-/// provider file, because one machine can hold several provider logins.
+/// provider file, because one machine can hold several provider logins. A
+/// generic identity ('default' and friends) is served from the plain provider
+/// file by [loadAccountSnapshot] itself, mirroring where the write side
+/// stores it.
 ProviderQuota? _loadCachedSnapshot(ProviderQuota result) =>
     providerAdapterById(result.provider)?.accountScopedCache == true
         ? loadAccountSnapshot(result.provider, result.account)

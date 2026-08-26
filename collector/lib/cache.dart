@@ -1007,7 +1007,15 @@ ProviderQuota? loadSnapshotForAdmission(String provider) {
 /// `loadSnapshot(provider)` path never finds them. Legacy sanitized names are
 /// still read only when the embedded account identity matches exactly.
 ProviderQuota? loadAccountSnapshot(String provider, String account) {
-  if (!_hasAccount(account)) return null;
+  if (!_hasAccount(account)) {
+    // A generic identity's trusted snapshot lives in the plain provider file,
+    // because _accountedFile creates per-account files only for specific
+    // accounts. Serve it back only when the stored identity matches exactly,
+    // so a legacy specific-account snapshot is never relabeled as generic and
+    // one generic label never answers for another.
+    final generic = loadSnapshot(provider);
+    return generic != null && generic.account == account ? generic : null;
+  }
   final quota = _readSnapshotEvidenceForIdentity(
     provider,
     account,
@@ -1022,7 +1030,11 @@ ProviderQuota? loadAccountSnapshotForAdmission(
   String provider,
   String account,
 ) {
-  if (!_hasAccount(account)) return null;
+  if (!_hasAccount(account)) {
+    // Mirrors [loadAccountSnapshot]'s generic-identity fallback.
+    final generic = loadSnapshotForAdmission(provider);
+    return generic != null && generic.account == account ? generic : null;
+  }
   final quota = _readSnapshotEvidenceForIdentity(
     provider,
     account,

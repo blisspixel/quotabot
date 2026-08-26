@@ -90,7 +90,26 @@ Future<LoopbackCodeCapture> startLoopbackCodeCapture({
   HttpServer? ipv6;
   try {
     ipv6 = await HttpServer.bind(InternetAddress.loopbackIPv6, ipv4.port);
-  } on SocketException {
+  } on SocketException catch (e) {
+    // A fixed-port flow redirects to a hostname (localhost), which a browser
+    // may resolve to ::1 first. If another local process already holds the
+    // IPv6 loopback port, continuing IPv4-only would silently hand that
+    // process the authorization redirect, so a bind conflict fails the login
+    // instead. A host without IPv6 loopback still proceeds IPv4-only, and an
+    // OS-chosen port (port 0) keeps the lenient behavior because its flows
+    // redirect to the literal 127.0.0.1. 48/98/10048 are EADDRINUSE on macOS,
+    // Linux, and Windows; -1 is the Dart VM's in-process duplicate-bind
+    // signal, the same conflict raised before reaching the OS.
+    const addressInUse = {48, 98, 10048, -1};
+    if (port != 0 && addressInUse.contains(e.osError?.errorCode)) {
+      await ipv4.close(force: true);
+      throw SocketException(
+        'port $port is already in use on the IPv6 loopback interface; close '
+        'the process holding it and retry the login',
+        osError: e.osError,
+        port: port,
+      );
+    }
     ipv6 = null;
   }
   final servers = [ipv4, if (ipv6 != null) ipv6];
