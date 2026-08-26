@@ -61,8 +61,12 @@ String? providerRetrySummary(
   bool showingLastKnown = false,
 }) {
   final cause = switch (quota.pipeHealth) {
-    providerPipeHealthThrottled =>
-      quota.httpStatus == 429 ? 'rate limited' : 'provider slow',
+    // gRPC RESOURCE_EXHAUSTED (status 8) is a rate limit that arrives over
+    // HTTP 200, so the 429 check alone would mislabel it "provider slow".
+    providerPipeHealthThrottled => quota.httpStatus == 429 ||
+            (quota.error?.contains('gRPC status 8') ?? false)
+        ? 'rate limited'
+        : 'provider slow',
     providerPipeHealthDegraded => 'provider error',
     _ => null,
   };
@@ -88,10 +92,13 @@ String providerFailureSummary(
     showingLastKnown: showingLastKnown,
   );
   if (retry != null) return retry;
+  final error = quota.error?.trim();
+  // An expired-login message carries its exact provider status and repair
+  // steps; the generic reconnect line must not displace it.
+  if (error != null && error.contains('token expired')) return error;
   if (quota.httpStatus == 401 || quota.httpStatus == 403) {
     return 'live quota needs reconnecting';
   }
-  final error = quota.error?.trim();
   return error == null || error.isEmpty ? 'no live data' : error;
 }
 

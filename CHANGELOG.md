@@ -2,10 +2,27 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.10.0-rc.9 - 2026-08-25
 
 ### Fixed
 
+- Retained quota for a provider login recorded without an email (a generic
+  `default` identity) now survives failed refreshes. The account-scoped cache
+  lookup reads the plain provider file where those snapshots are written, so
+  an expired-token state shows stale bars and reset times instead of a blank
+  card. Exact identity matching keeps a legacy specific-account snapshot from
+  being relabeled as generic, and one generic label never answers for another.
+- Provider failure copy no longer displaces an expired-login message with the
+  generic reconnect line, and a gRPC resource-exhausted throttle is labeled
+  rate limited instead of provider slow.
+- OAuth grant files are flushed to disk before their atomic rename, so an
+  operating-system crash during a token refresh cannot truncate a grant whose
+  rotated refresh token the provider has already invalidated.
+- A fixed-port OAuth login now fails closed when another local process already
+  holds the IPv6 loopback port, instead of silently continuing IPv4-only and
+  letting that process receive the authorization redirect. PKCE already kept
+  the code unredeemable; the login no longer hangs, and hosts without IPv6
+  loopback still sign in over IPv4.
 - The source-setup portable desktop fallback now says when no published
   release matches the checkout version instead of a raw HTTP 404 exception on
   Windows or a silent skip on macOS and Linux, and states that the installed

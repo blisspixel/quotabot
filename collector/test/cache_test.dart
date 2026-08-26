@@ -79,6 +79,36 @@ void main() {
     expect(back.modelQuotas.single.windowLabel, 'weekly');
   });
 
+  test('a generic-identity snapshot is retained through the account lookup',
+      () {
+    final now = nowEpoch();
+    final trusted = ProviderQuota(
+      provider: 'grok',
+      displayName: 'Grok',
+      account: 'default',
+      plan: 'SuperGrok',
+      asOf: now,
+      windows: [
+        QuotaWindow(label: 'weekly', usedPercent: 41, resetsAt: now + 3600),
+      ],
+    );
+    saveSnapshot(trusted);
+
+    // The write side stores a generic identity in the plain provider file, so
+    // the account lookup must serve it back rather than dropping retention
+    // for a login the host records without an email.
+    final back = loadAccountSnapshot('grok', 'default');
+    expect(back, isNotNull);
+    expect(back!.account, 'default');
+    expect(back.windows.single.usedPercent, 41);
+    expect(loadAccountSnapshotForAdmission('grok', 'default'), isNotNull);
+
+    // One generic label never answers for another, and a specific account
+    // still reads only its per-account evidence.
+    expect(loadAccountSnapshot('grok', 'unknown'), isNull);
+    expect(loadAccountSnapshot('grok', 'a@example.com'), isNull);
+  });
+
   test('reset credits are fresh-read only and never return from cache', () {
     final q = ProviderQuota(
       provider: id,
