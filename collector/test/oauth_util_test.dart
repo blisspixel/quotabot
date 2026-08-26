@@ -79,12 +79,32 @@ void main() {
           }
           // The refusal under test. The failed capture must also have
           // released its IPv4 socket so a retry after closing the
-          // conflicting process can bind the same port.
-          final reclaimed = await HttpServer.bind(
-            InternetAddress.loopbackIPv4,
-            squatter.port,
+          // conflicting process can bind the same port. The OS can lag the
+          // close, so mirror the bounded rebind retry the close-release test
+          // below uses.
+          HttpServer? reclaimed;
+          Object? lastError;
+          for (final delayMs in const [0, 10, 25, 50, 100, 200, 400]) {
+            if (delayMs > 0) {
+              await Future<void>.delayed(Duration(milliseconds: delayMs));
+            }
+            try {
+              reclaimed = await HttpServer.bind(
+                InternetAddress.loopbackIPv4,
+                squatter.port,
+              );
+              break;
+            } on SocketException catch (error) {
+              lastError = error;
+            }
+          }
+          expect(
+            reclaimed,
+            isNotNull,
+            reason: 'IPv4 loopback port ${squatter.port} stayed in use: '
+                '$lastError',
           );
-          await reclaimed.close(force: true);
+          await reclaimed!.close(force: true);
           return;
         }
         await capture.close();
