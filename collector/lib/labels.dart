@@ -96,7 +96,8 @@ String providerFailureSummary(
   // An expired-login message carries its exact provider status and repair
   // steps; the generic reconnect line must not displace it.
   if (error != null && error.contains('token expired')) return error;
-  if (quota.httpStatus == 401 || quota.httpStatus == 403) {
+  if (quota.httpStatus == 401 ||
+      (quota.provider == 'antigravity' && quota.httpStatus == 403)) {
     return 'live quota needs reconnecting';
   }
   return error == null || error.isEmpty ? 'no live data' : error;

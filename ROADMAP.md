@@ -120,7 +120,13 @@ a broad 0.x product to a boring 1.0:
    remains an explicit GitHub action that distinguishes preview from stable,
    preserves the installed release channel, and uses one bounded request without
    automatic checks or upgrade prompts.
-4. When the developer-controlled stabilization inventory is quiet, complete
+4. Release candidates 7 through 10 close the next field-review inventory:
+   cloud-offload classification, provider failure fidelity, grouped desktop
+   settings, source-install recovery, retained generic-account quota, durable
+   OAuth writes, dual-loopback callback binding, loopback account-label
+   privacy, bounded HTTP request bodies and MCP sessions, exact LiteLLM account
+   routing, and native desktop connection-state consistency.
+5. When the developer-controlled stabilization inventory is quiet, complete
    Windows and macOS signing below and run a signed 0.10.x rehearsal through
    clean install, update, rollback, and immutable publication. Reopen product
    breadth only after the exit criteria pass.
@@ -246,7 +252,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 ## Current state
 
 The current line, **0.9.9**, remains the tagged stable and default installer
-version. The focused **0.10.0-rc.9** candidate carries the latest stabilization
+version. The focused **0.10.0-rc.10** candidate carries the latest stabilization
 inventory described in [Next](#next). The stable line contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning
@@ -263,7 +269,7 @@ milestone sections below.
 | Gate | State | Current evidence | What remains |
 |---|---|---|---|
 | Core contracts and automated quality | Stabilization candidate | Analysis, coverage, schema, security, and release-policy gates are automated; the routing-fallback, partial-cache, exact-identity, profile-isolation, and install-lifecycle regressions are covered | Keep every candidate green across the full matrix and resolve any new reproducible defect before signing activation |
-| Integration trust boundary | Stabilization candidate | Loopback, authentication, request bounds, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
+| Integration trust boundary | Stabilization candidate | Loopback, authentication, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP sessions, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Installation and update | Rehearsed on 0.9.9; hardened in 0.10.x | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8; later candidates add transactional update, rollback, and guarded uninstall regressions | Repeat the lifecycle on the unsigned 0.10.x stabilization candidate, then on the signed rehearsal and frozen 1.0 candidate |

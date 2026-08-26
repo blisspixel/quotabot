@@ -123,6 +123,22 @@ void main() {
       expect(providerFailureSummary(ordinary), 'invalid response');
     });
 
+    test('keeps a bare Grok HTTP 403 diagnostic when reconnect is unavailable',
+        () {
+      final quota = ProviderQuota.error(
+        'grok',
+        'Grok',
+        'Grok quota request failed (HTTP 403)',
+        1000,
+        httpStatus: 403,
+      );
+
+      expect(
+        providerFailureSummary(quota),
+        'Grok quota request failed (HTTP 403)',
+      );
+    });
+
     test('a gRPC resource-exhausted throttle is labeled rate limited', () {
       expect(
         providerFailureSummary(

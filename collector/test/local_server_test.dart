@@ -263,6 +263,103 @@ void main() {
     );
   });
 
+  test('rejects a non-positive mutation body timeout before binding', () async {
+    await expectLater(
+      startLocalQuotabotServer(
+        port: 0,
+        snapshotProvider: () async => [_q('claude', 20)],
+        requestBodyTimeout: Duration.zero,
+        now: () => _now,
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test('unauthenticated reads pseudonymize email account identities', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [
+        _q('grok', 20, account: 'person@example.com'),
+      ],
+      mutationToken: _mutationToken,
+      now: () => _now,
+    );
+    final base = 'http://127.0.0.1:${server.port}';
+    try {
+      final first = await _requestJson(Uri.parse('$base/'));
+      final second = await _requestJson(Uri.parse('$base/'));
+      final publicAccount =
+          ((first.body['providers'] as List).single as Map)['account'];
+      expect(publicAccount, startsWith('account:'));
+      expect(publicAccount, isNot(contains('@')));
+      expect(
+        ((second.body['providers'] as List).single as Map)['account'],
+        publicAccount,
+      );
+      expect(jsonEncode(first.body), isNot(contains('person@example.com')));
+
+      final suggestion = await _requestJson(Uri.parse('$base/suggest'));
+      expect(
+        jsonEncode(suggestion.body),
+        isNot(contains('person@example.com')),
+      );
+
+      final provider = await _requestJson(Uri.parse('$base/providers/grok'));
+      expect(provider.body['account'], publicAccount);
+
+      final owner = await _requestJson(
+        Uri.parse('$base/'),
+        headers: const {
+          HttpHeaders.authorizationHeader: 'Bearer $_mutationToken',
+        },
+      );
+      expect(
+        ((owner.body['providers'] as List).single as Map)['account'],
+        'person@example.com',
+      );
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('authenticated mutation bodies have an explicit read deadline',
+      () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      mutationToken: _mutationToken,
+      requestBodyTimeout: const Duration(milliseconds: 100),
+      now: () => _now,
+    );
+    try {
+      final socket = await Socket.connect('127.0.0.1', server.port);
+      addTearDown(socket.destroy);
+      socket.write(
+        'POST /leases/reserve HTTP/1.1\r\n'
+        'Host: 127.0.0.1:${server.port}\r\n'
+        'Authorization: Bearer $_mutationToken\r\n'
+        'Content-Type: application/json\r\n'
+        'Content-Length: 100\r\n'
+        'Connection: close\r\n'
+        '\r\n'
+        '{',
+      );
+      await socket.flush();
+
+      final elapsed = Stopwatch()..start();
+      final response = await utf8.decoder.bind(socket).join().timeout(
+            const Duration(seconds: 3),
+          );
+      expect(elapsed.elapsed, lessThan(const Duration(seconds: 2)));
+      if (response.isNotEmpty) {
+        expect(response, contains(' 408 '));
+        expect(response, contains('request body timed out'));
+      }
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
   test('local server serves snapshot, health, providers, and errors', () async {
     var collections = 0;
     final logs = <String>[];
