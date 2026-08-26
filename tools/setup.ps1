@@ -561,7 +561,16 @@ function Install-QuotabotPortableDesktop {
     Write-Ok "Installed the desktop app to $(Split-Path -Parent $installed)"
     return $installed
   } catch {
-    Write-Warn2 "Portable desktop install skipped: $($_.Exception.Message)"
+    $status = $null
+    try { $status = [int]$_.Exception.Response.StatusCode } catch {}
+    if ($status -eq 404) {
+      Write-Warn2 ("Portable desktop install skipped: no published release " +
+        "$version provides $asset. The installed desktop app is unchanged; " +
+        "build it from source once desktop build tools are ready, or re-run " +
+        "setup after that release is published.")
+    } else {
+      Write-Warn2 "Portable desktop install skipped: $($_.Exception.Message)"
+    }
     return $null
   } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
