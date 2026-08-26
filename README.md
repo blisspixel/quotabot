@@ -10,7 +10,7 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.9.
+> **Current release candidate:** 0.10.0-rc.10.
 > **Next:** a focused 0.10.x stabilization train, then signed release
 > readiness. No new product breadth. See [roadmap Next](ROADMAP.md#next)
 > and the [documentation index](docs/README.md).
@@ -130,6 +130,9 @@ tool and schema contract is in [AGENTS.md](AGENTS.md). See the
   model-list metadata endpoints; Antigravity may perform required onboarding.
 - The desktop update check reads public GitHub release metadata only after the
   user invokes it. It sends no quota, account, history, prompt, or code data.
+- Plain loopback HTTP reads pseudonymize email-shaped account labels unless the
+  caller supplies the server's owner-only bearer token. The bundled LiteLLM
+  router uses that token so exact account routing remains available locally.
 - Routing fails soft, so callers can continue if quotabot is unavailable.
 
 Run `quotabot explain` to inspect files and network destinations used by each

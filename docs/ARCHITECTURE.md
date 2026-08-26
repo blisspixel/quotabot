@@ -499,7 +499,10 @@ rejects batch JSON-RPC payloads, requires a bearer token of at least 32
 characters, and admits requests before the session transport reads a body.
 Missing or invalid bearer tokens return HTTP 401 with a Bearer challenge.
 POST bodies without a declared length, or larger than 256 KiB, return HTTP 413
-without buffering. Host and origin rebinding stays HTTP 403.
+without buffering. Body reads have a 15-second deadline, and at most 64 active
+sessions are retained, including concurrent initialization attempts. The public
+server constructor enforces the same loopback, timeout, and session-limit
+invariants as CLI startup. Host and origin rebinding stays HTTP 403.
 `bin/example_routing_agent.dart` shows the same logic used for direct Dart
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
@@ -509,14 +512,17 @@ first routing policy, `GET /suggest?quota_stretch=true` for the default reserve,
 and `GET /suggest?cost_penalty=codex:2` for explicit caller-owned cost
 discounting. The server accepts a quota-stretch threshold from 20 through 50 and
 rejects malformed, out-of-range, or mutually exclusive policy inputs before
-collection. Its read endpoints are unauthenticated loopback metadata. The only
-write endpoints are authenticated, bounded lease reserve and
+collection. Its read endpoints are unauthenticated loopback metadata.
+Email-shaped account labels in those reads are replaced with stable keyed
+pseudonyms unless the caller presents the server's owner-only bearer token. The
+only write endpoints are authenticated, bounded lease reserve and
 release operations. Server startup creates and permission-checks a stable
 per-user bearer token without printing it. First-start token creation uses the
 same process-and-isolate guard plus an owner-only flushed temporary file, so
 parallel servers publish one complete token. A reserve request submits only
 provider/account targets and lease policy, then selects and writes under one
-ledger guard. It never receives task text, prompts, source code, or model output.
+ledger guard. Mutation body reads have a 15-second deadline. The server never
+receives task text, prompts, source code, or model output.
 Before any provider work, the server also validates browser `Origin` and Fetch
 Metadata. Non-loopback and null origins are rejected, as are originless
 same-site or cross-site subresource fetches. Normal non-browser clients without

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 import 'analysis.dart';
 import 'cache.dart';
 import 'decision.dart';
@@ -24,6 +26,7 @@ typedef LocalRoutedRequestSummaryProvider = RoutedRequestSummary Function();
 const _maxLocalMutationBodyBytes = 32 * 1024;
 const _maxLocalMutationDrainBytes = 64 * 1024;
 const _maxLocalMutationTargets = 64;
+const defaultLocalHttpRequestBodyTimeout = Duration(seconds: 15);
 
 class _LocalLeaseTarget {
   final String provider;
@@ -59,6 +62,7 @@ Future<HttpServer> startLocalQuotabotServer({
   RouteLeaseStore leaseStore = const NoopRouteLeaseStore(),
   String? mutationToken,
   int maxConcurrentRequests = 32,
+  Duration requestBodyTimeout = defaultLocalHttpRequestBodyTimeout,
   int Function() now = nowEpoch,
   void Function(String message)? log,
 }) async {
@@ -67,6 +71,13 @@ Future<HttpServer> startLocalQuotabotServer({
       maxConcurrentRequests,
       'maxConcurrentRequests',
       'must be at least 1',
+    );
+  }
+  if (requestBodyTimeout <= Duration.zero) {
+    throw ArgumentError.value(
+      requestBodyTimeout,
+      'requestBodyTimeout',
+      'must be greater than zero',
     );
   }
   if (mutationToken != null && !isValidLocalHttpMutationToken(mutationToken)) {
@@ -125,13 +136,61 @@ Future<HttpServer> startLocalQuotabotServer({
     }
   }
 
+  bool constantTimeEquals(String actual, String expected) {
+    final left = utf8.encode(actual);
+    final right = utf8.encode(expected);
+    final length = left.length > right.length ? left.length : right.length;
+    var difference = left.length ^ right.length;
+    for (var i = 0; i < length; i++) {
+      final leftByte = i < left.length ? left[i] : 0;
+      final rightByte = i < right.length ? right[i] : 0;
+      difference |= leftByte ^ rightByte;
+    }
+    return difference == 0;
+  }
+
+  bool ownerAuthenticated(HttpRequest request) {
+    final token = mutationToken;
+    if (token == null) return false;
+    final values = request.headers[HttpHeaders.authorizationHeader];
+    if (values == null || values.length != 1) return false;
+    return constantTimeEquals(values.single, 'Bearer $token');
+  }
+
+  final accountPseudonymKey = utf8.encode(
+    mutationToken ?? randomLocalHttpMutationToken(),
+  );
+
+  String pseudonymizeAccount(String provider, String account) {
+    final identity = '${provider.trim().toLowerCase()}\u0000${account.trim()}';
+    final digest = Hmac(sha256, accountPseudonymKey)
+        .convert(utf8.encode(identity))
+        .toString();
+    return 'account:${digest.substring(0, 24)}';
+  }
+
+  Object? protectAccountIdentity(Object? value) {
+    if (value is List) return value.map(protectAccountIdentity).toList();
+    if (value is! Map) return value;
+    final provider =
+        value['provider'] is String ? value['provider'] as String : '';
+    return value.map((key, nested) {
+      if (key == 'account' && nested is String && nested.contains('@')) {
+        return MapEntry(key, pseudonymizeAccount(provider, nested));
+      }
+      return MapEntry(key, protectAccountIdentity(nested));
+    });
+  }
+
   void writeJson(HttpRequest req, Object data, [int status = HttpStatus.ok]) {
+    final responseData =
+        ownerAuthenticated(req) ? data : protectAccountIdentity(data);
     req.response
       ..statusCode = status
       ..headers.contentType = ContentType.json
       ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
       ..headers.set('X-Content-Type-Options', 'nosniff')
-      ..write(const JsonEncoder.withIndent('  ').convert(data));
+      ..write(const JsonEncoder.withIndent('  ').convert(responseData));
   }
 
   bool rejectUnknownQuery(HttpRequest request) {
@@ -148,25 +207,8 @@ Future<HttpServer> startLocalQuotabotServer({
     return true;
   }
 
-  bool constantTimeEquals(String actual, String expected) {
-    final left = utf8.encode(actual);
-    final right = utf8.encode(expected);
-    final length = left.length > right.length ? left.length : right.length;
-    var difference = left.length ^ right.length;
-    for (var i = 0; i < length; i++) {
-      final leftByte = i < left.length ? left[i] : 0;
-      final rightByte = i < right.length ? right[i] : 0;
-      difference |= leftByte ^ rightByte;
-    }
-    return difference == 0;
-  }
-
   bool authorizedMutation(HttpRequest request) {
-    final token = mutationToken;
-    if (token == null) return false;
-    final values = request.headers[HttpHeaders.authorizationHeader];
-    if (values == null || values.length != 1) return false;
-    return constantTimeEquals(values.single, 'Bearer $token');
+    return ownerAuthenticated(request);
   }
 
   Future<({Map<String, dynamic>? body, String? error, int status})>
@@ -183,7 +225,12 @@ Future<HttpServer> startLocalQuotabotServer({
     final declaredLength = request.contentLength;
     if (declaredLength > _maxLocalMutationBodyBytes) {
       if (declaredLength <= _maxLocalMutationDrainBytes) {
-        await request.drain<void>();
+        try {
+          await request.drain<void>().timeout(requestBodyTimeout);
+        } on TimeoutException {
+          request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+          return (body: null, error: 'request body timed out', status: 408);
+        }
       } else {
         request.response.headers.set(HttpHeaders.connectionHeader, 'close');
       }
@@ -193,7 +240,7 @@ Future<HttpServer> startLocalQuotabotServer({
     var total = 0;
     var tooLarge = false;
     try {
-      await for (final chunk in request) {
+      await for (final chunk in request.timeout(requestBodyTimeout)) {
         total += chunk.length;
         if (total > _maxLocalMutationBodyBytes) {
           tooLarge = true;
@@ -230,6 +277,9 @@ Future<HttpServer> startLocalQuotabotServer({
         error: 'request body must be valid JSON',
         status: 400
       );
+    } on TimeoutException {
+      request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+      return (body: null, error: 'request body timed out', status: 408);
     }
   }
 

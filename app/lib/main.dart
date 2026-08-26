@@ -1859,7 +1859,11 @@ class _DashboardState extends State<Dashboard>
           }
           // Budget a truthful inline Connect row so the first frame before
           // measured sizing does not clip it.
-          if (_canConnectProvider(q.provider) && providerNeedsConnection(q)) {
+          if (providerInlineConnectRowVisible(
+            quota: q,
+            hostIntegration: widget._hostIntegration,
+            canConnect: _canConnectProvider(q.provider),
+          )) {
             card += 28;
           }
           if (q.isLocal || isExpanded) {
@@ -2352,9 +2356,11 @@ class _DashboardState extends State<Dashboard>
       }),
       onContextMenu: (pos) => _showCardMenu(q, pos),
       onConnect:
-          widget._hostIntegration &&
-              _canConnectProvider(q.provider) &&
-              providerNeedsConnection(q)
+          providerInlineConnectRowVisible(
+            quota: q,
+            hostIntegration: widget._hostIntegration,
+            canConnect: _canConnectProvider(q.provider),
+          )
           ? () => unawaited(_connectAndValidate(q.provider, account: q.account))
           : null,
       showAccounts: _shouldShowAccount(q, counts),

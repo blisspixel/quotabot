@@ -2162,9 +2162,9 @@ void main() {
     var checks = 0;
     final opened = <String>[];
     const latest = QuotabotRelease(
-      tag: 'v0.10.0-rc.10',
-      version: '0.10.0-rc.10',
-      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.10',
+      tag: 'v0.10.0-rc.11',
+      version: '0.10.0-rc.11',
+      url: 'https://github.com/blisspixel/quotabot/releases/tag/v0.10.0-rc.11',
       prerelease: true,
     );
     const stable = QuotabotRelease(
@@ -2209,7 +2209,7 @@ void main() {
     await tester.pump();
     expect(checks, 1);
     expect(find.text('Update available'), findsOneWidget);
-    expect(find.text('Latest preview: 0.10.0-rc.10'), findsOneWidget);
+    expect(find.text('Latest preview: 0.10.0-rc.11'), findsOneWidget);
     expect(
       find.descendant(
         of: find.byType(AlertDialog).last,

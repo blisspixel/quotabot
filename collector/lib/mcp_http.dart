@@ -19,6 +19,9 @@ const defaultMcpHttpPath = '/mcp';
 const maxMcpHttpRequestBytes = 256 * 1024;
 const maxMcpHttpDrainBytes = 512 * 1024;
 const minMcpHttpBearerTokenCharacters = 32;
+const defaultMcpHttpRequestBodyTimeout = Duration(seconds: 15);
+const defaultMaxMcpHttpSessions = 64;
+const _unauthorizedSocketDestroyDelay = Duration(milliseconds: 25);
 const mcpHttpBearerRealm = 'quotabot-mcp';
 const _mcpAllowedHosts = {'localhost', '127.0.0.1', '::1'};
 
@@ -28,6 +31,8 @@ class QuotabotMcpHttpConfig {
   final String path;
   final String? bearerToken;
   final Set<String>? allowedOrigins;
+  final Duration requestBodyTimeout;
+  final int maxSessions;
 
   const QuotabotMcpHttpConfig({
     this.host = defaultMcpHttpHost,
@@ -35,6 +40,8 @@ class QuotabotMcpHttpConfig {
     this.path = defaultMcpHttpPath,
     this.bearerToken,
     this.allowedOrigins,
+    this.requestBodyTimeout = defaultMcpHttpRequestBodyTimeout,
+    this.maxSessions = defaultMaxMcpHttpSessions,
   });
 }
 
@@ -76,12 +83,15 @@ class QuotabotStreamableHttpServer {
   final String path;
   final String bearerToken;
   final Set<String>? allowedOrigins;
+  final Duration requestBodyTimeout;
+  final int maxSessions;
   final McpServer Function(String sessionId) serverFactory;
 
   HttpServer? _http;
   Set<String>? _boundOrigins;
   final Map<String, StreamableHTTPServerTransport> _transports = {};
   final Map<String, McpServer> _servers = {};
+  int _pendingSessionInitializations = 0;
 
   QuotabotStreamableHttpServer({
     required this.host,
@@ -90,7 +100,28 @@ class QuotabotStreamableHttpServer {
     required this.bearerToken,
     required this.serverFactory,
     this.allowedOrigins,
-  });
+    this.requestBodyTimeout = defaultMcpHttpRequestBodyTimeout,
+    this.maxSessions = defaultMaxMcpHttpSessions,
+  }) {
+    if (!isLoopbackMcpHost(host)) {
+      throw ArgumentError.value(
+        host,
+        'host',
+        'Streamable HTTP MCP must bind to localhost, 127.0.0.1, or ::1',
+      );
+    }
+    if (requestBodyTimeout <= Duration.zero) {
+      throw ArgumentError.value(
+        requestBodyTimeout,
+        'requestBodyTimeout',
+        'must be greater than zero',
+      );
+    }
+    if (maxSessions < 1) {
+      throw ArgumentError.value(
+          maxSessions, 'maxSessions', 'must be at least 1');
+    }
+  }
 
   Future<void> start() async {
     if (_http != null) {
@@ -135,21 +166,14 @@ class QuotabotStreamableHttpServer {
       await request.response.close();
       return;
     }
+    if (!_hasBearerToken(request, bearerToken)) {
+      await _rejectUnauthorized(request);
+      return;
+    }
     if (request.method == 'POST' &&
         (request.contentLength < 0 ||
             request.contentLength > maxMcpHttpRequestBytes)) {
       await _rejectPayloadTooLarge(request);
-      return;
-    }
-    if (!_hasBearerToken(request, bearerToken)) {
-      request.response
-        ..statusCode = HttpStatus.unauthorized
-        ..headers.set(
-          HttpHeaders.wwwAuthenticateHeader,
-          'Bearer realm="$mcpHttpBearerRealm"',
-        )
-        ..write('Unauthorized');
-      await request.response.close();
       return;
     }
 
@@ -176,10 +200,44 @@ class QuotabotStreamableHttpServer {
     }
   }
 
+  Future<void> _rejectUnauthorized(HttpRequest request) async {
+    const body = 'Unauthorized';
+    final bodyBytes = utf8.encode(body);
+    request.response
+      ..statusCode = HttpStatus.unauthorized
+      ..headers.set(HttpHeaders.connectionHeader, 'close')
+      ..headers.set(HttpHeaders.contentLengthHeader, '${bodyBytes.length}')
+      ..headers.set(
+        HttpHeaders.wwwAuthenticateHeader,
+        'Bearer realm="$mcpHttpBearerRealm"',
+      );
+    if (request.contentLength != 0) {
+      Socket? socket;
+      try {
+        socket = await request.response.detachSocket(writeHeaders: true);
+        socket.add(bodyBytes);
+        await socket.flush();
+        unawaited(socket.close());
+        // A short grace period lets the loopback client consume the flushed
+        // 401 before the forced close releases an incomplete request body.
+        Timer(_unauthorizedSocketDestroyDelay, socket.destroy);
+      } catch (_) {
+        socket?.destroy();
+      }
+      return;
+    }
+    request.response.write(body);
+    await request.response.close();
+  }
+
   Future<void> _rejectPayloadTooLarge(HttpRequest request) async {
     final declared = request.contentLength;
     if (declared > 0 && declared <= maxMcpHttpDrainBytes) {
-      await request.drain<void>();
+      try {
+        await request.drain<void>().timeout(requestBodyTimeout);
+      } on TimeoutException {
+        request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+      }
     } else {
       request.response.headers.set(HttpHeaders.connectionHeader, 'close');
     }
@@ -201,13 +259,25 @@ class QuotabotStreamableHttpServer {
       return;
     }
 
-    final bodyBytes = await request.fold<BytesBuilder>(
-      BytesBuilder(copy: false),
-      (builder, chunk) {
-        builder.add(chunk);
-        return builder;
-      },
-    );
+    BytesBuilder bodyBytes;
+    try {
+      bodyBytes = await request.fold<BytesBuilder>(
+        BytesBuilder(copy: false),
+        (builder, chunk) {
+          builder.add(chunk);
+          return builder;
+        },
+      ).timeout(requestBodyTimeout);
+    } on TimeoutException {
+      request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+      await _jsonRpcError(
+        request.response,
+        httpStatus: HttpStatus.requestTimeout,
+        errorCode: ErrorCode.invalidRequest,
+        message: 'Request body timed out',
+      );
+      return;
+    }
     dynamic body;
     try {
       body = jsonDecode(utf8.decode(bodyBytes.takeBytes()));
@@ -245,8 +315,23 @@ class QuotabotStreamableHttpServer {
       return;
     }
     if (body['method'] == 'initialize') {
+      if (_transports.length + _pendingSessionInitializations >= maxSessions) {
+        request.response.headers.set(HttpHeaders.retryAfterHeader, '1');
+        await _jsonRpcError(
+          request.response,
+          httpStatus: HttpStatus.serviceUnavailable,
+          errorCode: ErrorCode.connectionClosed,
+          message: 'Session capacity reached',
+        );
+        return;
+      }
       final transport = _createTransport();
-      await transport.handleRequest(request, body);
+      _pendingSessionInitializations++;
+      try {
+        await transport.handleRequest(request, body);
+      } finally {
+        _pendingSessionInitializations--;
+      }
       return;
     }
     await _jsonRpcError(
@@ -332,6 +417,20 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
   if (config.port < 1 || config.port > 65535) {
     throw ArgumentError.value(config.port, 'port', 'port must be 1..65535');
   }
+  if (config.requestBodyTimeout <= Duration.zero) {
+    throw ArgumentError.value(
+      config.requestBodyTimeout,
+      'requestBodyTimeout',
+      'must be greater than zero',
+    );
+  }
+  if (config.maxSessions < 1) {
+    throw ArgumentError.value(
+      config.maxSessions,
+      'maxSessions',
+      'must be at least 1',
+    );
+  }
   final bearerToken = config.bearerToken?.trim();
   if (bearerToken == null ||
       bearerToken.length < minMcpHttpBearerTokenCharacters) {
@@ -349,6 +448,8 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
     path: path,
     bearerToken: bearerToken,
     allowedOrigins: config.allowedOrigins,
+    requestBodyTimeout: config.requestBodyTimeout,
+    maxSessions: config.maxSessions,
     serverFactory: (_) => buildQuotabotMcpServer(
       snapshot: snapshot,
       burnByProvider: burnByProvider,

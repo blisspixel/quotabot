@@ -40,3 +40,14 @@ bool providerNeedsConnection(ProviderQuota quota) {
   }
   return false;
 }
+
+/// Whether the provider card can render its inline Connect row.
+///
+/// Test and preview dashboards can inject provider data without desktop host
+/// services. Their first-frame height must follow the same condition as the
+/// rendered card instead of reserving space for an action that cannot appear.
+bool providerInlineConnectRowVisible({
+  required ProviderQuota quota,
+  required bool hostIntegration,
+  required bool canConnect,
+}) => hostIntegration && canConnect && providerNeedsConnection(quota);

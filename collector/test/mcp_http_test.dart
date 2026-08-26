@@ -53,7 +53,11 @@ class _Harness {
   Future<void> stop() => server.stop();
 }
 
-Future<_Harness> _start({String token = _token}) async {
+Future<_Harness> _start({
+  String token = _token,
+  Duration requestBodyTimeout = defaultMcpHttpRequestBodyTimeout,
+  int maxSessions = defaultMaxMcpHttpSessions,
+}) async {
   // Asking the operating system for a free port and then binding it is a race:
   // the probe socket must close before the server can claim that port, and any
   // suite running in parallel can take it in the gap. The server under test
@@ -62,7 +66,12 @@ Future<_Harness> _start({String token = _token}) async {
   for (var attempt = 0;; attempt++) {
     final port = await _freePort();
     final server = buildQuotabotStreamableHttpServer(
-      config: QuotabotMcpHttpConfig(port: port, bearerToken: token),
+      config: QuotabotMcpHttpConfig(
+        port: port,
+        bearerToken: token,
+        requestBodyTimeout: requestBodyTimeout,
+        maxSessions: maxSessions,
+      ),
       snapshot: () async => _fixture(),
       burnByProvider: (providers, now) => const <String, BurnStat>{},
       now: () => _now,
@@ -254,18 +263,58 @@ void main() {
     await chunkedResponse.drain<void>();
     expect(chunkedResponse.statusCode, HttpStatus.requestEntityTooLarge);
 
-    final unauthenticatedOversized = await http.post(
-      harness.uri,
-      headers: {
-        HttpHeaders.acceptHeader: 'application/json, text/event-stream',
-        HttpHeaders.contentTypeHeader: 'application/json',
-      },
-      body: List<int>.filled(maxMcpHttpRequestBytes + 1, 0x20),
-    );
+    http.Response? unauthenticatedOversized;
+    final unauthenticatedElapsed = Stopwatch()..start();
+    try {
+      unauthenticatedOversized = await http
+          .post(
+            harness.uri,
+            headers: {
+              HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+              HttpHeaders.contentTypeHeader: 'application/json',
+            },
+            body: List<int>.filled(maxMcpHttpRequestBytes + 1, 0x20),
+          )
+          .timeout(const Duration(seconds: 2));
+    } on http.ClientException {
+      // Windows can abort the upload after the server flushes and closes its
+      // unauthorized response. That prompt close is an equally bounded
+      // rejection for a client that is still writing the oversized body.
+    }
     expect(
-      unauthenticatedOversized.statusCode,
-      HttpStatus.requestEntityTooLarge,
+        unauthenticatedElapsed.elapsed, lessThan(const Duration(seconds: 2)));
+    if (unauthenticatedOversized != null) {
+      expect(
+        unauthenticatedOversized.statusCode,
+        HttpStatus.unauthorized,
+      );
+      expect(
+        unauthenticatedOversized.headers[HttpHeaders.wwwAuthenticateHeader],
+        contains('Bearer realm="$mcpHttpBearerRealm"'),
+      );
+    }
+
+    final preauthSocket = await Socket.connect('127.0.0.1', harness.uri.port);
+    addTearDown(preauthSocket.destroy);
+    final preauthElapsed = Stopwatch()..start();
+    preauthSocket.write(
+      'POST ${harness.uri.path} HTTP/1.1\r\n'
+      'Host: 127.0.0.1:${harness.uri.port}\r\n'
+      'Accept: application/json, text/event-stream\r\n'
+      'Content-Type: application/json\r\n'
+      'Content-Length: ${maxMcpHttpRequestBytes + 1}\r\n'
+      'Connection: close\r\n'
+      '\r\n'
+      '{',
     );
+    await preauthSocket.flush();
+    final preauthResponse = await utf8.decoder
+        .bind(preauthSocket)
+        .join()
+        .timeout(const Duration(seconds: 3));
+    expect(preauthResponse, contains(' 401 '));
+    expect(preauthResponse, contains('Unauthorized'));
+    expect(preauthElapsed.elapsed, lessThan(const Duration(seconds: 2)));
 
     final wrongToken = await http.post(
       harness.uri,
@@ -278,6 +327,54 @@ void main() {
       body: jsonEncode(_initializeBody()),
     );
     expect(wrongToken.statusCode, HttpStatus.unauthorized);
+  });
+
+  test('times out a stalled authenticated request body', () async {
+    final harness = await _start(
+      requestBodyTimeout: const Duration(milliseconds: 100),
+    );
+    addTearDown(harness.stop);
+
+    final socket = await Socket.connect('127.0.0.1', harness.uri.port);
+    addTearDown(socket.destroy);
+    socket.write(
+      'POST ${harness.uri.path} HTTP/1.1\r\n'
+      'Host: 127.0.0.1:${harness.uri.port}\r\n'
+      'Authorization: Bearer $_token\r\n'
+      'Accept: application/json, text/event-stream\r\n'
+      'Content-Type: application/json\r\n'
+      'Content-Length: 100\r\n'
+      'Connection: close\r\n'
+      '\r\n'
+      '{',
+    );
+    await socket.flush();
+
+    final response = await utf8.decoder.bind(socket).join().timeout(
+          const Duration(seconds: 3),
+        );
+    expect(response, contains(' 408 '));
+    expect(response, contains('Request body timed out'));
+  });
+
+  test('bounds authenticated Streamable HTTP sessions', () async {
+    final harness = await _start(maxSessions: 1);
+    addTearDown(harness.stop);
+    final first = await _connect(harness.uri);
+    addTearDown(first.close);
+
+    final second = await http.post(
+      harness.uri,
+      headers: {
+        HttpHeaders.authorizationHeader: 'Bearer $_token',
+        HttpHeaders.acceptHeader: 'application/json, text/event-stream',
+        HttpHeaders.contentTypeHeader: 'application/json',
+      },
+      body: jsonEncode(_initializeBody()),
+    );
+    expect(second.statusCode, HttpStatus.serviceUnavailable);
+    expect(second.headers[HttpHeaders.retryAfterHeader], '1');
+    expect(second.body, contains('Session capacity reached'));
   });
 
   test('DNS rebinding and endpoint hardening reject unsafe requests', () async {
@@ -318,6 +415,38 @@ void main() {
     expect(
       () => buildQuotabotStreamableHttpServer(
         config: const QuotabotMcpHttpConfig(host: '0.0.0.0'),
+        snapshot: () async => const [],
+        burnByProvider: (providers, now) => const <String, BurnStat>{},
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => QuotabotStreamableHttpServer(
+        host: '0.0.0.0',
+        port: 8722,
+        path: '/mcp',
+        bearerToken: _token,
+        serverFactory: (_) => throw StateError('must not construct'),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => buildQuotabotStreamableHttpServer(
+        config: const QuotabotMcpHttpConfig(
+          bearerToken: _token,
+          requestBodyTimeout: Duration.zero,
+        ),
+        snapshot: () async => const [],
+        burnByProvider: (providers, now) => const <String, BurnStat>{},
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => buildQuotabotStreamableHttpServer(
+        config: const QuotabotMcpHttpConfig(
+          bearerToken: _token,
+          maxSessions: 0,
+        ),
         snapshot: () async => const [],
         burnByProvider: (providers, now) => const <String, BurnStat>{},
       ),
