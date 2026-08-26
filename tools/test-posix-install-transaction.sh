@@ -104,9 +104,11 @@ cat > "$fake_bin/curl" <<'EOF'
 #!/usr/bin/env sh
 url=''
 destination=''
+write_out=''
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o) shift; destination=$1 ;;
+    -w) shift; write_out=$1 ;;
     http*) url=$1 ;;
   esac
   shift
@@ -115,6 +117,9 @@ case "$url" in
   *.sha256) cp "$FAKE_SIDECAR" "$destination" ;;
   *) cp "$FAKE_ARCHIVE" "$destination" ;;
 esac
+if [ -n "$write_out" ]; then
+  printf '200'
+fi
 if [ -n "${URL_TRACE:-}" ]; then
   printf '%s\n' "$url" >> "$URL_TRACE"
 fi
@@ -333,6 +338,7 @@ if ! grep -q '^install_portable_desktop() {' "$portable_function"; then
 fi
 source "$portable_function"
 step() { :; }
+warn() { :; }
 
 if [ "$transaction_os" = darwin ]; then
   portable_archive="$test_root/quotabot-darwin-arm64-desktop.zip"

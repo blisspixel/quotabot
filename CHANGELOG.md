@@ -6,6 +6,10 @@ Notable changes to quotabot. Newest first.
 
 ### Fixed
 
+- The source-setup portable desktop fallback now says when no published
+  release matches the checkout version instead of a raw HTTP 404 exception on
+  Windows or a silent skip on macOS and Linux, and states that the installed
+  desktop app is unchanged with the two truthful next steps.
 - A Grok read denied because the CLI's stored token is already past its
   recorded expiry now reports an expired login with the repair steps (use Grok
   once, or `quotabot login grok`) instead of a bare gRPC status, so an idle

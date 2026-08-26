@@ -200,6 +200,7 @@ source_release_tag() {
 
 install_portable_desktop() {
   local repo version asset url work archive sum expected actual dest expanded
+  local http_code
   repo="${QUOTABOT_REPO:-blisspixel/quotabot}"
   if [ -n "${QUOTABOT_VERSION:-}" ]; then
     version="$QUOTABOT_VERSION"
@@ -237,8 +238,20 @@ install_portable_desktop() {
   sum="$work/$asset.sha256"
   expanded="$work/expanded"
   step 'Installing the portable desktop app'
-  if ! curl -fsSL "$url" -o "$archive" || ! curl -fsSL "${url}.sha256" -o "$sum"; then
+  http_code="$(curl -sSL -o "$archive" -w '%{http_code}' "$url")" || http_code=000
+  if [ "$http_code" != 200 ]; then
     rm -rf "$work"
+    if [ "$http_code" = 404 ]; then
+      warn "Portable desktop install skipped: no published release ${version} provides ${asset}." >&2
+      warn "The installed desktop app is unchanged. Build it from source once desktop build tools are ready, or re-run setup after that release is published." >&2
+    else
+      warn "Portable desktop install skipped: download failed (HTTP ${http_code})." >&2
+    fi
+    return 1
+  fi
+  if ! curl -fsSL "${url}.sha256" -o "$sum"; then
+    rm -rf "$work"
+    warn "Portable desktop install skipped: the checksum sidecar download failed." >&2
     return 1
   fi
   expected="$(awk 'NR == 1 {print tolower($1)}' "$sum")"

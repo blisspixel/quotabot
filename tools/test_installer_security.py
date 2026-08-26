@@ -209,6 +209,17 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn('return "v$($Matches[1])"', windows)
         self.assertIn("printf 'v%s\\n'", posix)
 
+    def test_portable_desktop_fallback_names_a_missing_release(self) -> None:
+        windows = (ROOT / "tools" / "setup.ps1").read_text(encoding="utf-8")
+        posix = (ROOT / "tools" / "setup.sh").read_text(encoding="utf-8")
+
+        for script in (windows, posix):
+            with self.subTest(script="setup.ps1" if script is windows else "setup.sh"):
+                self.assertIn("no published release ", script)
+                self.assertIn("The installed desktop app is unchanged", script)
+        self.assertIn("[int]$_.Exception.Response.StatusCode", windows)
+        self.assertIn('if [ "$http_code" = 404 ]', posix)
+
     def test_windows_install_smoke_uses_fail_closed_doctor_verification(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "install-smoke.yml").read_text(
             encoding="utf-8"
