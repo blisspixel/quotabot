@@ -510,9 +510,18 @@ void main() {
       });
 
       final elapsed = Stopwatch()..start();
-      final response = await utf8.decoder.bind(socket).join().timeout(
-            const Duration(seconds: 2),
-          );
+      String response;
+      try {
+        response = await utf8.decoder.bind(socket).join().timeout(
+              const Duration(seconds: 2),
+            );
+      } on SocketException {
+        // Some platforms reset a socket whose request body is still arriving
+        // after the server closes it. A prompt reset is equivalent to a 408
+        // here; the elapsed-time and health checks still prove the deadline
+        // fired and released request capacity.
+        response = '';
+      }
       expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
       if (response.isNotEmpty) {
         expect(response, contains(' 408 '));
