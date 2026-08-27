@@ -126,7 +126,11 @@ a broad 0.x product to a boring 1.0:
    OAuth writes, dual-loopback callback binding, loopback account-label
    privacy, bounded HTTP request bodies and MCP sessions, exact LiteLLM account
    routing, and native desktop connection-state consistency.
-5. When the developer-controlled stabilization inventory is quiet, complete
+5. Release candidate 11 closes the post-publication request-admission finding:
+   loopback HTTP errors no longer wait for unread request bodies, and the
+   authenticated mutation body deadline is one wall-clock budget that a slow
+   sender cannot extend by trickling bytes.
+6. When the developer-controlled stabilization inventory is quiet, complete
    Windows and macOS signing below and run a signed 0.10.x rehearsal through
    clean install, update, rollback, and immutable publication. Reopen product
    breadth only after the exit criteria pass.
@@ -252,7 +256,7 @@ the Claude and Codex grants, then the frozen 1.0 rehearsal.
 ## Current state
 
 The current line, **0.9.9**, remains the tagged stable and default installer
-version. The focused **0.10.0-rc.10** candidate carries the latest stabilization
+version. The focused **0.10.0-rc.11** candidate carries the latest stabilization
 inventory described in [Next](#next). The stable line contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning

@@ -41,8 +41,12 @@ try {
   Write-Gate 'Repository policy and release consistency'
   Push-Location $root
   try {
-    Invoke-CheckedCommand -Command 'ruff' -Arguments @('check', '.')
-    Invoke-CheckedCommand -Command 'ruff' -Arguments @('format', '--check', '.')
+    Invoke-CheckedCommand `
+      -Command 'python' `
+      -Arguments @('-m', 'ruff', 'check', '.')
+    Invoke-CheckedCommand `
+      -Command 'python' `
+      -Arguments @('-m', 'ruff', 'format', '--check', '.')
     Invoke-CheckedCommand `
       -Command 'python' `
       -Arguments @('-m', 'unittest', 'discover', '-s', 'tools', '-p', 'test_*.py')

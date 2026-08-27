@@ -1095,8 +1095,10 @@ explicit caller cost penalty.
 The server also exposes authenticated `POST /leases/reserve` and
 `POST /leases/release` for the bundled LiteLLM router. Startup creates a stable
 owner-only bearer token under the local quotabot HTTP directory; the token is
-never printed or returned. Mutation bodies are bounded quota target metadata
-only, have a 15-second read deadline, and never contain prompts or code. Read
+never printed or returned. Mutation bodies are capped at 32 KiB of quota target
+metadata, use one 15-second wall-clock read deadline, and never contain prompts
+or code. Errors decided before body parsing flush and close without waiting for
+an unread sender, and read endpoints reject request bodies. Read
 endpoints remain unauthenticated, but replace email-shaped account labels with
 stable keyed pseudonyms. Supplying the owner-only bearer token on a read returns
 exact labels for local integrations that need account-specific routing.

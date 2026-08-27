@@ -27,6 +27,11 @@ const _maxLocalMutationBodyBytes = 32 * 1024;
 const _maxLocalMutationDrainBytes = 64 * 1024;
 const _maxLocalMutationTargets = 64;
 const defaultLocalHttpRequestBodyTimeout = Duration(seconds: 15);
+const _rejectedRequestSocketDestroyDelay = Duration(milliseconds: 25);
+
+class _LocalMutationBodyTooLarge implements Exception {
+  const _LocalMutationBodyTooLarge();
+}
 
 class _LocalLeaseTarget {
   final String provider;
@@ -182,15 +187,60 @@ Future<HttpServer> startLocalQuotabotServer({
     });
   }
 
-  void writeJson(HttpRequest req, Object data, [int status = HttpStatus.ok]) {
+  List<int> jsonResponseBytes(HttpRequest req, Object data) {
     final responseData =
         ownerAuthenticated(req) ? data : protectAccountIdentity(data);
-    req.response
+    return utf8.encode(
+      const JsonEncoder.withIndent('  ').convert(responseData),
+    );
+  }
+
+  void setJsonResponseHeaders(
+    HttpRequest request,
+    int status, {
+    int? contentLength,
+  }) {
+    request.response
       ..statusCode = status
       ..headers.contentType = ContentType.json
       ..headers.set(HttpHeaders.cacheControlHeader, 'no-store')
-      ..headers.set('X-Content-Type-Options', 'nosniff')
-      ..write(const JsonEncoder.withIndent('  ').convert(responseData));
+      ..headers.set('X-Content-Type-Options', 'nosniff');
+    if (contentLength != null) {
+      request.response.headers.contentLength = contentLength;
+    }
+  }
+
+  void writeJson(HttpRequest req, Object data, [int status = HttpStatus.ok]) {
+    final bytes = jsonResponseBytes(req, data);
+    setJsonResponseHeaders(req, status);
+    req.response.add(bytes);
+  }
+
+  bool requestMayHaveBody(HttpRequest request) =>
+      request.contentLength > 0 || request.headers.chunkedTransferEncoding;
+
+  Future<void> rejectWithoutReadingBody(
+    HttpRequest request,
+    Object data,
+    int status,
+  ) async {
+    if (!requestMayHaveBody(request)) {
+      writeJson(request, data, status);
+      return;
+    }
+    final bytes = jsonResponseBytes(request, data);
+    setJsonResponseHeaders(request, status, contentLength: bytes.length);
+    request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+    Socket? socket;
+    try {
+      socket = await request.response.detachSocket(writeHeaders: true);
+      if (request.method != 'HEAD') socket.add(bytes);
+      await socket.flush();
+      unawaited(socket.close());
+      Timer(_rejectedRequestSocketDestroyDelay, socket.destroy);
+    } catch (_) {
+      socket?.destroy();
+    }
   }
 
   bool rejectUnknownQuery(HttpRequest request) {
@@ -213,45 +263,22 @@ Future<HttpServer> startLocalQuotabotServer({
 
   Future<({Map<String, dynamic>? body, String? error, int status})>
       readMutationBody(HttpRequest request) async {
-    final contentType = request.headers.contentType;
-    if (contentType == null ||
-        contentType.mimeType.toLowerCase() != 'application/json') {
-      return (
-        body: null,
-        error: 'content type must be application/json',
-        status: 415,
-      );
-    }
-    final declaredLength = request.contentLength;
-    if (declaredLength > _maxLocalMutationBodyBytes) {
-      if (declaredLength <= _maxLocalMutationDrainBytes) {
-        try {
-          await request.drain<void>().timeout(requestBodyTimeout);
-        } on TimeoutException {
-          request.response.headers.set(HttpHeaders.connectionHeader, 'close');
-          return (body: null, error: 'request body timed out', status: 408);
-        }
-      } else {
-        request.response.headers.set(HttpHeaders.connectionHeader, 'close');
-      }
-      return (body: null, error: 'request body too large', status: 413);
-    }
-    final bytes = BytesBuilder(copy: false);
-    var total = 0;
-    var tooLarge = false;
     try {
-      await for (final chunk in request.timeout(requestBodyTimeout)) {
-        total += chunk.length;
-        if (total > _maxLocalMutationBodyBytes) {
-          tooLarge = true;
-          if (total > _maxLocalMutationDrainBytes) {
-            request.response.headers.set(HttpHeaders.connectionHeader, 'close');
-            return (body: null, error: 'request body too large', status: 413);
-          }
-          continue;
+      final bytes = BytesBuilder(copy: false);
+      var tooLarge = false;
+      final total = await request.fold<int>(0, (total, chunk) {
+        final nextTotal = total + chunk.length;
+        if (nextTotal > _maxLocalMutationDrainBytes) {
+          throw const _LocalMutationBodyTooLarge();
         }
-        if (!tooLarge) bytes.add(chunk);
-      }
+        if (nextTotal > _maxLocalMutationBodyBytes) {
+          tooLarge = true;
+          bytes.clear();
+        } else if (!tooLarge) {
+          bytes.add(chunk);
+        }
+        return nextTotal;
+      }).timeout(requestBodyTimeout);
       if (tooLarge) {
         return (body: null, error: 'request body too large', status: 413);
       }
@@ -277,6 +304,9 @@ Future<HttpServer> startLocalQuotabotServer({
         error: 'request body must be valid JSON',
         status: 400
       );
+    } on _LocalMutationBodyTooLarge {
+      request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+      return (body: null, error: 'request body too large', status: 413);
     } on TimeoutException {
       request.response.headers.set(HttpHeaders.connectionHeader, 'close');
       return (body: null, error: 'request body timed out', status: 408);
@@ -797,14 +827,36 @@ Future<HttpServer> startLocalQuotabotServer({
         HttpHeaders.wwwAuthenticateHeader,
         'Bearer realm="quotabot-local"',
       );
-      writeJson(request, {'error': 'unauthorized'}, HttpStatus.unauthorized);
+      await rejectWithoutReadingBody(
+        request,
+        {'error': 'unauthorized'},
+        HttpStatus.unauthorized,
+      );
       return;
     }
     if (request.uri.hasQuery) {
-      writeJson(
+      await rejectWithoutReadingBody(
         request,
         {'error': 'query parameters are not allowed'},
         HttpStatus.badRequest,
+      );
+      return;
+    }
+    final contentType = request.headers.contentType;
+    if (contentType == null ||
+        contentType.mimeType.toLowerCase() != 'application/json') {
+      await rejectWithoutReadingBody(
+        request,
+        {'error': 'content type must be application/json'},
+        HttpStatus.unsupportedMediaType,
+      );
+      return;
+    }
+    if (request.contentLength > _maxLocalMutationDrainBytes) {
+      await rejectWithoutReadingBody(
+        request,
+        {'error': 'request body too large'},
+        HttpStatus.requestEntityTooLarge,
       );
       return;
     }
@@ -991,17 +1043,25 @@ Future<HttpServer> startLocalQuotabotServer({
     // request that triggers collection or cache writes even though CORS keeps
     // it from reading the response.
     if (!_isLoopbackHost(request.headers.value('host'))) {
-      writeJson(request, {'error': 'forbidden host'}, HttpStatus.forbidden);
+      await rejectWithoutReadingBody(
+        request,
+        {'error': 'forbidden host'},
+        HttpStatus.forbidden,
+      );
       return;
     }
     final origins = request.headers['origin'];
     if (origins != null &&
         (origins.length != 1 || !_isLoopbackOrigin(origins.single))) {
-      writeJson(request, {'error': 'forbidden origin'}, HttpStatus.forbidden);
+      await rejectWithoutReadingBody(
+        request,
+        {'error': 'forbidden origin'},
+        HttpStatus.forbidden,
+      );
       return;
     }
     if (origins == null && !_allowsOriginlessFetchMetadata(request.headers)) {
-      writeJson(
+      await rejectWithoutReadingBody(
         request,
         {'error': 'forbidden fetch metadata'},
         HttpStatus.forbidden,
@@ -1012,12 +1072,16 @@ Future<HttpServer> startLocalQuotabotServer({
     final mutationPath = path == '/leases/reserve' || path == '/leases/release';
     if (mutationPath) {
       if (mutationToken == null) {
-        writeJson(request, {'error': 'not found'}, HttpStatus.notFound);
+        await rejectWithoutReadingBody(
+          request,
+          {'error': 'not found'},
+          HttpStatus.notFound,
+        );
         return;
       }
       if (request.method != 'POST') {
         request.response.headers.set(HttpHeaders.allowHeader, 'POST');
-        writeJson(
+        await rejectWithoutReadingBody(
           request,
           {'error': 'method not allowed'},
           HttpStatus.methodNotAllowed,
@@ -1029,10 +1093,18 @@ Future<HttpServer> startLocalQuotabotServer({
     }
     if (request.method != 'GET') {
       request.response.headers.set(HttpHeaders.allowHeader, 'GET');
-      writeJson(
+      await rejectWithoutReadingBody(
         request,
         {'error': 'method not allowed'},
         HttpStatus.methodNotAllowed,
+      );
+      return;
+    }
+    if (requestMayHaveBody(request)) {
+      await rejectWithoutReadingBody(
+        request,
+        {'error': 'request body is not allowed'},
+        HttpStatus.badRequest,
       );
       return;
     }
@@ -1112,7 +1184,7 @@ Future<HttpServer> startLocalQuotabotServer({
           request.response.headers
             ..set(HttpHeaders.retryAfterHeader, '1')
             ..set(HttpHeaders.connectionHeader, 'close');
-          writeJson(
+          await rejectWithoutReadingBody(
             request,
             {'error': 'server busy'},
             HttpStatus.serviceUnavailable,

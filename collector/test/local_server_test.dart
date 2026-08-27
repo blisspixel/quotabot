@@ -360,6 +360,185 @@ void main() {
     }
   });
 
+  test('early rejections do not wait for an unread request body', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      mutationToken: _mutationToken,
+      requestBodyTimeout: const Duration(seconds: 5),
+      now: () => _now,
+    );
+    try {
+      final cases = <({String request, int status, String? error})>[
+        (
+          request: 'POST /leases/reserve HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Content-Type: application/json\r\n'
+              'Content-Length: 100\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '{',
+          status: HttpStatus.unauthorized,
+          error: 'unauthorized',
+        ),
+        (
+          request: 'POST /leases/release HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Authorization: Bearer wrong-token\r\n'
+              'Content-Type: application/json\r\n'
+              'Transfer-Encoding: chunked\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '1\r\n'
+              '{\r\n',
+          status: HttpStatus.unauthorized,
+          error: 'unauthorized',
+        ),
+        (
+          request: 'POST /leases/reserve?unexpected=1 HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Authorization: Bearer $_mutationToken\r\n'
+              'Content-Type: application/json\r\n'
+              'Content-Length: 100\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '{',
+          status: HttpStatus.badRequest,
+          error: 'query parameters are not allowed',
+        ),
+        (
+          request: 'POST /leases/reserve HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Authorization: Bearer $_mutationToken\r\n'
+              'Content-Type: text/plain\r\n'
+              'Content-Length: 100\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '{',
+          status: HttpStatus.unsupportedMediaType,
+          error: 'content type must be application/json',
+        ),
+        (
+          request: 'GET /health HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Content-Length: 100\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '{',
+          status: HttpStatus.badRequest,
+          error: 'request body is not allowed',
+        ),
+        (
+          request: 'HEAD /health HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Content-Length: 100\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '{',
+          status: HttpStatus.methodNotAllowed,
+          error: null,
+        ),
+        (
+          request: 'POST /leases/reserve HTTP/1.1\r\n'
+              'Host: 127.0.0.1:${server.port}\r\n'
+              'Authorization: Bearer $_mutationToken\r\n'
+              'Content-Type: application/json\r\n'
+              'Content-Length: 65537\r\n'
+              'Connection: close\r\n'
+              '\r\n'
+              '{',
+          status: HttpStatus.requestEntityTooLarge,
+          error: 'request body too large',
+        ),
+      ];
+      for (final testCase in cases) {
+        final socket = await Socket.connect('127.0.0.1', server.port);
+        try {
+          socket.write(testCase.request);
+          await socket.flush();
+
+          final elapsed = Stopwatch()..start();
+          final response = await utf8.decoder.bind(socket).join().timeout(
+                const Duration(seconds: 3),
+              );
+          expect(elapsed.elapsed, lessThan(const Duration(seconds: 2)));
+          expect(response, contains(' ${testCase.status} '));
+          final error = testCase.error;
+          if (error == null) {
+            final headerEnd = response.indexOf('\r\n\r\n');
+            expect(headerEnd, greaterThanOrEqualTo(0));
+            expect(response.substring(headerEnd + 4), isEmpty);
+          } else {
+            expect(response, contains(error));
+          }
+        } finally {
+          socket.destroy();
+        }
+      }
+    } finally {
+      await server.close(force: true);
+    }
+  });
+
+  test('authenticated mutation deadline bounds a slow trickle', () async {
+    final server = await startLocalQuotabotServer(
+      port: 0,
+      snapshotProvider: () async => [_q('claude', 20)],
+      mutationToken: _mutationToken,
+      maxConcurrentRequests: 1,
+      requestBodyTimeout: const Duration(milliseconds: 150),
+      now: () => _now,
+    );
+    final socket = await Socket.connect('127.0.0.1', server.port);
+    Timer? writer;
+    try {
+      socket.write(
+        'POST /leases/reserve HTTP/1.1\r\n'
+        'Host: 127.0.0.1:${server.port}\r\n'
+        'Authorization: Bearer $_mutationToken\r\n'
+        'Content-Type: application/json\r\n'
+        'Content-Length: 100\r\n'
+        'Connection: close\r\n'
+        '\r\n'
+        '{',
+      );
+      await socket.flush();
+      writer = Timer.periodic(const Duration(milliseconds: 40), (_) {
+        try {
+          socket.add(const [0x20]);
+        } catch (_) {}
+      });
+
+      final elapsed = Stopwatch()..start();
+      String response;
+      try {
+        response = await utf8.decoder.bind(socket).join().timeout(
+              const Duration(seconds: 2),
+            );
+      } on SocketException {
+        // Some platforms reset a socket whose request body is still arriving
+        // after the server closes it. A prompt reset is equivalent to a 408
+        // here; the elapsed-time and health checks still prove the deadline
+        // fired and released request capacity.
+        response = '';
+      }
+      expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
+      if (response.isNotEmpty) {
+        expect(response, contains(' 408 '));
+        expect(response, contains('request body timed out'));
+      }
+      final health = await _requestJson(
+        Uri.parse('http://127.0.0.1:${server.port}/health'),
+      );
+      expect(health.status, HttpStatus.ok);
+      expect(health.body['ok'], isTrue);
+    } finally {
+      writer?.cancel();
+      socket.destroy();
+      await server.close(force: true);
+    }
+  });
+
   test('local server serves snapshot, health, providers, and errors', () async {
     var collections = 0;
     final logs = <String>[];
