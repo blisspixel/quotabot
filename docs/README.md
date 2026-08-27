@@ -5,7 +5,7 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.8. The next work in the focused 0.10.x stabilization train is
+0.10.0-rc.11. The next work in the focused 0.10.x stabilization train is
 field-discovered correctness, recovery and quality-of-life refinement, and
 native validation. Signed release readiness follows once that inventory is
 quiet, without weakening existing checksums or provenance. The
@@ -24,7 +24,11 @@ Release candidate 7 carries the field round after rc.6: Grok and NVIDIA
 live-read diagnostics, Ollama cloud-offload honesty, compact first-run and
 200px recovery, exact `check`/`login`/`logout` identities, MCP Streamable HTTP
 401/413 admission, POSIX space-safe Flutter, LiteLLM fail-closed leases, and
-stacked pull-request CI. Changelog detail is in [CHANGELOG.md](../CHANGELOG.md).
+stacked pull-request CI. Release candidates 8 through 11 add grouped desktop
+settings, source-install recovery, durable OAuth storage, account-label privacy,
+bounded HTTP sessions and request admission, exact LiteLLM account routing, and
+native desktop connection-state consistency. Changelog detail is in
+[CHANGELOG.md](../CHANGELOG.md).
 
 ## Install and first success
 

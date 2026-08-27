@@ -61,13 +61,37 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             root = Path(directory)
             self._write_fixture(root)
             (root / "README.md").write_text(
-                "> **Current stable:** 1.2.2. Release notes.\n",
+                "> **Current stable:** 1.2.2. Release notes.\n"
+                "> **Current release candidate:** 1.2.3.\n",
                 encoding="utf-8",
             )
 
             with self.assertRaisesRegex(
                 VersionCheckError,
                 r"expected 1\.2\.3; mismatched README current stable=1\.2\.2",
+            ):
+                check_release_versions(root)
+
+    def test_stale_docs_candidate_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_fixture(
+                root,
+                source_version="1.3.0-rc.2",
+                stable_version="1.2.3",
+                locked_version="1.3.0-rc.2",
+            )
+            (root / "docs/README.md").write_text(
+                "The current verified stable release is 1.2.3. "
+                "The current release candidate is\n"
+                "1.3.0-rc.1. The next work in the focused 0.10.x train.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                VersionCheckError,
+                r"expected 1\.3\.0-rc\.2; mismatched "
+                r"docs index current candidate=1\.3\.0-rc\.1",
             ):
                 check_release_versions(root)
 
@@ -173,7 +197,10 @@ class ReleaseVersionCheckTests(unittest.TestCase):
                 "    dependency: transitive\n"
                 '    version: "1.0.0"\n'
             ),
-            "README.md": (f"> **Current stable:** {stable_version}. Release notes.\n"),
+            "README.md": (
+                f"> **Current stable:** {stable_version}. Release notes.\n"
+                f"> **Current release candidate:** {source_version}.\n"
+            ),
             "SECURITY.md": (
                 "  The current audited release is "
                 f"[v{stable_version}](https://github.com/blisspixel/quotabot/"
@@ -185,7 +212,8 @@ class ReleaseVersionCheckTests(unittest.TestCase):
             ),
             "docs/README.md": (
                 "The current verified stable release is "
-                f"{stable_version}. Next steps.\n"
+                f"{stable_version}. The current release candidate is\n"
+                f"{source_version}. The next work in the focused 0.10.x train.\n"
             ),
             "docs/SETUP.md": (
                 "The current stable release is\n"

@@ -2,6 +2,22 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.11 - 2026-08-26
+
+### Fixed
+
+- Loopback HTTP errors now flush promptly without waiting for an unread request
+  body, so incomplete unauthorized, invalid, unsupported, oversized, or busy
+  requests cannot occupy all local server request slots. The detached response
+  path preserves JSON security headers and HTTP HEAD body suppression.
+- Authenticated lease mutation bodies now use one wall-clock read deadline. A
+  sender cannot keep a request alive indefinitely by sending another byte just
+  before an idle timeout, and existing bounded complete requests retain their
+  prior response and connection behavior.
+- The documentation index now identifies the current candidate, and the release
+  consistency gate checks candidate markers in both README entry points so a
+  later version bump cannot leave either page behind.
+
 ## 0.10.0-rc.10 - 2026-08-26
 
 ### Fixed
