@@ -164,7 +164,9 @@ for that surface.
   bundled LiteLLM router also uses authenticated
   `POST /leases/reserve` and `POST /leases/release`. Server startup creates a
   stable owner-only mutation token that is never printed or returned; mutation
-  bodies contain bounded quota target metadata only, never prompts or code.
+  bodies contain at most 32 KiB of quota target metadata, use one 15-second
+  wall-clock read deadline, and never contain prompts or code. Rejected unread
+  bodies are closed without waiting for the sender.
 
 ## The routing contract
 

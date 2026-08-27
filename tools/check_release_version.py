@@ -73,6 +73,11 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             rf"^> \*\*Current stable:\*\* ({VERSION})\.",
             "README current stable",
         ),
+        "README current candidate": _required_match(
+            root / "README.md",
+            rf"^> \*\*Current release candidate:\*\* ({VERSION})\.",
+            "README current candidate",
+        ),
         "SECURITY current audited release": _required_match(
             root / "SECURITY.md",
             (
@@ -90,6 +95,11 @@ def release_versions(root: Path) -> tuple[dict[str, str], str]:
             root / "docs" / "README.md",
             rf"^The current verified stable release is ({VERSION})\.",
             "docs index current stable",
+        ),
+        "docs index current candidate": _required_match(
+            root / "docs" / "README.md",
+            rf"^({VERSION})\. The next work in the focused 0\.10\.x",
+            "docs index current candidate",
         ),
         "setup current stable": _required_match(
             root / "docs" / "SETUP.md",
