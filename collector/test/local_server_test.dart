@@ -597,6 +597,13 @@ void main() {
         jsonBody: const {},
       );
       expect(disabledMutation.status, HttpStatus.notFound);
+      final disabledProof = await _requestJson(
+        Uri.parse(
+          '$base$localHttpServerProofPath?'
+          'nonce=0123456789abcdef0123456789abcdef',
+        ),
+      );
+      expect(disabledProof.status, HttpStatus.notFound);
       expect(collections, 1);
     } finally {
       await server.close(force: true);
@@ -669,6 +676,29 @@ void main() {
           'idempotency_key': idempotencyKey,
         };
     try {
+      const proofNonce = '0123456789abcdef0123456789abcdef';
+      final proof = await _getJson(
+        Uri.parse('$base$localHttpServerProofPath?nonce=$proofNonce'),
+      );
+      expect(proof['schema'], localHttpServerProofSchema);
+      expect(proof['nonce'], proofNonce);
+      expect(
+        proof['proof'],
+        localHttpServerProof(
+          token: _mutationToken,
+          nonce: proofNonce,
+          endpoint: localHttpServerEndpoint(
+            InternetAddress.loopbackIPv4,
+            server.port,
+          ),
+        ),
+      );
+      final invalidProof = await _requestJson(
+        Uri.parse('$base$localHttpServerProofPath?nonce=short'),
+      );
+      expect(invalidProof.status, HttpStatus.badRequest);
+      expect(collections, 0, reason: 'proof must not collect provider data');
+
       final denied = await _requestJson(
         Uri.parse('$base/leases/reserve'),
         method: 'POST',

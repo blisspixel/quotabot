@@ -1060,13 +1060,18 @@ The HTTP transport binds only to `localhost`, `127.0.0.1`, or `::1`, enables
 DNS-rebinding host/origin checks, rejects batch JSON-RPC payloads, and uses the
 same tool/resource factory as stdio. `--token-file PATH`, `--token-env NAME`, or
 `--token TOKEN` is required, and the resolved token must contain at least 32
-characters. Prefer a local owner-only token file for normal use. A literal
+and at most 4096 characters. Token files are limited to 4 KiB and must be
+regular files. Linux rejects group or other permission bits; Windows applies a
+checked owner-only DACL and macOS removes extended ACL entries before the read.
+Prefer a local owner-only token file for normal use. A literal
 `--token TOKEN` can be exposed through shell history or process inspection, so
 reserve it for ephemeral local testing. POST bodies must declare `Content-Length`
 and cannot exceed 256 KiB; the supported MCP clients do this automatically. The
 server rejects missing credentials before reading the body, applies a 15-second
-body deadline, and retains at most 64 active sessions. The endpoint is MCP
-Streamable HTTP, not the plain JSON endpoint below.
+body deadline, admits at most 128 concurrent requests, and retains at most 64
+active sessions. Early rejections flush and close incomplete request bodies
+without waiting for the sender. The endpoint is MCP Streamable HTTP, not the
+plain JSON endpoint below.
 
 See [../AGENTS.md](../AGENTS.md) for the routing contract and a decision recipe,
 `collector/bin/example_routing_agent.dart` for a Dart routing example, and
@@ -1101,7 +1106,11 @@ or code. Errors decided before body parsing flush and close without waiting for
 an unread sender, and read endpoints reject request bodies. Read
 endpoints remain unauthenticated, but replace email-shaped account labels with
 stable keyed pseudonyms. Supplying the owner-only bearer token on a read returns
-exact labels for local integrations that need account-specific routing.
+exact labels for local integrations that need account-specific routing. The
+bundled LiteLLM integration first requests a nonce proof at `GET /auth/prove`
+and verifies it against the exact loopback peer. It sends the bearer only on
+that same connection, after proof, so a different process that bound the
+configured port cannot receive the credential.
 
 Browser requests must use a loopback `Origin`. When a browser omits `Origin`,
 Fetch Metadata rejects same-site and cross-site subresource requests before any

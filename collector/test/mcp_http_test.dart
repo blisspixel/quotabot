@@ -57,6 +57,7 @@ Future<_Harness> _start({
   String token = _token,
   Duration requestBodyTimeout = defaultMcpHttpRequestBodyTimeout,
   int maxSessions = defaultMaxMcpHttpSessions,
+  int maxConcurrentRequests = defaultMaxMcpHttpConcurrentRequests,
 }) async {
   // Asking the operating system for a free port and then binding it is a race:
   // the probe socket must close before the server can claim that port, and any
@@ -71,6 +72,7 @@ Future<_Harness> _start({
         bearerToken: token,
         requestBodyTimeout: requestBodyTimeout,
         maxSessions: maxSessions,
+        maxConcurrentRequests: maxConcurrentRequests,
       ),
       snapshot: () async => _fixture(),
       burnByProvider: (providers, now) => const <String, BurnStat>{},
@@ -116,6 +118,20 @@ Map<String, Object?> _initializeBody() => const {
         'clientInfo': {'name': 'direct-http-test', 'version': '1.0.0'},
       },
     };
+
+Future<String> _incompleteRawResponse(_Harness harness, String request) async {
+  final socket = await Socket.connect('127.0.0.1', harness.uri.port);
+  try {
+    socket.write(request);
+    await socket.flush();
+    return await utf8.decoder
+        .bind(socket)
+        .join()
+        .timeout(const Duration(seconds: 3));
+  } finally {
+    socket.destroy();
+  }
+}
 
 void main() {
   test('Streamable HTTP exposes the same tools and resource metadata',
@@ -357,6 +373,122 @@ void main() {
     expect(response, contains('Request body timed out'));
   });
 
+  test('early MCP rejections release incomplete request bodies promptly',
+      () async {
+    final harness = await _start(
+      requestBodyTimeout: const Duration(milliseconds: 100),
+    );
+    addTearDown(harness.stop);
+    final authority = '127.0.0.1:${harness.uri.port}';
+    final cases = <(String, String)>[
+      (
+        ' 200 ',
+        'OPTIONS ${harness.uri.path} HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Content-Length: 100\r\n'
+            'Connection: close\r\n\r\n{',
+      ),
+      (
+        ' 404 ',
+        'POST /wrong HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Content-Length: 100\r\n'
+            'Connection: close\r\n\r\n{',
+      ),
+      (
+        ' 405 ',
+        'PUT ${harness.uri.path} HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Content-Length: 100\r\n'
+            'Connection: close\r\n\r\n{',
+      ),
+      (
+        ' 404 ',
+        'POST ${harness.uri.path} HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Authorization: Bearer $_token\r\n'
+            'Mcp-Session-Id: missing-session\r\n'
+            'Content-Length: 100\r\n'
+            'Connection: close\r\n\r\n{',
+      ),
+      (
+        ' 400 ',
+        'GET ${harness.uri.path} HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Authorization: Bearer $_token\r\n'
+            'Content-Length: 100\r\n'
+            'Connection: close\r\n\r\n{',
+      ),
+      (
+        ' 413 ',
+        'POST ${harness.uri.path} HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Authorization: Bearer $_token\r\n'
+            'Content-Length: ${maxMcpHttpDrainBytes + 1}\r\n'
+            'Connection: close\r\n\r\n{',
+      ),
+      (
+        ' 413 ',
+        'POST ${harness.uri.path} HTTP/1.1\r\n'
+            'Host: $authority\r\n'
+            'Authorization: Bearer $_token\r\n'
+            'Transfer-Encoding: chunked\r\n'
+            'Connection: close\r\n\r\n1\r\n{\r\n',
+      ),
+    ];
+    for (final entry in cases) {
+      final elapsed = Stopwatch()..start();
+      final response = await _incompleteRawResponse(harness, entry.$2);
+      expect(response, contains(entry.$1),
+          reason: entry.$2.split('\r\n').first);
+      expect(elapsed.elapsed, lessThan(const Duration(seconds: 2)));
+    }
+  });
+
+  test('MCP request capacity is bounded and recovers', () async {
+    final harness = await _start(
+      requestBodyTimeout: const Duration(seconds: 3),
+      maxConcurrentRequests: 1,
+    );
+    addTearDown(harness.stop);
+    final authority = '127.0.0.1:${harness.uri.port}';
+    final stalled = await Socket.connect('127.0.0.1', harness.uri.port);
+    addTearDown(stalled.destroy);
+    stalled.write(
+      'POST ${harness.uri.path} HTTP/1.1\r\n'
+      'Host: $authority\r\n'
+      'Authorization: Bearer $_token\r\n'
+      'Content-Type: application/json\r\n'
+      'Content-Length: 100\r\n'
+      'Connection: close\r\n\r\n{',
+    );
+    await stalled.flush();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    final busy = await _incompleteRawResponse(
+      harness,
+      'GET ${harness.uri.path} HTTP/1.1\r\n'
+      'Host: $authority\r\n'
+      'Authorization: Bearer $_token\r\n'
+      'Connection: close\r\n\r\n',
+    );
+    expect(busy, contains(' 503 '));
+    expect(busy, contains('Request capacity reached'));
+
+    stalled.destroy();
+    http.Response? recovered;
+    for (var attempt = 0; attempt < 20; attempt++) {
+      recovered = await http.get(
+        harness.uri,
+        headers: {HttpHeaders.authorizationHeader: 'Bearer $_token'},
+      );
+      if (recovered.statusCode != HttpStatus.serviceUnavailable) break;
+      await Future<void>.delayed(const Duration(milliseconds: 25));
+    }
+    expect(recovered?.statusCode, HttpStatus.badRequest);
+    expect(recovered?.body, contains('Missing session ID'));
+  });
+
   test('bounds authenticated Streamable HTTP sessions', () async {
     final harness = await _start(maxSessions: 1);
     addTearDown(harness.stop);
@@ -446,6 +578,17 @@ void main() {
         config: const QuotabotMcpHttpConfig(
           bearerToken: _token,
           maxSessions: 0,
+        ),
+        snapshot: () async => const [],
+        burnByProvider: (providers, now) => const <String, BurnStat>{},
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => buildQuotabotStreamableHttpServer(
+        config: const QuotabotMcpHttpConfig(
+          bearerToken: _token,
+          maxConcurrentRequests: 0,
         ),
         snapshot: () async => const [],
         burnByProvider: (providers, now) => const <String, BurnStat>{},

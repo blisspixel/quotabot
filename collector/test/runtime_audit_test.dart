@@ -194,6 +194,129 @@ void main() {
     expect(report.providers.single.network, isNotEmpty);
   });
 
+  test('runtime access paths match production filenames and Linux XDG roots',
+      () {
+    final report = buildRuntimeAccessReport(
+      generatedAt: 1,
+      includeReads: true,
+      includeNetwork: false,
+      environment: const {
+        'HOME': '/home/tester',
+        'XDG_CONFIG_HOME': '/config-root',
+        'XDG_DATA_HOME': '/data-root',
+      },
+      os: 'linux',
+    );
+    String normalized(String value) => value.replaceAll('\\', '/');
+    final shared = report.shared.map((record) => normalized(record.target));
+    expect(
+      shared,
+      contains('/config-root/quotabot/manual/quotas.json'),
+    );
+    expect(
+      shared,
+      contains('/home/tester/.quotabot/litellm-metrics.jsonl'),
+    );
+    expect(shared.join('\n'), isNot(contains('manual_quotas.json')));
+    expect(shared.join('\n'), isNot(contains('litellm_metrics.jsonl')));
+
+    const appRoots = {
+      'antigravity': 'Antigravity',
+      'cursor': 'Cursor',
+      'kiro': 'Kiro',
+      'windsurf': 'Windsurf',
+    };
+    for (final entry in appRoots.entries) {
+      final targets = report.providers
+          .firstWhere((provider) => provider.provider == entry.key)
+          .reads
+          .map((record) => normalized(record.target));
+      expect(
+        targets.any(
+          (target) => target.startsWith('/data-root/${entry.value}'),
+        ),
+        isTrue,
+        reason: entry.key,
+      );
+      expect(
+        targets.any(
+          (target) => target.startsWith('/config-root/${entry.value}'),
+        ),
+        isFalse,
+        reason: entry.key,
+      );
+    }
+  });
+
+  test('runtime access paths use the requested OS instead of the host OS', () {
+    const environment = {
+      'USERPROFILE': r'C:\host-user',
+      'LOCALAPPDATA': r'C:\host-local',
+      'APPDATA': r'C:\host-roaming',
+      'HOME': '/target-home',
+      'XDG_CONFIG_HOME': '/target-config',
+      'XDG_DATA_HOME': '/target-data',
+    };
+
+    final linux = buildRuntimeAccessReport(
+      generatedAt: 1,
+      includeReads: true,
+      includeNetwork: false,
+      environment: environment,
+      os: 'linux',
+    );
+    final linuxTargets = [
+      ...linux.shared,
+      ...linux.providers.expand((provider) => provider.reads),
+    ].map((record) => record.target);
+    expect(linuxTargets, everyElement(isNot(contains(r'C:\host'))));
+    expect(linuxTargets, everyElement(isNot(contains(r'\'))));
+    expect(
+      linuxTargets,
+      contains('/target-data/Cursor/User/globalStorage/state.vscdb'),
+    );
+
+    final windows = buildRuntimeAccessReport(
+      generatedAt: 1,
+      includeReads: true,
+      includeNetwork: false,
+      environment: environment,
+      os: 'windows',
+    );
+    final windowsTargets = [
+      ...windows.shared,
+      ...windows.providers.expand((provider) => provider.reads),
+    ].map((record) => record.target);
+    expect(
+      windowsTargets,
+      contains(r'C:\host-local\quotabot\manual\quotas.json'),
+    );
+    expect(
+      windowsTargets,
+      contains(r'C:\host-roaming\Cursor\User\globalStorage\state.vscdb'),
+    );
+
+    final macos = buildRuntimeAccessReport(
+      generatedAt: 1,
+      includeReads: true,
+      includeNetwork: false,
+      environment: environment,
+      os: 'macos',
+    );
+    final macosTargets = [
+      ...macos.shared,
+      ...macos.providers.expand((provider) => provider.reads),
+    ].map((record) => record.target);
+    expect(macosTargets, everyElement(isNot(contains(r'C:\host'))));
+    expect(macosTargets, everyElement(isNot(contains(r'\'))));
+    expect(
+      macosTargets,
+      contains(
+        '/target-home/Library/Application Support/Cursor/User/globalStorage/state.vscdb',
+      ),
+    );
+  });
+
   test('local runtime network records honor host overrides without queries',
       () {
     final report = buildRuntimeAccessReport(

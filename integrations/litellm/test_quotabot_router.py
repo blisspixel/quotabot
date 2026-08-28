@@ -1,9 +1,12 @@
 import asyncio
+import base64
+import ipaddress
 import json
 import os
 import tempfile
 import unittest
 import unittest.mock
+import urllib.parse
 import urllib.request
 import warnings
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,8 +25,16 @@ from quotabot_router import (
     _candidate_for_reserved_target,
     _is_loopback_url,
     _load_local_http_token,
+    _local_server_proof,
     _metric_info_for_candidate,
 )
+
+
+def _server_endpoint(handler: BaseHTTPRequestHandler) -> str:
+    local = handler.connection.getsockname()
+    address = ipaddress.ip_address(str(local[0]).split("%", 1)[0])
+    encoded = base64.urlsafe_b64encode(address.packed).rstrip(b"=").decode("ascii")
+    return f"{encoded}:{int(local[1])}"
 
 
 class _Key:
@@ -1059,6 +1070,49 @@ models:
             "redirect response must be closed explicitly",
         )
 
+    def test_prebound_impostor_never_receives_mutation_bearer(self):
+        token = "local-test-mutation-token-0123456789"
+        requests_seen = []
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_GET(self):
+                requests_seen.append((self.path, self.headers.get("Authorization")))
+                query = urllib.parse.urlsplit(self.path)
+                nonce = urllib.parse.parse_qs(query.query).get("nonce", [""])[0]
+                body = json.dumps(
+                    {
+                        "schema": "quotabot.local-server-proof.v1",
+                        "nonce": nonce,
+                        "proof": "0" * 64,
+                    }
+                ).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 5)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+
+        router = QuotabotRouter()
+        router.policy = Policy(quotabot_url=f"http://127.0.0.1:{server.server_port}")
+        with unittest.mock.patch.dict(os.environ, {"QUOTABOT_HTTP_TOKEN": token}):
+            self.assertIsNone(router._fetch_suggest())
+
+        self.assertEqual(len(requests_seen), 1)
+        self.assertTrue(requests_seen[0][0].startswith("/auth/prove?nonce="))
+        self.assertIsNone(requests_seen[0][1])
+
     def test_metrics_path_is_constrained_to_quotabot_home(self):
         inside = Policy(metrics_path="~/.quotabot/routing.jsonl")
         inside_path = Path(inside.metrics_path)
@@ -1443,6 +1497,7 @@ class LeaseHttpTests(unittest.TestCase):
         token = "local-test-mutation-token-0123456789"
         state = {
             "authorizations": [],
+            "proof_authorizations": [],
             "read_authorizations": [],
             "reservations": [],
             "releases": [],
@@ -1450,6 +1505,8 @@ class LeaseHttpTests(unittest.TestCase):
         state_lock = Lock()
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
             def _write_json(self, status, payload):
                 body = json.dumps(payload).encode("utf-8")
                 self.send_response(status)
@@ -1459,6 +1516,26 @@ class LeaseHttpTests(unittest.TestCase):
                 self.wfile.write(body)
 
             def do_GET(self):
+                parsed = urllib.parse.urlsplit(self.path)
+                if parsed.path == "/auth/prove":
+                    nonce = urllib.parse.parse_qs(parsed.query).get("nonce", [""])[0]
+                    with state_lock:
+                        state["proof_authorizations"].append(
+                            self.headers.get("Authorization")
+                        )
+                    self._write_json(
+                        200,
+                        {
+                            "schema": "quotabot.local-server-proof.v1",
+                            "nonce": nonce,
+                            "proof": _local_server_proof(
+                                token,
+                                nonce,
+                                _server_endpoint(self),
+                            ),
+                        },
+                    )
+                    return
                 if self.path != "/suggest":
                     self._write_json(404, {"error": "not found"})
                     return
@@ -1649,6 +1726,7 @@ class LeaseHttpTests(unittest.TestCase):
             [f"Bearer {token}"] * 4,
         )
         self.assertEqual(state["read_authorizations"], [f"Bearer {token}"])
+        self.assertEqual(state["proof_authorizations"], [None] * 5)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'mcp_http.dart';
+import 'util.dart';
+
+const maxMcpHttpBearerTokenBytes = 4096;
+const maxMcpHttpBearerTokenCharacters = 4096;
 
 const mcpServerUsage = '''
 Usage:
@@ -12,9 +17,9 @@ Options:
   --host HOST         Loopback bind host: localhost, 127.0.0.1, or ::1.
   --port PORT         TCP port, 1..65535. Default: 8722.
   --path PATH         MCP endpoint path. Default: /mcp.
-  --token TOKEN       Required HTTP bearer token. Prefer --token-file for real use.
-  --token-env NAME    Read the required HTTP bearer token from an environment variable.
-  --token-file PATH   Read the required HTTP bearer token from a local file.
+  --token TOKEN       Required 32..4096 character HTTP bearer. Prefer --token-file.
+  --token-env NAME    Read the bounded HTTP bearer from an environment variable.
+  --token-file PATH   Read at most 4 KiB from an owner-only regular file.
   --help              Show this usage.
 ''';
 
@@ -184,6 +189,9 @@ Future<String?> loadMcpBearerToken(McpServerCliOptions options) async {
   if (type != FileSystemEntityType.file) {
     throw FormatException('token file must be a regular file: $tokenFile');
   }
+  if (await file.length() > maxMcpHttpBearerTokenBytes) {
+    throw const FormatException('token file is too large');
+  }
   if (!Platform.isWindows) {
     final mode = (await file.stat()).mode;
     if ((mode & 0x3f) != 0) {
@@ -192,10 +200,27 @@ Future<String?> loadMcpBearerToken(McpServerCliOptions options) async {
       );
     }
   }
+  if (Platform.isWindows || Platform.isMacOS) {
+    try {
+      await enforceOwnerOnlyFileAsync(file);
+    } on FileSystemException {
+      throw const FormatException(
+        'token file permissions could not be restricted owner-only',
+      );
+    }
+  }
+  RandomAccessFile? opened;
   try {
-    return _nonEmptyToken(await file.readAsString(), '--token-file');
-  } on FileSystemException {
+    opened = await file.open();
+    final bytes = await opened.read(maxMcpHttpBearerTokenBytes + 1);
+    if (bytes.length > maxMcpHttpBearerTokenBytes) {
+      throw const FormatException('token file is too large');
+    }
+    return _nonEmptyToken(utf8.decode(bytes), '--token-file');
+  } on FileSystemException catch (_) {
     throw FormatException('token file is unreadable: $tokenFile');
+  } finally {
+    await opened?.close();
   }
 }
 
@@ -206,6 +231,12 @@ String _nonEmptyToken(String value, String source) {
     throw FormatException(
       '$source token must be at least '
       '$minMcpHttpBearerTokenCharacters characters',
+    );
+  }
+  if (token.length > maxMcpHttpBearerTokenCharacters) {
+    throw FormatException(
+      '$source token must be at most '
+      '$maxMcpHttpBearerTokenCharacters characters',
     );
   }
   return token;

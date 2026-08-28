@@ -2,6 +2,34 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.12 - 2026-08-27
+
+### Security
+
+- The bundled LiteLLM router now authenticates the exact loopback server and
+  TCP connection with a nonce-bound HMAC proof before sending the stable local
+  bearer. A different process that binds the configured port first receives no
+  credential, while valid exact-account reads and lease mutations continue on
+  the proven connection.
+- The Python MCP Streamable HTTP example disables ambient proxy inheritance, so
+  its loopback bearer cannot be forwarded through an `HTTP_PROXY`, `HTTPS_PROXY`,
+  or equivalent environment setting.
+- MCP HTTP token inputs are capped at 4 KiB. Token files remain regular-file
+  only, reject unsafe POSIX group or other mode bits, and enforce the existing
+  checked owner-only ACL boundary on Windows and macOS before reading.
+
+### Fixed
+
+- MCP Streamable HTTP now caps active requests at 128 and promptly flushes and
+  closes every early rejection with an unread or incomplete request body.
+  Rejected authentication, path, method, session, preflight, and oversized-body
+  cases cannot occupy all request capacity, and normal capacity recovers after
+  a stalled sender disconnects.
+- The dry-run runtime-access manifest now reports the production manual-quota
+  and LiteLLM metrics filenames, uses `XDG_DATA_HOME` for Linux IDE state, and
+  honors its explicit target operating system instead of leaking host-OS path
+  choices into cross-platform reports.
+
 ## 0.10.0-rc.11 - 2026-08-27
 
 ### Fixed
