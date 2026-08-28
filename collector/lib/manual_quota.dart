@@ -5,6 +5,8 @@ import 'models.dart';
 import 'profiles.dart';
 import 'util.dart';
 
+const manualQuotaFileName = 'quotas.json';
+
 const manualQuotaSchema = 'quotabot.manual.v1';
 const manualQuotaSource = providerQuotaManualSource;
 
@@ -117,7 +119,7 @@ Directory manualQuotaDir({Directory? root}) {
 }
 
 File manualQuotaFile({Directory? dir}) => File(
-      '${manualQuotaDir(root: dir).path}/quotas.json',
+      '${manualQuotaDir(root: dir).path}/$manualQuotaFileName',
     );
 
 List<ManualQuotaEntry> loadManualQuotaEntries({Directory? dir}) {

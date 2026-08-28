@@ -500,9 +500,15 @@ characters, and admits requests before the session transport reads a body.
 Missing or invalid bearer tokens return HTTP 401 with a Bearer challenge.
 POST bodies without a declared length, or larger than 256 KiB, return HTTP 413
 without buffering. Body reads have a 15-second deadline, and at most 64 active
-sessions are retained, including concurrent initialization attempts. The public
-server constructor enforces the same loopback, timeout, and session-limit
-invariants as CLI startup. Host and origin rebinding stays HTTP 403.
+sessions are retained, including concurrent initialization attempts. A separate
+128-request admission cap covers incomplete requests that have not created a
+session. Every early rejection with an unread body flushes a correctly framed
+response and releases its socket without waiting for the sender to finish. The
+public server constructor enforces the same loopback, timeout, request-limit,
+and session-limit invariants as CLI startup. Host and origin rebinding stays
+HTTP 403. Bearer sources are bounded to 4 KiB; token-file mode requires a
+regular file and applies the checked owner-only permission boundary on Windows
+and macOS while Linux rejects group or other permission bits.
 `bin/example_routing_agent.dart` shows the same logic used for direct Dart
 routing decisions, while `integrations/mcp_clients/` shows Python and TypeScript
 MCP clients for both stdio and Streamable HTTP.
@@ -519,7 +525,12 @@ only write endpoints are authenticated, bounded lease reserve and
 release operations. Server startup creates and permission-checks a stable
 per-user bearer token without printing it. First-start token creation uses the
 same process-and-isolate guard plus an owner-only flushed temporary file, so
-parallel servers publish one complete token. A reserve request submits only
+parallel servers publish one complete token. `GET /auth/prove` returns a
+nonce-bound HMAC over the listener endpoint for local clients that already
+possess the bearer. The bundled LiteLLM router requires that proof from the
+exact peer and sends the bearer only on the same still-open TCP connection, so
+a process that pre-binds the configured port cannot collect the credential. A
+reserve request submits only
 provider/account targets and lease policy, then selects and writes under one
 ledger guard. Mutation body reads have a 15-second deadline. The server never
 receives task text, prompts, source code, or model output.
@@ -621,8 +632,9 @@ surprise API spend.
 The integration is covered at two layers. Unit tests import the hook directly to
 check policy precedence, trusted key alias/user_id agent identity, spend-class
 guardrails, local-fallback ordering, loopback URL hardening, no-redirect quotabot
-fetches, authenticated concurrent reservation, callback release, and metrics
-path containment under `~/.quotabot`. CI also installs the current
+fetches, exact-peer authentication before bearer disclosure, authenticated
+concurrent reservation, callback release, and metrics path containment under
+`~/.quotabot`. CI also installs the current
 `litellm[proxy]` package and starts a real LiteLLM proxy on loopback with a fake
 quotabot suggestion and lease server plus a fake OpenAI-compatible backend. That
 test proves the actual proxy hook reserves and rewrites a logical model, releases

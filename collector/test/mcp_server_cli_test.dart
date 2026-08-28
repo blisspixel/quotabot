@@ -122,6 +122,31 @@ void main() {
       throwsFormatException,
     );
 
+    await tokenFile.writeAsBytes(
+      List<int>.filled(maxMcpHttpBearerTokenBytes + 1, 0x61),
+    );
+    expect(
+      () => loadMcpBearerToken(
+        McpServerCliOptions.parse([
+          '--http',
+          '--token-file',
+          tokenFile.path,
+        ]),
+      ),
+      throwsFormatException,
+    );
+
+    expect(
+      () => loadMcpBearerToken(
+        McpServerCliOptions.parse([
+          '--http',
+          '--token',
+          'a' * (maxMcpHttpBearerTokenCharacters + 1),
+        ]),
+      ),
+      throwsFormatException,
+    );
+
     expect(
       () => loadMcpBearerToken(
         McpServerCliOptions.parse([

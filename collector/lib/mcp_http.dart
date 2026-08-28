@@ -21,7 +21,8 @@ const maxMcpHttpDrainBytes = 512 * 1024;
 const minMcpHttpBearerTokenCharacters = 32;
 const defaultMcpHttpRequestBodyTimeout = Duration(seconds: 15);
 const defaultMaxMcpHttpSessions = 64;
-const _unauthorizedSocketDestroyDelay = Duration(milliseconds: 25);
+const defaultMaxMcpHttpConcurrentRequests = 128;
+const _rejectedRequestSocketDestroyDelay = Duration(milliseconds: 25);
 const mcpHttpBearerRealm = 'quotabot-mcp';
 const _mcpAllowedHosts = {'localhost', '127.0.0.1', '::1'};
 
@@ -33,6 +34,7 @@ class QuotabotMcpHttpConfig {
   final Set<String>? allowedOrigins;
   final Duration requestBodyTimeout;
   final int maxSessions;
+  final int maxConcurrentRequests;
 
   const QuotabotMcpHttpConfig({
     this.host = defaultMcpHttpHost,
@@ -42,6 +44,7 @@ class QuotabotMcpHttpConfig {
     this.allowedOrigins,
     this.requestBodyTimeout = defaultMcpHttpRequestBodyTimeout,
     this.maxSessions = defaultMaxMcpHttpSessions,
+    this.maxConcurrentRequests = defaultMaxMcpHttpConcurrentRequests,
   });
 }
 
@@ -85,6 +88,7 @@ class QuotabotStreamableHttpServer {
   final Set<String>? allowedOrigins;
   final Duration requestBodyTimeout;
   final int maxSessions;
+  final int maxConcurrentRequests;
   final McpServer Function(String sessionId) serverFactory;
 
   HttpServer? _http;
@@ -92,6 +96,7 @@ class QuotabotStreamableHttpServer {
   final Map<String, StreamableHTTPServerTransport> _transports = {};
   final Map<String, McpServer> _servers = {};
   int _pendingSessionInitializations = 0;
+  int _activeRequests = 0;
 
   QuotabotStreamableHttpServer({
     required this.host,
@@ -102,6 +107,7 @@ class QuotabotStreamableHttpServer {
     this.allowedOrigins,
     this.requestBodyTimeout = defaultMcpHttpRequestBodyTimeout,
     this.maxSessions = defaultMaxMcpHttpSessions,
+    this.maxConcurrentRequests = defaultMaxMcpHttpConcurrentRequests,
   }) {
     if (!isLoopbackMcpHost(host)) {
       throw ArgumentError.value(
@@ -121,6 +127,13 @@ class QuotabotStreamableHttpServer {
       throw ArgumentError.value(
           maxSessions, 'maxSessions', 'must be at least 1');
     }
+    if (maxConcurrentRequests < 1) {
+      throw ArgumentError.value(
+        maxConcurrentRequests,
+        'maxConcurrentRequests',
+        'must be at least 1',
+      );
+    }
   }
 
   Future<void> start() async {
@@ -130,7 +143,7 @@ class QuotabotStreamableHttpServer {
     final http = await HttpServer.bind(host, port);
     _http = http;
     _boundOrigins = allowedOrigins ?? defaultMcpAllowedOrigins(http.port);
-    http.listen(_handleRequest);
+    http.listen(_admitRequest);
   }
 
   Future<void> stop() async {
@@ -143,27 +156,50 @@ class QuotabotStreamableHttpServer {
     _servers.clear();
   }
 
+  void _admitRequest(HttpRequest request) {
+    if (_activeRequests >= maxConcurrentRequests) {
+      unawaited(
+        _rejectPlain(
+          request,
+          status: HttpStatus.serviceUnavailable,
+          body: 'Request capacity reached',
+          headers: {HttpHeaders.retryAfterHeader: '1'},
+        ).catchError((_) {}),
+      );
+      return;
+    }
+    _activeRequests++;
+    unawaited(
+      _handleRequest(request)
+          .whenComplete(() => _activeRequests--)
+          .catchError((_) {}),
+    );
+  }
+
   Future<void> _handleRequest(HttpRequest request) async {
     if (request.method == 'OPTIONS') {
-      request.response.statusCode = HttpStatus.ok;
-      await request.response.close();
+      await _rejectPlain(request, status: HttpStatus.ok, body: '');
       return;
     }
     if (request.uri.path != path) {
-      request.response
-        ..statusCode = HttpStatus.notFound
-        ..write('Not Found');
-      await request.response.close();
+      await _rejectPlain(
+        request,
+        status: HttpStatus.notFound,
+        body: 'Not Found',
+      );
       return;
     }
     if (request.method != 'GET' &&
         request.method != 'POST' &&
         request.method != 'DELETE') {
-      request.response
-        ..statusCode = HttpStatus.methodNotAllowed
-        ..headers.set(HttpHeaders.allowHeader, 'GET, POST, DELETE, OPTIONS')
-        ..write('Method Not Allowed');
-      await request.response.close();
+      await _rejectPlain(
+        request,
+        status: HttpStatus.methodNotAllowed,
+        body: 'Method Not Allowed',
+        headers: {
+          HttpHeaders.allowHeader: 'GET, POST, DELETE, OPTIONS',
+        },
+      );
       return;
     }
     if (!_hasBearerToken(request, bearerToken)) {
@@ -200,58 +236,118 @@ class QuotabotStreamableHttpServer {
     }
   }
 
-  Future<void> _rejectUnauthorized(HttpRequest request) async {
-    const body = 'Unauthorized';
-    final bodyBytes = utf8.encode(body);
-    request.response
-      ..statusCode = HttpStatus.unauthorized
-      ..headers.set(HttpHeaders.connectionHeader, 'close')
-      ..headers.set(HttpHeaders.contentLengthHeader, '${bodyBytes.length}')
-      ..headers.set(
-        HttpHeaders.wwwAuthenticateHeader,
-        'Bearer realm="$mcpHttpBearerRealm"',
+  bool _requestMayHaveBody(HttpRequest request) =>
+      request.contentLength > 0 || request.headers.chunkedTransferEncoding;
+
+  Future<void> _rejectPlain(
+    HttpRequest request, {
+    required int status,
+    required String body,
+    Map<String, String> headers = const {},
+    bool bodyConsumed = false,
+  }) =>
+      _rejectResponse(
+        request,
+        status: status,
+        body: body,
+        headers: headers,
+        bodyConsumed: bodyConsumed,
       );
-    if (request.contentLength != 0) {
+
+  Future<void> _rejectResponse(
+    HttpRequest request, {
+    required int status,
+    required String body,
+    Map<String, String> headers = const {},
+    ContentType? contentType,
+    bool bodyConsumed = false,
+  }) async {
+    final bytes = utf8.encode(body);
+    request.response
+      ..statusCode = status
+      ..headers.contentLength = bytes.length;
+    if (contentType != null) request.response.headers.contentType = contentType;
+    for (final entry in headers.entries) {
+      request.response.headers.set(entry.key, entry.value);
+    }
+    if (!bodyConsumed && _requestMayHaveBody(request)) {
+      request.response.headers.set(HttpHeaders.connectionHeader, 'close');
       Socket? socket;
       try {
         socket = await request.response.detachSocket(writeHeaders: true);
-        socket.add(bodyBytes);
+        if (request.method != 'HEAD' && bytes.isNotEmpty) socket.add(bytes);
         await socket.flush();
         unawaited(socket.close());
-        // A short grace period lets the loopback client consume the flushed
-        // 401 before the forced close releases an incomplete request body.
-        Timer(_unauthorizedSocketDestroyDelay, socket.destroy);
+        Timer(_rejectedRequestSocketDestroyDelay, socket.destroy);
       } catch (_) {
         socket?.destroy();
       }
       return;
     }
-    request.response.write(body);
+    if (request.method != 'HEAD' && bytes.isNotEmpty) {
+      request.response.add(bytes);
+    }
     await request.response.close();
+  }
+
+  Future<void> _rejectUnauthorized(HttpRequest request) async {
+    await _rejectPlain(
+      request,
+      status: HttpStatus.unauthorized,
+      body: 'Unauthorized',
+      headers: {
+        HttpHeaders.wwwAuthenticateHeader: 'Bearer realm="$mcpHttpBearerRealm"',
+      },
+    );
   }
 
   Future<void> _rejectPayloadTooLarge(HttpRequest request) async {
     final declared = request.contentLength;
+    var bodyConsumed = false;
     if (declared > 0 && declared <= maxMcpHttpDrainBytes) {
       try {
         await request.drain<void>().timeout(requestBodyTimeout);
+        bodyConsumed = true;
       } on TimeoutException {
-        request.response.headers.set(HttpHeaders.connectionHeader, 'close');
+        bodyConsumed = false;
       }
-    } else {
-      request.response.headers.set(HttpHeaders.connectionHeader, 'close');
     }
-    request.response
-      ..statusCode = HttpStatus.requestEntityTooLarge
-      ..write('Payload Too Large');
-    await request.response.close();
+    await _rejectPlain(
+      request,
+      status: HttpStatus.requestEntityTooLarge,
+      body: 'Payload Too Large',
+      bodyConsumed: bodyConsumed,
+    );
   }
+
+  Future<void> _jsonRpcError(
+    HttpRequest request, {
+    required int httpStatus,
+    required ErrorCode errorCode,
+    required String message,
+    bool bodyConsumed = false,
+  }) =>
+      _rejectResponse(
+        request,
+        status: httpStatus,
+        body: jsonEncode(
+          JsonRpcError(
+            id: null,
+            error: JsonRpcErrorData(
+              code: errorCode.value,
+              message: message,
+            ),
+          ).toJson(),
+        ),
+        contentType: ContentType.json,
+        bodyConsumed: bodyConsumed,
+      );
 
   Future<void> _handlePost(HttpRequest request) async {
     final sessionId = request.headers.value('mcp-session-id');
     if (sessionId != null && !_transports.containsKey(sessionId)) {
       await _jsonRpcError(
-        request.response,
+        request,
         httpStatus: HttpStatus.notFound,
         errorCode: ErrorCode.connectionClosed,
         message: 'Session not found',
@@ -271,7 +367,7 @@ class QuotabotStreamableHttpServer {
     } on TimeoutException {
       request.response.headers.set(HttpHeaders.connectionHeader, 'close');
       await _jsonRpcError(
-        request.response,
+        request,
         httpStatus: HttpStatus.requestTimeout,
         errorCode: ErrorCode.invalidRequest,
         message: 'Request body timed out',
@@ -283,29 +379,32 @@ class QuotabotStreamableHttpServer {
       body = jsonDecode(utf8.decode(bodyBytes.takeBytes()));
     } catch (_) {
       await _jsonRpcError(
-        request.response,
+        request,
         httpStatus: HttpStatus.badRequest,
         errorCode: ErrorCode.parseError,
         message: 'Parse error',
+        bodyConsumed: true,
       );
       return;
     }
     if (body is List) {
       await _jsonRpcError(
-        request.response,
+        request,
         httpStatus: HttpStatus.badRequest,
         errorCode: ErrorCode.invalidRequest,
         message: 'Invalid Request: Batch JSON-RPC payloads are not supported',
+        bodyConsumed: true,
       );
       return;
     }
     if (body is! Map) {
       await _jsonRpcError(
-        request.response,
+        request,
         httpStatus: HttpStatus.badRequest,
         errorCode: ErrorCode.invalidRequest,
         message:
             'Invalid Request: POST body must contain a JSON-RPC message object',
+        bodyConsumed: true,
       );
       return;
     }
@@ -318,10 +417,11 @@ class QuotabotStreamableHttpServer {
       if (_transports.length + _pendingSessionInitializations >= maxSessions) {
         request.response.headers.set(HttpHeaders.retryAfterHeader, '1');
         await _jsonRpcError(
-          request.response,
+          request,
           httpStatus: HttpStatus.serviceUnavailable,
           errorCode: ErrorCode.connectionClosed,
           message: 'Session capacity reached',
+          bodyConsumed: true,
         );
         return;
       }
@@ -335,29 +435,32 @@ class QuotabotStreamableHttpServer {
       return;
     }
     await _jsonRpcError(
-      request.response,
+      request,
       httpStatus: HttpStatus.badRequest,
       errorCode: ErrorCode.connectionClosed,
       message:
           'Bad Request: No valid session ID provided or not an initialization request',
+      bodyConsumed: true,
     );
   }
 
   Future<void> _handleSessionRequest(HttpRequest request) async {
     final sessionId = request.headers.value('mcp-session-id');
     if (sessionId == null) {
-      request.response
-        ..statusCode = HttpStatus.badRequest
-        ..write('Missing session ID');
-      await request.response.close();
+      await _rejectPlain(
+        request,
+        status: HttpStatus.badRequest,
+        body: 'Missing session ID',
+      );
       return;
     }
     final transport = _transports[sessionId];
     if (transport == null) {
-      request.response
-        ..statusCode = HttpStatus.notFound
-        ..write('Session not found');
-      await request.response.close();
+      await _rejectPlain(
+        request,
+        status: HttpStatus.notFound,
+        body: 'Session not found',
+      );
       return;
     }
     await transport.handleRequest(request);
@@ -431,6 +534,13 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
       'must be at least 1',
     );
   }
+  if (config.maxConcurrentRequests < 1) {
+    throw ArgumentError.value(
+      config.maxConcurrentRequests,
+      'maxConcurrentRequests',
+      'must be at least 1',
+    );
+  }
   final bearerToken = config.bearerToken?.trim();
   if (bearerToken == null ||
       bearerToken.length < minMcpHttpBearerTokenCharacters) {
@@ -450,6 +560,7 @@ QuotabotStreamableHttpServer buildQuotabotStreamableHttpServer({
     allowedOrigins: config.allowedOrigins,
     requestBodyTimeout: config.requestBodyTimeout,
     maxSessions: config.maxSessions,
+    maxConcurrentRequests: config.maxConcurrentRequests,
     serverFactory: (_) => buildQuotabotMcpServer(
       snapshot: snapshot,
       burnByProvider: burnByProvider,
@@ -467,28 +578,6 @@ String _mcpSessionId() {
   final random = math.Random.secure();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
   return base64UrlEncode(bytes).replaceAll('=', '');
-}
-
-Future<void> _jsonRpcError(
-  HttpResponse response, {
-  required int httpStatus,
-  required ErrorCode errorCode,
-  required String message,
-}) async {
-  response
-    ..statusCode = httpStatus
-    ..write(
-      jsonEncode(
-        JsonRpcError(
-          id: null,
-          error: JsonRpcErrorData(
-            code: errorCode.value,
-            message: message,
-          ),
-        ).toJson(),
-      ),
-    );
-  await response.close();
 }
 
 bool _hasBearerToken(HttpRequest request, String expected) {

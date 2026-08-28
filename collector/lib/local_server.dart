@@ -1033,6 +1033,42 @@ Future<HttpServer> startLocalQuotabotServer({
     );
   }
 
+  void handleServerProof(HttpRequest request) {
+    final token = mutationToken;
+    if (token == null) {
+      writeJson(request, {'error': 'not found'}, HttpStatus.notFound);
+      return;
+    }
+    final query = request.uri.queryParametersAll;
+    if (query.length != 1 ||
+        !query.containsKey('nonce') ||
+        query['nonce']!.length != 1 ||
+        !isValidLocalHttpServerProofNonce(query['nonce']!.single)) {
+      writeJson(
+          request, {'error': 'invalid proof nonce'}, HttpStatus.badRequest);
+      return;
+    }
+    if (!server.address.isLoopback) {
+      writeJson(request, {'error': 'server identity unavailable'},
+          HttpStatus.internalServerError);
+      return;
+    }
+    final nonce = query['nonce']!.single;
+    final endpoint = localHttpServerEndpoint(
+      server.address,
+      server.port,
+    );
+    writeJson(request, {
+      'schema': localHttpServerProofSchema,
+      'nonce': nonce,
+      'proof': localHttpServerProof(
+        token: token,
+        nonce: nonce,
+        endpoint: endpoint,
+      ),
+    });
+  }
+
   // Routes one request to its handler. Handlers only write a response; they
   // never close it, so [serve] can own closing exactly once. A rejected Host or
   // method short-circuits before any snapshot or provider work.
@@ -1113,6 +1149,8 @@ Future<HttpServer> startLocalQuotabotServer({
         await handleSnapshot(request);
       case '/suggest':
         await handleSuggest(request);
+      case localHttpServerProofPath:
+        handleServerProof(request);
       case '/health':
         if (rejectUnknownQuery(request)) return;
         writeJson(request, {'ok': true, 'generated_at': now()});

@@ -1,6 +1,8 @@
 import 'dart:io';
 
+import 'litellm_metrics.dart';
 import 'local_runtime_config.dart';
+import 'manual_quota.dart';
 import 'profiles.dart';
 import 'provider_ids.dart';
 import 'util.dart';
@@ -176,7 +178,7 @@ RuntimeAccessReport buildRuntimeAccessReport({
   final env = environment ?? Platform.environment;
   final operatingSystem = os ?? Platform.operatingSystem;
   final selectedProviders = providers == null
-      ? defaultProviderRuntimeAccess(environment: env)
+      ? defaultProviderRuntimeAccess(environment: env, os: operatingSystem)
       : List<ProviderRuntimeAccess>.of(providers);
   final observedIds = observedProviderIds
       ?.map((p) => normalizeProviderId(p) ?? p)
@@ -238,24 +240,27 @@ RuntimeAccessReport buildRuntimeAccessReport({
 
 List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
   Map<String, String>? environment,
+  String? os,
 }) {
   final env = environment ?? Platform.environment;
-  final h = _home(env);
-  final appData = _appData(env, h);
-  final config = _configBase(env, h);
+  final operatingSystem = os ?? Platform.operatingSystem;
+  final h = _home(env, operatingSystem);
+  final appData = _appData(env, h, operatingSystem);
+  final config = _configBase(env, h, operatingSystem);
+  String join(String base, String relative) =>
+      _joinPath(base, relative, operatingSystem);
   return [
     ProviderRuntimeAccess(
       provider: claudeProviderId,
       displayName: claudeProviderName,
       kind: 'subscription',
       reads: [
-        _file(_joinPath(h, '.claude/.credentials.json'),
-            'Claude OAuth access token',
+        _file(join(h, '.claude/.credentials.json'), 'Claude OAuth access token',
             dataClass: 'credential'),
-        _file(_joinPath(config, 'quotabot/auth/claude*.json'),
+        _file(join(config, 'quotabot/auth/claude*.json'),
             'quotabot stored Claude OAuth grant',
             dataClass: 'credential'),
-        _fileWrite(_joinPath(config, 'quotabot/auth/claude*.json'),
+        _fileWrite(join(config, 'quotabot/auth/claude*.json'),
             'rotated Claude OAuth grant persistence',
             dataClass: 'credential'),
       ],
@@ -278,13 +283,12 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: codexProviderName,
       kind: 'subscription',
       reads: [
-        _file(_joinPath(h, '.codex/auth.json'),
-            'Codex ChatGPT OAuth access token',
+        _file(join(h, '.codex/auth.json'), 'Codex ChatGPT OAuth access token',
             dataClass: 'credential'),
-        _file(_joinPath(config, 'quotabot/auth/codex*.json'),
+        _file(join(config, 'quotabot/auth/codex*.json'),
             'quotabot stored Codex OAuth grant',
             dataClass: 'credential'),
-        _fileWrite(_joinPath(config, 'quotabot/auth/codex*.json'),
+        _fileWrite(join(config, 'quotabot/auth/codex*.json'),
             'rotated Codex OAuth grant persistence',
             dataClass: 'credential'),
       ],
@@ -301,13 +305,12 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: grokProviderName,
       kind: 'subscription',
       reads: [
-        _file(_joinPath(h, '.grok/auth.json'),
-            'Grok CLI account and bearer token',
+        _file(join(h, '.grok/auth.json'), 'Grok CLI account and bearer token',
             dataClass: 'credential'),
-        _file(_joinPath(config, 'quotabot/auth/grok*.json'),
+        _file(join(config, 'quotabot/auth/grok*.json'),
             'quotabot stored Grok OAuth grant',
             dataClass: 'credential'),
-        _fileWrite(_joinPath(config, 'quotabot/auth/grok*.json'),
+        _fileWrite(join(config, 'quotabot/auth/grok*.json'),
             'rotated Grok OAuth grant persistence',
             dataClass: 'credential'),
       ],
@@ -326,28 +329,27 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: antigravityProviderName,
       kind: 'subscription',
       reads: [
-        _file(_joinPath(appData, 'Antigravity*/**/globalStorage/state.vscdb'),
+        _file(join(appData, 'Antigravity*/**/globalStorage/state.vscdb'),
             'Antigravity account, plan, and local quota cache'),
-        _file(_joinPath(h, '.gemini/oauth_creds.json'),
+        _file(join(h, '.gemini/oauth_creds.json'),
             'Gemini CLI OAuth fallback token',
             dataClass: 'credential'),
-        _file(_joinPath(h, '.gemini/antigravity-cli/oauth_creds.json'),
+        _file(join(h, '.gemini/antigravity-cli/oauth_creds.json'),
             'agy file-fallback OAuth token',
             dataClass: 'credential'),
-        _file(_joinPath(h, '.gemini/google_accounts.json'),
+        _file(join(h, '.gemini/google_accounts.json'),
             'Gemini CLI account labels',
             dataClass: 'account_metadata'),
-        _file(
-            _joinPath(h, '.gemini/accounts.json'), 'Gemini CLI account labels',
+        _file(join(h, '.gemini/accounts.json'), 'Gemini CLI account labels',
             dataClass: 'account_metadata'),
         _credentialStore(
           'os-keyring://gemini/antigravity',
           'agy OS keyring OAuth token (Windows Credential Manager, macOS Keychain, Linux secret-service)',
         ),
-        _file(_joinPath(config, 'quotabot/auth/antigravity*.json'),
+        _file(join(config, 'quotabot/auth/antigravity*.json'),
             'quotabot stored Antigravity OAuth grant',
             dataClass: 'credential'),
-        _fileWrite(_joinPath(config, 'quotabot/auth/antigravity*.json'),
+        _fileWrite(join(config, 'quotabot/auth/antigravity*.json'),
             'rotated Antigravity OAuth grant persistence',
             dataClass: 'credential'),
       ],
@@ -374,7 +376,7 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: cursorProviderName,
       kind: 'subscription',
       reads: [
-        _file(_globalStorage(appData, h, 'Cursor'),
+        _file(_globalStorage(appData, h, 'Cursor', operatingSystem),
             'Cursor local account, plan, and usage metadata'),
       ],
     ),
@@ -383,13 +385,12 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: windsurfProviderName,
       kind: 'subscription',
       reads: [
-        _file(_joinPath(appData, 'Windsurf*/**/globalStorage/state.vscdb'),
+        _file(join(appData, 'Windsurf*/**/globalStorage/state.vscdb'),
             'Windsurf or Devin Desktop local quota cache'),
-        _file(_joinPath(appData, 'devin/credentials.toml'),
+        _file(join(appData, 'devin/credentials.toml'),
             'Devin CLI credential presence',
             dataClass: 'credential'),
-        _file(_joinPath(appData, 'devin/config.json'),
-            'Devin CLI account metadata',
+        _file(join(appData, 'devin/config.json'), 'Devin CLI account metadata',
             dataClass: 'account_metadata'),
       ],
     ),
@@ -398,7 +399,7 @@ List<ProviderRuntimeAccess> defaultProviderRuntimeAccess({
       displayName: kiroProviderName,
       kind: 'subscription',
       reads: [
-        _file(_globalStorage(appData, h, 'Kiro'),
+        _file(_globalStorage(appData, h, 'Kiro', operatingSystem),
             'Kiro local account and usage metadata'),
       ],
     ),
@@ -476,20 +477,22 @@ List<RuntimeAccessRecord> _sharedReads(
   Map<String, String> env,
   String operatingSystem,
 ) {
-  final h = _home(env);
-  final config = _configBase(env, h);
+  final h = _home(env, operatingSystem);
+  final config = _configBase(env, h, operatingSystem);
+  String join(String base, String relative) =>
+      _joinPath(base, relative, operatingSystem);
   return [
-    _file(_joinPath(config, 'quotabot/manual/manual_quotas.json'),
+    _file(join(config, 'quotabot/manual/$manualQuotaFileName'),
         'self-reported manual quota entries'),
-    _file(_joinPath(config, 'quotabot/cache/*.json'),
+    _file(join(config, 'quotabot/cache/*.json'),
         'last-known quota snapshot cache'),
-    _fileWrite(_joinPath(config, 'quotabot/cache/*.json'),
+    _fileWrite(join(config, 'quotabot/cache/*.json'),
         'fresh quota snapshot cache writes'),
-    _file(_joinPath(config, 'quotabot/cache/history_*.jsonl'),
+    _file(join(config, 'quotabot/cache/history_*.jsonl'),
         'local analytics history for burn and calibration'),
-    _fileWrite(_joinPath(config, 'quotabot/cache/history_*.jsonl'),
+    _fileWrite(join(config, 'quotabot/cache/history_*.jsonl'),
         'local analytics history updates'),
-    _file(_joinPath(h, '.quotabot/litellm_metrics.jsonl'),
+    _file(join(h, '.quotabot/$litellmMetricsFileName'),
         'local LiteLLM routed-request metadata'),
     ..._localHardwareAccess(env, operatingSystem),
   ];
@@ -642,31 +645,57 @@ RuntimeAccessRecord _localRuntime(
   return _http(method, origin.authority, path, purpose, scheme: origin.scheme);
 }
 
-String _home(Map<String, String> env) =>
-    env['USERPROFILE'] ?? env['HOME'] ?? home();
+String _home(Map<String, String> env, String operatingSystem) {
+  if (operatingSystem == 'windows') {
+    return env['USERPROFILE'] ?? env['HOME'] ?? home();
+  }
+  return env['HOME'] ?? env['USERPROFILE'] ?? home();
+}
 
-String _configBase(Map<String, String> env, String h) =>
-    env['LOCALAPPDATA'] ?? env['XDG_CONFIG_HOME'] ?? '$h/.config';
-
-String _appData(Map<String, String> env, String h) {
-  if (Platform.isWindows) return env['APPDATA'] ?? '$h/AppData/Roaming';
-  if (Platform.isMacOS) return '$h/Library/Application Support';
+String _configBase(
+  Map<String, String> env,
+  String h,
+  String operatingSystem,
+) {
+  if (operatingSystem == 'windows') {
+    return env['LOCALAPPDATA'] ?? '$h/AppData/Local';
+  }
   return env['XDG_CONFIG_HOME'] ?? '$h/.config';
 }
 
-String _globalStorage(String appData, String h, String appName) {
-  if (Platform.isWindows) {
-    return _joinPath(appData, '$appName/User/globalStorage/state.vscdb');
+String _appData(Map<String, String> env, String h, String operatingSystem) {
+  if (operatingSystem == 'windows') {
+    return env['APPDATA'] ?? '$h/AppData/Roaming';
   }
-  if (Platform.isMacOS) {
-    return _joinPath(h,
-        'Library/Application Support/$appName/User/globalStorage/state.vscdb');
-  }
-  return _joinPath(appData, '$appName/User/globalStorage/state.vscdb');
+  if (operatingSystem == 'macos') return '$h/Library/Application Support';
+  return env['XDG_DATA_HOME'] ?? '$h/.local/share';
 }
 
-String _joinPath(String base, String relative) =>
-    '$base${Platform.pathSeparator}${relative.replaceAll('/', Platform.pathSeparator)}';
+String _globalStorage(
+  String appData,
+  String h,
+  String appName,
+  String operatingSystem,
+) {
+  if (operatingSystem == 'macos') {
+    return _joinPath(
+      h,
+      'Library/Application Support/$appName/User/globalStorage/state.vscdb',
+      operatingSystem,
+    );
+  }
+  return _joinPath(
+    appData,
+    '$appName/User/globalStorage/state.vscdb',
+    operatingSystem,
+  );
+}
+
+String _joinPath(String base, String relative, String operatingSystem) {
+  final separator = operatingSystem == 'windows' ? '\\' : '/';
+  final normalized = relative.replaceAll(RegExp(r'[\\/]'), separator);
+  return '$base$separator$normalized';
+}
 
 const _localProviderIds = {
   ollamaProviderId,

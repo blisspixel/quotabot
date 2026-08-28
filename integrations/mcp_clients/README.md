@@ -99,7 +99,10 @@ reading the bearer token or constructing the HTTP transport. Explicit ports,
 paths, and query strings are allowed. The check intentionally does not resolve
 DNS names.
 HTTP POST bodies must declare their length and cannot exceed 256 KiB. The Python
-and TypeScript MCP SDK transports set the length automatically.
+and TypeScript MCP SDK transports set the length automatically. The Python
+example also disables environment-derived proxies on its HTTP client so its
+loopback bearer stays on the direct loopback connection even when `HTTP_PROXY`,
+`HTTPS_PROXY`, or related variables are configured.
 
 ## TypeScript
 

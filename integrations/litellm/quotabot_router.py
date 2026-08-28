@@ -33,9 +33,13 @@ dependency), so it runs unchanged on Windows, macOS, and Linux.
 from __future__ import annotations
 
 import asyncio
+import base64
 import csv
 import datetime
 import email.utils
+import hashlib
+import hmac
+import http.client
 import ipaddress
 import json
 import logging
@@ -216,6 +220,9 @@ _RESERVED_METADATA_KEYS = {
     _ORIGINAL_MODEL_METADATA_KEY,
 }
 _SUGGEST_SCHEMA = "quotabot.suggest.v1"
+_LOCAL_SERVER_PROOF_SCHEMA = "quotabot.local-server-proof.v1"
+_LOCAL_SERVER_PROOF_PATH = "/auth/prove"
+_MAX_SERVER_PROOF_RESPONSE_BYTES = 4096
 _MAX_SUGGEST_RESPONSE_BYTES = 4 * 1024 * 1024
 _MAX_LEASE_RESPONSE_BYTES = 256 * 1024
 _UNAVAILABLE_RETRY_SECONDS = 5.0
@@ -248,6 +255,121 @@ def _load_local_http_token() -> Optional[str]:
         return token
     except (OSError, UnicodeError):
         return None
+
+
+def _local_server_endpoint(sock: Any) -> str:
+    peer = sock.getpeername()
+    if not isinstance(peer, tuple) or len(peer) < 2:
+        raise ValueError("missing loopback peer")
+    address = ipaddress.ip_address(str(peer[0]).split("%", 1)[0])
+    port = int(peer[1])
+    if not address.is_loopback or not 1 <= port <= 65535:
+        raise ValueError("peer is not loopback")
+    encoded = base64.urlsafe_b64encode(address.packed).rstrip(b"=").decode("ascii")
+    return f"{encoded}:{port}"
+
+
+def _local_server_proof(token: str, nonce: str, endpoint: str) -> str:
+    message = f"quotabot-local-server-proof-v1\n{nonce}\n{endpoint}"
+    return hmac.new(
+        token.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _read_bounded_response(
+    response: http.client.HTTPResponse,
+    maximum: int,
+) -> Optional[bytes]:
+    raw = response.read(maximum + 1)
+    return raw if len(raw) <= maximum else None
+
+
+def _authenticated_local_request(
+    base_url: str,
+    path: str,
+    token: str,
+    *,
+    method: str = "GET",
+    body: Optional[bytes] = None,
+    maximum: int,
+) -> Optional[bytes]:
+    if not _is_loopback_url(base_url):
+        return None
+    parsed = urllib.parse.urlsplit(base_url)
+    host = parsed.hostname
+    if host is None:
+        return None
+    connection_type = (
+        http.client.HTTPSConnection
+        if parsed.scheme.lower() == "https"
+        else http.client.HTTPConnection
+    )
+    connection = connection_type(host, parsed.port, timeout=2)
+    try:
+        connection.connect()
+        original_socket = connection.sock
+        if original_socket is None:
+            return None
+        endpoint = _local_server_endpoint(original_socket)
+        nonce = secrets.token_urlsafe(32)
+        challenge_path = f"{_LOCAL_SERVER_PROOF_PATH}?" + urllib.parse.urlencode(
+            {"nonce": nonce}
+        )
+        connection.request(
+            "GET",
+            challenge_path,
+            headers={"Accept": "application/json"},
+        )
+        challenge_response = connection.getresponse()
+        challenge_raw = _read_bounded_response(
+            challenge_response,
+            _MAX_SERVER_PROOF_RESPONSE_BYTES,
+        )
+        if (
+            challenge_response.status != 200
+            or challenge_response.will_close
+            or challenge_raw is None
+            or connection.sock is not original_socket
+        ):
+            return None
+        challenge = json.loads(challenge_raw.decode("utf-8"))
+        proof = challenge.get("proof") if isinstance(challenge, dict) else None
+        if (
+            not isinstance(challenge, dict)
+            or challenge.get("schema") != _LOCAL_SERVER_PROOF_SCHEMA
+            or challenge.get("nonce") != nonce
+            or not isinstance(proof, str)
+            or not hmac.compare_digest(
+                proof,
+                _local_server_proof(token, nonce, endpoint),
+            )
+            or connection.sock is not original_socket
+        ):
+            return None
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            headers["Content-Length"] = str(len(body))
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        raw = _read_bounded_response(response, maximum)
+        if response.status < 200 or response.status >= 300:
+            return None
+        return raw
+    except (
+        http.client.HTTPException,
+        OSError,
+        UnicodeError,
+        ValueError,
+    ):
+        return None
+    finally:
+        connection.close()
 
 
 class _Availability(list[dict[str, Any]]):
@@ -883,7 +1005,20 @@ class QuotabotRouter(CustomLogger):
             return None
         url = self.policy.quotabot_url.rstrip("/") + "/suggest"
         token = _load_local_http_token()
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        if token is not None:
+            raw = _authenticated_local_request(
+                self.policy.quotabot_url,
+                "/suggest",
+                token,
+                maximum=_MAX_SUGGEST_RESPONSE_BYTES,
+            )
+            if raw is None:
+                return None
+            try:
+                return json.loads(raw.decode("utf-8"))
+            except (UnicodeError, ValueError):
+                return None
+        headers: dict[str, str] = {}
         request = urllib.request.Request(url, headers=headers)  # noqa: S310 (local only)
         try:
             with _NO_REDIRECT_OPENER.open(request, timeout=2) as resp:
@@ -1026,27 +1161,21 @@ class QuotabotRouter(CustomLogger):
     ) -> Optional[dict[str, Any]]:
         if not _is_loopback_url(self.policy.quotabot_url):
             return None
-        url = self.policy.quotabot_url.rstrip("/") + path
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        raw = _authenticated_local_request(
+            self.policy.quotabot_url,
+            path,
+            token,
             method="POST",
+            body=body,
+            maximum=_MAX_LEASE_RESPONSE_BYTES,
         )
         try:
-            with _NO_REDIRECT_OPENER.open(request, timeout=2) as response:  # noqa: S310
-                raw = response.read(_MAX_LEASE_RESPONSE_BYTES + 1)
-                if len(raw) > _MAX_LEASE_RESPONSE_BYTES:
-                    return None
-                decoded = json.loads(raw.decode("utf-8"))
-                return decoded if isinstance(decoded, dict) else None
-        except urllib.error.HTTPError as error:
-            error.close()
-            return None
-        except (urllib.error.URLError, OSError, UnicodeError, ValueError):
+            if raw is None:
+                return None
+            decoded = json.loads(raw.decode("utf-8"))
+            return decoded if isinstance(decoded, dict) else None
+        except (UnicodeError, ValueError):
             return None
 
     async def _release_route_lease(self, route_meta: dict[str, Any]) -> None:

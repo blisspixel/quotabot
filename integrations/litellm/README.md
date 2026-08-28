@@ -60,7 +60,11 @@ proxy consistent with the desktop widget and MCP server.
    Linux. `QUOTABOT_HTTP_TOKEN_FILE` can select another protected file, while
    `QUOTABOT_HTTP_TOKEN` is intended only for ephemeral testing. Remote managed
    routes fail closed when the token is absent or invalid; a configured local
-   fallback remains available. The plugin also supplies this token on
+   fallback remains available. Before any bearer-bearing request, the plugin
+   challenges the exact loopback peer for a nonce-bound HMAC proof and requires
+   the authenticated request to continue on that same TCP connection. A
+   different process that bound the configured port first receives only the
+   public challenge and never the token. The plugin supplies the token on
    `GET /suggest`, which preserves exact account selection while unauthenticated
    plain HTTP reads receive pseudonymous email-shaped account labels.
 

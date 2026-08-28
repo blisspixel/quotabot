@@ -33,7 +33,11 @@ async def main() -> int:
         url = require_loopback_mcp_url(raw_url)
         headers = bearer_headers()
         timeout = httpx.Timeout(10.0, read=60.0)
-        async with httpx.AsyncClient(headers=headers, timeout=timeout) as client:
+        async with httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout,
+            trust_env=False,
+        ) as client:
             async with streamable_http_client(url, http_client=client) as (
                 read_stream,
                 write_stream,

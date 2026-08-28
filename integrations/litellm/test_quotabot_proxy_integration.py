@@ -8,6 +8,10 @@ server and the OpenAI-compatible model backend are loopback test doubles.
 from __future__ import annotations
 
 import contextlib
+import base64
+import hashlib
+import hmac
+import ipaddress
 import json
 import os
 import shutil
@@ -20,6 +24,7 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -49,18 +54,45 @@ def _json_response(
     handler.wfile.write(body)
 
 
+def _server_proof(handler: BaseHTTPRequestHandler, token: str, nonce: str) -> str:
+    peer = handler.connection.getsockname()
+    address = ipaddress.ip_address(str(peer[0]).split("%", 1)[0])
+    encoded = base64.urlsafe_b64encode(address.packed).rstrip(b"=").decode("ascii")
+    endpoint = f"{encoded}:{int(peer[1])}"
+    message = f"quotabot-local-server-proof-v1\n{nonce}\n{endpoint}"
+    return hmac.new(
+        token.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 class _SilentHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         return None
 
 
 class _FakeQuotabotHandler(_SilentHandler):
+    protocol_version = "HTTP/1.1"
     requests_seen = 0
     reservations_seen = 0
     releases_seen = 0
     mutation_token = "quotabot-proxy-mutation-token-012345"
 
     def do_GET(self) -> None:
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/auth/prove":
+            nonce = urllib.parse.parse_qs(parsed.query).get("nonce", [""])[0]
+            _json_response(
+                self,
+                200,
+                {
+                    "schema": "quotabot.local-server-proof.v1",
+                    "nonce": nonce,
+                    "proof": _server_proof(self, type(self).mutation_token, nonce),
+                },
+            )
+            return
         if self.path != "/suggest":
             _json_response(self, 404, {"error": "not found"})
             return
