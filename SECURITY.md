@@ -69,8 +69,12 @@ reads and writes helps scope any report:
   email-shaped account labels unless the caller presents the owner-only bearer
   token. Both HTTP transports bound total request-body time. Plain HTTP also
   closes body-bearing requests rejected before parsing without waiting to drain
-  them, and MCP caps active sessions and rejects invalid credentials before
-  reading a body.
+  them. The bundled LiteLLM router proves the exact loopback peer on the same
+  connection before disclosing that bearer. MCP bounds bearer inputs, active
+  requests, and sessions, rejects invalid credentials before reading a body,
+  and promptly closes early rejections with incomplete bodies. The Python MCP
+  example bypasses ambient HTTP proxy settings for its bearer-bearing loopback
+  transport.
 - Alert webhooks are loopback-only by default. Enabling an external host is an
   explicit disclosure of alert metadata, which can include provider, account,
   window, remaining percentage, reset, and suggested route. Prompts, source,

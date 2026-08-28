@@ -2,11 +2,16 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
+
 import 'file_guard.dart';
 import 'util.dart';
 
 const _maxLocalHttpMutationTokenFileBytes = 4096;
+const localHttpServerProofSchema = 'quotabot.local-server-proof.v1';
+const localHttpServerProofPath = '/auth/prove';
 final _localHttpMutationTokenPattern = RegExp(r'^[A-Za-z0-9_-]{32,128}$');
+final _localHttpServerProofNoncePattern = RegExp(r'^[A-Za-z0-9_-]{32,128}$');
 
 typedef LocalHttpMutationTokenFactory = String Function();
 
@@ -24,6 +29,35 @@ String randomLocalHttpMutationToken() {
   final random = Random.secure();
   final bytes = List<int>.generate(32, (_) => random.nextInt(256));
   return base64UrlEncode(bytes).replaceAll('=', '');
+}
+
+bool isValidLocalHttpServerProofNonce(Object? value) =>
+    value is String && _localHttpServerProofNoncePattern.hasMatch(value);
+
+String localHttpServerEndpoint(InternetAddress address, int port) {
+  if (!address.isLoopback || port < 1 || port > 65535) {
+    throw ArgumentError('local server proof requires a loopback endpoint');
+  }
+  final encodedAddress =
+      base64UrlEncode(address.rawAddress).replaceAll('=', '');
+  return '$encodedAddress:$port';
+}
+
+String localHttpServerProof({
+  required String token,
+  required String nonce,
+  required String endpoint,
+}) {
+  if (!isValidLocalHttpMutationToken(token)) {
+    throw ArgumentError.value(token.length, 'token', 'invalid mutation token');
+  }
+  if (!isValidLocalHttpServerProofNonce(nonce)) {
+    throw ArgumentError.value(nonce, 'nonce', 'invalid proof nonce');
+  }
+  final message = 'quotabot-local-server-proof-v1\n$nonce\n$endpoint';
+  return Hmac(sha256, utf8.encode(token))
+      .convert(utf8.encode(message))
+      .toString();
 }
 
 T _withLocalHttpMutationTokenLock<T>(File tokenFile, T Function() run) {

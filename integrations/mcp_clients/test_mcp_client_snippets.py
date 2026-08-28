@@ -73,6 +73,7 @@ class McpClientSnippetTest(unittest.TestCase):
             python_main.index("headers = bearer_headers()"),
             python_main.index("httpx.AsyncClient("),
         )
+        self.assertIn("trust_env=False", python_main)
         self.assertLess(
             ts_main.index("requireLoopbackMcpUrl(rawUrl)"),
             ts_main.index("const headers = mcpBearerHeaders()"),
