@@ -274,17 +274,20 @@ jobs:
             x86_64|amd64) architecture=x64 ;;
             *) echo 'Unsupported macOS runner architecture.' >&2; exit 1 ;;
           esac
+          built_app='app/build/macos/Build/Products/Release/quotabot.app'
           manifest="$RUNNER_TEMP/quotabot-macos-desktop-inventory.json"
-          candidate='app/build/macos/Build/Products/Release'
-          plan='app/build/macos/Build/Products/signing-plan.json'
+          candidate="$RUNNER_TEMP/quotabot-macos-desktop-candidate"
+          plan="$RUNNER_TEMP/quotabot-macos-desktop-signing-plan.json"
           bash tools/package-macos.sh --no-archive
+          test ! -e "$candidate"
+          mkdir "$candidate"
+          ditto "$built_app" "$candidate/quotabot.app"
           python tools/native_code_inventory.py \
             --platform macos --surface desktop --architecture "$architecture" \
             --json "$candidate" > "$manifest"
           python tools/create_macos_signing_plan.py \
             --manifest "$manifest" --output "$plan" \
             --surface desktop --architecture "$architecture" "$candidate"
-          cp "$plan" "$RUNNER_TEMP/quotabot-macos-desktop-signing-plan.json"
           bash tools/package-macos.sh --package-only
           archive="$(find release -maxdepth 1 -name 'quotabot-darwin-*-desktop.zip' -print -quit)"
           test -n "$archive"
@@ -292,6 +295,10 @@ jobs:
           expanded="$RUNNER_TEMP/quotabot-macos-desktop-expanded"
           mkdir -p "$expanded"
           ditto -x -k "$archive" "$expanded"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture "$architecture" \
+            --json "$expanded" \
+            > "$RUNNER_TEMP/quotabot-macos-desktop-packaged-inventory.json"
           python tools/native_code_inventory.py \
             --platform macos --surface desktop --architecture "$architecture" \
             --expect-manifest "$manifest" "$expanded"

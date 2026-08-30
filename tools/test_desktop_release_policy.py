@@ -666,7 +666,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(ci.count("native_code_inventory.py"), 8)
+        self.assertEqual(ci.count("native_code_inventory.py"), 9)
         self.assertEqual(release.count("native_code_inventory.py"), 31)
         self.assertNotIn("sign_windows.py", ci)
         self.assertNotIn("sign_windows.py", release)
@@ -693,7 +693,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
         self.assertEqual(ci.count("--platform macos --surface cli --architecture"), 2)
         self.assertEqual(
-            ci.count("--platform macos --surface desktop --architecture"), 2
+            ci.count("--platform macos --surface desktop --architecture"), 3
         )
         self.assertEqual(ci.count("--expect-manifest"), 4)
         self.assertEqual(ci.count("create_macos_signing_plan.py"), 2)
@@ -1287,6 +1287,9 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("package-macos.sh --no-archive", workflow)
         self.assertIn("package-macos.sh --package-only", workflow)
         self.assertIn("--platform macos --surface desktop", workflow)
+        self.assertIn("quotabot-macos-desktop-candidate", workflow)
+        self.assertIn('ditto "$built_app" "$candidate/quotabot.app"', workflow)
+        self.assertIn("quotabot-macos-desktop-packaged-inventory.json", workflow)
         self.assertIn("quotabot-windows-readiness.json", workflow)
         self.assertIn("quotabot-linux-readiness.json", workflow)
         self.assertIn("if: always() &&", workflow)
