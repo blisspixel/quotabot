@@ -325,7 +325,9 @@ batch size. The workflow fails closed without those values when
 order is a credential-free build and immutable unsigned handoff, complete-tree
 and catalog revalidation in an isolated environment-bound signer,
 authentication with short-lived OIDC, signing, a new post-signing inventory and
-verification, then a second immutable handoff to packaging. Packaging,
+full-tree delta validation, native verification, then a second immutable
+handoff to packaging. The credential-free packaging job repeats the delta gate
+against the trusted unsigned inventory and exact action catalog. Packaging,
 attestation, release upload, and fresh-download verification have no access to
 the signing environment. The archive must match the selected inventory, and
 the clean release-verification jobs download each exact draft Windows archive,
@@ -338,6 +340,17 @@ complete inventory matches. The release notes must disclose that Windows
 publisher identity is not established. The published v0.9.9 release artifacts
 remain unsigned. Ordinary CI packaging stays unsigned and cannot access the
 protected release environment.
+
+The manually dispatched `.github/workflows/windows-signing-rehearsal.yml`
+builds the CLI and desktop candidates outside `release-signing`, signs and
+verifies both inside it with short-lived OIDC, and uploads one-day signed
+handoffs. A separate credential-free job independently downloads the original
+unsigned and signed candidates, regenerates the catalog, repeats the byte-level
+delta and native verification, deletes both local payloads, and retains bounded
+JSON evidence for 14 days. It never publishes a release asset and must be
+dispatched from protected `main`. The workflow is implemented but cannot
+complete until the owner provisions the Azure identity, environment values,
+Public Trust profile, and subscriber EKU.
 
 ### macOS Developer ID and notarization verification
 
@@ -540,12 +553,13 @@ maintainer will consume it:
    applies only to releases published after the setting was enabled on July 18,
    2026. v0.9.4 and later releases are locked under that policy; v0.9.2 and
    earlier releases were not changed retroactively.
-8. Push an annotated `vX.Y.Z` tag. Wait for every `Release` workflow job,
+8. Push an annotated `vX.Y.Z` or `vX.Y.Z-rc.N` tag. Wait for every `Release` workflow job,
    including its reusable CI quality gate, four CLI builds, four clean CLI
    execution legs, three desktop builds, and three clean desktop
    archive-verification legs, to pass.
-9. Confirm that the published stable release is neither draft nor prerelease,
-   is marked immutable, and has
+9. Confirm that a stable tag is published as neither draft nor prerelease, or
+   that an RC tag is published as a prerelease and does not replace the latest
+   stable release. Confirm it is marked immutable and has
    these CLI archive and `.sha256` sidecar pairs:
    `quotabot-windows-x64.zip`, `quotabot-darwin-arm64.tar.gz`,
    `quotabot-linux-x64.tar.gz`, and `quotabot-linux-arm64.tar.gz`.
@@ -554,14 +568,26 @@ maintainer will consume it:
    `quotabot-darwin-arm64-desktop.zip`, and
    `quotabot-linux-x64-desktop.tar.gz`.
 10. Download every archive, compare it with its SHA-256 sidecar, and verify its
-   repository provenance with `gh attestation verify <archive> --repo
-   blisspixel/quotabot`. That basic command does not constrain the signer or tag;
-   the release and install-smoke workflows add signer-workflow, source-ref,
-   source-digest, and self-hosted-runner restrictions.
-   The release workflow creates the attestation before uploading each pair.
-11. After publication, dispatch `Install smoke` immediately and require its
-    clean install, prior-version upgrade, persistent-state, and source-setup
-    matrix to pass on Windows, macOS, and Linux.
+    exact repository provenance. Resolve the protected tag commit, then require
+    the release workflow, exact tag, exact commit, and GitHub-hosted runner:
+
+    ```bash
+    tag=vX.Y.Z  # or the exact vX.Y.Z-rc.N tag
+    source_digest="$(git rev-parse "$tag^{commit}")"
+    gh attestation verify <archive> \
+      --repo blisspixel/quotabot \
+      --signer-workflow blisspixel/quotabot/.github/workflows/release.yml \
+      --source-ref "refs/tags/$tag" \
+      --source-digest "$source_digest" \
+      --deny-self-hosted-runners
+    ```
+
+    The release workflow creates the attestation before uploading each pair.
+11. After publication, dispatch `Install smoke` immediately. For an RC, set the
+    `target_tag` input to the exact `vX.Y.Z-rc.N` tag; leaving it blank resolves
+    the latest stable release instead. Require the clean install, prior-version
+    upgrade, persistent-state, and source-setup matrix to pass on Windows,
+    macOS, and Linux.
 12. Confirm GitHub security signals are clear: CI, CodeQL, secret scanning,
     Dependabot alerts, and the dependency-review PR gate.
 

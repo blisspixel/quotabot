@@ -114,7 +114,7 @@ jobs:
         run: bash tools/test-posix-space-safe-dart.sh
 
       - name: Coverage checker and policy tests
-        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_macos_codesign_integration tools.test_macos_codesign_output tools.test_macos_signing_plan tools.test_native_code_inventory tools.test_record_macos_notarization tools.test_sign_macos_candidate tools.test_validate_macos_signing_delta tools.test_windows_signing_catalog tools.test_verify_macos_signatures tools.test_verify_windows_signatures tools.test_verify_cli_archive tools.test_verify_desktop_archive
+        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_macos_codesign_integration tools.test_macos_codesign_output tools.test_macos_signing_plan tools.test_native_code_inventory tools.test_record_macos_notarization tools.test_sign_macos_candidate tools.test_validate_macos_signing_delta tools.test_validate_windows_signing_delta tools.test_windows_signing_catalog tools.test_verify_macos_signatures tools.test_verify_windows_signatures tools.test_verify_cli_archive tools.test_verify_desktop_archive
 
       - name: Release version consistency
         run: python tools/check_release_version.py

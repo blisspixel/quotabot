@@ -5,14 +5,17 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.13. The next work in the focused 0.10.x stabilization train is owner
-signing setup and one signed lifecycle rehearsal. Its
+0.10.0-rc.14. The next work in the focused 0.10.x stabilization train is owner
+signing setup and one signed lifecycle rehearsal. The latest published candidate
+baseline is rc.12; its
 [cross-platform install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-passed install, upgrade, source-setup, and desktop-run checks. The repository now
+passed install, upgrade, source-setup, and desktop-run checks. rc.14 has no
+published lifecycle evidence yet. The repository now
 contains fail-closed Windows and macOS signing paths for CLI and desktop assets.
-They capture one signing policy per release, pin the Apple build toolchain, and
-bind signed native-verification digests through final publication audit. The
-manual macOS rehearsal is implemented but has not succeeded because owner
+They capture one signing policy per release, pin the Apple build toolchain,
+enforce exact unsigned-to-signed tree deltas, and bind signed native-verification
+and release-metadata digests through final publication audit. The manual Windows
+and macOS rehearsals are implemented but have not succeeded because owner
 provisioning is absent. Current published artifacts remain unsigned; owner
 identity provisioning, successful protected rehearsals, mode activation, and
 signed fresh-download evidence remain. The

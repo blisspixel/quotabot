@@ -164,6 +164,53 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         publish = publish_job.index("gh api --method PATCH")
         self.assertLess(classification_check, publish)
 
+    def test_release_metadata_is_bound_through_final_publication(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        create_job = workflow.split("  create-release:\n", 1)[1].split("  build:\n", 1)[
+            0
+        ]
+        publish_job = workflow.split("  publish-release:\n", 1)[1]
+
+        for output_name in (
+            "release_title_sha256",
+            "release_body_sha256",
+        ):
+            self.assertIn(
+                f"{output_name}: ${{{{ steps.ensure_release.outputs.{output_name} }}}}",
+                create_job,
+            )
+            self.assertIn(f'echo "{output_name}=${output_name}"', create_job)
+        self.assertIn("Draft release title does not match the release tag", create_job)
+        self.assertIn(
+            "Draft release body does not exactly match the current signing policy and changelog",
+            create_job,
+        )
+        self.assertIn("jq -erj '.name | strings'", create_job)
+        self.assertIn("jq -erj '.body | strings'", create_job)
+        self.assertEqual(create_job.count("cmp -s"), 2)
+        self.assertNotIn('release_title="$(gh api', create_job)
+        self.assertNotIn('release_body="$(gh api', create_job)
+
+        self.assertIn("EXPECTED_RELEASE_TITLE_SHA256", publish_job)
+        self.assertIn("EXPECTED_RELEASE_BODY_SHA256", publish_job)
+        self.assertIn("jq -erj '.name | strings'", publish_job)
+        self.assertIn("jq -erj '.body | strings'", publish_job)
+        self.assertNotIn('release_title="$(gh api', publish_job)
+        self.assertNotIn('release_body="$(gh api', publish_job)
+        title_check = publish_job.index(
+            "The draft release title changed after creation"
+        )
+        body_check = publish_job.index("The draft release body changed after creation")
+        asset_check = publish_job.index(
+            "The draft release asset set changed after final audit"
+        )
+        publish = publish_job.index("gh api --method PATCH")
+        self.assertLess(title_check, asset_check)
+        self.assertLess(body_check, asset_check)
+        self.assertLess(asset_check, publish)
+
     def test_release_runs_exact_tag_quality_and_security_gates(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
@@ -667,10 +714,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(ci.count("native_code_inventory.py"), 9)
-        self.assertEqual(release.count("native_code_inventory.py"), 31)
+        self.assertEqual(release.count("native_code_inventory.py"), 35)
         self.assertNotIn("sign_windows.py", ci)
         self.assertNotIn("sign_windows.py", release)
-        self.assertEqual(release.count("create_windows_signing_catalog.py"), 4)
+        self.assertEqual(release.count("create_windows_signing_catalog.py"), 8)
+        self.assertEqual(release.count("validate_windows_signing_delta.py"), 4)
         self.assertEqual(
             release.count("azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca"),
             2,
@@ -699,11 +747,11 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertEqual(ci.count("create_macos_signing_plan.py"), 2)
         self.assertEqual(
             release.count("--platform windows --surface cli --architecture x64"),
-            6,
+            8,
         )
         self.assertEqual(
             release.count("--platform windows --surface desktop --architecture x64"),
-            6,
+            8,
         )
         self.assertEqual(
             release.count("--platform macos --surface cli --architecture arm64"),
@@ -713,7 +761,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             release.count("--platform macos --surface desktop --architecture arm64"),
             10,
         )
-        self.assertEqual(release.count("--expect-manifest"), 16)
+        self.assertEqual(release.count("--expect-manifest"), 20)
         self.assertEqual(release.count("create_macos_signing_plan.py"), 4)
         self.assertEqual(release.count("sign_macos_candidate.py"), 2)
         self.assertEqual(release.count("record_macos_notarization.py"), 2)
@@ -769,14 +817,20 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             catalog_at = sign.index("create_windows_signing_catalog.py")
             azure_login_at = sign.index("azure/login@")
             sign_at = sign.index("Azure/artifact-signing-action@")
+            pristine_download_at = sign.index(
+                "Redownload the pristine unsigned Windows", sign_at
+            )
             post_sign_at = sign.index("Post-signing native inventory failed")
+            delta_at = sign.index("validate_windows_signing_delta.py")
             verify_sig_at = sign.index("verify_windows_signatures.py")
-            preserve_at = sign.index("actions/upload-artifact@", sign_at)
+            preserve_at = sign.index("Preserve the immutable signed Windows")
             self.assertLess(validate_at, catalog_at)
             self.assertLess(catalog_at, azure_login_at)
             self.assertLess(azure_login_at, sign_at)
-            self.assertLess(sign_at, post_sign_at)
-            self.assertLess(post_sign_at, verify_sig_at)
+            self.assertLess(sign_at, pristine_download_at)
+            self.assertLess(pristine_download_at, post_sign_at)
+            self.assertLess(post_sign_at, delta_at)
+            self.assertLess(delta_at, verify_sig_at)
             self.assertLess(verify_sig_at, preserve_at)
             self.assertIn("environment: release-signing", sign)
             self.assertIn("contents: read", sign)
@@ -806,16 +860,27 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertIn("exclude-environment-credential: true", sign)
             self.assertIn("exclude-azure-cli-credential: false", sign)
             self.assertIn("--expected-subscriber-eku", sign)
+            self.assertIn("--before-root $baselineCandidate", sign)
+            self.assertIn("--after-root $candidate", sign)
             self.assertNotIn("secrets.", sign[azure_login_at:sign_at])
 
             self.assertIn("always()", package)
             self.assertIn("result == 'skipped'", package)
             self.assertIn("result == 'success'", package)
             self.assertIn("actions/download-artifact@", package)
+            self.assertIn("packaging-baseline", package)
+            self.assertIn("Independent unsigned baseline validation", package)
+            self.assertIn("create_windows_signing_catalog.py", package)
             self.assertIn("-PackageOnly", package)
             self.assertIn(verifier, package)
             self.assertIn("--expect-manifest", package)
+            self.assertIn("validate_windows_signing_delta.py", package)
+            self.assertIn("packaging-signing-delta.json", package)
+            self.assertIn("packaging-unsigned-inventory.json", package)
+            self.assertIn("packaging-signing-catalog.txt", package)
             self.assertIn("--expected-subscriber-eku", package)
+            self.assertIn("--before-root $baselineCandidate", package)
+            self.assertIn("--after-root $candidate", package)
             self.assertIn("actions/attest-build-provenance@", package)
             self.assertIn("gh release upload", package)
             self.assertNotIn("environment: release-signing", package)
@@ -827,11 +892,16 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertNotIn("--expected-signer-thumbprint", package)
 
             package_at = package.index("-PackageOnly")
+            package_delta_at = package.index("validate_windows_signing_delta.py")
+            native_verify_at = package.index("verify_windows_signatures.py")
             verify_at = package.index(verifier)
             archive_inventory_at = package.rindex("native_code_inventory.py")
             preserve_at = package.index("actions/upload-artifact@")
             attest_at = package.index("actions/attest-build-provenance@")
             upload_at = package.index("gh release upload")
+            self.assertLess(package_delta_at, package_at)
+            self.assertLess(package_delta_at, native_verify_at)
+            self.assertLess(native_verify_at, package_at)
             self.assertLess(package_at, verify_at)
             self.assertLess(verify_at, archive_inventory_at)
             self.assertLess(archive_inventory_at, preserve_at)
@@ -850,6 +920,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertNotIn("Azure/artifact-signing-action@", job)
 
         self.assertIn("tools.test_native_code_inventory", ci)
+        self.assertIn("tools.test_validate_windows_signing_delta", ci)
         self.assertIn("tools.test_windows_signing_catalog", ci)
 
     def test_release_signing_modes_are_explicit_and_disclosed(self) -> None:
@@ -897,7 +968,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("Developer ID signed, hardened, notarized", release)
         self.assertIn("Native signing status:", release)
         self.assertIn("Do not bypass SmartScreen or Gatekeeper.", release)
-        self.assertIn("Draft release native signing disclosure", release)
+        self.assertIn("Draft release body does not exactly match", release)
         self.assertNotIn("QUOTABOT_WINDOWS_PFX", release)
         for repository_variable in (
             "QUOTABOT_WINDOWS_SIGNING_BACKEND",
@@ -915,6 +986,18 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("needs.create-release.outputs.macos_signing_mode", release)
         self.assertIn("needs.create-release.outputs.windows_signing_backend", release)
         self.assertIn("needs.create-release.outputs.windows_subscriber_eku", release)
+
+        operations = (ROOT / "docs" / "RELEASE-SIGNING.md").read_text(encoding="utf-8")
+        repository_variables = operations.split("Set these repository variables", 1)[
+            1
+        ].split("Set only these sensitive values", 1)[0]
+        self.assertIn("QUOTABOT_MACOS_NOTARY_ISSUER_ID", repository_variables)
+        self.assertIn("QUOTABOT_MACOS_NOTARY_KEY_ID", repository_variables)
+        self.assertIn("must be repository variables", operations)
+        self.assertNotIn(
+            "Set the role-limited notary identifiers as variables in",
+            operations,
+        )
 
     def test_macos_jobs_pin_the_runner_and_apple_toolchain(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -938,6 +1021,110 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("/Applications/Xcode_16.4.app/Contents/Developer", release)
         self.assertIn("Build version 16F6", toolchain)
         self.assertIn("notarytool stapler", toolchain)
+
+    def test_signing_rehearsals_are_protected_bounded_and_nonpublishing(
+        self,
+    ) -> None:
+        macos = (
+            ROOT / ".github" / "workflows" / "macos-signing-rehearsal.yml"
+        ).read_text(encoding="utf-8")
+        windows = (
+            ROOT / ".github" / "workflows" / "windows-signing-rehearsal.yml"
+        ).read_text(encoding="utf-8")
+
+        for workflow, environment, cleanup_marker in (
+            (macos, "release-signing-macos", "cleanup\n"),
+            (windows, "release-signing", "Delete the signed candidate"),
+        ):
+            self.assertIn("  workflow_dispatch:", workflow.split("jobs:", 1)[0])
+            self.assertIn("validate-source:", workflow)
+            self.assertIn("build-unsigned-candidates:", workflow)
+            self.assertIn("sign-and-verify:", workflow)
+            self.assertIn("$GITHUB_REF", workflow)
+            self.assertIn("refs/heads/main", workflow)
+            self.assertEqual(workflow.count(f"environment: {environment}\n"), 1)
+            self.assertNotIn("contents: write", workflow)
+            self.assertNotIn("gh release", workflow)
+            self.assertNotIn("attest-build-provenance", workflow)
+            self.assertIn("retention-days: 2", workflow)
+            self.assertIn("retention-days: 14", workflow)
+            self.assertIn("if-no-files-found: error", workflow)
+
+            build = workflow.split("  build-unsigned-candidates:\n", 1)[1].split(
+                "  sign-and-verify:\n", 1
+            )[0]
+            signer = workflow.split("  sign-and-verify:\n", 1)[1]
+            self.assertNotIn(f"environment: {environment}", build)
+            self.assertNotIn("id-token: write", build)
+            self.assertNotIn("secrets.", build)
+            self.assertIn(f"environment: {environment}", signer)
+            self.assertIn("if: always()", signer)
+            cleanup_at = signer.index(cleanup_marker)
+            evidence_at = signer.index("Preserve bounded rehearsal evidence")
+            self.assertLess(cleanup_at, evidence_at)
+
+        self.assertIn("id-token: write", windows)
+        configuration_at = windows.index("Validate the protected signing configuration")
+        azure_login_at = windows.index("azure/login@")
+        self.assertLess(configuration_at, azure_login_at)
+        self.assertIn(
+            "WINDOWS_SUBSCRIBER_EKU", windows[configuration_at:azure_login_at]
+        )
+        self.assertIn("canonical UUID", windows[configuration_at:azure_login_at])
+        self.assertIn("absolute HTTPS URL", windows[configuration_at:azure_login_at])
+        self.assertIn("azure/login@", windows)
+        self.assertIn("Azure/artifact-signing-action@", windows)
+        self.assertIn("validate_windows_signing_delta.py", windows)
+        self.assertIn("verify_windows_signatures.py", windows)
+        self.assertIn("verify-signed-candidates:", windows)
+        self.assertIn("matrix:\n        surface: [cli, desktop]", windows)
+        self.assertIn(
+            "path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal/*.json",
+            windows,
+        )
+        self.assertNotIn("secrets.", windows)
+
+        windows_signer = windows.split("  sign-and-verify:\n", 1)[1].split(
+            "  verify-signed-candidates:\n", 1
+        )[0]
+        windows_verifier = windows.split("  verify-signed-candidates:\n", 1)[1]
+        signer_action_at = windows_signer.index("Azure/artifact-signing-action@")
+        signer_baseline_at = windows_signer.index(
+            "Redownload the pristine unsigned rehearsal baseline"
+        )
+        signer_delta_at = windows_signer.index("validate_windows_signing_delta.py")
+        self.assertLess(signer_action_at, signer_baseline_at)
+        self.assertLess(signer_baseline_at, signer_delta_at)
+        self.assertIn("--before-root $baselineCandidate", windows_signer)
+        self.assertIn("--after-root $candidate", windows_signer)
+        self.assertIn("retention-days: 1", windows_signer)
+        self.assertIn(
+            "Delete the signed candidate and unbounded signer inputs", windows_signer
+        )
+
+        self.assertNotIn("environment: release-signing", windows_verifier)
+        self.assertNotIn("id-token: write", windows_verifier)
+        self.assertNotIn("azure/login@", windows_verifier)
+        self.assertNotIn("Azure/artifact-signing-action@", windows_verifier)
+        self.assertNotIn("vars.", windows_verifier)
+        self.assertNotIn("secrets.", windows_verifier)
+        self.assertEqual(windows_verifier.count("actions/download-artifact@"), 2)
+        self.assertIn("Independent unsigned baseline validation", windows_verifier)
+        self.assertIn("--before-root $baselineCandidate", windows_verifier)
+        self.assertIn("--after-root $signedCandidate", windows_verifier)
+        verifier_cleanup_at = windows_verifier.index(
+            "Delete the independently verified candidate handoffs"
+        )
+        verifier_evidence_at = windows_verifier.index(
+            "Preserve bounded rehearsal evidence"
+        )
+        self.assertLess(verifier_cleanup_at, verifier_evidence_at)
+
+        self.assertNotIn("id-token: write", macos)
+        self.assertNotIn("azure/login@", macos)
+        self.assertIn("trap cleanup EXIT", macos)
+        self.assertIn('rm -f "$certificate" "$notary_key" "$submission"', macos)
+        self.assertIn("verify_macos_signatures.py", macos)
 
     def test_macos_signing_isolated_reproducible_and_fail_closed(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(

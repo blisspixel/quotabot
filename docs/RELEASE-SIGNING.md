@@ -13,16 +13,19 @@ candidate must retain the explicit release-note disclosure, checksums, GitHub
 provenance, and exact asset audit.
 
 Start identity enrollment when the owner is ready for the external validation
-and recurring account costs. Activate signing only after all of these are true:
+and recurring account costs. Complete signing readiness in this order:
 
 1. The reproducible bug inventory is empty and the current candidate passes the
    complete three-OS project gate.
 2. Windows Public Trust identity validation and the macOS Developer ID identity
    are active under the publisher name the owner intends users to see.
-3. The isolated signing jobs, native verifiers, and protected environment have
-   passed a nonrelease rehearsal without weakening SmartScreen or Gatekeeper.
-4. One signed release candidate passes fresh-download install, launch, update,
-   rollback, uninstall, checksum, provenance, and immutable asset verification.
+3. The isolated signing jobs, native verifiers, and protected environments pass
+   nonpublishing rehearsals without weakening SmartScreen or Gatekeeper.
+4. Set the repository signing modes for one protected release candidate, then
+   run the complete signed tag workflow and fresh-download lifecycle.
+5. Keep signing active for later releases only after that signed candidate
+   passes install, launch, update, rollback, uninstall, checksum, provenance,
+   native verification, and immutable asset verification.
 
 Identity enrollment can take time, but it does not require freezing development.
 Do not describe an artifact as trusted, signed, or notarized until its own native
@@ -76,12 +79,12 @@ gh api repos/blisspixel/quotabot/actions/permissions/selected-actions
 
 Create a protected Windows environment named `release-signing`:
 
-1. Restrict deployments to tag pattern `v*` only.
+1. Restrict deployments to the protected `main` branch and tag pattern `v*`.
 2. Require a maintainer review. If the repository has only one maintainer, keep
    self-review available so a release cannot deadlock. Disable administrator
    bypass when the repository plan and environment controls expose that option.
-3. Keep every signing credential and signing-service identifier in this
-   environment. Only the two isolated Windows signer jobs reference it.
+3. Keep every Azure OIDC and signing-service identifier in this environment.
+   Only the isolated Windows signer jobs reference it.
    Unsigned builds, packaging, attestation, upload, verification, ordinary CI,
    and pull requests do not.
 
@@ -100,6 +103,8 @@ before any environment-bound job starts:
 ```text
 QUOTABOT_WINDOWS_SIGNING_BACKEND=unsigned
 QUOTABOT_MACOS_SIGNING_MODE=unsigned
+QUOTABOT_MACOS_NOTARY_ISSUER_ID
+QUOTABOT_MACOS_NOTARY_KEY_ID
 ```
 
 When preparing the Apple path, set these non-secret repository variables. The
@@ -111,13 +116,10 @@ QUOTABOT_MACOS_DEVELOPER_IDENTITY
 QUOTABOT_MACOS_TEAM_ID
 ```
 
-Set the role-limited notary identifiers as variables in
-`release-signing-macos`:
-
-```text
-QUOTABOT_MACOS_NOTARY_ISSUER_ID
-QUOTABOT_MACOS_NOTARY_KEY_ID
-```
+The notary issuer and key identifiers are non-secret verification policy. They
+must be repository variables because release preflight validates and snapshots
+them before any environment-bound signer starts. The P8 private key remains a
+protected environment secret.
 
 Set only these sensitive values as secrets in `release-signing-macos`:
 
@@ -243,10 +245,45 @@ login and receives:
 
 Do not change the repository mode merely because Azure accepts one signing
 request. First complete a protected nonrelease rehearsal using the same account,
-profile, exact catalog generator, verifier, and fresh-download checks. Confirm
-that every PE has one embedded signature, the timestamp message imprint binds
-the outer signature, and every leaf contains exactly the configured subscriber
-identity plus the common Public Trust and code-signing EKUs.
+profile, exact catalog generator, full-tree delta validator, and verifier.
+The manual `Windows signing rehearsal` workflow builds both unsigned candidates
+outside `release-signing`, enters that protected environment only for OIDC
+authentication and signing, and transfers each signed candidate through a
+one-day handoff. A separate credential-free job re-downloads the original
+unsigned baseline and signed handoff, regenerates the catalog, repeats the delta
+and native signature checks, deletes both local payloads on every exit, retains
+bounded JSON evidence for 14 days, and publishes nothing. Confirm that every
+catalogued PE changes and no other tree entry does, every PE has one embedded
+signature, the timestamp message imprint binds the outer signature, and every
+leaf contains exactly the configured subscriber identity plus the common Public
+Trust and code-signing EKUs.
+
+Dispatch and inspect the protected rehearsal from `main`:
+
+```bash
+main_sha="$(gh api repos/blisspixel/quotabot/commits/main --jq '.sha')"
+gh workflow run windows-signing-rehearsal.yml --ref main
+gh run list --workflow windows-signing-rehearsal.yml --branch main \
+  --event workflow_dispatch --commit "$main_sha" --limit 5
+run_id=123456789  # replace with the approved run id shown above
+gh run watch "$run_id" --exit-status
+gh run view "$run_id" --json workflowName,event,headSha,conclusion \
+  | jq -e --arg sha "$main_sha" \
+    '.workflowName == "Windows signing rehearsal" and .event == "workflow_dispatch" and .headSha == $sha and .conclusion == "success"'
+gh run download "$run_id" \
+  --pattern 'windows-*-signing-rehearsal-evidence' \
+  --dir windows-signing-rehearsal-evidence
+for surface in cli desktop; do
+  evidence="windows-signing-rehearsal-evidence/windows-$surface-signing-rehearsal-evidence"
+  jq -e '.schema == "quotabot.windows-signing-delta.v1" and .ok == true' \
+    "$evidence/signing-delta.json"
+  jq -e '.schema == "quotabot.windows-signature-verification.v2" and .verified == true' \
+    "$evidence/signature-verification.json"
+done
+```
+
+Retain the run URL, commit SHA, approval record, and both evidence artifacts.
+The rehearsal does not replace the later signed release-candidate lifecycle.
 
 Then set:
 
@@ -307,19 +344,49 @@ Owner checklist:
    CLI and desktop candidates outside `release-signing-macos`, signs and verifies
    them inside that protected environment, uploads only bounded receipts and
    digest records, and does not publish either candidate.
-6. Verify the exact fresh-downloaded CLI and desktop artifacts. Both require
+   Dispatch and inspect it with:
+
+   ```bash
+   main_sha="$(gh api repos/blisspixel/quotabot/commits/main --jq '.sha')"
+   gh workflow run macos-signing-rehearsal.yml --ref main
+   gh run list --workflow macos-signing-rehearsal.yml --branch main \
+     --event workflow_dispatch --commit "$main_sha" --limit 5
+   run_id=123456789  # replace with the approved run id shown above
+   gh run watch "$run_id" --exit-status
+   gh run view "$run_id" --json workflowName,event,headSha,conclusion \
+     | jq -e --arg sha "$main_sha" \
+       '.workflowName == "macOS signing rehearsal" and .event == "workflow_dispatch" and .headSha == $sha and .conclusion == "success"'
+   gh run download "$run_id" \
+     --pattern 'macos-*-signing-rehearsal-evidence' \
+     --dir macos-signing-rehearsal-evidence
+   for surface in cli desktop; do
+     evidence="macos-signing-rehearsal-evidence/macos-$surface-signing-rehearsal-evidence"
+     jq -e '.schema == "quotabot.macos-signing-delta.v1" and .ok == true and .operation == "signing"' \
+       "$evidence/signing-delta.json"
+     jq -e '.schema == "quotabot.macos-notarization.v1" and .ok == true and .status == "accepted"' \
+       "$evidence/notarization.json"
+     jq -e '.schema == "quotabot.macos-signature-verification.v1" and .ok == true' \
+       "$evidence/signature-verification.json"
+   done
+   jq -e '.schema == "quotabot.macos-signing-delta.v1" and .ok == true and .operation == "stapling"' \
+     macos-signing-rehearsal-evidence/macos-desktop-signing-rehearsal-evidence/stapling-delta.json
+   ```
+
+   Retain the run URL, commit SHA, approval record, and both evidence artifacts.
+6. Only after that protected rehearsal succeeds, set
+   `QUOTABOT_MACOS_SIGNING_MODE=developer-id`, push the protected release-candidate
+   tag at the current `main` tip, approve both signer jobs, and let the complete
+   release workflow publish the signed candidate.
+7. Verify the exact fresh-downloaded CLI and desktop artifacts. Both require
    `codesign --verify --strict`, `spctl --assess`, and accepted notarization
    evidence. The desktop app additionally requires `codesign --verify --deep
    --strict` and `stapler validate`. A standalone CLI cannot carry a stapled
    ticket and must not be failed merely because no staple exists.
-7. Only after that protected rehearsal succeeds, set
-   `QUOTABOT_MACOS_SIGNING_MODE=developer-id` and run the full signed candidate
-   lifecycle.
 
 The Apple signing key is different from the notarization credential. Keep both
-out of ordinary build and packaging jobs. Do not switch the macOS release mode
-until the signer, notarization, stapling, verification, failure-path tests, and
-fresh-download rehearsal all pass.
+out of ordinary build and packaging jobs. Do not leave the macOS release mode
+active for later releases until the signer, notarization, stapling, verification,
+failure-path tests, and signed fresh-download lifecycle all pass.
 
 ### Implemented macOS release path
 
@@ -377,6 +444,15 @@ unsigned handoffs expire after two days, the protected jobs delete their
 candidates and credentials, and only bounded receipts and digest records are
 retained for 14 days. It is ready to run but has not completed successfully
 because the owner identity and protected environment are not provisioned.
+
+The manual `Windows signing rehearsal` workflow applies the same protected-main,
+nonpublishing, bounded-evidence model to both Windows surfaces. Release and
+rehearsal signers compare the complete signed tree with the trusted unsigned
+tree and exact Azure catalog. Every originally catalogued PE must change, while
+added, removed, out-of-catalog, non-Authenticode, or unchanged entries fail the
+run. A separate credential-free rehearsal verifier and each release packaging
+job independently download the original unsigned handoff and repeat that
+comparison before evidence or a signed package can be accepted.
 
 All macOS build, signing, packaging, verification, and rehearsal jobs use the
 explicit `macos-15` arm64 image and Xcode 16.4 build 16F6. Ordinary CI compiles
