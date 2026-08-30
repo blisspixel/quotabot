@@ -10,13 +10,18 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.12.
-> **Next:** a focused 0.10.x stabilization train, then signed release
-> readiness. No new product breadth. See [roadmap Next](ROADMAP.md#next)
-> and the [documentation index](docs/README.md).
+> **Current release candidate:** 0.10.0-rc.13.
+> **Next:** finish the focused 0.10.x stabilization gate, provision the Windows
+> and Apple publisher identities, and rehearse the repository-ready signing
+> paths on one signed candidate. No new product breadth. See [roadmap
+> Next](ROADMAP.md#next) and the [documentation index](docs/README.md).
 
 Release candidates state Windows and macOS signing mode at the top of the
-GitHub release notes. Owner provisioning lives in
+GitHub release notes. The source workflow now has fail-closed signing paths for
+both platforms, snapshots that policy once per run, and binds final signed-asset
+digests to native fresh-download verification. Published artifacts remain
+unsigned until owner provisioning and a protected native rehearsal succeed.
+Provisioning and activation live in
 [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
 
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
@@ -90,9 +95,10 @@ filters, alerts, analytics, drift recovery, routing receipts, and every command.
 
 ## Supported sources
 
-Subscription sources include Claude, Codex, Antigravity / Gemini, Grok, Cursor,
-Windsurf, Kiro, and optional NVIDIA NIM discovery. Cursor 3.x support passively
-detects an owner-bound local plan, but Cursor does not persist its current quota
+Supported cloud and application sources include Claude, Codex, Antigravity /
+Gemini, Grok, Cursor, Windsurf, Kiro, and optional NVIDIA NIM discovery. Cursor
+3.x support passively detects an owner-bound local plan, but Cursor does not
+persist its current quota
 pools in the supported local state, so quotabot cannot yet route on Cursor
 headroom. Local sources are Ollama, LM Studio, and Lemonade. Manual entries
 remain explicitly self-reported. Exact endpoints, evidence classes, credential
@@ -104,6 +110,11 @@ provider-owned cross-checks are in [Provider CLIs](docs/PROVIDER_CLIS.md).
 Portable desktop bundles are published for Windows, macOS, and Linux alongside
 the CLI. The app is optional. Windows signing and macOS Developer ID signing,
 notarization, and stapling are required 0.10.x release-readiness gates.
+The release workflow now supports Azure Artifact Signing and macOS Developer ID
+modes for both the CLI and desktop assets. Those modes fail closed when required
+identity, credential, signature, notarization, staple, or verification evidence
+is missing. They remain inactive until owner provisioning and a successful
+protected rehearsal; each release's notes state the mode used by its artifacts.
 The grouped Settings dialog includes the installed build and an explicit
 **Check for updates** action. It contacts GitHub only after that action, shows
 the latest candidate and latest stable release separately, and opens the chosen
@@ -146,8 +157,12 @@ adapter. The complete promises and verification methods are in
 
 The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
 passed its 14-asset audit and cross-platform install and upgrade matrix. Its
-Windows and macOS artifacts remain unsigned, so 0.10.x must repeat that evidence
-with platform-signed artifacts before 1.0. See the [release
+Windows and macOS artifacts remain unsigned. The
+[0.10.0-rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
+also passed cross-platform install, upgrade, source-setup, and desktop-run
+checks. The repository signing paths are ready, but current published Windows
+and macOS artifacts remain unsigned, so 0.10.x must repeat that evidence with
+platform-signed artifacts before 1.0. See the [release
 evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),
 [contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).

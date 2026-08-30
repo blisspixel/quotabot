@@ -26,6 +26,14 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      windows_signing_backend: ${{ steps.signing_modes.outputs.windows_signing_backend }}
+      windows_subscriber_eku: ${{ steps.signing_modes.outputs.windows_subscriber_eku }}
+      macos_signing_mode: ${{ steps.signing_modes.outputs.macos_signing_mode }}
+      macos_developer_identity: ${{ steps.signing_modes.outputs.macos_developer_identity }}
+      macos_team_id: ${{ steps.signing_modes.outputs.macos_team_id }}
+      macos_notary_issuer_id: ${{ steps.signing_modes.outputs.macos_notary_issuer_id }}
+      macos_notary_key_id: ${{ steps.signing_modes.outputs.macos_notary_key_id }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -46,18 +54,95 @@ jobs:
       - name: Verify tag matches the source release version
         run: python tools/check_release_version.py --tag "$GITHUB_REF_NAME"
       - name: Validate explicit native signing modes
+        id: signing_modes
         env:
           WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
           MACOS_SIGNING_MODE: ${{ vars.QUOTABOT_MACOS_SIGNING_MODE }}
+          MACOS_DEVELOPER_IDENTITY: ${{ vars.QUOTABOT_MACOS_DEVELOPER_IDENTITY }}
+          MACOS_NOTARY_ISSUER_ID: ${{ vars.QUOTABOT_MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ vars.QUOTABOT_MACOS_NOTARY_KEY_ID }}
+          MACOS_TEAM_ID: ${{ vars.QUOTABOT_MACOS_TEAM_ID }}
         run: |
-          case "$WINDOWS_SIGNING_BACKEND" in
-            unsigned|azure-artifact-signing) ;;
-            *) echo 'QUOTABOT_WINDOWS_SIGNING_BACKEND must be unsigned or azure-artifact-signing.' >&2; exit 1 ;;
-          esac
-          case "$MACOS_SIGNING_MODE" in
-            unsigned) ;;
-            *) echo 'QUOTABOT_MACOS_SIGNING_MODE must be unsigned until the Developer ID path is enabled.' >&2; exit 1 ;;
-          esac
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          windows_backend = os.environ.get("WINDOWS_SIGNING_BACKEND", "")
+          windows_subscriber_eku = os.environ.get("WINDOWS_SUBSCRIBER_EKU", "")
+          macos_mode = os.environ.get("MACOS_SIGNING_MODE", "")
+          macos_identity = os.environ.get("MACOS_DEVELOPER_IDENTITY", "")
+          macos_team_id = os.environ.get("MACOS_TEAM_ID", "")
+          macos_notary_issuer_id = os.environ.get("MACOS_NOTARY_ISSUER_ID", "")
+          macos_notary_key_id = os.environ.get("MACOS_NOTARY_KEY_ID", "")
+
+          if windows_backend not in {"unsigned", "azure-artifact-signing"}:
+              raise SystemExit(
+                  "QUOTABOT_WINDOWS_SIGNING_BACKEND must be unsigned or "
+                  "azure-artifact-signing."
+              )
+          if windows_backend == "azure-artifact-signing":
+              if (
+                  re.fullmatch(
+                      r"1\.3\.6\.1\.4\.1\.311\.97\.(?:0|[1-9][0-9]*)"
+                      r"(?:\.(?:0|[1-9][0-9]*))*",
+                      windows_subscriber_eku,
+                  )
+                  is None
+                  or windows_subscriber_eku == "1.3.6.1.4.1.311.97.1.0"
+              ):
+                  raise SystemExit("QUOTABOT_WINDOWS_SUBSCRIBER_EKU is invalid.")
+          else:
+              windows_subscriber_eku = ""
+
+          if macos_mode not in {"unsigned", "developer-id"}:
+              raise SystemExit(
+                  "QUOTABOT_MACOS_SIGNING_MODE must be unsigned or developer-id."
+              )
+          if macos_mode == "developer-id":
+              if (
+                  not macos_identity.startswith("Developer ID Application: ")
+                  or len(macos_identity) > 256
+                  or any(ord(character) < 32 or ord(character) == 127 for character in macos_identity)
+              ):
+                  raise SystemExit("QUOTABOT_MACOS_DEVELOPER_IDENTITY is invalid.")
+              if re.fullmatch(r"[A-Z0-9]{10}", macos_team_id) is None:
+                  raise SystemExit("QUOTABOT_MACOS_TEAM_ID is invalid.")
+              if not macos_identity.endswith(f" ({macos_team_id})"):
+                  raise SystemExit(
+                      "The macOS Developer ID identity does not match its team id."
+                  )
+              if (
+                  re.fullmatch(
+                      r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+                      r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}",
+                      macos_notary_issuer_id,
+                  )
+                  is None
+              ):
+                  raise SystemExit("QUOTABOT_MACOS_NOTARY_ISSUER_ID is invalid.")
+              if re.fullmatch(r"[A-Z0-9]{10}", macos_notary_key_id) is None:
+                  raise SystemExit("QUOTABOT_MACOS_NOTARY_KEY_ID is invalid.")
+          else:
+              macos_identity = ""
+              macos_team_id = ""
+              macos_notary_issuer_id = ""
+              macos_notary_key_id = ""
+
+          outputs = {
+              "windows_signing_backend": windows_backend,
+              "windows_subscriber_eku": windows_subscriber_eku,
+              "macos_signing_mode": macos_mode,
+              "macos_developer_identity": macos_identity,
+              "macos_team_id": macos_team_id,
+              "macos_notary_issuer_id": macos_notary_issuer_id,
+              "macos_notary_key_id": macos_notary_key_id,
+          }
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              for key, value in outputs.items():
+                  handle.write(f"{key}={value}\n")
+          PY
 
   quality-gate:
     needs: preflight
@@ -89,6 +174,13 @@ jobs:
     timeout-minutes: 10
     outputs:
       release_id: ${{ steps.ensure_release.outputs.release_id }}
+      windows_signing_backend: ${{ steps.ensure_release.outputs.windows_signing_backend }}
+      windows_subscriber_eku: ${{ steps.ensure_release.outputs.windows_subscriber_eku }}
+      macos_signing_mode: ${{ steps.ensure_release.outputs.macos_signing_mode }}
+      macos_developer_identity: ${{ steps.ensure_release.outputs.macos_developer_identity }}
+      macos_team_id: ${{ steps.ensure_release.outputs.macos_team_id }}
+      macos_notary_issuer_id: ${{ steps.ensure_release.outputs.macos_notary_issuer_id }}
+      macos_notary_key_id: ${{ steps.ensure_release.outputs.macos_notary_key_id }}
     permissions:
       contents: write
     steps:
@@ -99,8 +191,13 @@ jobs:
         id: ensure_release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
-          MACOS_SIGNING_MODE: ${{ vars.QUOTABOT_MACOS_SIGNING_MODE }}
+          WINDOWS_SIGNING_BACKEND: ${{ needs.preflight.outputs.windows_signing_backend }}
+          WINDOWS_SUBSCRIBER_EKU: ${{ needs.preflight.outputs.windows_subscriber_eku }}
+          MACOS_SIGNING_MODE: ${{ needs.preflight.outputs.macos_signing_mode }}
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.preflight.outputs.macos_developer_identity }}
+          MACOS_TEAM_ID: ${{ needs.preflight.outputs.macos_team_id }}
+          MACOS_NOTARY_ISSUER_ID: ${{ needs.preflight.outputs.macos_notary_issuer_id }}
+          MACOS_NOTARY_KEY_ID: ${{ needs.preflight.outputs.macos_notary_key_id }}
         run: |
           resolve_remote_tag_commit() {
             local object_type object_sha
@@ -138,7 +235,11 @@ jobs:
           else
             windows_status='Windows: unsigned transition artifact. SmartScreen publisher identity is not established.'
           fi
-          macos_status='macOS: unsigned transition artifact. Developer ID and notarization are not established.'
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            macos_status='macOS: Developer ID signed, hardened, notarized, stapled where supported, and Gatekeeper verified.'
+          else
+            macos_status='macOS: unsigned transition artifact. Developer ID and notarization are not established.'
+          fi
           signing_note="Native signing status: $windows_status $macos_status Checksums and GitHub build provenance remain required. Do not bypass SmartScreen or Gatekeeper."
           release_version="${GITHUB_REF_NAME#v}"
           changelog_notes="$(awk -v version="$release_version" '
@@ -207,6 +308,13 @@ jobs:
             ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
           esac
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "windows_signing_backend=$WINDOWS_SIGNING_BACKEND" >> "$GITHUB_OUTPUT"
+          echo "windows_subscriber_eku=$WINDOWS_SUBSCRIBER_EKU" >> "$GITHUB_OUTPUT"
+          echo "macos_signing_mode=$MACOS_SIGNING_MODE" >> "$GITHUB_OUTPUT"
+          echo "macos_developer_identity=$MACOS_DEVELOPER_IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "macos_team_id=$MACOS_TEAM_ID" >> "$GITHUB_OUTPUT"
+          echo "macos_notary_issuer_id=$MACOS_NOTARY_ISSUER_ID" >> "$GITHUB_OUTPUT"
+          echo "macos_notary_key_id=$MACOS_NOTARY_KEY_ID" >> "$GITHUB_OUTPUT"
 
   build:
     needs: create-release
@@ -224,9 +332,6 @@ jobs:
           - os: ubuntu-24.04-arm
             script: bash tools/package-cli.sh
             archive: release/quotabot-linux-arm64.tar.gz
-          - os: macos-latest
-            script: bash tools/package-cli.sh
-            archive: release/quotabot-darwin-arm64.tar.gz
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -264,6 +369,341 @@ jobs:
             "${{ matrix.archive }}.sha256" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
+
+  build-macos-cli-unsigned:
+    needs: create-release
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+        with:
+          sdk: '3.12.2'
+      - name: Resolve collector dependencies
+        working-directory: collector
+        run: dart pub get --enforce-lockfile
+      - name: Build and inventory the unsigned macOS CLI candidate
+        run: |
+          set -euo pipefail
+          bash tools/package-cli.sh --no-archive
+          source='collector/build/quotabot_cli_release/bundle'
+          stage="$RUNNER_TEMP/quotabot-macos-cli-unsigned"
+          candidate="$stage/candidate"
+          mkdir -p "$stage"
+          ditto "$source" "$candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 --json \
+            "$candidate" > "$stage/unsigned-inventory.json"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$stage/unsigned-inventory.json" \
+            --output "$stage/signing-plan.json" \
+            --surface cli --architecture arm64 "$candidate"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$candidate" "$stage/candidate.zip"
+          rm -rf "$candidate"
+      - name: Preserve the immutable unsigned macOS CLI candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-cli-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-macos-cli-unsigned
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  sign-macos-cli:
+    needs: [create-release, build-macos-cli-unsigned]
+    if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    environment: release-signing-macos
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the immutable unsigned macOS CLI candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-cli-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-macos-cli-signing
+      - name: Validate, sign, notarize, and verify the macOS CLI candidate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.QUOTABOT_MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.QUOTABOT_MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.create-release.outputs.macos_developer_identity }}
+          MACOS_NOTARY_ISSUER_ID: ${{ needs.create-release.outputs.macos_notary_issuer_id }}
+          MACOS_NOTARY_KEY_ID: ${{ needs.create-release.outputs.macos_notary_key_id }}
+          MACOS_NOTARY_KEY_P8: ${{ secrets.QUOTABOT_MACOS_NOTARY_KEY_P8 }}
+          MACOS_TEAM_ID: ${{ needs.create-release.outputs.macos_team_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          stage="$RUNNER_TEMP/quotabot-macos-cli-signing"
+          candidate="$stage/candidate"
+          unsigned_manifest="$stage/unsigned-inventory.json"
+          plan="$stage/signing-plan.json"
+          validated_plan="$stage/validated-signing-plan.json"
+          keychain="$RUNNER_TEMP/quotabot-cli-signing.keychain-db"
+          certificate="$stage/developer-id.p12"
+          notary_key="$stage/notary-key.p8"
+          submission="$stage/notary-submission.zip"
+          submission_check="$stage/notary-submission-expanded"
+          submission_json="$stage/notary-submission.json"
+          notary_log="$stage/notary-log.json"
+          keychain_password="$(openssl rand -hex 32)"
+          cleanup() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -rf "$submission_check"
+            rm -f "$certificate" "$notary_key" "$submission" \
+              "$submission_json" "$notary_log"
+          }
+          trap cleanup EXIT
+
+          [[ -f "$stage/candidate.zip" ]] || {
+            echo 'The immutable macOS CLI handoff archive is missing.' >&2
+            exit 1
+          }
+          ditto -x -k "$stage/candidate.zip" "$stage"
+          rm -f "$stage/candidate.zip"
+
+          [[ -n "$MACOS_CERTIFICATE_P12_BASE64" && \
+             -n "$MACOS_CERTIFICATE_PASSWORD" && \
+             -n "$MACOS_DEVELOPER_IDENTITY" && \
+             -n "$MACOS_NOTARY_ISSUER_ID" && \
+             -n "$MACOS_NOTARY_KEY_ID" && \
+             -n "$MACOS_NOTARY_KEY_P8" && \
+             -n "$MACOS_TEAM_ID" ]] || {
+            echo 'The protected macOS signing environment is incomplete.' >&2
+            exit 1
+          }
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 \
+            --expect-manifest "$unsigned_manifest" "$candidate"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$unsigned_manifest" --output "$validated_plan" \
+            --surface cli --architecture arm64 "$candidate"
+          cmp -s "$plan" "$validated_plan" || {
+            echo 'The downloaded macOS CLI signing plan changed.' >&2
+            exit 1
+          }
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" \
+            | openssl base64 -d -A -out "$certificate"
+          printf '%s' "$MACOS_NOTARY_KEY_P8" > "$notary_key"
+          [[ -s "$certificate" && $(stat -f '%z' "$certificate") -le 262144 ]]
+          [[ -s "$notary_key" && $(stat -f '%z' "$notary_key") -le 16384 ]]
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" >/dev/null
+
+          python tools/sign_macos_candidate.py \
+            --manifest "$unsigned_manifest" --plan "$plan" \
+            --identity "$MACOS_DEVELOPER_IDENTITY" --team-id "$MACOS_TEAM_ID" \
+            --keychain "$keychain" --receipt "$stage/signing.json" "$candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 --json \
+            "$candidate" > "$stage/signed-inventory.json"
+          python tools/validate_macos_signing_delta.py \
+            --before "$unsigned_manifest" --after "$stage/signed-inventory.json" \
+            --plan "$plan" --operation signing \
+            --receipt "$stage/signing-delta.json"
+          ditto -c -k --sequesterRsrc --keepParent "$candidate" "$submission"
+          mkdir "$submission_check"
+          ditto -x -k "$submission" "$submission_check"
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 \
+            --expect-manifest "$stage/signed-inventory.json" \
+            "$submission_check/candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 --json \
+            "$submission_check/candidate" > "$stage/submission-inventory.json"
+          rm -rf "$submission_check"
+          if ! xcrun notarytool submit "$submission" --wait --output-format json \
+            --key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" > "$submission_json"; then
+            echo 'Apple did not accept the macOS CLI notarization request.' >&2
+            exit 1
+          fi
+          submission_id="$(plutil -extract id raw -o - "$submission_json")"
+          [[ "$submission_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || {
+            echo 'Apple returned an invalid notarization submission id.' >&2
+            exit 1
+          }
+          xcrun notarytool log "$submission_id" --output-format json \
+            --key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" > "$notary_log"
+          python tools/record_macos_notarization.py \
+            --submission "$submission_json" --log "$notary_log" \
+            --artifact "$submission" --inventory "$stage/submission-inventory.json" \
+            --signing-receipt "$stage/signing.json" \
+            --surface cli --receipt "$stage/notarization.json"
+          cp "$stage/signed-inventory.json" "$stage/inventory.json"
+          python tools/verify_macos_signatures.py \
+            --manifest "$stage/inventory.json" \
+            --signing-plan "$plan" \
+            --notarization-receipt "$stage/notarization.json" \
+            --surface cli --architecture arm64 \
+            --expected-identity "$MACOS_DEVELOPER_IDENTITY" \
+            --expected-team-id "$MACOS_TEAM_ID" \
+            --receipt "$stage/signature-verification.json" "$candidate"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$candidate" "$stage/candidate.zip"
+          rm -rf "$candidate"
+          cleanup
+          trap - EXIT
+      - name: Preserve the immutable signed macOS CLI candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-cli-signed-candidate
+          path: ${{ runner.temp }}/quotabot-macos-cli-signing
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  package-macos-cli:
+    needs: [create-release, build-macos-cli-unsigned, sign-macos-cli]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.build-macos-cli-unsigned.result == 'success' &&
+          ((needs.create-release.outputs.macos_signing_mode == 'unsigned' &&
+            needs.sign-macos-cli.result == 'skipped') ||
+           (needs.create-release.outputs.macos_signing_mode == 'developer-id' &&
+            needs.sign-macos-cli.result == 'success')) }}
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the signed macOS CLI candidate
+        if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-cli-signed-candidate
+          path: ${{ runner.temp }}/quotabot-macos-cli-package
+      - name: Download the explicitly unsigned macOS CLI candidate
+        if: needs.create-release.outputs.macos_signing_mode == 'unsigned'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-cli-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-macos-cli-package
+      - name: Revalidate and package the selected macOS CLI candidate
+        env:
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.create-release.outputs.macos_developer_identity }}
+          MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
+          MACOS_TEAM_ID: ${{ needs.create-release.outputs.macos_team_id }}
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/quotabot-macos-cli-package"
+          candidate="$stage/candidate"
+          [[ -f "$stage/candidate.zip" ]] || {
+            echo 'The selected macOS CLI handoff archive is missing.' >&2
+            exit 1
+          }
+          ditto -x -k "$stage/candidate.zip" "$stage"
+          rm -f "$stage/candidate.zip"
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            manifest="$stage/inventory.json"
+          else
+            manifest="$stage/unsigned-inventory.json"
+          fi
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 \
+            --expect-manifest "$manifest" "$candidate"
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            python tools/verify_macos_signatures.py \
+              --manifest "$manifest" \
+              --signing-plan "$stage/signing-plan.json" \
+              --notarization-receipt "$stage/notarization.json" \
+              --surface cli --architecture arm64 \
+              --expected-identity "$MACOS_DEVELOPER_IDENTITY" \
+              --expected-team-id "$MACOS_TEAM_ID" \
+              --receipt "$stage/packaging-signature-verification.json" \
+              "$candidate"
+          fi
+          destination='collector/build/quotabot_cli_release/bundle'
+          mkdir -p "$(dirname "$destination")"
+          [[ ! -e "$destination" ]] || {
+            echo 'Package destination unexpectedly exists.' >&2
+            exit 1
+          }
+          ditto "$candidate" "$destination"
+          bash tools/package-cli.sh --package-only
+      - name: Verify and bind the macOS CLI archive
+        env:
+          MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
+        run: |
+          set -euo pipefail
+          python tools/verify_cli_archive.py release/quotabot-darwin-arm64.tar.gz
+          stage="$RUNNER_TEMP/quotabot-macos-cli-package"
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            manifest="$stage/inventory.json"
+          else
+            manifest="$stage/unsigned-inventory.json"
+          fi
+          expanded="$RUNNER_TEMP/quotabot-macos-cli-expanded"
+          mkdir -p "$expanded"
+          tar -xzf release/quotabot-darwin-arm64.tar.gz -C "$expanded"
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture arm64 \
+            --expect-manifest "$manifest" "$expanded"
+      - name: Preserve the macOS CLI signing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-cli-native-signing-inventory
+          path: ${{ runner.temp }}/quotabot-macos-cli-package/*.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Attest macOS CLI archive build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release/quotabot-darwin-arm64.tar.gz
+      - name: Upload the macOS CLI asset to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            release/quotabot-darwin-arm64.tar.gz \
+            release/quotabot-darwin-arm64.tar.gz.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber
 
   build-windows-cli-unsigned:
     needs: create-release
@@ -311,8 +751,8 @@ jobs:
           retention-days: 7
 
   sign-windows-cli:
-    needs: build-windows-cli-unsigned
-    if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+    needs: [create-release, build-windows-cli-unsigned]
+    if: needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
     runs-on: windows-latest
     environment: release-signing
     timeout-minutes: 20
@@ -382,7 +822,7 @@ jobs:
       - name: Verify the signed Windows CLI candidate
         shell: pwsh
         env:
-          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.create-release.outputs.windows_subscriber_eku }}
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-signing'
           $candidate = Join-Path $stage 'candidate'
@@ -409,9 +849,9 @@ jobs:
       ${{ always() &&
           needs.create-release.result == 'success' &&
           needs.build-windows-cli-unsigned.result == 'success' &&
-          ((vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned' &&
+          ((needs.create-release.outputs.windows_signing_backend == 'unsigned' &&
             needs.sign-windows-cli.result == 'skipped') ||
-           (vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing' &&
+           (needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing' &&
             needs.sign-windows-cli.result == 'success')) }}
     runs-on: windows-latest
     timeout-minutes: 20
@@ -427,13 +867,13 @@ jobs:
         with:
           python-version: '3.13'
       - name: Download the signed Windows CLI candidate
-        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        if: needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-cli-signed-candidate
           path: ${{ runner.temp }}/quotabot-windows-cli-package
       - name: Download the explicitly unsigned Windows CLI candidate
-        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned'
+        if: needs.create-release.outputs.windows_signing_backend == 'unsigned'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-cli-unsigned-candidate
@@ -441,8 +881,8 @@ jobs:
       - name: Revalidate and package the selected Windows CLI candidate
         shell: pwsh
         env:
-          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
-          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.create-release.outputs.windows_subscriber_eku }}
+          WINDOWS_SIGNING_BACKEND: ${{ needs.create-release.outputs.windows_signing_backend }}
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-package'
           $candidate = Join-Path $stage 'candidate'
@@ -468,7 +908,7 @@ jobs:
       - name: Bind the Windows CLI archive to its native inventory
         shell: pwsh
         env:
-          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          WINDOWS_SIGNING_BACKEND: ${{ needs.create-release.outputs.windows_signing_backend }}
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-package'
           $manifest = if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
@@ -488,7 +928,7 @@ jobs:
           path: |
             ${{ runner.temp }}/quotabot-windows-cli-package/*.json
             ${{ runner.temp }}/quotabot-windows-cli-package/*.txt
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
       - name: Attest Windows CLI archive build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -506,11 +946,12 @@ jobs:
             --clobber
 
   verify-cli-release:
-    needs: [create-release, build, package-windows-cli]
+    needs: [create-release, build, package-macos-cli, package-windows-cli]
     if: >-
       ${{ always() &&
           needs.create-release.result == 'success' &&
           needs.build.result == 'success' &&
+          needs.package-macos-cli.result == 'success' &&
           needs.package-windows-cli.result == 'success' }}
     strategy:
       fail-fast: false
@@ -518,7 +959,7 @@ jobs:
         include:
           - os: windows-latest
             archive: quotabot-windows-x64.zip
-          - os: macos-latest
+          - os: macos-15
             archive: quotabot-darwin-arm64.tar.gz
           - os: ubuntu-latest
             archive: quotabot-linux-x64.tar.gz
@@ -537,9 +978,22 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        if: runner.os == 'macOS'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+        run: |
+          bash tools/require-macos-toolchain.sh
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
+      - name: Download the accepted macOS CLI notarization evidence
+        if: runner.os == 'macOS' && needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-cli-native-signing-inventory
+          path: ${{ runner.temp }}/quotabot-macos-cli-draft-evidence
       - name: Download the draft CLI asset and checksum
         shell: bash
         env:
@@ -584,7 +1038,7 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
-          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.create-release.outputs.windows_subscriber_eku }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-cli-release\${{ matrix.archive }}'
           $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-cli-expanded'
@@ -595,7 +1049,7 @@ jobs:
           $inventory = python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 --json $expanded
           if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI native inventory failed with exit code $LASTEXITCODE" }
           Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
-          if ('${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}' -eq 'azure-artifact-signing') {
+          if ('${{ needs.create-release.outputs.windows_signing_backend }}' -eq 'azure-artifact-signing') {
             python tools/verify_windows_signatures.py --manifest $manifest --surface cli --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $expanded
             if ($LASTEXITCODE -ne 0) { throw "Downloaded CLI signature verification failed with exit code $LASTEXITCODE" }
           }
@@ -609,15 +1063,22 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $doctor.schema -ne 'quotabot.v1') {
             throw 'Downloaded CLI doctor check failed.'
           }
+          if ('${{ needs.create-release.outputs.windows_signing_backend }}' -eq 'azure-artifact-signing') {
+            $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+            Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-draft-archive.sha256') -Value "$digest  ${{ matrix.archive }}" -Encoding ascii
+            Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'quotabot-windows-cli-draft-signing-mode.txt') -Value 'azure-artifact-signing' -Encoding ascii
+          }
       - name: Preserve downloaded Windows CLI signature evidence
-        if: always() && runner.os == 'Windows' && vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        if: always() && runner.os == 'Windows' && needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-cli-draft-signature-verification
           path: |
             ${{ runner.temp }}/quotabot-windows-cli-draft-inventory.json
             ${{ runner.temp }}/quotabot-windows-cli-draft-signature-verification.json
-          if-no-files-found: warn
+            ${{ runner.temp }}/quotabot-windows-cli-draft-archive.sha256
+            ${{ runner.temp }}/quotabot-windows-cli-draft-signing-mode.txt
+          if-no-files-found: error
           retention-days: 14
       - name: Exercise the downloaded macOS or Linux CLI
         if: runner.os != 'Windows'
@@ -625,12 +1086,37 @@ jobs:
         env:
           GH_TOKEN: ''
           GITHUB_TOKEN: ''
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.create-release.outputs.macos_developer_identity }}
+          MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
+          MACOS_TEAM_ID: ${{ needs.create-release.outputs.macos_team_id }}
         run: |
+          set -euo pipefail
           archive="$RUNNER_TEMP/quotabot-cli-release/${{ matrix.archive }}"
           expanded="$RUNNER_TEMP/quotabot-cli-expanded"
           export XDG_CONFIG_HOME="$RUNNER_TEMP/quotabot-cli-state"
           mkdir -p "$expanded" "$XDG_CONFIG_HOME"
           tar -xzf "$archive" -C "$expanded"
+          if [ "$RUNNER_OS" = macOS ]; then
+            manifest="$RUNNER_TEMP/quotabot-macos-cli-draft-inventory.json"
+            python tools/native_code_inventory.py \
+              --platform macos --surface cli --architecture arm64 --json \
+              "$expanded" > "$manifest"
+            if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+              evidence="$RUNNER_TEMP/quotabot-macos-cli-draft-evidence"
+              python tools/native_code_inventory.py \
+                --platform macos --surface cli --architecture arm64 \
+                --expect-manifest "$evidence/inventory.json" "$expanded"
+              python tools/verify_macos_signatures.py \
+                --manifest "$manifest" \
+                --signing-plan "$evidence/signing-plan.json" \
+                --notarization-receipt "$evidence/notarization.json" \
+                --surface cli --architecture arm64 \
+                --expected-identity "$MACOS_DEVELOPER_IDENTITY" \
+                --expected-team-id "$MACOS_TEAM_ID" \
+                --receipt "$RUNNER_TEMP/quotabot-macos-cli-draft-signature-verification.json" \
+                "$expanded"
+            fi
+          fi
           executable="$expanded/bin/quotabot"
           test -x "$executable"
           expected_version="quotabot ${GITHUB_REF_NAME#v}"
@@ -641,6 +1127,376 @@ jobs:
           }
           "$executable" doctor --json \
             | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+          if [ "$RUNNER_OS" = macOS ] && [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            digest="$(shasum -a 256 "$archive" | awk '{print $1}')"
+            [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+            printf '%s  %s\n' "$digest" "${{ matrix.archive }}" \
+              > "$RUNNER_TEMP/quotabot-macos-cli-draft-archive.sha256"
+            printf '%s\n' "$MACOS_SIGNING_MODE" \
+              > "$RUNNER_TEMP/quotabot-macos-cli-draft-signing-mode.txt"
+          fi
+      - name: Preserve downloaded macOS CLI signature evidence
+        if: always() && runner.os == 'macOS' && needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-cli-draft-signature-verification
+          path: |
+            ${{ runner.temp }}/quotabot-macos-cli-draft-*.json
+            ${{ runner.temp }}/quotabot-macos-cli-draft-archive.sha256
+            ${{ runner.temp }}/quotabot-macos-cli-draft-signing-mode.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  build-macos-desktop-unsigned:
+    needs: create-release
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+      - name: Resolve desktop dependencies
+        working-directory: app
+        run: flutter pub get --enforce-lockfile
+      - name: Build and inventory the unsigned macOS desktop candidate
+        run: |
+          set -euo pipefail
+          bash tools/package-macos.sh --no-archive
+          source='app/build/macos/Build/Products/Release/quotabot.app'
+          stage="$RUNNER_TEMP/quotabot-macos-desktop-unsigned"
+          candidate="$stage/candidate"
+          mkdir -p "$candidate"
+          ditto "$source" "$candidate/quotabot.app"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 --json \
+            "$candidate" > "$stage/unsigned-inventory.json"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$stage/unsigned-inventory.json" \
+            --output "$stage/signing-plan.json" \
+            --surface desktop --architecture arm64 "$candidate"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$candidate" "$stage/candidate.zip"
+          rm -rf "$candidate"
+      - name: Preserve the immutable unsigned macOS desktop candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-desktop-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-macos-desktop-unsigned
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  sign-macos-desktop:
+    needs: [create-release, build-macos-desktop-unsigned]
+    if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    environment: release-signing-macos
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the immutable unsigned macOS desktop candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-desktop-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-macos-desktop-signing
+      - name: Validate, sign, notarize, staple, and verify the macOS desktop candidate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.QUOTABOT_MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.QUOTABOT_MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.create-release.outputs.macos_developer_identity }}
+          MACOS_NOTARY_ISSUER_ID: ${{ needs.create-release.outputs.macos_notary_issuer_id }}
+          MACOS_NOTARY_KEY_ID: ${{ needs.create-release.outputs.macos_notary_key_id }}
+          MACOS_NOTARY_KEY_P8: ${{ secrets.QUOTABOT_MACOS_NOTARY_KEY_P8 }}
+          MACOS_TEAM_ID: ${{ needs.create-release.outputs.macos_team_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          stage="$RUNNER_TEMP/quotabot-macos-desktop-signing"
+          candidate="$stage/candidate"
+          unsigned_manifest="$stage/unsigned-inventory.json"
+          plan="$stage/signing-plan.json"
+          validated_plan="$stage/validated-signing-plan.json"
+          keychain="$RUNNER_TEMP/quotabot-desktop-signing.keychain-db"
+          certificate="$stage/developer-id.p12"
+          notary_key="$stage/notary-key.p8"
+          submission="$stage/notary-submission.zip"
+          submission_check="$stage/notary-submission-expanded"
+          submission_json="$stage/notary-submission.json"
+          notary_log="$stage/notary-log.json"
+          keychain_password="$(openssl rand -hex 32)"
+          cleanup() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -rf "$submission_check"
+            rm -f "$certificate" "$notary_key" "$submission" \
+              "$submission_json" "$notary_log"
+          }
+          trap cleanup EXIT
+
+          [[ -f "$stage/candidate.zip" ]] || {
+            echo 'The immutable macOS desktop handoff archive is missing.' >&2
+            exit 1
+          }
+          ditto -x -k "$stage/candidate.zip" "$stage"
+          rm -f "$stage/candidate.zip"
+          [[ -n "$MACOS_CERTIFICATE_P12_BASE64" && \
+             -n "$MACOS_CERTIFICATE_PASSWORD" && \
+             -n "$MACOS_DEVELOPER_IDENTITY" && \
+             -n "$MACOS_NOTARY_ISSUER_ID" && \
+             -n "$MACOS_NOTARY_KEY_ID" && \
+             -n "$MACOS_NOTARY_KEY_P8" && \
+             -n "$MACOS_TEAM_ID" ]] || {
+            echo 'The protected macOS signing environment is incomplete.' >&2
+            exit 1
+          }
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 \
+            --expect-manifest "$unsigned_manifest" "$candidate"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$unsigned_manifest" --output "$validated_plan" \
+            --surface desktop --architecture arm64 "$candidate"
+          cmp -s "$plan" "$validated_plan" || {
+            echo 'The downloaded macOS desktop signing plan changed.' >&2
+            exit 1
+          }
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" \
+            | openssl base64 -d -A -out "$certificate"
+          printf '%s' "$MACOS_NOTARY_KEY_P8" > "$notary_key"
+          [[ -s "$certificate" && $(stat -f '%z' "$certificate") -le 262144 ]]
+          [[ -s "$notary_key" && $(stat -f '%z' "$notary_key") -le 16384 ]]
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" >/dev/null
+
+          python tools/sign_macos_candidate.py \
+            --manifest "$unsigned_manifest" --plan "$plan" \
+            --identity "$MACOS_DEVELOPER_IDENTITY" --team-id "$MACOS_TEAM_ID" \
+            --keychain "$keychain" \
+            --entitlements app/macos/Runner/DeveloperID.entitlements \
+            --receipt "$stage/signing.json" "$candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 --json \
+            "$candidate" > "$stage/signed-inventory.json"
+          python tools/validate_macos_signing_delta.py \
+            --before "$unsigned_manifest" --after "$stage/signed-inventory.json" \
+            --plan "$plan" --operation signing \
+            --receipt "$stage/signing-delta.json"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$candidate/quotabot.app" "$submission"
+          mkdir "$submission_check"
+          ditto -x -k "$submission" "$submission_check"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 \
+            --expect-manifest "$stage/signed-inventory.json" "$submission_check"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 --json \
+            "$submission_check" > "$stage/submission-inventory.json"
+          rm -rf "$submission_check"
+          if ! xcrun notarytool submit "$submission" --wait --output-format json \
+            --key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" > "$submission_json"; then
+            echo 'Apple did not accept the macOS desktop notarization request.' >&2
+            exit 1
+          fi
+          submission_id="$(plutil -extract id raw -o - "$submission_json")"
+          [[ "$submission_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || {
+            echo 'Apple returned an invalid notarization submission id.' >&2
+            exit 1
+          }
+          xcrun notarytool log "$submission_id" --output-format json \
+            --key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" > "$notary_log"
+          python tools/record_macos_notarization.py \
+            --submission "$submission_json" --log "$notary_log" \
+            --artifact "$submission" --inventory "$stage/submission-inventory.json" \
+            --signing-receipt "$stage/signing.json" \
+            --surface desktop --receipt "$stage/notarization.json"
+          xcrun stapler staple "$candidate/quotabot.app"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 --json \
+            "$candidate" > "$stage/inventory.json"
+          python tools/validate_macos_signing_delta.py \
+            --before "$stage/signed-inventory.json" --after "$stage/inventory.json" \
+            --plan "$plan" --operation stapling \
+            --receipt "$stage/stapling-delta.json"
+          python tools/verify_macos_signatures.py \
+            --manifest "$stage/inventory.json" \
+            --signing-plan "$plan" \
+            --notarization-receipt "$stage/notarization.json" \
+            --stapling-delta-receipt "$stage/stapling-delta.json" \
+            --surface desktop --architecture arm64 \
+            --expected-identity "$MACOS_DEVELOPER_IDENTITY" \
+            --expected-team-id "$MACOS_TEAM_ID" \
+            --expected-entitlements app/macos/Runner/DeveloperID.entitlements \
+            --receipt "$stage/signature-verification.json" "$candidate"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$candidate" "$stage/candidate.zip"
+          rm -rf "$candidate"
+          cleanup
+          trap - EXIT
+      - name: Preserve the immutable signed macOS desktop candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-desktop-signed-candidate
+          path: ${{ runner.temp }}/quotabot-macos-desktop-signing
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+
+  package-macos-desktop:
+    needs: [create-release, build-macos-desktop-unsigned, sign-macos-desktop]
+    if: >-
+      ${{ always() &&
+          needs.create-release.result == 'success' &&
+          needs.build-macos-desktop-unsigned.result == 'success' &&
+          ((needs.create-release.outputs.macos_signing_mode == 'unsigned' &&
+            needs.sign-macos-desktop.result == 'skipped') ||
+           (needs.create-release.outputs.macos_signing_mode == 'developer-id' &&
+            needs.sign-macos-desktop.result == 'success')) }}
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the signed macOS desktop candidate
+        if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-desktop-signed-candidate
+          path: ${{ runner.temp }}/quotabot-macos-desktop-package
+      - name: Download the explicitly unsigned macOS desktop candidate
+        if: needs.create-release.outputs.macos_signing_mode == 'unsigned'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-desktop-unsigned-candidate
+          path: ${{ runner.temp }}/quotabot-macos-desktop-package
+      - name: Revalidate and package the selected macOS desktop candidate
+        env:
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.create-release.outputs.macos_developer_identity }}
+          MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
+          MACOS_TEAM_ID: ${{ needs.create-release.outputs.macos_team_id }}
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/quotabot-macos-desktop-package"
+          candidate="$stage/candidate"
+          [[ -f "$stage/candidate.zip" ]] || {
+            echo 'The selected macOS desktop handoff archive is missing.' >&2
+            exit 1
+          }
+          ditto -x -k "$stage/candidate.zip" "$stage"
+          rm -f "$stage/candidate.zip"
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            manifest="$stage/inventory.json"
+          else
+            manifest="$stage/unsigned-inventory.json"
+          fi
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 \
+            --expect-manifest "$manifest" "$candidate"
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            python tools/verify_macos_signatures.py \
+              --manifest "$manifest" \
+              --signing-plan "$stage/signing-plan.json" \
+              --notarization-receipt "$stage/notarization.json" \
+              --stapling-delta-receipt "$stage/stapling-delta.json" \
+              --surface desktop --architecture arm64 \
+              --expected-identity "$MACOS_DEVELOPER_IDENTITY" \
+              --expected-team-id "$MACOS_TEAM_ID" \
+              --expected-entitlements app/macos/Runner/DeveloperID.entitlements \
+              --receipt "$stage/packaging-signature-verification.json" \
+              "$candidate"
+          fi
+          destination='app/build/macos/Build/Products/Release/quotabot.app'
+          mkdir -p "$(dirname "$destination")"
+          [[ ! -e "$destination" ]] || {
+            echo 'Package destination unexpectedly exists.' >&2
+            exit 1
+          }
+          ditto "$candidate/quotabot.app" "$destination"
+          bash tools/package-macos.sh --package-only
+      - name: Verify and bind the macOS desktop archive
+        env:
+          MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
+        run: |
+          set -euo pipefail
+          python tools/verify_desktop_archive.py \
+            release/quotabot-darwin-arm64-desktop.zip
+          stage="$RUNNER_TEMP/quotabot-macos-desktop-package"
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            manifest="$stage/inventory.json"
+          else
+            manifest="$stage/unsigned-inventory.json"
+          fi
+          expanded="$RUNNER_TEMP/quotabot-macos-desktop-expanded"
+          mkdir -p "$expanded"
+          ditto -x -k release/quotabot-darwin-arm64-desktop.zip "$expanded"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 \
+            --expect-manifest "$manifest" "$expanded"
+      - name: Preserve the macOS desktop signing evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-desktop-native-signing-inventory
+          path: ${{ runner.temp }}/quotabot-macos-desktop-package/*.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Attest macOS desktop archive build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release/quotabot-darwin-arm64-desktop.zip
+      - name: Upload the macOS desktop asset to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            release/quotabot-darwin-arm64-desktop.zip \
+            release/quotabot-darwin-arm64-desktop.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber
 
   build-desktop:
     needs: create-release
@@ -648,9 +1504,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            script: bash tools/package-macos.sh
-            archive: release/quotabot-darwin-arm64-desktop.zip
           - os: ubuntu-latest
             script: bash tools/package-linux.sh
             archive: release/quotabot-linux-x64-desktop.tar.gz
@@ -747,8 +1600,8 @@ jobs:
           retention-days: 7
 
   sign-windows-desktop:
-    needs: build-windows-desktop-unsigned
-    if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+    needs: [create-release, build-windows-desktop-unsigned]
+    if: needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
     runs-on: windows-latest
     environment: release-signing
     timeout-minutes: 20
@@ -818,7 +1671,7 @@ jobs:
       - name: Verify the signed Windows desktop candidate
         shell: pwsh
         env:
-          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.create-release.outputs.windows_subscriber_eku }}
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-signing'
           $candidate = Join-Path $stage 'candidate'
@@ -845,9 +1698,9 @@ jobs:
       ${{ always() &&
           needs.create-release.result == 'success' &&
           needs.build-windows-desktop-unsigned.result == 'success' &&
-          ((vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned' &&
+          ((needs.create-release.outputs.windows_signing_backend == 'unsigned' &&
             needs.sign-windows-desktop.result == 'skipped') ||
-           (vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing' &&
+           (needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing' &&
             needs.sign-windows-desktop.result == 'success')) }}
     runs-on: windows-latest
     timeout-minutes: 20
@@ -863,13 +1716,13 @@ jobs:
         with:
           python-version: '3.13'
       - name: Download the signed Windows desktop candidate
-        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        if: needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-desktop-signed-candidate
           path: ${{ runner.temp }}/quotabot-windows-desktop-package
       - name: Download the explicitly unsigned Windows desktop candidate
-        if: vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'unsigned'
+        if: needs.create-release.outputs.windows_signing_backend == 'unsigned'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: windows-desktop-unsigned-candidate
@@ -877,8 +1730,8 @@ jobs:
       - name: Revalidate and package the selected Windows desktop candidate
         shell: pwsh
         env:
-          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
-          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.create-release.outputs.windows_subscriber_eku }}
+          WINDOWS_SIGNING_BACKEND: ${{ needs.create-release.outputs.windows_signing_backend }}
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-package'
           $candidate = Join-Path $stage 'candidate'
@@ -904,7 +1757,7 @@ jobs:
       - name: Bind the Windows desktop archive to its native inventory
         shell: pwsh
         env:
-          WINDOWS_SIGNING_BACKEND: ${{ vars.QUOTABOT_WINDOWS_SIGNING_BACKEND }}
+          WINDOWS_SIGNING_BACKEND: ${{ needs.create-release.outputs.windows_signing_backend }}
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-package'
           $manifest = if ($env:WINDOWS_SIGNING_BACKEND -eq 'azure-artifact-signing') {
@@ -924,7 +1777,7 @@ jobs:
           path: |
             ${{ runner.temp }}/quotabot-windows-desktop-package/*.json
             ${{ runner.temp }}/quotabot-windows-desktop-package/*.txt
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
       - name: Attest Windows desktop archive build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
@@ -942,11 +1795,12 @@ jobs:
             --clobber
 
   verify-desktop-release:
-    needs: [create-release, build-desktop, package-windows-desktop]
+    needs: [create-release, build-desktop, package-macos-desktop, package-windows-desktop]
     if: >-
       ${{ always() &&
           needs.create-release.result == 'success' &&
           needs.build-desktop.result == 'success' &&
+          needs.package-macos-desktop.result == 'success' &&
           needs.package-windows-desktop.result == 'success' }}
     strategy:
       fail-fast: false
@@ -954,7 +1808,7 @@ jobs:
         include:
           - os: windows-latest
             archive: quotabot-windows-x64-desktop.zip
-          - os: macos-latest
+          - os: macos-15
             archive: quotabot-darwin-arm64-desktop.zip
           - os: ubuntu-latest
             archive: quotabot-linux-x64-desktop.tar.gz
@@ -969,9 +1823,22 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        if: runner.os == 'macOS'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+        run: |
+          bash tools/require-macos-toolchain.sh
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
+      - name: Download the accepted macOS desktop notarization evidence
+        if: runner.os == 'macOS' && needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-desktop-native-signing-inventory
+          path: ${{ runner.temp }}/quotabot-macos-desktop-draft-evidence
       - name: Download the draft desktop asset and checksum
         shell: bash
         env:
@@ -1012,10 +1879,10 @@ jobs:
             --source-digest "$source_digest" \
             --deny-self-hosted-runners
       - name: Verify downloaded Windows desktop signatures
-        if: runner.os == 'Windows' && vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        if: runner.os == 'Windows' && needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
         shell: pwsh
         env:
-          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.create-release.outputs.windows_subscriber_eku }}
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'quotabot-release\${{ matrix.archive }}'
           $expanded = Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-expanded'
@@ -1027,15 +1894,67 @@ jobs:
           Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
           python tools/verify_windows_signatures.py --manifest $manifest --surface desktop --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $expanded
           if ($LASTEXITCODE -ne 0) { throw "Downloaded desktop signature verification failed with exit code $LASTEXITCODE" }
+          $digest = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-archive.sha256') -Value "$digest  ${{ matrix.archive }}" -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'quotabot-windows-desktop-draft-signing-mode.txt') -Value 'azure-artifact-signing' -Encoding ascii
       - name: Preserve downloaded Windows desktop signature evidence
-        if: always() && runner.os == 'Windows' && vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'
+        if: always() && runner.os == 'Windows' && needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-desktop-draft-signature-verification
           path: |
             ${{ runner.temp }}/quotabot-windows-desktop-draft-inventory.json
             ${{ runner.temp }}/quotabot-windows-desktop-draft-signature-verification.json
-          if-no-files-found: warn
+            ${{ runner.temp }}/quotabot-windows-desktop-draft-archive.sha256
+            ${{ runner.temp }}/quotabot-windows-desktop-draft-signing-mode.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Verify downloaded macOS desktop signatures and staple
+        if: runner.os == 'macOS' && needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        env:
+          MACOS_DEVELOPER_IDENTITY: ${{ needs.create-release.outputs.macos_developer_identity }}
+          MACOS_TEAM_ID: ${{ needs.create-release.outputs.macos_team_id }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/quotabot-release/${{ matrix.archive }}"
+          expanded="$RUNNER_TEMP/quotabot-macos-desktop-draft-expanded"
+          evidence="$RUNNER_TEMP/quotabot-macos-desktop-draft-evidence"
+          manifest="$RUNNER_TEMP/quotabot-macos-desktop-draft-inventory.json"
+          mkdir -p "$expanded"
+          ditto -x -k "$archive" "$expanded"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 --json \
+            "$expanded" > "$manifest"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture arm64 \
+            --expect-manifest "$evidence/inventory.json" "$expanded"
+          python tools/verify_macos_signatures.py \
+            --manifest "$manifest" \
+            --signing-plan "$evidence/signing-plan.json" \
+            --notarization-receipt "$evidence/notarization.json" \
+            --stapling-delta-receipt "$evidence/stapling-delta.json" \
+            --surface desktop --architecture arm64 \
+            --expected-identity "$MACOS_DEVELOPER_IDENTITY" \
+            --expected-team-id "$MACOS_TEAM_ID" \
+            --expected-entitlements app/macos/Runner/DeveloperID.entitlements \
+            --receipt "$RUNNER_TEMP/quotabot-macos-desktop-draft-signature-verification.json" \
+            "$expanded"
+          digest="$(shasum -a 256 "$archive" | awk '{print $1}')"
+          [[ "$digest" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "$digest" "${{ matrix.archive }}" \
+            > "$RUNNER_TEMP/quotabot-macos-desktop-draft-archive.sha256"
+          printf '%s\n' developer-id \
+            > "$RUNNER_TEMP/quotabot-macos-desktop-draft-signing-mode.txt"
+      - name: Preserve downloaded macOS desktop signature evidence
+        if: always() && runner.os == 'macOS' && needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-desktop-draft-signature-verification
+          path: |
+            ${{ runner.temp }}/quotabot-macos-desktop-draft-*.json
+            ${{ runner.temp }}/quotabot-macos-desktop-draft-archive.sha256
+            ${{ runner.temp }}/quotabot-macos-desktop-draft-signing-mode.txt
+          if-no-files-found: error
           retention-days: 14
       - name: Download and verify the previous stable desktop asset
         shell: bash
@@ -1183,7 +2102,7 @@ jobs:
         with:
           name: portable-readiness-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/quotabot-*-readiness.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
       - name: Exercise the macOS portable lifecycle
         if: runner.os == 'macOS'
@@ -1232,6 +2151,30 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
+      - name: Download the verified macOS CLI archive digest
+        if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-cli-draft-signature-verification
+          path: ${{ runner.temp }}/quotabot-final-macos-evidence/cli
+      - name: Download the verified macOS desktop archive digest
+        if: needs.create-release.outputs.macos_signing_mode == 'developer-id'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-desktop-draft-signature-verification
+          path: ${{ runner.temp }}/quotabot-final-macos-evidence/desktop
+      - name: Download the verified Windows CLI archive digest
+        if: needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-cli-draft-signature-verification
+          path: ${{ runner.temp }}/quotabot-final-windows-evidence/cli
+      - name: Download the verified Windows desktop archive digest
+        if: needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-desktop-draft-signature-verification
+          path: ${{ runner.temp }}/quotabot-final-windows-evidence/desktop
       - name: Require the exact complete release asset set
         id: asset_manifest
         env:
@@ -1282,6 +2225,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+          MACOS_SIGNING_MODE: ${{ needs.create-release.outputs.macos_signing_mode }}
+          WINDOWS_SIGNING_BACKEND: ${{ needs.create-release.outputs.windows_signing_backend }}
         run: |
           destination="$RUNNER_TEMP/quotabot-final-assets"
           mkdir -p "$destination"
@@ -1304,6 +2249,38 @@ jobs:
           done <<< "$names"
 
           (cd "$destination" && sha256sum --check ./*.sha256)
+          if [ "$MACOS_SIGNING_MODE" = developer-id ]; then
+            evidence="$RUNNER_TEMP/quotabot-final-macos-evidence"
+            [[ "$(cat "$evidence/cli/quotabot-macos-cli-draft-signing-mode.txt")" == developer-id ]]
+            [[ "$(cat "$evidence/desktop/quotabot-macos-desktop-draft-signing-mode.txt")" == developer-id ]]
+            read -r cli_digest cli_name cli_extra \
+              < "$evidence/cli/quotabot-macos-cli-draft-archive.sha256"
+            read -r desktop_digest desktop_name desktop_extra \
+              < "$evidence/desktop/quotabot-macos-desktop-draft-archive.sha256"
+            [[ "$cli_digest" =~ ^[0-9a-f]{64}$ && \
+               "$cli_name" == quotabot-darwin-arm64.tar.gz && -z "$cli_extra" ]]
+            [[ "$desktop_digest" =~ ^[0-9a-f]{64}$ && \
+               "$desktop_name" == quotabot-darwin-arm64-desktop.zip && \
+               -z "$desktop_extra" ]]
+            [[ "$(sha256sum "$destination/$cli_name" | awk '{print $1}')" == "$cli_digest" ]]
+            [[ "$(sha256sum "$destination/$desktop_name" | awk '{print $1}')" == "$desktop_digest" ]]
+          fi
+          if [ "$WINDOWS_SIGNING_BACKEND" = azure-artifact-signing ]; then
+            evidence="$RUNNER_TEMP/quotabot-final-windows-evidence"
+            [[ "$(cat "$evidence/cli/quotabot-windows-cli-draft-signing-mode.txt")" == azure-artifact-signing ]]
+            [[ "$(cat "$evidence/desktop/quotabot-windows-desktop-draft-signing-mode.txt")" == azure-artifact-signing ]]
+            read -r cli_digest cli_name cli_extra \
+              < "$evidence/cli/quotabot-windows-cli-draft-archive.sha256"
+            read -r desktop_digest desktop_name desktop_extra \
+              < "$evidence/desktop/quotabot-windows-desktop-draft-archive.sha256"
+            [[ "$cli_digest" =~ ^[0-9a-f]{64}$ && \
+               "$cli_name" == quotabot-windows-x64.zip && -z "$cli_extra" ]]
+            [[ "$desktop_digest" =~ ^[0-9a-f]{64}$ && \
+               "$desktop_name" == quotabot-windows-x64-desktop.zip && \
+               -z "$desktop_extra" ]]
+            [[ "$(sha256sum "$destination/$cli_name" | awk '{print $1}')" == "$cli_digest" ]]
+            [[ "$(sha256sum "$destination/$desktop_name" | awk '{print $1}')" == "$desktop_digest" ]]
+          fi
           python tools/verify_cli_archive.py \
             "$destination/quotabot-windows-x64.zip"
           python tools/verify_cli_archive.py \

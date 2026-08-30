@@ -70,6 +70,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Require the pinned Apple toolchain
+        if: runner.os == 'macOS'
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+        run: |
+          bash tools/require-macos-toolchain.sh
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+
       # Pin Python so `python` resolves on every runner (macOS ships only
       # python3), for the coverage gate and the LiteLLM router tests.
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -106,7 +114,7 @@ jobs:
         run: bash tools/test-posix-space-safe-dart.sh
 
       - name: Coverage checker and policy tests
-        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_native_code_inventory tools.test_windows_signing_catalog tools.test_verify_windows_signatures tools.test_verify_cli_archive tools.test_verify_desktop_archive
+        run: python -m unittest tools.test_archive_dependabot_advisory tools.test_check_lcov tools.test_check_release_version tools.test_dependency_policy tools.test_desktop_readiness_smoke tools.test_desktop_release_policy tools.test_installer_security tools.test_macos_codesign_integration tools.test_macos_codesign_output tools.test_macos_signing_plan tools.test_native_code_inventory tools.test_record_macos_notarization tools.test_sign_macos_candidate tools.test_validate_macos_signing_delta tools.test_windows_signing_catalog tools.test_verify_macos_signatures tools.test_verify_windows_signatures tools.test_verify_cli_archive tools.test_verify_desktop_archive
 
       - name: Release version consistency
         run: python tools/check_release_version.py
@@ -154,12 +162,40 @@ jobs:
       - name: Verify macOS or Linux CLI package build
         if: runner.os != 'Windows'
         run: |
-          bash tools/package-cli.sh
+          if [ "$RUNNER_OS" = macOS ]; then
+            case "$(uname -m)" in
+              arm64|aarch64) architecture=arm64 ;;
+              x86_64|amd64) architecture=x64 ;;
+              *) echo 'Unsupported macOS runner architecture.' >&2; exit 1 ;;
+            esac
+            candidate='collector/build/quotabot_cli_release/bundle'
+            manifest="$RUNNER_TEMP/quotabot-macos-cli-inventory.json"
+            plan='collector/build/quotabot_cli_release/signing-plan.json'
+            bash tools/package-cli.sh --no-archive
+            python tools/native_code_inventory.py \
+              --platform macos --surface cli --architecture "$architecture" --json \
+              "$candidate" > "$manifest"
+            python tools/create_macos_signing_plan.py \
+              --manifest "$manifest" --output "$plan" \
+              --surface cli --architecture "$architecture" "$candidate"
+            cp "$plan" "$RUNNER_TEMP/quotabot-macos-cli-signing-plan.json"
+            bash tools/package-cli.sh --package-only
+          else
+            bash tools/package-cli.sh
+          fi
           archive="$(find release -maxdepth 1 -type f \( \
             -name 'quotabot-darwin-*.tar.gz' -o \
             -name 'quotabot-linux-*.tar.gz' \) -print -quit)"
           test -n "$archive"
           python tools/verify_cli_archive.py "$archive"
+          if [ "$RUNNER_OS" = macOS ]; then
+            expanded="$RUNNER_TEMP/quotabot-macos-cli-expanded"
+            mkdir -p "$expanded"
+            tar -xzf "$archive" -C "$expanded"
+            python tools/native_code_inventory.py \
+              --platform macos --surface cli --architecture "$architecture" \
+              --expect-manifest "$manifest" "$expanded"
+          fi
 
       - name: Flutter dependencies
         working-directory: app
@@ -194,15 +230,6 @@ jobs:
           Expand-Archive -LiteralPath release/quotabot-windows-x64-desktop.zip -DestinationPath $extract
           python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 --expect-manifest $manifest $extract
 
-      - name: Preserve Windows native signing inventories
-        if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: native-signing-inventory-${{ runner.os }}-${{ runner.arch }}
-          path: ${{ runner.temp }}/quotabot-windows-*-inventory.json
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Verify Windows desktop candidate readiness
         if: runner.os == 'Windows'
         run: >-
@@ -236,16 +263,49 @@ jobs:
         with:
           name: desktop-readiness-${{ runner.os }}-${{ runner.arch }}
           path: ${{ runner.temp }}/quotabot-*-readiness.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
       - name: Verify macOS desktop package build
         if: runner.os == 'macOS'
         run: |
-          bash tools/package-macos.sh
+          case "$(uname -m)" in
+            arm64|aarch64) architecture=arm64 ;;
+            x86_64|amd64) architecture=x64 ;;
+            *) echo 'Unsupported macOS runner architecture.' >&2; exit 1 ;;
+          esac
+          manifest="$RUNNER_TEMP/quotabot-macos-desktop-inventory.json"
+          candidate='app/build/macos/Build/Products/Release'
+          plan='app/build/macos/Build/Products/signing-plan.json'
+          bash tools/package-macos.sh --no-archive
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture "$architecture" \
+            --json "$candidate" > "$manifest"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$manifest" --output "$plan" \
+            --surface desktop --architecture "$architecture" "$candidate"
+          cp "$plan" "$RUNNER_TEMP/quotabot-macos-desktop-signing-plan.json"
+          bash tools/package-macos.sh --package-only
           archive="$(find release -maxdepth 1 -name 'quotabot-darwin-*-desktop.zip' -print -quit)"
           test -n "$archive"
           python tools/verify_desktop_archive.py "$archive"
+          expanded="$RUNNER_TEMP/quotabot-macos-desktop-expanded"
+          mkdir -p "$expanded"
+          ditto -x -k "$archive" "$expanded"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture "$architecture" \
+            --expect-manifest "$manifest" "$expanded"
+
+      - name: Preserve native signing inventories
+        if: always() && (runner.os == 'Windows' || runner.os == 'macOS')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-signing-inventory-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            ${{ runner.temp }}/quotabot-windows-*-inventory.json
+            ${{ runner.temp }}/quotabot-macos-*.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: MCP client snippet tests
         working-directory: integrations/mcp_clients
