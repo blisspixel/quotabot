@@ -196,4 +196,37 @@ void main() {
     );
     expect(elapsed.elapsed, lessThan(const Duration(seconds: 1)));
   });
+
+  test('aged malformed and prior-generation claims remain recoverable', () {
+    final dir = Directory.systemTemp.createTempSync('quotabot-guard-test-');
+    addTearDown(() {
+      if (dir.existsSync()) dir.deleteSync(recursive: true);
+    });
+    final contents = <String>[
+      '',
+      '{malformed',
+      jsonEncode({'pid': pid, 'owner': '$pid.prior_generation.claim'}),
+    ];
+
+    for (var index = 0; index < contents.length; index++) {
+      final lockFile = File(
+        '${dir.path}${Platform.pathSeparator}store_$index.lock',
+      )..createSync();
+      final claimFile = File('${lockFile.path}.claim')
+        ..writeAsStringSync(contents[index], flush: true)
+        ..setLastModifiedSync(
+          DateTime.now().subtract(const Duration(minutes: 5)),
+        );
+
+      final guard = acquireInterprocessFileGuardSync(
+        lockFile,
+        hardenClaim: (_) {},
+        acquisitionTimeout: const Duration(seconds: 1),
+        reclaimSameProcessClaims: false,
+      );
+      guard.release();
+
+      expect(claimFile.existsSync(), isFalse, reason: 'case $index');
+    }
+  });
 }

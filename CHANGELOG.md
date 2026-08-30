@@ -2,6 +2,32 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.15 - 2026-08-30
+
+### Security
+
+- Cache evidence transactions now use the shared claim-backed native guard, so
+  provider/account snapshot, drift, history, bucket, and recovery critical
+  sections serialize both processes and isolates. Long operations retain their
+  exact process-generation claim instead of letting a stale-age heuristic admit
+  a second isolate.
+- Evidence guards reject non-directory cache roots, unsafe lock leaves, and
+  malformed live claim objects before entering a cache transaction. Abandoned
+  empty, malformed, and prior-process claims remain recoverable only after the
+  native lock proves that no process owns them.
+
+### Changed
+
+- Multi-lock cache recovery preserves the released legacy-then-canonical order,
+  applies one 30-second acquisition budget across the whole operation, and
+  releases every acquired native lock and owned claim after partial failure.
+- The Windows and macOS signing environment shells now require maintainer review
+  and accept only protected `main` or `v*` deployments. This is policy
+  scaffolding only; neither environment contains signer values or secrets.
+
+Both repository signing modes remain `unsigned` until owner identities, exact
+environment values and credentials, and successful native rehearsals exist.
+
 ## 0.10.0-rc.14 - 2026-08-30
 
 ### Changed
