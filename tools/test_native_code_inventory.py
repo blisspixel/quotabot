@@ -1,4 +1,4 @@
-"""Tests for the bounded Windows PE signing payload inventory."""
+"""Tests for the bounded native signing payload inventory."""
 
 from __future__ import annotations
 
@@ -25,6 +25,47 @@ def _pe(*, machine: int = 0x8664) -> bytes:
     struct.pack_into("<HHIIIHH", payload, 0x84, machine, 1, 0, 0, 0, 0xF0, 0x2022)
     struct.pack_into("<H", payload, 0x98, 0x20B)
     struct.pack_into("<II", payload, 0xD0, 4096, 512)
+    return bytes(payload)
+
+
+def _macho64(*, cpu_type: int = 0x0100000C) -> bytes:
+    return struct.pack(
+        "<IIIIIIII",
+        0xFEEDFACF,
+        cpu_type,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def _fat_macho(*cpu_types: int) -> bytes:
+    header_size = 8 + 20 * len(cpu_types)
+    next_offset = ((header_size + 63) // 64) * 64
+    slices: list[tuple[int, bytes]] = []
+    payload = bytearray(next_offset)
+    struct.pack_into(">II", payload, 0, 0xCAFEBABE, len(cpu_types))
+    for index, cpu_type in enumerate(cpu_types):
+        thin = _macho64(cpu_type=cpu_type)
+        offset = next_offset
+        struct.pack_into(
+            ">IIIII",
+            payload,
+            8 + index * 20,
+            cpu_type,
+            0,
+            offset,
+            len(thin),
+            6,
+        )
+        slices.append((offset, thin))
+        next_offset += 64
+    payload.extend(b"\0" * (next_offset - len(payload)))
+    for offset, thin in slices:
+        payload[offset : offset + len(thin)] = thin
     return bytes(payload)
 
 
@@ -131,6 +172,160 @@ class NativeCodeInventoryTests(unittest.TestCase):
 
             self.assertEqual(result.architecture, "arm64")
             self.assertEqual(result.native_code[0].architecture, "arm64")
+
+    def test_macos_cli_inventory_discovers_thin_macho_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write(root / "bin" / "quotabot", _macho64())
+            _write(root / "lib" / "libsqlite3.dylib", _macho64())
+            _write(root / "lib" / "notice.txt", b"not native code\n")
+
+            result = inventory_native_code(
+                root,
+                platform="macos",
+                surface="cli",
+                architecture="arm64",
+            )
+
+            self.assertEqual(result.platform, "macos")
+            self.assertEqual(
+                [entry.path for entry in result.native_code],
+                ["bin/quotabot", "lib/libsqlite3.dylib"],
+            )
+            self.assertEqual({entry.kind for entry in result.native_code}, {"macho"})
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes are not portable on Windows")
+    def test_macos_candidate_digest_binds_executable_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "bin" / "quotabot"
+            _write(executable, _macho64())
+            executable.chmod(0o755)
+            first = native_code_inventory.inventory_native_code(
+                root,
+                platform="macos",
+                surface="cli",
+                architecture="arm64",
+            )
+
+            executable.chmod(0o644)
+            changed = native_code_inventory.inventory_native_code(
+                root,
+                platform="macos",
+                surface="cli",
+                architecture="arm64",
+            )
+
+            self.assertNotEqual(first.candidate_sha256, changed.candidate_sha256)
+            self.assertEqual(
+                {entry.architecture for entry in first.native_code}, {"arm64"}
+            )
+
+    def test_macos_desktop_accepts_universal_macho_and_framework_code(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write(
+                root / "quotabot.app" / "Contents" / "MacOS" / "quotabot",
+                _fat_macho(0x01000007, 0x0100000C),
+            )
+            _write(
+                root
+                / "quotabot.app"
+                / "Contents"
+                / "Frameworks"
+                / "Example.framework"
+                / "Versions"
+                / "A"
+                / "Example",
+                _macho64(),
+            )
+
+            result = inventory_native_code(
+                root,
+                platform="macos",
+                surface="desktop",
+                architecture="arm64",
+            )
+
+            by_path = {entry.path: entry for entry in result.native_code}
+            self.assertEqual(
+                by_path["quotabot.app/Contents/MacOS/quotabot"].architecture,
+                "x64+arm64",
+            )
+            self.assertIn(
+                "quotabot.app/Contents/Frameworks/Example.framework/Versions/A/Example",
+                by_path,
+            )
+
+    def test_macos_expected_code_and_architecture_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write(root / "bin" / "quotabot", _macho64())
+            _write(root / "lib" / "broken.dylib", b"plain text")
+            with self.assertRaisesRegex(
+                NativeInventoryError,
+                "expected Mach-O module is malformed: lib/broken.dylib",
+            ):
+                inventory_native_code(
+                    root,
+                    platform="macos",
+                    surface="cli",
+                    architecture="arm64",
+                )
+
+            _write(root / "lib" / "broken.dylib", _macho64(cpu_type=0x01000007))
+            with self.assertRaisesRegex(
+                NativeInventoryError,
+                "expected arm64, observed x64",
+            ):
+                inventory_native_code(
+                    root,
+                    platform="macos",
+                    surface="cli",
+                    architecture="arm64",
+                )
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is not portable on Windows")
+    def test_macos_inventory_covers_safe_links_and_rejects_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "candidate"
+            framework = (
+                root / "quotabot.app" / "Contents" / "Frameworks" / "Example.framework"
+            )
+            executable = root / "quotabot.app" / "Contents" / "MacOS" / "quotabot"
+            _write(executable, _macho64())
+            _write(framework / "Versions" / "A" / "Example", _macho64())
+            (framework / "Versions" / "Current").symlink_to("A")
+            (framework / "Example").symlink_to("Versions/Current/Example")
+
+            first = inventory_native_code(
+                root,
+                platform="macos",
+                surface="desktop",
+                architecture="arm64",
+            )
+            (framework / "Example").unlink()
+            (framework / "Example").symlink_to("Versions/A/Example")
+            changed = inventory_native_code(
+                root,
+                platform="macos",
+                surface="desktop",
+                architecture="arm64",
+            )
+            self.assertNotEqual(first.candidate_sha256, changed.candidate_sha256)
+
+            (framework / "Example").unlink()
+            (framework / "Example").symlink_to("../../../../../../outside")
+            with self.assertRaisesRegex(
+                NativeInventoryError,
+                "escaping symbolic link",
+            ):
+                inventory_native_code(
+                    root,
+                    platform="macos",
+                    surface="desktop",
+                    architecture="arm64",
+                )
 
     def test_candidate_digest_is_deterministic_and_covers_non_native_files(
         self,

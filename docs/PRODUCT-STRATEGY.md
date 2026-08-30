@@ -1,6 +1,6 @@
 # Product strategy
 
-Updated 2026-08-21. Revisit this document when provider quota models, the MCP
+Updated 2026-08-30. Revisit this document when provider quota models, the MCP
 specification, or the product's acquisition path changes materially. The
 execution order and single immediate priority live in
 [ROADMAP.md](../ROADMAP.md#next); this document explains the product reasoning
@@ -22,10 +22,13 @@ The immediate product constraint is trust, not feature depth. Quota stretch
 shipped in 0.9.6, closing the policy gap between subscription-first and
 always-local routing without weakening the no-surprise-spend boundary. The
 focused 0.10.x train now resolves field-discovered correctness, recovery, and
-quality-of-life defects and repeats native validation. Windows signing and
-macOS Developer ID signing, notarization, and stapling follow when that
-developer-controlled inventory is quiet, before final native-host, account,
-and accessibility evidence on the signed 1.0 candidate.
+quality-of-life defects and repeats native validation. Fail-closed Windows and
+macOS signing paths are implemented in the repository with run-scoped policy,
+pinned Apple tooling, exact notarization chains, and final verified-archive
+digest binding. Owner provisioning, successful protected rehearsals, mode
+activation, and signed fresh-download evidence follow when that
+developer-controlled inventory is quiet, before final native-host, account, and
+accessibility evidence on the signed 1.0 candidate.
 
 ## User jobs
 
@@ -106,12 +109,15 @@ The CLI has a low-friction release path, and the desktop has a native
 portable-archive pipeline with checksums, attestations, and a draft-release
 barrier. v0.9.9 completed the exact release and three-OS install path; the
 [baseline release evidence](BUILDING.md#baseline-release-evidence) records what it
-proved. That evidence is not a substitute for the current 0.10.x stabilization
-and signed rehearsal, or for rerunning the complete path on the exact 1.0
-candidate. The remaining acquisition work is to finish the reproducible defect
-inventory, then activate operating-system signing and notarization. Update,
-uninstall, data preservation, destructive reset, and rollback remain separate
-documented operations.
+proved. The
+[rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
+also passed cross-platform install, upgrade, source-setup, and desktop-run
+checks. That evidence is not a substitute for the signed rehearsal or for
+rerunning the complete path on the exact 1.0 candidate. The repository signing
+implementation is complete; owner identities, protected rehearsals, mode
+activation, and signed lifecycle evidence remain. Update, uninstall, data
+preservation, destructive reset, and rollback remain separate documented
+operations.
 
 ### Content-blind auditability
 
@@ -141,16 +147,18 @@ turns into paid API spend.
   schema, security, drift, and release gates.
 - v0.9.9 completed the exact release and three-OS published-installer rehearsal,
   so release mechanics now have current evidence rather than only a future plan.
+- rc.12 repeated cross-platform install, upgrade, source-setup, and desktop-run
+  evidence, and the repository now implements isolated, fail-closed Windows and
+  macOS signing paths around immutable candidate handoffs.
 - The advisor-not-proxy and zero-inference boundaries are meaningful product
   differences, not only marketing language.
 
 ### Friction now
 
-- Advanced routing choices are documented across long command lists instead of
-  one intent matrix.
-- Portable desktop assets are not yet Authenticode-signed, Developer ID-signed,
-  or notarized, which remains the largest acquisition gap for a first-class 1.0
-  release.
+- Published portable assets remain unsigned even though both repository signing
+  paths are implemented. Owner identities, successful protected rehearsals, mode
+  activation, and a signed fresh-download lifecycle remain the largest
+  acquisition gap for a first-class 1.0 release.
 - Native keyboard and screen-reader evidence is still incomplete even though
   automated focus, scaling, contrast, and semantics coverage is strong.
 - Claude and Codex grants still need dated idle-machine validation against real
@@ -300,18 +308,22 @@ Sources: [Apple notarization guidance, accessed 2026-07-27](https://developer.ap
 Signing comes before the remaining native evidence because it changes the exact
 artifacts and platform launch path under test. Clean-install, accessibility,
 provider, and lifecycle evidence collected first would need to be repeated after
-signing. Repository work can establish the fail-closed workflow and verification
-tests, but a Windows signing identity, Apple Developer Program membership,
-Developer ID identity, and protected release credentials require project-owner
-authority.
+signing. Repository work now establishes immutable candidate handoffs, isolated
+signer jobs, fail-closed platform verification, bounded receipts,
+credential-free packaging, and final digest-bound fresh-download checks.
+Credential-free macOS CI also exercises real Apple signing tools with hardened
+ad hoc fixtures. A Windows signing identity, Apple Developer Program membership,
+Developer ID identity, protected release credentials, and successful native
+rehearsals still require project-owner authority.
 
 ### After signed-artifact rehearsal: close the remaining 1.0 evidence gates
 
 The remaining gates are native macOS and Linux provider records, dated Claude
 and Codex idle-machine grant validation, native accessibility smoke, and the
-final exact-candidate rehearsal. The 0.9.x releases prove the tag, artifact,
-checksum, provenance, and lifecycle machinery, but all evidence must be repeated
-against the frozen, signed 1.0 candidate.
+final exact-candidate rehearsal. v0.9.9 proves the tag, artifact, checksum,
+provenance, and lifecycle machinery, and rc.12 repeats the cross-platform
+acquisition matrix, but all evidence must be repeated against the frozen, signed
+1.0 candidate.
 
 ### After 1.0 stabilization: improve decision evidence
 
