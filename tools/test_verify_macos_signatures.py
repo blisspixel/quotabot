@@ -10,9 +10,9 @@ import struct
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest import mock
 
 from tools import (
     create_macos_signing_plan,
@@ -499,7 +499,7 @@ class VerifyMacOSSignaturesTests(unittest.TestCase):
             output = io.StringIO()
 
             with (
-                mock.patch.object(
+                unittest.mock.patch.object(
                     verify_macos_signatures,
                     "verify_macos_signatures",
                     side_effect=MacOSSignatureVerificationError(
