@@ -10,7 +10,7 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.13.
+> **Current release candidate:** 0.10.0-rc.14.
 > **Next:** finish the focused 0.10.x stabilization gate, provision the Windows
 > and Apple publisher identities, and rehearse the repository-ready signing
 > paths on one signed candidate. No new product breadth. See [roadmap
@@ -19,9 +19,10 @@ runtimes, so work can fall back locally when subscription caps are low.
 Release candidates state Windows and macOS signing mode at the top of the
 GitHub release notes. The source workflow now has fail-closed signing paths for
 both platforms, snapshots that policy once per run, and binds final signed-asset
-digests to native fresh-download verification. Published artifacts remain
-unsigned until owner provisioning and a protected native rehearsal succeed.
-Provisioning and activation live in
+digests to native fresh-download verification. Existing published artifacts are
+immutable and remain unsigned. No future signed artifact can publish until owner
+provisioning, both protected native rehearsals, explicit mode activation, and
+the signed lifecycle gates succeed. Provisioning and activation live in
 [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md).
 
 quotabot is a local advisor, not a proxy. Quota and routing reads make no model
@@ -113,8 +114,9 @@ notarization, and stapling are required 0.10.x release-readiness gates.
 The release workflow now supports Azure Artifact Signing and macOS Developer ID
 modes for both the CLI and desktop assets. Those modes fail closed when required
 identity, credential, signature, notarization, staple, or verification evidence
-is missing. They remain inactive until owner provisioning and a successful
-protected rehearsal; each release's notes state the mode used by its artifacts.
+is missing. They remain inactive until owner provisioning and successful
+protected Windows and macOS rehearsals; each release's notes state the mode used
+by its artifacts.
 The grouped Settings dialog includes the installed build and an explicit
 **Check for updates** action. It contacts GitHub only after that action, shows
 the latest candidate and latest stable release separately, and opens the chosen

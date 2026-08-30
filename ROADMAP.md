@@ -99,8 +99,9 @@ remaining dependency order.
 2. The repository now implements fail-closed Windows and macOS signing paths for
    the CLI and desktop assets. They preserve immutable unsigned handoffs,
    inventory every native module, sign only the exact validated targets, verify
-   before credential-free packaging, and repeat verification after downloading
-   the exact draft assets. Current published artifacts remain unsigned.
+   exact unsigned-to-signed tree deltas before credential-free packaging, and
+   repeat verification after downloading the exact draft assets. Current
+   published artifacts remain unsigned.
 3. Before activation, keep the reproducible correctness and credential-lifecycle
    inventory empty, pass the complete three-OS project gate from clean `main`,
    complete the required live grant-flow smoke, and keep recovery guidance
@@ -154,20 +155,21 @@ Final clean-install, accessibility, and provider evidence should be collected
 against the signed artifacts users will actually receive.
 
 The repository path is ready for both platforms. Windows has exact PE catalogs,
-an isolated Azure Artifact Signing job, post-signing inventory, native trust and
-timestamp verification, credential-free packaging, and fresh-download checks.
+isolated Azure Artifact Signing jobs, byte-level Authenticode-only signing delta
+checks, native trust and timestamp verification, independent credential-free
+packaging validation, and fresh-download checks.
 macOS has exact CLI and desktop Mach-O inventories, inside-out signing plans,
   isolated Developer ID jobs, exact signing and stapling delta checks, archive and
   extracted-inventory and code-directory-bound notarization receipts, exact
   entitlement verification, Gatekeeper checks, desktop stapling,
   credential-free packaging, and digest-bound fresh-download checks. Native CI
-  also exercises hardened ad hoc signatures against pinned Apple tools. A manual
-  workflow dispatched from protected `main` can rehearse the credentialed
-  contract without publishing candidates and retains only bounded evidence. It
-  is implemented but has not run successfully because owner provisioning is
-  absent. Current published artifacts remain unsigned. Owner provisioning, a
-  successful protected rehearsal, mode activation, and one signed lifecycle
-  record remain open.
+  also exercises hardened ad hoc signatures against pinned Apple tools. Separate
+  Windows and macOS workflows dispatched from protected `main` rehearse both
+  credentialed contracts without publishing candidates and retain only bounded
+  durable evidence. They are implemented but have not run successfully because
+  owner provisioning is absent. Current published artifacts remain unsigned.
+  Owner provisioning, successful protected rehearsals, mode activation, and one
+  signed lifecycle record remain open.
 
 **Behavior**
 
@@ -215,9 +217,10 @@ macOS has exact CLI and desktop Mach-O inventories, inside-out signing plans,
 - The release workflow signs in the correct order, verifies before packaging,
   and fails closed under deterministic missing-secret and bad-signature tests.
 - Windows release assets pass `signtool verify /pa /all` plus the bounded
-  timestamp message-imprint verifier; macOS native code and the app pass
-  `codesign --verify --deep --strict` and `spctl --assess`, while the app also
-  passes stapler validation, after a fresh download of the exact draft assets.
+  timestamp message-imprint verifier. After a fresh download of the exact draft
+  assets, the macOS CLI passes `codesign --verify --strict` and `spctl --assess`;
+  the app passes `codesign --verify --deep --strict`, `spctl --assess`, and
+  stapler validation.
 - A signed 0.10.x rehearsal passes clean install, launch, tray, update, rollback,
   data-preserving uninstall, checksum, provenance, and immutable publication on
   native Windows and macOS runners.
@@ -255,7 +258,7 @@ dated idle-machine validation of the Claude and Codex grants, then the frozen
 ## Current state
 
 The current line, **0.9.9**, remains the tagged default installer version. The
-focused **0.10.0-rc.13** candidate carries the latest stabilization inventory
+focused **0.10.0-rc.14** candidate carries the latest stabilization inventory
 described in [Next](#next). The stable line contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning
@@ -276,7 +279,7 @@ milestone sections below.
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
 | Installation and update | Rehearsed on 0.9.9; green on rc.12 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8; the [rc.12 matrix](https://github.com/blisspixel/quotabot/actions/runs/33312529854) passed cross-platform install, upgrade, source-setup, and desktop-run checks with the transactional lifecycle hardening | Repeat the lifecycle on the signed rehearsal and frozen 1.0 candidate |
-| Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories, isolated signer jobs, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and protected environments, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
+| Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and protected environments, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
 | Release rehearsal | Ready for signed rerun | v0.9.9 completed the tag, asset, checksum, provenance, install, upgrade, state, and immutable-publication rehearsal; rc.12 repeated the cross-platform acquisition and desktop-run matrix | Run a signed 0.10.x rehearsal, then repeat on the frozen 1.0 candidate with interactive provider and accessibility evidence |

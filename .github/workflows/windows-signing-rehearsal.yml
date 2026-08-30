@@ -1,0 +1,426 @@
+name: Windows signing rehearsal
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-signing-rehearsal-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      windows_subscriber_eku: ${{ steps.policy.outputs.windows_subscriber_eku }}
+    steps:
+      - name: Require a protected main rehearsal
+        id: policy
+        env:
+          WINDOWS_SUBSCRIBER_EKU: ${{ vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU }}
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo 'The Windows signing rehearsal must be dispatched from main.' >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          value = os.environ.get("WINDOWS_SUBSCRIBER_EKU", "")
+          if (
+              re.fullmatch(
+                  r"1\.3\.6\.1\.4\.1\.311\.97\.(?:0|[1-9][0-9]*)"
+                  r"(?:\.(?:0|[1-9][0-9]*))*",
+                  value,
+              )
+              is None
+              or value == "1.3.6.1.4.1.311.97.1.0"
+          ):
+              raise SystemExit("QUOTABOT_WINDOWS_SUBSCRIBER_EKU is invalid.")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as handle:
+              handle.write(f"windows_subscriber_eku={value}\n")
+          PY
+
+  build-unsigned-candidates:
+    needs: validate-source
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [cli, desktop]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      SURFACE: ${{ matrix.surface }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - if: matrix.surface == 'cli'
+        uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+        with:
+          sdk: '3.12.2'
+      - name: Set up pinned Flutter SDK
+        if: matrix.surface == 'desktop'
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+      - name: Build and inventory the exact unsigned candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal"
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'unsigned-inventory.json'
+          $catalog = Join-Path $stage 'signing-catalog.txt'
+
+          if ($env:SURFACE -eq 'cli') {
+            ./tools/package-cli.ps1 -NoArchive
+            $source = 'collector/build/quotabot_cli_release/bundle'
+          } elseif ($env:SURFACE -eq 'desktop') {
+            ./tools/package-windows.ps1 -NoArchive
+            $source = 'app/build/windows/x64/runner/Release'
+          } else {
+            throw "Unexpected Windows rehearsal surface: $env:SURFACE"
+          }
+
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item -LiteralPath $source -Destination $candidate -Recurse
+          $inventory = python tools/native_code_inventory.py --platform windows --surface $env:SURFACE --architecture x64 --json $candidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unsigned native inventory failed with exit code $LASTEXITCODE"
+          }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/create_windows_signing_catalog.py --manifest $manifest --output $catalog --surface $env:SURFACE --architecture x64 $candidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signing catalog creation failed with exit code $LASTEXITCODE"
+          }
+      - name: Preserve the immutable unsigned rehearsal handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-${{ matrix.surface }}-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 2
+
+  sign-and-verify:
+    needs: [validate-source, build-unsigned-candidates]
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [cli, desktop]
+    runs-on: windows-latest
+    environment: release-signing
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SURFACE: ${{ matrix.surface }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the immutable unsigned rehearsal handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-${{ matrix.surface }}-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal
+      - name: Validate the protected signing configuration
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ vars.QUOTABOT_AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.QUOTABOT_AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.QUOTABOT_AZURE_SUBSCRIPTION_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.QUOTABOT_AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.QUOTABOT_AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERTIFICATE_PROFILE: ${{ vars.QUOTABOT_AZURE_CERTIFICATE_PROFILE }}
+          WINDOWS_SUBSCRIBER_EKU: ${{ needs.validate-source.outputs.windows_subscriber_eku }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $values = @{
+            AZURE_CLIENT_ID = $env:AZURE_CLIENT_ID
+            AZURE_TENANT_ID = $env:AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID = $env:AZURE_SUBSCRIPTION_ID
+            AZURE_SIGNING_ENDPOINT = $env:AZURE_SIGNING_ENDPOINT
+            AZURE_SIGNING_ACCOUNT = $env:AZURE_SIGNING_ACCOUNT
+            AZURE_CERTIFICATE_PROFILE = $env:AZURE_CERTIFICATE_PROFILE
+            WINDOWS_SUBSCRIBER_EKU = $env:WINDOWS_SUBSCRIBER_EKU
+          }
+          foreach ($entry in $values.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($entry.Value) -or
+                $entry.Value.Length -gt 512 -or
+                $entry.Value -match '[\x00-\x1f\x7f]') {
+              throw "Protected Windows signing value $($entry.Key) is invalid."
+            }
+          }
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID')) {
+            $identifier = [guid]::Empty
+            if (-not [guid]::TryParseExact($values[$name], 'D', [ref]$identifier)) {
+              throw "Protected Windows signing value $name must be a canonical UUID."
+            }
+          }
+          $endpoint = $null
+          if (-not [uri]::TryCreate($env:AZURE_SIGNING_ENDPOINT, [UriKind]::Absolute, [ref]$endpoint) -or
+              $endpoint.Scheme -ne 'https' -or
+              [string]::IsNullOrWhiteSpace($endpoint.Host) -or
+              -not [string]::IsNullOrEmpty($endpoint.UserInfo) -or
+              -not [string]::IsNullOrEmpty($endpoint.Query) -or
+              -not [string]::IsNullOrEmpty($endpoint.Fragment)) {
+            throw 'The protected Azure signing endpoint must be an absolute HTTPS URL.'
+          }
+          if ($env:WINDOWS_SUBSCRIBER_EKU -notmatch '^1\.3\.6\.1\.4\.1\.311\.97\.(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*))*$' -or
+              $env:WINDOWS_SUBSCRIBER_EKU -eq '1.3.6.1.4.1.311.97.1.0') {
+            throw 'The protected rehearsal subscriber EKU is invalid.'
+          }
+      - name: Validate the complete candidate and exact signing catalog
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal"
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'unsigned-inventory.json'
+          $catalog = Join-Path $stage 'signing-catalog.txt'
+          $validatedCatalog = Join-Path $stage 'validated-signing-catalog.txt'
+          python tools/native_code_inventory.py --platform windows --surface $env:SURFACE --architecture x64 --expect-manifest $manifest $candidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unsigned candidate validation failed with exit code $LASTEXITCODE"
+          }
+          python tools/create_windows_signing_catalog.py --manifest $manifest --output $validatedCatalog --surface $env:SURFACE --architecture x64 $candidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signing catalog validation failed with exit code $LASTEXITCODE"
+          }
+          $expectedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $catalog).Hash
+          $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $validatedCatalog).Hash
+          if ($actualHash -ne $expectedHash) {
+            throw 'Downloaded signing catalog does not match the validated candidate.'
+          }
+      - name: Authenticate the isolated rehearsal signer to Azure
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        with:
+          client-id: ${{ vars.QUOTABOT_AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.QUOTABOT_AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.QUOTABOT_AZURE_SUBSCRIPTION_ID }}
+          auth-type: SERVICE_PRINCIPAL
+      - name: Sign the exact rehearsal catalog with Azure Artifact Signing
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.QUOTABOT_AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.QUOTABOT_AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.QUOTABOT_AZURE_CERTIFICATE_PROFILE }}
+          files-catalog: ${{ runner.temp }}\quotabot-windows-${{ matrix.surface }}-rehearsal\validated-signing-catalog.txt
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          append-signature: false
+          enhanced-key-usage: 1.3.6.1.5.5.7.3.3
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          timeout: 300
+          batch-size: 0
+          cache-dependencies: false
+          trace: false
+      - name: Redownload the pristine unsigned rehearsal baseline
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-${{ matrix.surface }}-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal-signing-baseline
+      - name: Inventory and verify the signed rehearsal candidate
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.validate-source.outputs.windows_subscriber_eku }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal"
+          $candidate = Join-Path $stage 'candidate'
+          $manifest = Join-Path $stage 'inventory.json'
+          $receipt = Join-Path $stage 'signature-verification.json'
+          $deltaReceipt = Join-Path $stage 'signing-delta.json'
+          $baselineStage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal-signing-baseline"
+          $baselineCandidate = Join-Path $baselineStage 'candidate'
+          $baselineManifest = Join-Path $baselineStage 'unsigned-inventory.json'
+          $baselineCatalog = Join-Path $baselineStage 'signing-catalog.txt'
+          $validatedBaselineCatalog = Join-Path $baselineStage 'validated-signing-catalog.txt'
+          python tools/native_code_inventory.py --platform windows --surface $env:SURFACE --architecture x64 --expect-manifest $baselineManifest $baselineCandidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pristine unsigned rehearsal baseline validation failed with exit code $LASTEXITCODE"
+          }
+          python tools/create_windows_signing_catalog.py --manifest $baselineManifest --output $validatedBaselineCatalog --surface $env:SURFACE --architecture x64 $baselineCandidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Pristine rehearsal signing catalog validation failed with exit code $LASTEXITCODE"
+          }
+          $expectedCatalogHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $baselineCatalog).Hash
+          $actualCatalogHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $validatedBaselineCatalog).Hash
+          if ($actualCatalogHash -ne $expectedCatalogHash) {
+            throw 'Pristine signing catalog does not match the unsigned rehearsal baseline.'
+          }
+          $inventory = python tools/native_code_inventory.py --platform windows --surface $env:SURFACE --architecture x64 --json $candidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Post-signing native inventory failed with exit code $LASTEXITCODE"
+          }
+          Set-Content -LiteralPath $manifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/validate_windows_signing_delta.py --before $baselineManifest --after $manifest --catalog $validatedBaselineCatalog --before-root $baselineCandidate --after-root $candidate --receipt $deltaReceipt
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows signing delta validation failed with exit code $LASTEXITCODE"
+          }
+          python tools/verify_windows_signatures.py --manifest $manifest --surface $env:SURFACE --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $receipt $candidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows signature verification failed with exit code $LASTEXITCODE"
+          }
+      - name: Preserve the immutable signed rehearsal handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-${{ matrix.surface }}-rehearsal-signed
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+      - name: Clear the Azure session
+        if: always()
+        shell: pwsh
+        run: |
+          if (Get-Command az -ErrorAction SilentlyContinue) {
+            az logout 2>$null | Out-Null
+            az account clear 2>$null | Out-Null
+            $global:LASTEXITCODE = 0
+          }
+      - name: Delete the signed candidate and unbounded signer inputs
+        if: always()
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal"
+          $baselineStage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal-signing-baseline"
+          foreach ($name in @('candidate', 'signing-catalog.txt', 'validated-signing-catalog.txt')) {
+            $target = Join-Path $stage $name
+            if (Test-Path -LiteralPath $target) {
+              Remove-Item -LiteralPath $target -Recurse -Force
+            }
+          }
+          if (Test-Path -LiteralPath $baselineStage) {
+            Remove-Item -LiteralPath $baselineStage -Recurse -Force
+          }
+      - name: Preserve bounded signer failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-${{ matrix.surface }}-signing-rehearsal-failure-evidence
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal/*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  verify-signed-candidates:
+    needs: [validate-source, build-unsigned-candidates, sign-and-verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [cli, desktop]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      SURFACE: ${{ matrix.surface }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download the independent unsigned rehearsal baseline
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-${{ matrix.surface }}-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal-baseline
+      - name: Download the signed rehearsal handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-${{ matrix.surface }}-rehearsal-signed
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal-signed
+      - name: Independently verify the signed rehearsal candidate
+        shell: pwsh
+        env:
+          QUOTABOT_WINDOWS_SUBSCRIBER_EKU: ${{ needs.validate-source.outputs.windows_subscriber_eku }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $baselineStage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal-baseline"
+          $signedStage = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal-signed"
+          $evidence = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-rehearsal-evidence"
+          $baselineCandidate = Join-Path $baselineStage 'candidate'
+          $baselineManifest = Join-Path $baselineStage 'unsigned-inventory.json'
+          $baselineCatalog = Join-Path $baselineStage 'signing-catalog.txt'
+          $validatedCatalog = Join-Path $baselineStage 'validated-independent-signing-catalog.txt'
+          $signedCandidate = Join-Path $signedStage 'candidate'
+          $signedManifest = Join-Path $evidence 'inventory.json'
+          $deltaReceipt = Join-Path $evidence 'signing-delta.json'
+          $signatureReceipt = Join-Path $evidence 'signature-verification.json'
+
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          Copy-Item -LiteralPath $baselineManifest -Destination (Join-Path $evidence 'unsigned-inventory.json')
+          python tools/native_code_inventory.py --platform windows --surface $env:SURFACE --architecture x64 --expect-manifest $baselineManifest $baselineCandidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Independent unsigned baseline validation failed with exit code $LASTEXITCODE"
+          }
+          python tools/create_windows_signing_catalog.py --manifest $baselineManifest --output $validatedCatalog --surface $env:SURFACE --architecture x64 $baselineCandidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Independent signing catalog validation failed with exit code $LASTEXITCODE"
+          }
+          $expectedCatalogHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $baselineCatalog).Hash
+          $actualCatalogHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $validatedCatalog).Hash
+          if ($actualCatalogHash -ne $expectedCatalogHash) {
+            throw 'Independent signing catalog does not match the unsigned baseline.'
+          }
+          $inventory = python tools/native_code_inventory.py --platform windows --surface $env:SURFACE --architecture x64 --json $signedCandidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Independent signed inventory failed with exit code $LASTEXITCODE"
+          }
+          Set-Content -LiteralPath $signedManifest -Value $inventory -Encoding utf8NoBOM -NoNewline
+          python tools/validate_windows_signing_delta.py --before $baselineManifest --after $signedManifest --catalog $validatedCatalog --before-root $baselineCandidate --after-root $signedCandidate --receipt $deltaReceipt
+          if ($LASTEXITCODE -ne 0) {
+            throw "Independent signing delta validation failed with exit code $LASTEXITCODE"
+          }
+          python tools/verify_windows_signatures.py --manifest $signedManifest --surface $env:SURFACE --architecture x64 --expected-subscriber-eku $env:QUOTABOT_WINDOWS_SUBSCRIBER_EKU --receipt $signatureReceipt $signedCandidate
+          if ($LASTEXITCODE -ne 0) {
+            throw "Independent Windows signature verification failed with exit code $LASTEXITCODE"
+          }
+      - name: Delete the independently verified candidate handoffs
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($suffix in @('rehearsal-baseline', 'rehearsal-signed')) {
+            $target = Join-Path $env:RUNNER_TEMP "quotabot-windows-$env:SURFACE-$suffix"
+            if (Test-Path -LiteralPath $target) {
+              Remove-Item -LiteralPath $target -Recurse -Force
+            }
+          }
+      - name: Preserve bounded rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-${{ matrix.surface }}-signing-rehearsal-evidence
+          path: ${{ runner.temp }}/quotabot-windows-${{ matrix.surface }}-rehearsal-evidence/*.json
+          if-no-files-found: error
+          retention-days: 14
