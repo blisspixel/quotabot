@@ -406,6 +406,32 @@ class MacOSSigningDeltaTests(unittest.TestCase):
             self.assertEqual(failure["schema"], ERROR_SCHEMA)
             self.assertEqual(failure["code"], "content_changed_outside_plan")
 
+    def test_cli_reports_failure_receipt_publish_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "--before",
+                        str(base / "missing-before.json"),
+                        "--after",
+                        str(base / "missing-after.json"),
+                        "--plan",
+                        str(base / "missing-plan.json"),
+                        "--operation",
+                        "signing",
+                        "--receipt",
+                        str(base),
+                    ]
+                )
+
+            self.assertEqual(result, 1)
+            failure = json.loads(output.getvalue())
+            self.assertEqual(failure["code"], "inventory_invalid")
+            self.assertEqual(failure["receipt_error_code"], "receipt_path_invalid")
+
 
 if __name__ == "__main__":
     unittest.main()

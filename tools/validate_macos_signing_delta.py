@@ -575,8 +575,8 @@ def main(argv: list[str] | None = None) -> int:
         failure = {"schema": ERROR_SCHEMA, "ok": False, "code": error.code}
         try:
             _publish_receipt(args.receipt, failure)
-        except MacOSSigningDeltaError:
-            pass
+        except MacOSSigningDeltaError as receipt_error:
+            failure["receipt_error_code"] = receipt_error.code
         print(json.dumps(failure, separators=(",", ":"), sort_keys=True))
         return 1
     print(

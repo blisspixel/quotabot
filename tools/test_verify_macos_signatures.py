@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import plistlib
 import struct
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from tools import (
@@ -489,6 +491,39 @@ class VerifyMacOSSignaturesTests(unittest.TestCase):
                         runner=failing_runner,
                     )
                 self.assertEqual(caught.exception.code, expected_code)
+
+    def test_cli_reports_failure_receipt_publish_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                result = verify_macos_signatures.main(
+                    [
+                        "--manifest",
+                        str(base / "missing-inventory.json"),
+                        "--signing-plan",
+                        str(base / "missing-plan.json"),
+                        "--notarization-receipt",
+                        str(base / "missing-notarization.json"),
+                        "--surface",
+                        "cli",
+                        "--architecture",
+                        "arm64",
+                        "--expected-identity",
+                        IDENTITY,
+                        "--expected-team-id",
+                        TEAM_ID,
+                        "--receipt",
+                        str(base),
+                        str(base / "missing-candidate"),
+                    ]
+                )
+
+            self.assertEqual(result, 1)
+            failure = json.loads(output.getvalue())
+            self.assertEqual(failure["code"], "codesign_unavailable")
+            self.assertEqual(failure["receipt_error_code"], "receipt_path_invalid")
 
 
 if __name__ == "__main__":

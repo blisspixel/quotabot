@@ -516,8 +516,8 @@ def main(argv: list[str] | None = None) -> int:
             failure["target"] = error.target
         try:
             _publish_receipt(args.receipt, failure)
-        except MacOSSignatureVerificationError:
-            pass
+        except MacOSSignatureVerificationError as receipt_error:
+            failure["receipt_error_code"] = receipt_error.code
         print(json.dumps(failure, separators=(",", ":"), sort_keys=True))
         return 1
     print(
