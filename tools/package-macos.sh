@@ -75,7 +75,12 @@ if [ "$package_only" -eq 1 ]; then
   echo "Using existing macOS release bundle: $app_bundle"
 fi
 echo "macOS release bundle ready: $app_bundle"
-echo "Production distribution still requires Developer ID signing, notarization, and stapling."
+if /usr/bin/codesign --verify --deep --strict "$app_bundle" >/dev/null 2>&1 && \
+   /usr/bin/xcrun stapler validate "$app_bundle" >/dev/null 2>&1; then
+  echo "Existing Developer ID signature and stapled ticket will be preserved."
+else
+  echo "Production distribution still requires Developer ID signing, notarization, and stapling."
+fi
 
 if [ "$archive" -eq 0 ]; then
   exit 0
@@ -95,7 +100,7 @@ cleanup_package() {
 trap cleanup_package EXIT
 temporary_out="$package_workspace/$asset"
 temporary_sidecar="$package_workspace/$asset.sha256"
-ditto -c -k --keepParent "$app_bundle" "$temporary_out"
+ditto -c -k --sequesterRsrc --keepParent "$app_bundle" "$temporary_out"
 hash="$(shasum -a 256 "$temporary_out" | awk '{print tolower($1)}')"
 printf '%s  %s' "$hash" "$asset" > "$temporary_sidecar"
 

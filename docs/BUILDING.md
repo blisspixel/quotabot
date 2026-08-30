@@ -110,8 +110,9 @@ Notes:
   plus its checksum sidecar. `--no-archive` leaves the built app available for a
   later signing step, while `--package-only` archives that exact existing app
   without resolving Flutter or rebuilding it. The two options are mutually
-  exclusive. Production distribution still needs Developer ID signing,
-  notarization, and stapling.
+  exclusive. The helper itself does not sign. The tag workflow can place
+  Developer ID signing, notarization, desktop stapling, and native verification
+  between those two phases when its protected macOS mode is activated.
 - **Linux:** `bash tools/package-linux.sh` verifies the committed lockfile, then
   runs `flutter build linux --release --no-pub`
   on a Linux host, verifies the executable bundle plus `.desktop` and icon
@@ -135,30 +136,44 @@ Notes:
   allows publication. The separate `Install smoke` workflow tests the published
   one-line installer, a versioned upgrade, persistent data, and source setup.
 
-Before Windows platform signing, inventory the native candidate with the
-read-only, standard-library-only scanner. It covers every shipped PE module,
-including EXE and DLL files. The command validates PE headers by
-content, requires the expected x64 or arm64 architecture, rejects links and
-malformed expected code, and emits normalized relative paths plus candidate and
-inventory SHA-256 digests. It does not sign or verify a platform identity.
+### Native signing inventories
+
+Before platform signing, inventory the candidate with the read-only,
+standard-library-only scanner. It covers every shipped PE module on Windows and
+every thin or fat macOS Mach-O module, including code nested inside app,
+framework, plugin, and other native bundles. The command validates headers by
+content, requires the expected x64 or arm64 architecture, rejects malformed
+expected code, and emits normalized relative paths plus candidate and inventory
+SHA-256 digests. The complete candidate digest also covers non-native files and
+safe in-tree macOS framework links. Escaping, absolute, cyclic, broken, or
+otherwise unsafe links fail closed. The scanner does not sign or verify a
+platform identity.
+
 The gate runs on an isolated release runner and assumes no other local process
-is concurrently replacing candidate paths. It rejects links present during each
-scan and detects ordinary candidate mutations, but it is not a sandbox against a
-concurrent local attacker racing Windows reparse-point changes.
+is concurrently replacing candidate paths. It detects ordinary candidate
+mutations, but it is not a sandbox against a concurrent local attacker racing
+candidate-path replacement.
 
 ```powershell
 python tools/native_code_inventory.py --platform windows --surface cli --architecture x64 collector/build/quotabot_cli_release/bundle
 python tools/native_code_inventory.py --platform windows --surface desktop --architecture x64 app/build/windows/x64/runner/Release
 ```
 
+```bash
+python tools/native_code_inventory.py --platform macos --surface cli --architecture arm64 collector/build/quotabot_cli_release/bundle
+python tools/native_code_inventory.py --platform macos --surface desktop --architecture arm64 app/build/macos/Build/Products/Release
+```
+
 Add `--json` for the deterministic `quotabot.signing-inventory.v1` object. It
 contains no generated timestamp or absolute candidate root. The complete
-candidate digest covers every regular file, while the native inventory lists the
-bounded executable-code subset. Windows CI and release builds capture that
-manifest after the build-only phase, package without rebuilding, verify the
-archive shape and checksum, extract the archive, and require `--expect-manifest`
-to match before attestation or publication. The manifest is retained with the
-workflow evidence.
+candidate digest covers the complete tree, while the native inventory lists the
+bounded executable-code subset. Windows CI and the Windows and macOS release
+paths capture that manifest after the build-only phase, package without
+rebuilding, verify the archive shape and checksum, extract the archive, and
+require `--expect-manifest` to match before attestation or publication. The
+manifest is retained with the workflow evidence.
+
+### Windows Authenticode verification
 
 Authenticode changes PE bytes, so a signed candidate needs a new post-signing
 inventory. For an Azure Artifact Signing release candidate, set the non-secret
@@ -324,11 +339,104 @@ publisher identity is not established. The published v0.9.9 release artifacts
 remain unsigned. Ordinary CI packaging stays unsigned and cannot access the
 protected release environment.
 
-The current scanner is intentionally Windows-only. The roadmap still requires
-the standalone macOS CLI, app, nested Mach-O code, and native code bundles to be
-inventoried and verified using native macOS evidence before Developer ID signing
-and notarization are enabled. Linux remains outside the current platform-signing
-scope.
+### macOS Developer ID and notarization verification
+
+The release workflow now implements the protected path for the standalone macOS CLI,
+desktop app, nested Mach-O code, and native bundles. It remains inactive while
+`QUOTABOT_MACOS_SIGNING_MODE=unsigned`; current published artifacts are unsigned.
+Owner provisioning and a successful protected rehearsal are required before the
+mode can change to `developer-id`.
+
+The manually dispatched `.github/workflows/macos-signing-rehearsal.yml` builds
+unsigned CLI and desktop candidates outside the protected environment, then runs
+the same signing and verification contract inside `release-signing-macos`. It
+must be dispatched from protected `main` and never publishes a candidate:
+unsigned handoffs expire after two days, protected jobs delete candidate
+payloads and credentials, and only bounded receipts and digest records are
+retained for 14 days. The workflow is implemented but has not completed
+successfully because owner provisioning is still absent.
+
+Every macOS CI, release, and rehearsal job selects the explicit `macos-15` arm64
+runner and `/Applications/Xcode_16.4.app/Contents/Developer`. The
+`tools/require-macos-toolchain.sh` gate requires Xcode 16.4 build 16F6 and the
+expected Apple security tools. Credential-free CI also compiles minimal arm64
+CLI and app fixtures, signs them ad hoc with hardened runtime in the generated
+inside-out order, and exercises real `codesign` entitlement and code-directory
+output parsing. Developer ID identity, secure timestamp, notarization,
+Gatekeeper, and stapling still require the protected rehearsal.
+
+`tools/create_macos_signing_plan.py` first requires the complete candidate to
+match its unsigned inventory, then derives a bounded
+`quotabot.macos-signing-plan.v1` target list. Native targets and their containing
+bundles are ordered inside out. The desktop plan requires `quotabot.app` as its
+outer bundle; a CLI plan rejects bundle and entitlement state.
+
+The isolated `release-signing-macos` job downloads the immutable unsigned
+handoff, regenerates the inventory and plan, and stops if either differs. It
+imports `QUOTABOT_MACOS_CERTIFICATE_P12_BASE64` with
+`QUOTABOT_MACOS_CERTIFICATE_PASSWORD` into an ephemeral keychain, then
+`tools/sign_macos_candidate.py` signs every exact target with the configured
+`QUOTABOT_MACOS_DEVELOPER_IDENTITY`, `QUOTABOT_MACOS_TEAM_ID`, hardened runtime,
+and a secure timestamp. Only the outer app receives the exact committed
+`app/macos/Runner/DeveloperID.entitlements`; every other target, including the
+CLI, must have no entitlements.
+
+The signer then inventories the complete tree again and runs
+`tools/validate_macos_signing_delta.py`. Signing must change every planned
+Mach-O target, preserve its mode, add or change only planned bundle
+`_CodeSignature` metadata beyond those targets, and remove nothing. The bounded
+success receipt is `quotabot.macos-signing-delta.v1`; handled failures use
+`quotabot.macos-signing-delta-error.v1` and stop the release.
+
+The signer submits a bounded ZIP with `notarytool` using
+`QUOTABOT_MACOS_NOTARY_ISSUER_ID`, `QUOTABOT_MACOS_NOTARY_KEY_ID`, and the
+protected `QUOTABOT_MACOS_NOTARY_KEY_P8`. Both Apple's submission and log must
+say `Accepted`; `tools/record_macos_notarization.py` converts them to a bounded
+`quotabot.macos-notarization.v1` receipt. It rejects any error issue, requires
+Apple's logged archive name and SHA-256 to match the submitted ZIP, and requires
+the notarization ticket to cover every signed code directory recorded for the
+  candidate. Before submission, the workflow extracts that exact ZIP and requires
+  its complete inventory to match the signed candidate. The receipt tool extracts
+  and inventories the Apple-accepted ZIP again, rejects any change during that
+  validation, and records the extracted inventory. The desktop app is then
+  stapled. A second
+delta check permits only signature metadata changes and requires no native-code
+change. When Apple attaches the ticket only as extended metadata, the file
+inventory remains unchanged and `stapler validate` supplies the ticket proof.
+Apple does not support stapling the standalone CLI, so the CLI retains accepted
+notarization evidence without a staple.
+
+After a new post-signing inventory,
+`tools/verify_macos_signatures.py` loads the original signing plan and verifies
+every planned target with strict
+`codesign`, confirms the Developer ID authority, team id, timestamp, and
+hardened-runtime flag, compares each target's embedded entitlements with the
+exact expected policy. For the CLI it requires current candidate and inventory
+digests to equal the notarized state. For desktop it chains the notarized state
+through the exact stapling-delta receipt to the current inventory. It also binds
+current code-directory hashes to the accepted notarization receipt, runs `spctl
+--assess --type execute` against the CLI or app, and requires
+`source=Notarized Developer ID`. The desktop additionally runs `stapler
+validate`. Its bounded
+`quotabot.macos-signature-verification.v1` receipt records inventory and plan
+digests, entitlements and code-directory digests, target count, notarization
+submission id, Gatekeeper source, and whether a staple was required and valid.
+
+The signer deletes the P12, P8, raw notarization files, submission archive, and
+temporary keychain on success or failure. Packaging, attestation, upload, and
+fresh-download verification receive no Apple credentials. They revalidate the
+post-signing inventory and accepted notarization receipt before publication.
+Release preflight captures one validated native signing policy for the entire
+run, including the Windows subscriber EKU and the macOS identity, team, and
+notary identifiers when their signing modes are active. Inactive policy fields
+are cleared instead of forwarded. Final audit requires the signed Windows and macOS archive digests and mode
+records emitted by fresh native verification to match the assets immediately
+before their immutable asset manifest is approved for publication. A
+missing credential, changed candidate or plan, signature failure, non-accepted
+or unbound notarization result, unexpected signing or stapling delta,
+entitlements mismatch, missing desktop staple, Gatekeeper rejection, or invalid
+receipt fails closed and leaves the release unpublished. Linux remains outside
+the current platform-signing scope.
 
 Owner provisioning and activation details for the protected environment, Entra
 federated subject, profile-scoped role, durable subscriber EKU, and transition
@@ -481,8 +589,13 @@ before publication. The immediately dispatched
 [install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058)
 then passed clean install, upgrade from the actual prior stable v0.9.8,
 persistent-state, and source-setup checks on Windows, macOS, and Ubuntu. This is
-the rehearsal baseline; the complete checklist, signing, notarization, and
-interactive evidence must run again on the exact 1.0 candidate.
+the tagged rehearsal baseline. The later
+[0.10.0-rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
+passed cross-platform install, upgrade, source-setup, and desktop-run checks for
+the hardened lifecycle. Both runs used unsigned Windows and macOS artifacts.
+The complete checklist, successful protected signing rehearsals, signed
+fresh-download verification, and interactive evidence must run again on the
+signed 0.10.x rehearsal and exact 1.0 candidate.
 
 ## Icon and dev launcher
 

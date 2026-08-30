@@ -35,7 +35,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("build-desktop:", workflow)
         self.assertIn("verify-desktop-release:", workflow)
         self.assertIn(
-            "needs: [create-release, build-desktop, package-windows-desktop]",
+            "needs: [create-release, build-desktop, package-macos-desktop, "
+            "package-windows-desktop]",
             workflow,
         )
         self.assertIn("audit-release-assets:", workflow)
@@ -63,8 +64,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "  publish-release:\n", 1
         )[0]
         self.assertIn("Draft release asset set is incomplete or unexpected", audit_job)
-        self.assertEqual(audit_job.count(".sha256"), 8)
+        self.assertEqual(audit_job.count(".sha256"), 12)
         self.assertIn("sha256sum --check", audit_job)
+        self.assertIn("quotabot-final-macos-evidence", audit_job)
+        self.assertIn("quotabot-final-windows-evidence", audit_job)
         self.assertEqual(audit_job.count("python tools/verify_desktop_archive.py"), 3)
         self.assertIn("gh attestation verify", audit_job)
 
@@ -79,9 +82,6 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertEqual(
             "        include:\n"
-            "          - os: macos-latest\n"
-            "            script: bash tools/package-macos.sh\n"
-            "            archive: release/quotabot-darwin-arm64-desktop.zip\n"
             "          - os: ubuntu-latest\n"
             "            script: bash tools/package-linux.sh\n"
             "            archive: release/quotabot-linux-x64-desktop.tar.gz\n",
@@ -98,11 +98,12 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        build_job = workflow.split("  build:\n", 1)[1].split(
+        cli_pipeline = workflow.split("  build:\n", 1)[1].split(
             "  verify-cli-release:\n", 1
         )[0]
+        build_job = cli_pipeline.split("  build-macos-cli-unsigned:\n", 1)[0]
         verify_job = workflow.split("  verify-cli-release:\n", 1)[1].split(
-            "  build-desktop:\n", 1
+            "  build-macos-desktop-unsigned:\n", 1
         )[0]
         audit_job = workflow.split("  audit-release-assets:\n", 1)[1].split(
             "  publish-release:\n", 1
@@ -114,7 +115,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "quotabot-linux-x64.tar.gz",
             "quotabot-linux-arm64.tar.gz",
         ):
-            self.assertIn(asset, build_job)
+            self.assertIn(asset, cli_pipeline)
             self.assertIn(asset, verify_job)
             self.assertIn(asset, audit_job)
 
@@ -126,7 +127,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("release/quotabot-*", build_job)
 
         self.assertIn(
-            "needs: [create-release, build, package-windows-cli]",
+            "needs: [create-release, build, package-macos-cli, package-windows-cli]",
             verify_job,
         )
         self.assertIn("ubuntu-24.04-arm", verify_job)
@@ -278,10 +279,16 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "secret-scan-gate",
             "create-release",
             "build",
+            "build-macos-cli-unsigned",
+            "sign-macos-cli",
+            "package-macos-cli",
             "build-windows-cli-unsigned",
             "sign-windows-cli",
             "package-windows-cli",
             "verify-cli-release",
+            "build-macos-desktop-unsigned",
+            "sign-macos-desktop",
+            "package-macos-desktop",
             "build-desktop",
             "build-windows-desktop-unsigned",
             "sign-windows-desktop",
@@ -292,8 +299,10 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
         job_names = (
             "build",
+            "package-macos-cli",
             "package-windows-cli",
             "verify-cli-release",
+            "package-macos-desktop",
             "build-desktop",
             "package-windows-desktop",
             "verify-desktop-release",
@@ -318,7 +327,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
         verify_cli = release.split("  verify-cli-release:\n", 1)[1].split(
-            "  build-desktop:\n", 1
+            "  build-macos-desktop-unsigned:\n", 1
         )[0]
         verify_desktop = release.split("  verify-desktop-release:\n", 1)[1].split(
             "  audit-release-assets:\n", 1
@@ -649,7 +658,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("Do not bypass a warning until", normalized_distribution)
         self.assertIn("Do not remove quarantine metadata", normalized_distribution)
 
-    def test_windows_native_signing_inventory_binds_archives(
+    def test_native_signing_inventories_bind_archives(
         self,
     ) -> None:
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -657,8 +666,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertEqual(ci.count("native_code_inventory.py"), 4)
-        self.assertEqual(release.count("native_code_inventory.py"), 12)
+        self.assertEqual(ci.count("native_code_inventory.py"), 9)
+        self.assertEqual(release.count("native_code_inventory.py"), 31)
         self.assertNotIn("sign_windows.py", ci)
         self.assertNotIn("sign_windows.py", release)
         self.assertEqual(release.count("create_windows_signing_catalog.py"), 4)
@@ -674,9 +683,6 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         )
         self.assertEqual(ci.count("verify_windows_signatures.py"), 0)
         self.assertEqual(release.count("verify_windows_signatures.py"), 6)
-        for workflow in (ci, release):
-            self.assertNotIn("--platform macos", workflow)
-
         self.assertEqual(
             ci.count("--platform windows --surface cli --architecture x64"),
             2,
@@ -685,7 +691,12 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             ci.count("--platform windows --surface desktop --architecture x64"),
             2,
         )
-        self.assertEqual(ci.count("--expect-manifest"), 2)
+        self.assertEqual(ci.count("--platform macos --surface cli --architecture"), 2)
+        self.assertEqual(
+            ci.count("--platform macos --surface desktop --architecture"), 3
+        )
+        self.assertEqual(ci.count("--expect-manifest"), 4)
+        self.assertEqual(ci.count("create_macos_signing_plan.py"), 2)
         self.assertEqual(
             release.count("--platform windows --surface cli --architecture x64"),
             6,
@@ -694,7 +705,19 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             release.count("--platform windows --surface desktop --architecture x64"),
             6,
         )
-        self.assertEqual(release.count("--expect-manifest"), 6)
+        self.assertEqual(
+            release.count("--platform macos --surface cli --architecture arm64"),
+            9,
+        )
+        self.assertEqual(
+            release.count("--platform macos --surface desktop --architecture arm64"),
+            10,
+        )
+        self.assertEqual(release.count("--expect-manifest"), 16)
+        self.assertEqual(release.count("create_macos_signing_plan.py"), 4)
+        self.assertEqual(release.count("sign_macos_candidate.py"), 2)
+        self.assertEqual(release.count("record_macos_notarization.py"), 2)
+        self.assertEqual(release.count("verify_macos_signatures.py"), 6)
 
         cli_unsigned = release.split("  build-windows-cli-unsigned:\n", 1)[1].split(
             "  sign-windows-cli:\n", 1
@@ -768,7 +791,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertIn("vars.QUOTABOT_AZURE_SIGNING_ENDPOINT", sign)
             self.assertIn("vars.QUOTABOT_AZURE_SIGNING_ACCOUNT", sign)
             self.assertIn("vars.QUOTABOT_AZURE_CERTIFICATE_PROFILE", sign)
-            self.assertIn("vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU", sign)
+            self.assertIn("needs.create-release.outputs.windows_subscriber_eku", sign)
             self.assertIn("files-catalog:", sign)
             self.assertIn("file-digest: SHA256", sign)
             self.assertIn(
@@ -816,7 +839,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertLess(attest_at, upload_at)
 
         non_windows_cli = release.split("  build:\n", 1)[1].split(
-            "  build-windows-cli-unsigned:\n", 1
+            "  build-macos-cli-unsigned:\n", 1
         )[0]
         non_windows_desktop = release.split("  build-desktop:\n", 1)[1].split(
             "  build-windows-desktop-unsigned:\n", 1
@@ -833,7 +856,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
-        self.assertEqual(release.count("environment: release-signing"), 2)
+        self.assertEqual(release.count("environment: release-signing\n"), 2)
+        self.assertEqual(release.count("environment: release-signing-macos"), 2)
         for job_name, next_job in (
             ("sign-windows-cli", "package-windows-cli"),
             ("sign-windows-desktop", "package-windows-desktop"),
@@ -843,28 +867,197 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             ]
             self.assertIn("environment: release-signing", job)
         self.assertNotIn(
-            "environment: release-signing",
-            release.split("  build:\n", 1)[1].split("  sign-windows-cli:\n", 1)[0],
+            "environment: release-signing\n",
+            release.split("  build:\n", 1)[1].split("  build-macos-cli-unsigned:\n", 1)[
+                0
+            ],
         )
         self.assertNotIn(
-            "environment: release-signing",
+            "environment: release-signing\n",
             release.split("  package-windows-cli:\n", 1)[1].split(
-                "  sign-windows-desktop:\n", 1
+                "  verify-cli-release:\n", 1
             )[0],
         )
         self.assertNotIn(
-            "environment: release-signing",
-            release.split("  package-windows-desktop:\n", 1)[1],
+            "environment: release-signing\n",
+            release.split("  package-windows-desktop:\n", 1)[1].split(
+                "  verify-desktop-release:\n", 1
+            )[0],
         )
         self.assertIn(
-            "unsigned|azure-artifact-signing",
+            'windows_backend not in {"unsigned", "azure-artifact-signing"}',
             release,
         )
-        self.assertIn("QUOTABOT_MACOS_SIGNING_MODE must be unsigned", release)
+        self.assertIn('windows_subscriber_eku = ""', release)
+        self.assertIn('macos_identity = ""', release)
+        self.assertIn(
+            "QUOTABOT_MACOS_SIGNING_MODE must be unsigned or developer-id.",
+            release,
+        )
+        self.assertIn("Developer ID signed, hardened, notarized", release)
         self.assertIn("Native signing status:", release)
         self.assertIn("Do not bypass SmartScreen or Gatekeeper.", release)
         self.assertIn("Draft release native signing disclosure", release)
         self.assertNotIn("QUOTABOT_WINDOWS_PFX", release)
+        for repository_variable in (
+            "QUOTABOT_WINDOWS_SIGNING_BACKEND",
+            "QUOTABOT_WINDOWS_SUBSCRIBER_EKU",
+            "QUOTABOT_MACOS_SIGNING_MODE",
+            "QUOTABOT_MACOS_DEVELOPER_IDENTITY",
+            "QUOTABOT_MACOS_TEAM_ID",
+            "QUOTABOT_MACOS_NOTARY_ISSUER_ID",
+            "QUOTABOT_MACOS_NOTARY_KEY_ID",
+        ):
+            self.assertEqual(release.count(f"vars.{repository_variable}"), 1)
+        self.assertIn("steps.signing_modes.outputs.macos_signing_mode", release)
+        self.assertIn("steps.signing_modes.outputs.windows_signing_backend", release)
+        self.assertIn("steps.signing_modes.outputs.windows_subscriber_eku", release)
+        self.assertIn("needs.create-release.outputs.macos_signing_mode", release)
+        self.assertIn("needs.create-release.outputs.windows_signing_backend", release)
+        self.assertIn("needs.create-release.outputs.windows_subscriber_eku", release)
+
+    def test_macos_jobs_pin_the_runner_and_apple_toolchain(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        rehearsal = (
+            ROOT / ".github" / "workflows" / "macos-signing-rehearsal.yml"
+        ).read_text(encoding="utf-8")
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        toolchain = (ROOT / "tools" / "require-macos-toolchain.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("macos-latest", release)
+        self.assertNotIn("macos-latest", rehearsal)
+        self.assertEqual(release.count("macos-15"), 8)
+        self.assertEqual(rehearsal.count("macos-15"), 2)
+        self.assertEqual(release.count("require-macos-toolchain.sh"), 8)
+        self.assertEqual(rehearsal.count("require-macos-toolchain.sh"), 2)
+        self.assertEqual(ci.count("require-macos-toolchain.sh"), 1)
+        self.assertIn("/Applications/Xcode_16.4.app/Contents/Developer", release)
+        self.assertIn("Build version 16F6", toolchain)
+        self.assertIn("notarytool stapler", toolchain)
+
+    def test_macos_signing_isolated_reproducible_and_fail_closed(self) -> None:
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        signer = (ROOT / "tools" / "sign_macos_candidate.py").read_text(
+            encoding="utf-8"
+        )
+        verifier = (ROOT / "tools" / "verify_macos_signatures.py").read_text(
+            encoding="utf-8"
+        )
+        recorder = (ROOT / "tools" / "record_macos_notarization.py").read_text(
+            encoding="utf-8"
+        )
+
+        for surface, next_pipeline in (
+            ("cli", "build-windows-cli-unsigned"),
+            ("desktop", "build-desktop"),
+        ):
+            unsigned = release.split(f"  build-macos-{surface}-unsigned:\n", 1)[
+                1
+            ].split(f"  sign-macos-{surface}:\n", 1)[0]
+            sign = release.split(f"  sign-macos-{surface}:\n", 1)[1].split(
+                f"  package-macos-{surface}:\n", 1
+            )[0]
+            package = release.split(f"  package-macos-{surface}:\n", 1)[1].split(
+                f"  {next_pipeline}:\n", 1
+            )[0]
+
+            self.assertIn("--no-archive", unsigned)
+            self.assertIn("native_code_inventory.py", unsigned)
+            self.assertIn("create_macos_signing_plan.py", unsigned)
+            self.assertIn("candidate.zip", unsigned)
+            self.assertIn("--sequesterRsrc --keepParent", unsigned)
+            self.assertIn("actions/upload-artifact@", unsigned)
+            self.assertNotIn("secrets.", unsigned)
+            self.assertNotIn("environment: release-signing-macos", unsigned)
+            self.assertNotIn("id-token: write", unsigned)
+
+            self.assertIn("environment: release-signing-macos", sign)
+            self.assertIn("contents: read", sign)
+            self.assertNotIn("contents: write", sign)
+            self.assertNotIn("id-token: write", sign)
+            self.assertIn("--expect-manifest", sign)
+            self.assertIn("cmp -s", sign)
+            self.assertIn("security create-keychain", sign)
+            self.assertIn("security delete-keychain", sign)
+            self.assertIn("trap cleanup EXIT", sign)
+            self.assertIn("sign_macos_candidate.py", sign)
+            self.assertIn("notarytool submit", sign)
+            self.assertIn("--wait --output-format json", sign)
+            self.assertIn("record_macos_notarization.py", sign)
+            self.assertIn("validate_macos_signing_delta.py", sign)
+            self.assertIn('--artifact "$submission"', sign)
+            self.assertIn('ditto -x -k "$submission"', sign)
+            self.assertIn("submission-inventory.json", sign)
+            self.assertIn('--inventory "$stage/submission-inventory.json"', sign)
+            self.assertIn('--signing-receipt "$stage/signing.json"', sign)
+            self.assertIn("verify_macos_signatures.py", sign)
+            self.assertIn("--signing-plan", sign)
+            self.assertIn("candidate.zip", sign)
+            for credential in (
+                "QUOTABOT_MACOS_CERTIFICATE_P12_BASE64",
+                "QUOTABOT_MACOS_CERTIFICATE_PASSWORD",
+                "QUOTABOT_MACOS_NOTARY_KEY_P8",
+            ):
+                self.assertIn(f"secrets.{credential}", sign)
+
+            if surface == "desktop":
+                self.assertIn(
+                    "--entitlements app/macos/Runner/DeveloperID.entitlements",
+                    sign,
+                )
+                self.assertIn("--operation stapling", sign)
+                self.assertIn("xcrun stapler staple", sign)
+                self.assertIn("--stapling-delta-receipt", sign)
+            else:
+                self.assertNotIn("--entitlements", sign)
+                self.assertNotIn("stapler staple", sign)
+
+            self.assertIn("always()", package)
+            self.assertIn("result == 'skipped'", package)
+            self.assertIn("result == 'success'", package)
+            self.assertIn("actions/download-artifact@", package)
+            self.assertIn("--package-only", package)
+            self.assertIn("--expect-manifest", package)
+            self.assertIn("verify_macos_signatures.py", package)
+            self.assertIn("actions/attest-build-provenance@", package)
+            self.assertIn("gh release upload", package)
+            self.assertNotIn("secrets.QUOTABOT_MACOS", package)
+            self.assertNotIn("environment: release-signing-macos", package)
+
+        for required in (
+            '"--options",\n            "runtime"',
+            '"--timestamp"',
+            'Path("/usr/bin/codesign")',
+        ):
+            self.assertIn(required, signer)
+        for required in (
+            'Path("/usr/bin/codesign")',
+            'Path("/usr/sbin/spctl")',
+            'Path("/usr/bin/xcrun")',
+            '"--deep"',
+            '"stapler", "validate"',
+            '"source=Notarized Developer ID"',
+        ):
+            self.assertIn(required, verifier)
+        self.assertIn('Path("/usr/bin/ditto")', recorder)
+        self.assertIn("archive_inventory != inventory", recorder)
+
+        verify_cli = release.split("  verify-cli-release:\n", 1)[1].split(
+            "  build-macos-desktop-unsigned:\n", 1
+        )[0]
+        verify_desktop = release.split("  verify-desktop-release:\n", 1)[1].split(
+            "  audit-release-assets:\n", 1
+        )[0]
+        for job in (verify_cli, verify_desktop):
+            self.assertIn("verify_macos_signatures.py", job)
+            self.assertIn("native_code_inventory.py", job)
+            self.assertIn("notarization.json", job)
 
     def test_release_notes_are_curated_without_generated_attribution(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -899,6 +1092,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             "gh api repos/blisspixel/quotabot/actions/permissions/selected-actions",
             signing,
         )
+        self.assertIn("protected `main` branch and the `v*` tag pattern", normalized)
+        self.assertIn("dispatched from `main`", normalized)
 
     def test_release_acceptance_jobs_do_not_inherit_skipped_signers(self) -> None:
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
@@ -907,13 +1102,23 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         cases = (
             (
                 "verify-cli-release",
-                "build-desktop",
-                ("create-release", "build", "package-windows-cli"),
+                "build-macos-desktop-unsigned",
+                (
+                    "create-release",
+                    "build",
+                    "package-macos-cli",
+                    "package-windows-cli",
+                ),
             ),
             (
                 "verify-desktop-release",
                 "audit-release-assets",
-                ("create-release", "build-desktop", "package-windows-desktop"),
+                (
+                    "create-release",
+                    "build-desktop",
+                    "package-macos-desktop",
+                    "package-windows-desktop",
+                ),
             ),
             (
                 "audit-release-assets",
@@ -952,7 +1157,7 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             encoding="utf-8"
         )
         verify_cli = release.split("  verify-cli-release:\n", 1)[1].split(
-            "  build-desktop:\n", 1
+            "  build-macos-desktop-unsigned:\n", 1
         )[0]
         verify_desktop = release.split("  verify-desktop-release:\n", 1)[1].split(
             "  audit-release-assets:\n", 1
@@ -978,16 +1183,16 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             self.assertLess(inventory_at, signature_at)
             self.assertLess(signature_at, preserve_at)
             self.assertIn("--expected-subscriber-eku", job)
-            self.assertIn("vars.QUOTABOT_WINDOWS_SUBSCRIBER_EKU", job)
+            self.assertIn("needs.create-release.outputs.windows_subscriber_eku", job)
             self.assertNotIn("--expected-signer-subject", job)
             self.assertNotIn("--expected-signer-thumbprint", job)
             self.assertIn("--receipt $receipt $expanded", job)
             preserve_context = job[max(0, preserve_at - 500) : preserve_at + 500]
             self.assertIn(
-                "vars.QUOTABOT_WINDOWS_SIGNING_BACKEND == 'azure-artifact-signing'",
+                "needs.create-release.outputs.windows_signing_backend == 'azure-artifact-signing'",
                 preserve_context,
             )
-            self.assertIn("if-no-files-found: warn", preserve_context)
+            self.assertIn("if-no-files-found: error", preserve_context)
 
         audit_job = release.split("  audit-release-assets:\n", 1)[1].split(
             "  publish-release:\n", 1
@@ -1079,7 +1284,12 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("package-windows.ps1 -NoArchive", workflow)
         self.assertIn("package-windows.ps1 -PackageOnly", workflow)
         self.assertNotIn("package-linux.sh --no-archive", workflow)
-        self.assertNotIn("package-macos.sh --no-archive", workflow)
+        self.assertIn("package-macos.sh --no-archive", workflow)
+        self.assertIn("package-macos.sh --package-only", workflow)
+        self.assertIn("--platform macos --surface desktop", workflow)
+        self.assertIn("quotabot-macos-desktop-candidate", workflow)
+        self.assertIn('ditto "$built_app" "$candidate/quotabot.app"', workflow)
+        self.assertIn("quotabot-macos-desktop-packaged-inventory.json", workflow)
         self.assertIn("quotabot-windows-readiness.json", workflow)
         self.assertIn("quotabot-linux-readiness.json", workflow)
         self.assertIn("if: always() &&", workflow)
@@ -1094,7 +1304,9 @@ class DesktopReleasePolicyTests(unittest.TestCase):
         self.assertIn("tools/package-cli.sh", workflow)
         self.assertIn("package-cli.ps1 -NoArchive", workflow)
         self.assertIn("package-cli.ps1 -PackageOnly", workflow)
-        self.assertNotIn("package-cli.sh --no-archive", workflow)
+        self.assertIn("package-cli.sh --no-archive", workflow)
+        self.assertIn("package-cli.sh --package-only", workflow)
+        self.assertIn("--platform macos --surface cli", workflow)
         self.assertEqual(workflow.count("tools/verify_cli_archive.py"), 2)
 
 

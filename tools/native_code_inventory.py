@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inventory and compare Windows PE release candidates without mutation."""
+"""Inventory and compare native release candidates without mutation."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import posixpath
 import stat
 import struct
 import sys
@@ -32,6 +33,15 @@ _PE_ARCHITECTURES = {
     0x8664: "x64",
     0xAA64: "arm64",
 }
+
+_MACH_ARCHITECTURES = {
+    0x00000007: "x86",
+    0x01000007: "x64",
+    0x0000000C: "arm",
+    0x0100000C: "arm64",
+}
+_MACH_ARCHITECTURE_ORDER = {"x86": 0, "x64": 1, "arm": 2, "arm64": 3}
+_MAX_FAT_ARCHITECTURES = 16
 
 
 class NativeInventoryError(ValueError):
@@ -65,6 +75,7 @@ class NativeInventory:
     candidate_file_count: int
     candidate_bytes: int
     candidate_sha256: str
+    candidate_entries: tuple[dict[str, object], ...]
     native_code: tuple[NativeCodeEntry, ...]
     inventory_sha256: str
 
@@ -81,6 +92,8 @@ class NativeInventory:
             "candidate_file_count": self.candidate_file_count,
             "candidate_bytes": self.candidate_bytes,
             "candidate_sha256": self.candidate_sha256,
+            "candidate_entry_count": len(self.candidate_entries),
+            "candidate_entries": [dict(entry) for entry in self.candidate_entries],
             "native_code_count": self.native_code_count,
             "native_code": [entry.to_dict() for entry in self.native_code],
             "inventory_sha256": self.inventory_sha256,
@@ -92,6 +105,27 @@ class _FileSnapshot:
     path: Path
     relative: str
     size: int
+    modified_ns: int
+    device: int
+    inode: int
+    mode: int
+
+
+@dataclass(frozen=True)
+class _LinkSnapshot:
+    path: Path
+    relative: str
+    target: str
+    modified_ns: int
+    device: int
+    inode: int
+
+
+@dataclass(frozen=True)
+class _DirectorySnapshot:
+    path: Path
+    relative: str
+    mode: int
     modified_ns: int
     device: int
     inode: int
@@ -130,7 +164,26 @@ def _is_junction(path: Path, relative: str) -> bool:
         ) from error
 
 
-def _candidate_entries(root: Path):
+def _validated_macos_link_target(relative: str, target: str) -> str:
+    if (
+        not target
+        or len(target) > MAX_RELATIVE_PATH_CHARS
+        or target.startswith("/")
+        or "\\" in target
+        or any(ord(character) < 32 or ord(character) == 127 for character in target)
+    ):
+        raise NativeInventoryError(
+            f"macOS candidate contains an unsafe symbolic link: {relative}"
+        )
+    resolved = posixpath.normpath(posixpath.join(posixpath.dirname(relative), target))
+    if resolved in {"", ".", ".."} or resolved.startswith("../"):
+        raise NativeInventoryError(
+            f"macOS candidate contains an escaping symbolic link: {relative}"
+        )
+    return target
+
+
+def _candidate_entries(root: Path, platform: str):
     entry_count = 0
     directories = [root]
     while directories:
@@ -161,18 +214,29 @@ def _candidate_entries(root: Path):
                     f"candidate path cannot be inspected: {relative}"
                 ) from error
             if stat.S_ISLNK(metadata.st_mode):
-                raise NativeInventoryError(
-                    f"Windows candidate contains a symbolic link: {relative}"
-                )
+                if platform == "windows":
+                    raise NativeInventoryError(
+                        f"Windows candidate contains a symbolic link: {relative}"
+                    )
+                try:
+                    target = _validated_macos_link_target(relative, os.readlink(path))
+                except NativeInventoryError:
+                    raise
+                except OSError as error:
+                    raise NativeInventoryError(
+                        f"candidate path cannot be inspected: {relative}"
+                    ) from error
+                yield "symlink", path, relative, metadata, target
+                continue
             if _is_junction(path, relative):
                 raise NativeInventoryError(
-                    f"Windows candidate contains a junction: {relative}"
+                    f"{platform.capitalize()} candidate contains a junction: {relative}"
                 )
             if stat.S_ISDIR(metadata.st_mode):
                 child_directories.append(path)
-                yield "directory", path, relative, metadata
+                yield "directory", path, relative, metadata, None
             elif stat.S_ISREG(metadata.st_mode):
-                yield "file", path, relative, metadata
+                yield "file", path, relative, metadata, None
             else:
                 raise NativeInventoryError(
                     f"candidate contains a special file: {relative}"
@@ -255,6 +319,7 @@ def _hash_and_capture(
             modified_ns=expected.st_mtime_ns,
             device=expected.st_dev,
             inode=expected.st_ino,
+            mode=stat.S_IMODE(expected.st_mode),
         ),
     )
 
@@ -294,13 +359,113 @@ def _pe_architecture(payload: bytes, size: int) -> str | None:
     return _PE_ARCHITECTURES.get(machine, f"machine-0x{machine:04x}")
 
 
-def _verify_stable_snapshot(root: Path, files: list[_FileSnapshot]) -> None:
+def _macho_architectures(payload: bytes, size: int) -> tuple[str, ...] | None:
+    if len(payload) < 4:
+        return None
+    magic = payload[:4]
+    thin = {
+        b"\xce\xfa\xed\xfe": ("<", 28),
+        b"\xcf\xfa\xed\xfe": ("<", 32),
+        b"\xfe\xed\xfa\xce": (">", 28),
+        b"\xfe\xed\xfa\xcf": (">", 32),
+    }.get(magic)
+    if thin is not None:
+        endian, header_size = thin
+        if len(payload) < header_size or size < header_size:
+            raise ValueError("truncated Mach-O header")
+        cpu_type, _subtype, file_type, command_count, command_bytes = (
+            struct.unpack_from(f"{endian}IIIII", payload, 4)
+        )
+        if file_type == 0 or command_count > 4096 or command_bytes > size - header_size:
+            raise ValueError("invalid Mach-O header")
+        architecture = _MACH_ARCHITECTURES.get(cpu_type, f"cpu-0x{cpu_type:08x}")
+        return (architecture,)
+
+    fat = {
+        b"\xca\xfe\xba\xbe": (">", False),
+        b"\xbe\xba\xfe\xca": ("<", False),
+        b"\xca\xfe\xba\xbf": (">", True),
+        b"\xbf\xba\xfe\xca": ("<", True),
+    }.get(magic)
+    if fat is None:
+        return None
+    endian, is_64_bit = fat
+    if len(payload) < 8:
+        raise ValueError("truncated universal Mach-O header")
+    architecture_count = struct.unpack_from(f"{endian}I", payload, 4)[0]
+    entry_size = 32 if is_64_bit else 20
+    table_end = 8 + architecture_count * entry_size
+    if (
+        architecture_count == 0
+        or architecture_count > _MAX_FAT_ARCHITECTURES
+        or table_end > len(payload)
+        or table_end > size
+    ):
+        raise ValueError("invalid universal Mach-O table")
+    architectures: list[str] = []
+    slices: list[tuple[int, int]] = []
+    for index in range(architecture_count):
+        offset = 8 + index * entry_size
+        if is_64_bit:
+            cpu_type, _subtype, slice_offset, slice_size, alignment, _reserved = (
+                struct.unpack_from(f"{endian}IIQQII", payload, offset)
+            )
+        else:
+            cpu_type, _subtype, slice_offset, slice_size, alignment = (
+                struct.unpack_from(f"{endian}IIIII", payload, offset)
+            )
+        if (
+            slice_offset < table_end
+            or slice_size == 0
+            or slice_offset + slice_size > size
+            or alignment > 31
+        ):
+            raise ValueError("invalid universal Mach-O slice")
+        architecture = _MACH_ARCHITECTURES.get(cpu_type, f"cpu-0x{cpu_type:08x}")
+        if architecture in architectures:
+            raise ValueError("duplicate universal Mach-O architecture")
+        architectures.append(architecture)
+        slices.append((slice_offset, slice_offset + slice_size))
+    sorted_slices = sorted(slices)
+    for index, (start, end) in enumerate(sorted_slices):
+        if index and start < sorted_slices[index - 1][1]:
+            raise ValueError("overlapping universal Mach-O slices")
+        if end <= start:
+            raise ValueError("invalid universal Mach-O slice")
+    return tuple(
+        sorted(
+            architectures,
+            key=lambda value: (_MACH_ARCHITECTURE_ORDER.get(value, 99), value),
+        )
+    )
+
+
+def _verify_stable_snapshot(
+    root: Path,
+    files: list[_FileSnapshot],
+    links: list[_LinkSnapshot],
+    directories: list[_DirectorySnapshot],
+    *,
+    platform: str,
+) -> None:
     observed_files: set[str] = set()
-    for kind, _path, relative, _metadata in _candidate_entries(root):
+    observed_links: dict[str, str] = {}
+    observed_directories: set[str] = set()
+    for kind, _path, relative, _metadata, target in _candidate_entries(root, platform):
         if kind == "file":
             observed_files.add(relative)
+        elif kind == "symlink" and target is not None:
+            observed_links[relative] = target
+        elif kind == "directory":
+            observed_directories.add(relative)
     expected_files = {item.relative for item in files}
-    if observed_files != expected_files:
+    expected_links = {item.relative: item.target for item in links}
+    expected_directories = {item.relative for item in directories}
+    if (
+        observed_files != expected_files
+        or observed_links != expected_links
+        or observed_directories != expected_directories
+    ):
         raise NativeInventoryError("candidate contents changed while inventoried")
     for item in files:
         try:
@@ -313,12 +478,65 @@ def _verify_stable_snapshot(root: Path, files: list[_FileSnapshot]) -> None:
             not stat.S_ISREG(current.st_mode)
             or current.st_size != item.size
             or current.st_mtime_ns != item.modified_ns
+            or stat.S_IMODE(current.st_mode) != item.mode
             or (item.device and current.st_dev and current.st_dev != item.device)
             or (item.inode and current.st_ino and current.st_ino != item.inode)
         ):
             raise NativeInventoryError(
                 f"candidate contents changed while inventoried: {item.relative}"
             )
+    for item in links:
+        try:
+            current = item.path.lstat()
+            target = os.readlink(item.path)
+        except OSError as error:
+            raise NativeInventoryError(
+                f"candidate contents changed while inventoried: {item.relative}"
+            ) from error
+        if (
+            not stat.S_ISLNK(current.st_mode)
+            or target != item.target
+            or current.st_mtime_ns != item.modified_ns
+            or (item.device and current.st_dev and current.st_dev != item.device)
+            or (item.inode and current.st_ino and current.st_ino != item.inode)
+        ):
+            raise NativeInventoryError(
+                f"candidate contents changed while inventoried: {item.relative}"
+            )
+    for item in directories:
+        try:
+            current = item.path.lstat()
+        except OSError as error:
+            raise NativeInventoryError(
+                f"candidate contents changed while inventoried: {item.relative}"
+            ) from error
+        if (
+            not stat.S_ISDIR(current.st_mode)
+            or stat.S_IMODE(current.st_mode) != item.mode
+            or current.st_mtime_ns != item.modified_ns
+            or (item.device and current.st_dev and current.st_dev != item.device)
+            or (item.inode and current.st_ino and current.st_ino != item.inode)
+        ):
+            raise NativeInventoryError(
+                f"candidate contents changed while inventoried: {item.relative}"
+            )
+
+
+def _is_expected_macho(relative: str, *, required: str) -> bool:
+    if relative == required or relative.casefold().endswith(".dylib"):
+        return True
+    parts = relative.split("/")
+    if "Contents" in parts:
+        for index in range(len(parts) - 2):
+            if parts[index] == "Contents" and parts[index + 1] == "MacOS":
+                return True
+    for index, part in enumerate(parts):
+        if not part.casefold().endswith(".framework"):
+            continue
+        framework_name = part[: -len(".framework")]
+        if parts[-1] == framework_name and "Resources" not in parts[index + 1 :]:
+            return True
+    return False
 
 
 def inventory_native_code(
@@ -328,9 +546,9 @@ def inventory_native_code(
     surface: str,
     architecture: str,
 ) -> NativeInventory:
-    """Return a deterministic Windows PE inventory for an existing candidate."""
-    if platform != "windows":
-        raise NativeInventoryError("only Windows inventory is currently supported")
+    """Return a deterministic native-code inventory for an existing candidate."""
+    if platform not in {"windows", "macos"}:
+        raise NativeInventoryError("platform must be windows or macos")
     if surface not in {"cli", "desktop"}:
         raise NativeInventoryError("surface must be cli or desktop")
     if architecture not in {"x64", "arm64"}:
@@ -351,10 +569,14 @@ def inventory_native_code(
     candidate_records: list[dict[str, object]] = []
     native_entries: list[NativeCodeEntry] = []
     snapshots: list[_FileSnapshot] = []
+    link_snapshots: list[_LinkSnapshot] = []
+    directory_snapshots: list[_DirectorySnapshot] = []
     candidate_file_count = 0
     candidate_bytes = 0
 
-    for kind, path, relative, metadata in _candidate_entries(resolved):
+    for kind, path, relative, metadata, link_target in _candidate_entries(
+        resolved, platform
+    ):
         folded = relative.casefold()
         previous = seen_paths.get(folded)
         if previous is not None and previous != relative:
@@ -362,6 +584,41 @@ def inventory_native_code(
                 f"candidate contains case-colliding paths: {previous}, {relative}"
             )
         seen_paths[folded] = relative
+        if kind == "symlink":
+            assert link_target is not None
+            candidate_records.append(
+                {"path": relative, "kind": "symlink", "link_target": link_target}
+            )
+            link_snapshots.append(
+                _LinkSnapshot(
+                    path=path,
+                    relative=relative,
+                    target=link_target,
+                    modified_ns=metadata.st_mtime_ns,
+                    device=metadata.st_dev,
+                    inode=metadata.st_ino,
+                )
+            )
+            continue
+        if kind == "directory":
+            candidate_records.append(
+                {
+                    "path": relative,
+                    "kind": "directory",
+                    "mode": stat.S_IMODE(metadata.st_mode),
+                }
+            )
+            directory_snapshots.append(
+                _DirectorySnapshot(
+                    path=path,
+                    relative=relative,
+                    mode=stat.S_IMODE(metadata.st_mode),
+                    modified_ns=metadata.st_mtime_ns,
+                    device=metadata.st_dev,
+                    inode=metadata.st_ino,
+                )
+            )
+            continue
         if kind != "file":
             continue
         candidate_file_count += 1
@@ -375,23 +632,53 @@ def inventory_native_code(
         candidate_records.append(
             {
                 "path": relative,
+                "kind": "file",
                 "bytes": metadata.st_size,
+                "mode": stat.S_IMODE(metadata.st_mode),
                 "sha256": digest,
             }
         )
-        observed_architecture = _pe_architecture(captured, metadata.st_size)
-        if path.suffix.casefold() in {".dll", ".exe"} and observed_architecture is None:
-            raise NativeInventoryError(f"expected PE module is malformed: {relative}")
-        if observed_architecture is not None:
-            if observed_architecture != architecture:
+        if platform == "windows":
+            pe_architecture = _pe_architecture(captured, metadata.st_size)
+            observed_architectures = (
+                (pe_architecture,) if pe_architecture is not None else None
+            )
+            expected_native = path.suffix.casefold() in {".dll", ".exe"}
+            malformed_label = "PE module"
+            kind_label = "pe"
+        else:
+            try:
+                observed_architectures = _macho_architectures(
+                    captured, metadata.st_size
+                )
+            except ValueError as error:
                 raise NativeInventoryError(
-                    f"PE architecture mismatch at {relative}: expected "
+                    f"expected Mach-O module is malformed: {relative}"
+                ) from error
+            required_macos = (
+                "bin/quotabot"
+                if surface == "cli"
+                else "quotabot.app/Contents/MacOS/quotabot"
+            )
+            expected_native = _is_expected_macho(relative, required=required_macos)
+            malformed_label = "Mach-O module"
+            kind_label = "macho"
+        if expected_native and observed_architectures is None:
+            raise NativeInventoryError(
+                f"expected {malformed_label} is malformed: {relative}"
+            )
+        if observed_architectures is not None:
+            observed_architecture = "+".join(observed_architectures)
+            if architecture not in observed_architectures:
+                platform_label = "PE" if platform == "windows" else "Mach-O"
+                raise NativeInventoryError(
+                    f"{platform_label} architecture mismatch at {relative}: expected "
                     f"{architecture}, observed {observed_architecture}"
                 )
             native_entries.append(
                 NativeCodeEntry(
                     path=relative,
-                    kind="pe",
+                    kind=kind_label,
                     architecture=observed_architecture,
                     bytes=metadata.st_size,
                     sha256=digest,
@@ -402,15 +689,34 @@ def inventory_native_code(
                     "candidate contains too many native code files"
                 )
 
-    required = "bin/quotabot.exe" if surface == "cli" else "quotabot.exe"
+    if platform == "windows":
+        required = "bin/quotabot.exe" if surface == "cli" else "quotabot.exe"
+        required_label = "PE module"
+    else:
+        required = (
+            "bin/quotabot"
+            if surface == "cli"
+            else "quotabot.app/Contents/MacOS/quotabot"
+        )
+        required_label = "Mach-O module"
     candidate_paths = {record["path"] for record in candidate_records}
     if required not in candidate_paths:
-        raise NativeInventoryError(f"required PE launcher is missing: {required}")
+        raise NativeInventoryError(
+            f"required {required_label} launcher is missing: {required}"
+        )
     native_code = tuple(sorted(native_entries, key=lambda entry: entry.path))
     if required not in {entry.path for entry in native_code}:
-        raise NativeInventoryError(f"expected PE module is malformed: {required}")
+        raise NativeInventoryError(
+            f"expected {required_label} is malformed: {required}"
+        )
 
-    _verify_stable_snapshot(resolved, snapshots)
+    _verify_stable_snapshot(
+        resolved,
+        snapshots,
+        link_snapshots,
+        directory_snapshots,
+        platform=platform,
+    )
     candidate_records.sort(key=lambda record: str(record["path"]))
     candidate_sha256 = canonical_sha256(candidate_records)
     body = {
@@ -421,6 +727,8 @@ def inventory_native_code(
         "candidate_file_count": candidate_file_count,
         "candidate_bytes": candidate_bytes,
         "candidate_sha256": candidate_sha256,
+        "candidate_entry_count": len(candidate_records),
+        "candidate_entries": candidate_records,
         "native_code_count": len(native_code),
         "native_code": [entry.to_dict() for entry in native_code],
     }
@@ -432,6 +740,7 @@ def inventory_native_code(
         candidate_file_count=candidate_file_count,
         candidate_bytes=candidate_bytes,
         candidate_sha256=candidate_sha256,
+        candidate_entries=tuple(candidate_records),
         native_code=native_code,
         inventory_sha256=canonical_sha256(body),
     )
@@ -488,9 +797,9 @@ def load_inventory_manifest(path: Path) -> dict[str, object]:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Inventory Windows PE code in an existing release candidate.",
+        description="Inventory native code in an existing release candidate.",
     )
-    parser.add_argument("--platform", required=True, choices=("windows",))
+    parser.add_argument("--platform", required=True, choices=("windows", "macos"))
     parser.add_argument("--surface", required=True, choices=("cli", "desktop"))
     parser.add_argument("--architecture", required=True, choices=("x64", "arm64"))
     output = parser.add_mutually_exclusive_group()
@@ -535,15 +844,16 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         return 0
+    kind = "PE" if inventory.platform == "windows" else "Mach-O"
     print(
         f"native signing inventory {inventory.platform}/{inventory.surface}/"
-        f"{inventory.architecture}: {inventory.native_code_count} PE modules, "
+        f"{inventory.architecture}: {inventory.native_code_count} {kind} modules, "
         f"{inventory.candidate_file_count} candidate files"
     )
     print(f"candidate sha256: {inventory.candidate_sha256}")
     print(f"inventory sha256: {inventory.inventory_sha256}")
     for entry in inventory.native_code:
-        print(f"pe {entry.architecture} {entry.sha256} {entry.path}")
+        print(f"{entry.kind} {entry.architecture} {entry.sha256} {entry.path}")
     if args.expect_manifest is not None:
         print("candidate matches expected inventory")
     return 0

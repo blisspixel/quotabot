@@ -36,8 +36,21 @@ The tag workflow has two explicit Windows modes:
   Windows trust, SHA-256 Authenticode and RFC 3161 policy, and binds the signer
   to one durable Artifact Signing subscriber identity EKU.
 
-The macOS mode is currently `unsigned`. Developer ID signing, notarization, and
-stapling must be implemented and rehearsed before that mode can change.
+It also has two explicit macOS modes:
+
+- `unsigned` packages the unchanged, fully inventoried candidate and retains the
+  unsigned transition warning.
+- `developer-id` signs the exact validated CLI and desktop targets inside out
+  with hardened runtime and secure timestamps, requires accepted notarization,
+  staples the desktop app, verifies signatures and Gatekeeper, and repeats those
+  checks after packaging and fresh download. The standalone CLI cannot carry a
+  stapled ticket, so it must pass accepted notarization, native signature
+  verification, and Gatekeeper assessment without stapler validation.
+
+The macOS `developer-id` path is implemented and covered by deterministic policy
+and failure tests. Both repository modes remain `unsigned`, and current published
+artifacts remain unsigned. Owner provisioning, a successful protected rehearsal,
+mode activation, and signed fresh-download evidence remain required.
 
 ## GitHub configuration
 
@@ -53,15 +66,15 @@ Azure/artifact-signing-action@*
 The workflow itself pins Azure Login and Artifact Signing Action to reviewed
 full commit SHAs. GitHub resolves every referenced action before it evaluates a
 job condition, so these repository allowlist entries are required even while
-the signing mode is `unsigned` and both signing jobs will be skipped. Confirm
-the live policy before pushing an immutable release tag:
+the Windows signing mode is `unsigned` and both Windows signer jobs are skipped.
+Confirm the live policy before pushing an immutable release tag:
 
 ```bash
 gh api repos/blisspixel/quotabot/actions/permissions
 gh api repos/blisspixel/quotabot/actions/permissions/selected-actions
 ```
 
-Create one protected environment named `release-signing`:
+Create a protected Windows environment named `release-signing`:
 
 1. Restrict deployments to tag pattern `v*` only.
 2. Require a maintainer review. If the repository has only one maintainer, keep
@@ -72,6 +85,15 @@ Create one protected environment named `release-signing`:
    Unsigned builds, packaging, attestation, upload, verification, ordinary CI,
    and pull requests do not.
 
+Create a separate protected Apple environment named `release-signing-macos`.
+Allow deployments only from the protected `main` branch and the `v*` tag
+pattern, require review, and apply the same administrator-bypass policy. The two
+release signer jobs use the tag path. The nonpublishing rehearsal signer uses
+the protected-main path and fails unless the workflow was dispatched from
+`main`. No other jobs reference the environment. The Windows environment cannot
+read the Apple certificate or notary credential, and the macOS jobs receive no
+Azure OIDC permission.
+
 Set these repository variables so preflight can select and disclose the mode
 before any environment-bound job starts:
 
@@ -80,6 +102,35 @@ QUOTABOT_WINDOWS_SIGNING_BACKEND=unsigned
 QUOTABOT_MACOS_SIGNING_MODE=unsigned
 ```
 
+When preparing the Apple path, set these non-secret repository variables. The
+identity must begin with `Developer ID Application: ` and end with the same
+ten-character team id in parentheses:
+
+```text
+QUOTABOT_MACOS_DEVELOPER_IDENTITY
+QUOTABOT_MACOS_TEAM_ID
+```
+
+Set the role-limited notary identifiers as variables in
+`release-signing-macos`:
+
+```text
+QUOTABOT_MACOS_NOTARY_ISSUER_ID
+QUOTABOT_MACOS_NOTARY_KEY_ID
+```
+
+Set only these sensitive values as secrets in `release-signing-macos`:
+
+```text
+QUOTABOT_MACOS_CERTIFICATE_P12_BASE64
+QUOTABOT_MACOS_CERTIFICATE_PASSWORD
+QUOTABOT_MACOS_NOTARY_KEY_P8
+```
+
+The P12 holds the Developer ID Application identity. The P8 is the App Store
+Connect notary key. Neither value belongs in repository variables, logs, cache,
+or retained artifacts.
+
 After Azure issues the profile's durable subscriber identity, also set this
 non-secret repository variable so packaging and fresh-download verification can
 enforce the public signer identity without entering the signing environment:
@@ -87,6 +138,12 @@ enforce the public signer identity without entering the signing environment:
 ```text
 QUOTABOT_WINDOWS_SUBSCRIBER_EKU
 ```
+
+Release preflight validates the selected modes and captures this subscriber EKU
+plus the macOS identity, team, and notary identifiers once. Every later signing,
+packaging, and fresh-download verification job consumes that run-scoped
+snapshot. Inactive policy fields are cleared, so changing a repository variable
+during a release cannot change the verifier policy partway through that run.
 
 Keep Windows in `unsigned` until every Azure value below is provisioned and a
 protected rehearsal succeeds. Never create a PFX, client secret, certificate
@@ -182,7 +239,7 @@ login and receives:
 - no appended signature;
 - no dependency cache or trace output.
 
-## Activation and rehearsal
+## Windows activation and rehearsal
 
 Do not change the repository mode merely because Azure accepts one signing
 request. First complete a protected nonrelease rehearsal using the same account,
@@ -238,26 +295,112 @@ Owner checklist:
    authenticate `notarytool`. Place the credential only in a separate protected
    `release-signing-macos` environment and never in repository variables or
    artifacts.
-4. Finish the repository's macOS signer job. It must sign nested Mach-O files
-   from the inside out with hardened runtime and a secure timestamp, submit the
-   supported container with `notarytool`, wait for acceptance, staple the app
-   ticket, and record only bounded evidence.
-5. Verify the exact fresh-downloaded CLI and desktop artifacts with
-   `codesign --verify --deep --strict`, `spctl --assess`, and stapler validation
-   where a ticket can be stapled. Then run the full native lifecycle rehearsal.
+4. Configure the repository and protected-environment variables and secrets named
+   in [GitHub configuration](#github-configuration). Confirm the Developer ID
+   identity ends with the configured team id and that the notary key belongs to
+   that Apple team.
+5. Run a successful protected rehearsal through both isolated macOS signer jobs.
+   Deterministic tests prove the fail-closed policy but do not substitute for a
+   real certificate import, Apple notarization, Gatekeeper assessment, or staple.
+   Dispatch `.github/workflows/macos-signing-rehearsal.yml` from protected
+   `main`; it builds unsigned
+   CLI and desktop candidates outside `release-signing-macos`, signs and verifies
+   them inside that protected environment, uploads only bounded receipts and
+   digest records, and does not publish either candidate.
+6. Verify the exact fresh-downloaded CLI and desktop artifacts. Both require
+   `codesign --verify --strict`, `spctl --assess`, and accepted notarization
+   evidence. The desktop app additionally requires `codesign --verify --deep
+   --strict` and `stapler validate`. A standalone CLI cannot carry a stapled
+   ticket and must not be failed merely because no staple exists.
+7. Only after that protected rehearsal succeeds, set
+   `QUOTABOT_MACOS_SIGNING_MODE=developer-id` and run the full signed candidate
+   lifecycle.
 
 The Apple signing key is different from the notarization credential. Keep both
 out of ordinary build and packaging jobs. Do not switch the macOS release mode
 until the signer, notarization, stapling, verification, failure-path tests, and
 fresh-download rehearsal all pass.
 
-When the macOS signer is implemented, create `release-signing-macos` with the
-same `v*` tag restriction, required maintainer review, and no administrator
-bypass as the Windows environment. Keep Apple certificate and notarization
-secrets there so the Windows OIDC jobs cannot read them. The macOS job should
-create a temporary keychain, import the password-protected Developer ID
-Application identity, use it only for the inventoried candidate, and delete the
-temporary keychain even when the job fails.
+### Implemented macOS release path
+
+The repository now implements the following protected macOS path for both CLI
+and desktop:
+
+1. An ordinary macOS build job inventories the complete unsigned candidate and
+   creates an exact inside-out signing plan. It places the candidate, inventory,
+   and plan in an immutable handoff artifact.
+2. The isolated signer downloads that handoff, regenerates and compares the
+   inventory and plan, imports the password-protected P12 into a temporary
+   keychain, and signs every exact Mach-O and containing bundle with hardened
+   runtime and a secure timestamp. Only the outer desktop app receives the exact
+   committed `app/macos/Runner/DeveloperID.entitlements`; the CLI and every
+   other target require empty entitlements. A complete pre-signing and
+   post-signing inventory comparison requires every planned Mach-O to change,
+   forbids removals, and permits other additions or changes only inside a
+   planned bundle's `_CodeSignature` metadata.
+3. The signer submits a bounded ZIP to `notarytool`, requires both the submission
+   and log to say `Accepted`, rejects notarization errors, and binds Apple's
+   logged archive SHA-256 and name to the submitted ZIP. Before submission, it
+   extracts that exact ZIP and requires its complete inventory to match the
+   signed candidate. The recorder extracts and inventories the Apple-accepted
+   ZIP again and rejects any mid-validation change; the accepted receipt records
+   that extracted inventory and requires the ticket to cover every signed code
+   directory. It staples the
+   desktop app, then permits only signature metadata changes and requires no
+   native-code change. When the ticket is attached only as extended metadata,
+   the file inventory remains unchanged and `stapler validate` supplies the
+   ticket proof. The CLI records accepted notarization without attempting an
+   unsupported staple.
+4. Native verification loads the original plan and checks every planned target's
+   Developer ID authority,
+   team id, timestamp, hardened-runtime flag, strict signature, and exact
+   embedded entitlements. It binds the CLI's current inventory directly to its
+   notarized inventory and chains desktop notarization through the exact
+   stapling-delta receipt. It also binds current code-directory hashes to the
+   accepted notarization receipt, requires Gatekeeper to report `Notarized
+   Developer ID` for the CLI or app, and validates the desktop staple. It writes
+   bounded receipts without retaining raw native diagnostics.
+5. The signer creates a new post-signing inventory and a second immutable
+   handoff. A separate job with no Apple credentials revalidates, packages,
+   checksums, attests, and uploads that exact candidate.
+6. Clean macOS verification jobs download the exact draft CLI and desktop assets,
+   recheck their complete inventories, rerun the native verifier with the
+   accepted notarization receipts, and retain bounded release evidence before
+   publication can continue. They emit the exact verified archive digests and
+   captured signing mode; final audit requires those values to match the assets
+   immediately before the immutable asset manifest can reach publication.
+
+The manual `macOS signing rehearsal` workflow exercises the same core signing,
+notarization, delta, entitlement, Gatekeeper, and desktop-staple contract without
+creating a release. It fails unless dispatched from protected `main`. Its
+unsigned handoffs expire after two days, the protected jobs delete their
+candidates and credentials, and only bounded receipts and digest records are
+retained for 14 days. It is ready to run but has not completed successfully
+because the owner identity and protected environment are not provisioned.
+
+All macOS build, signing, packaging, verification, and rehearsal jobs use the
+explicit `macos-15` arm64 image and Xcode 16.4 build 16F6. Ordinary CI compiles
+minimal arm64 CLI and app fixtures, applies hardened ad hoc signatures in the
+generated inside-out order, and exercises real Apple entitlement, architecture,
+and code-directory output. That credential-free test does not replace the
+protected Developer ID, secure-timestamp, notarization, Gatekeeper, and staple
+rehearsal.
+
+The signer deletes the P12, P8, raw notarization submission and log, submission
+archive, and temporary keychain on success or failure. Missing credentials,
+identity or team mismatch, changed candidates or plans, signing failure,
+unexpected signing or stapling delta, non-accepted or unbound notarization,
+entitlements mismatch, missing desktop staple, Gatekeeper rejection, or
+incomplete verification leaves the release unpublished. The delta validator
+emits `quotabot.macos-signing-delta.v1` on success and bounded
+`quotabot.macos-signing-delta-error.v1` evidence for handled failures. Unsigned
+mode skips the signer and packages only the unchanged inventoried candidate with
+an explicit release-note warning.
+
+This implementation is repository readiness, not activation evidence. Current
+published macOS artifacts remain unsigned until owner provisioning, a successful
+protected rehearsal, mode activation, and signed fresh-download verification are
+complete.
 
 Primary references:
 

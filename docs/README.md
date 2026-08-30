@@ -5,39 +5,31 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.12. The next work in the focused 0.10.x stabilization train is
-field-discovered correctness, recovery and quality-of-life refinement, and
-native validation. Signed release readiness follows once that inventory is
-quiet, without weakening existing checksums or provenance. The
+0.10.0-rc.13. The next work in the focused 0.10.x stabilization train is owner
+signing setup and one signed lifecycle rehearsal. Its
+[cross-platform install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
+passed install, upgrade, source-setup, and desktop-run checks. The repository now
+contains fail-closed Windows and macOS signing paths for CLI and desktop assets.
+They capture one signing policy per release, pin the Apple build toolchain, and
+bind signed native-verification digests through final publication audit. The
+manual macOS rehearsal is implemented but has not succeeded because owner
+provisioning is absent. Current published artifacts remain unsigned; owner
+identity provisioning, successful protected rehearsals, mode activation, and
+signed fresh-download evidence remain. The
 [roadmap Next section](../ROADMAP.md#next) owns the exact behavior, guardrails,
 completion criteria, rationale, and place ahead of the remaining native 1.0
 evidence gates.
 
-Claude OAuth recovery is confirmed end to end in
-[issue #77](https://github.com/blisspixel/quotabot/issues/77). Release
-candidate 5 keeps HTTP 429 labeled as throttling instead of an expired login.
-Release candidate 6 covers exact transport identity and retry keys,
-profile/account isolation, transactional install and uninstall, explicit
-quotabot-only logout, duplicate-option handling, supplemental manual evidence,
-first-run deferral, and reset-reminder privacy and delivery lifecycle.
-Release candidate 7 carries the field round after rc.6: Grok and NVIDIA
-live-read diagnostics, Ollama cloud-offload honesty, compact first-run and
-200px recovery, exact `check`/`login`/`logout` identities, MCP Streamable HTTP
-401/413 admission, POSIX space-safe Flutter, LiteLLM fail-closed leases, and
-stacked pull-request CI. Release candidates 8 through 12 add grouped desktop
-settings, source-install recovery, durable OAuth storage, account-label privacy,
-bounded HTTP sessions and request admission, exact LiteLLM account routing,
-authenticated loopback server identity, proxy-independent MCP clients, and
-native desktop connection-state consistency. Changelog detail is in
-[CHANGELOG.md](../CHANGELOG.md).
+Completed candidate detail, including the live-confirmed Claude OAuth recovery,
+belongs in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Install and first success
 
 - [SETUP.md](SETUP.md): install, run `doctor`, connect providers, and recover
   from common first-run states.
 - [BUILDING.md](BUILDING.md): build the CLI and desktop application from source.
-- [RELEASE-SIGNING.md](RELEASE-SIGNING.md): provision and operate the protected
-  native signing environment.
+- [RELEASE-SIGNING.md](RELEASE-SIGNING.md): provision, activate, rehearse, and
+  verify the protected native signing environments.
 - [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md): verify, run, update,
   roll back, and uninstall native desktop release bundles.
 

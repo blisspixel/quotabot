@@ -1,0 +1,283 @@
+name: macOS signing rehearsal
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-signing-rehearsal-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require a protected main rehearsal
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo 'The macOS signing rehearsal must be dispatched from main.' >&2
+            exit 1
+          fi
+
+  build-unsigned-candidates:
+    needs: validate-source
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260 # v1
+        with:
+          sdk: '3.12.2'
+      - name: Set up pinned Flutter SDK
+        shell: pwsh
+        run: >
+          ./tools/setup-flutter-ci.ps1
+          -FlutterVersion '3.44.6'
+          -ExpectedCommit 'ee80f08bbf97172ec030b8751ceab557177a34a6'
+      - name: Build exact unsigned candidates
+        run: |
+          set -euo pipefail
+          architecture=arm64
+          cli_stage="$RUNNER_TEMP/quotabot-macos-cli-rehearsal"
+          desktop_stage="$RUNNER_TEMP/quotabot-macos-desktop-rehearsal"
+
+          bash tools/package-cli.sh --no-archive
+          mkdir -p "$cli_stage"
+          ditto collector/build/quotabot_cli_release/bundle "$cli_stage/candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface cli --architecture "$architecture" --json \
+            "$cli_stage/candidate" > "$cli_stage/unsigned-inventory.json"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$cli_stage/unsigned-inventory.json" \
+            --output "$cli_stage/signing-plan.json" \
+            --surface cli --architecture "$architecture" "$cli_stage/candidate"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$cli_stage/candidate" "$cli_stage/candidate.zip"
+          rm -rf "$cli_stage/candidate"
+
+          bash tools/package-macos.sh --no-archive
+          mkdir -p "$desktop_stage/candidate"
+          ditto app/build/macos/Build/Products/Release/quotabot.app \
+            "$desktop_stage/candidate/quotabot.app"
+          python tools/native_code_inventory.py \
+            --platform macos --surface desktop --architecture "$architecture" --json \
+            "$desktop_stage/candidate" > "$desktop_stage/unsigned-inventory.json"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$desktop_stage/unsigned-inventory.json" \
+            --output "$desktop_stage/signing-plan.json" \
+            --surface desktop --architecture "$architecture" \
+            "$desktop_stage/candidate"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$desktop_stage/candidate" "$desktop_stage/candidate.zip"
+          rm -rf "$desktop_stage/candidate"
+      - name: Preserve unsigned CLI rehearsal handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-cli-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-macos-cli-rehearsal
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 2
+      - name: Preserve unsigned desktop rehearsal handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-desktop-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-macos-desktop-rehearsal
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 2
+
+  sign-and-verify:
+    needs: build-unsigned-candidates
+    strategy:
+      fail-fast: false
+      matrix:
+        surface: [cli, desktop]
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    environment: release-signing-macos
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Require the pinned Apple toolchain
+        run: bash tools/require-macos-toolchain.sh
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - name: Download immutable unsigned rehearsal handoff
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-${{ matrix.surface }}-rehearsal-unsigned
+          path: ${{ runner.temp }}/quotabot-macos-${{ matrix.surface }}-rehearsal
+      - name: Sign, notarize, and verify without publishing
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.QUOTABOT_MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.QUOTABOT_MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_DEVELOPER_IDENTITY: ${{ vars.QUOTABOT_MACOS_DEVELOPER_IDENTITY }}
+          MACOS_NOTARY_ISSUER_ID: ${{ vars.QUOTABOT_MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ vars.QUOTABOT_MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY_P8: ${{ secrets.QUOTABOT_MACOS_NOTARY_KEY_P8 }}
+          MACOS_TEAM_ID: ${{ vars.QUOTABOT_MACOS_TEAM_ID }}
+          SURFACE: ${{ matrix.surface }}
+        run: |
+          set -euo pipefail
+          umask 077
+          stage="$RUNNER_TEMP/quotabot-macos-$SURFACE-rehearsal"
+          candidate="$stage/candidate"
+          unsigned_manifest="$stage/unsigned-inventory.json"
+          plan="$stage/signing-plan.json"
+          validated_plan="$stage/validated-signing-plan.json"
+          keychain="$RUNNER_TEMP/quotabot-$SURFACE-rehearsal.keychain-db"
+          certificate="$stage/developer-id.p12"
+          notary_key="$stage/notary-key.p8"
+          submission="$stage/notary-submission.zip"
+          submission_check="$stage/notary-submission-expanded"
+          submission_json="$stage/notary-submission.json"
+          notary_log="$stage/notary-log.json"
+          keychain_password="$(openssl rand -hex 32)"
+          cleanup() {
+            security delete-keychain "$keychain" >/dev/null 2>&1 || true
+            rm -rf "$candidate"
+            rm -rf "$submission_check"
+            rm -f "$certificate" "$notary_key" "$submission" \
+              "$submission_json" "$notary_log"
+          }
+          trap cleanup EXIT
+
+          [[ -n "$MACOS_CERTIFICATE_P12_BASE64" && \
+             -n "$MACOS_CERTIFICATE_PASSWORD" && \
+             -n "$MACOS_DEVELOPER_IDENTITY" && \
+             -n "$MACOS_NOTARY_ISSUER_ID" && \
+             -n "$MACOS_NOTARY_KEY_ID" && \
+             -n "$MACOS_NOTARY_KEY_P8" && \
+             -n "$MACOS_TEAM_ID" ]] || {
+            echo 'The protected macOS signing environment is incomplete.' >&2
+            exit 1
+          }
+          ditto -x -k "$stage/candidate.zip" "$stage"
+          rm -f "$stage/candidate.zip"
+          python tools/native_code_inventory.py \
+            --platform macos --surface "$SURFACE" --architecture arm64 \
+            --expect-manifest "$unsigned_manifest" "$candidate"
+          python tools/create_macos_signing_plan.py \
+            --manifest "$unsigned_manifest" --output "$validated_plan" \
+            --surface "$SURFACE" --architecture arm64 "$candidate"
+          cmp -s "$plan" "$validated_plan"
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" \
+            | openssl base64 -d -A -out "$certificate"
+          printf '%s' "$MACOS_NOTARY_KEY_P8" > "$notary_key"
+          [[ -s "$certificate" && $(stat -f '%z' "$certificate") -le 262144 ]]
+          [[ -s "$notary_key" && $(stat -f '%z' "$notary_key") -le 16384 ]]
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" >/dev/null
+
+          sign_args=(
+            --manifest "$unsigned_manifest" --plan "$plan"
+            --identity "$MACOS_DEVELOPER_IDENTITY" --team-id "$MACOS_TEAM_ID"
+            --keychain "$keychain" --receipt "$stage/signing.json"
+          )
+          if [ "$SURFACE" = desktop ]; then
+            sign_args+=(--entitlements app/macos/Runner/DeveloperID.entitlements)
+          fi
+          python tools/sign_macos_candidate.py "${sign_args[@]}" "$candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface "$SURFACE" --architecture arm64 --json \
+            "$candidate" > "$stage/signed-inventory.json"
+          python tools/validate_macos_signing_delta.py \
+            --before "$unsigned_manifest" --after "$stage/signed-inventory.json" \
+            --plan "$plan" --operation signing \
+            --receipt "$stage/signing-delta.json"
+
+          submission_root="$candidate"
+          if [ "$SURFACE" = desktop ]; then
+            submission_root="$candidate/quotabot.app"
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$submission_root" "$submission"
+          mkdir "$submission_check"
+          ditto -x -k "$submission" "$submission_check"
+          extracted_candidate="$submission_check/candidate"
+          if [ "$SURFACE" = desktop ]; then
+            extracted_candidate="$submission_check"
+          fi
+          python tools/native_code_inventory.py \
+            --platform macos --surface "$SURFACE" --architecture arm64 \
+            --expect-manifest "$stage/signed-inventory.json" "$extracted_candidate"
+          python tools/native_code_inventory.py \
+            --platform macos --surface "$SURFACE" --architecture arm64 --json \
+            "$extracted_candidate" > "$stage/submission-inventory.json"
+          rm -rf "$submission_check"
+          xcrun notarytool submit "$submission" --wait --output-format json \
+            --key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" > "$submission_json"
+          submission_id="$(plutil -extract id raw -o - "$submission_json")"
+          [[ "$submission_id" =~ ^[0-9A-Fa-f-]{36}$ ]]
+          xcrun notarytool log "$submission_id" --output-format json \
+            --key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" \
+            --issuer "$MACOS_NOTARY_ISSUER_ID" > "$notary_log"
+          python tools/record_macos_notarization.py \
+            --submission "$submission_json" --log "$notary_log" \
+            --artifact "$submission" --inventory "$stage/submission-inventory.json" \
+            --signing-receipt "$stage/signing.json" \
+            --surface "$SURFACE" --receipt "$stage/notarization.json"
+
+          if [ "$SURFACE" = desktop ]; then
+            xcrun stapler staple "$candidate/quotabot.app"
+          fi
+          python tools/native_code_inventory.py \
+            --platform macos --surface "$SURFACE" --architecture arm64 --json \
+            "$candidate" > "$stage/inventory.json"
+          if [ "$SURFACE" = desktop ]; then
+            python tools/validate_macos_signing_delta.py \
+              --before "$stage/signed-inventory.json" --after "$stage/inventory.json" \
+              --plan "$plan" --operation stapling \
+              --receipt "$stage/stapling-delta.json"
+          else
+            cmp -s "$stage/signed-inventory.json" "$stage/inventory.json"
+          fi
+          verify_args=(
+            --manifest "$stage/inventory.json"
+            --signing-plan "$plan"
+            --notarization-receipt "$stage/notarization.json"
+            --surface "$SURFACE" --architecture arm64
+            --expected-identity "$MACOS_DEVELOPER_IDENTITY"
+            --expected-team-id "$MACOS_TEAM_ID"
+            --receipt "$stage/signature-verification.json"
+          )
+          if [ "$SURFACE" = desktop ]; then
+            verify_args+=(--expected-entitlements app/macos/Runner/DeveloperID.entitlements)
+            verify_args+=(--stapling-delta-receipt "$stage/stapling-delta.json")
+          fi
+          python tools/verify_macos_signatures.py "${verify_args[@]}" "$candidate"
+          cleanup
+          trap - EXIT
+      - name: Preserve bounded rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-${{ matrix.surface }}-signing-rehearsal-evidence
+          path: ${{ runner.temp }}/quotabot-macos-${{ matrix.surface }}-rehearsal/*.json
+          if-no-files-found: error
+          retention-days: 14

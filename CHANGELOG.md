@@ -2,6 +2,49 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.13 - 2026-08-30
+
+### Security
+
+- The macOS release workflow now has an isolated, fail-closed Developer ID path
+  for both CLI and desktop candidates. Complete unsigned inventories produce an
+  exact inside-out plan, protected jobs sign with hardened runtime and a secure
+  timestamp, and an allowed-delta gate rejects changes outside planned Mach-O
+  files and bundle signature metadata.
+- Apple notarization acceptance is bound to the exact submitted archive,
+  its freshly extracted post-signing inventory, the original signing plan, and
+  architecture-specific code-directory hashes. Final verification chains the
+  desktop through its bounded stapling delta, checks every signature, authority,
+  team id, timestamp, runtime flag, and embedded entitlement, requires
+  Gatekeeper to report `Notarized Developer ID`, and validates the desktop
+  staple.
+- The protected macOS jobs use a temporary keychain and delete the certificate,
+  notary key, raw Apple responses, submission archive, and candidate. A manual
+  rehearsal workflow exercises both surfaces without creating a release or
+  retaining a signed candidate.
+- Release preflight now snapshots the validated signing modes, Windows
+  subscriber EKU, and macOS identity, team, and notary identifiers for the
+  entire run while clearing inactive policy fields. Final publication also requires each signed Windows and
+  macOS archive digest to match the exact fresh-download asset that passed native
+  verification.
+- macOS build, signing, packaging, verification, and rehearsal jobs use the
+  explicit `macos-15` arm64 image and Xcode 16.4 build 16F6. CI compiles real
+  arm64 fixtures and exercises hardened ad hoc signing, inside-out order,
+  entitlements, architecture selection, and code-directory parsing with Apple's
+  installed tools before credentialed rehearsal.
+
+### Fixed
+
+- Direct Developer ID distribution uses a dedicated empty entitlement set
+  instead of inheriting the App Sandbox entitlement, preserving the desktop
+  app's read-only access to local provider quota metadata.
+- Native candidate inventories now cover Windows PE and macOS Mach-O code,
+  safe in-tree macOS symlinks, complete file and directory modes, and complete
+  candidate contents across build, signing, packaging, and fresh-download
+  verification.
+- The 0.10.0-rc.12 install, upgrade, source-setup, and desktop-run matrix passed
+  on Windows, macOS, and Ubuntu, closing the stabilization acquisition gate.
+
 ## 0.10.0-rc.12 - 2026-08-27
 
 ### Security
