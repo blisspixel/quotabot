@@ -307,14 +307,16 @@ jobs:
           case "$release_id" in
             ''|*[!0-9]*) echo 'Draft release id is invalid.' >&2; exit 1 ;;
           esac
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-          echo "windows_signing_backend=$WINDOWS_SIGNING_BACKEND" >> "$GITHUB_OUTPUT"
-          echo "windows_subscriber_eku=$WINDOWS_SUBSCRIBER_EKU" >> "$GITHUB_OUTPUT"
-          echo "macos_signing_mode=$MACOS_SIGNING_MODE" >> "$GITHUB_OUTPUT"
-          echo "macos_developer_identity=$MACOS_DEVELOPER_IDENTITY" >> "$GITHUB_OUTPUT"
-          echo "macos_team_id=$MACOS_TEAM_ID" >> "$GITHUB_OUTPUT"
-          echo "macos_notary_issuer_id=$MACOS_NOTARY_ISSUER_ID" >> "$GITHUB_OUTPUT"
-          echo "macos_notary_key_id=$MACOS_NOTARY_KEY_ID" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_id=$release_id"
+            echo "windows_signing_backend=$WINDOWS_SIGNING_BACKEND"
+            echo "windows_subscriber_eku=$WINDOWS_SUBSCRIBER_EKU"
+            echo "macos_signing_mode=$MACOS_SIGNING_MODE"
+            echo "macos_developer_identity=$MACOS_DEVELOPER_IDENTITY"
+            echo "macos_team_id=$MACOS_TEAM_ID"
+            echo "macos_notary_issuer_id=$MACOS_NOTARY_ISSUER_ID"
+            echo "macos_notary_key_id=$MACOS_NOTARY_KEY_ID"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: create-release
