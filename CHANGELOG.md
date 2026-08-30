@@ -2,6 +2,34 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.14 - 2026-08-30
+
+### Changed
+
+- Windows release signers now prove an exact full-tree unsigned-to-signed delta
+  for the original PE catalog. The byte-level gate permits only a well-formed
+  appended Authenticode certificate table and its required PE header fields.
+  Credential-free packaging jobs independently download and revalidate the
+  unsigned handoff, regenerate its catalog, and repeat the delta gate before
+  accepting a signed candidate.
+- A protected, nonpublishing Windows signing rehearsal now exercises both CLI
+  and desktop candidates with short-lived Azure OIDC, exact catalog signing,
+  native verification, cleanup on every exit, and bounded retained evidence. A
+  separate credential-free job repeats the complete validation from clean
+  unsigned and signed artifact downloads.
+- Final release publication now binds the exact draft title and body digests in
+  addition to the immutable asset manifest, tag, commit, and prerelease class.
+- Apple notary identifiers are documented at repository-variable scope so the
+  credential-free release preflight can validate and snapshot them before the
+  protected signer starts. Signing activation and signed candidate lifecycle
+  steps now have an executable, non-circular operator order.
+- Windows and macOS rehearsal instructions now include exact dispatch, watch,
+  download, receipt-validation, and evidence-retention steps. Release guidance
+  also distinguishes stable tags from prerelease install-smoke targets.
+
+Both repository signing modes remain `unsigned` until owner identities,
+protected environments, credentials, and successful native rehearsals exist.
+
 ## 0.10.0-rc.13 - 2026-08-30
 
 ### Security
