@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from tools import (
     create_macos_signing_plan,
@@ -497,7 +498,16 @@ class VerifyMacOSSignaturesTests(unittest.TestCase):
             base = Path(directory)
             output = io.StringIO()
 
-            with redirect_stdout(output):
+            with (
+                mock.patch.object(
+                    verify_macos_signatures,
+                    "verify_macos_signatures",
+                    side_effect=MacOSSignatureVerificationError(
+                        "candidate_validation_failed"
+                    ),
+                ),
+                redirect_stdout(output),
+            ):
                 result = verify_macos_signatures.main(
                     [
                         "--manifest",
@@ -522,7 +532,7 @@ class VerifyMacOSSignaturesTests(unittest.TestCase):
 
             self.assertEqual(result, 1)
             failure = json.loads(output.getvalue())
-            self.assertEqual(failure["code"], "codesign_unavailable")
+            self.assertEqual(failure["code"], "candidate_validation_failed")
             self.assertEqual(failure["receipt_error_code"], "receipt_path_invalid")
 
 
