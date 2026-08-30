@@ -6,10 +6,9 @@ import io
 import json
 import struct
 import tempfile
-import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
-from unittest import mock
+from unittest import TestCase, main as unittest_main, mock
 
 from tools import validate_windows_signing_delta as validator
 from tools.native_code_inventory import canonical_sha256, inventory_native_code
@@ -128,7 +127,7 @@ def _publish_catalog(path: Path, native_paths: list[str]) -> bytes:
     return payload
 
 
-class WindowsSigningDeltaTests(unittest.TestCase):
+class WindowsSigningDeltaTests(TestCase):
     def _fixture(
         self,
         base: Path,
@@ -544,4 +543,4 @@ class WindowsSigningDeltaTests(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    unittest_main()
