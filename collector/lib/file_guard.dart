@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
+
+import 'package:ffi/ffi.dart';
 
 import 'src/exclusive_create_collision.dart';
 
@@ -10,6 +13,32 @@ const _claimProbeGrace = Duration(seconds: 2);
 const _sameProcessClaimStaleAfter = Duration(minutes: 2);
 const _maxClaimBytes = 1024;
 const defaultFileGuardAcquisitionTimeout = Duration(seconds: 30);
+final String _processClaimGeneration = _currentProcessGeneration();
+
+final class _WindowsFileTime extends Struct {
+  @Uint32()
+  external int low;
+
+  @Uint32()
+  external int high;
+}
+
+typedef _GetCurrentProcessNative = Pointer<Void> Function();
+typedef _GetCurrentProcessDart = Pointer<Void> Function();
+typedef _GetProcessTimesNative = Int32 Function(
+  Pointer<Void>,
+  Pointer<_WindowsFileTime>,
+  Pointer<_WindowsFileTime>,
+  Pointer<_WindowsFileTime>,
+  Pointer<_WindowsFileTime>,
+);
+typedef _GetProcessTimesDart = int Function(
+  Pointer<Void>,
+  Pointer<_WindowsFileTime>,
+  Pointer<_WindowsFileTime>,
+  Pointer<_WindowsFileTime>,
+  Pointer<_WindowsFileTime>,
+);
 
 /// A claim-backed native file guard that serializes both processes and isolates.
 ///
@@ -53,6 +82,7 @@ InterprocessFileGuard acquireInterprocessFileGuardSync(
   File lockFile, {
   required GuardFileHardener hardenClaim,
   Duration acquisitionTimeout = defaultFileGuardAcquisitionTimeout,
+  bool reclaimSameProcessClaims = true,
 }) {
   final elapsed = Stopwatch()..start();
   var attempted = false;
@@ -79,7 +109,12 @@ InterprocessFileGuard acquireInterprocessFileGuardSync(
       continue;
     }
     try {
-      if (_tryReclaimStaleClaim(lockFile)) continue;
+      if (_tryReclaimStaleClaim(
+        lockFile,
+        reclaimSameProcessClaims: reclaimSameProcessClaims,
+      )) {
+        continue;
+      }
     } on FileSystemException catch (error) {
       if (!_isTransientWindowsContention(error)) rethrow;
     }
@@ -97,6 +132,7 @@ Future<InterprocessFileGuard> acquireInterprocessFileGuard(
   File lockFile, {
   required GuardFileHardener hardenClaim,
   Duration acquisitionTimeout = defaultFileGuardAcquisitionTimeout,
+  bool reclaimSameProcessClaims = true,
 }) async {
   final elapsed = Stopwatch()..start();
   var attempted = false;
@@ -123,7 +159,12 @@ Future<InterprocessFileGuard> acquireInterprocessFileGuard(
       continue;
     }
     try {
-      if (_tryReclaimStaleClaim(lockFile)) continue;
+      if (_tryReclaimStaleClaim(
+        lockFile,
+        reclaimSameProcessClaims: reclaimSameProcessClaims,
+      )) {
+        continue;
+      }
     } on FileSystemException catch (error) {
       if (!_isTransientWindowsContention(error)) rethrow;
     }
@@ -189,7 +230,7 @@ _FileClaim? _tryCreateClaim(
   GuardFileHardener hardenClaim,
 ) {
   final claimFile = File('${lockFile.path}.claim');
-  final owner = '$pid.${_randomSuffix(18)}';
+  final owner = '$pid.$_processClaimGeneration.${_randomSuffix(18)}';
   try {
     claimFile.createSync(exclusive: true);
   } on FileSystemException catch (error) {
@@ -273,12 +314,24 @@ Future<InterprocessFileGuard?> _lockClaim(
   }
 }
 
-bool _tryReclaimStaleClaim(File lockFile) {
+bool _tryReclaimStaleClaim(
+  File lockFile, {
+  required bool reclaimSameProcessClaims,
+}) {
   final claimFile = File('${lockFile.path}.claim');
   final before = _readClaimSnapshot(claimFile);
   if (before == null) return true;
   final age = DateTime.now().difference(before.modified);
   if (age < _claimProbeGrace || age.isNegative) return false;
+
+  // Some cache operations intentionally have no short wall-clock bound. Their
+  // callers disable reclamation only for an owner from this exact process-start
+  // generation, so another isolate cannot steal a live claim merely because it
+  // is old. Malformed claims and a reused pid from an earlier generation still
+  // probe the native lock after the grace interval and recover when it is free.
+  if (!reclaimSameProcessClaims && _isCurrentProcessClaim(before)) {
+    return false;
+  }
 
   // A same-process POSIX lock cannot distinguish isolates. Internal guarded
   // operations are bounded well below this interval, which also lets an
@@ -305,6 +358,9 @@ bool _tryReclaimStaleClaim(File lockFile) {
     if (!before.sameGeneration(after)) return false;
     final currentAge = DateTime.now().difference(after.modified);
     if (currentAge < _claimProbeGrace || currentAge.isNegative) return false;
+    if (!reclaimSameProcessClaims && _isCurrentProcessClaim(after)) {
+      return false;
+    }
     if (!Platform.isWindows &&
         (after.pid == null || after.pid == pid) &&
         currentAge < _sameProcessClaimStaleAfter) {
@@ -337,6 +393,15 @@ bool _tryReclaimStaleClaim(File lockFile) {
       lock.closeSync();
     }
   }
+}
+
+bool _isCurrentProcessClaim(_FileClaimSnapshot claim) {
+  if (claim.pid != pid || claim.owner == null) return false;
+  final parts = claim.owner!.split('.');
+  return parts.length == 3 &&
+      parts[0] == '$pid' &&
+      parts[1] == _processClaimGeneration &&
+      parts[2].isNotEmpty;
 }
 
 bool _claimIsOwnedBy(File claimFile, String owner) {
@@ -443,6 +508,56 @@ String _randomSuffix(int byteCount) {
   return base64UrlEncode(
     List<int>.generate(byteCount, (_) => random.nextInt(256)),
   ).replaceAll('=', '');
+}
+
+String _currentProcessGeneration() {
+  try {
+    if (Platform.isLinux) {
+      final stat = File('/proc/self/stat').readAsStringSync();
+      final commandEnd = stat.lastIndexOf(') ');
+      if (commandEnd < 0) throw const FormatException('process stat');
+      final fields = stat.substring(commandEnd + 2).trim().split(' ');
+      if (fields.length <= 19 || !RegExp(r'^\d+$').hasMatch(fields[19])) {
+        throw const FormatException('process start');
+      }
+      return 'linux_${fields[19]}';
+    }
+    if (Platform.isWindows) {
+      final kernel = DynamicLibrary.open('kernel32.dll');
+      final current = kernel.lookupFunction<_GetCurrentProcessNative,
+          _GetCurrentProcessDart>('GetCurrentProcess');
+      final times =
+          kernel.lookupFunction<_GetProcessTimesNative, _GetProcessTimesDart>(
+              'GetProcessTimes');
+      final created = calloc<_WindowsFileTime>();
+      final exited = calloc<_WindowsFileTime>();
+      final kernelTime = calloc<_WindowsFileTime>();
+      final userTime = calloc<_WindowsFileTime>();
+      try {
+        if (times(current(), created, exited, kernelTime, userTime) == 0) {
+          throw const FileSystemException('process generation unavailable');
+        }
+        return 'windows_${created.ref.high.toRadixString(16)}_'
+            '${created.ref.low.toRadixString(16)}';
+      } finally {
+        calloc.free(created);
+        calloc.free(exited);
+        calloc.free(kernelTime);
+        calloc.free(userTime);
+      }
+    }
+    final ps = File('/bin/ps').existsSync() ? '/bin/ps' : '/usr/bin/ps';
+    if (!File(ps).existsSync()) {
+      throw const FileSystemException('process generation unavailable');
+    }
+    final result = Process.runSync(ps, ['-o', 'lstart=', '-p', '$pid']);
+    final value = result.exitCode == 0 ? '${result.stdout}'.trim() : '';
+    final safe = value.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    if (safe.isNotEmpty && safe.length <= 128) return 'posix_$safe';
+  } catch (_) {}
+  // Unsupported hosts keep the conservative old behavior: a same-pid claim
+  // cannot be proven to belong to another process generation.
+  return 'pid_$pid';
 }
 
 class _FileClaim {

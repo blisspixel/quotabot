@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 
 import 'drift.dart';
+import 'file_guard.dart';
 import 'insights.dart';
 import 'models.dart';
 import 'provider_adapters.dart';
@@ -20,6 +21,10 @@ import 'util.dart';
 /// cached evidence marked stale instead of blanking or laundering the provider.
 Directory cacheDir() {
   final dir = quotabotDir('cache');
+  if (FileSystemEntity.typeSync(dir.path, followLinks: false) !=
+      FileSystemEntityType.directory) {
+    throw FileSystemException('invalid cache directory', dir.path);
+  }
   restrictOwnerOnlyDirectory(dir);
   return dir;
 }
@@ -400,36 +405,154 @@ bool _legacyAccountArtifactsExist(
   ].any((file) => file.existsSync());
 }
 
+typedef _EvidenceGuardObserver = void Function(
+  String phase,
+  String absolutePath,
+);
+
+_EvidenceGuardObserver? _evidenceGuardObserverForTesting;
+
+/// Observes evidence guard acquisition attempts in tests. Release builds
+/// reject this override so production lock behavior cannot be intercepted.
+void setEvidenceGuardObserverForTesting(
+  void Function(String phase, String absolutePath)? observer,
+) {
+  var assertsEnabled = false;
+  assert(() {
+    assertsEnabled = true;
+    return true;
+  }());
+  if (!assertsEnabled) {
+    throw UnsupportedError(
+      'test evidence guard observer is unavailable in release',
+    );
+  }
+  _evidenceGuardObserverForTesting = observer;
+}
+
+/// Exercises the cache evidence guard in tests without exposing a release-mode
+/// locking surface. Cache production paths call [_withEvidenceLock] directly.
+T withCacheEvidenceLockForTesting<T>(
+  String provider,
+  String account,
+  T Function() run, {
+  bool includeLegacy = false,
+  Duration operationTimeout = defaultFileGuardAcquisitionTimeout,
+}) {
+  var assertsEnabled = false;
+  assert(() {
+    assertsEnabled = true;
+    return true;
+  }());
+  if (!assertsEnabled) {
+    throw UnsupportedError('test evidence lock is unavailable in release');
+  }
+  return _withEvidenceLock(
+    provider,
+    account,
+    run,
+    includeLegacy: includeLegacy,
+    operationTimeout: operationTimeout,
+  );
+}
+
+void _prepareEvidenceLockFile(File file) {
+  restrictOwnerOnlyDirectory(file.parent);
+  var type = FileSystemEntity.typeSync(file.path, followLinks: false);
+  if (type == FileSystemEntityType.notFound) {
+    _evidenceGuardObserverForTesting?.call(
+      'before_create',
+      file.absolute.path,
+    );
+    try {
+      file.createSync(recursive: true, exclusive: true);
+    } on FileSystemException {
+      type = FileSystemEntity.typeSync(file.path, followLinks: false);
+      if (type != FileSystemEntityType.file) rethrow;
+    }
+    type = FileSystemEntity.typeSync(file.path, followLinks: false);
+  }
+  if (type != FileSystemEntityType.file) {
+    throw FileSystemException('invalid evidence lock', file.path);
+  }
+  restrictOwnerOnlyFile(file);
+}
+
 T _withEvidenceLock<T>(
   String provider,
   String account,
   T Function() run, {
   bool includeLegacy = false,
+  Duration operationTimeout = defaultFileGuardAcquisitionTimeout,
 }) {
-  final files = _evidenceLockFiles(
+  final byPath = <String, File>{};
+  for (final file in _evidenceLockFiles(
     provider,
     account,
     includeLegacy: includeLegacy,
-  );
-  T lockAt(int index) {
-    if (index == files.length) return run();
-    final file = files[index];
-    restrictOwnerOnlyDirectory(file.parent);
-    if (!file.existsSync()) file.createSync(recursive: true);
-    restrictOwnerOnlyFile(file);
-    final lock = file.openSync(mode: FileMode.write);
-    try {
-      lock.lockSync(FileLock.blockingExclusive);
-      return lockAt(index + 1);
-    } finally {
-      try {
-        lock.unlockSync();
-      } catch (_) {}
-      lock.closeSync();
+  )) {
+    final absolute = file.absolute.path;
+    final normalized = Platform.isWindows
+        ? absolute.replaceAll('/', '\\').toLowerCase()
+        : absolute;
+    byPath.putIfAbsent(normalized, () => file);
+  }
+  final guards = <InterprocessFileGuard>[];
+  final elapsed = Stopwatch()..start();
+  try {
+    // Preserve the released legacy-then-canonical order while deduplicating by
+    // normalized absolute path. Mixed-version recovery processes use that
+    // established order, so changing it would introduce an inversion stall.
+    for (final entry in byPath.entries) {
+      final file = entry.value;
+      _prepareEvidenceLockFile(file);
+      _evidenceGuardObserverForTesting?.call(
+        'before_acquire',
+        file.absolute.path,
+      );
+      final root = cacheDir();
+      if (file.parent.absolute.path != root.absolute.path ||
+          FileSystemEntity.typeSync(file.path, followLinks: false) !=
+              FileSystemEntityType.file) {
+        throw FileSystemException('invalid evidence lock', file.path);
+      }
+      final remaining = operationTimeout - elapsed.elapsed;
+      if (remaining.inMicroseconds <= 0) {
+        throw FileSystemException(
+          'timed out acquiring evidence guards',
+          file.path,
+        );
+      }
+      guards.add(
+        acquireInterprocessFileGuardSync(
+          file,
+          hardenClaim: restrictOwnerOnlyFile,
+          acquisitionTimeout: remaining,
+          reclaimSameProcessClaims: false,
+        ),
+      );
+      _evidenceGuardObserverForTesting?.call(
+        'after_acquire',
+        file.absolute.path,
+      );
+      // Dart does not expose a portable no-follow open for this lock file. The
+      // repeated path checks reject persistent links and swaps before the
+      // guarded operation, while the claim and native lock coordinate every
+      // cooperative quotabot writer. A hostile same-user path swap in the
+      // check-to-open interval remains outside this metadata lock boundary.
+      if (FileSystemEntity.typeSync(root.path, followLinks: false) !=
+              FileSystemEntityType.directory ||
+          FileSystemEntity.typeSync(file.path, followLinks: false) !=
+              FileSystemEntityType.file) {
+        throw FileSystemException('evidence lock changed', file.path);
+      }
+    }
+    return run();
+  } finally {
+    for (final guard in guards.reversed) {
+      guard.release();
     }
   }
-
-  return lockAt(0);
 }
 
 /// Writes via a per-process temp file then rename, so a concurrent reader (the
