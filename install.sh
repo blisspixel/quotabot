@@ -438,9 +438,23 @@ install_versioned_tree "$extract_dir" "$INSTALL_ROOT" cli
 
 # Keep the PATH shim valid until its complete replacement is ready.
 wrapper_tmp=$(mktemp "$INSTALL_DIR/.quotabot.XXXXXX")
+printf -v wrapper_install_root '%q' "$INSTALL_ROOT"
 cat > "$wrapper_tmp" <<EOF
 #!/usr/bin/env bash
-exec "$INSTALL_ROOT/bin/quotabot" "\$@"
+set -euo pipefail
+install_root=$wrapper_install_root
+install_parent="\${install_root%/*}"
+target_name="\${install_root##*/}"
+versions_name=".\${target_name}-versions"
+active_relative="\$(readlink "\$install_root")"
+generation_name="\${active_relative#"\$versions_name"/}"
+if [[ "\$active_relative" != "\$versions_name/\$generation_name" ||
+      "\$generation_name" == */* ||
+      ! "\$generation_name" =~ ^(generation|legacy)-[0-9]{14}-[0-9]+$ ]]; then
+  echo "quotabot install target is invalid: \$install_root" >&2
+  exit 1
+fi
+exec "\$install_parent/\$active_relative/bin/quotabot" "\$@"
 EOF
 chmod +x "$wrapper_tmp"
 mv -f "$wrapper_tmp" "$INSTALL_DIR/$BINARY_NAME"
