@@ -396,6 +396,19 @@ with an exact rc.16 or later tag to bootstrap it. The current installers retain
 exact-tag rollback compatibility with older archives that predate the bundled
 scripts, while rc.16 and later exact installs require them.
 
+Windows rc.16 has a bundled Windows PowerShell compatibility defect that can
+stop self-update before the replacement is activated. If it occurs, bootstrap
+the corrected immutable installer once from an ordinary PowerShell terminal:
+
+```powershell
+$env:QUOTABOT_VERSION = 'v0.10.0-rc.17'; irm https://raw.githubusercontent.com/blisspixel/quotabot/v0.10.0-rc.17/install.ps1 | iex
+```
+
+Then open a new terminal and verify `quotabot update --check`, `quotabot
+--version`, and `quotabot doctor`. Updates from rc.17 onward use the corrected
+bundled installer. The command preserves local configuration, history, grants,
+profiles, and manual entries.
+
 ### Uninstall the release CLI but preserve data
 
 macOS and Linux:

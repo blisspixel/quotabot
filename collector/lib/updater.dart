@@ -198,6 +198,7 @@ Future<QuotabotUpdateCheck> checkForQuotabotUpdate({
   required String currentVersion,
   required UpdateChannel channel,
   String? targetTag,
+  String? githubToken,
   http.Client? client,
   Duration timeout = const Duration(seconds: 15),
   String repository = quotabotReleaseRepository,
@@ -228,6 +229,16 @@ Future<QuotabotUpdateCheck> checkForQuotabotUpdate({
       'User-Agent': 'quotabot/$currentVersion',
       'X-GitHub-Api-Version': '2022-11-28',
     };
+    final token = githubToken?.trim();
+    if (token != null && token.isNotEmpty) {
+      if (token.length > 4096 ||
+          token.codeUnits.any((unit) => unit < 32 || unit == 127)) {
+        throw const QuotabotUpdateException(
+          'the GitHub release token is invalid',
+        );
+      }
+      headers['Authorization'] = 'Bearer $token';
+    }
     final rows = <Object?>[];
     var bytesRead = 0;
     if (requested != null) {

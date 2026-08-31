@@ -31,7 +31,7 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.10.0-rc.16';
+const _version = '0.10.0-rc.17';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
@@ -648,6 +648,8 @@ Future<void> _runUpdate(Set<String> flags, bool wantsJson) async {
       currentVersion: _version,
       channel: channel,
       targetTag: _stringOption(flags, 'target', null),
+      githubToken: Platform.environment['GH_TOKEN'] ??
+          Platform.environment['GITHUB_TOKEN'],
       client: sharedHttpClient,
     );
     final comparison = check.target.version.compareTo(check.current);

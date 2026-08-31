@@ -95,10 +95,14 @@ Feature breadth is frozen. Completed candidate detail belongs in
 [CHANGELOG.md](CHANGELOG.md); this section records only the remaining dependency
 order.
 
-1. Release candidate 16 is the current stabilization baseline. It adds the
-   checksum-verified `quotabot update` path required to keep installed release
-   CLIs current without weakening the immutable-asset contract. Candidate
-   publication remains gated by the complete three-OS tag workflow and
+1. Release candidate 17 is the current stabilization baseline. It hardens the
+   checksum-verified `quotabot update` path with module-independent Windows
+   hashing, a legacy-shell-compatible ZIP staging name, authenticated GitHub
+   metadata reads when an explicit token is already present, and failure
+   diagnostics in the hosted lifecycle smoke. The immutable rc.16 Windows
+   bundle cannot receive that correction retroactively, so affected rc.16
+   installations use the documented exact-tag rc.17 bootstrap once. Every
+   candidate publication is gated by the complete three-OS tag workflow and
    subsequent cross-platform install smoke; unsigned transition status remains
    explicit until the signed lifecycle passes.
 2. The repository now implements fail-closed Windows and macOS signing paths for
@@ -279,7 +283,7 @@ dated idle-machine validation of the Claude and Codex grants, then the frozen
 ## Current state
 
 The current line, **0.9.9**, remains the tagged default installer version. The
-focused **0.10.0-rc.16** candidate carries the latest stabilization inventory
+focused **0.10.0-rc.17** candidate carries the latest stabilization inventory
 described in [Next](#next). The stable line contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning
@@ -299,7 +303,7 @@ milestone sections below.
 | Integration trust boundary | Stabilization candidate | Loopback, exact-server authentication before bearer disclosure, pseudonymous unauthenticated account labels, request-body deadlines, bounded MCP requests and sessions, proxy-independent Python MCP transport, exact idempotency, LiteLLM reservation behavior, and reviewed optional dependency locks are enforced and tested | Keep packaged guidance and live integration smoke current while field testing continues |
 | Provider truth and drift handling | Partial | Drift fails closed; Claude authorization is fixed and live-confirmed end to end; token parsing, account cleanup, explicit disconnect, parser, and cache provenance have deterministic coverage | Validate idle Claude/Codex grants, current Fable entitlement, Windows evidence, and remaining provider response shapes |
 | Native provider evidence | Partial | Windows has reported evidence; WSL covers truthful Linux failure behavior | Link dated Windows evidence and verify natural states on native macOS and Linux |
-| Installation and update | Rehearsed on 0.9.9; green on rc.12 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8; the [rc.12 matrix](https://github.com/blisspixel/quotabot/actions/runs/33312529854) passed cross-platform install, upgrade, source-setup, and desktop-run checks with the transactional lifecycle hardening | Repeat the lifecycle on the signed rehearsal and frozen 1.0 candidate |
+| Installation and update | Rehearsed on 0.9.9; corrective rc.17 | The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9) locked its 14-asset set ([release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121)) and passed [three-OS install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058), including upgrade from v0.9.8; rc.17 adds the bundled self-update correction and exact forced-update lifecycle coverage after rc.16 exposed a Windows PowerShell compatibility defect | Retain rc.17's complete cross-platform lifecycle evidence, then repeat on the signed rehearsal and frozen 1.0 candidate |
 | Native signing | Repository-ready; inactive | Exact Windows PE and macOS Mach-O inventories and deltas, isolated signer jobs, protected nonpublishing rehearsal workflows, reviewed `main` and `v*` environment policies, deterministic policy and failure tests, credential-free packaging, bounded receipts, and exact draft-asset re-verification are implemented for CLI and desktop; current published artifacts remain unsigned | Provision both owner identities and the exact protected-environment values and secrets, pass native protected rehearsals, activate both modes, and retain one signed 0.10.x lifecycle record |
 | First-run and recommendation comprehension | Ready for evidence | `doctor`, desktop, `suggest`, and `top` share one explanation and decision receipt | Prove on native hosts that a new user understands the route, reason, evidence, spend class, and fallback |
 | Accessibility and operator diagnostics | Partial | Automated scaling, labels, targets, contrast, failure-state, and support-safe diagnostic coverage exists | Complete native keyboard and screen-reader smoke and verify every critical failure is actionable |
