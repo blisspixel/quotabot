@@ -10,10 +10,11 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.14.
-> **Next:** finish the focused 0.10.x stabilization gate, provision the Windows
-> and Apple publisher identities, and rehearse the repository-ready signing
-> paths on one signed candidate. No new product breadth. See [roadmap
+> **Current release candidate:** 0.10.0-rc.15.
+> **Next:** complete the bounded provider-ID cache migration, finish the focused
+> 0.10.x stabilization gate, provision the Windows and Apple publisher
+> identities, and rehearse the repository-ready signing paths on one signed
+> candidate. No new product breadth. See [roadmap
 > Next](ROADMAP.md#next) and the [documentation index](docs/README.md).
 
 Release candidates state Windows and macOS signing mode at the top of the

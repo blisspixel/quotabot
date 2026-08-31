@@ -52,8 +52,9 @@ It also has two explicit macOS modes:
 
 The macOS `developer-id` path is implemented and covered by deterministic policy
 and failure tests. Both repository modes remain `unsigned`, and current published
-artifacts remain unsigned. Owner provisioning, a successful protected rehearsal,
-mode activation, and signed fresh-download evidence remain required.
+artifacts remain unsigned. Owner identity and credential provisioning, a
+successful protected rehearsal, mode activation, and signed fresh-download
+evidence remain required.
 
 ## GitHub configuration
 
@@ -77,7 +78,8 @@ gh api repos/blisspixel/quotabot/actions/permissions
 gh api repos/blisspixel/quotabot/actions/permissions/selected-actions
 ```
 
-Create a protected Windows environment named `release-signing`:
+The protected Windows environment is named `release-signing`. Keep it configured
+as follows:
 
 1. Restrict deployments to the protected `main` branch and tag pattern `v*`.
 2. Require a maintainer review. If the repository has only one maintainer, keep
@@ -88,14 +90,19 @@ Create a protected Windows environment named `release-signing`:
    Unsigned builds, packaging, attestation, upload, verification, ordinary CI,
    and pull requests do not.
 
-Create a separate protected Apple environment named `release-signing-macos`.
-Allow deployments only from the protected `main` branch and the `v*` tag
+The separate protected Apple environment is named `release-signing-macos`.
+Keep deployments restricted to the protected `main` branch and the `v*` tag
 pattern, require review, and apply the same administrator-bypass policy. The two
 release signer jobs use the tag path. The nonpublishing rehearsal signer uses
 the protected-main path and fails unless the workflow was dispatched from
 `main`. No other jobs reference the environment. The Windows environment cannot
 read the Apple certificate or notary credential, and the macOS jobs receive no
 Azure OIDC permission.
+
+Both live environment shells now require maintainer review and restrict
+deployments to `main` and `v*`. They contain no signing values or secrets. This
+is environment policy readiness, not owner identity provisioning, successful
+rehearsal evidence, or signing activation.
 
 Set these repository variables so preflight can select and disclose the mode
 before any environment-bound job starts:
@@ -443,7 +450,8 @@ creating a release. It fails unless dispatched from protected `main`. Its
 unsigned handoffs expire after two days, the protected jobs delete their
 candidates and credentials, and only bounded receipts and digest records are
 retained for 14 days. It is ready to run but has not completed successfully
-because the owner identity and protected environment are not provisioned.
+because the owner Apple identity, repository verification variables, and
+protected environment secrets are not provisioned.
 
 The manual `Windows signing rehearsal` workflow applies the same protected-main,
 nonpublishing, bounded-evidence model to both Windows surfaces. Release and
@@ -473,10 +481,10 @@ emits `quotabot.macos-signing-delta.v1` on success and bounded
 mode skips the signer and packages only the unchanged inventoried candidate with
 an explicit release-note warning.
 
-This implementation is repository readiness, not activation evidence. Current
-published macOS artifacts remain unsigned until owner provisioning, a successful
-protected rehearsal, mode activation, and signed fresh-download verification are
-complete.
+This implementation is repository readiness, not activation evidence. Existing
+published macOS artifacts are immutable and remain unsigned. Future macOS
+artifacts remain unsigned until owner provisioning, a successful protected
+rehearsal, mode activation, and signed fresh-download verification are complete.
 
 Primary references:
 

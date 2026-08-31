@@ -367,7 +367,8 @@ must be dispatched from protected `main` and never publishes a candidate:
 unsigned handoffs expire after two days, protected jobs delete candidate
 payloads and credentials, and only bounded receipts and digest records are
 retained for 14 days. The workflow is implemented but has not completed
-successfully because owner provisioning is still absent.
+successfully because owner identities and the required environment values and
+secrets are still absent.
 
 Every macOS CI, release, and rehearsal job selects the explicit `macos-15` arm64
 runner and `/Applications/Xcode_16.4.app/Contents/Developer`. The

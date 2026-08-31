@@ -407,7 +407,10 @@ directory. They remain attached to cache-only and failed-read fallbacks so a
 process restart or transient provider failure cannot silently clear the warning.
 Canonical cache and drift records carry internal microsecond observation
 generations. Admission, generation comparison, cache write, and diagnostic
-update run under one per-provider/account interprocess lock. A clean writer
+update run under one per-provider/account claim-backed native guard that
+serializes processes and isolates. Multi-lock recovery preserves the released
+legacy-then-canonical order, shares one bounded acquisition deadline, and
+releases every acquired claim on partial failure. A clean writer
 clears only an older drift record, and a late older writer cannot hide a newer
 warning or baseline even when both provider timestamps fall in the same second.
 Baseline reads reject a mismatched provider, a mismatched scoped account, a
