@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-30. This file is the forward plan. It records brief shipped
+Updated 2026-08-31. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -94,9 +94,12 @@ Feature breadth is frozen. Completed candidate detail belongs in
 [CHANGELOG.md](CHANGELOG.md); this section records only the remaining dependency
 order.
 
-1. Release candidate 12 is the current published stabilization baseline. Its
-   [cross-platform install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-   passed install, upgrade, source-setup, and desktop-run checks.
+1. Release candidate 15 is the current stabilization baseline. Its
+   [protected-main CI](https://github.com/blisspixel/quotabot/actions/runs/33343427816)
+   passed the complete Windows, macOS, and Linux project gate. Candidate
+   publication remains gated by the complete tag workflow and subsequent
+   cross-platform install smoke; unsigned transition status remains explicit
+   until the signed lifecycle passes.
 2. The repository now implements fail-closed Windows and macOS signing paths for
    the CLI and desktop assets. They preserve immutable unsigned handoffs,
    inventory every native module, sign only the exact validated targets, verify
