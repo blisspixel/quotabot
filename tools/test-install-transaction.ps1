@@ -143,6 +143,21 @@ try {
   Import-InstallFunction `
     -Path (Join-Path $repositoryRoot 'install.ps1') `
     -Name 'Test-QuotabotArchiveRequiresUpdater'
+  Import-InstallFunction `
+    -Path (Join-Path $repositoryRoot 'install.ps1') `
+    -Name 'Get-QuotabotFileSha256'
+  $hashFixture = Join-Path $testRoot 'sha256-fixture.txt'
+  Set-Content -LiteralPath $hashFixture -Value 'abc' -Encoding Ascii -NoNewline
+  $previousModulePath = $env:PSModulePath
+  try {
+    $env:PSModulePath = ''
+    $fixtureHash = Get-QuotabotFileSha256 -Path $hashFixture
+  } finally {
+    $env:PSModulePath = $previousModulePath
+  }
+  if ($fixtureHash -cne 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad') {
+    throw "Unexpected SHA-256 result: $fixtureHash"
+  }
   foreach ($legacyVersion in @('latest', 'v0.9.9', 'v0.10.0-rc.15')) {
     if (Test-QuotabotArchiveRequiresUpdater -Version $legacyVersion) {
       throw "$legacyVersion must remain compatible with an archive that predates bundled updater scripts"

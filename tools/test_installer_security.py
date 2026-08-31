@@ -65,6 +65,10 @@ class InstallerSecurityTests(unittest.TestCase):
         self.assertIn("[Security.Cryptography.SHA256]::Create()", script)
         self.assertIn("Get-QuotabotFileSha256 -Path $downloadPath", script)
         self.assertNotIn("Get-FileHash", script)
+        self.assertIn("$downloadPath = Join-Path $workPath $assetName", script)
+        self.assertNotIn(
+            '$downloadPath = Join-Path $workPath "$assetName.download"', script
+        )
         self.assertNotIn("$checksumFound", script)
         self.assertNotIn("continuing with HTTPS verification only", script)
 

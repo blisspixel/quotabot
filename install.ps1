@@ -247,7 +247,7 @@ $installRoot = "$env:LOCALAPPDATA\quotabot"
 $installDir = Join-Path $installRoot "bin"
 $assetName = "quotabot-windows-x64.zip"
 $workPath = Join-Path ([IO.Path]::GetTempPath()) "quotabot-install-$([guid]::NewGuid())"
-$downloadPath = Join-Path $workPath "$assetName.download"
+$downloadPath = Join-Path $workPath $assetName
 $checksumPath = Join-Path $workPath "$assetName.sha256"
 $extractPath = Join-Path $workPath 'expanded'
 

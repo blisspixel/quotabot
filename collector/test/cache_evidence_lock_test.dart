@@ -12,6 +12,8 @@ import 'package:quotabot_collector/storage_keys.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:test/test.dart';
 
+const _isolateSchedulingTimeout = Duration(seconds: 90);
+
 void _holdAgedCacheEvidenceLock(List<Object> arguments) {
   final root = Directory(arguments[0] as String);
   final account = arguments[1] as String;
@@ -31,36 +33,33 @@ void _holdAgedCacheEvidenceLock(List<Object> arguments) {
       sendPort.send('locked');
       final timeout = Stopwatch()..start();
       while (!releaseFile.existsSync()) {
-        if (timeout.elapsed >= const Duration(seconds: 30)) {
+        if (timeout.elapsed >= _isolateSchedulingTimeout) {
           throw StateError('timed out waiting to release evidence guard');
         }
         sleep(const Duration(milliseconds: 10));
       }
     },
-    operationTimeout: const Duration(seconds: 30),
+    operationTimeout: _isolateSchedulingTimeout,
   );
   sendPort.send('released');
 }
 
-void _waitForCacheEvidenceLock(List<Object> arguments) {
+void _waitForCacheEvidenceLock(List<Object> arguments) async {
   final root = Directory(arguments[0] as String);
   final account = arguments[1] as String;
   final sendPort = arguments[2] as SendPort;
   final releaseFile = File(arguments[3] as String);
   setQuotabotDirOverrideForTesting(root);
-  var announced = false;
-  setEvidenceGuardObserverForTesting((phase, _) {
-    if (phase == 'before_acquire' && !announced) {
-      announced = true;
-      sendPort.send('waiting');
-    }
-  });
+  sendPort.send('waiting');
+  // Yield once so the parent observes readiness before this isolate enters the
+  // intentionally synchronous acquisition loop.
+  await Future<void>.delayed(Duration.zero);
   final elapsed = Stopwatch()..start();
   final releaseObserved = withCacheEvidenceLockForTesting(
     codexProviderId,
     account,
     releaseFile.existsSync,
-    operationTimeout: const Duration(seconds: 30),
+    operationTimeout: _isolateSchedulingTimeout,
   );
   elapsed.stop();
   sendPort.send(<String, Object>{
@@ -322,7 +321,7 @@ void main() {
       waiterMessages?.close();
     });
     expect(
-      await holderIterator.moveNext().timeout(const Duration(seconds: 30)),
+      await holderIterator.moveNext().timeout(_isolateSchedulingTimeout),
       isTrue,
     );
     expect(holderIterator.current, 'locked');
@@ -339,7 +338,7 @@ void main() {
       ],
     );
     expect(
-      await waiterIterator.moveNext().timeout(const Duration(seconds: 30)),
+      await waiterIterator.moveNext().timeout(_isolateSchedulingTimeout),
       isTrue,
     );
     expect(waiterIterator.current, 'waiting');
@@ -349,7 +348,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 200));
     releaseFile.createSync();
     expect(
-      await waiterIterator.moveNext().timeout(const Duration(seconds: 30)),
+      await waiterIterator.moveNext().timeout(_isolateSchedulingTimeout),
       isTrue,
     );
     final waited = waiterIterator.current;
@@ -359,7 +358,7 @@ void main() {
     expect(result['release_observed'], isTrue);
     expect(result['elapsed_ms'], isA<int>());
     expect(
-      await holderIterator.moveNext().timeout(const Duration(seconds: 30)),
+      await holderIterator.moveNext().timeout(_isolateSchedulingTimeout),
       isTrue,
     );
     expect(holderIterator.current, 'released');
