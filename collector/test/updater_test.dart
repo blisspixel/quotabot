@@ -68,6 +68,54 @@ void main() {
   });
 
   group('release discovery', () {
+    test('uses an explicit GitHub token without exposing it in errors',
+        () async {
+      const token = 'github-test-token';
+      final authenticated = MockClient((request) async {
+        expect(request.headers['authorization'], 'Bearer $token');
+        return http.Response(jsonEncode([release('v0.9.9')]), 200);
+      });
+      final check = await checkForQuotabotUpdate(
+        currentVersion: '0.9.8',
+        channel: UpdateChannel.stable,
+        githubToken: ' $token ',
+        client: authenticated,
+      );
+      expect(check.target.tag, 'v0.9.9');
+
+      final unauthenticated = MockClient((request) async {
+        expect(request.headers, isNot(contains('authorization')));
+        return http.Response(jsonEncode([release('v0.9.9')]), 200);
+      });
+      await checkForQuotabotUpdate(
+        currentVersion: '0.9.8',
+        channel: UpdateChannel.stable,
+        client: unauthenticated,
+      );
+
+      await expectLater(
+        checkForQuotabotUpdate(
+          currentVersion: '0.9.8',
+          channel: UpdateChannel.stable,
+          githubToken: 'secret\nvalue',
+          client: releasesClient([release('v0.9.9')]),
+        ),
+        throwsA(
+          isA<QuotabotUpdateException>()
+              .having(
+                (error) => error.message,
+                'message',
+                contains('token is invalid'),
+              )
+              .having(
+                (error) => error.message,
+                'message',
+                isNot(contains('secret')),
+              ),
+        ),
+      );
+    });
+
     test('release candidates follow the newest preview by default', () async {
       final check = await checkForQuotabotUpdate(
         currentVersion: '0.10.0-rc.14',
@@ -277,5 +325,38 @@ void main() {
     expect(invocation.environment['QUOTABOT_VERSION'], 'v0.10.0-rc.16');
     expect(invocation.environment['QUOTABOT_REPO'], 'blisspixel/quotabot');
     expect(invocation.installedExecutable, endsWith('bin\\quotabot.exe'));
+  });
+
+  test('POSIX invocation uses only the bundled installer and exact tag',
+      () async {
+    if (Platform.isWindows) return;
+    final temp = Directory.systemTemp.createTempSync('quotabot_updater_');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    final bundle = Directory('${temp.path}${Platform.pathSeparator}bundle');
+    final bin = Directory('${bundle.path}${Platform.pathSeparator}bin')
+      ..createSync(recursive: true);
+    final lib = Directory('${bundle.path}${Platform.pathSeparator}lib')
+      ..createSync(recursive: true);
+    final executable = File('${bin.path}${Platform.pathSeparator}quotabot')
+      ..writeAsBytesSync([1]);
+    final installer = File('${lib.path}${Platform.pathSeparator}install.sh')
+      ..writeAsStringSync('exit 0');
+
+    final invocation = packagedInstallerInvocation(
+      currentExecutable: executable.path,
+      operatingSystem: Platform.isMacOS ? 'macos' : 'linux',
+      targetTag: 'v0.10.0-rc.17',
+      environment: {'HOME': temp.path},
+    );
+
+    expect(invocation.executable, anyOf('/bin/bash', '/usr/bin/bash'));
+    expect(invocation.arguments, [installer.path]);
+    expect(invocation.environment['QUOTABOT_VERSION'], 'v0.10.0-rc.17');
+    expect(invocation.environment['QUOTABOT_REPO'], 'blisspixel/quotabot');
+    expect(
+      invocation.installedExecutable,
+      '${temp.path}${Platform.pathSeparator}.local'
+      '${Platform.pathSeparator}bin${Platform.pathSeparator}quotabot',
+    );
   });
 }

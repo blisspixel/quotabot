@@ -10,7 +10,7 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.16.
+> **Current release candidate:** 0.10.0-rc.17.
 > **Next:** complete the bounded provider-ID cache migration, finish the focused
 > 0.10.x stabilization gate, provision the Windows and Apple publisher
 > identities, and rehearse the repository-ready signing paths on one signed
@@ -71,7 +71,9 @@ quotabot suggest
 `suggest` ranks usable subscriptions and supplies a local fallback when one is
 available. The `quotabot update` command begins with release candidate 16; an
 older stable install can bootstrap it by running the one-line installer with an
-exact rc.16 or later tag. For that preview path, inspect-before-run
+exact rc.17 or later tag. Windows rc.16 users should use that same exact rc.17
+bootstrap once because the immutable rc.16 Windows bundle has a PowerShell
+self-update compatibility defect. For that preview path, inspect-before-run
 installation, login, updates, rollback, and uninstall, use the [setup
 guide](docs/SETUP.md).
 

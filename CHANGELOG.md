@@ -2,6 +2,35 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.17 - 2026-08-31
+
+### Fixed
+
+- Windows self-update now computes the release archive hash through the .NET
+  cryptography API instead of depending on a PowerShell module command that can
+  be absent from a child Windows PowerShell session.
+- The Windows installer now keeps the downloaded archive's `.zip` suffix, so
+  Windows PowerShell 5.1 can extract it before transactional activation.
+
+### Changed
+
+- Release metadata reads authenticate to GitHub when an explicit `GH_TOKEN` or
+  `GITHUB_TOKEN` is already present. The token is accepted only for the fixed
+  GitHub API request and is never included in output or errors.
+- Hosted self-update smoke now preserves bounded JSON failure output and reruns
+  the failed exact install without JSON solely to expose actionable installer
+  diagnostics.
+- The Windows installer hash implementation has an executable regression with
+  the PowerShell module path removed, alongside the existing transactional and
+  hosted cross-platform lifecycle checks.
+
+Windows rc.16 installations that encounter its bundled updater defect must run
+the exact rc.17 installer once. The immutable rc.16 archive cannot be changed;
+normal `quotabot update` operation resumes from rc.17 onward.
+
+Both repository signing modes remain `unsigned` until owner identities, exact
+environment values and credentials, and successful native rehearsals exist.
+
 ## 0.10.0-rc.16 - 2026-08-31
 
 ### Added

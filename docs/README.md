@@ -5,9 +5,9 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.16. The next work in the focused 0.10.x stabilization train is the
+0.10.0-rc.17. The next work in the focused 0.10.x stabilization train is the
 bounded provider-ID cache migration, owner signing setup, and one signed
-lifecycle rehearsal. rc.16 adds a checksum-verified `quotabot update` command
+lifecycle rehearsal. rc.17 hardens the checksum-verified `quotabot update` command
 whose release discovery, exact-tag installation, transactional activation, and
 installed-version verification join the existing cross-platform lifecycle
 gate. The repository now
