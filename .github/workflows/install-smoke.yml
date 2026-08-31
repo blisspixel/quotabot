@@ -292,7 +292,12 @@ jobs:
             throw 'Self-update check returned an unexpected contract.'
           }
           $updateJson = & $installed update --force --target=$env:TARGET_TAG --json
-          if ($LASTEXITCODE -ne 0) { throw "Forced self-update exited $LASTEXITCODE" }
+          $updateExit = $LASTEXITCODE
+          if ($updateExit -ne 0) {
+            $updateJson | Write-Host
+            & $installed update --force --target=$env:TARGET_TAG
+            throw "Forced self-update exited $updateExit"
+          }
           $update = $updateJson | ConvertFrom-Json
           if ($update.schema -ne 'quotabot.update.v1' -or
               $update.selection -ne 'exact' -or
@@ -312,7 +317,15 @@ jobs:
           executable="$HOME/.local/bin/quotabot"
           check_json="$("$executable" update --check --target="$TARGET_TAG" --json)"
           python -c 'import json, sys; value = json.loads(sys.argv[1]); assert value["schema"] == "quotabot.update.v1" and value["selection"] == "exact" and value["target_tag"] == sys.argv[2] and value["installed"] is False' "$check_json" "$TARGET_TAG"
+          set +e
           update_json="$("$executable" update --force --target="$TARGET_TAG" --json)"
+          update_status=$?
+          set -e
+          if (( update_status != 0 )); then
+            printf '%s\n' "$update_json" >&2
+            "$executable" update --force --target="$TARGET_TAG" || true
+            exit "$update_status"
+          fi
           python -c 'import json, sys; value = json.loads(sys.argv[1]); assert value["schema"] == "quotabot.update.v1" and value["selection"] == "exact" and value["target_tag"] == sys.argv[2] and value["installed"] is True' "$update_json" "$TARGET_TAG"
           [[ "$("$executable" --version)" == "quotabot ${TARGET_TAG#v}" ]]
 

@@ -42,6 +42,27 @@ function Test-QuotabotArchiveRequiresUpdater {
     return [int64]$parsed.Groups['rc'].Value -ge 16
 }
 
+function Get-QuotabotFileSha256 {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($hasher.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+        } finally {
+            $hasher.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 Write-Host "=== quotabot installer ==="
 
 function Install-QuotabotPayload {
@@ -257,7 +278,7 @@ try {
         if ($expected -notmatch '^[0-9a-f]{64}$') {
             throw "Invalid checksum file for $assetName"
         }
-        $actual = (Get-FileHash -Algorithm SHA256 $downloadPath).Hash.ToLowerInvariant()
+        $actual = Get-QuotabotFileSha256 -Path $downloadPath
         if ($actual -ne $expected) {
             throw "Checksum mismatch for $assetName"
         }
