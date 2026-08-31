@@ -5,12 +5,12 @@ Start with the shortest path for what you need.
 ## Project status
 
 The current verified stable release is 0.9.9. The current release candidate is
-0.10.0-rc.15. The next work in the focused 0.10.x stabilization train is the
+0.10.0-rc.16. The next work in the focused 0.10.x stabilization train is the
 bounded provider-ID cache migration, owner signing setup, and one signed
-lifecycle rehearsal. The latest published candidate baseline is rc.12; its
-[cross-platform install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-passed install, upgrade, source-setup, and desktop-run checks. rc.15 has no
-published lifecycle evidence yet. The repository now
+lifecycle rehearsal. rc.16 adds a checksum-verified `quotabot update` command
+whose release discovery, exact-tag installation, transactional activation, and
+installed-version verification join the existing cross-platform lifecycle
+gate. The repository now
 contains fail-closed Windows and macOS signing paths for CLI and desktop assets.
 They capture one signing policy per release, pin the Apple build toolchain,
 enforce exact unsigned-to-signed tree deltas, and bind signed native-verification

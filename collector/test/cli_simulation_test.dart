@@ -789,7 +789,7 @@ void main() {
     expect(
       help.stdout as String,
       contains(
-        'machine-readable output where supported (including suggest, models, report, verify)',
+        'machine-readable output where supported (including suggest, models, report, verify, update)',
       ),
     );
     expect(

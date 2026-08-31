@@ -26,6 +26,7 @@ $out = Join-Path $releaseDir $asset
 $sidecar = "$out.sha256"
 $bundle = Join-Path $buildDir 'bundle'
 $packagedExe = Join-Path $bundle 'bin\quotabot.exe'
+$packagedLib = Join-Path $bundle 'lib'
 
 if (-not $PackageOnly) {
   . (Join-Path $scriptDir 'windows-space-safe-dart.ps1')
@@ -69,6 +70,13 @@ if (-not (Test-Path -LiteralPath $packagedExe -PathType Leaf)) {
   }
   throw "CLI build did not produce $packagedExe"
 }
+
+# Bundle the exact installer implementations used by `quotabot update`. The
+# complete CLI archive and its checksum authenticate these scripts before they
+# are activated, so self-update never executes the mutable main-branch copy.
+New-Item -ItemType Directory -Force -Path $packagedLib | Out-Null
+Copy-Item -LiteralPath (Join-Path $root 'install.ps1') -Destination $packagedLib -Force
+Copy-Item -LiteralPath (Join-Path $root 'install.sh') -Destination $packagedLib -Force
 
 if ($NoArchive) {
   Write-Host "CLI bundle ready: $bundle"

@@ -140,6 +140,19 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) "quotabot-install-transaction-$([guid]::NewGuid())"
 try {
   New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
+  Import-InstallFunction `
+    -Path (Join-Path $repositoryRoot 'install.ps1') `
+    -Name 'Test-QuotabotArchiveRequiresUpdater'
+  foreach ($legacyVersion in @('latest', 'v0.9.9', 'v0.10.0-rc.15')) {
+    if (Test-QuotabotArchiveRequiresUpdater -Version $legacyVersion) {
+      throw "$legacyVersion must remain compatible with an archive that predates bundled updater scripts"
+    }
+  }
+  foreach ($modernVersion in @('v0.10.0-rc.16', 'v0.10.0', 'v0.10.1', 'v1.0.0')) {
+    if (-not (Test-QuotabotArchiveRequiresUpdater -Version $modernVersion)) {
+      throw "$modernVersion must require bundled updater scripts"
+    }
+  }
   foreach ($relativeScript in @('install.ps1', 'tools\setup.ps1')) {
     $scriptPath = Join-Path $repositoryRoot $relativeScript
     if ($relativeScript -eq 'tools\setup.ps1') {

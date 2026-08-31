@@ -43,6 +43,27 @@ cleanup_test() {
   fi
   rm -rf -- "$test_root"
 }
+
+updater_requirement="$test_root/updater-requirement.sh"
+sed -n '/^requires_packaged_updater_scripts() {$/,/^}$/p' \
+  "$repository_root/install.sh" > "$updater_requirement"
+if ! grep -q '^requires_packaged_updater_scripts() {' "$updater_requirement"; then
+  echo 'Could not extract the packaged-updater compatibility rule.' >&2
+  exit 1
+fi
+source "$updater_requirement"
+for legacy_version in latest v0.9.9 v0.10.0-rc.15; do
+  if requires_packaged_updater_scripts "$legacy_version"; then
+    echo "$legacy_version must remain compatible with legacy release archives." >&2
+    exit 1
+  fi
+done
+for modern_version in v0.10.0-rc.16 v0.10.0 v0.10.1 v1.0.0; do
+  if ! requires_packaged_updater_scripts "$modern_version"; then
+    echo "$modern_version must require packaged updater scripts." >&2
+    exit 1
+  fi
+done
 trap cleanup_test EXIT
 
 count_directory_entries() {

@@ -240,6 +240,7 @@ local metadata. Add `--json` to any read command for machine output.
 | Command                | What it does                                          |
 |------------------------|-------------------------------------------------------|
 | `status` (or `doctor`) | Every provider, its windows, and resets (the default).|
+| `update` | Check or install the newest checksum-verified release for the selected channel. |
 | `top`                  | Live dashboard that redraws in place (q quit, r now, s sort). |
 | `models`               | Catalogued models ordered by routability, with explicit availability and caps. |
 | `calibration`          | Forecast reliability from recorded history.          |
@@ -634,6 +635,19 @@ account appears only when duplicate accounts for that provider need
 disambiguation. Alert webhook JSON retains its exact account metadata contract
 and is not rewritten by this display preference.
 
+## Updating the CLI
+
+`quotabot update --check` reads the bounded public GitHub release list and
+reports the selected channel without changing the installation. `quotabot
+update` then invokes the installer carried inside the current verified archive,
+downloads one exact published tag and checksum sidecar, activates it
+transactionally, and verifies the new stable executable's version. Stable
+builds follow stable releases; release candidates follow previews. Use
+`--preview` or `--stable` to change channel, or `--target=TAG` to select one
+exact published tag. A newer exact target installs without `--force`; add
+`--force` only to reinstall the current target or roll back. `--json` emits
+`quotabot.update.v1`.
+
 ## Exit codes
 
 The CLI uses stable exit codes so a shell or agent can branch without parsing
@@ -651,6 +665,9 @@ output:
   `top`), has no usable quota at the moment. `check` also uses this code when a
   known provider adapter returns no current row, or for provider-drift evidence
   because last-trusted headroom is not current capacity.
+- `74` I/O failure: an explicitly requested `update` could not complete release
+  discovery, start or finish its packaged installer, or verify the installed
+  version.
 
 For metered providers, `available` means more than the practical spent floor is
 left. Quotabot treats 1.5% or less remaining headroom as unavailable so

@@ -690,11 +690,17 @@ try {
   Expand-Archive -LiteralPath $asset -DestinationPath $extractPath -Force
   $downloadedExe = Join-Path $extractPath 'bin\quotabot.exe'
   $downloadedSqlite = Join-Path $extractPath 'lib\sqlite3.dll'
+  $downloadedWindowsUpdater = Join-Path $extractPath 'lib\install.ps1'
+  $downloadedPosixUpdater = Join-Path $extractPath 'lib\install.sh'
   if (-not (Test-Path -LiteralPath $downloadedExe)) {
     throw "CLI archive did not contain bin\quotabot.exe"
   }
   if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
     throw "CLI archive did not contain lib\sqlite3.dll"
+  }
+  if (-not (Test-Path -LiteralPath $downloadedWindowsUpdater -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $downloadedPosixUpdater -PathType Leaf)) {
+    throw 'CLI archive did not contain the packaged updater scripts'
   }
   if ($CliOnly -or $NoApp) {
     Write-Step "Installing the CLI to $installRoot"
