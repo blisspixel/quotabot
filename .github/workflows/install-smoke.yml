@@ -30,6 +30,7 @@ jobs:
       previous_tag: ${{ steps.releases.outputs.previous_tag }}
       target_sha: ${{ steps.releases.outputs.target_sha }}
       previous_sha: ${{ steps.releases.outputs.previous_sha }}
+      supports_self_update: ${{ steps.releases.outputs.supports_self_update }}
     steps:
       - name: Resolve latest and previous releases
         id: releases
@@ -102,16 +103,31 @@ jobs:
           target_sha="$(resolve_tag_commit "$target")"
           previous_sha="$(resolve_tag_commit "$previous")"
 
+          supports_self_update=false
+          if [[ "$target" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([0-9]+))?$ ]]; then
+            major=$((10#${BASH_REMATCH[1]}))
+            minor=$((10#${BASH_REMATCH[2]}))
+            patch=$((10#${BASH_REMATCH[3]}))
+            rc="${BASH_REMATCH[5]:-}"
+            if (( major > 0 || minor > 10 || (minor == 10 && patch > 0) )) ||
+               (( major == 0 && minor == 10 && patch == 0 )) &&
+               { [[ -z "$rc" ]] || (( 10#$rc >= 16 )); }; then
+              supports_self_update=true
+            fi
+          fi
+
           {
             echo "target_tag=$target"
             echo "previous_tag=$previous"
             echo "target_sha=$target_sha"
             echo "previous_sha=$previous_sha"
+            echo "supports_self_update=$supports_self_update"
           } >> "$GITHUB_OUTPUT"
           echo "Target: $target"
           echo "Target commit: $target_sha"
           echo "Upgrade from: $previous"
           echo "Previous commit: $previous_sha"
+          echo "Self-update smoke: $supports_self_update"
 
   clean-install:
     needs: resolve-releases
@@ -259,6 +275,46 @@ jobs:
           actual_version="$($executable --version)"
           [[ "$actual_version" == "$expected_version" ]] || { echo "Expected $expected_version, got $actual_version" >&2; exit 1; }
           "$executable" doctor --json | python -c 'import json, sys; assert json.load(sys.stdin)["schema"] == "quotabot.v1"'
+
+      - name: Force self-update Windows from the published tag
+        if: runner.os == 'Windows' && needs.resolve-releases.outputs.supports_self_update == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installed = Join-Path $env:LOCALAPPDATA 'quotabot/bin/quotabot.exe'
+          $checkJson = & $installed update --check --target=$env:TARGET_TAG --json
+          if ($LASTEXITCODE -ne 0) { throw "Self-update check exited $LASTEXITCODE" }
+          $check = $checkJson | ConvertFrom-Json
+          if ($check.schema -ne 'quotabot.update.v1' -or
+              $check.selection -ne 'exact' -or
+              $check.target_tag -ne $env:TARGET_TAG -or
+              $check.installed) {
+            throw 'Self-update check returned an unexpected contract.'
+          }
+          $updateJson = & $installed update --force --target=$env:TARGET_TAG --json
+          if ($LASTEXITCODE -ne 0) { throw "Forced self-update exited $LASTEXITCODE" }
+          $update = $updateJson | ConvertFrom-Json
+          if ($update.schema -ne 'quotabot.update.v1' -or
+              $update.selection -ne 'exact' -or
+              $update.target_tag -ne $env:TARGET_TAG -or
+              -not $update.installed) {
+            throw 'Forced self-update returned an unexpected contract.'
+          }
+          $expectedVersion = 'quotabot ' + $env:TARGET_TAG.TrimStart('v')
+          $actualVersion = & $installed --version
+          if ($actualVersion -ne $expectedVersion) { throw "Expected $expectedVersion, got $actualVersion" }
+
+      - name: Force self-update macOS or Linux from the published tag
+        if: runner.os != 'Windows' && needs.resolve-releases.outputs.supports_self_update == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          executable="$HOME/.local/bin/quotabot"
+          check_json="$("$executable" update --check --target="$TARGET_TAG" --json)"
+          python -c 'import json, sys; value = json.loads(sys.argv[1]); assert value["schema"] == "quotabot.update.v1" and value["selection"] == "exact" and value["target_tag"] == sys.argv[2] and value["installed"] is False' "$check_json" "$TARGET_TAG"
+          update_json="$("$executable" update --force --target="$TARGET_TAG" --json)"
+          python -c 'import json, sys; value = json.loads(sys.argv[1]); assert value["schema"] == "quotabot.update.v1" and value["selection"] == "exact" and value["target_tag"] == sys.argv[2] and value["installed"] is True' "$update_json" "$TARGET_TAG"
+          [[ "$("$executable" --version)" == "quotabot ${TARGET_TAG#v}" ]]
 
       - name: Preserve verified current release archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

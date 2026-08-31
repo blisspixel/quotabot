@@ -52,6 +52,7 @@ asset="quotabot-${os}-${arch}.tar.gz"
 out="$release_dir/$asset"
 bundle="$build_dir/bundle"
 packaged_executable="$bundle/bin/quotabot"
+packaged_lib="$bundle/lib"
 
 if [ "$package_only" -eq 0 ]; then
   if ! command -v dart >/dev/null 2>&1; then
@@ -86,6 +87,14 @@ if [ ! -x "$packaged_executable" ]; then
   fi
   exit 1
 fi
+
+# The release checksum authenticates the updater scripts together with the
+# binary. An installed CLI therefore uses its bundled, immutable installer
+# instead of executing a mutable branch URL.
+mkdir -p "$packaged_lib"
+cp "$root/install.ps1" "$packaged_lib/install.ps1"
+cp "$root/install.sh" "$packaged_lib/install.sh"
+chmod 755 "$packaged_lib/install.sh"
 
 if [ "$archive" -eq 0 ]; then
   echo "CLI bundle ready: $bundle"

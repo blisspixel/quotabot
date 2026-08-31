@@ -197,10 +197,39 @@ void main() {
     },
   );
 
-  test('release endpoint requests enough history for the stable channel', () {
+  test('release endpoint uses bounded pages for the stable channel', () {
     final uri = Uri.parse(quotabotReleasesApi);
 
-    expect(uri.queryParameters['per_page'], '100');
+    expect(uri.queryParameters['per_page'], '20');
+    expect(uri.queryParameters['page'], '1');
+  });
+
+  test('live checker follows bounded pagination to find stable', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      request.response.headers.contentType = ContentType.json;
+      final page = request.uri.queryParameters['page'];
+      request.response.write(
+        jsonEncode(
+          page == '1'
+              ? [
+                  for (var rc = 40; rc >= 21; rc--)
+                    release('v0.10.0-rc.$rc', prerelease: true),
+                ]
+              : [release('v0.9.9')],
+        ),
+      );
+      await request.response.close();
+    });
+
+    final status = await checkQuotabotUpdates(
+      releasesApi: Uri.parse('http://127.0.0.1:${server.port}/releases'),
+      timeout: const Duration(seconds: 2),
+    );
+
+    expect(status.latest.version, '0.10.0-rc.40');
+    expect(status.stable?.version, '0.9.9');
   });
 
   test('live checker does not follow release endpoint redirects', () async {

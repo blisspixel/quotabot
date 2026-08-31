@@ -61,6 +61,63 @@ void main() {
     expect(temp.listSync(), isEmpty);
   });
 
+  test('update help documents channels, verification, and exact targets',
+      () async {
+    final optionForm = await runCli(['update', '--help']);
+    final commandForm = await runCli(['help', 'update']);
+
+    expectExitCode(optionForm, 0);
+    expectExitCode(commandForm, 0);
+    expect(optionForm.stderr, isEmpty);
+    expect(commandForm.stderr, isEmpty);
+    expect(commandForm.stdout, optionForm.stdout);
+
+    final output = optionForm.stdout as String;
+    expect(output, contains('quotabot update [--check]'));
+    expect(
+      output,
+      contains(
+        '[--check] --target=vMAJOR.MINOR.PATCH[-rc.N] [--force]',
+      ),
+    );
+    expect(output, contains('Release candidates follow the preview channel'));
+    expect(output, contains('verifies its SHA-256 sidecar'));
+    expect(output, contains('quotabot.update.v1'));
+    expect(temp.listSync(), isEmpty);
+  });
+
+  test('update rejects ambiguous controls before any network request',
+      () async {
+    for (final testCase in [
+      (
+        ['update', '--stable', '--preview'],
+        '--stable and --preview are mutually exclusive',
+      ),
+      (
+        ['update', '--target=v0.9.9', '--preview'],
+        '--target cannot be combined with --stable or --preview',
+      ),
+      (
+        ['update', '--check', '--force'],
+        '--check and --force are mutually exclusive',
+      ),
+      (
+        ['update', '--target=0.9.9'],
+        '--target must be vMAJOR.MINOR.PATCH',
+      ),
+      (
+        ['update', '--target=v${'9' * 100}.0.0'],
+        '--target must be vMAJOR.MINOR.PATCH',
+      ),
+    ]) {
+      final result = await runCli(testCase.$1);
+      expectExitCode(result, 64);
+      expect(result.stdout, isEmpty);
+      expect(result.stderr as String, contains(testCase.$2));
+    }
+    expect(temp.listSync(), isEmpty);
+  });
+
   test('global help remains available', () async {
     final result = await runCli(['--help']);
 

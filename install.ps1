@@ -14,6 +14,34 @@
 
 $ErrorActionPreference = 'Stop'
 
+function Test-QuotabotArchiveRequiresUpdater {
+    param([Parameter(Mandatory)][string]$Version)
+
+    if ($Version -eq 'latest') {
+        return $false
+    }
+    $parsed = [regex]::Match(
+        $Version,
+        '^v(?<major>[0-9]+)\.(?<minor>[0-9]+)\.(?<patch>[0-9]+)(?:-rc\.(?<rc>[0-9]+))?$'
+    )
+    if (-not $parsed.Success) {
+        throw 'Cannot classify the requested quotabot release version.'
+    }
+    $major = [int64]$parsed.Groups['major'].Value
+    $minor = [int64]$parsed.Groups['minor'].Value
+    $patch = [int64]$parsed.Groups['patch'].Value
+    if ($major -gt 0 -or $minor -gt 10 -or ($minor -eq 10 -and $patch -gt 0)) {
+        return $true
+    }
+    if ($major -lt 0 -or $minor -lt 10 -or $patch -lt 0) {
+        return $false
+    }
+    if (-not $parsed.Groups['rc'].Success) {
+        return $true
+    }
+    return [int64]$parsed.Groups['rc'].Value -ge 16
+}
+
 Write-Host "=== quotabot installer ==="
 
 function Install-QuotabotPayload {
@@ -193,6 +221,7 @@ if ($version -ne 'latest' -and $version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-rc\
     Write-Error "Invalid QUOTABOT_VERSION value. Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N."
     exit 1
 }
+$requiresPackagedUpdater = Test-QuotabotArchiveRequiresUpdater -Version $version
 $installRoot = "$env:LOCALAPPDATA\quotabot"
 $installDir = Join-Path $installRoot "bin"
 $assetName = "quotabot-windows-x64.zip"
@@ -238,11 +267,27 @@ try {
     Expand-Archive -LiteralPath $downloadPath -DestinationPath $extractPath -Force
     $downloadedExe = Join-Path $extractPath "bin\quotabot.exe"
     $downloadedSqlite = Join-Path $extractPath "lib\sqlite3.dll"
+    $downloadedWindowsUpdater = Join-Path $extractPath "lib\install.ps1"
+    $downloadedPosixUpdater = Join-Path $extractPath "lib\install.sh"
     if (-not (Test-Path -LiteralPath $downloadedExe)) {
         throw "Downloaded archive did not contain bin\quotabot.exe"
     }
     if (-not (Test-Path -LiteralPath $downloadedSqlite)) {
         throw "Downloaded archive did not contain lib\sqlite3.dll"
+    }
+    if ($requiresPackagedUpdater -and
+        (-not (Test-Path -LiteralPath $downloadedWindowsUpdater -PathType Leaf) -or
+         -not (Test-Path -LiteralPath $downloadedPosixUpdater -PathType Leaf))) {
+        throw "Downloaded archive did not contain the packaged updater scripts"
+    }
+    $reportedVersion = (& $downloadedExe --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Downloaded quotabot executable failed its pre-activation version check'
+    }
+    $expectedVersion = if ($version -eq 'latest') { $null } else { "quotabot $($version.Substring(1))" }
+    if (($expectedVersion -and $reportedVersion -cne $expectedVersion) -or
+        (-not $expectedVersion -and $reportedVersion -notmatch '^quotabot [0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?$')) {
+        throw "Downloaded quotabot executable reported an unexpected version: $reportedVersion"
     }
     Install-QuotabotPayload -SourceRoot $extractPath -InstallRoot $installRoot
     Write-Host "Installed to $installRoot"

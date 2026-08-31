@@ -945,6 +945,8 @@ if [ "$source_cli" -eq 1 ]; then
 tar -xzf "$asset" -C "$tmpdir"
 [ -x "$tmpdir/bin/quotabot" ] || { echo "CLI archive did not contain executable bin/quotabot" >&2; exit 1; }
 [ -d "$tmpdir/lib" ] || { echo "CLI archive did not contain lib/" >&2; exit 1; }
+[ -f "$tmpdir/lib/install.ps1" ] || { echo "CLI archive did not contain lib/install.ps1" >&2; exit 1; }
+[ -x "$tmpdir/lib/install.sh" ] || { echo "CLI archive did not contain executable lib/install.sh" >&2; exit 1; }
 
 desktop_target=""
 if [ "$cli_only" -eq 1 ]; then

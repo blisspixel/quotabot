@@ -62,8 +62,9 @@ collector/ (Dart package)
                      anthropic, openai, xai, and google OAuth
   util.dart          home/config dirs, varint + protobuf helpers
   bin/collect.dart        CLI: status/doctor, top, watch, models, suggest,
+                          update,
                           verify/explain, stats/report/calibration, manual,
-                          json, login/logout (stable exit codes 0/64/65/69)
+                          json, login/logout (stable exit codes 0/64/65/69/74)
   bin/mcp_server.dart     MCP server over stdio or opt-in Streamable HTTP
                           (tools, local leases, quotas://current and
                           quotas://alerts resources)
@@ -708,9 +709,15 @@ leaves JSON standard output reserved for alert records.
 - Desktop maintenance uses one responsive Settings dialog instead of a long
   popup menu. Profile and provider visibility, display, refresh and alert, and
   update controls are grouped into bounded sections. Release discovery is
-  user-triggered, validates a bounded GitHub response, distinguishes the newest
-  candidate from the newest stable release, and opens release details rather
-  than silently replacing a running binary. No update request runs at startup.
+  user-triggered, streams small bounded GitHub pages under one deadline,
+  distinguishes the newest candidate from the newest stable release, and opens release details rather
+  than silently replacing a running binary. The CLI `update` command follows
+  the installed channel, uses GitHub's direct tag endpoint for exact selection,
+  and invokes only the installer bundled inside its authenticated archive. That
+  installer verifies the new archive sidecar and extracted executable version
+  before the existing rollback-protected generation switch. The command then
+  executes the stable entry to verify the selected version again. No update
+  request runs at startup.
 - `fleet.dart` is the Quota Analytics body, opened under the same dashboard
   header and menu as the quota view. It swaps the body in place without pushing
   a route. Entry grows a short content-hugged quota window to the normal

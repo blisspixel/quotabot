@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-30. This file is the forward plan. It records brief shipped
+Updated 2026-08-31. This file is the forward plan. It records brief shipped
 prerequisites only where remaining work depends on them; full shipped work
 belongs in [CHANGELOG.md](CHANGELOG.md), implementation detail belongs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and the product reasoning behind
@@ -40,8 +40,9 @@ by being correct, quiet, and predictable, not by being large.
   metadata to that provider's own metadata endpoint; Antigravity may also run
   its provider-required account onboarding request. An external alert webhook
   can send alert metadata only after the user explicitly enables an external
-  host. Desktop release discovery may read public GitHub metadata only after a
-  user explicitly checks for updates; it never runs automatically.
+  host. CLI and desktop release discovery may read public GitHub metadata only
+  after a user explicitly checks for or starts an update; it never runs
+  automatically.
 - **Bounded local writes.** Cache, history, OAuth rotation, profiles, manual
   entries, preferences, alerts, and routing leases are explicit local metadata
   writes. Machine outputs never include secrets.
@@ -94,9 +95,12 @@ Feature breadth is frozen. Completed candidate detail belongs in
 [CHANGELOG.md](CHANGELOG.md); this section records only the remaining dependency
 order.
 
-1. Release candidate 12 is the current published stabilization baseline. Its
-   [cross-platform install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-   passed install, upgrade, source-setup, and desktop-run checks.
+1. Release candidate 16 is the current stabilization baseline. It adds the
+   checksum-verified `quotabot update` path required to keep installed release
+   CLIs current without weakening the immutable-asset contract. Candidate
+   publication remains gated by the complete three-OS tag workflow and
+   subsequent cross-platform install smoke; unsigned transition status remains
+   explicit until the signed lifecycle passes.
 2. The repository now implements fail-closed Windows and macOS signing paths for
    the CLI and desktop assets. They preserve immutable unsigned handoffs,
    inventory every native module, sign only the exact validated targets, verify
@@ -275,7 +279,7 @@ dated idle-machine validation of the Claude and Codex grants, then the frozen
 ## Current state
 
 The current line, **0.9.9**, remains the tagged default installer version. The
-focused **0.10.0-rc.15** candidate carries the latest stabilization inventory
+focused **0.10.0-rc.16** candidate carries the latest stabilization inventory
 described in [Next](#next). The stable line contains the implemented
 core of the first three milestones below: the truthful substrate (0.6), one
 calibrated forecast behind a single decision core (0.7), and the self-tuning
@@ -934,6 +938,22 @@ added it is a credit-pool provider like Cursor, never an included-quota plan.
 blocks new signups from 2026-05-15 and ends support for IDE plugins and paid
 subscriptions on 2027-04-30 while other AWS experiences continue, so it does not
 justify a separate adapter ahead of Kiro.
+
+OpenRouter is a viable credit-backed metadata candidate, not an included-quota
+plan. Its official [`GET /api/v1/key`](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
+read works with the current API key and reports the key's optional dollar limit,
+remaining limit, reset cadence, usage, expiration, and free-tier classification.
+The account-wide
+[`GET /api/v1/credits`](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits)
+read reports total purchased credits and usage but requires a broader management
+key. Prefer the current-key read so quotabot does not ask for management authority
+merely to show capacity. If admitted after the typed shared-pool work, classify
+the route as `paid_api`, keep it out of default and `budget: quota` routing, show
+dollars and reset semantics without calling them subscription quota, and fail
+closed when the key has no explicit spending limit. Sanitized fixtures must cover
+unlimited keys, free-tier keys, reset and non-reset limits, expired or otherwise
+unusable keys, BYOK accounting, and malformed or unauthorized responses. No
+inference request is needed to validate this surface.
 
 ElevenLabs is a separate AI-service candidate, not a coding-route commitment.
 Its official [subscription endpoint](https://elevenlabs.io/docs/api-reference/user/subscription/get)

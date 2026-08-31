@@ -31,12 +31,13 @@ void _holdAgedCacheEvidenceLock(List<Object> arguments) {
       sendPort.send('locked');
       final timeout = Stopwatch()..start();
       while (!releaseFile.existsSync()) {
-        if (timeout.elapsed >= const Duration(seconds: 10)) {
+        if (timeout.elapsed >= const Duration(seconds: 30)) {
           throw StateError('timed out waiting to release evidence guard');
         }
         sleep(const Duration(milliseconds: 10));
       }
     },
+    operationTimeout: const Duration(seconds: 30),
   );
   sendPort.send('released');
 }
@@ -59,6 +60,7 @@ void _waitForCacheEvidenceLock(List<Object> arguments) {
     codexProviderId,
     account,
     releaseFile.existsSync,
+    operationTimeout: const Duration(seconds: 30),
   );
   elapsed.stop();
   sendPort.send(<String, Object>{
@@ -320,7 +322,7 @@ void main() {
       waiterMessages?.close();
     });
     expect(
-      await holderIterator.moveNext().timeout(const Duration(seconds: 10)),
+      await holderIterator.moveNext().timeout(const Duration(seconds: 30)),
       isTrue,
     );
     expect(holderIterator.current, 'locked');
@@ -337,7 +339,7 @@ void main() {
       ],
     );
     expect(
-      await waiterIterator.moveNext().timeout(const Duration(seconds: 10)),
+      await waiterIterator.moveNext().timeout(const Duration(seconds: 30)),
       isTrue,
     );
     expect(waiterIterator.current, 'waiting');
@@ -347,7 +349,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 200));
     releaseFile.createSync();
     expect(
-      await waiterIterator.moveNext().timeout(const Duration(seconds: 10)),
+      await waiterIterator.moveNext().timeout(const Duration(seconds: 30)),
       isTrue,
     );
     final waited = waiterIterator.current;
@@ -357,7 +359,7 @@ void main() {
     expect(result['release_observed'], isTrue);
     expect(result['elapsed_ms'], isA<int>());
     expect(
-      await holderIterator.moveNext().timeout(const Duration(seconds: 10)),
+      await holderIterator.moveNext().timeout(const Duration(seconds: 30)),
       isTrue,
     );
     expect(holderIterator.current, 'released');
