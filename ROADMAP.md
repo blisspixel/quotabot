@@ -939,6 +939,22 @@ blocks new signups from 2026-05-15 and ends support for IDE plugins and paid
 subscriptions on 2027-04-30 while other AWS experiences continue, so it does not
 justify a separate adapter ahead of Kiro.
 
+OpenRouter is a viable credit-backed metadata candidate, not an included-quota
+plan. Its official [`GET /api/v1/key`](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key)
+read works with the current API key and reports the key's optional dollar limit,
+remaining limit, reset cadence, usage, expiration, and free-tier classification.
+The account-wide
+[`GET /api/v1/credits`](https://openrouter.ai/docs/api/api-reference/credits/get-remaining-credits)
+read reports total purchased credits and usage but requires a broader management
+key. Prefer the current-key read so quotabot does not ask for management authority
+merely to show capacity. If admitted after the typed shared-pool work, classify
+the route as `paid_api`, keep it out of default and `budget: quota` routing, show
+dollars and reset semantics without calling them subscription quota, and fail
+closed when the key has no explicit spending limit. Sanitized fixtures must cover
+unlimited keys, free-tier keys, reset and non-reset limits, expired or otherwise
+unusable keys, BYOK accounting, and malformed or unauthorized responses. No
+inference request is needed to validate this surface.
+
 ElevenLabs is a separate AI-service candidate, not a coding-route commitment.
 Its official [subscription endpoint](https://elevenlabs.io/docs/api-reference/user/subscription/get)
 exposes plan, credit use and limit, reset time, extension and overage metadata,

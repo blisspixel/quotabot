@@ -108,7 +108,11 @@ write_payload() {
   mkdir -p "$payload/bin" "$payload/lib"
   cat > "$payload/bin/quotabot" <<EOF
 #!/usr/bin/env sh
-printf '%s\n' '$version'
+if [ "\${1:-}" = --version ]; then
+  printf '%s\n' 'quotabot 0.10.0-rc.16'
+else
+  printf '%s\n' '$version'
+fi
 EOF
   chmod +x "$payload/bin/quotabot"
   printf '%s\n' "$version" > "$payload/lib/sqlite3.test"
