@@ -31,6 +31,9 @@ Notable changes to quotabot. Newest first.
   compatibility with older stable archives.
 - CLI and desktop release discovery now use small, stream-bounded pages under
   one deadline; exact CLI targets use GitHub's direct tag endpoint.
+- The POSIX PATH shim now resolves the active generation once and executes its
+  retained immutable path, so a reader already dispatching during an update
+  cannot race the stable symlink switch.
 
 Both repository signing modes remain `unsigned` until owner identities, exact
 environment values and credentials, and successful native rehearsals exist.
