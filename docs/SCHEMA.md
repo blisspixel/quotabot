@@ -158,6 +158,27 @@ The contract is additive. Unknown fields are allowed at the root, provider,
 window, and model levels. Existing field meanings and types must not change
 inside `quotabot.v1`; incompatible changes require a new schema id.
 
+## `quotabot.update.v1`
+
+`quotabot update --json` and `quotabot update --check --json` emit a bounded
+release-selection result that never contains local quota, account, prompt, or
+source-code data:
+
+- `schema`: always `quotabot.update.v1`.
+- `current_version`, `target_version`, and the exact `target_tag`.
+- `selection`: `channel` for stable or preview discovery, or `exact` when the
+  caller supplied `--target`. Channel selection also includes `channel` as
+  `stable` or `preview`; exact selection omits it.
+- `update_available`: whether the target is newer than the running version.
+- `forced`: whether the caller explicitly allowed reinstall or rollback.
+- `installed`: true only after the packaged installer succeeds and the stable
+  installed executable reports the exact selected version. A check-only result
+  and a no-op result keep it false.
+
+A failed update emits only `schema`, `ok: false`, and a bounded plain `error`.
+Malformed arguments fail earlier with usage exit 64; GitHub discovery,
+installer, timeout, and installed-version failures use exit 74.
+
 ## Routing outputs
 
 `quotabot suggest --json`, MCP `suggest_provider`, and local HTTP `/suggest`

@@ -2,6 +2,39 @@
 
 Notable changes to quotabot. Newest first.
 
+## 0.10.0-rc.16 - 2026-08-31
+
+### Added
+
+- `quotabot update` now discovers published GitHub releases only when invoked,
+  follows the preview channel automatically from a release candidate, and
+  supports read-only `--check`, explicit `--stable` or `--preview`, exact
+  `--target`, controlled `--force`, and `quotabot.update.v1` JSON output.
+
+### Security
+
+- CLI release archives now carry the exact Windows and POSIX installer scripts
+  used by self-update. The archive checksum authenticates those scripts as part
+  of the downloaded archive, while the release publishes independently
+  verifiable GitHub build provenance. The command never executes a mutable
+  branch copy.
+- Self-update selects one validated immutable tag, downloads the matching native
+  archive and required SHA-256 sidecar, uses the existing rollback-protected
+  generation switch, and verifies the extracted binary before activation plus
+  the installed binary afterward.
+
+### Changed
+
+- Native packaging, archive verification, and source setup now require the
+  bundled updater scripts. Both convenience installers enforce that requirement
+  for exact rc.16 and later tags while retaining bootstrap and rollback
+  compatibility with older stable archives.
+- CLI and desktop release discovery now use small, stream-bounded pages under
+  one deadline; exact CLI targets use GitHub's direct tag endpoint.
+
+Both repository signing modes remain `unsigned` until owner identities, exact
+environment values and credentials, and successful native rehearsals exist.
+
 ## 0.10.0-rc.15 - 2026-08-30
 
 ### Security

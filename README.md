@@ -10,7 +10,7 @@ and recommends where to send the next request. It also reports supported local
 runtimes, so work can fall back locally when subscription caps are low.
 
 > **Current stable:** 0.9.9. quotabot remains under active 0.x development.
-> **Current release candidate:** 0.10.0-rc.15.
+> **Current release candidate:** 0.10.0-rc.16.
 > **Next:** complete the bounded provider-ID cache migration, finish the focused
 > 0.10.x stabilization gate, provision the Windows and Apple publisher
 > identities, and rehearse the repository-ready signing paths on one signed
@@ -69,8 +69,11 @@ quotabot suggest
 
 `doctor` explains stale or unavailable evidence and gives a repair command.
 `suggest` ranks usable subscriptions and supplies a local fallback when one is
-available. For inspect-before-run installation, login, updates, rollback, and
-uninstall, use the [setup guide](docs/SETUP.md).
+available. The `quotabot update` command begins with release candidate 16; an
+older stable install can bootstrap it by running the one-line installer with an
+exact rc.16 or later tag. For that preview path, inspect-before-run
+installation, login, updates, rollback, and uninstall, use the [setup
+guide](docs/SETUP.md).
 
 ## Core commands
 
@@ -85,6 +88,7 @@ uninstall, use the [setup guide](docs/SETUP.md).
 | Inspect model availability and budget | `quotabot models` |
 | Watch quota and routing changes | `quotabot top` or `quotabot watch` |
 | Require selected reads to be live | `quotabot verify --require-live` |
+| Install the latest release for this channel | `quotabot update` |
 
 Provider routing is balanced by default. `--local-first` prefers reachable
 on-device capacity immediately. `--quota-stretch` keeps fresh measured included
@@ -142,8 +146,9 @@ tool and schema contract is in [AGENTS.md](AGENTS.md). See the
 - No model calls or reads of prompts, code, model output, or other user content.
 - Local metadata stays local. Live adapters contact only provider quota or
   model-list metadata endpoints; Antigravity may perform required onboarding.
-- The desktop update check reads public GitHub release metadata only after the
-  user invokes it. It sends no quota, account, history, prompt, or code data.
+- CLI and desktop update checks read public GitHub release metadata only after
+  the user invokes them. They send no quota, account, history, prompt, or code
+  data. `quotabot update` installs one exact tag with its required checksum.
 - Plain loopback HTTP reads pseudonymize email-shaped account labels unless the
   caller supplies the server's owner-only bearer token. The bundled LiteLLM
   router proves the identity of the exact loopback server connection before it
@@ -159,13 +164,11 @@ adapter. The complete promises and verification methods are in
 ## Release and project status
 
 The immutable [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
-passed its 14-asset audit and cross-platform install and upgrade matrix. Its
-Windows and macOS artifacts remain unsigned. The
-[0.10.0-rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
-also passed cross-platform install, upgrade, source-setup, and desktop-run
-checks. The repository signing paths are ready, but current published Windows
-and macOS artifacts remain unsigned, so 0.10.x must repeat that evidence with
-platform-signed artifacts before 1.0. See the [release
+passed its 14-asset audit and cross-platform install and upgrade matrix. Every
+release candidate repeats native build, archive, checksum, provenance,
+fresh-download, install, upgrade, source-setup, and desktop-run checks. Current
+published Windows and macOS artifacts remain unsigned, so 0.10.x must repeat
+that evidence with platform-signed artifacts before 1.0. See the [release
 evidence](docs/BUILDING.md#baseline-release-evidence),
 [roadmap](ROADMAP.md), [documentation index](docs/README.md),
 [contributing guide](CONTRIBUTING.md), and [security policy](SECURITY.md).

@@ -22,6 +22,7 @@ import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/provenance.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
+import 'package:quotabot_collector/updater.dart';
 import 'package:quotabot_collector/util.dart';
 import 'package:quotabot_collector/webhook.dart';
 
@@ -30,15 +31,17 @@ import 'package:quotabot_collector/webhook.dart';
 /// Live reads may contact provider metadata endpoints and refresh bounded local
 /// state.
 
-const _version = '0.10.0-rc.15';
+const _version = '0.10.0-rc.16';
 
 /// Documented, stable CLI exit codes a shell or agent can branch on:
 /// 0 success; 64 usage error (bad arguments or an unknown provider); 65 a
-/// `verify` run failed an honesty check or its requested strict live-read gate; 69 the
-/// requested provider, or the whole fleet, has no usable quota right now.
+/// `verify` run failed an honesty check or its requested strict live-read gate;
+/// 69 the requested provider, or the whole fleet, has no usable quota right now;
+/// 74 an explicit update could not complete its GitHub or installation I/O.
 const int _exitUsage = 64;
 const int _exitVerifyFailed = 65;
 const int _exitUnavailable = 69;
+const int _exitIoError = 74;
 
 late AnsiStyle style;
 List<ProviderQuota>? _simulatedSnapshot;
@@ -360,6 +363,9 @@ Future<void> _runMain(List<String> rawArgs) async {
   _simulationNoticePending = _usingSimulation && !wantsJson;
 
   switch (cmd) {
+    case 'update':
+      await _runUpdate(flags, wantsJson);
+      return;
     case 'login':
       await _login(pos.length > 1 ? pos[1] : '');
       return;
@@ -621,6 +627,185 @@ Future<void> _runMain(List<String> rawArgs) async {
   }
 }
 
+Future<void> _runUpdate(Set<String> flags, bool wantsJson) async {
+  final parsedCurrent = QuotabotVersion.tryParse(_version);
+  if (parsedCurrent == null) {
+    _printUpdateError(
+      wantsJson,
+      'the installed quotabot version is not a supported release version',
+    );
+    return;
+  }
+  final channel = flags.contains('--stable')
+      ? UpdateChannel.stable
+      : flags.contains('--preview') || parsedCurrent.isPrerelease
+          ? UpdateChannel.preview
+          : UpdateChannel.stable;
+  final force = flags.contains('--force');
+  final checkOnly = flags.contains('--check');
+  try {
+    final check = await checkForQuotabotUpdate(
+      currentVersion: _version,
+      channel: channel,
+      targetTag: _stringOption(flags, 'target', null),
+      client: sharedHttpClient,
+    );
+    final comparison = check.target.version.compareTo(check.current);
+    final shouldInstall = !checkOnly && (comparison > 0 || force);
+    if (!shouldInstall) {
+      if (wantsJson) {
+        stdout.writeln(
+          _jsonPretty(check.toJson(forced: force)),
+        );
+      } else if (comparison > 0) {
+        final selection = check.channel == null
+            ? 'exact target'
+            : '${check.channel!.name} channel';
+        stdout.writeln(
+          'Update available: ${check.current} -> ${check.target.version} '
+          '($selection).',
+        );
+      } else if (comparison < 0) {
+        stdout.writeln(
+          'Selected target ${check.target.version} is older than the installed '
+          '${check.current}; add --force to install it.',
+        );
+      } else {
+        stdout.writeln(check.channel == null
+            ? 'quotabot ${check.current} matches the selected exact target.'
+            : 'quotabot ${check.current} is up to date on the '
+                '${check.channel!.name} channel.');
+      }
+      return;
+    }
+
+    final invocation = packagedInstallerInvocation(
+      currentExecutable: Platform.resolvedExecutable,
+      operatingSystem: Platform.operatingSystem,
+      targetTag: check.target.tag,
+      environment: Platform.environment,
+    );
+    if (!wantsJson) {
+      stdout.writeln(
+        '${force ? 'Installing' : 'Updating to'} ${check.target.tag} from the '
+        'checksum-verified GitHub release...',
+      );
+    }
+    final installerExit = await _runUpdateProcess(
+      invocation.executable,
+      invocation.arguments,
+      environment: invocation.environment,
+      quiet: wantsJson,
+      timeout: const Duration(minutes: 10),
+    );
+    if (installerExit != 0) {
+      throw QuotabotUpdateException(
+        'the checksum-verified installer exited with code $installerExit',
+      );
+    }
+    final verified = await _runUpdateProcessCapture(
+      invocation.installedExecutable,
+      const ['--version'],
+      timeout: const Duration(seconds: 30),
+    );
+    final expectedVersion = 'quotabot ${check.target.version}';
+    if (verified.exitCode != 0 || verified.stdout.trim() != expectedVersion) {
+      throw const QuotabotUpdateException(
+        'the installed executable did not report the selected version',
+      );
+    }
+    if (wantsJson) {
+      stdout.writeln(
+        _jsonPretty(check.toJson(installed: true, forced: force)),
+      );
+    } else {
+      stdout.writeln('Updated successfully to ${check.target.version}.');
+      stdout.writeln('Run "quotabot doctor" to verify provider readiness.');
+    }
+  } on QuotabotUpdateException catch (error) {
+    _printUpdateError(wantsJson, error.message);
+  } on ProcessException {
+    _printUpdateError(wantsJson, 'the packaged installer could not be started');
+  } on TimeoutException {
+    _printUpdateError(wantsJson, 'the packaged installer timed out');
+  }
+}
+
+void _printUpdateError(bool wantsJson, String message) {
+  if (wantsJson) {
+    stdout.writeln(
+      _jsonPretty({
+        'schema': quotabotUpdateSchema,
+        'ok': false,
+        'error': message,
+      }),
+    );
+  } else {
+    stderr.writeln('quotabot update: $message');
+  }
+  exitCode = _exitIoError;
+}
+
+Future<int> _runUpdateProcess(
+  String executable,
+  List<String> arguments, {
+  required Map<String, String> environment,
+  required bool quiet,
+  required Duration timeout,
+}) async {
+  final process = await Process.start(
+    executable,
+    arguments,
+    environment: environment,
+    mode: ProcessStartMode.normal,
+  );
+  final stdoutDone = quiet
+      ? process.stdout.drain<void>()
+      : process.stdout.listen(stdout.add).asFuture<void>();
+  final stderrDone = quiet
+      ? process.stderr.drain<void>()
+      : process.stderr.listen(stderr.add).asFuture<void>();
+  try {
+    final results = await Future.wait<dynamic>([
+      process.exitCode,
+      stdoutDone,
+      stderrDone,
+    ]).timeout(timeout);
+    return results.first as int;
+  } on TimeoutException {
+    process.kill();
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      process.kill(ProcessSignal.sigkill);
+    }
+    rethrow;
+  }
+}
+
+Future<ProcessResult> _runUpdateProcessCapture(
+  String executable,
+  List<String> arguments, {
+  required Duration timeout,
+}) async {
+  Process? process;
+  try {
+    process = await Process.start(executable, arguments);
+    final capturedOut = process.stdout.transform(systemEncoding.decoder).join();
+    final capturedError =
+        process.stderr.transform(systemEncoding.decoder).drain<void>();
+    final results = await Future.wait<dynamic>([
+      process.exitCode,
+      capturedOut,
+      capturedError,
+    ]).timeout(timeout);
+    return ProcessResult(process.pid, results[0] as int, results[1], '');
+  } on TimeoutException {
+    process?.kill();
+    rethrow;
+  }
+}
+
 List<String> _profileLegacyCredentialFilterProviders(QuotaProfile profile) {
   final providers = <String>{};
   for (final entry in profile.accounts.entries) {
@@ -664,6 +849,7 @@ const _knownCommands = {
   'status',
   'suggest',
   'top',
+  'update',
   'verify',
   'watch',
 };
@@ -1366,11 +1552,14 @@ const _valueOptions = {
   'waste-threshold',
   'webhook',
   'window',
+  'target',
 };
 
 const _switchOptions = {
   '--allow-external',
   '--color',
+  '--check',
+  '--force',
   '--help',
   '--include-accounts',
   '--json',
@@ -1379,12 +1568,14 @@ const _switchOptions = {
   '--no-color',
   '--once',
   '--provider-route',
+  '--preview',
   '--quota-stretch',
   '--reads',
   '--require-live',
   '--require-reasoning',
   '--require-tools',
   '--require-vision',
+  '--stable',
   '--truecolor',
   '--tuned-burn',
   '--use-expiring-quota',
@@ -1441,6 +1632,7 @@ String? _commandOptionError(String command, Set<String> flags) {
     'manual',
     'explain',
     'verify',
+    'update',
   };
   final allowed = <String>{'color', 'no-color'};
   if (jsonCommands.contains(command)) allowed.add('json');
@@ -1524,6 +1716,14 @@ String? _commandOptionError(String command, Set<String> flags) {
         'tier',
         'yes',
       });
+    case 'update':
+      allowed.addAll(const {
+        'check',
+        'force',
+        'preview',
+        'stable',
+        'target',
+      });
   }
   for (final flag in flags) {
     final name = _optionName(flag);
@@ -1535,6 +1735,26 @@ String? _commandOptionError(String command, Set<String> flags) {
   final hasMock = flags.any((flag) => flag.startsWith('--mock-provider='));
   final hasState = flags.any((flag) => flag.startsWith('--state='));
   if (hasState && !hasMock) return '--state requires --mock-provider';
+  if (command == 'update') {
+    if (flags.contains('--stable') && flags.contains('--preview')) {
+      return '--stable and --preview are mutually exclusive';
+    }
+    final hasTarget = flags.any((flag) => flag.startsWith('--target='));
+    if (hasTarget &&
+        (flags.contains('--stable') || flags.contains('--preview'))) {
+      return '--target cannot be combined with --stable or --preview';
+    }
+    final target = _stringOption(flags, 'target', null);
+    if (target != null) {
+      final parsedTarget = QuotabotVersion.tryParse(target);
+      if (parsedTarget == null || parsedTarget.tag != target) {
+        return '--target must be vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N';
+      }
+    }
+    if (flags.contains('--check') && flags.contains('--force')) {
+      return '--check and --force are mutually exclusive';
+    }
+  }
   return null;
 }
 
@@ -2126,6 +2346,9 @@ void _printHelp([String? command]) {
     case 'models':
       _printModelsHelp();
       return;
+    case 'update':
+      _printUpdateHelp();
+      return;
   }
 
   String head(String s) => style.bold(s);
@@ -2199,12 +2422,15 @@ void _printHelp([String? command]) {
   stdout.writeln('');
   stdout.writeln(head('OTHER'));
   stdout.writeln('  json                full snapshot as quotabot.v1 JSON');
+  stdout.writeln(
+    '  update              install the newest checksum-verified release',
+  );
   stdout.writeln('  help, version');
   stdout.writeln('');
   stdout.writeln(head('OPTIONS'));
   stdout.writeln(
     '  --json              machine-readable output where supported '
-    '(including suggest, models, report, verify)',
+    '(including suggest, models, report, verify, update)',
   );
   stdout.writeln(
     '  --include-accounts  report: include account labels in Markdown',
@@ -2310,6 +2536,9 @@ void _printHelp([String? command]) {
         '  Live reads may contact provider endpoints; state commands can write bounded local metadata.'),
   );
   stdout.writeln(
+    style.dim('  Update contacts GitHub only when invoked.'),
+  );
+  stdout.writeln(
     style.dim(
         '  Local models (Ollama/LM Studio/Lemonade) appear once their server is'),
   );
@@ -2320,6 +2549,58 @@ void _printHelp([String? command]) {
   stdout.writeln(
     style.dim(
         '  Agents: see AGENTS.md. MCP server: dart run bin/mcp_server.dart.'),
+  );
+}
+
+void _printUpdateHelp() {
+  String head(String value) => style.bold(value);
+  stdout.writeln(
+    '${style.bold('quotabot')} update  -  install a checksum-verified release',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('USAGE'));
+  stdout.writeln('  quotabot update [--check] [--stable|--preview]');
+  stdout.writeln(
+    '  quotabot update [--check] --target=vMAJOR.MINOR.PATCH[-rc.N] [--force]',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('CHANNEL'));
+  stdout.writeln(
+    '  Stable builds follow stable releases. Release candidates follow the '
+    'preview channel.',
+  );
+  stdout.writeln(
+    '  --stable            select the newest published stable release',
+  );
+  stdout.writeln(
+    '  --preview           include published release candidates',
+  );
+  stdout.writeln(
+    '  --target=TAG        select one exact published release tag',
+  );
+  stdout.writeln('');
+  stdout.writeln(head('CONTROL'));
+  stdout.writeln(
+    '  --check             report availability without changing the install',
+  );
+  stdout.writeln(
+    '  --force             reinstall the selected version or allow rollback',
+  );
+  stdout.writeln(
+    '  --json              emit quotabot.update.v1 instead of human output',
+  );
+  stdout.writeln('');
+  stdout.writeln(
+    '  Release discovery reads public GitHub metadata only after this command '
+    'is invoked.',
+  );
+  stdout.writeln(
+    '  Installation uses the updater bundled inside the verified CLI archive, '
+    'downloads an exact tag,',
+  );
+  stdout.writeln(
+    '  verifies its SHA-256 sidecar, activates one complete generation, and '
+    'checks the installed version.',
   );
 }
 

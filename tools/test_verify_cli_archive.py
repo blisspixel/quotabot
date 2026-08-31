@@ -33,6 +33,8 @@ def _windows_archive(root: Path, *, extra: str | None = None) -> Path:
     with zipfile.ZipFile(path, mode="w") as archive:
         archive.writestr("bin/quotabot.exe", b"executable")
         archive.writestr("lib/sqlite3.dll", b"library")
+        archive.writestr("lib/install.ps1", b"installer")
+        archive.writestr("lib/install.sh", b"installer")
         if extra is not None:
             archive.writestr(extra, b"extra")
     _write_sidecar(path)
@@ -63,6 +65,8 @@ def _posix_archive(
         for name, payload, mode in (
             ("./bin/quotabot", b"executable", executable_mode),
             ("./lib/libsqlite3.so", b"library", 0o644),
+            ("./lib/install.ps1", b"installer", 0o644),
+            ("./lib/install.sh", b"installer", 0o755),
         ):
             info = tarfile.TarInfo(name)
             info.size = len(payload)
@@ -83,6 +87,8 @@ def _archive_with_hard_link(root: Path, target: str) -> Path:
         for name, payload, mode in (
             ("./bin/quotabot", b"executable", 0o755),
             ("./lib/libsqlite3.so", b"library", 0o644),
+            ("./lib/install.ps1", b"installer", 0o644),
+            ("./lib/install.sh", b"installer", 0o755),
         ):
             info = tarfile.TarInfo(name)
             info.size = len(payload)
@@ -213,6 +219,20 @@ class CliArchiveTests(unittest.TestCase):
             with self.assertRaisesRegex(CliArchiveError, "regular library"):
                 verify_cli_archive(archive)
 
+    def test_rejects_missing_packaged_updater(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            archive = _windows_archive_from_entries(
+                Path(directory),
+                [
+                    ("bin/quotabot.exe", b"executable"),
+                    ("lib/sqlite3.dll", b"library"),
+                    ("lib/install.ps1", b"installer"),
+                ],
+            )
+
+            with self.assertRaisesRegex(CliArchiveError, "packaged updater"):
+                verify_cli_archive(archive)
+
     def test_rejects_zip_symbolic_link(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             link = zipfile.ZipInfo("lib/sqlite3.dll")
@@ -233,6 +253,8 @@ class CliArchiveTests(unittest.TestCase):
                 [
                     ("bin/quotabot.exe", b"executable"),
                     ("lib/sqlite3.dll", b"library"),
+                    ("lib/install.ps1", b"installer"),
+                    ("lib/install.sh", b"installer"),
                     ("lib/./sqlite3.dll", b"duplicate"),
                 ],
             )

@@ -69,7 +69,7 @@ def _validate_link(entry_name: str, target: str) -> None:
             stack.append(part)
 
 
-def _zip_entries(path: Path) -> tuple[tuple[str, ...], bool, bool]:
+def _zip_entries(path: Path) -> tuple[tuple[str, ...], bool, bool, bool]:
     try:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
@@ -101,12 +101,21 @@ def _zip_entries(path: Path) -> tuple[tuple[str, ...], bool, bool]:
                 and entry.file_size > 0
                 for entry in infos
             )
+            updater_ready = all(
+                any(
+                    _normalized_entry(entry.filename) == required
+                    and not entry.is_dir()
+                    and entry.file_size > 0
+                    for entry in infos
+                )
+                for required in ("lib/install.ps1", "lib/install.sh")
+            )
     except (OSError, zipfile.BadZipFile) as error:
         raise CliArchiveError(f"invalid ZIP archive: {error}") from error
-    return names, executable, library_file
+    return names, executable, library_file, updater_ready
 
 
-def _tar_entries(path: Path) -> tuple[tuple[str, ...], bool, bool]:
+def _tar_entries(path: Path) -> tuple[tuple[str, ...], bool, bool, bool]:
     try:
         with tarfile.open(path, mode="r:gz") as archive:
             members = archive.getmembers()
@@ -141,13 +150,27 @@ def _tar_entries(path: Path) -> tuple[tuple[str, ...], bool, bool]:
                 and entry.size > 0
                 for entry in members
             )
+            windows_updater = any(
+                _normalized_entry(entry.name) == "lib/install.ps1"
+                and entry.isfile()
+                and entry.size > 0
+                for entry in members
+            )
+            posix_updater = any(
+                _normalized_entry(entry.name) == "lib/install.sh"
+                and entry.isfile()
+                and entry.size > 0
+                and entry.mode & 0o111 != 0
+                for entry in members
+            )
+            updater_ready = windows_updater and posix_updater
     except (OSError, tarfile.TarError) as error:
         raise CliArchiveError(f"invalid tar archive: {error}") from error
-    return names, executable, library_file
+    return names, executable, library_file, updater_ready
 
 
 def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
-    names, executable, library_file = (
+    names, executable, library_file, updater_ready = (
         _zip_entries(path) if extension == "zip" else _tar_entries(path)
     )
     entries = tuple(
@@ -161,6 +184,8 @@ def _archive_entries(path: Path, extension: str) -> tuple[str, ...]:
         raise CliArchiveError("CLI archive is missing a nonempty executable")
     if not library_file:
         raise CliArchiveError("CLI archive is missing a nonempty regular library file")
+    if not updater_ready:
+        raise CliArchiveError("CLI archive is missing its executable packaged updater")
     return entries
 
 
@@ -196,6 +221,9 @@ def _require_shape(operating_system: str, entries: tuple[str, ...]) -> None:
         raise CliArchiveError(
             f"CLI archive is missing required entry: {expected_executable}"
         )
+    for updater in ("lib/install.ps1", "lib/install.sh"):
+        if updater not in entries:
+            raise CliArchiveError(f"CLI archive is missing required entry: {updater}")
     if operating_system in {"windows", "darwin"} and len(
         {entry.casefold() for entry in entries}
     ) != len(entries):

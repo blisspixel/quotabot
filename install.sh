@@ -24,6 +24,23 @@ if [[ "$VERSION" != "latest" && ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0
   exit 1
 fi
 
+requires_packaged_updater_scripts() {
+  local requested="$1"
+  local major minor patch rc
+  [[ "$requested" != latest ]] || return 1
+  [[ "$requested" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([0-9]+))?$ ]] || return 2
+  major=$((10#${BASH_REMATCH[1]}))
+  minor=$((10#${BASH_REMATCH[2]}))
+  patch=$((10#${BASH_REMATCH[3]}))
+  rc="${BASH_REMATCH[5]:-}"
+  (( major > 0 )) && return 0
+  (( minor > 10 )) && return 0
+  (( minor < 10 )) && return 1
+  (( patch > 0 )) && return 0
+  [[ -z "$rc" ]] && return 0
+  (( 10#$rc >= 16 ))
+}
+
 echo "Installing quotabot CLI..."
 
 # Create destination
@@ -397,6 +414,21 @@ if [[ ! -x "$extract_dir/bin/quotabot" ]]; then
 fi
 if [[ ! -d "$extract_dir/lib" ]]; then
   echo "Downloaded archive did not contain lib/" >&2
+  exit 1
+fi
+if requires_packaged_updater_scripts "$VERSION" &&
+   [[ ! -f "$extract_dir/lib/install.ps1" || ! -x "$extract_dir/lib/install.sh" ]]; then
+  echo "Downloaded archive did not contain the packaged updater scripts" >&2
+  exit 1
+fi
+reported_version=$("$extract_dir/bin/quotabot" --version)
+if [[ "$VERSION" == latest ]]; then
+  if [[ ! "$reported_version" =~ ^quotabot\ [0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+    echo "Downloaded quotabot executable reported an unexpected version: $reported_version" >&2
+    exit 1
+  fi
+elif [[ "$reported_version" != "quotabot ${VERSION#v}" ]]; then
+  echo "Downloaded quotabot executable reported an unexpected version: $reported_version" >&2
   exit 1
 fi
 

@@ -575,6 +575,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
                 "windows-build-prereqs.ps1",
             ):
                 shutil.copy2(ROOT / "tools" / name, tools / name)
+            for name in ("install.ps1", "install.sh"):
+                shutil.copy2(ROOT / name, root / name)
 
             cli_bytes = b"exact normalized CLI candidate\n"
             desktop_bytes = b"exact desktop candidate\n"
@@ -644,6 +646,8 @@ class DesktopReleasePolicyTests(unittest.TestCase):
             tools.mkdir()
             for name in ("package-cli.sh", "package-pair.sh"):
                 shutil.copy2(ROOT / "tools" / name, tools / name)
+            for name in ("install.ps1", "install.sh"):
+                shutil.copy2(ROOT / name, root / name)
 
             cli_bytes = b"exact normalized POSIX CLI candidate\n"
             cli = (

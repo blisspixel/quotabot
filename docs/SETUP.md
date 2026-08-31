@@ -365,13 +365,36 @@ route eligible. It runs the same on all three platforms.
 
 ### Update the release CLI
 
-Re-run the same one-line installer. It replaces the CLI bundle and preserves
-quotabot's separate config, history, grants, profiles, and manual entries. The
-installer stages a complete versioned payload and switches the stable entry only
-after validation. If activation fails, the previous entry is restored. A
-long-running process can continue using its previous generation, so close and
-restart `quotabot top`, MCP, and other servers before checking the new version.
-Then run `quotabot --version` and `quotabot doctor`.
+Run the installed updater:
+
+```bash
+quotabot update --check
+quotabot update
+quotabot --version
+quotabot doctor
+```
+
+Stable builds follow stable releases by default. Release candidates follow the
+preview channel automatically. A stable installation can inspect or enter the
+preview channel with `quotabot update --preview`; use `--stable` to select the
+newest stable release. `--target=vMAJOR.MINOR.PATCH[-rc.N]` selects one exact
+published version for checking or a forward update. Add `--force` only for a
+deliberate reinstall or rollback.
+
+The command reads public GitHub release metadata only when invoked. It runs the
+installer bundled inside the current checksum-verified CLI archive, downloads
+one exact immutable tag and its required `.sha256` sidecar, stages a complete
+versioned payload, switches the stable entry only after validation, and executes
+the installed binary to confirm the selected version. If activation fails, the
+previous entry is restored. Config, history, grants, profiles, and manual entries
+remain separate and are preserved.
+
+A long-running process can continue using its previous generation, so close and
+restart `quotabot top`, MCP, and other servers after an update. A release older
+than rc.16 does not contain the bundled updater; run the one-line installer once
+with an exact rc.16 or later tag to bootstrap it. The current installers retain
+exact-tag rollback compatibility with older archives that predate the bundled
+scripts, while rc.16 and later exact installs require them.
 
 ### Uninstall the release CLI but preserve data
 
