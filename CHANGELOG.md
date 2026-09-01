@@ -2,7 +2,7 @@
 
 Notable changes to quotabot. Newest first.
 
-## Unreleased
+## 0.10.1-rc.1 - 2026-09-01
 
 ### Added
 
