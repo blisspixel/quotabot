@@ -20,6 +20,7 @@ import 'package:quotabot_collector/http_client.dart';
 import 'package:quotabot_collector/identifiers.dart';
 import 'package:quotabot_collector/labels.dart';
 import 'package:quotabot_collector/provenance.dart';
+import 'package:quotabot_collector/provider_id_migration.dart';
 import 'package:quotabot_collector/route_render.dart';
 import 'package:quotabot_collector/top.dart';
 import 'package:quotabot_collector/updater.dart';
@@ -4065,6 +4066,7 @@ Future<void> _runAnalyticsStorageRecovery(
     return;
   }
 
+  await coordinateProviderIdCacheMigration();
   final confirmed = flags.contains('--yes');
   final result = confirmed
       ? recoverAnalyticsStorage(provider, account, tier)

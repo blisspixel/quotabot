@@ -314,6 +314,67 @@ metadata. Cache-only routing reads only canonical snapshot filenames that match
 the parsed provider/account identity and rejects snapshots dated materially in
 the future, so a stray JSON file in the cache directory cannot become a fresh
 routing recommendation.
+
+### Provider-ID cache migration
+
+Provider renames use one registered, one-way retired-to-current alias map and a
+bounded startup coordinator. The map is empty in the shipped build until a real
+rename is required. When an alias exists, live CLI collection, normal desktop
+collection, direct analytics recovery, and MCP live or disk-backed quota reads
+await a coalesced in-process migration flight before touching cache evidence.
+The completed flight is cleared so a later pass can reconcile a released older
+writer. Demo, help, version, update, login, and simulation-only paths remain
+no-touch.
+
+One claim-backed native coordinator guard serializes processes and isolates.
+For each affected identity, the coordinator then acquires every retired
+evidence guard before every canonical guard, matching the order used by current
+cache transactions. Current writers recheck the retired branch inside those
+guards immediately before mutation. A released older writer can therefore
+finish without being overwritten: its one-sided advance is carried on the next
+pass, while independently advanced branches are preserved and quarantined.
+
+The coordinator recognizes only fixed snapshot, drift, history, bucket,
+analytics-checkpoint, and legacy-owner roles. It rejects links, malformed
+identities, unregistered evidence classes, future captures, nonmonotonic
+history, impossible bucket aggregates, invalid checkpoints, unsafe filename
+components, and malformed canonical targets. Accepted files are copied byte for
+byte, so raw-history and analytics checkpoint digests do not change. Readers
+canonicalize an embedded retired provider id only in memory.
+
+Released raw account filenames remain evidence only after the bounded file
+content, and bucket-owner evidence when required, proves one exact account. The
+coordinator copies those bytes into the opaque canonical `account_<digest>`
+target while retaining both raw and opaque retired-then-current lock domains.
+A new-provider raw compatibility file is treated as another preserved branch:
+equal evidence can coalesce into the opaque target, while divergent evidence is
+quarantined. A durable opaque-target deletion also suppresses that raw fallback,
+so an older writer cannot resurrect deleted canonical evidence.
+
+Each alias has an owner-only `quotabot.provider-id-migration.v1` receipt. A
+record contains a fixed role and tier, an opaque account digest when the role is
+account-scoped, bounded byte counts, and SHA-256 branch digests. It contains no
+raw account, path, prompt, code, credential, or provider response. A prepared
+record is published while the identity guards are still held, before the
+canonical target is atomically installed. A committed record is published
+before those guards are released. Restart can therefore distinguish an initial
+copy with an installed target, a shared branch baseline, a one-sided legacy
+advance, and a true two-branch conflict. If a prepared initial target is absent
+after restart, the coordinator cannot distinguish a pre-rename interruption
+from a post-rename canonical deletion, so it preserves the retired branch and
+fails closed instead of copying it again.
+
+Alias count, directory entries, candidate records, per-record bytes, total
+evidence bytes, receipt size, and lock acquisition are hard-bounded. Cooperative
+wall-time checks stop between bounded local filesystem operations; they do not
+claim to interrupt a stalled operating-system call. Partial scans retain prior
+baselines and publish explicit global uncertainty. Missing, malformed, prepared,
+contradicted, or globally uncertain receipts fail closed at cache reads and
+writes. Quarantine remains exact to the affected provider identity and quota,
+history, or bucket tier whenever the evidence is specific enough; unresolved
+legacy ownership stays preserved without being admitted to an unrelated exact
+account.
+
 Account-scoped recent history and hourly buckets also use canonical opaque
 filenames. Their first canonical write stores a best-effort owner-only
 `quotabot.analytics-migration.v1` checkpoint for the exact-account legacy path:
