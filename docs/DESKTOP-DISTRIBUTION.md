@@ -34,11 +34,11 @@ it was enabled on July 18, 2026. v0.9.4 and later releases are locked under that
 policy; v0.9.2 and earlier releases were not changed retroactively.
 
 The verified
-[v0.10.0 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
+[v0.10.1 stable release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1)
 contains all three desktop bundles and sidecars inside the exact 14-asset set.
-The [v0.10.0 release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719)
+The [candidate release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567)
 built and attested those archives. The separate
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830)
 passed packaged desktop and source-setup checks on Windows, macOS, and Ubuntu.
 Application signing and notarization remain pre-1.0 native trust gates.
 Interactive native accessibility evidence remains a separate final 1.0 gate
@@ -127,7 +127,7 @@ Expand-Archive -LiteralPath $asset -DestinationPath $destination
 Start-Process (Join-Path $destination 'quotabot.exe')
 ```
 
-The published v0.10.0 Windows packages are not Authenticode-signed. Each newer
+The published v0.10.1 Windows packages are not Authenticode-signed. Each newer
 release begins with a mandatory native signing status in its GitHub release
 notes. `Windows: unsigned transition artifact` means SmartScreen publisher
 identity is not established. Checksums and GitHub provenance do not establish
