@@ -338,7 +338,7 @@ Until the owner completes Public Trust identity validation, the explicit
 `unsigned` transition mode packages the unchanged candidate only after its
 complete inventory matches. The release notes must disclose that Windows
 publisher identity is not established. The published v0.9.9 release artifacts
-remain unsigned, as do the stable v0.10.0 transition artifacts. Ordinary CI
+remain unsigned, as do the stable v0.10.1 transition artifacts. Ordinary CI
 packaging stays unsigned and cannot access the protected release environment.
 
 The manually dispatched `.github/workflows/windows-signing-rehearsal.yml`
@@ -616,16 +616,19 @@ tray-readiness check remain separate release-candidate requirements.
 ### Baseline release evidence
 
 The current tagged rehearsal baseline is the immutable
-[v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0)
+[v0.10.1 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.1)
 with its exact 14-asset set. The native
-[v0.10.0 release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719)
+[candidate release run](https://github.com/blisspixel/quotabot/actions/runs/33557788567)
 builds, checksums, shape-checks, attests, freshly downloads, and reverifies every
 archive before publication. The separate
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
-then covers the canonical unversioned Latest install, upgrade from the actual
-prior stable, exact-tag self-update, persistent state, source setup, and desktop
-run checks on Windows, macOS, and Ubuntu. Stable 0.10.0 promotes the fully
-verified rc.17 updater correction. The earlier
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33562140830)
+then covers exact-tag installation and self-update, upgrade from the actual prior
+stable, persistent state, source setup, and desktop run checks on Windows,
+macOS, and Ubuntu. Stable publication binds GitHub Latest and its follow-up
+smoke repeats canonical unversioned acquisition. Stable 0.10.1 promotes the
+exact provider-ID continuity candidate after that lifecycle passed. The
+[stable v0.10.0 release](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0),
+the earlier
 [v0.9.9 release](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9)
 and
 [0.10.0-rc.12 install smoke](https://github.com/blisspixel/quotabot/actions/runs/33312529854)
