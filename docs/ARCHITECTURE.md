@@ -847,9 +847,9 @@ The official repository also blocks `v*` tag updates and deletion. GitHub
 release immutability locks the tag and assets when a draft is published after
 the setting activation. The v0.10.0 pipeline publishes and locks the exact 14
 expected assets through the native
-[release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml),
+[v0.10.0 release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719),
 then exercises exact-tag and canonical Latest acquisition through the three-OS
-[published install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml).
+[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
 Application signing and notarization are pre-1.0 completion gates. Interactive

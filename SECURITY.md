@@ -33,10 +33,10 @@ reads and writes helps scope any report:
   draft is published.
   The current audited release is [v0.10.0](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0).
   Its exact 14-asset set is locked after the native
-  [release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml)
+  [release run](https://github.com/blisspixel/quotabot/actions/runs/33466848719)
   and three-OS
-  [install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
-  pass, including upgrade from the actual prior stable and an unversioned
+  [install smoke](https://github.com/blisspixel/quotabot/actions/runs/33469407949)
+  passed, including upgrade from the actual prior stable and an unversioned
   canonical Latest install.
   Immutability is prospective from July 18, 2026; v0.9.2 and earlier releases
   were not changed retroactively.
