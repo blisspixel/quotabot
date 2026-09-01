@@ -2495,8 +2495,9 @@ jobs:
             exit 1
           fi
           expected_prerelease=false
+          expected_make_latest=true
           case "$GITHUB_REF_NAME" in
-            *-*) expected_prerelease=true ;;
+            *-*) expected_prerelease=true; expected_make_latest=false ;;
           esac
           read -r release_tag is_draft is_prerelease < <(gh api \
             "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
@@ -2535,4 +2536,27 @@ jobs:
           fi
           gh api --method PATCH \
             "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
-            -F draft=false >/dev/null
+            -F draft=false \
+            -f make_latest="$expected_make_latest" >/dev/null
+          read -r published_tag published_draft published_prerelease < <(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            --jq '[.tag_name, .draft, .prerelease] | @tsv')
+          if [ "$published_tag" != "$GITHUB_REF_NAME" ] || \
+             [ "$published_draft" != false ] || \
+             [ "$published_prerelease" != "$expected_prerelease" ]; then
+            echo 'Published release metadata does not match the audited draft.' >&2
+            exit 1
+          fi
+          latest_tag="$(gh api \
+            "repos/$GITHUB_REPOSITORY/releases/latest" \
+            --jq '.tag_name')"
+          if [ "$expected_make_latest" = true ] && \
+             [ "$latest_tag" != "$GITHUB_REF_NAME" ]; then
+            echo 'Stable release did not become GitHub Latest.' >&2
+            exit 1
+          fi
+          if [ "$expected_make_latest" = false ] && \
+             [ "$latest_tag" = "$GITHUB_REF_NAME" ]; then
+            echo 'Prerelease unexpectedly replaced GitHub Latest.' >&2
+            exit 1
+          fi

@@ -157,7 +157,13 @@ class DesktopReleasePolicyTests(unittest.TestCase):
 
         self.assertIn("expected_prerelease=false", publish_job)
         self.assertIn("expected_prerelease=true", publish_job)
+        self.assertIn("expected_make_latest=true", publish_job)
+        self.assertIn("expected_make_latest=false", publish_job)
         self.assertIn("[.tag_name, .draft, .prerelease] | @tsv", publish_job)
+        self.assertIn('-f make_latest="$expected_make_latest"', publish_job)
+        self.assertIn('"repos/$GITHUB_REPOSITORY/releases/latest"', publish_job)
+        self.assertIn("Stable release did not become GitHub Latest", publish_job)
+        self.assertIn("Prerelease unexpectedly replaced GitHub Latest", publish_job)
         classification_check = publish_job.index(
             "The draft prerelease classification changed after creation"
         )

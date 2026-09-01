@@ -63,6 +63,18 @@ void main() {
     expect(status.updateAvailable, isTrue);
   });
 
+  test('preview installs recommend the matching final stable release', () {
+    final status = parseQuotabotReleases([
+      release('v0.9.9'),
+      release('v0.10.0-rc.17', prerelease: true),
+      release('v0.10.0'),
+    ], currentVersion: '0.10.0-rc.17');
+
+    expect(status.currentIsPrerelease, isTrue);
+    expect(status.recommended?.version, '0.10.0');
+    expect(status.updateAvailable, isTrue);
+  });
+
   test('stable installs do not fall back to an unpaired preview', () {
     final status = parseQuotabotReleases([
       release('v0.10.0-rc.7', prerelease: true),

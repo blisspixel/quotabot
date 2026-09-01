@@ -166,11 +166,11 @@ release. `QUOTABOT_VERSION=vMAJOR.MINOR.PATCH` or
 `vMAJOR.MINOR.PATCH-rc.N` selects one exact tag for a reproducible rollback.
 
 The current stable release is
-[v0.9.9](https://github.com/blisspixel/quotabot/releases/tag/v0.9.9). Its
-[install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058)
-passed the one-line install, upgrade from the actual prior stable v0.9.8,
-persistent-state, and source-setup matrix on Windows, macOS, and Ubuntu. Every
-patch release follows the same published-artifact path.
+[v0.10.0](https://github.com/blisspixel/quotabot/releases/tag/v0.10.0). Its
+[install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml)
+covers the unversioned Latest install, upgrade from the actual prior stable,
+persistent state, source setup, and desktop-run matrix on Windows, macOS, and
+Ubuntu. Every patch release follows the same published-artifact path.
 
 For a one-line macOS or Linux fork install, pass the repository override to the
 installer process, not only to `curl`:
@@ -401,13 +401,13 @@ stop self-update before the replacement is activated. If it occurs, bootstrap
 the corrected immutable installer once from an ordinary PowerShell terminal:
 
 ```powershell
-$env:QUOTABOT_VERSION = 'v0.10.0-rc.17'; irm https://raw.githubusercontent.com/blisspixel/quotabot/v0.10.0-rc.17/install.ps1 | iex
+$env:QUOTABOT_VERSION = 'v0.10.0'; irm https://raw.githubusercontent.com/blisspixel/quotabot/v0.10.0/install.ps1 | iex
 ```
 
 Then open a new terminal and verify `quotabot update --check`, `quotabot
---version`, and `quotabot doctor`. Updates from rc.17 onward use the corrected
-bundled installer. The command preserves local configuration, history, grants,
-profiles, and manual entries.
+--version`, and `quotabot doctor`. Updates from rc.17 and stable 0.10.0 onward
+use the corrected bundled installer. The command preserves local configuration,
+history, grants, profiles, and manual entries.
 
 ### Uninstall the release CLI but preserve data
 

@@ -845,15 +845,15 @@ attestations, clean-runner lifecycle checks, and a draft-release publication
 barrier. Source setup remains available when a launcher or shortcut is wanted.
 The official repository also blocks `v*` tag updates and deletion. GitHub
 release immutability locks the tag and assets when a draft is published after
-the setting activation. The v0.9.9 pipeline published and locked the exact 14
-expected assets from
-[release 32290931121](https://github.com/blisspixel/quotabot/actions/runs/32290931121),
-then passed the three-OS
-[published install smoke](https://github.com/blisspixel/quotabot/actions/runs/32299292058).
+the setting activation. The v0.10.0 pipeline publishes and locks the exact 14
+expected assets through the native
+[release workflow](https://github.com/blisspixel/quotabot/actions/workflows/release.yml),
+then exercises exact-tag and canonical Latest acquisition through the three-OS
+[published install smoke](https://github.com/blisspixel/quotabot/actions/workflows/install-smoke.yml).
 Releases published before the July 18, 2026 activation were not changed
 retroactively.
-Application signing and notarization are 0.10.x exit gates. Interactive native
-evidence remains a final 1.0 gate and must run again on the exact signed
+Application signing and notarization are pre-1.0 completion gates. Interactive
+native evidence remains a final 1.0 gate and must run again on the exact signed
 candidate. Platform prerequisites and artifacts are documented in
 [BUILDING.md](BUILDING.md), [DESKTOP-DISTRIBUTION.md](DESKTOP-DISTRIBUTION.md),
 and [../ROADMAP.md](../ROADMAP.md).
